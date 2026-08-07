@@ -56,17 +56,3 @@ export function captureState(position: THREE.Vector3, target: THREE.Vector3, bou
   return { az, el, distR: dist / bounds.radius, target: [rel.x, rel.y, rel.z] }
 }
 
-const EL_LIMIT = Math.PI / 2 - 0.01
-
-/** Orbit by pointer deltas (radians per pixel baked in). */
-export function orbitState(state: CameraState, dx: number, dy: number): CameraState {
-  return {
-    ...state,
-    az: state.az - dx * 0.01,
-    el: THREE.MathUtils.clamp(state.el + dy * 0.01, -EL_LIMIT, EL_LIMIT),
-  }
-}
-
-export function zoomState(state: CameraState, factor: number): CameraState {
-  return { ...state, distR: THREE.MathUtils.clamp(state.distR * factor, 1.1, 20) }
-}

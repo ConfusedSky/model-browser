@@ -138,7 +138,8 @@ export default function ViewerLayer({
         return
       }
       const s = sessionRef.current
-      if (s !== null) void onPersist(s)
+      // Level the horizon and rebase the rest state, then persist that view.
+      if (s !== null) void s.settle(renderNow).then(() => onPersist(s))
       // A drag released outside the tile gets no later pointerleave — the
       // overlay would be stuck. Dismiss now if the release landed outside.
       if (modeRef.current === 'orbit') {
@@ -209,7 +210,10 @@ export default function ViewerLayer({
 
   async function closeLightbox(): Promise<void> {
     const s = sessionRef.current
-    if (s !== null) await onPersist(s)
+    if (s !== null) {
+      await s.settle(renderNow) // no-op if already level (e.g. Esc mid-drag aside)
+      await onPersist(s)
+    }
     onDismiss()
   }
 

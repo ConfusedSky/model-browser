@@ -13,6 +13,14 @@ import { MeshLru } from './three/lru'
 import { disposeModel, embedded3mfThumbnail, formatOf, geometryBytes, parseModel } from './three/models'
 import { RenderQueue } from './three/queue'
 import ViewerLayer, { type ViewerState } from './viewer/ViewerLayer'
+import {
+  getOrbitFlip,
+  getOrbitMode,
+  ORBIT_MODES,
+  setOrbitFlip,
+  setOrbitMode,
+  type OrbitMode,
+} from './viewer/orbitModes'
 import type { ViewerSession } from './viewer/session'
 
 export default function App() {
@@ -39,6 +47,8 @@ export default function App() {
   const [listing, setListing] = useState<DirEntry[]>([])
   const [error, setError] = useState<string | null>(null)
   const [viewer, setViewer] = useState<ViewerState | null>(null)
+  const [orbitMode, setOrbitModeState] = useState<OrbitMode>(getOrbitMode)
+  const [orbitFlip, setOrbitFlipState] = useState<boolean>(getOrbitFlip)
   const trackerRef = useRef(new GestureTracker())
 
   const { thumbs, setThumb, setPlaceholder } = useThumbnails(listing, api, lru, queue)
@@ -174,6 +184,39 @@ export default function App() {
           )}
         </main>
         <ChatPanel />
+      </div>
+      {/* EXPERIMENTAL orbit-feel picker — remove once a winner is chosen */}
+      <div className="fixed bottom-3 left-3 z-50 flex items-center gap-1 rounded-full border border-zinc-700 bg-zinc-900/90 p-1 text-xs">
+        <span className="px-2 text-zinc-500">orbit</span>
+        {ORBIT_MODES.map((m) => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => {
+              setOrbitMode(m)
+              setOrbitModeState(m)
+            }}
+            className={`rounded-full px-2.5 py-1 ${
+              m === orbitMode ? 'bg-sky-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            {m}
+          </button>
+        ))}
+        <span className="h-4 w-px bg-zinc-700" />
+        <button
+          type="button"
+          onClick={() => {
+            setOrbitFlip(!orbitFlip)
+            setOrbitFlipState(!orbitFlip)
+          }}
+          title="Negate the spindle axis (+axis ↔ −axis)"
+          className={`rounded-full px-2.5 py-1 ${
+            orbitFlip ? 'bg-amber-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
+          }`}
+        >
+          flip
+        </button>
       </div>
       {viewer !== null && (
         <ViewerLayer

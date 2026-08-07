@@ -20,6 +20,10 @@ export function parseModel(bytes: ArrayBuffer, format: ModelFormat): THREE.Objec
   if (format === 'stl') {
     const geometry = new STLLoader().parse(bytes)
     if (geometry.getAttribute('normal') === undefined) geometry.computeVertexNormals()
+    // STL is Z-up (print-bed convention); the scene is Y-up. Bake the
+    // conversion into the geometry so models stand upright. (3MFLoader does
+    // this itself; OBJ is conventionally Y-up already.)
+    geometry.rotateX(-Math.PI / 2)
     return new THREE.Mesh(geometry, makeMaterial())
   }
   if (format === 'obj') {
