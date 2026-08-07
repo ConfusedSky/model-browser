@@ -9,7 +9,7 @@ The walk SHALL enter each real directory at most once, keyed by its resolved rea
 
 Each model entry's virtual path SHALL be identical to the path a nested browse would yield, so thumbnails and camera state are shared between the two views, and each model entry's name SHALL be its path relative to the requested root. When the requested root is a zip or a directory inside one, the same rules SHALL apply within the archive: its immediate directories are the container entries, every model under the prefix is listed with names relative to that prefix, and no further descent is attempted.
 
-The walk SHALL be bounded by a hard budget on directories visited and models scanned, independent of the cap on returned models (500). Because the ordering is by file name rather than by walk order, the returned models SHALL be the first 500 of the sorted result rather than the first 500 encountered. A response SHALL carry an explicit truncation flag whenever any model was dropped, whether by the cap or by the budget.
+The walk SHALL be bounded by a hard budget on the work it does — entering a directory and scanning a model each counting against one budget — independent of the cap on the number of models returned. Because the ordering is by file name rather than by walk order, the returned models SHALL be the cap's worth taken from the sorted result rather than the first ones encountered. A response SHALL carry an explicit truncation flag whenever any model was dropped, whether by the cap or by the budget.
 
 #### Scenario: Models across subfolders in one listing
 - **WHEN** the client requests a flat listing of a folder containing models nested several directories deep
@@ -45,7 +45,7 @@ The walk SHALL be bounded by a hard budget on directories visited and models sca
 
 #### Scenario: Model-sparse giant tree stops at the budget
 - **WHEN** a flat-listed folder contains far more directories than the walk budget allows, holding too few models to reach the model cap
-- **THEN** the walk stops at the budget, the request completes, and the response is flagged truncated
+- **THEN** the walk stops when the budget is exhausted, the request completes, and the response is flagged truncated
 
 ### Requirement: Flat view toggle
 The client SHALL offer a flat-view toggle alongside the path bar. While active, the grid SHALL show the current folder's flat listing — the top-level folder and zip tiles first, navigable exactly as in the nested view, then model tiles labeled by relative path — and hover-warm, drag-to-orbit, the lightbox, and thumbnail/camera persistence SHALL behave exactly as in the nested view for the same models. The toggle SHALL remain in effect across navigation within the session, including navigation into a zip, and a truncated listing SHALL be indicated to the user.
