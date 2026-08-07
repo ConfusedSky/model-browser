@@ -3,12 +3,14 @@ import { stat } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
 import { Readable } from 'node:stream'
 import { Hono } from 'hono'
-import type { ThumbPutRequest } from '../../shared/types'
+import type { OrbitAxis, ThumbPutRequest } from '../../shared/types'
 import { ThumbCache } from './cache'
 import { guard } from './guard'
 import { ListingError, complete, listDir } from './listing'
 import { VPathError, parseVPath } from './vpath'
 import { ZipError, extractEntry } from './zip'
+
+const ORBIT_AXES: readonly OrbitAxis[] = ['x', '-x', 'y', '-y', 'z', '-z']
 
 export function createApp(cache: ThumbCache = new ThumbCache()): Hono {
   const app = new Hono()
@@ -70,10 +72,14 @@ export function createApp(cache: ThumbCache = new ThumbCache()): Hono {
     if (typeof body.path !== 'string' || typeof body.mtime !== 'number') {
       return c.json({ error: 'path and mtime are required' }, 400)
     }
+    if (body.axis !== undefined && !ORBIT_AXES.includes(body.axis)) {
+      return c.json({ error: `invalid axis: ${String(body.axis)}` }, 400)
+    }
     await cache.put(body.path, {
       mtime: body.mtime,
       png: body.png !== undefined ? Buffer.from(body.png, 'base64') : undefined,
       camera: body.camera,
+      axis: body.axis,
     })
     return c.json({ ok: true })
   })

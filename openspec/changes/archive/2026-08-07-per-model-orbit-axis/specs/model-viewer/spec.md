@@ -21,7 +21,7 @@ Every model SHALL orbit as a clamped turntable around its spindle axis: horizont
 ## MODIFIED Requirements
 
 ### Requirement: Lightbox expanded view
-Clicking a model tile — a press released without exceeding the drag threshold — SHALL dismiss the orbit overlay and open the model in a modal lightbox with full orbit and zoom controls. There SHALL be no separate expand affordance. Esc or clicking outside SHALL close it, persisting camera state and thumbnail like an orbit release. While open the lightbox SHALL trap keyboard focus, and on close SHALL return focus to the tile that opened it. The lightbox SHALL contain the model's orbit-axis control: three axis buttons (X/Y/Z) plus a flip toggle covering all six spindles, with the current value indicated. Changing the axis SHALL re-frame the view to the new spindle's default three-quarter view and immediately persist the axis, camera state, and a re-rendered thumbnail.
+Clicking a model tile — a press released without exceeding the drag threshold — SHALL dismiss the orbit overlay and open the model in a modal lightbox with full orbit and zoom controls. There SHALL be no separate expand affordance. Esc or clicking outside SHALL close it, persisting camera state and thumbnail like an orbit release. While open the lightbox SHALL trap keyboard focus, and on close SHALL return focus to the tile that opened it. The lightbox SHALL contain the model's orbit-axis control: three axis buttons (X/Y/Z) plus a flip toggle covering all six spindles, with the current value indicated. Changing the axis SHALL smoothly animate the camera — a brief eased rotation, not an instant snap — to the new spindle's default three-quarter view, visibly rotating the chosen axis to screen-up, and SHALL immediately persist the axis, the end-state camera, and a re-rendered thumbnail (the end state is known upfront; persistence does not wait for the animation). A drag during the transition SHALL cancel the animation and orbit from the current pose.
 
 #### Scenario: Expanding a model
 - **WHEN** the user clicks a model tile without dragging
@@ -41,7 +41,11 @@ Clicking a model tile — a press released without exceeding the drag threshold 
 
 #### Scenario: Changing the orbit axis
 - **WHEN** the user selects a different axis (or toggles flip) in the lightbox
-- **THEN** the view re-frames to the new spindle's default three-quarter view, and the axis, camera, and updated thumbnail are persisted immediately
+- **THEN** the view smoothly rotates the chosen axis to screen-up, settling at the new spindle's default three-quarter view, and the axis, end-state camera, and updated thumbnail are persisted immediately
+
+#### Scenario: Dragging during the axis transition
+- **WHEN** the user starts an orbit drag while the axis-change animation is in flight
+- **THEN** the animation is cancelled and the drag orbits around the new spindle from the current pose
 
 #### Scenario: Axis override survives sessions and browsers
 - **WHEN** the user overrides a model's axis and later opens the app in another browser

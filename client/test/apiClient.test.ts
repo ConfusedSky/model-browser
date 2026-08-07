@@ -34,13 +34,15 @@ describe('HttpApiClient contract', () => {
     await expect(api.listDir('/a.zip!/b.zip')).rejects.toBeInstanceOf(HttpError)
   })
 
-  it('getThumb decodes base64 png to an object URL and passes camera through', async () => {
+  it('getThumb decodes base64 png to an object URL and passes camera and axis through', async () => {
     const png = btoa('png-bytes')
-    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ status: 'hit', png, camera: CAM }))
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ status: 'hit', png, camera: CAM, axis: '-z' }))
     const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
     const res = await api.getThumb('/m.stl', 42)
     expect(fetchFn).toHaveBeenCalledWith(`/api/thumb?path=${encodeURIComponent('/m.stl')}&mtime=42`)
-    expect(res).toEqual({ status: 'hit', camera: CAM, pngUrl: 'blob:mock' })
+    expect(res).toEqual({ status: 'hit', camera: CAM, axis: '-z', pngUrl: 'blob:mock' })
   })
 
   it('getThumb on miss has no pngUrl', async () => {
@@ -50,15 +52,21 @@ describe('HttpApiClient contract', () => {
     expect(res.pngUrl).toBeUndefined()
   })
 
-  it('putThumb sends png as base64 and camera in one request', async () => {
+  it('putThumb sends png as base64, camera, and axis in one request', async () => {
     const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ ok: true }))
     const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
-    await api.putThumb({ path: '/m.stl', mtime: 42, png: new Blob(['raw-png']), camera: CAM })
+    await api.putThumb({
+      path: '/m.stl',
+      mtime: 42,
+      png: new Blob(['raw-png']),
+      camera: CAM,
+      axis: '-z',
+    })
     const [url, init] = fetchFn.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('/api/thumb')
     expect(init.method).toBe('PUT')
     const body = JSON.parse(init.body as string) as Record<string, unknown>
-    expect(body).toEqual({ path: '/m.stl', mtime: 42, png: btoa('raw-png'), camera: CAM })
+    expect(body).toEqual({ path: '/m.stl', mtime: 42, png: btoa('raw-png'), camera: CAM, axis: '-z' })
   })
 
   it('fetchModel returns raw bytes', async () => {

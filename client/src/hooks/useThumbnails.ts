@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type * as THREE from 'three'
-import type { CameraState, DirEntry } from '../../../shared/types'
+import type { CameraState, DirEntry, OrbitAxis } from '../../../shared/types'
 import type { ApiClient } from '../api/client'
 import { DEFAULT_CAMERA } from '../three/camera'
 import type { MeshLru } from '../three/lru'
@@ -11,6 +11,7 @@ export interface ThumbState {
   status: 'loading' | 'ready' | 'error'
   url?: string
   camera?: CameraState
+  axis?: OrbitAxis
 }
 
 /**
@@ -57,7 +58,12 @@ export function useThumbnails(
           const cached = await api.getThumb(entry.path, entry.mtime)
           if (!alive) return
           if (cached.status === 'hit' && cached.pngUrl !== undefined) {
-            setThumb(entry.path, { status: 'ready', url: cached.pngUrl, camera: cached.camera })
+            setThumb(entry.path, {
+              status: 'ready',
+              url: cached.pngUrl,
+              camera: cached.camera,
+              axis: cached.axis,
+            })
             return
           }
           // In-flight jobs must not parse or drive the shared renderer while
@@ -69,13 +75,15 @@ export function useThumbnails(
           await queue.whenResumed()
           if (!alive) return
           const camera = cached.camera ?? DEFAULT_CAMERA
-          const png = await renderThumbnail(object, camera)
+          const axis = cached.axis ?? 'y'
+          const png = await renderThumbnail(object, camera, axis)
           await api.putThumb({ path: entry.path, mtime: entry.mtime, png })
           if (!alive) return
           setThumb(entry.path, {
             status: 'ready',
             url: URL.createObjectURL(png),
             camera: cached.camera,
+            axis: cached.axis,
           })
         } catch {
           if (alive) setThumb(entry.path, { status: 'error' })

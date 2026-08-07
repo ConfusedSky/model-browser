@@ -18,9 +18,17 @@ export interface DirListing {
 }
 
 /**
- * Bounds-relative camera state: azimuth/elevation (radians), distance in
+ * Orbit spindle axis: the model turns around this axis, camera up locked to
+ * it. Sign is part of the value (six spindles). Default 'y'.
+ */
+export type OrbitAxis = 'x' | '-x' | 'y' | '-y' | 'z' | '-z'
+
+/**
+ * Bounds- and spindle-relative camera state: azimuth/elevation (radians)
+ * measured in the model's spindle frame (its stored OrbitAxis), distance in
  * multiples of the bounding-sphere radius, target relative to the bounding-box
- * center in radius units. Never world coordinates.
+ * center in radius units. Never world coordinates. Under the default 'y'
+ * spindle this equals the historical world-Y representation.
  */
 export interface CameraState {
   az: number
@@ -34,6 +42,8 @@ export type ThumbStatus = 'hit' | 'stale' | 'miss'
 export interface ThumbGetResponse {
   status: ThumbStatus
   camera?: CameraState
+  /** Stored spindle axis; absent when the path is unknown (read as 'y'). */
+  axis?: OrbitAxis
   /** base64 PNG, present when status === 'hit'. */
   png?: string
 }
@@ -44,6 +54,7 @@ export interface ThumbPutRequest {
   /** base64 PNG. */
   png?: string
   camera?: CameraState
+  axis?: OrbitAxis
 }
 
 export interface ApiError {

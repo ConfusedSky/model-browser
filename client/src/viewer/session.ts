@@ -1,74 +1,88 @@
 import * as THREE from 'three'
-import type { CameraState } from '../../../shared/types'
+import type { CameraState, OrbitAxis } from '../../../shared/types'
 import {
   boundsOf,
+  captureState,
   DEFAULT_CAMERA,
+  frameFor,
   statePosition,
   stateTarget,
   type Bounds,
+  type SpindleFrame,
 } from '../three/camera'
 import { getRenderer, makeScene, renderThumbnail } from '../three/renderer'
-import { getOrbitFlip, getOrbitMode, type OrbitMode } from './orbitModes'
 
 const ROT_SPEED = 0.01
 const EL_LIMIT = Math.PI / 2 - 0.01
-const WORLD_UP = new THREE.Vector3(0, 1, 0)
+/** Duration of the axis-change camera tween. */
+export const AXIS_TWEEN_MS = 350
 
-/**
- * Turntable frames per orbit mode: spindle `s` (yaw axis, also camera up) and
- * a plane basis (a, b) chosen with a×b = -s so yaw direction feels identical
- * across variants.
- */
-const FRAMES: Record<OrbitMode, { s: THREE.Vector3; a: THREE.Vector3; b: THREE.Vector3 }> = {
-  turntable: {
-    s: new THREE.Vector3(0, 1, 0),
-    a: new THREE.Vector3(1, 0, 0),
-    b: new THREE.Vector3(0, 0, 1),
-  },
-  'turntable-x': {
-    s: new THREE.Vector3(1, 0, 0),
-    a: new THREE.Vector3(0, 0, 1),
-    b: new THREE.Vector3(0, 1, 0),
-  },
-  'turntable-z': {
-    s: new THREE.Vector3(0, 0, 1),
-    a: new THREE.Vector3(0, 1, 0),
-    b: new THREE.Vector3(1, 0, 0),
-  },
+function easeInOutCubic(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2
+}
+
+/** In-flight axis-change animation: slerp direction and up, lerp length/target. */
+interface AxisTween {
+  start: number
+  fromDir: THREE.Vector3
+  fromUp: THREE.Vector3
+  fromTarget: THREE.Vector3
+  fromLen: number
+  dirRot: THREE.Quaternion
+  upRot: THREE.Quaternion
+  toLen: number
+  toTarget: THREE.Vector3
 }
 
 /**
  * A live view of one model, driven by the orbit overlay or the lightbox.
- * Clamped turntable around the active mode's spindle axis; camera up is
- * locked to the spindle. The model object belongs to the mesh LRU — close()
- * detaches it, never disposes it.
+ * Clamped turntable around the model's spindle axis; camera up is locked to
+ * the spindle. The model object belongs to the mesh LRU — close() detaches
+ * it, never disposes it.
  */
 export class ViewerSession {
   private scene: THREE.Scene
   private camera = new THREE.PerspectiveCamera(40, 1)
   private bounds: Bounds
+  private frame: SpindleFrame
   private target: THREE.Vector3
   /** Camera position relative to target — the live source of truth. */
   private offset: THREE.Vector3
-  private up = WORLD_UP.clone()
-  /** Rest state (world-Y az/el) — persisted; approximate for X/Z spindles. */
+  private up: THREE.Vector3
+  private tween: AxisTween | null = null
+  private _axis: OrbitAxis
+  /** Rest state (spindle-relative az/el) — persisted, exact for every axis. */
   state: CameraState
 
   constructor(
     readonly object: THREE.Object3D,
+    axis: OrbitAxis = 'y',
     initial: CameraState = DEFAULT_CAMERA,
+    private readonly now: () => number = () => performance.now(),
   ) {
     this.scene = makeScene()
     this.scene.add(object)
     this.bounds = boundsOf(object)
+    this._axis = axis
+    this.frame = frameFor(axis)
     this.state = initial
     this.target = stateTarget(initial, this.bounds)
-    this.offset = statePosition(initial, this.bounds).sub(this.target)
+    this.offset = statePosition(initial, this.bounds, axis).sub(this.target)
+    this.up = this.frame.s.clone()
     this.camera.near = this.bounds.radius / 100
     this.camera.far = this.bounds.radius * 100
   }
 
+  get axis(): OrbitAxis {
+    return this._axis
+  }
+
+  get animating(): boolean {
+    return this.tween !== null
+  }
+
   render(width: number, height: number): void {
+    this.advance()
     const r = getRenderer()
     r.setSize(width, height, false)
     this.camera.aspect = width / height
@@ -79,14 +93,66 @@ export class ViewerSession {
     r.render(this.scene, this.camera)
   }
 
-  /** Clamped turntable around the active mode's spindle. */
+  /**
+   * Move the live pose along the axis tween (per the session clock); snaps
+   * and clears when done. render() calls this every frame.
+   */
+  advance(): void {
+    const tw = this.tween
+    if (tw === null) return
+    const t = THREE.MathUtils.clamp((this.now() - tw.start) / AXIS_TWEEN_MS, 0, 1)
+    const e = easeInOutCubic(t)
+    const q = new THREE.Quaternion().slerpQuaternions(new THREE.Quaternion(), tw.dirRot, e)
+    const dir = tw.fromDir.clone().applyQuaternion(q)
+    this.offset.copy(dir).multiplyScalar(THREE.MathUtils.lerp(tw.fromLen, tw.toLen, e))
+    const uq = new THREE.Quaternion().slerpQuaternions(new THREE.Quaternion(), tw.upRot, e)
+    this.up.copy(tw.fromUp).applyQuaternion(uq)
+    this.target.lerpVectors(tw.fromTarget, tw.toTarget, e)
+    if (t >= 1) {
+      this.tween = null
+      this.up.copy(this.frame.s)
+    }
+  }
+
+  /**
+   * Switch the spindle. The rest state jumps straight to the new spindle's
+   * default view (so persistence never waits on the animation) while the live
+   * pose tweens there — an eased rotation that carries the new axis to
+   * screen-up. Called mid-tween it retargets from the current pose.
+   */
+  setAxis(axis: OrbitAxis): void {
+    if (axis === this._axis) return
+    this.advance()
+    this._axis = axis
+    this.frame = frameFor(axis)
+    this.state = { ...DEFAULT_CAMERA }
+    const toTarget = stateTarget(this.state, this.bounds)
+    const toOffset = statePosition(this.state, this.bounds, axis).sub(toTarget)
+    const fromLen = this.offset.length()
+    const fromDir = this.offset.clone().divideScalar(fromLen)
+    const toLen = toOffset.length()
+    const toDir = toOffset.divideScalar(toLen)
+    this.tween = {
+      start: this.now(),
+      fromDir,
+      fromUp: this.up.clone(),
+      fromTarget: this.target.clone(),
+      fromLen,
+      dirRot: new THREE.Quaternion().setFromUnitVectors(fromDir, toDir),
+      upRot: new THREE.Quaternion().setFromUnitVectors(
+        this.up.clone().normalize(),
+        this.frame.s,
+      ),
+      toLen,
+      toTarget,
+    }
+  }
+
+  /** Clamped turntable around the spindle. A drag cancels any axis tween. */
   orbit(dx: number, dy: number): void {
-    const frame = FRAMES[getOrbitMode()]
-    // Flip negates the spindle; swapping the plane basis keeps a×b = -s, so
-    // drag direction feels the same in the flipped frame.
-    const s = getOrbitFlip() ? frame.s.clone().negate() : frame.s
-    const a = getOrbitFlip() ? frame.b : frame.a
-    const b = getOrbitFlip() ? frame.a : frame.b
+    this.advance() // cancel from the pose of *now*, not the last rendered frame
+    this.tween = null
+    const { s, a, b } = this.frame
     const len = this.offset.length()
     const dir = this.offset.clone().divideScalar(len)
     const el = THREE.MathUtils.clamp(
@@ -105,6 +171,14 @@ export class ViewerSession {
   }
 
   zoom(factor: number): void {
+    this.advance()
+    if (this.tween !== null) {
+      // Cancelling mid-tween must re-lock up to the spindle — nothing else
+      // ever restores it, and a half-slerped up would stick as a permanent
+      // camera roll.
+      this.tween = null
+      this.up.copy(this.frame.s)
+    }
     const len = THREE.MathUtils.clamp(
       this.offset.length() * factor,
       1.1 * this.bounds.radius,
@@ -115,30 +189,25 @@ export class ViewerSession {
   }
 
   /**
-   * Rebase the persisted rest state to the current view. Never moves the live
-   * view. The stored format is world-Y az/el, so for X/Z spindles this is the
-   * nearest level approximation (persistence fidelity is settled once a
-   * spindle winner is chosen).
+   * Rebase the persisted rest state to the current view, exactly, in the
+   * spindle frame. Never moves the live view. During an axis tween this is a
+   * no-op: the rest state is already the tween's end state.
    */
   settle(render: () => void = () => {}): Promise<void> {
-    const len = this.offset.length()
-    const dir = this.offset.clone().divideScalar(len)
-    const el = THREE.MathUtils.clamp(
-      Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1)),
-      -EL_LIMIT,
-      EL_LIMIT,
-    )
-    const horizontal = Math.hypot(dir.x, dir.z)
-    const az = horizontal > 1e-4 ? Math.atan2(dir.x, dir.z) : Math.atan2(-this.up.x, -this.up.z)
-    const rel = this.target.clone().sub(this.bounds.center).divideScalar(this.bounds.radius)
-    this.state = { az, el, distR: len / this.bounds.radius, target: [rel.x, rel.y, rel.z] }
+    if (this.tween !== null) {
+      render()
+      return Promise.resolve()
+    }
+    const position = this.target.clone().add(this.offset)
+    const state = captureState(position, this.target, this.bounds, this._axis)
+    this.state = { ...state, el: THREE.MathUtils.clamp(state.el, -EL_LIMIT, EL_LIMIT) }
     render()
     return Promise.resolve()
   }
 
   /** 512×512 PNG of the rest state. */
   snapshot(): Promise<Blob> {
-    return renderThumbnail(this.object, this.state)
+    return renderThumbnail(this.object, this.state, this._axis)
   }
 
   close(): void {

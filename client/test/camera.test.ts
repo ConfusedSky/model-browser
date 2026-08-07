@@ -1,21 +1,23 @@
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
-import type { CameraState } from '../../shared/types'
+import type { CameraState, OrbitAxis } from '../../shared/types'
 import {
   applyState,
   boundsOf,
   captureState,
+  frameFor,
   statePosition,
   stateTarget,
   type Bounds,
 } from '../src/three/camera'
 
 const STATE: CameraState = { az: 0.8, el: 0.4, distR: 3, target: [0.1, -0.2, 0.05] }
+const AXES: OrbitAxis[] = ['x', '-x', 'y', '-y', 'z', '-z']
 
-function roundTrip(state: CameraState, bounds: Bounds): CameraState {
-  const pos = statePosition(state, bounds)
+function roundTrip(state: CameraState, bounds: Bounds, axis?: OrbitAxis): CameraState {
+  const pos = statePosition(state, bounds, axis)
   const target = stateTarget(state, bounds)
-  return captureState(pos, target, bounds)
+  return captureState(pos, target, bounds, axis)
 }
 
 function expectClose(a: CameraState, b: CameraState): void {
@@ -56,6 +58,54 @@ describe('bounds-relative camera state', () => {
     camera.getWorldDirection(forward)
     const toTarget = stateTarget(STATE, bounds).sub(camera.position).normalize()
     expect(forward.dot(toTarget)).toBeCloseTo(1, 5)
+  })
+
+  it('capture(apply(state)) round-trips under every spindle axis', () => {
+    const bounds: Bounds = { center: new THREE.Vector3(5, 2, -3), radius: 7 }
+    for (const axis of AXES) expectClose(roundTrip(STATE, bounds, axis), STATE)
+  })
+
+  it('spindle round-trip survives a re-scaled re-export', () => {
+    const mm: Bounds = { center: new THREE.Vector3(10, 0, 0), radius: 25.4 }
+    const inches: Bounds = { center: new THREE.Vector3(0.39, 0, 0), radius: 1 }
+    for (const axis of AXES) {
+      expectClose(roundTrip(STATE, mm, axis), STATE)
+      expectClose(roundTrip(STATE, inches, axis), STATE)
+    }
+  })
+
+  it('the default axis reproduces the historical world-Y representation', () => {
+    const bounds: Bounds = { center: new THREE.Vector3(1, 2, 3), radius: 4 }
+    const legacy = statePosition(STATE, bounds) // axis omitted
+    const explicit = statePosition(STATE, bounds, 'y')
+    expect(legacy.distanceTo(explicit)).toBeLessThan(1e-9)
+    // The world-Y formula the client used before spindle frames existed:
+    const dist = STATE.distR * bounds.radius
+    const manual = stateTarget(STATE, bounds).add(
+      new THREE.Vector3(
+        Math.sin(STATE.az) * Math.cos(STATE.el),
+        Math.sin(STATE.el),
+        Math.cos(STATE.az) * Math.cos(STATE.el),
+      ).multiplyScalar(dist),
+    )
+    expect(explicit.distanceTo(manual)).toBeLessThan(1e-9)
+  })
+
+  it('every frame satisfies a×b = −s with unit vectors (consistent drag feel)', () => {
+    for (const axis of AXES) {
+      const { s, a, b } = frameFor(axis)
+      expect(new THREE.Vector3().crossVectors(a, b).distanceTo(s.clone().negate())).toBeLessThan(1e-12)
+      for (const v of [s, a, b]) expect(v.length()).toBeCloseTo(1, 12)
+    }
+  })
+
+  it('applyState locks camera up to the spindle', () => {
+    const bounds: Bounds = { center: new THREE.Vector3(0, 0, 0), radius: 2 }
+    for (const axis of AXES) {
+      const camera = new THREE.PerspectiveCamera(40, 1)
+      applyState(camera, STATE, bounds, axis)
+      expect(camera.up.distanceTo(frameFor(axis).s)).toBeLessThan(1e-12)
+    }
   })
 
   it('boundsOf centers a mesh and finds a positive radius', () => {

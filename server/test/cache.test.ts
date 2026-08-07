@@ -33,19 +33,36 @@ describe('ThumbCache maintenance', () => {
     expect((await cache.get(path, 1)).status).toBe('stale')
   })
 
-  it('sweeps whole entries (camera included) when the source is gone', async () => {
+  it('sweeps whole entries (camera and axis included) when the source is gone', async () => {
     const cache = tempCache()
     const fx = makeFixtures()
     cleanups.push(fx.dir)
     const doomed = join(fx.dir, 'doomed.stl')
     writeFileSync(doomed, 'x')
-    await cache.put(doomed, { mtime: 1, png: Buffer.from('png'), camera: CAM })
+    await cache.put(doomed, { mtime: 1, png: Buffer.from('png'), camera: CAM, axis: '-z' })
     unlinkSync(doomed)
     await cache.maintain()
     const res = await cache.get(doomed, 1)
     expect(res.status).toBe('miss')
     expect(res.camera).toBeUndefined()
+    expect(res.axis).toBeUndefined()
     expect(readdirSync(cache.dir)).toHaveLength(0)
+  })
+
+  it('stores the axis beside the camera and defaults a missing axis to y', async () => {
+    const cache = tempCache()
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const path = join(fx.dir, 'loose.stl')
+    await cache.put(path, { mtime: 1, png: Buffer.from('png'), camera: CAM })
+    expect((await cache.get(path, 1)).axis).toBe('y') // pre-axis entry reads as +Y
+    await cache.put(path, { mtime: 1, camera: CAM, axis: '-x' })
+    const res = await cache.get(path, 1)
+    expect(res.axis).toBe('-x')
+    expect(res.status).toBe('hit') // axis write keyed by path — png keying untouched
+    // A later png-only put must not drop the stored axis.
+    await cache.put(path, { mtime: 2, png: Buffer.from('png2') })
+    expect((await cache.get(path, 2)).axis).toBe('-x')
   })
 
   it('tests virtual-path existence against the containing zip, not the entry', async () => {
@@ -62,14 +79,14 @@ describe('ThumbCache maintenance', () => {
     expect((await cache.get(vpath, 1)).status).toBe('miss')
   })
 
-  it('size-cap eviction removes least-recently-read pngs but spares camera state', async () => {
+  it('size-cap eviction removes least-recently-read pngs but spares camera state and axis', async () => {
     const cache = tempCache(10) // tiny cap: any two pngs exceed it
     const fx = makeFixtures()
     cleanups.push(fx.dir)
     const a = join(fx.dir, 'loose.stl')
     const b = fx.zipPath
     const tick = () => new Promise((r) => setTimeout(r, 5))
-    await cache.put(a, { mtime: 1, png: Buffer.from('aaaaaaaa'), camera: CAM })
+    await cache.put(a, { mtime: 1, png: Buffer.from('aaaaaaaa'), camera: CAM, axis: 'z' })
     await tick()
     await cache.put(b, { mtime: 1, png: Buffer.from('bbbbbbbb'), camera: CAM })
     await tick()
@@ -79,6 +96,7 @@ describe('ThumbCache maintenance', () => {
     const resA = await cache.get(a, 1)
     expect(resA.status).toBe('stale') // png gone…
     expect(resA.camera).toEqual(CAM) // …camera spared
+    expect(resA.axis).toBe('z') // …axis spared too
     const pngs = readdirSync(cache.dir).filter((f) => f.endsWith('.png'))
     expect(pngs.length).toBeLessThanOrEqual(1)
   })

@@ -14,14 +14,6 @@ import { MeshLru } from './three/lru'
 import { disposeModel, embedded3mfThumbnail, formatOf, geometryBytes, parseModel } from './three/models'
 import { RenderQueue } from './three/queue'
 import ViewerLayer, { type ViewerState } from './viewer/ViewerLayer'
-import {
-  getOrbitFlip,
-  getOrbitMode,
-  ORBIT_MODES,
-  setOrbitFlip,
-  setOrbitMode,
-  type OrbitMode,
-} from './viewer/orbitModes'
 import type { ViewerSession } from './viewer/session'
 
 export default function App() {
@@ -48,8 +40,6 @@ export default function App() {
   const [listing, setListing] = useState<DirEntry[]>([])
   const [error, setError] = useState<string | null>(null)
   const [viewer, setViewer] = useState<ViewerState | null>(null)
-  const [orbitMode, setOrbitModeState] = useState<OrbitMode>(getOrbitMode)
-  const [orbitFlip, setOrbitFlipState] = useState<boolean>(getOrbitFlip)
   const trackerRef = useRef(new GestureTracker())
 
   const { thumbs, setThumb, setPlaceholder } = useThumbnails(listing, api, lru, queue)
@@ -148,12 +138,16 @@ export default function App() {
       const entry = viewer?.entry
       if (entry === undefined) return
       try {
+        // Capture before the await: a rapid axis change mid-snapshot must not
+        // pair this PNG with the newer axis/state in one PUT.
+        const { state, axis } = session
         const png = await session.snapshot()
-        await api.putThumb({ path: entry.path, mtime: entry.mtime, png, camera: session.state })
+        await api.putThumb({ path: entry.path, mtime: entry.mtime, png, camera: state, axis })
         setThumb(entry.path, {
           status: 'ready',
           url: URL.createObjectURL(png),
-          camera: session.state,
+          camera: state,
+          axis,
         })
       } catch {
         // persistence is best-effort; the orbit itself already happened
@@ -201,43 +195,11 @@ export default function App() {
         </main>
         <ChatPanel />
       </div>
-      {/* EXPERIMENTAL orbit-feel picker — remove once a winner is chosen */}
-      <div className="fixed bottom-3 left-3 z-50 flex items-center gap-1 rounded-full border border-zinc-700 bg-zinc-900/90 p-1 text-xs">
-        <span className="px-2 text-zinc-500">orbit</span>
-        {ORBIT_MODES.map((m) => (
-          <button
-            key={m}
-            type="button"
-            onClick={() => {
-              setOrbitMode(m)
-              setOrbitModeState(m)
-            }}
-            className={`rounded-full px-2.5 py-1 ${
-              m === orbitMode ? 'bg-sky-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
-            {m}
-          </button>
-        ))}
-        <span className="h-4 w-px bg-zinc-700" />
-        <button
-          type="button"
-          onClick={() => {
-            setOrbitFlip(!orbitFlip)
-            setOrbitFlipState(!orbitFlip)
-          }}
-          title="Negate the spindle axis (+axis ↔ −axis)"
-          className={`rounded-full px-2.5 py-1 ${
-            orbitFlip ? 'bg-amber-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
-          }`}
-        >
-          flip
-        </button>
-      </div>
       {viewer !== null && (
         <ViewerLayer
           viewer={viewer}
           camera={thumbs.get(viewer.entry.path)?.camera}
+          axis={thumbs.get(viewer.entry.path)?.axis}
           api={api}
           lru={lru}
           tracker={trackerRef.current}

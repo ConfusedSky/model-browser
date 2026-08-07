@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type * as THREE from 'three'
-import type { CameraState, DirEntry } from '../../../shared/types'
+import type { CameraState, DirEntry, OrbitAxis } from '../../../shared/types'
 import type { ApiClient } from '../api/client'
 import { GestureTracker } from '../lib/gesture'
 import type { MeshLru } from '../three/lru'
@@ -18,6 +18,7 @@ export interface ViewerState {
 interface Props {
   viewer: ViewerState
   camera: CameraState | undefined
+  axis: OrbitAxis | undefined
   api: ApiClient
   lru: MeshLru<THREE.Object3D>
   tracker: GestureTracker
@@ -26,6 +27,8 @@ interface Props {
   onPersist: (session: ViewerSession) => Promise<void>
 }
 
+const AXIS_LETTERS = ['x', 'y', 'z'] as const
+
 /**
  * The single live-canvas layer: in 'orbit' mode it overlays the pressed tile;
  * in 'lightbox' mode it is a modal with full orbit/zoom, focus-trapped.
@@ -33,6 +36,7 @@ interface Props {
 export default function ViewerLayer({
   viewer,
   camera,
+  axis,
   api,
   lru,
   tracker,
@@ -41,6 +45,7 @@ export default function ViewerLayer({
   onPersist,
 }: Props) {
   const [session, setSession] = useState<ViewerSession | null>(null)
+  const [sessionAxis, setSessionAxis] = useState<OrbitAxis>('y')
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasHostRef = useRef<HTMLDivElement>(null)
   // A pointer-opened viewer mounts mid-press (orbit); a keyboard-opened one
@@ -51,24 +56,26 @@ export default function ViewerLayer({
   modeRef.current = viewer.mode
 
   // Load the mesh (spinner until warm) and build the session. The saved
-  // camera may not be in the thumbs map yet (its queued GET may not have run)
-  // — fetch it from the server so a fast open never clobbers a saved
-  // orientation with the default view on persist.
+  // camera/axis may not be in the thumbs map yet (its queued GET may not have
+  // run) — fetch them from the server so a fast open never clobbers a saved
+  // orientation with the default view on persist. Camera and axis live in the
+  // same cache entry, so a present camera means the axis prop is settled too.
   useEffect(() => {
     let alive = true
-    const cameraPromise: Promise<CameraState | undefined> =
+    const savedPromise: Promise<{ camera?: CameraState; axis: OrbitAxis }> =
       camera !== undefined
-        ? Promise.resolve(camera)
+        ? Promise.resolve({ camera, axis: axis ?? 'y' })
         : api
             .getThumb(viewer.entry.path, viewer.entry.mtime)
-            .then((r) => r.camera)
-            .catch(() => undefined)
-    void Promise.all([lru.acquire(viewer.entry.path), cameraPromise])
-      .then(([object, savedCamera]) => {
+            .then((r) => ({ camera: r.camera, axis: r.axis ?? ('y' as OrbitAxis) }))
+            .catch(() => ({ axis: 'y' as OrbitAxis }))
+    void Promise.all([lru.acquire(viewer.entry.path), savedPromise])
+      .then(([object, saved]) => {
         if (!alive) return
-        const s = new ViewerSession(object, savedCamera)
+        const s = new ViewerSession(object, saved.axis, saved.camera)
         sessionRef.current = s
         setSession(s)
+        setSessionAxis(saved.axis)
       })
       .catch(() => {
         if (alive) onDismiss()
@@ -222,6 +229,31 @@ export default function ViewerLayer({
     tracker.start(e.clientX, e.clientY)
   }
 
+  // Drives renders while an axis-change tween is in flight. The loop ends on
+  // its own when the tween completes or a drag/zoom cancels it.
+  const tweenLoopActive = useRef(false)
+  function runTweenLoop(): void {
+    if (tweenLoopActive.current) return
+    tweenLoopActive.current = true
+    const step = (): void => {
+      renderNow()
+      if (sessionRef.current?.animating === true) requestAnimationFrame(step)
+      else tweenLoopActive.current = false
+    }
+    requestAnimationFrame(step)
+  }
+
+  // The rest state is already the new spindle's default view, so persistence
+  // is immediate — only the visible camera takes the scenic route.
+  function changeAxis(next: OrbitAxis): void {
+    const s = sessionRef.current
+    if (s === null || next === s.axis) return
+    s.setAxis(next)
+    setSessionAxis(next)
+    runTweenLoop()
+    void onPersist(s)
+  }
+
   const spinner = (
     <span className="absolute left-1/2 top-1/2 size-8 -translate-x-1/2 -translate-y-1/2 animate-spin rounded-full border-2 border-zinc-600 border-t-zinc-200" />
   )
@@ -266,6 +298,51 @@ export default function ViewerLayer({
       >
         <div ref={canvasHostRef} className="h-full w-full" />
         {session === null && spinner}
+        {session !== null && (
+          <div
+            className="absolute left-3 top-3 flex items-center gap-1 rounded-full bg-zinc-800/80 p-1 text-xs"
+            aria-label="Orbit axis"
+          >
+            <span className="px-1.5 text-zinc-500">axis</span>
+            {AXIS_LETTERS.map((letter) => {
+              const flipped = sessionAxis.startsWith('-')
+              const active = sessionAxis === letter || sessionAxis === `-${letter}`
+              return (
+                <button
+                  key={letter}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => changeAxis(flipped ? (`-${letter}` as OrbitAxis) : letter)}
+                  className={`rounded-full px-2.5 py-1 ${
+                    active ? 'bg-sky-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  {letter.toUpperCase()}
+                </button>
+              )
+            })}
+            <span className="h-4 w-px bg-zinc-700" />
+            <button
+              type="button"
+              aria-pressed={sessionAxis.startsWith('-')}
+              title="Negate the spindle axis (+axis ↔ −axis)"
+              onClick={() =>
+                changeAxis(
+                  sessionAxis.startsWith('-')
+                    ? (sessionAxis.slice(1) as OrbitAxis)
+                    : (`-${sessionAxis}` as OrbitAxis),
+                )
+              }
+              className={`rounded-full px-2.5 py-1 ${
+                sessionAxis.startsWith('-')
+                  ? 'bg-amber-700 text-white'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              flip
+            </button>
+          </div>
+        )}
         <button
           type="button"
           aria-label="Close"

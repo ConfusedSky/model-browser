@@ -191,4 +191,31 @@ describe('thumbnail cache API', () => {
     expect(body.status).toBe('hit')
     expect(body.camera).toEqual(cam2)
   })
+
+  it('an entry without a stored axis is served as y', async () => {
+    const res = await get(`/api/thumb?path=${encodeURIComponent(path)}&mtime=111`)
+    expect(((await res.json()) as ThumbGetResponse).axis).toBe('y')
+  })
+
+  it('put stores the axis and get serves it back', async () => {
+    const put = await app.request('/api/thumb', {
+      method: 'PUT',
+      headers: { ...LOOPBACK, 'content-type': 'application/json' },
+      body: JSON.stringify({ path, mtime: 111, camera, axis: '-z' }),
+    })
+    expect(put.status).toBe(200)
+    const res = await get(`/api/thumb?path=${encodeURIComponent(path)}&mtime=111`)
+    const body = (await res.json()) as ThumbGetResponse
+    expect(body.axis).toBe('-z')
+    expect(body.camera).toEqual(camera)
+  })
+
+  it('rejects an invalid axis', async () => {
+    const put = await app.request('/api/thumb', {
+      method: 'PUT',
+      headers: { ...LOOPBACK, 'content-type': 'application/json' },
+      body: JSON.stringify({ path, mtime: 111, axis: 'w' }),
+    })
+    expect(put.status).toBe(400)
+  })
 })

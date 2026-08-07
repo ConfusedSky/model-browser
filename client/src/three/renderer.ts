@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import type { CameraState } from '../../../shared/types'
+import type { CameraState, OrbitAxis } from '../../../shared/types'
 import { applyState, boundsOf, DEFAULT_CAMERA } from './camera'
 import { encodeSrgbInPlace } from './srgb'
 
@@ -36,7 +36,11 @@ export function makeScene(): THREE.Scene {
  * Render a model to a 512×512 transparent PNG via an offscreen render target
  * on the shared renderer (never the visible canvas).
  */
-export function renderThumbnail(object: THREE.Object3D, state: CameraState = DEFAULT_CAMERA): Promise<Blob> {
+export function renderThumbnail(
+  object: THREE.Object3D,
+  state: CameraState = DEFAULT_CAMERA,
+  axis: OrbitAxis = 'y',
+): Promise<Blob> {
   const r = getRenderer()
   const scene = makeScene()
   // scene.add() reparents — the object may belong to a live ViewerSession
@@ -45,7 +49,7 @@ export function renderThumbnail(object: THREE.Object3D, state: CameraState = DEF
   scene.add(object)
   const bounds = boundsOf(object)
   const camera = new THREE.PerspectiveCamera(40, 1)
-  applyState(camera, state, bounds)
+  applyState(camera, state, bounds, axis)
 
   const target = new THREE.WebGLRenderTarget(THUMB_SIZE, THUMB_SIZE, {
     samples: 4,

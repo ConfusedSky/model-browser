@@ -1,6 +1,7 @@
 import type {
   CameraState,
   DirListing,
+  OrbitAxis,
   ThumbGetResponse,
   ThumbStatus,
 } from '../../../shared/types'
@@ -8,6 +9,8 @@ import type {
 export interface ThumbResult {
   status: ThumbStatus
   camera?: CameraState
+  /** Stored spindle axis; absent when the path is unknown (read as 'y'). */
+  axis?: OrbitAxis
   /** Object URL for the cached PNG, present on 'hit'. */
   pngUrl?: string
 }
@@ -17,6 +20,7 @@ export interface ThumbSave {
   mtime: number
   png?: Blob
   camera?: CameraState
+  axis?: OrbitAxis
 }
 
 /**
@@ -94,6 +98,7 @@ export class HttpApiClient implements ApiClient {
     return {
       status: body.status,
       camera: body.camera,
+      axis: body.axis,
       pngUrl: body.png !== undefined ? base64ToBlobUrl(body.png) : undefined,
     }
   }
@@ -107,6 +112,7 @@ export class HttpApiClient implements ApiClient {
         mtime: save.mtime,
         png: save.png !== undefined ? await blobToBase64(save.png) : undefined,
         camera: save.camera,
+        axis: save.axis,
       }),
     })
     if (!res.ok) {

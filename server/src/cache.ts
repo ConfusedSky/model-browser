@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { CameraState, ThumbGetResponse } from '../../shared/types'
+import type { CameraState, OrbitAxis, ThumbGetResponse } from '../../shared/types'
 import { parseVPath } from './vpath'
 
 interface Meta {
@@ -10,6 +10,8 @@ interface Meta {
   /** mtime the PNG was rendered against; undefined when only camera is stored. */
   mtime?: number
   camera?: CameraState
+  /** Orbit spindle axis; undefined reads as 'y' (pre-axis entries). */
+  axis?: OrbitAxis
   /** Last time the PNG was served — LRU clock for size-cap eviction. */
   lastRead: number
 }
@@ -62,24 +64,26 @@ export class ThumbCache {
     const key = this.key(path)
     const meta = await this.readMeta(key)
     if (meta === null) return { status: 'miss' }
-    if (meta.mtime !== mtime) return { status: meta.camera !== undefined || meta.mtime !== undefined ? 'stale' : 'miss', camera: meta.camera }
+    const axis = meta.axis ?? 'y'
+    if (meta.mtime !== mtime) return { status: meta.camera !== undefined || meta.mtime !== undefined ? 'stale' : 'miss', camera: meta.camera, axis }
     let png
     try {
       png = await readFile(this.pngFile(key))
     } catch {
-      return { status: 'stale', camera: meta.camera }
+      return { status: 'stale', camera: meta.camera, axis }
     }
     await this.writeMeta(key, { ...meta, lastRead: Date.now() })
-    return { status: 'hit', camera: meta.camera, png: png.toString('base64') }
+    return { status: 'hit', camera: meta.camera, axis, png: png.toString('base64') }
   }
 
-  async put(path: string, opts: { mtime: number; png?: Buffer; camera?: CameraState }): Promise<void> {
+  async put(path: string, opts: { mtime: number; png?: Buffer; camera?: CameraState; axis?: OrbitAxis }): Promise<void> {
     const key = this.key(path)
     const prev = await this.readMeta(key)
     const meta: Meta = {
       path,
       mtime: opts.png !== undefined ? opts.mtime : prev?.mtime,
       camera: opts.camera ?? prev?.camera,
+      axis: opts.axis ?? prev?.axis,
       lastRead: Date.now(),
     }
     if (opts.png !== undefined) {
