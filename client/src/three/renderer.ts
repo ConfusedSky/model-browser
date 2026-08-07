@@ -38,6 +38,9 @@ export function makeScene(): THREE.Scene {
 export function renderThumbnail(object: THREE.Object3D, state: CameraState = DEFAULT_CAMERA): Promise<Blob> {
   const r = getRenderer()
   const scene = makeScene()
+  // scene.add() reparents — the object may belong to a live ViewerSession
+  // scene (it is LRU-shared), so its original parent must be restored after.
+  const originalParent = object.parent
   scene.add(object)
   const bounds = boundsOf(object)
   const camera = new THREE.PerspectiveCamera(40, 1)
@@ -57,6 +60,7 @@ export function renderThumbnail(object: THREE.Object3D, state: CameraState = DEF
     r.setRenderTarget(prevTarget)
     target.dispose()
     scene.remove(object)
+    originalParent?.add(object)
   }
 
   // GL readback is bottom-up; flip rows into ImageData.

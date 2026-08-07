@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { zipSync } from 'fflate'
@@ -25,11 +25,14 @@ export function makeFixtures(): {
   writeFileSync(join(dir, 'notes.txt'), 'not a model')
   writeFileSync(join(dir, '.hidden.stl'), stlBytes(4))
   mkdirSync(join(dir, 'sub'), { recursive: true })
+  symlinkSync(join(dir, 'sub'), join(dir, 'linked'))
 
   const zip = zipSync({
     'box.stl': new Uint8Array(boxStl),
     'parts/lid.stl': new Uint8Array(lidStl),
     'parts/readme.txt': new TextEncoder().encode('skip me'),
+    // A real directory whose name ends in .zip — must stay navigable.
+    'v2.zip/deep2.stl': new Uint8Array(stlBytes(6)),
     'inner.zip': [new Uint8Array(zipSync({ 'deep.stl': new Uint8Array(stlBytes(5)) })), { level: 0 }],
   })
   const zipPath = join(dir, 'models.zip')

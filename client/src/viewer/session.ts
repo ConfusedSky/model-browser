@@ -48,11 +48,9 @@ export class ViewerSession {
     this.state = zoomState(this.state, factor)
   }
 
-  /** 512×512 PNG of the current view. */
-  async snapshot(): Promise<Blob> {
-    const blob = await renderThumbnail(this.object, this.state)
-    this.scene.add(this.object) // renderThumbnail borrows the object into its own scene
-    return blob
+  /** 512×512 PNG of the current view. renderThumbnail restores the object's parent. */
+  snapshot(): Promise<Blob> {
+    return renderThumbnail(this.object, this.state)
   }
 
   close(): void {

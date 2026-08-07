@@ -60,12 +60,19 @@ describe('GET /api/dir', () => {
     const res = await get(`/api/dir?path=${encodeURIComponent(fx.dir)}`)
     const body = (await res.json()) as DirListing
     const names = body.entries.map((e) => e.name)
-    expect(names).toEqual(['sub', 'models.zip', 'loose.stl'])
+    expect(names).toEqual(['linked', 'sub', 'models.zip', 'loose.stl'])
     const model = body.entries.find((e) => e.name === 'loose.stl')!
     expect(model.kind).toBe('model')
     expect(model.format).toBe('stl')
     expect(model.size).toBeGreaterThan(0)
     expect(model.mtime).toBeGreaterThan(0)
+  })
+
+  it('lists a symlinked directory as a dir entry', async () => {
+    const res = await get(`/api/dir?path=${encodeURIComponent(fx.dir)}`)
+    const body = (await res.json()) as DirListing
+    const linked = body.entries.find((e) => e.name === 'linked')
+    expect(linked?.kind).toBe('dir')
   })
 
   it('404s on a missing path', async () => {
@@ -84,9 +91,16 @@ describe('zip virtual folders', () => {
     const res = await get(`/api/dir?path=${encodeURIComponent(fx.zipPath)}`)
     const body = (await res.json()) as DirListing
     const names = body.entries.map((e) => e.name)
-    expect(names).toEqual(['parts', 'inner.zip', 'box.stl'])
+    expect(names).toEqual(['parts', 'v2.zip', 'inner.zip', 'box.stl'])
     const dir = body.entries.find((e) => e.name === 'parts')!
     expect(dir.path).toBe(`${fx.zipPath}!/parts`)
+  })
+
+  it('a directory named *.zip inside a zip stays navigable', async () => {
+    const res = await get(`/api/dir?path=${encodeURIComponent(`${fx.zipPath}!/v2.zip`)}`)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as DirListing
+    expect(body.entries.map((e) => e.name)).toEqual(['deep2.stl'])
   })
 
   it('lists a folder inside a zip', async () => {

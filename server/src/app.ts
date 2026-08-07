@@ -41,6 +41,7 @@ export function createApp(cache: ThumbCache = new ThumbCache()): Hono {
       'x-content-type-options': 'nosniff',
     }
     if (entry !== undefined) {
+      if (/\.zip$/i.test(entry)) return c.json({ error: 'nested zips are unsupported' }, 400)
       const bytes = await extractEntry(fsPath, entry)
       return c.body(new Uint8Array(bytes), 200, headers)
     }

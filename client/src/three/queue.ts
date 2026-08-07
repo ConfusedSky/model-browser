@@ -12,6 +12,7 @@ export class RenderQueue {
   private jobs: Job[] = []
   private running = 0
   private suspended = false
+  private resumeWaiters: (() => void)[] = []
 
   constructor(private concurrency = 2) {}
 
@@ -30,7 +31,19 @@ export class RenderQueue {
 
   resume(): void {
     this.suspended = false
+    const waiters = this.resumeWaiters
+    this.resumeWaiters = []
+    for (const w of waiters) w()
     this.pump()
+  }
+
+  /**
+   * Gate for in-flight jobs: suspend() cannot stop a job that already started,
+   * so jobs await this before each renderer-touching stage (parse, render).
+   */
+  whenResumed(): Promise<void> {
+    if (!this.suspended) return Promise.resolve()
+    return new Promise((resolve) => this.resumeWaiters.push(resolve))
   }
 
   private pump(): void {

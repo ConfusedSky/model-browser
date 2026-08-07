@@ -50,8 +50,10 @@ export default function PathBar({ path, error, api, onNavigate }: Props) {
         onFocus={() => {
           editing.current = true
           setOpen(true)
-          setSuggestions(value === '' ? getRecents() : [])
-          if (value !== '') refreshSuggestions(value)
+          // Focus always offers recents (spec: focusing the bar lists recent
+          // directories) — the input holds the current path, which would
+          // otherwise make recents unreachable. Editing switches to completions.
+          setSuggestions(getRecents().filter((r) => r !== path))
         }}
         onBlur={() => {
           editing.current = false

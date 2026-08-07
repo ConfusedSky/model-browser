@@ -15,6 +15,8 @@ interface Meta {
 }
 
 const DEFAULT_CAP = 2 * 1024 ** 3
+/** PNG writes between automatic maintenance runs (D4: "after writes crossing a threshold"). */
+const MAINTAIN_EVERY = 32
 
 /**
  * Server-side `{png, cameraState}` store, filed under a hash of the virtual
@@ -22,9 +24,13 @@ const DEFAULT_CAP = 2 * 1024 ** 3
  * path only.
  */
 export class ThumbCache {
+  private writesSinceMaintain = 0
+  private maintaining = false
+
   constructor(
     readonly dir: string = process.env.MODEL_BROWSER_CACHE ?? join(homedir(), '.cache', 'model-browser'),
     readonly sizeCap: number = Number(process.env.MODEL_BROWSER_CACHE_CAP ?? DEFAULT_CAP),
+    readonly maintainEvery: number = MAINTAIN_EVERY,
   ) {}
 
   private key(path: string): string {
@@ -82,6 +88,22 @@ export class ThumbCache {
       await writeFile(this.pngFile(key), opts.png)
     }
     await this.writeMeta(key, meta)
+    if (opts.png !== undefined && ++this.writesSinceMaintain >= this.maintainEvery) {
+      this.writesSinceMaintain = 0
+      void this.runMaintain()
+    }
+  }
+
+  private async runMaintain(): Promise<void> {
+    if (this.maintaining) return
+    this.maintaining = true
+    try {
+      await this.maintain()
+    } catch {
+      // best-effort background sweep
+    } finally {
+      this.maintaining = false
+    }
   }
 
   /**

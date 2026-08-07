@@ -6,10 +6,12 @@ interface Props {
   thumbs: Map<string, ThumbState>
   onEnter: (entry: DirEntry) => void
   onModelPointerDown: (e: React.PointerEvent, entry: DirEntry, el: HTMLElement) => void
+  /** Keyboard activation (Enter/Space) — opens the lightbox directly. */
+  onModelOpen: (entry: DirEntry, el: HTMLElement) => void
   onModelHover: (path: string | null) => void
 }
 
-export default function Grid({ entries, thumbs, onEnter, onModelPointerDown, onModelHover }: Props) {
+export default function Grid({ entries, thumbs, onEnter, onModelPointerDown, onModelOpen, onModelHover }: Props) {
   if (entries.length === 0) {
     return <p className="mt-16 text-center text-sm text-zinc-600">Nothing to show here.</p>
   }
@@ -22,6 +24,7 @@ export default function Grid({ entries, thumbs, onEnter, onModelPointerDown, onM
           thumb={thumbs.get(entry.path)}
           onEnter={onEnter}
           onModelPointerDown={onModelPointerDown}
+          onModelOpen={onModelOpen}
           onModelHover={onModelHover}
         />
       ))}
@@ -34,12 +37,14 @@ function Tile({
   thumb,
   onEnter,
   onModelPointerDown,
+  onModelOpen,
   onModelHover,
 }: {
   entry: DirEntry
   thumb: ThumbState | undefined
   onEnter: (entry: DirEntry) => void
   onModelPointerDown: (e: React.PointerEvent, entry: DirEntry, el: HTMLElement) => void
+  onModelOpen: (entry: DirEntry, el: HTMLElement) => void
   onModelHover: (path: string | null) => void
 }) {
   const base =
@@ -60,6 +65,13 @@ function Tile({
       data-model-tile={entry.path}
       className={`${base} touch-none select-none`}
       onPointerDown={(e) => onModelPointerDown(e, entry, e.currentTarget)}
+      onKeyDown={(e) => {
+        // Keyboard activation fires click, not pointerdown — handle it here.
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onModelOpen(entry, e.currentTarget)
+        }
+      }}
       onPointerEnter={() => onModelHover(entry.path)}
       onPointerLeave={() => onModelHover(null)}
     >

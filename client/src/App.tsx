@@ -87,6 +87,17 @@ export default function App() {
     })
   }
 
+  function openLightbox(entry: DirEntry, el: HTMLElement): void {
+    trackerRef.current.start(0, 0)
+    const r = el.getBoundingClientRect()
+    setViewer({
+      mode: 'lightbox',
+      entry,
+      rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+      originEl: el,
+    })
+  }
+
   function enterEntry(entry: DirEntry): void {
     if (entry.kind === 'dir' || entry.kind === 'zip') navigate(entry.path)
   }
@@ -157,6 +168,7 @@ export default function App() {
               thumbs={thumbs}
               onEnter={enterEntry}
               onModelPointerDown={onModelPointerDown}
+              onModelOpen={openLightbox}
               onModelHover={(p) => (p !== null ? hover.enter(p) : hover.leave())}
             />
           )}
@@ -167,6 +179,7 @@ export default function App() {
         <ViewerLayer
           viewer={viewer}
           camera={thumbs.get(viewer.entry.path)?.camera}
+          api={api}
           lru={lru}
           tracker={trackerRef.current}
           onPromote={() => setViewer((v) => (v !== null ? { ...v, mode: 'lightbox' } : v))}

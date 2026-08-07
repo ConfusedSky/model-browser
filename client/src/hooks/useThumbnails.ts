@@ -60,7 +60,13 @@ export function useThumbnails(
             setThumb(entry.path, { status: 'ready', url: cached.pngUrl, camera: cached.camera })
             return
           }
+          // In-flight jobs must not parse or drive the shared renderer while
+          // an orbit/lightbox is active — wait out the suspension first.
+          await queue.whenResumed()
+          if (!alive) return
           const object = await lru.acquire(entry.path)
+          if (!alive) return
+          await queue.whenResumed()
           if (!alive) return
           const camera = cached.camera ?? DEFAULT_CAMERA
           const png = await renderThumbnail(object, camera)

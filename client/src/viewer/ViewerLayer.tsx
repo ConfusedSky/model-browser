@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type * as THREE from 'three'
 import type { CameraState, DirEntry } from '../../../shared/types'
+import type { ApiClient } from '../api/client'
 import { GestureTracker } from '../lib/gesture'
 import type { MeshLru } from '../three/lru'
 import { getRenderer } from '../three/renderer'
@@ -17,6 +18,7 @@ export interface ViewerState {
 interface Props {
   viewer: ViewerState
   camera: CameraState | undefined
+  api: ApiClient
   lru: MeshLru<THREE.Object3D>
   tracker: GestureTracker
   onPromote: () => void
@@ -31,6 +33,7 @@ interface Props {
 export default function ViewerLayer({
   viewer,
   camera,
+  api,
   lru,
   tracker,
   onPromote,
@@ -40,19 +43,30 @@ export default function ViewerLayer({
   const [session, setSession] = useState<ViewerSession | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasHostRef = useRef<HTMLDivElement>(null)
-  const pointer = useRef({ down: true, lastX: 0, lastY: 0 })
+  // A pointer-opened viewer mounts mid-press (orbit); a keyboard-opened one
+  // mounts directly in lightbox mode with no pointer down.
+  const pointer = useRef({ down: viewer.mode === 'orbit', lastX: 0, lastY: 0 })
   const sessionRef = useRef<ViewerSession | null>(null)
   const modeRef = useRef(viewer.mode)
   modeRef.current = viewer.mode
 
-  // Load the mesh (spinner until warm) and build the session.
+  // Load the mesh (spinner until warm) and build the session. The saved
+  // camera may not be in the thumbs map yet (its queued GET may not have run)
+  // — fetch it from the server so a fast open never clobbers a saved
+  // orientation with the default view on persist.
   useEffect(() => {
     let alive = true
-    void lru
-      .acquire(viewer.entry.path)
-      .then((object) => {
+    const cameraPromise: Promise<CameraState | undefined> =
+      camera !== undefined
+        ? Promise.resolve(camera)
+        : api
+            .getThumb(viewer.entry.path, viewer.entry.mtime)
+            .then((r) => r.camera)
+            .catch(() => undefined)
+    void Promise.all([lru.acquire(viewer.entry.path), cameraPromise])
+      .then(([object, savedCamera]) => {
         if (!alive) return
-        const s = new ViewerSession(object, camera)
+        const s = new ViewerSession(object, savedCamera)
         sessionRef.current = s
         setSession(s)
       })
@@ -116,7 +130,7 @@ export default function ViewerLayer({
         renderNow()
       }
     }
-    function onUp(): void {
+    function onUp(e: PointerEvent): void {
       if (!pointer.current.down) return
       pointer.current.down = false
       if (!tracker.isDrag) {
@@ -125,6 +139,18 @@ export default function ViewerLayer({
       }
       const s = sessionRef.current
       if (s !== null) void onPersist(s)
+      // A drag released outside the tile gets no later pointerleave — the
+      // overlay would be stuck. Dismiss now if the release landed outside.
+      if (modeRef.current === 'orbit') {
+        const rect = containerRef.current?.getBoundingClientRect()
+        const inside =
+          rect !== undefined &&
+          e.clientX >= rect.left &&
+          e.clientX <= rect.right &&
+          e.clientY >= rect.top &&
+          e.clientY <= rect.bottom
+        if (!inside) onDismiss()
+      }
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
@@ -156,7 +182,18 @@ export default function ViewerLayer({
     containerRef.current?.focus()
     function onKey(e: KeyboardEvent): void {
       if (e.key === 'Escape') void closeLightbox()
-      if (e.key === 'Tab') e.preventDefault() // single-control dialog: focus stays here
+      if (e.key === 'Tab') {
+        // Real trap: cycle focus through the dialog and its controls.
+        e.preventDefault()
+        const dialog = containerRef.current
+        if (dialog === null) return
+        const focusables = [dialog, ...dialog.querySelectorAll<HTMLElement>('button')]
+        const idx = focusables.indexOf(document.activeElement as HTMLElement)
+        const next = e.shiftKey
+          ? (idx - 1 + focusables.length) % focusables.length
+          : (idx + 1) % focusables.length
+        focusables[next]?.focus()
+      }
     }
     function onResize(): void {
       renderNow()
@@ -189,6 +226,7 @@ export default function ViewerLayer({
     const { rect } = viewer
     return (
       <div
+        ref={containerRef}
         className="fixed z-30 cursor-grab touch-none rounded-xl border border-sky-700 bg-zinc-900 active:cursor-grabbing"
         style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
         onPointerDown={startGesture}

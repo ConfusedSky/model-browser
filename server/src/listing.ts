@@ -1,7 +1,7 @@
 import { readdir, stat } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join } from 'node:path'
 import type { DirEntry, DirListing } from '../../shared/types'
-import { joinVPath, parseVPath } from './vpath'
+import { joinVPath, parseVPath, VPathError } from './vpath'
 import { listZipEntries } from './zip'
 
 export class ListingError extends Error {
@@ -37,7 +37,8 @@ async function listFsDir(path: string): Promise<DirEntry[]> {
     } catch {
       continue
     }
-    if (d.isDirectory()) {
+    // stat (not the dirent) so symlinked directories are followed and listed.
+    if (s.isDirectory()) {
       entries.push({ name: d.name, path: full, kind: 'dir', size: 0, mtime: s.mtimeMs })
     } else if (/\.zip$/i.test(d.name)) {
       entries.push({ name: d.name, path: full, kind: 'zip', size: s.size, mtime: s.mtimeMs })
@@ -60,6 +61,14 @@ async function listZipDir(zipPath: string, prefix: string): Promise<DirEntry[]> 
   }
   const zipEntries = await listZipEntries(zipPath)
   const norm = prefix === '' ? '' : prefix.endsWith('/') ? prefix : `${prefix}/`
+
+  // A prefix that is itself a *file* entry in the archive is not a directory.
+  // If that file is a zip, this is the nested-zip case.
+  const exactFile = norm === '' ? undefined : zipEntries.find((e) => e.name === norm.slice(0, -1))
+  if (exactFile !== undefined) {
+    if (/\.zip$/i.test(exactFile.name)) throw new VPathError('nested zips are unsupported')
+    throw new ListingError(400, `not a directory: ${exactFile.name}`)
+  }
 
   const dirs = new Set<string>()
   const entries: DirEntry[] = []

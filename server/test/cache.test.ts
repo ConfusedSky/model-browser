@@ -83,6 +83,24 @@ describe('ThumbCache maintenance', () => {
     expect(pngs.length).toBeLessThanOrEqual(1)
   })
 
+  it('runs maintenance automatically after the write threshold', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mb-cache-'))
+    cleanups.push(dir)
+    const cache = new ThumbCache(dir, 2 * 1024 ** 3, 2) // maintain every 2 png writes
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const doomed = join(fx.dir, 'doomed.stl')
+    writeFileSync(doomed, 'x')
+    await cache.put(doomed, { mtime: 1, png: Buffer.from('png'), camera: CAM })
+    unlinkSync(doomed)
+    await cache.put(join(fx.dir, 'loose.stl'), { mtime: 1, png: Buffer.from('png') })
+    // second png write crosses the threshold → background sweep removes doomed
+    for (let i = 0; i < 40 && (await cache.get(doomed, 1)).status !== 'miss'; i++) {
+      await new Promise((r) => setTimeout(r, 25))
+    }
+    expect((await cache.get(doomed, 1)).status).toBe('miss')
+  })
+
   it('is a no-op when the cache dir does not exist yet', async () => {
     const cache = new ThumbCache(join(tmpdir(), 'mb-does-not-exist'))
     await expect(cache.maintain()).resolves.toBeUndefined()
