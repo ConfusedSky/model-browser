@@ -1,6 +1,32 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DRAG_THRESHOLD_PX, GestureTracker } from '../src/lib/gesture'
 import { createHoverWarmer, HOVER_LINGER_MS } from '../src/lib/hover'
+import { fitSquareBox } from '../src/lib/layout'
+
+describe('fitSquareBox (overlay fallback framing)', () => {
+  it('centers a square in a landscape box', () => {
+    expect(fitSquareBox({ left: 10, top: 20, width: 200, height: 100 })).toEqual({
+      left: 60,
+      top: 20,
+      width: 100,
+      height: 100,
+    })
+  })
+
+  it('centers a square in a portrait box', () => {
+    expect(fitSquareBox({ left: 0, top: 0, width: 80, height: 120 })).toEqual({
+      left: 0,
+      top: 20,
+      width: 80,
+      height: 80,
+    })
+  })
+
+  it('is the identity on a square box', () => {
+    const box = { left: 5, top: 5, width: 64, height: 64 }
+    expect(fitSquareBox(box)).toEqual(box)
+  })
+})
 
 describe('GestureTracker (click vs drag)', () => {
   it('a sub-threshold release is a click, not a drag', () => {

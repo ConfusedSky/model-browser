@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import type { CameraState } from '../../../shared/types'
 import { applyState, boundsOf, DEFAULT_CAMERA } from './camera'
+import { encodeSrgbInPlace } from './srgb'
 
 export const THUMB_SIZE = 512
 
@@ -62,6 +63,10 @@ export function renderThumbnail(object: THREE.Object3D, state: CameraState = DEF
     scene.remove(object)
     originalParent?.add(object)
   }
+
+  // Render-target readback is linear; the visible canvas gets sRGB output
+  // encoding from the renderer. Encode here so thumbnails match the live view.
+  encodeSrgbInPlace(pixels)
 
   // GL readback is bottom-up; flip rows into ImageData.
   const canvas = document.createElement('canvas')

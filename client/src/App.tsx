@@ -8,6 +8,7 @@ import PathBar from './components/PathBar'
 import { useThumbnails } from './hooks/useThumbnails'
 import { GestureTracker } from './lib/gesture'
 import { createHoverWarmer } from './lib/hover'
+import { fitSquareBox, type Box } from './lib/layout'
 import { getLastPath, pushRecent } from './lib/recents'
 import { MeshLru } from './three/lru'
 import { disposeModel, embedded3mfThumbnail, formatOf, geometryBytes, parseModel } from './three/models'
@@ -85,14 +86,29 @@ export default function App() {
 
   const hover = useMemo(() => createHoverWarmer((p) => lru.warm(p)), [lru])
 
+  /**
+   * The overlay replaces the thumbnail image, not the whole tile: same pixels,
+   * same square aspect as the PNG (seamless handoff), and the label row below
+   * stays visible. Falls back to the centered square of the content area when
+   * no <img> has rendered yet.
+   */
+  function overlayRectFor(el: HTMLElement): Box {
+    const img = el.querySelector('img')
+    if (img !== null) {
+      const r = img.getBoundingClientRect()
+      return { left: r.left, top: r.top, width: r.width, height: r.height }
+    }
+    const content = el.querySelector('[data-tile-content]') ?? el
+    return fitSquareBox(content.getBoundingClientRect())
+  }
+
   function onModelPointerDown(e: React.PointerEvent, entry: DirEntry, el: HTMLElement): void {
     if (e.button !== 0) return
     trackerRef.current.start(e.clientX, e.clientY)
-    const r = el.getBoundingClientRect()
     setViewer({
       mode: 'orbit',
       entry,
-      rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+      rect: overlayRectFor(el),
       originEl: el,
     })
   }

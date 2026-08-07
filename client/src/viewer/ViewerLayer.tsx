@@ -231,7 +231,7 @@ export default function ViewerLayer({
     return (
       <div
         ref={containerRef}
-        className="fixed z-30 cursor-grab touch-none rounded-xl border border-sky-700 bg-zinc-900 active:cursor-grabbing"
+        className="fixed z-30 cursor-grab touch-none rounded-lg bg-zinc-900 ring-1 ring-sky-700/50 active:cursor-grabbing"
         style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
         onPointerDown={startGesture}
         onPointerLeave={() => {

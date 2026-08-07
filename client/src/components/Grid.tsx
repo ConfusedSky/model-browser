@@ -75,7 +75,7 @@ function Tile({
       onPointerEnter={() => onModelHover(entry.path)}
       onPointerLeave={() => onModelHover(null)}
     >
-      <div className="relative flex min-h-0 w-full flex-1 items-center justify-center">
+      <div data-tile-content className="relative flex min-h-0 w-full flex-1 items-center justify-center">
         {thumb?.status === 'error' ? (
           <span className="text-2xl" title="Failed to load model">⚠️</span>
         ) : thumb?.url !== undefined ? (
