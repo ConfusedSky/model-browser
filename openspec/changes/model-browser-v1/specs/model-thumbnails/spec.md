@@ -38,7 +38,7 @@ The server SHALL store each model's camera (orientation) state alongside its thu
 - **THEN** the second browser shows the thumbnail in the saved orientation
 
 ### Requirement: Bounded, self-maintaining cache
-The thumbnail cache SHALL NOT grow without bound. Superseded thumbnails (an older mtime for the same path) SHALL be deleted, entries whose source path no longer exists SHALL be swept — for a virtual path, existence SHALL be tested against the containing zip rather than the entry — and when total cache size exceeds a configurable cap (default 2GB) least-recently-read thumbnails SHALL be evicted. Saved camera state SHALL survive eviction of its thumbnail. Entries SHALL be stored under a hash of the path rather than the path itself, since paths contain `/`, `!`, and spaces and may exceed filename length limits.
+The thumbnail cache SHALL NOT grow without bound. Superseded thumbnails (an older mtime for the same path) SHALL be deleted, entries whose source path no longer exists SHALL be swept — for a virtual path, existence SHALL be tested against the containing zip rather than the entry — and when total cache size exceeds a configurable cap (default 2GB) least-recently-read thumbnails SHALL be evicted. Camera state SHALL survive size-cap eviction of its thumbnail (it is tiny and cannot be regenerated), but the existence sweep SHALL remove the entire entry — camera state included — when the source path no longer exists. Entries SHALL be stored under a hash of the path rather than the path itself, since paths contain `/`, `!`, and spaces and may exceed filename length limits.
 
 #### Scenario: Repeated edits do not accumulate
 - **WHEN** a model file is modified several times, each modification generating a new thumbnail
@@ -51,6 +51,10 @@ The thumbnail cache SHALL NOT grow without bound. Superseded thumbnails (an olde
 #### Scenario: Camera state survives thumbnail eviction
 - **WHEN** a thumbnail is evicted by the size cap and the user later revisits its directory
 - **THEN** it is re-rendered from the still-stored camera state, not from the default view
+
+#### Scenario: Sweep removes camera state with the entry
+- **WHEN** a model file is deleted and the cache is swept
+- **THEN** the entire cache entry, camera state included, is removed; a file later appearing at that path gets the default view
 
 ### Requirement: Embedded 3MF preview as placeholder
 When a 3MF package contains an embedded thumbnail image, the client SHALL display it as an immediate placeholder until its own render replaces it.

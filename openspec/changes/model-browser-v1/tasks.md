@@ -21,7 +21,7 @@
 
 - [ ] 4.1 Implement cache store in `~/.cache/model-browser/` holding `{png, cameraState}` per file, entries filed under a hash of the path — png keyed by path+mtime (for zip entries, the containing zip's mtime), cameraState by path only
 - [ ] 4.2 Implement `GET /api/thumb` (returns png + camera or miss/stale) and `PUT /api/thumb` (stores png and/or camera in one request)
-- [ ] 4.3 Cache maintenance: delete superseded-mtime pngs, sweep entries whose source path is gone (virtual paths test the containing zip, not the entry), evict least-recently-read pngs over a configurable size cap (default 2GB); never evict camera state
+- [ ] 4.3 Cache maintenance: delete superseded-mtime pngs, sweep entries whose source path is gone (virtual paths test the containing zip, not the entry), evict least-recently-read pngs over a configurable size cap (default 2GB); size-cap eviction spares camera state; the existence sweep removes whole entries including camera state
 
 ## 5. Client: Browsing UI
 
@@ -40,7 +40,7 @@
 - [ ] 7.1 Mesh LRU: byte-budgeted (~1GB default, configurable) against parsed geometry on the JS heap, hover linger (~120ms) prefetch with parse-concurrency cap, eviction by bytes calling `geometry.dispose()` on every evicted entry (three.js tracks GPU buffers in a WeakMap — dropping the reference leaks VRAM)
 - [ ] 7.2 Shared orbit overlay: single WebGL canvas overlaying the active tile on mousedown, OrbitControls drag, spinner when mesh not yet warm, dismissed on pointer-leave/scroll/resize; discriminate click from drag by a ~5px movement threshold — a sub-threshold release opens the lightbox instead of persisting an orbit
 - [ ] 7.3 Persist on release: save camera state + re-rendered snapshot via one PUT on orbit release and lightbox close
-- [ ] 7.4 Lightbox: opened by click-without-drag on a model tile (no separate expand affordance); modal expanded view with full orbit/zoom, Esc/click-out close, focus trap while open and focus restored to the originating tile on close, same persist path
+- [ ] 7.4 Lightbox: opened by click-without-drag on a model tile (no separate expand affordance); modal expanded view with full orbit/zoom, loading indicator when opened before the mesh is warm, Esc/click-out close, focus trap while open and focus restored to the originating tile on close, same persist path
 
 ## 8. Verification
 

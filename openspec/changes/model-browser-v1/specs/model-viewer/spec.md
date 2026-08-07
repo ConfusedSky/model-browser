@@ -60,6 +60,10 @@ Clicking a model tile — a press released without exceeding the drag threshold 
 - **WHEN** the user clicks a model tile without dragging
 - **THEN** a modal lightbox shows the model with orbit and zoom controls over the dimmed grid
 
+#### Scenario: Lightbox opened before mesh is warm
+- **WHEN** the user clicks a tile whose mesh has not finished loading (e.g. a fast click that beats the hover-warm linger)
+- **THEN** the lightbox opens immediately with a loading indicator and becomes orbitable when the mesh is ready
+
 #### Scenario: Closing the lightbox
 - **WHEN** the user presses Esc or clicks outside the lightbox after orbiting
 - **THEN** the lightbox closes and the tile's thumbnail reflects the final orientation
