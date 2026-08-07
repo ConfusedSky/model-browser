@@ -29,7 +29,7 @@ export interface ThumbSave {
  * touching callers.
  */
 export interface ApiClient {
-  listDir(path: string): Promise<DirListing>
+  listDir(path: string, opts?: { flat?: boolean }): Promise<DirListing>
   complete(prefix: string): Promise<string[]>
   fetchModel(path: string): Promise<ArrayBuffer>
   getThumb(path: string, mtime: number): Promise<ThumbResult>
@@ -71,8 +71,9 @@ async function blobToBase64(blob: Blob): Promise<string> {
 export class HttpApiClient implements ApiClient {
   constructor(private fetchFn: typeof fetch = (...args) => fetch(...args)) {}
 
-  async listDir(path: string): Promise<DirListing> {
-    const res = await this.fetchFn(`/api/dir?path=${encodeURIComponent(path)}`)
+  async listDir(path: string, opts?: { flat?: boolean }): Promise<DirListing> {
+    const flat = opts?.flat === true ? '&flat=true' : ''
+    const res = await this.fetchFn(`/api/dir?path=${encodeURIComponent(path)}${flat}`)
     return jsonOrThrow<DirListing>(res)
   }
 

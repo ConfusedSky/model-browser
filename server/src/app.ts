@@ -6,7 +6,7 @@ import { Hono } from 'hono'
 import type { OrbitAxis, ThumbPutRequest } from '../../shared/types'
 import { ThumbCache } from './cache'
 import { guard } from './guard'
-import { ListingError, complete, listDir } from './listing'
+import { ListingError, complete, listDir, listFlat } from './listing'
 import { VPathError, parseVPath } from './vpath'
 import { ZipError, extractEntry } from './zip'
 
@@ -27,6 +27,7 @@ export function createApp(cache: ThumbCache = new ThumbCache()): Hono {
   app.get('/api/dir', async (c) => {
     const path = c.req.query('path')
     if (path === undefined || path === '') return c.json({ error: 'path is required' }, 400)
+    if (c.req.query('flat') === 'true') return c.json(await listFlat(path))
     return c.json(await listDir(path))
   })
 

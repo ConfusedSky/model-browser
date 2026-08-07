@@ -15,6 +15,8 @@ export interface DirEntry {
 export interface DirListing {
   path: string
   entries: DirEntry[]
+  /** Flat listings only: models were dropped by the return cap or walk budget. */
+  truncated?: boolean
 }
 
 /**

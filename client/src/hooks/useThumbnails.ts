@@ -15,9 +15,32 @@ export interface ThumbState {
 }
 
 /**
- * Per-tile thumbnail pipeline: check the server cache, and on miss/stale run
- * load → parse → render → PUT through the render queue. Meshes load through
- * the LRU, so thumbnail bytes seed later orbits.
+ * Cache lookups are pure I/O and must not occupy a render-queue slot — a fully
+ * cached directory fills at the speed of the cache, not renderer concurrency.
+ * Module-level so a superseded listing's in-flight lookups share the limit
+ * with its successor's.
+ */
+const lookupLimit = makeLimiter(8)
+
+function makeLimiter(limit: number) {
+  let active = 0
+  const waiting: (() => void)[] = []
+  return async <T>(fn: () => Promise<T>): Promise<T> => {
+    if (active >= limit) await new Promise<void>((resolve) => waiting.push(resolve))
+    active++
+    try {
+      return await fn()
+    } finally {
+      active--
+      waiting.shift()?.()
+    }
+  }
+}
+
+/**
+ * Per-tile thumbnail pipeline: check the server cache (own concurrency limit),
+ * and on miss/stale run load → parse → render → PUT through the render queue.
+ * Meshes load through the LRU, so thumbnail bytes seed later orbits.
  */
 export function useThumbnails(
   entries: DirEntry[],
@@ -51,11 +74,11 @@ export function useThumbnails(
     const models = entries.filter((e) => e.kind === 'model')
     setThumbs(new Map(models.map((e) => [e.path, { status: 'loading' as const }])))
 
-    const cancels = models.map((entry) =>
-      queue.push(async () => {
-        if (!alive) return
+    const cancels: (() => void)[] = []
+    for (const entry of models) {
+      void (async () => {
         try {
-          const cached = await api.getThumb(entry.path, entry.mtime)
+          const cached = await lookupLimit(() => api.getThumb(entry.path, entry.mtime))
           if (!alive) return
           if (cached.status === 'hit' && cached.pngUrl !== undefined) {
             setThumb(entry.path, {
@@ -66,30 +89,42 @@ export function useThumbnails(
             })
             return
           }
-          // In-flight jobs must not parse or drive the shared renderer while
-          // an orbit/lightbox is active — wait out the suspension first.
-          await queue.whenResumed()
-          if (!alive) return
-          const object = await lru.acquire(entry.path)
-          if (!alive) return
-          await queue.whenResumed()
-          if (!alive) return
-          const camera = cached.camera ?? DEFAULT_CAMERA
-          const axis = cached.axis ?? 'y'
-          const png = await renderThumbnail(object, camera, axis)
-          await api.putThumb({ path: entry.path, mtime: entry.mtime, png })
-          if (!alive) return
-          setThumb(entry.path, {
-            status: 'ready',
-            url: URL.createObjectURL(png),
-            camera: cached.camera,
-            axis: cached.axis,
-          })
+          // Only the miss/stale tail touches the shared renderer — it alone
+          // goes through the queue.
+          cancels.push(
+            queue.push(async () => {
+              if (!alive) return
+              try {
+                // In-flight jobs must not parse or drive the shared renderer
+                // while an orbit/lightbox is active — wait out the suspension
+                // first.
+                await queue.whenResumed()
+                if (!alive) return
+                const object = await lru.acquire(entry.path)
+                if (!alive) return
+                await queue.whenResumed()
+                if (!alive) return
+                const camera = cached.camera ?? DEFAULT_CAMERA
+                const axis = cached.axis ?? 'y'
+                const png = await renderThumbnail(object, camera, axis)
+                await api.putThumb({ path: entry.path, mtime: entry.mtime, png })
+                if (!alive) return
+                setThumb(entry.path, {
+                  status: 'ready',
+                  url: URL.createObjectURL(png),
+                  camera: cached.camera,
+                  axis: cached.axis,
+                })
+              } catch {
+                if (alive) setThumb(entry.path, { status: 'error' })
+              }
+            }),
+          )
         } catch {
           if (alive) setThumb(entry.path, { status: 'error' })
         }
-      }),
-    )
+      })()
+    }
     return () => {
       alive = false
       for (const cancel of cancels) cancel()

@@ -38,6 +38,8 @@ export default function App() {
 
   const [path, setPath] = useState(getLastPath)
   const [listing, setListing] = useState<DirEntry[]>([])
+  const [flat, setFlat] = useState(false)
+  const [truncated, setTruncated] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [viewer, setViewer] = useState<ViewerState | null>(null)
   const trackerRef = useRef(new GestureTracker())
@@ -45,13 +47,14 @@ export default function App() {
   const { thumbs, setThumb, setPlaceholder } = useThumbnails(listing, api, lru, queue)
   placeholderRef.current = setPlaceholder
 
-  const navigate = useCallback(
-    (target: string) => {
+  const fetchListing = useCallback(
+    (target: string, asFlat: boolean) => {
       void api
-        .listDir(target)
+        .listDir(target, { flat: asFlat })
         .then((res) => {
           setPath(target)
           setListing(res.entries)
+          setTruncated(res.truncated === true)
           setError(null)
           pushRecent(target)
         })
@@ -61,6 +64,14 @@ export default function App() {
     },
     [api],
   )
+
+  const navigate = useCallback((target: string) => fetchListing(target, flat), [fetchListing, flat])
+
+  function toggleFlat(): void {
+    const next = !flat
+    setFlat(next)
+    if (path !== '') fetchListing(path, next)
+  }
 
   useEffect(() => {
     if (path !== '') navigate(path)
@@ -185,6 +196,19 @@ export default function App() {
           ↑
         </button>
         <PathBar path={path} error={error} api={api} onNavigate={navigate} />
+        <button
+          type="button"
+          onClick={toggleFlat}
+          aria-pressed={flat}
+          title="Show every model under this folder in one grid"
+          className={`rounded-lg border px-3 py-2 text-sm ${
+            flat
+              ? 'border-sky-500 text-sky-400 hover:border-sky-400'
+              : 'border-zinc-700 text-zinc-300 hover:border-zinc-500'
+          }`}
+        >
+          Flat
+        </button>
       </header>
       <div className="flex min-h-0 flex-1">
         <main className="min-w-0 flex-1 overflow-auto">
@@ -193,14 +217,22 @@ export default function App() {
               Enter a directory path above to browse your models.
             </p>
           ) : (
-            <Grid
-              entries={listing}
-              thumbs={thumbs}
-              onEnter={enterEntry}
-              onModelPointerDown={onModelPointerDown}
-              onModelOpen={openLightbox}
-              onModelHover={(p) => (p !== null ? hover.enter(p) : hover.leave())}
-            />
+            <>
+              {truncated && (
+                <p className="px-4 pt-3 text-xs text-amber-400">
+                  Showing {listing.filter((e) => e.kind === 'model').length} models; some were
+                  omitted.
+                </p>
+              )}
+              <Grid
+                entries={listing}
+                thumbs={thumbs}
+                onEnter={enterEntry}
+                onModelPointerDown={onModelPointerDown}
+                onModelOpen={openLightbox}
+                onModelHover={(p) => (p !== null ? hover.enter(p) : hover.leave())}
+              />
+            </>
           )}
         </main>
         <ChatPanel />

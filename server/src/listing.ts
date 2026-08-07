@@ -1,4 +1,4 @@
-import { readdir, stat } from 'node:fs/promises'
+import { readdir, realpath, stat } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join } from 'node:path'
 import type { DirEntry, DirListing } from '../../shared/types'
 import { joinVPath, parseVPath, VPathError } from './vpath'
@@ -133,6 +133,137 @@ export async function listDir(vpath: string): Promise<DirListing> {
     throw new ListingError(400, `not a directory or zip: ${fsPath}`)
   }
   return { path: vpath, entries: await listZipDir(fsPath, entry) }
+}
+
+interface FlatWalk {
+  /** Walk steps left: entering a container and scanning a model each cost 1. */
+  budget: number
+  /** Realpaths of directories already entered — cycle guard and alias dedup. */
+  visited: Set<string>
+  models: DirEntry[]
+  truncated: boolean
+}
+
+/** Spend one walk step; refusing (budget exhausted) marks the walk truncated. */
+function takeStep(walk: FlatWalk): boolean {
+  if (walk.budget <= 0) {
+    walk.truncated = true
+    return false
+  }
+  walk.budget--
+  return true
+}
+
+async function walkFsLevel(level: DirEntry[], rel: string, walk: FlatWalk): Promise<void> {
+  for (const e of level) {
+    if (walk.truncated) return
+    if (e.kind === 'model') {
+      if (!takeStep(walk)) return
+      walk.models.push({ ...e, name: `${rel}${e.name}` })
+    } else if (e.kind === 'dir') {
+      const real = await realpath(e.path).catch(() => null)
+      if (real === null || walk.visited.has(real)) continue
+      if (!takeStep(walk)) return
+      walk.visited.add(real)
+      let sub
+      try {
+        sub = await listFsDir(e.path)
+      } catch {
+        continue // unreadable subdirectory: skipped, only an unreadable root fails
+      }
+      await walkFsLevel(sub, `${rel}${e.name}/`, walk)
+    } else {
+      if (!takeStep(walk)) return
+      await walkZip(e.path, '', `${rel}${e.name}!/`, walk)
+    }
+  }
+}
+
+async function walkZip(
+  zipPath: string,
+  prefix: string,
+  namePrefix: string,
+  walk: FlatWalk,
+): Promise<void> {
+  let zipStat, zipEntries
+  try {
+    zipStat = await stat(zipPath)
+    zipEntries = await listZipEntries(zipPath)
+  } catch {
+    return // unreadable/corrupt zip: skipped like an unreadable subdirectory
+  }
+  const norm = prefix === '' ? '' : prefix.endsWith('/') ? prefix : `${prefix}/`
+  for (const e of zipEntries) {
+    if (walk.truncated) return
+    if (!e.name.startsWith(norm)) continue
+    const rest = e.name.slice(norm.length)
+    if (rest === '') continue
+    // Only model extensions match — nested zip *file* entries fall out here,
+    // while models under a directory named *.zip match like any other.
+    const format = modelFormat(rest)
+    if (format === undefined) continue
+    if (!takeStep(walk)) return
+    walk.models.push({
+      name: `${namePrefix}${rest}`,
+      path: joinVPath(zipPath, e.name),
+      kind: 'model',
+      format,
+      size: e.size,
+      mtime: zipStat.mtimeMs,
+    })
+  }
+}
+
+/**
+ * Flat listing: the root's immediate dir/zip entries as tiles, then every
+ * model recursively under it, named by root-relative path and ordered by file
+ * name (basename, full relative path as tiebreak). Walk work is bounded by a
+ * step budget; the response by a model cap. Either dropping models sets
+ * `truncated`.
+ */
+export async function listFlat(vpath: string): Promise<DirListing> {
+  const { fsPath, entry } = parseVPath(vpath)
+  if (!isAbsolute(fsPath)) throw new ListingError(400, 'path must be absolute')
+  const walk: FlatWalk = {
+    budget: Number(process.env.MODEL_BROWSER_FLAT_BUDGET ?? 20000),
+    visited: new Set(),
+    models: [],
+    truncated: false,
+  }
+  let containers: DirEntry[]
+  if (entry === undefined) {
+    const s = await stat(fsPath).catch(() => null)
+    if (s === null) throw new ListingError(404, `no such path: ${fsPath}`)
+    if (s.isDirectory()) {
+      const level = await listFsDir(fsPath)
+      containers = level.filter((e) => e.kind !== 'model')
+      walk.visited.add(await realpath(fsPath).catch(() => fsPath))
+      if (takeStep(walk)) await walkFsLevel(level, '', walk)
+    } else if (/\.zip$/i.test(fsPath)) {
+      containers = (await listZipDir(fsPath, '')).filter((e) => e.kind !== 'model')
+      if (takeStep(walk)) await walkZip(fsPath, '', '', walk)
+    } else {
+      throw new ListingError(400, `not a directory or zip: ${fsPath}`)
+    }
+  } else {
+    containers = (await listZipDir(fsPath, entry)).filter((e) => e.kind !== 'model')
+    if (takeStep(walk)) await walkZip(fsPath, entry, '', walk)
+  }
+
+  const cap = Number(process.env.MODEL_BROWSER_FLAT_CAP ?? 500)
+  const base = (n: string) => n.slice(n.lastIndexOf('/') + 1)
+  // Not sortEntries: its model comparison is the full name, i.e. the relative
+  // path — flat ordering is by file name so same-named parts sit together (D2).
+  walk.models.sort(
+    (a, b) => base(a.name).localeCompare(base(b.name)) || a.name.localeCompare(b.name),
+  )
+  if (walk.models.length > cap) {
+    walk.truncated = true
+    walk.models.length = cap
+  }
+  const listing: DirListing = { path: vpath, entries: [...containers, ...walk.models] }
+  if (walk.truncated) listing.truncated = true
+  return listing
 }
 
 /** Subdirectory completions for a partial path (path-bar autocomplete). */
