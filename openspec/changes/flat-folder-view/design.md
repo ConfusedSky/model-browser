@@ -7,7 +7,7 @@
 ## Goals / Non-Goals
 
 **Goals:**
-- One request returns every model under a folder (through subfolders and zips) as ordinary `DirEntry`s, so the entire existing tile/orbit/thumbnail machinery works untouched.
+- One request returns the folder's immediate container tiles plus every model under it (through subfolders and zips) as ordinary `DirEntry`s, so the entire existing tile/orbit/thumbnail/navigation machinery works untouched.
 - Distinguishable labels for same-named models in different subfolders.
 - Bounded work on huge trees, with truncation visible to the user.
 
@@ -24,7 +24,7 @@ Same path/vpath semantics, same error taxonomy, same guard; the response stays a
 
 ### D2: Flat entries are plain `DirEntry`s with `name` = root-relative path
 
-The walk emits only `kind: 'model'` entries whose `path` is the same virtual path a nested browse would produce (so thumbnail PNGs and camera state are shared between views) and whose `name` is the path relative to the requested root — `printers/voron/part.stl`, or `kit.zip!/arms/left.stl` for zip contents. `Grid` already renders `name`, so labels need no client change; `DirEntry`'s shape is untouched, so `useThumbnails`, hover-warm, and the viewer consume flat listings blindly.
+A flat listing is the root's immediate `dir`/`zip` entries (exactly as the nested listing reports them — top level only, no recursive folder tiles) followed by `kind: 'model'` entries for every model under the root. Model `path`s are the same virtual paths a nested browse would produce (so thumbnail PNGs and camera state are shared between views); model `name`s are relative to the requested root — `printers/voron/part.stl`, or `kit.zip!/arms/left.stl` for zip contents. The existing `sortEntries` rank (dir < zip < model) already puts containers before models, `Grid` already renders `name` and routes dir/zip tiles through `onEnter`, so navigation and labels need no client change; `DirEntry`'s shape is untouched, so `useThumbnails`, hover-warm, and the viewer consume flat listings blindly. A zip's tile and its extracted models both appear — the tile is the way down, the models are the flat content; same for folders.
 
 *Alternative — client-side recursion (N requests):* thundering-herd of `/api/dir` calls, client-side cycle/caps logic, and interleaved partial state; the server walk is one bounded request.
 
@@ -36,7 +36,7 @@ The walk emits only `kind: 'model'` entries whose `path` is the same virtual pat
 
 ### D4: Toggle lives in App state beside the path bar, sticky within the session
 
-A single `flat` boolean in `App`; `navigate` passes it through, and toggling re-fetches the current path. Flat mode renders the same `Grid` — model tiles only fall out naturally since the listing contains only models. A small notice renders when `truncated` is set ("showing first 500 models"). Entering a folder from the path bar (or `↑`) stays in flat mode until toggled off — consistent with "I'm browsing this collection flat right now".
+A single `flat` boolean in `App`; `navigate` passes it through, and toggling re-fetches the current path. Flat mode renders the same `Grid` — top-level container tiles first, then models, falling out of the listing order with no Grid changes. A small notice renders when `truncated` is set ("showing first 500 models"). Entering a folder from the path bar (or `↑`) stays in flat mode until toggled off — consistent with "I'm browsing this collection flat right now".
 
 ## Risks / Trade-offs
 

@@ -3,11 +3,11 @@
 ## ADDED Requirements
 
 ### Requirement: Recursive flat listing
-The server SHALL support a flat variant of the directory listing that returns every model file recursively under the requested folder as model entries only — no directory or zip tiles. The walk SHALL descend into subdirectories and into zip files' contents (one archive level; nested zips are skipped), SHALL skip hidden (dot-prefixed) directories and unreadable subdirectories without failing the request, and SHALL terminate on symlink cycles by never entering the same real directory twice. Each entry's virtual path SHALL be identical to the path a nested browse would yield (so thumbnails and camera state are shared), and each entry's name SHALL be its path relative to the requested root. Results SHALL be capped (500 models); a capped response SHALL carry an explicit truncation flag.
+The server SHALL support a flat variant of the directory listing that returns the requested folder's immediate subdirectory and zip entries (top level only — deeper folders are not listed as tiles) followed by every model file recursively under the folder. The walk SHALL descend into subdirectories and into zip files' contents (one archive level; nested zips are skipped), SHALL skip hidden (dot-prefixed) directories and unreadable subdirectories without failing the request, and SHALL terminate on symlink cycles by never entering the same real directory twice. Each model entry's virtual path SHALL be identical to the path a nested browse would yield (so thumbnails and camera state are shared), and each model entry's name SHALL be its path relative to the requested root. The model count SHALL be capped (500); a capped response SHALL carry an explicit truncation flag.
 
 #### Scenario: Models across subfolders in one listing
 - **WHEN** the client requests a flat listing of a folder containing models nested several directories deep
-- **THEN** all of them are returned as model entries named by their relative paths, with no directory entries
+- **THEN** all of them are returned as model entries named by their relative paths, preceded by the folder's immediate subdirectory and zip entries — and no deeper directories appear as entries
 
 #### Scenario: Zip contents included
 - **WHEN** a flat-listed folder contains a zip with model entries
@@ -22,11 +22,15 @@ The server SHALL support a flat variant of the directory listing that returns ev
 - **THEN** the response contains the cap's worth of entries and is flagged truncated
 
 ### Requirement: Flat view toggle
-The client SHALL offer a flat-view toggle alongside the path bar. While active, the grid SHALL show the current folder's flat listing — model tiles labeled by relative path — and hover-warm, drag-to-orbit, the lightbox, and thumbnail/camera persistence SHALL behave exactly as in the nested view for the same models. The toggle SHALL remain in effect across navigation within the session, and a truncated listing SHALL be indicated to the user.
+The client SHALL offer a flat-view toggle alongside the path bar. While active, the grid SHALL show the current folder's flat listing — the top-level folder and zip tiles first, navigable exactly as in the nested view, then model tiles labeled by relative path — and hover-warm, drag-to-orbit, the lightbox, and thumbnail/camera persistence SHALL behave exactly as in the nested view for the same models. The toggle SHALL remain in effect across navigation within the session, and a truncated listing SHALL be indicated to the user.
 
 #### Scenario: Toggling flat view
 - **WHEN** the user activates the flat toggle on a folder with nested models
-- **THEN** the grid re-renders showing all models recursively with relative-path labels, and deactivating it restores the nested view
+- **THEN** the grid re-renders showing the folder's top-level containers followed by all models recursively with relative-path labels, and deactivating it restores the nested view
+
+#### Scenario: Navigating down while flat
+- **WHEN** flat view is active and the user clicks one of the top-level folder tiles
+- **THEN** the grid shows that folder's flat listing (its own top-level containers and recursive models)
 
 #### Scenario: Orbiting from the flat view
 - **WHEN** the user orbits a model tile in flat view and later browses to its containing folder in nested view
