@@ -12,8 +12,8 @@
 - Bounded work on huge trees, with truncation visible to the user.
 
 **Non-Goals:**
-- Flat view *inside* the results of another zip's flat view or any nested-zip descent — nested zips stay rejected by design (D6).
-- Grouping/section headers, search/filtering, or sort options — flat is one alphabetical grid by relative path; refinements are future changes.
+- Flat view *inside* the results of another zip's flat view or any nested-zip descent — nested zips stay rejected by design (D6 of the v1 design).
+- Grouping/section headers, search/filtering, or sort options — flat is one grid ordered by file name; refinements are future changes.
 - Persisting the toggle across reloads or per-folder — session-sticky UI state only, promotable later if the view proves out.
 
 ## Decisions
@@ -22,28 +22,53 @@
 
 Same path/vpath semantics, same error taxonomy, same guard; the response stays a `DirListing`. `ApiClient.listDir` gains an options argument. A separate endpoint would duplicate vpath resolution and error handling for no isolation benefit.
 
-### D2: Flat entries are plain `DirEntry`s with `name` = root-relative path
+The flag is pinned to the literal `flat=true`. Any other value — absent, `flat=false`, `flat=0`, `flat=` — yields the ordinary nested listing, so a query string can never enable a recursive walk by accident, and the client emits exactly `flat=true`.
 
-A flat listing is the root's immediate `dir`/`zip` entries (exactly as the nested listing reports them — top level only, no recursive folder tiles) followed by `kind: 'model'` entries for every model under the root. Model `path`s are the same virtual paths a nested browse would produce (so thumbnail PNGs and camera state are shared between views); model `name`s are relative to the requested root — `printers/voron/part.stl`, or `kit.zip!/arms/left.stl` for zip contents. The existing `sortEntries` rank (dir < zip < model) already puts containers before models, `Grid` already renders `name` and routes dir/zip tiles through `onEnter`, so navigation and labels need no client change; `DirEntry`'s shape is untouched, so `useThumbnails`, hover-warm, and the viewer consume flat listings blindly. A zip's tile and its extracted models both appear — the tile is the way down, the models are the flat content; same for folders.
+### D2: Flat entries are plain `DirEntry`s with `name` = root-relative path, ordered by file name
+
+A flat listing is the root's immediate `dir`/`zip` entries (exactly as the nested listing reports them — top level only, no recursive folder tiles) followed by `kind: 'model'` entries for every model under the root. Model `path`s are the same virtual paths a nested browse would produce (so thumbnail PNGs and camera state are shared between views); model `name`s are relative to the requested root — `printers/voron/part.stl`, or `kit.zip!/arms/left.stl` for zip contents. `Grid` already renders `name` and routes dir/zip tiles through `onEnter`, so navigation and labels need no client change; `DirEntry`'s shape is untouched, so `useThumbnails`, hover-warm, and the viewer consume flat listings blindly. A zip's tile and its extracted models both appear — the tile is the way down, the models are the flat content; same for folders.
+
+Models are ordered by **file name** (basename), ties broken by the full relative path, so `a/bracket.stl` and `z/bracket.stl` sit next to each other rather than a whole folder away — the point of a flat view is to see the parts, not to re-impose the folder tree the user just flattened.
+
+`listFlat` therefore sorts the two groups itself and concatenates them; the combined array is **not** passed through `sortEntries`, whose model comparison is `localeCompare` on `name` — for flat entries that is the relative path, which is exactly the ordering this decision rejects. The existing rank (dir < zip < model) still describes the result, it just isn't the mechanism.
 
 *Alternative — client-side recursion (N requests):* thundering-herd of `/api/dir` calls, client-side cycle/caps logic, and interleaved partial state; the server walk is one bounded request.
 
-### D3: Walk = existing per-level listers + realpath cycle guard + entry cap
+### D3: Walk = existing per-level listers + realpath visited-set + hard budget
 
-`listFlat` walks depth-first alphabetically, reusing the module's per-level logic: filesystem levels via `readdir`+`stat` (skipping dot-entries, as today), zips flattened via `listZipEntries` in one step (zip name lists are already flat — every model entry under the prefix, minus nested `.zip`s, which are skipped, not errors, in a walk). Each *directory* is entered only once, keyed by `realpath`, making symlink cycles terminate; the walk stops at a model cap (500) and sets `truncated: true` on `DirListing` (optional field — nested listings never set it). Unreadable subdirectories are skipped rather than failing the whole walk; only an unreadable *root* is a 404, matching `listDir` today.
+`listFlat` walks depth-first alphabetically, reusing the module's per-level logic: filesystem levels via `readdir`+`stat` (skipping dot-entries, as today), zips flattened via `listZipEntries` in one step (zip name lists are already flat — every model entry under the prefix). Nested zip *file entries* are skipped rather than erroring, as a walk has no user to report to; a directory inside an archive whose name merely ends in `.zip` is walked normally, since `vpath.ts` is explicit that a name alone cannot tell the two apart. Unreadable subdirectories are skipped rather than failing the whole walk; only an unreadable *root* is a 404, matching `listDir` today.
 
-*Alternative — depth cap instead of realpath set:* still explodes on wide trees and still loops within the cap; the visited-set is exact and cheap.
+Each *directory* is entered at most once, keyed by `realpath`. This terminates symlink cycles, and it also de-duplicates: a directory reachable by several routes contributes its models once, under the first route walked. That is the intended semantic — a flat view is a view of the *files*, and the same file listed under two aliases is noise. The consequence is stated rather than incidental: `/root/b -> /root/a` shows `b` as a top-level tile whose contents do not appear in `/root`'s flat model list (they appear once, under `a/…`); entering `b` flat lists them under `b`'s own root.
+
+*Alternative — ancestor-chain guard instead of a global visited-set:* terminates cycles equally well but lists aliased files once per route, which is the duplication this decision deliberately avoids.
+
+**Bounding.** The 500-model return cap bounds the *response*, not the *work*: a tree of 100k model-free directories never reaches it. The walk therefore also carries a hard budget on directories visited and models scanned, and stops when either fires. Both the cap and the budget set `truncated: true` on `DirListing` (optional field — nested listings never set it), so the flag means "some models are missing", whichever limit produced it. The budget is deliberately test-reachable: it reads an env override (`MODEL_BROWSER_FLAT_BUDGET`, mirroring how tests already inject `MODEL_BROWSER_CACHE`), so the budget-truncation test uses a small fixture instead of thousands of directories.
+
+Ordering by file name (D2) means emission order is not sort order, so truncation cannot be a running cut: the walk collects model metadata up to the budget, sorts, then returns the first 500. Truncation is therefore defined against the sorted order — as long as the walk completed within budget, the user sees a true alphabetical prefix of the folder's models, not an arbitrary subset. Scanning past 500 is cheap (name, path, size, mtime per model); only the response is capped.
 
 ### D4: Toggle lives in App state beside the path bar, sticky within the session
 
-A single `flat` boolean in `App`; `navigate` passes it through, and toggling re-fetches the current path. Flat mode renders the same `Grid` — top-level container tiles first, then models, falling out of the listing order with no Grid changes. A small notice renders when `truncated` is set ("showing first 500 models"). Entering a folder from the path bar (or `↑`) stays in flat mode until toggled off — consistent with "I'm browsing this collection flat right now".
+A single `flat` boolean in `App`; `navigate` passes it through, and toggling re-fetches the current path. Flat mode renders the same `Grid` — top-level container tiles first, then models, falling out of the listing order with no Grid changes. A small notice renders when `truncated` is set, worded off the count actually returned ("showing the first 173 models — some were omitted") rather than a hardcoded cap: a budget-truncated walk (D3) can return fewer than 500, so the notice must not claim a number the response doesn't carry. Entering a folder from the path bar (or `↑`) stays in flat mode until toggled off — consistent with "I'm browsing this collection flat right now".
+
+### D5: A root inside a zip is flat too
+
+Flat mode is sticky (D4) and top-level zip tiles stay navigable, so clicking a zip tile in flat view issues `flat=true` against `kit.zip` — and then against `kit.zip!/sub`. This is a normal path, not an edge case, so it gets defined rather than special-cased: the archive's immediate directories under the prefix are the container tiles, every model under the prefix is listed with `name` relative to that prefix, and there is no further descent (nested zips remain rejected). The whole listing already comes from one `listZipEntries` call, so the flat variant is a filter over the same name list the nested variant groups.
+
+### D6: Cache lookups leave the render queue
+
+`useThumbnails` wraps each tile's entire job in `queue.push` — including the `api.getThumb` cache lookup, which is pure I/O and touches no renderer. The render queue exists to serialize work against the single shared `WebGLRenderer` (`model-viewer`), so a cache *hit* occupying one of its two slots for a full HTTP round trip is accidental coupling, not policy. Nested directories are small enough to hide it; a 500-tile flat view is not.
+
+The lookup moves out under its own concurrency limit, and only the miss/stale tail — `lru.acquire` → `renderThumbnail` → `putThumb` — is pushed to the queue, still behind `whenResumed()`. The single-renderer and orbit-suspension invariants are unchanged; what changes is that a fully cached view is no longer paced by renderer concurrency. Cancellation stops flowing through the queue's cancel handle for the lookup phase, but the effect's `alive` flag already guards every `setThumb`, so a superseded listing still cannot write into the new one's state.
+
+This is a fix to a pre-existing property rather than something flat view introduces, but flat view is what makes it matter, and the change is small and local.
 
 ## Risks / Trade-offs
 
-- [Huge trees make one slow request] → cap at 500 models + skip-on-error keeps the walk bounded; truncation is explicit, never silent.
-- [500 fresh thumbnails hammer the render queue on first flat view] → the existing limited-concurrency queue and orbit-suspension already govern this; tiles fill progressively, same as a big nested directory.
+- [Huge trees make one slow request] → hard walk budget + 500-model return cap + skip-on-error keeps the walk bounded whether or not the tree contains models; truncation is explicit, never silent.
+- [500 fresh thumbnails hammer the render queue on first flat view] → unavoidable for genuinely uncached models, and the existing limited-concurrency queue and orbit-suspension already govern it; tiles fill progressively. The *cached* case is the one that was needlessly slow, and D6 fixes it.
 - [Relative-path labels can be long] → tile labels already truncate with ellipsis; the full name remains in `alt`/hover.
-- [Same model reachable via two symlinked routes appears twice] → accepted; entries are keyed by their virtual path and each renders/persists independently. The cycle guard only guarantees termination.
+- [A file reachable by two symlinked routes is listed once, under the first route walked] → intended (D3), but it means a flat listing is not always the union of what nested browsing shows under the same root: a symlinked sibling folder's models are absent from the parent's flat list even though the nested view shows them under both names. Accepted — the alternative is duplicate tiles for one file.
+- [Scanning past the return cap to sort by file name] → bounded by the walk budget, and only metadata is collected; the cost is proportional to the tree already being read, not to the models returned.
 
 ## Open Questions
 
