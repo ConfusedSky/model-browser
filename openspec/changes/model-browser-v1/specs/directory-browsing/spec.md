@@ -11,6 +11,25 @@ The server SHALL list the contents of any readable local directory, returning su
 - **WHEN** the client requests a listing for a path that does not exist or is not readable
 - **THEN** the server responds with an error the UI surfaces without crashing
 
+### Requirement: API restricted to the app's own origin
+Because the server reads and serves arbitrary local paths as the user, the server SHALL bind to 127.0.0.1 only and SHALL reject every `/api/*` request that does not originate from the app itself: requests carrying an `Origin` header that is not a loopback origin SHALL be refused, requests whose `Host` header is not a loopback host SHALL be refused, and CORS headers SHALL never be emitted. Localhost binding alone is NOT sufficient, since any page open in the user's browser can reach a localhost port. Because no-cors subresource embeds (`<img src>`, `<script src>`) carry no `Origin` header and so pass the origin check, model bytes SHALL be served as `Content-Type: application/octet-stream` with `X-Content-Type-Options: nosniff`.
+
+#### Scenario: Another site probes the API
+- **WHEN** a page served from a non-loopback origin fetches any `/api/*` endpoint
+- **THEN** the request is refused, and no listing, file bytes, or cache write occurs
+
+#### Scenario: DNS rebinding attempt
+- **WHEN** a request arrives whose `Host` header is not a loopback host
+- **THEN** the request is refused regardless of its `Origin`
+
+#### Scenario: No-cors embed cannot read model bytes
+- **WHEN** a cross-origin page embeds `/api/file` as an `<img>` or `<script>` source, sending no `Origin` header
+- **THEN** the response declares `application/octet-stream` with `nosniff`, so the browser blocks the load instead of decoding or executing it
+
+#### Scenario: The app's own requests
+- **WHEN** the client makes an API request, in dev through the Vite proxy or in production from the served origin
+- **THEN** the request is allowed
+
 ### Requirement: Thumbnail grid navigation
 The client SHALL display directory contents as a responsive grid. Activating a subdirectory or zip tile SHALL navigate into it; the current location SHALL always be reflected in the path bar.
 
