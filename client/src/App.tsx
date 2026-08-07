@@ -206,6 +206,7 @@ export default function App() {
           onPromote={() => setViewer((v) => (v !== null ? { ...v, mode: 'lightbox' } : v))}
           onDismiss={closeViewer}
           onPersist={persist}
+          onLoadError={() => setThumb(viewer.entry.path, { status: 'error' })}
         />
       )}
     </div>

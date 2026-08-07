@@ -25,6 +25,7 @@ interface Props {
   onPromote: () => void
   onDismiss: () => void
   onPersist: (session: ViewerSession) => Promise<void>
+  onLoadError: (message: string) => void
 }
 
 const AXIS_LETTERS = ['x', 'y', 'z'] as const
@@ -43,9 +44,12 @@ export default function ViewerLayer({
   onPromote,
   onDismiss,
   onPersist,
+  onLoadError,
 }: Props) {
   const [session, setSession] = useState<ViewerSession | null>(null)
   const [sessionAxis, setSessionAxis] = useState<OrbitAxis>('y')
+  /** Mesh-load failure message — the viewer shows it instead of dismissing. */
+  const [loadError, setLoadError] = useState<string | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasHostRef = useRef<HTMLDivElement>(null)
   // A pointer-opened viewer mounts mid-press (orbit); a keyboard-opened one
@@ -77,8 +81,14 @@ export default function ViewerLayer({
         setSession(s)
         setSessionAxis(saved.axis)
       })
-      .catch(() => {
-        if (alive) onDismiss()
+      .catch((err: unknown) => {
+        // Missing file / gone zip entry / parse failure: show it, don't
+        // silently dismiss — and flip the tile so the stale thumbnail stops
+        // advertising a healthy model.
+        if (!alive) return
+        const message = err instanceof Error ? err.message : String(err)
+        setLoadError(message)
+        onLoadError(message)
       })
     return () => {
       alive = false
@@ -271,7 +281,17 @@ export default function ViewerLayer({
         }}
       >
         <div ref={canvasHostRef} className="h-full w-full" />
-        {session === null && spinner}
+        {session === null &&
+          (loadError !== null ? (
+            <span
+              role="alert"
+              className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full bg-zinc-800/90 px-2.5 py-1 text-xs text-red-400"
+            >
+              ⚠ failed to load
+            </span>
+          ) : (
+            spinner
+          ))}
       </div>
     )
   }
@@ -297,7 +317,21 @@ export default function ViewerLayer({
         }}
       >
         <div ref={canvasHostRef} className="h-full w-full" />
-        {session === null && spinner}
+        {session === null &&
+          (loadError !== null ? (
+            <div
+              role="alert"
+              className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-8 text-center"
+            >
+              <span className="text-2xl" aria-hidden="true">
+                ⚠
+              </span>
+              <p className="text-sm font-medium text-zinc-200">{viewer.entry.name}</p>
+              <p className="text-xs text-red-400">{loadError}</p>
+            </div>
+          ) : (
+            spinner
+          ))}
         {session !== null && (
           <div
             className="absolute left-3 top-3 flex items-center gap-1 rounded-full bg-zinc-800/80 p-1 text-xs"
