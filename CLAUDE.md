@@ -8,6 +8,15 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
 
 - `bun run dev` - start server + client together
 - `bun run test` / `bun run typecheck` - vitest + tsc across workspaces
+- `scripts/spec-diff.sh [change | capability change [requirement]]` - diff delta specs
+  vs main specs (no args = all active changes; prints `new spec <path>` for new capabilities)
+- `openspec validate <name>` takes the change name positionally (`--change` works on
+  status/instructions, not validate)
+
+## Workflow
+
+- Parallel Claude sessions implement/archive changes concurrently — re-read files and
+  `git status` before planning or editing against earlier reads
 
 ## Architecture constraints (violating these breaks recorded design decisions)
 
