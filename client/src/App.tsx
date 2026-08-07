@@ -142,13 +142,23 @@ export default function App() {
         // pair this PNG with the newer axis/state in one PUT.
         const { state, axis } = session
         const png = await session.snapshot()
-        await api.putThumb({ path: entry.path, mtime: entry.mtime, png, camera: state, axis })
-        setThumb(entry.path, {
-          status: 'ready',
-          url: URL.createObjectURL(png),
-          camera: state,
-          axis,
-        })
+        const url = URL.createObjectURL(png)
+        // Decode before applying, so when this promise resolves the tile's
+        // <img> swap cannot paint a half-decoded frame — the orbit overlay
+        // holds its dismissal on that guarantee.
+        const decode = createImageBitmap(png).then(
+          (bitmap) => bitmap.close(),
+          () => {
+            const img = new Image()
+            img.src = url
+            return img.decode().catch(() => {})
+          },
+        )
+        await Promise.all([
+          decode,
+          api.putThumb({ path: entry.path, mtime: entry.mtime, png, camera: state, axis }),
+        ])
+        setThumb(entry.path, { status: 'ready', url, camera: state, axis })
       } catch {
         // persistence is best-effort; the orbit itself already happened
       }

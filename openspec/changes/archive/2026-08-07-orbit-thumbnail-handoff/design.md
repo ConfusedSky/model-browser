@@ -37,6 +37,8 @@ On orbit-drag release, `ViewerLayer.onUp` fires `settle → onPersist` without a
 
 When the deferred dismiss fires: no-op if a new gesture is active (`pointer.current.down`) — the new gesture's own release owns dismissal; and no-op if the `viewer` prop identity changed since scheduling (a new tile's viewer replaced this one — calling `onDismiss` would clobber it, since `closeViewer` unconditionally nulls the shared viewer state).
 
+Corollary the hold makes necessary: a new press can now replace the `viewer` prop while the layer stays mounted (immediate dismissal used to force an unmount/remount between tiles), so a viewer identity change re-arms the pointer/gesture state exactly as a fresh mount would — otherwise the new tile's drag and promote would be dead.
+
 ## Risks / Trade-offs
 
 - [Overlay lingers up to the timeout on slow PUTs] → 1.5s cap; snapshot+PUT is local-loopback and typically well under it. The hold is invisible when the pointer is still over the tile (overlay persists there anyway today).

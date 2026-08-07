@@ -30,6 +30,9 @@ interface Props {
 
 const AXIS_LETTERS = ['x', 'y', 'z'] as const
 
+/** Longest the orbit overlay holds its dismissal waiting for the refreshed thumbnail. */
+export const PERSIST_HOLD_MS = 1500
+
 /**
  * The single live-canvas layer: in 'orbit' mode it overlays the pressed tile;
  * in 'lightbox' mode it is a modal with full orbit/zoom, focus-trapped.
@@ -55,9 +58,44 @@ export default function ViewerLayer({
   // A pointer-opened viewer mounts mid-press (orbit); a keyboard-opened one
   // mounts directly in lightbox mode with no pointer down.
   const pointer = useRef({ down: viewer.mode === 'orbit', lastX: 0, lastY: 0 })
+  // A held dismissal can keep this component mounted while a new press
+  // replaces the viewer prop — re-arm the gesture state exactly as a fresh
+  // mount would, or the new tile's drag/promote would be dead (D4).
+  const prevViewerRef = useRef(viewer)
+  if (prevViewerRef.current !== viewer) {
+    prevViewerRef.current = viewer
+    pointer.current = { down: viewer.mode === 'orbit', lastX: 0, lastY: 0 }
+  }
   const sessionRef = useRef<ViewerSession | null>(null)
   const modeRef = useRef(viewer.mode)
   modeRef.current = viewer.mode
+  const viewerRef = useRef(viewer)
+  viewerRef.current = viewer
+  /** In-flight settle→persist chain from the last drag release (D1). */
+  const pendingPersistRef = useRef<Promise<void> | null>(null)
+
+  /**
+   * Post-drag dismissal: hold the overlay until the refreshed thumbnail is
+   * applied and paintable (or a short timeout), so it unmounts onto matching
+   * pixels. Dismisses synchronously when nothing is pending. A held dismissal
+   * yields to any newer interaction (D4).
+   */
+  async function dismissAfterPersist(): Promise<void> {
+    const pending = pendingPersistRef.current
+    if (pending === null) {
+      onDismiss()
+      return
+    }
+    const scheduledViewer = viewerRef.current
+    await Promise.race([pending, new Promise((r) => setTimeout(r, PERSIST_HOLD_MS))])
+    // Two rAFs: let React commit the new <img> src and the browser paint it
+    // beneath the still-mounted overlay before unmounting.
+    await new Promise(requestAnimationFrame)
+    await new Promise(requestAnimationFrame)
+    if (pointer.current.down) return // a new gesture owns dismissal now
+    if (viewerRef.current !== scheduledViewer) return // a newer viewer replaced this one
+    onDismiss()
+  }
 
   // Load the mesh (spinner until warm) and build the session. The saved
   // camera/axis may not be in the thumbs map yet (its queued GET may not have
@@ -156,9 +194,19 @@ export default function ViewerLayer({
       }
       const s = sessionRef.current
       // Level the horizon and rebase the rest state, then persist that view.
-      if (s !== null) void s.settle(renderNow).then(() => onPersist(s))
+      // The chain is kept so post-drag dismissals can await it (D1).
+      if (s !== null) {
+        const p = s
+          .settle(renderNow)
+          .then(() => onPersist(s))
+          .finally(() => {
+            if (pendingPersistRef.current === p) pendingPersistRef.current = null
+          })
+        pendingPersistRef.current = p
+      }
       // A drag released outside the tile gets no later pointerleave — the
-      // overlay would be stuck. Dismiss now if the release landed outside.
+      // overlay would be stuck. Dismiss (persistence-aware) if the release
+      // landed outside.
       if (modeRef.current === 'orbit') {
         const rect = containerRef.current?.getBoundingClientRect()
         const inside =
@@ -167,7 +215,7 @@ export default function ViewerLayer({
           e.clientX <= rect.right &&
           e.clientY >= rect.top &&
           e.clientY <= rect.bottom
-        if (!inside) onDismiss()
+        if (!inside) void dismissAfterPersist()
       }
     }
     window.addEventListener('pointermove', onMove)
@@ -277,7 +325,7 @@ export default function ViewerLayer({
         style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
         onPointerDown={startGesture}
         onPointerLeave={() => {
-          if (!pointer.current.down) onDismiss()
+          if (!pointer.current.down) void dismissAfterPersist()
         }}
       >
         <div ref={canvasHostRef} className="h-full w-full" />
