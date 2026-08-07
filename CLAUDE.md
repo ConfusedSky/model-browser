@@ -17,6 +17,8 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
 
 - Parallel Claude sessions implement/archive changes concurrently — re-read files and
   `git status` before planning or editing against earlier reads
+- A dev instance is usually already running (ports 3177/5173, EADDRINUSE on a second
+  `bun run dev`) — server (`bun --hot`) and client (Vite HMR) pick up edits live
 
 ## Architecture constraints (violating these breaks recorded design decisions)
 
@@ -34,8 +36,16 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
 
 ## Testing
 
+- Component tests: `// @vitest-environment happy-dom` pragma, render with plain
+  react-dom (no testing-library), vi.mock `three/renderer` (no WebGL in tests) —
+  see client/test/orbitHandoff.test.tsx
+- Run vitest from the workspace dir (`cd client && bunx vitest run …`) — from the
+  repo root bunx fetches an unpinned vitest that can't resolve workspace deps
 - Server tests via Hono app.request() MUST pass a loopback `host` header — the
   same-origin guard 403s requests without one
 - Zip fixtures: fflate zipSync (see server/test/helpers.ts); cache dir per-test via
   MODEL_BROWSER_CACHE env var
 - Manual/E2E: Playwright MCP works here including headless WebGL
+  - Grid tiles respond only to PointerEvents (dispatch pointerdown on the tile,
+    pointerup on window) — synthetic `.click()` does nothing
+  - Set React-controlled inputs via the native value setter + `input` event
