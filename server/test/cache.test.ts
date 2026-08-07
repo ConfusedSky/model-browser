@@ -101,6 +101,25 @@ describe('ThumbCache maintenance', () => {
     expect(pngs.length).toBeLessThanOrEqual(1)
   })
 
+  it('a concurrent read cannot resurrect an entry the sweep removed', async () => {
+    const cache = tempCache()
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const doomed = join(fx.dir, 'doomed.stl')
+    writeFileSync(doomed, 'x')
+    await cache.put(doomed, { mtime: 1, png: Buffer.from('png'), camera: CAM })
+    unlinkSync(doomed)
+    // Hammer reads while the sweep runs: the lastRead touch must never
+    // recreate the meta file the sweep just deleted.
+    const reads = (async () => {
+      for (let i = 0; i < 50; i++) await cache.get(doomed, 1)
+    })()
+    await cache.maintain()
+    await reads
+    expect((await cache.get(doomed, 1)).status).toBe('miss')
+    expect(readdirSync(cache.dir)).toHaveLength(0)
+  })
+
   it('runs maintenance automatically after the write threshold', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mb-cache-'))
     cleanups.push(dir)

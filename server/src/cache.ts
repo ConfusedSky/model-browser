@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { CameraState, OrbitAxis, ThumbGetResponse } from '../../shared/types'
@@ -12,8 +12,6 @@ interface Meta {
   camera?: CameraState
   /** Orbit spindle axis; undefined reads as 'y' (pre-axis entries). */
   axis?: OrbitAxis
-  /** Last time the PNG was served — LRU clock for size-cap eviction. */
-  lastRead: number
 }
 
 const DEFAULT_CAP = 2 * 1024 ** 3
@@ -60,6 +58,7 @@ export class ThumbCache {
     await writeFile(this.metaFile(key), JSON.stringify(meta))
   }
 
+
   async get(path: string, mtime: number): Promise<ThumbGetResponse> {
     const key = this.key(path)
     const meta = await this.readMeta(key)
@@ -72,7 +71,12 @@ export class ThumbCache {
     } catch {
       return { status: 'stale', camera: meta.camera, axis }
     }
-    await this.writeMeta(key, { ...meta, lastRead: Date.now() })
+    // LRU clock for size-cap eviction is the png file's mtime. Bumping it via
+    // utimes (instead of rewriting the meta json) keeps reads race-free
+    // against the sweep: it cannot resurrect a removed entry and cannot be
+    // caught mid-write by the sweep's meta parse.
+    const now = new Date()
+    await utimes(this.pngFile(key), now, now).catch(() => {})
     return { status: 'hit', camera: meta.camera, axis, png: png.toString('base64') }
   }
 
@@ -84,7 +88,6 @@ export class ThumbCache {
       mtime: opts.png !== undefined ? opts.mtime : prev?.mtime,
       camera: opts.camera ?? prev?.camera,
       axis: opts.axis ?? prev?.axis,
-      lastRead: Date.now(),
     }
     if (opts.png !== undefined) {
       await mkdir(this.dir, { recursive: true })
@@ -122,7 +125,7 @@ export class ThumbCache {
     } catch {
       return
     }
-    const metas: { key: string; meta: Meta; pngSize: number }[] = []
+    const metas: { key: string; meta: Meta; pngSize: number; lastRead: number }[] = []
     for (const f of files) {
       if (!f.endsWith('.json')) continue
       const key = f.slice(0, -'.json'.length)
@@ -136,12 +139,12 @@ export class ThumbCache {
         continue
       }
       const pngStat = await stat(this.pngFile(key)).catch(() => null)
-      metas.push({ key, meta, pngSize: pngStat?.size ?? 0 })
+      metas.push({ key, meta, pngSize: pngStat?.size ?? 0, lastRead: pngStat?.mtimeMs ?? 0 })
     }
 
     let total = metas.reduce((sum, m) => sum + m.pngSize, 0)
     if (total <= this.sizeCap) return
-    metas.sort((a, b) => a.meta.lastRead - b.meta.lastRead)
+    metas.sort((a, b) => a.lastRead - b.lastRead)
     for (const m of metas) {
       if (total <= this.sizeCap) break
       if (m.pngSize === 0) continue
