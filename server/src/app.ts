@@ -1,0 +1,81 @@
+import { createReadStream } from 'node:fs'
+import { stat } from 'node:fs/promises'
+import { isAbsolute } from 'node:path'
+import { Readable } from 'node:stream'
+import { Hono } from 'hono'
+import type { ThumbPutRequest } from '../../shared/types'
+import { ThumbCache } from './cache'
+import { guard } from './guard'
+import { ListingError, complete, listDir } from './listing'
+import { VPathError, parseVPath } from './vpath'
+import { ZipError, extractEntry } from './zip'
+
+export function createApp(cache: ThumbCache = new ThumbCache()): Hono {
+  const app = new Hono()
+
+  app.use('/api/*', guard)
+
+  app.onError((err, c) => {
+    if (err instanceof ListingError) return c.json({ error: err.message }, err.status === 404 ? 404 : 400)
+    if (err instanceof VPathError) return c.json({ error: err.message }, 400)
+    if (err instanceof ZipError) return c.json({ error: err.message }, 422)
+    return c.json({ error: err.message }, 500)
+  })
+
+  app.get('/api/dir', async (c) => {
+    const path = c.req.query('path')
+    if (path === undefined || path === '') return c.json({ error: 'path is required' }, 400)
+    return c.json(await listDir(path))
+  })
+
+  app.get('/api/file', async (c) => {
+    const path = c.req.query('path')
+    if (path === undefined || path === '') return c.json({ error: 'path is required' }, 400)
+    const { fsPath, entry } = parseVPath(path)
+    if (!isAbsolute(fsPath)) return c.json({ error: 'path must be absolute' }, 400)
+
+    // octet-stream + nosniff make ORB dependably block no-cors embeds, which
+    // carry no Origin and so pass the guard's origin check.
+    const headers = {
+      'content-type': 'application/octet-stream',
+      'x-content-type-options': 'nosniff',
+    }
+    if (entry !== undefined) {
+      const bytes = await extractEntry(fsPath, entry)
+      return c.body(new Uint8Array(bytes), 200, headers)
+    }
+    const s = await stat(fsPath).catch(() => null)
+    if (s === null || !s.isFile()) return c.json({ error: `no such file: ${fsPath}` }, 404)
+    const stream = Readable.toWeb(createReadStream(fsPath)) as ReadableStream
+    return c.body(stream, 200, { ...headers, 'content-length': String(s.size) })
+  })
+
+  app.get('/api/complete', async (c) => {
+    const prefix = c.req.query('prefix') ?? ''
+    return c.json(await complete(prefix))
+  })
+
+  app.get('/api/thumb', async (c) => {
+    const path = c.req.query('path')
+    const mtime = Number(c.req.query('mtime'))
+    if (path === undefined || Number.isNaN(mtime)) {
+      return c.json({ error: 'path and mtime are required' }, 400)
+    }
+    return c.json(await cache.get(path, mtime))
+  })
+
+  app.put('/api/thumb', async (c) => {
+    const body = (await c.req.json()) as ThumbPutRequest
+    if (typeof body.path !== 'string' || typeof body.mtime !== 'number') {
+      return c.json({ error: 'path and mtime are required' }, 400)
+    }
+    await cache.put(body.path, {
+      mtime: body.mtime,
+      png: body.png !== undefined ? Buffer.from(body.png, 'base64') : undefined,
+      camera: body.camera,
+    })
+    return c.json({ ok: true })
+  })
+
+  return app
+}
