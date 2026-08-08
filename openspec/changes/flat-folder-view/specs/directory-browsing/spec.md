@@ -9,7 +9,7 @@ The walk SHALL enter each real directory at most once, keyed by its resolved rea
 
 Each model entry's virtual path SHALL be identical to the path a nested browse would yield, so thumbnails and camera state are shared between the two views, and each model entry's name SHALL be its path relative to the requested root. When the requested root is a zip or a directory inside one, the same rules SHALL apply within the archive: its immediate directories are the container entries, every model under the prefix is listed with names relative to that prefix, and no further descent is attempted.
 
-The walk SHALL be bounded by a hard budget on the work it does — entering a directory and scanning a model each counting against one budget — independent of the cap on the number of models returned. Because the ordering is by file name rather than by walk order, the returned models SHALL be the cap's worth taken from the sorted result rather than the first ones encountered. A response SHALL carry an explicit truncation flag whenever any model was dropped, whether by the cap or by the budget.
+The walk SHALL be bounded by a hard budget on the work it does, charged once per directory entry examined — every filesystem entry and every archive entry the walk inspects, whether or not it is kept — independent of the cap on the number of models returned. A malformed or non-positive configured limit SHALL fall back to its default rather than disable the bound. Because the ordering is by file name rather than by walk order, the returned models SHALL be the cap's worth taken from the sorted result rather than the first ones encountered. A response SHALL carry an explicit truncation flag whenever any model was dropped, whether by the cap or by the budget.
 
 #### Scenario: Models across subfolders in one listing
 - **WHEN** the client requests a flat listing of a folder containing models nested several directories deep
@@ -47,6 +47,10 @@ The walk SHALL be bounded by a hard budget on the work it does — entering a di
 - **WHEN** a flat-listed folder contains far more directories than the walk budget allows, holding too few models to reach the model cap
 - **THEN** the walk stops when the budget is exhausted, the request completes, and the response is flagged truncated
 
+#### Scenario: Entries that are examined but not kept still cost budget
+- **WHEN** a flat-listed folder holds a subdirectory of many files that are neither models nor directories
+- **THEN** examining them consumes the walk budget, so the request stays bounded and reports truncation rather than scanning them all for free
+
 ### Requirement: Flat view toggle
 The client SHALL offer a flat-view toggle alongside the path bar. While active, the grid SHALL show the current folder's flat listing — the top-level folder and zip tiles first, navigable exactly as in the nested view, then model tiles labeled by relative path — and hover-warm, drag-to-orbit, the lightbox, and thumbnail/camera persistence SHALL behave exactly as in the nested view for the same models. The toggle SHALL remain in effect across navigation within the session, including navigation into a zip, and a truncated listing SHALL be indicated to the user.
 
@@ -69,6 +73,14 @@ The client SHALL offer a flat-view toggle alongside the path bar. While active, 
 #### Scenario: Flat mode follows navigation
 - **WHEN** flat view is active and the user navigates to another folder
 - **THEN** the new folder is also shown flat until the toggle is turned off
+
+#### Scenario: An abandoned flat walk cannot repaint the view that replaced it
+- **WHEN** a slow flat listing finally arrives after the user has already navigated or toggled back, and a later listing is on screen
+- **THEN** the late response is discarded — the grid, path, and truncation notice continue to describe the listing the user is actually viewing
+
+#### Scenario: A failed flat request leaves the toggle off
+- **WHEN** activating the flat toggle produces an error instead of a listing
+- **THEN** the error is surfaced, the grid keeps showing the listing it already had, the toggle returns to its inactive state, and later navigation does not request flat listings
 
 #### Scenario: Truncation is visible
 - **WHEN** a flat listing comes back flagged as truncated

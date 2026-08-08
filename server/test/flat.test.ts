@@ -126,16 +126,26 @@ describe('flat listing of a directory', () => {
 })
 
 describe('flat listing rooted in a zip', () => {
-  it('zip root: immediate dirs and zip tiles, then models relative to the archive', async () => {
+  it('zip root: immediate dirs only, then models relative to the archive', async () => {
     const body = await flat(zipPath)
     expect(body.entries.map((e) => e.name)).toEqual([
       'arms',
       'v2.zip',
-      'inner.zip',
       'box.stl',
       'v2.zip/deep2.stl',
       'arms/left.stl',
     ])
+  })
+
+  it('a nested zip file is not offered as a container tile', async () => {
+    // It would 400 on click — the flat view must not hand out a dead link.
+    const body = await flat(zipPath)
+    expect(body.entries.some((e) => e.name === 'inner.zip')).toBe(false)
+    const res = await app.request(
+      `/api/dir?path=${encodeURIComponent(`${zipPath}!/inner.zip`)}&flat=true`,
+      { headers: LOOPBACK },
+    )
+    expect(res.status).toBe(400)
   })
 
   it('zip subdirectory: models named relative to the prefix', async () => {
@@ -159,6 +169,40 @@ describe('bounding', () => {
     const body = await flat(root)
     expect(body.entries.map((e) => e.name)).toEqual(CONTAINERS)
     expect(body.truncated).toBe(true)
+  })
+
+  it('charges for every entry examined, not just models and entered dirs', async () => {
+    // A folder of non-model files is the walk's real cost — statting them all
+    // for one charged step would leave the budget nominal.
+    const dir = mkdtempSync(join(tmpdir(), 'mb-flat-noise-'))
+    mkdirSync(join(dir, 'sub'))
+    for (let i = 0; i < 10; i++) writeFileSync(join(dir, 'sub', `t${i}.txt`), 'x')
+    writeFileSync(join(dir, 'sub', 'part.stl'), stlBytes(1))
+    try {
+      process.env.MODEL_BROWSER_FLAT_BUDGET = '4'
+      const body = await flat(dir)
+      expect(body.entries.filter((e) => e.kind === 'model')).toEqual([])
+      expect(body.truncated).toBe(true)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('a malformed limit falls back to the default instead of disabling the bound', async () => {
+    // Number('20k') is NaN, and NaN <= 0 / length > NaN are both false, so an
+    // unvalidated read silently removes the budget and the cap.
+    process.env.MODEL_BROWSER_FLAT_BUDGET = '20k'
+    process.env.MODEL_BROWSER_FLAT_CAP = 'lots'
+    const body = await flat(root)
+    expect(body.entries.map((e) => e.name)).toEqual([...CONTAINERS, ...MODELS])
+    expect(body.truncated).toBeUndefined()
+  })
+
+  it('an empty limit falls back too, rather than reading as zero', async () => {
+    process.env.MODEL_BROWSER_FLAT_BUDGET = ''
+    const body = await flat(root)
+    expect(body.entries.map((e) => e.name)).toEqual([...CONTAINERS, ...MODELS])
+    expect(body.truncated).toBeUndefined()
   })
 })
 
@@ -184,11 +228,25 @@ describe('flag and errors', () => {
     }
   })
 
-  it('404s on an unreadable root', async () => {
+  it('404s on a nonexistent root', async () => {
     const res = await app.request(
       `/api/dir?path=${encodeURIComponent(join(root, 'nope'))}&flat=true`,
       { headers: LOOPBACK },
     )
     expect(res.status).toBe(404)
+  })
+
+  it('404s on an unreadable root — only *sub*directory failures are swallowed', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mb-flat-root-locked-'))
+    chmodSync(dir, 0o000)
+    try {
+      const res = await app.request(`/api/dir?path=${encodeURIComponent(dir)}&flat=true`, {
+        headers: LOOPBACK,
+      })
+      expect(res.status).toBe(404)
+    } finally {
+      chmodSync(dir, 0o755)
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

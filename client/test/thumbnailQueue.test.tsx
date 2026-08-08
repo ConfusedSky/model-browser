@@ -71,6 +71,7 @@ beforeEach(() => {
   vi.stubGlobal('URL', {
     ...URL,
     createObjectURL: vi.fn(() => 'blob:mock'),
+    revokeObjectURL: vi.fn(),
   })
 })
 
@@ -123,5 +124,54 @@ describe('thumbnail cache lookups vs the render queue', () => {
 
     expect(statuses()).toEqual(['ready', 'ready'])
     expect(api.putThumb).toHaveBeenCalledTimes(2)
+  })
+
+  it('abandoning a listing cancels its queued lookups', async () => {
+    // The limiter replaced the render queue for lookups, so it has to carry
+    // the queue's cancellation too — otherwise a dead listing's backlog runs
+    // to completion and head-of-line blocks its successor.
+    let release!: () => void
+    const gate = new Promise<void>((r) => {
+      release = r
+    })
+    const api = {
+      getThumb: vi.fn(() => gate.then(() => ({ status: 'miss' }))),
+    } as unknown as ApiClient
+    const lru = { acquire: vi.fn() } as unknown as MeshLru<THREE.Object3D>
+
+    await render(<Harness entries={models(20)} api={api} lru={lru} queue={new RenderQueue(2)} />)
+    await settle()
+    expect(api.getThumb).toHaveBeenCalledTimes(8) // the limiter's ceiling
+
+    await act(async () => {
+      root!.unmount()
+      root = null
+    })
+    release()
+    await settle()
+
+    expect(api.getThumb).toHaveBeenCalledTimes(8) // the queued 12 never fired
+  })
+
+  it('a hit landing after the listing is gone revokes its object URL', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((r) => {
+      release = r
+    })
+    const api = {
+      getThumb: vi.fn(() => gate.then(() => ({ status: 'hit', pngUrl: 'blob:orphan' }))),
+    } as unknown as ApiClient
+    const lru = { acquire: vi.fn() } as unknown as MeshLru<THREE.Object3D>
+
+    await render(<Harness entries={models(1)} api={api} lru={lru} queue={new RenderQueue(2)} />)
+    await settle()
+    await act(async () => {
+      root!.unmount()
+      root = null
+    })
+    release()
+    await settle()
+
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:orphan')
   })
 })

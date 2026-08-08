@@ -47,11 +47,17 @@ export default function App() {
   const { thumbs, setThumb, setPlaceholder } = useThumbnails(listing, api, lru, queue)
   placeholderRef.current = setPlaceholder
 
+  // A flat walk can take seconds while a nested listing returns immediately,
+  // so responses can land out of order — only the newest request may write.
+  const requestRef = useRef(0)
+
   const fetchListing = useCallback(
-    (target: string, asFlat: boolean) => {
+    (target: string, asFlat: boolean, onFail?: () => void) => {
+      const req = ++requestRef.current
       void api
         .listDir(target, { flat: asFlat })
         .then((res) => {
+          if (req !== requestRef.current) return
           setPath(target)
           setListing(res.entries)
           setTruncated(res.truncated === true)
@@ -59,7 +65,9 @@ export default function App() {
           pushRecent(target)
         })
         .catch((err: unknown) => {
+          if (req !== requestRef.current) return
           setError(err instanceof Error ? err.message : String(err))
+          onFail?.()
         })
     },
     [api],
@@ -70,7 +78,10 @@ export default function App() {
   function toggleFlat(): void {
     const next = !flat
     setFlat(next)
-    if (path !== '') fetchListing(path, next)
+    // The button reflects the request immediately so a second click reads as
+    // "turn it back off", but a failed request must not leave it lit over a
+    // grid that never changed — nor make every later navigation go flat.
+    if (path !== '') fetchListing(path, next, () => setFlat(!next))
   }
 
   useEffect(() => {
