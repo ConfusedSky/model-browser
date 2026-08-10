@@ -5,6 +5,7 @@ import { HttpApiClient } from './api/client'
 import ChatPanel from './components/ChatPanel'
 import Grid from './components/Grid'
 import PathBar from './components/PathBar'
+import { SKELETON_DELAY_MS, useDelayedFlag } from './hooks/useDelayedFlag'
 import { useThumbnails } from './hooks/useThumbnails'
 import { GestureTracker } from './lib/gesture'
 import { createHoverWarmer } from './lib/hover'
@@ -41,9 +42,11 @@ export default function App() {
   const [flat, setFlat] = useState(false)
   const [truncated, setTruncated] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [pending, setPending] = useState(false)
   const [viewer, setViewer] = useState<ViewerState | null>(null)
   const trackerRef = useRef(new GestureTracker())
 
+  const showSkeleton = useDelayedFlag(pending, SKELETON_DELAY_MS)
   const { thumbs, setThumb, setPlaceholder } = useThumbnails(listing, api, lru, queue)
   placeholderRef.current = setPlaceholder
 
@@ -54,10 +57,12 @@ export default function App() {
   const fetchListing = useCallback(
     (target: string, asFlat: boolean, onFail?: () => void) => {
       const req = ++requestRef.current
+      setPending(true)
       void api
         .listDir(target, { flat: asFlat })
         .then((res) => {
           if (req !== requestRef.current) return
+          setPending(false)
           setPath(target)
           setListing(res.entries)
           setTruncated(res.truncated === true)
@@ -66,6 +71,7 @@ export default function App() {
         })
         .catch((err: unknown) => {
           if (req !== requestRef.current) return
+          setPending(false)
           setError(err instanceof Error ? err.message : String(err))
           onFail?.()
         })
@@ -222,11 +228,25 @@ export default function App() {
         </button>
       </header>
       <div className="flex min-h-0 flex-1">
-        <main className="min-w-0 flex-1 overflow-auto">
-          {path === '' ? (
+        <main className="min-w-0 flex-1 overflow-auto" aria-busy={showSkeleton || undefined}>
+          {path === '' && !showSkeleton ? (
             <p className="mt-24 text-center text-sm text-zinc-500">
               Enter a directory path above to browse your models.
             </p>
+          ) : showSkeleton ? (
+            // The old tiles are stale navigation targets while a slower listing
+            // is fetched — unmounting the grid is what makes them unclickable.
+            <div
+              aria-hidden="true"
+              className="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-3 p-4"
+            >
+              {Array.from({ length: 12 }, (_, i) => (
+                <div
+                  key={i}
+                  className="aspect-square animate-pulse rounded-xl border border-zinc-800 bg-zinc-900"
+                />
+              ))}
+            </div>
           ) : (
             <>
               {truncated && (

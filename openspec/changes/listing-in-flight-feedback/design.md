@@ -24,7 +24,7 @@ Every listing request funnels through `fetchListing` in `App`, which stamps it w
 
 ### D2: The skeleton reveals only after a delay (~200 ms)
 
-An immediate swap would flash a skeleton on every warm-disk navigation. `pending` feeds a small delayed-flag hook (`useDelayedFlag(pending, SKELETON_DELAY_MS)`): the skeleton renders only if the request is still unresolved after the delay, and hides the instant `pending` drops. 200 ms sits under the threshold where a click starts to feel ignored but above virtually every nested listing. The delay constant lives beside the hook; the component test overrides nothing — it drives a never-resolving `listDir` past the delay with real timers, the same way `flatToggle.test.tsx` drives its races.
+An immediate swap would flash a skeleton on every warm-disk navigation. `pending` feeds a small delayed-flag hook (`useDelayedFlag(pending, SKELETON_DELAY_MS)`): the skeleton renders only if the request is still unresolved after the delay, and hides the instant `pending` drops. The delay measures continuous in-flight time — a newer request taking over mid-flight does not re-arm it, since the user has already been waiting that long. 200 ms sits under the threshold where a click starts to feel ignored but above virtually every nested listing. The delay constant lives beside the hook; the component test overrides nothing — it drives a never-resolving `listDir` past the delay with real timers, the same way `flatToggle.test.tsx` drives its races.
 
 ### D3: The skeleton replaces the grid; the header stays live
 
