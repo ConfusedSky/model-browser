@@ -20,6 +20,16 @@ describe('formatBytes', () => {
     expect(formatBytes(10 * 1024)).toBe('10 KB')
     expect(formatBytes(999 * 1024 * 1024)).toBe('999 MB')
   })
+
+  it('never displays 1024 of a unit — values that round there promote instead', () => {
+    expect(formatBytes(1048064)).toBe('1.0 MB') // 1023.5 KB
+    expect(formatBytes(1023 * 1024)).toBe('1023 KB')
+  })
+
+  it('values that round to 10 drop the decimal like the rest of the >=10 range', () => {
+    expect(formatBytes(10189)).toBe('10 KB') // 9.95 KB
+    expect(formatBytes(10138)).toBe('9.9 KB') // 9.90 KB
+  })
 })
 
 describe('formatDate', () => {

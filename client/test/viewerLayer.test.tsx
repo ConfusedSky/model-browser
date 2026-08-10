@@ -147,3 +147,27 @@ describe('lightbox gesture binding', () => {
     expect(props.tracker.isDrag).toBe(true)
   })
 })
+
+describe('copy-path feedback', () => {
+  it('a failed copy withdraws an earlier "copied" confirmation', async () => {
+    const writeText = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('denied'))
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    try {
+      const props = makeProps('lightbox')
+      const el = await render(props)
+      const copy = el.querySelector<HTMLButtonElement>('button[aria-label="Copy path"]')!
+
+      await act(async () => copy.click())
+      expect(copy.textContent).toBe('copied')
+
+      // Second copy fails inside the first one's confirmation window.
+      await act(async () => copy.click())
+      expect(copy.textContent).toBe('copy')
+    } finally {
+      Reflect.deleteProperty(navigator, 'clipboard')
+    }
+  })
+})

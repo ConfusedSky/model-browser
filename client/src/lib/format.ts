@@ -4,12 +4,13 @@ const UNITS = ['B', 'KB', 'MB', 'GB', 'TB'] as const
 export function formatBytes(bytes: number): string {
   let value = bytes
   let unit = 0
-  while (value >= 1024 && unit < UNITS.length - 1) {
+  // 1023.5+ would *display* as "1024" — promote those to the next unit too.
+  while (value >= 1023.5 && unit < UNITS.length - 1) {
     value /= 1024
     unit++
   }
   const text =
-    unit === 0 ? String(value) : value >= 10 ? String(Math.round(value)) : value.toFixed(1)
+    unit === 0 ? String(value) : value >= 9.95 ? String(Math.round(value)) : value.toFixed(1)
   return `${text} ${UNITS[unit]}`
 }
 

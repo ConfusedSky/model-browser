@@ -295,6 +295,9 @@ export default function ViewerLayer({
 
   /** Clipboard-failure fallback: select the path text for a manual copy. */
   function selectPathText(): void {
+    // An earlier copy's "copied" confirmation must not outlive this failure.
+    clearTimeout(copyTimerRef.current)
+    setCopied(false)
     const el = pathRef.current
     if (el === null) return
     const range = document.createRange()
