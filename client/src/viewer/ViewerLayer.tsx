@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type * as THREE from 'three'
 import type { CameraState, DirEntry, OrbitAxis } from '../../../shared/types'
 import type { ApiClient } from '../api/client'
+import { formatBytes, formatDate } from '../lib/format'
 import { GestureTracker } from '../lib/gesture'
 import type { MeshLru } from '../three/lru'
 import { getRenderer } from '../three/renderer'
@@ -53,8 +54,11 @@ export default function ViewerLayer({
   const [sessionAxis, setSessionAxis] = useState<OrbitAxis>('y')
   /** Mesh-load failure message — the viewer shows it instead of dismissing. */
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasHostRef = useRef<HTMLDivElement>(null)
+  const pathRef = useRef<HTMLParagraphElement>(null)
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   // A pointer-opened viewer mounts mid-press (orbit); a keyboard-opened one
   // mounts directly in lightbox mode with no pointer down.
   const pointer = useRef({ down: viewer.mode === 'orbit', lastX: 0, lastY: 0 })
@@ -287,6 +291,34 @@ export default function ViewerLayer({
     tracker.start(e.clientX, e.clientY)
   }
 
+  useEffect(() => () => clearTimeout(copyTimerRef.current), [])
+
+  /** Clipboard-failure fallback: select the path text for a manual copy. */
+  function selectPathText(): void {
+    const el = pathRef.current
+    if (el === null) return
+    const range = document.createRange()
+    range.selectNodeContents(el)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+  }
+
+  function copyPath(): void {
+    // Outside a secure context (e.g. reached over LAN by IP) navigator.clipboard
+    // is undefined and the call throws synchronously — a bare .catch() misses it.
+    try {
+      if (navigator.clipboard === undefined) throw new Error('clipboard unavailable')
+      navigator.clipboard.writeText(viewer.entry.path).then(() => {
+        setCopied(true)
+        clearTimeout(copyTimerRef.current)
+        copyTimerRef.current = setTimeout(() => setCopied(false), 1500)
+      }, selectPathText)
+    } catch {
+      selectPathText()
+    }
+  }
+
   // Drives renders while an axis-change tween is in flight. The loop ends on
   // its own when the tween completes or a drag/zoom cancels it.
   const tweenLoopActive = useRef(false)
@@ -357,74 +389,119 @@ export default function ViewerLayer({
         aria-modal="true"
         aria-label={viewer.entry.name}
         tabIndex={-1}
-        className="relative h-[min(80vh,80vw)] w-[min(80vh,80vw)] cursor-grab touch-none rounded-2xl border border-zinc-700 bg-zinc-900 outline-none active:cursor-grabbing"
-        onPointerDown={startGesture}
-        onWheel={(e) => {
-          sessionRef.current?.zoom(e.deltaY > 0 ? 1.1 : 0.9)
-          renderNow()
-        }}
+        className="relative flex max-w-[95vw] overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-900 outline-none"
       >
-        <div ref={canvasHostRef} className="h-full w-full" />
-        {session === null &&
-          (loadError !== null ? (
-            <div
-              role="alert"
-              className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-8 text-center"
-            >
-              <span className="text-2xl" aria-hidden="true">
-                ⚠
-              </span>
-              <p className="text-sm font-medium text-zinc-200">{viewer.entry.name}</p>
-              <p className="text-xs text-red-400">{loadError}</p>
-            </div>
-          ) : (
-            spinner
-          ))}
-        {session !== null && (
+        {/* The square is load-bearing: snapshot() captures at aspect = 1, so a
+            squeezed live view would disagree with its thumbnail (D1). */}
+        <div className="relative h-[min(80vh,80vw)] w-[min(80vh,80vw)] shrink-0">
           <div
-            className="absolute left-3 top-3 flex items-center gap-1 rounded-full bg-zinc-800/80 p-1 text-xs"
-            aria-label="Orbit axis"
-          >
-            <span className="px-1.5 text-zinc-500">axis</span>
-            {AXIS_LETTERS.map((letter) => {
-              const flipped = sessionAxis.startsWith('-')
-              const active = sessionAxis === letter || sessionAxis === `-${letter}`
-              return (
-                <button
-                  key={letter}
-                  type="button"
-                  aria-pressed={active}
-                  onClick={() => changeAxis(flipped ? (`-${letter}` as OrbitAxis) : letter)}
-                  className={`rounded-full px-2.5 py-1 ${
-                    active ? 'bg-sky-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
-                  }`}
-                >
-                  {letter.toUpperCase()}
-                </button>
-              )
-            })}
-            <span className="h-4 w-px bg-zinc-700" />
-            <button
-              type="button"
-              aria-pressed={sessionAxis.startsWith('-')}
-              title="Negate the spindle axis (+axis ↔ −axis)"
-              onClick={() =>
-                changeAxis(
-                  sessionAxis.startsWith('-')
-                    ? (sessionAxis.slice(1) as OrbitAxis)
-                    : (`-${sessionAxis}` as OrbitAxis),
-                )
-              }
-              className={`rounded-full px-2.5 py-1 ${
-                sessionAxis.startsWith('-')
-                  ? 'bg-amber-700 text-white'
-                  : 'text-zinc-400 hover:text-zinc-200'
-              }`}
+            ref={canvasHostRef}
+            className="h-full w-full cursor-grab touch-none active:cursor-grabbing"
+            onPointerDown={startGesture}
+            onWheel={(e) => {
+              sessionRef.current?.zoom(e.deltaY > 0 ? 1.1 : 0.9)
+              renderNow()
+            }}
+          />
+          {session === null &&
+            (loadError !== null ? (
+              <div
+                role="alert"
+                className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-8 text-center"
+              >
+                <span className="text-2xl" aria-hidden="true">
+                  ⚠
+                </span>
+                <p className="text-sm font-medium text-zinc-200">{viewer.entry.name}</p>
+                <p className="text-xs text-red-400">{loadError}</p>
+              </div>
+            ) : (
+              spinner
+            ))}
+          {session !== null && (
+            <div
+              className="absolute left-3 top-3 flex items-center gap-1 rounded-full bg-zinc-800/80 p-1 text-xs"
+              aria-label="Orbit axis"
             >
-              flip
-            </button>
+              <span className="px-1.5 text-zinc-500">axis</span>
+              {AXIS_LETTERS.map((letter) => {
+                const flipped = sessionAxis.startsWith('-')
+                const active = sessionAxis === letter || sessionAxis === `-${letter}`
+                return (
+                  <button
+                    key={letter}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => changeAxis(flipped ? (`-${letter}` as OrbitAxis) : letter)}
+                    className={`rounded-full px-2.5 py-1 ${
+                      active ? 'bg-sky-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
+                    }`}
+                  >
+                    {letter.toUpperCase()}
+                  </button>
+                )
+              })}
+              <span className="h-4 w-px bg-zinc-700" />
+              <button
+                type="button"
+                aria-pressed={sessionAxis.startsWith('-')}
+                title="Negate the spindle axis (+axis ↔ −axis)"
+                onClick={() =>
+                  changeAxis(
+                    sessionAxis.startsWith('-')
+                      ? (sessionAxis.slice(1) as OrbitAxis)
+                      : (`-${sessionAxis}` as OrbitAxis),
+                  )
+                }
+                className={`rounded-full px-2.5 py-1 ${
+                  sessionAxis.startsWith('-')
+                    ? 'bg-amber-700 text-white'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                flip
+              </button>
+            </div>
+          )}
+        </div>
+        <div className="flex w-72 min-w-0 flex-col gap-4 overflow-y-auto p-4">
+          {/* pr-9 keeps the name clear of the dialog-anchored close button */}
+          <p className="break-all pr-9 text-sm font-medium text-zinc-200">{viewer.entry.name}</p>
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-zinc-500">path</span>
+              <button
+                type="button"
+                aria-label="Copy path"
+                onClick={copyPath}
+                className="rounded-full bg-zinc-800 px-2.5 py-0.5 text-xs text-zinc-300 hover:bg-zinc-700"
+              >
+                {copied ? 'copied' : 'copy'}
+              </button>
+            </div>
+            <p ref={pathRef} className="select-text break-all text-xs text-zinc-300">
+              {viewer.entry.path}
+            </p>
           </div>
-        )}
+          <dl className="flex flex-col gap-2 text-xs">
+            {viewer.entry.format !== undefined && (
+              <div className="flex justify-between gap-2">
+                <dt className="text-zinc-500">format</dt>
+                <dd className="uppercase text-zinc-300">{viewer.entry.format}</dd>
+              </div>
+            )}
+            <div className="flex justify-between gap-2">
+              <dt className="text-zinc-500">size</dt>
+              <dd className="text-zinc-300">{formatBytes(viewer.entry.size)}</dd>
+            </div>
+            <div className="flex justify-between gap-2">
+              <dt className="text-zinc-500">
+                {viewer.entry.path.includes('!/') ? 'modified (zip)' : 'modified'}
+              </dt>
+              <dd className="text-right text-zinc-300">{formatDate(viewer.entry.mtime)}</dd>
+            </div>
+          </dl>
+        </div>
         <button
           type="button"
           aria-label="Close"
@@ -433,9 +510,6 @@ export default function ViewerLayer({
         >
           ✕
         </button>
-        <p className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-zinc-800/80 px-3 py-1 text-xs text-zinc-300">
-          {viewer.entry.name}
-        </p>
       </div>
     </div>
   )

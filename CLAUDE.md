@@ -17,6 +17,9 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
 
 - Parallel Claude sessions implement/archive changes concurrently — re-read files and
   `git status` before planning or editing against earlier reads
+- Work is committed directly to `main` — no feature branches
+- design.md cites specific code (classes, call sites, geometry) — re-check those citations
+  against the source when reviewing; plausible-sounding ones have been wrong
 - A dev instance is usually already running (ports 3177/5173, EADDRINUSE on a second
   `bun run dev`) — server (`bun --hot`) and client (Vite HMR) pick up edits live
 
@@ -31,6 +34,8 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
 - Mesh LRU eviction must call geometry.dispose() — dropping the reference leaks VRAM (D5)
 - Camera state is bounds-relative, never world coords; thumbnails keyed path+mtime,
   camera by path only (D4)
+- Thumbnails always capture 512² at aspect 1 (three/renderer.ts); the live view uses its
+  host's aspect — a non-square viewer host persists a thumbnail framed unlike what was seen
 - Zip entries use virtual paths `foo.zip!/entry`, one level only — nested zips are
   rejected by design (D6)
 
@@ -44,8 +49,14 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
 - Server tests via Hono app.request() MUST pass a loopback `host` header — the
   same-origin guard 403s requests without one
 - Zip fixtures: fflate zipSync (see server/test/helpers.ts); cache dir per-test via
-  MODEL_BROWSER_CACHE env var
+  MODEL_BROWSER_CACHE env var; ad-hoc `bun -e` fixture scripts must run from server/
+  (fflate is a workspace dep, not a root one)
 - Manual/E2E: Playwright MCP works here including headless WebGL
-  - Grid tiles respond only to PointerEvents (dispatch pointerdown on the tile,
-    pointerup on window) — synthetic `.click()` does nothing
-  - Set React-controlled inputs via the native value setter + `input` event
+  - Model tiles respond only to PointerEvents: dispatch pointerdown on the tile, wait
+    ~300ms for the overlay to mount its window listeners, then pointerup on window —
+    same-tick release is silently missed. Dir/zip tiles take normal clicks.
+  - Grant clipboard upfront via `context.grantPermissions(['clipboard-read',
+    'clipboard-write'])` — clipboard calls otherwise hang forever on a permission
+    prompt in the headed MCP browser
+  - Set React-controlled inputs via the native value setter + `input` event; for
+    path-bar navigation, focus the input first and press Enter on the input itself

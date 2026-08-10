@@ -80,6 +80,13 @@ describe('ViewerLayer missing-model error', () => {
     expect(props.onLoadError).toHaveBeenCalledWith('no such file: /models/gone.stl')
   })
 
+  it('info panel is up for a model that failed to load, with a copyable path', async () => {
+    const props = makeProps('lightbox')
+    const el = await render(props)
+    expect(el.textContent).toContain('/models/gone.stl')
+    expect(el.querySelector('button[aria-label="Copy path"]')).not.toBeNull()
+  })
+
   it('closing an errored lightbox dismisses without persisting', async () => {
     const props = makeProps('lightbox')
     await render(props)
@@ -109,5 +116,34 @@ describe('ViewerLayer missing-model error', () => {
     })
     expect(props.onPromote).toHaveBeenCalled()
     expect(props.onPersist).not.toHaveBeenCalled()
+  })
+})
+
+describe('lightbox gesture binding', () => {
+  function press(el: HTMLElement, x: number, y: number): void {
+    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: x, clientY: y }))
+  }
+  const move = (x: number, y: number) =>
+    window.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: x, clientY: y }))
+
+  it('pointerdown on the panel starts no gesture; on the canvas host it does', async () => {
+    const props = makeProps('lightbox')
+    const el = await render(props)
+    const host = el.querySelector<HTMLElement>('.cursor-grab')
+    const copy = el.querySelector<HTMLElement>('button[aria-label="Copy path"]')
+    expect(host).not.toBeNull()
+    expect(copy).not.toBeNull()
+
+    await act(async () => {
+      press(copy!, 10, 10)
+      move(60, 60) // well past the drag threshold
+    })
+    expect(props.tracker.isDrag).toBe(false)
+
+    await act(async () => {
+      press(host!, 10, 10)
+      move(60, 60)
+    })
+    expect(props.tracker.isDrag).toBe(true)
   })
 })
