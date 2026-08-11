@@ -50,9 +50,11 @@ export function makeScene(): LitScene {
   // carries more intensity: the hemisphere ground already tints the scene
   // cool, so equal intensities read red-dominant.
   const rimRed = new THREE.DirectionalLight(0xff4444, 1.4)
+  rimRed.name = 'rim'
   rimRed.position.set(-1.5, 0.3, -0.6)
   rig.add(rimRed)
   const rimBlue = new THREE.DirectionalLight(0x3355ff, 2.5)
+  rimBlue.name = 'rim'
   rimBlue.position.set(1.5, 0.3, -0.6)
   rig.add(rimBlue)
   scene.add(rig)

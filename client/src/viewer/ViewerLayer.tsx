@@ -22,6 +22,8 @@ interface Props {
   axis: OrbitAxis | undefined
   /** Active lighting mode — a prop (not read from the store) so toggling repaints the live view. */
   lighting: LightingMode
+  /** SCAFFOLDING: rim accents on/off — a prop for the same reason as `lighting`. */
+  rims: boolean
   api: ApiClient
   lru: MeshLru<THREE.Object3D>
   tracker: GestureTracker
@@ -45,6 +47,7 @@ export default function ViewerLayer({
   camera,
   axis,
   lighting,
+  rims,
   api,
   lru,
   tracker,
@@ -144,7 +147,7 @@ export default function ViewerLayer({
   }, [viewer.entry.path, lru])
 
   // Attach the shared canvas and render whenever session/mode/size changes —
-  // and on a lighting toggle, so the experiment is visible without a drag.
+  // and on a lighting/rims toggle, so the experiment is visible without a drag.
   useEffect(() => {
     if (session === null) return
     const host = canvasHostRef.current
@@ -159,7 +162,7 @@ export default function ViewerLayer({
       if (canvas.parentElement === host) host.removeChild(canvas)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, viewer.mode, lighting])
+  }, [session, viewer.mode, lighting, rims])
 
   function renderNow(): void {
     const s = sessionRef.current

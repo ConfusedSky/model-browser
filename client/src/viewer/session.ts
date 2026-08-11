@@ -13,6 +13,7 @@ import {
 } from '../three/camera'
 import { getRenderer, makeScene, renderThumbnail } from '../three/renderer'
 import { getLightingMode } from './lighting'
+import { rimsEnabled } from './rims'
 
 const ROT_SPEED = 0.01
 const EL_LIMIT = Math.PI / 2 - 0.01
@@ -105,6 +106,10 @@ export class ViewerSession {
     // tween is running (D4).
     if (getLightingMode() === 'camera') this.rig.quaternion.copy(this.camera.quaternion)
     else if (this.tween === null) this.rig.quaternion.copy(rigQuaternion(this._axis))
+    // SCAFFOLDING: the rim-comparison toggle, live view only — snapshot()
+    // goes through renderThumbnail, which builds a fresh full-recipe scene.
+    const rims = rimsEnabled()
+    for (const light of this.rig.children) if (light.name === 'rim') light.visible = rims
     r.render(this.scene, this.camera)
   }
 
