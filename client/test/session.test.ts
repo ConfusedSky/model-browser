@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { OrbitAxis } from '../../shared/types'
 import { DEFAULT_CAMERA, rigQuaternion } from '../src/three/camera'
 import { AXIS_TWEEN_MS, ViewerSession } from '../src/viewer/session'
@@ -205,5 +205,18 @@ describe('ViewerSession light rig', () => {
     s.zoom(1.1)
     expect(s.animating).toBe(false)
     expect(s.rig.quaternion.angleTo(rigQuaternion('z'))).toBeLessThan(1e-12)
+  })
+})
+
+describe('ViewerSession teardown', () => {
+  it('disposes every directional light of its scene, not just the caster (D5)', () => {
+    const s = makeSession()
+    const lights = s.rig.children.filter(
+      (l): l is THREE.DirectionalLight => l instanceof THREE.DirectionalLight,
+    )
+    const disposals = lights.map((l) => vi.spyOn(l, 'dispose'))
+    expect(disposals.length).toBeGreaterThan(1)
+    s.close()
+    for (const dispose of disposals) expect(dispose).toHaveBeenCalledOnce()
   })
 })

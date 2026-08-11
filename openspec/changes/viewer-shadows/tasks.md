@@ -27,7 +27,7 @@
 - [x] 4.1 Add an in-memory rim-shadows flag (lighting.ts pattern, not persisted, default OFF — the shipped recipe casts from the key alone); `ViewerSession` applies it per render as `castShadow` on the two rim lights, and `stageModel` fits the rim shadow cameras alongside the key's so enabled rim shadows are well-formed at any model size — `renderThumbnail` never consults the flag
 - [x] 4.2 Add the toggle control to the viewer UI (lighting-pill precedent, App.tsx) labeled as a shadow toggle ("rim shadows"), wired to the render-on-toggle effect so the change shows without a drag
 - [x] 4.3 With shadows tuned (2.2), compare key-only vs. key+rim shadow casting on a small and a large fixture in both lighting modes; record the verdict in design.md (Open Questions)
-- [ ] 4.4 After the verdict: remove the toggle (flag, UI control, session hook) before archive — rim removal or toggle promotion, if chosen, each become their own follow-up change
+- [x] 4.4 After the verdict: remove the toggle (flag, UI control, session hook) before archive — rim removal or toggle promotion, if chosen, each become their own follow-up change
 
 ## 5. Mocks & verification
 

@@ -4,7 +4,6 @@ import { frameFor } from '../src/three/camera'
 import {
   KEY_LIGHT,
   makeScene,
-  RIM_LIGHT,
   stageModel,
   unstage,
   type LitScene,
@@ -106,46 +105,6 @@ describe('key-light shadow fit', () => {
       const { key } = stageRadius(radius)
       expect(key.position.clone().normalize().distanceTo(tuned)).toBeLessThan(1e-9)
     }
-  })
-})
-
-/** The rig's two rim lights, found the way stageModel and the session find them. */
-function rimsOf(lit: LitScene): THREE.DirectionalLight[] {
-  return lit.rig.children.filter(
-    (l): l is THREE.DirectionalLight => l instanceof THREE.DirectionalLight && l.name === RIM_LIGHT,
-  )
-}
-
-describe('rim shadow fit', () => {
-  it("gives each rim the key's fit, so an enabled rim shadow is well-formed", () => {
-    const { lit, key } = stageRadius(1)
-    const rims = rimsOf(lit)
-    expect(rims).toHaveLength(2)
-    const cam = key.shadow.camera
-    for (const rim of rims) {
-      const rimCam = rim.shadow.camera
-      expect([rimCam.left, rimCam.right, rimCam.bottom, rimCam.top]).toEqual([
-        cam.left,
-        cam.right,
-        cam.bottom,
-        cam.top,
-      ])
-      expect(rimCam.near).toBeCloseTo(cam.near, 9)
-      expect(rimCam.far).toBeCloseTo(cam.far, 9)
-      expect(rim.shadow.normalBias).toBeCloseTo(key.shadow.normalBias, 9)
-      expect(rim.shadow.mapSize.toArray()).toEqual([2048, 2048])
-      expect(rim.position.length()).toBeCloseTo(key.position.length(), 9)
-    }
-  })
-
-  it('leaves the rims lit, aimed as tuned, and not casting — fitting is configuration only', () => {
-    const tuned = rimsOf(makeScene()).map((l) => l.position.clone().normalize())
-    const rims = rimsOf(stageRadius(1).lit)
-    rims.forEach((rim, i) => {
-      expect(rim.castShadow).toBe(false)
-      expect(rim.visible).toBe(true)
-      expect(rim.position.clone().normalize().distanceTo(tuned[i]!)).toBeLessThan(1e-9)
-    })
   })
 })
 

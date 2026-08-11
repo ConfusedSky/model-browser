@@ -17,7 +17,6 @@ import { RenderQueue } from './three/queue'
 import { RIG_VERSION } from './three/renderer'
 import ViewerLayer, { type ViewerState } from './viewer/ViewerLayer'
 import { getLightingMode, LIGHTING_MODES, setLightingMode } from './viewer/lighting'
-import { rimShadowsEnabled, setRimShadowsEnabled } from './viewer/rimShadows'
 import type { ViewerSession } from './viewer/session'
 
 export default function App() {
@@ -48,7 +47,6 @@ export default function App() {
   const [pending, setPending] = useState(false)
   const [viewer, setViewer] = useState<ViewerState | null>(null)
   const [lighting, setLightingState] = useState<LightingMode>(getLightingMode)
-  const [rimShadows, setRimShadowsState] = useState(rimShadowsEnabled)
   const trackerRef = useRef(new GestureTracker())
 
   const showSkeleton = useDelayedFlag(pending, SKELETON_DELAY_MS)
@@ -300,22 +298,6 @@ export default function App() {
             {m}
           </button>
         ))}
-        {/* SCAFFOLDING: rim shadow casting on/off, live view only — removed after the comparison */}
-        <span className="h-4 w-px bg-zinc-700" />
-        <button
-          type="button"
-          aria-pressed={rimShadows}
-          title="Let the red/blue rim lights cast shadows too, in the live view"
-          onClick={() => {
-            setRimShadowsEnabled(!rimShadows)
-            setRimShadowsState(!rimShadows)
-          }}
-          className={`rounded-full px-2.5 py-1 ${
-            rimShadows ? 'bg-sky-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
-          }`}
-        >
-          rim shadows
-        </button>
       </div>
       {viewer !== null && (
         <ViewerLayer
@@ -323,7 +305,6 @@ export default function App() {
           camera={thumbs.get(viewer.entry.path)?.camera}
           axis={thumbs.get(viewer.entry.path)?.axis}
           lighting={lighting}
-          rimShadows={rimShadows}
           api={api}
           lru={lru}
           tracker={trackerRef.current}

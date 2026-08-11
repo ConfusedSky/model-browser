@@ -40,11 +40,10 @@ export interface LitScene {
   rig: THREE.Group
 }
 
-// Rig light names — the contract makeScene writes and stageModel/ViewerSession
-// read (shadow fit, casting policy). Constants, not literals: a typo in a
-// literal silently drops a light out of the fit or the toggle.
+// Rig light name — the contract makeScene writes and stageModel reads (shadow
+// fit, casting policy). A constant, not a literal: a typo in a literal
+// silently drops the key out of the fit.
 export const KEY_LIGHT = 'key'
-export const RIM_LIGHT = 'rim'
 
 export function makeScene(): LitScene {
   const scene = new THREE.Scene()
@@ -64,11 +63,9 @@ export function makeScene(): LitScene {
   // carries more intensity: the hemisphere ground already tints the scene
   // cool, so equal intensities read red-dominant.
   const rimRed = new THREE.DirectionalLight(0xff4444, 1.4)
-  rimRed.name = RIM_LIGHT
   rimRed.position.set(-1.5, 0.3, -0.6)
   rig.add(rimRed)
   const rimBlue = new THREE.DirectionalLight(0x3355ff, 2.5)
-  rimBlue.name = RIM_LIGHT
   rimBlue.position.set(1.5, 0.3, -0.6)
   rig.add(rimBlue)
   scene.add(rig)
@@ -91,11 +88,9 @@ const SHADOW_NORMAL_BIAS_R = 0.02
 const SHADOW_MAP_SIZE = 2048
 
 /**
- * Aim one rig light's shadow camera at an origin-centered model of this
- * radius. `setLength` keeps the light's direction — and therefore the shading
- * — exactly as `makeScene` tuned it; only the shadow camera's placement moves.
- * Configuration only, never `castShadow`: three allocates a shadow map for a
- * light while it actually casts, so fitting an idle rim costs nothing.
+ * Aim a rig light's shadow camera at an origin-centered model of this radius.
+ * `setLength` keeps the light's direction — and therefore the shading —
+ * exactly as `makeScene` tuned it; only the shadow camera's placement moves.
  */
 function fitShadow(light: THREE.DirectionalLight, radius: number): void {
   const distance = CASTER_DISTANCE_R * radius
@@ -171,16 +166,12 @@ export function stageModel(lit: LitScene, object: THREE.Object3D, axis: OrbitAxi
   pivot.add(object)
   const raw = boundsOf(object)
   pivot.position.copy(raw.center).negate()
-  // Fit every light that can cast (D2/D5): the key, which casts in the shipped
-  // recipe, and the rims, which only cast while the live-view comparison
-  // toggle adds them — fitted here so an enabled rim shadow is well-formed at
-  // any model size. Rim casting is off at stage time; only ViewerSession
-  // turns it on.
-  for (const light of lit.rig.children) {
-    if (!(light instanceof THREE.DirectionalLight)) continue
-    if (light.name !== KEY_LIGHT && light.name !== RIM_LIGHT) continue
-    fitShadow(light, raw.radius)
-    light.castShadow = light.name === KEY_LIGHT
+  // The key is the rig's only caster (D2/D5): fit its shadow camera to this
+  // model's radius, found by name so the fit never depends on child order.
+  const key = lit.rig.getObjectByName(KEY_LIGHT)
+  if (key instanceof THREE.DirectionalLight) {
+    fitShadow(key, raw.radius)
+    key.castShadow = true
   }
   const bounds: Bounds = {
     center: new THREE.Vector3(),

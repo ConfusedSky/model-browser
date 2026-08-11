@@ -10,16 +10,8 @@ import {
   type Bounds,
   type SpindleFrame,
 } from '../three/camera'
-import {
-  getRenderer,
-  makeScene,
-  placeFloor,
-  renderThumbnail,
-  RIM_LIGHT,
-  stageModel,
-} from '../three/renderer'
+import { getRenderer, makeScene, placeFloor, renderThumbnail, stageModel } from '../three/renderer'
 import { getLightingMode } from './lighting'
-import { rimShadowsEnabled } from './rimShadows'
 
 const ROT_SPEED = 0.01
 const EL_LIMIT = Math.PI / 2 - 0.01
@@ -118,14 +110,6 @@ export class ViewerSession {
     // tween is running (D4).
     if (getLightingMode() === 'camera') this.rig.quaternion.copy(this.camera.quaternion)
     else if (this.tween === null) this.rig.quaternion.copy(rigQuaternion(this._axis))
-    // SCAFFOLDING: the rim-shadow comparison toggle, live view only — the rims
-    // stay lit either way, only their casting changes. snapshot() goes through
-    // renderThumbnail, which builds a fresh key-only-casting scene. Their
-    // shadow cameras were fitted at stage time, so this is the whole switch.
-    const rimShadows = rimShadowsEnabled()
-    for (const light of this.rig.children) {
-      if (light.name === RIM_LIGHT) light.castShadow = rimShadows
-    }
     r.render(this.scene, this.camera)
   }
 
@@ -258,11 +242,11 @@ export class ViewerSession {
 
   close(): void {
     this.pivot.remove(this.object)
-    // The scene dies with the session; its key light owns a shadow-map
-    // texture, and so do the rims if the comparison toggle had them casting
-    // (D5). Every directional light is disposed — same rule as renderThumbnail's
-    // teardown — so no future caster can be missed here. The floor owns
-    // geometry/material. The model belongs to the LRU — only detached, above.
+    // The scene dies with the session; its key light owns a shadow-map texture
+    // (D5). Every directional light is disposed — same rule as
+    // renderThumbnail's teardown — so no future caster can be missed here. The
+    // floor owns geometry/material. The model belongs to the LRU — only
+    // detached, above.
     for (const light of this.rig.children) {
       if (light instanceof THREE.DirectionalLight) light.dispose()
     }
