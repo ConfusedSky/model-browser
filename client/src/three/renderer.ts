@@ -46,11 +46,13 @@ export function makeScene(): LitScene {
   fill.position.set(-1.5, -0.5, -1)
   rig.add(fill)
   // Rim accents: rig-space −X/+X, slightly behind the subject — exact
-  // screen-left/right in camera mode, model-fixed in axis mode (D1).
-  const rimRed = new THREE.DirectionalLight(0xff4444, 0.5)
+  // screen-left/right in camera mode, model-fixed in axis mode (D1). Blue
+  // carries more intensity: the hemisphere ground already tints the scene
+  // cool, so equal intensities read red-dominant.
+  const rimRed = new THREE.DirectionalLight(0xff4444, 1.4)
   rimRed.position.set(-1.5, 0.3, -0.6)
   rig.add(rimRed)
-  const rimBlue = new THREE.DirectionalLight(0x4466ff, 0.5)
+  const rimBlue = new THREE.DirectionalLight(0x3355ff, 2.5)
   rimBlue.position.set(1.5, 0.3, -0.6)
   rig.add(rimBlue)
   scene.add(rig)

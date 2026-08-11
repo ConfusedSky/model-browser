@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
-import { makeScene } from '../src/three/renderer'
+import { makeScene, RIG_VERSION } from '../src/three/renderer'
 
 describe('light rig contents', () => {
   const { rig } = makeScene()
@@ -9,6 +9,10 @@ describe('light rig contents', () => {
   )
   const white = directionals.filter((l) => l.color.getHex() === 0xffffff)
   const rims = directionals.filter((l) => l.color.getHex() !== 0xffffff)
+
+  it('is at pixel-recipe version 2 (bump deliberately, with the test mocks, when pixels change)', () => {
+    expect(RIG_VERSION).toBe(2)
+  })
 
   it('keeps the base three lights with their historical parameters', () => {
     const hemi = rig.children.find((l) => l instanceof THREE.HemisphereLight) as THREE.HemisphereLight
@@ -21,24 +25,15 @@ describe('light rig contents', () => {
     expect(white).toHaveLength(2)
   })
 
-  it('carries a red rim at rig-space -X and a blue rim mirrored at +X', () => {
+  it('carries the tuned rim accents: red at rig-space -X, blue mirrored at +X', () => {
     expect(rims).toHaveLength(2)
-    const red = rims.find((l) => {
-      const { r, g, b } = l.color
-      return r > g && r > b
-    })!
-    const blue = rims.find((l) => {
-      const { r, g, b } = l.color
-      return b > r && b > g
-    })!
-    expect(red.position.x).toBeLessThan(0)
-    expect(blue.position.x).toBeGreaterThan(0)
-    // Mirrored placement, behind the subject, equal accent intensities.
-    expect(red.position.x).toBe(-blue.position.x)
-    expect(red.position.y).toBe(blue.position.y)
-    expect(red.position.z).toBe(blue.position.z)
-    expect(red.position.z).toBeLessThan(0)
-    expect(red.intensity).toBe(blue.intensity)
-    expect(red.intensity).toBeLessThan(1) // an accent, not a floodlight
+    const red = rims.find((l) => l.color.getHex() === 0xff4444)!
+    const blue = rims.find((l) => l.color.getHex() === 0x3355ff)!
+    // Frozen at the visually tuned values (D1) — a change here changes every
+    // model's pixels and must come with a RIG_VERSION bump.
+    expect(red.position.toArray()).toEqual([-1.5, 0.3, -0.6])
+    expect(blue.position.toArray()).toEqual([1.5, 0.3, -0.6])
+    expect(red.intensity).toBe(1.4)
+    expect(blue.intensity).toBe(2.5)
   })
 })

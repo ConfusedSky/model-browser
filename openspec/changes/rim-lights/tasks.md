@@ -9,7 +9,7 @@
 ## 2. Client rig
 
 - [x] 2.1 Add the red (rig-left, slightly behind) and blue (rig-right, mirrored) rim `DirectionalLight`s to the rig in `makeScene`, tuned visually as accents; export `RIG_VERSION = 2` from `client/src/three/renderer.ts` (D1, D2)
-- [x] 2.2 Unit test: the rig contains the two accents with the expected colors, mirrored positions, equal intensities — and the base three lights' parameters are untouched
+- [x] 2.2 Unit test: the rig contains the two accents with the exact tuned colors, mirrored positions, and intensities — and the base three lights' parameters are untouched
 - [x] 2.3 Update every test factory that mocks `three/renderer` to export `RIG_VERSION` (`thumbnailQueue`, `flatToggle`, `listingSkeleton`, `orbitHandoff`, `sessionLighting` test files) — full-factory mocks throw on the missing export
 
 ## 3. Staleness & persistence

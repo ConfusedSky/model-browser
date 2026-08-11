@@ -106,6 +106,18 @@ describe('ThumbCache maintenance', () => {
     expect((await cache.get(path, 2)).rig).toBeUndefined()
   })
 
+  it('echoes the rig version on the missing-png stale branch too', async () => {
+    const cache = tempCache()
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const path = join(fx.dir, 'loose.stl')
+    await cache.put(path, { mtime: 1, png: Buffer.from('png'), camera: CAM, rig: 2 })
+    for (const f of readdirSync(cache.dir)) if (f.endsWith('.png')) unlinkSync(join(cache.dir, f))
+    const res = await cache.get(path, 1)
+    expect(res.status).toBe('stale')
+    expect(res.rig).toBe(2)
+  })
+
   it('tests virtual-path existence against the containing zip, not the entry', async () => {
     const cache = tempCache()
     const fx = makeFixtures()

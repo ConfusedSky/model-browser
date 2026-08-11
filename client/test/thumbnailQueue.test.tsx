@@ -139,6 +139,7 @@ describe('thumbnail cache lookups vs the render queue', () => {
         camera,
         axis: '-z',
         lighting: 'camera', // active mode is the default 'axis'
+        rig: 2, // current rig — the lighting clause alone must trigger this
       }),
       putThumb: vi.fn().mockResolvedValue(undefined),
     } as unknown as ApiClient
@@ -208,6 +209,7 @@ describe('thumbnail cache lookups vs the render queue', () => {
         camera,
         axis: '-z',
         lighting: 'axis', // mode matches — only the rig version is stale
+        rig: 1,
       }),
       putThumb: vi.fn().mockResolvedValue(undefined),
     } as unknown as ApiClient

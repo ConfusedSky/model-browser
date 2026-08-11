@@ -24,7 +24,7 @@ Two `DirectionalLight`s added in `makeScene` beside the current three: red at ri
 
 "Left/right" is exact only in `camera` mode, where rig space is camera space by construction: −x̂ is screen-left and −ẑ is behind the subject, at every orbit angle. In `axis` mode the accents are model-fixed — rig-space −X maps to the frame's −a, an arbitrary-but-deterministic direction the model turns through — so their screen position depends on the view: at the default azimuth (π/4) the red accent reads as a back rim and the blue as a right rim, and orbiting swings them around the model. That is the intended semantic (the accents "stay in place" on the model), not a defect; no single rig-space placement can read as left/right in both a 45°-yawed axis view and the camera frame.
 
-Intensities are chosen as accents (order 0.3–0.6) so they tint edges without shifting overall exposure; exact values and heights are tuned visually at apply time and then frozen in the unit test.
+Intensities are chosen as accents so they tint edges without shifting overall exposure; exact values were tuned visually at apply time and frozen in the unit test: red `0xff4444` at 1.4, blue `0x3355ff` at 2.5 — blue carries more raw intensity because the hemisphere's cool ground color already tints the scene blue, so equal intensities read as red-dominant.
 
 *Alternative — separate rim group oriented independently:* nothing needs independent orientation; a second group would duplicate the mode/tween/snap logic the rig already centralizes.
 
