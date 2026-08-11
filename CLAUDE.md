@@ -22,6 +22,8 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   against the source when reviewing; plausible-sounding ones have been wrong
 - A dev instance is usually already running (ports 3177/5173, EADDRINUSE on a second
   `bun run dev`) — server (`bun --hot`) and client (Vite HMR) pick up edits live
+- Archive changes with plain `openspec archive` (it applies delta specs); if the deltas
+  were already synced via /opsx:sync, archive with `--skip-specs` or it errors on collisions
 
 ## Architecture constraints (violating these breaks recorded design decisions)
 
@@ -38,6 +40,8 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   host's aspect — a non-square viewer host persists a thumbnail framed unlike what was seen
 - Zip entries use virtual paths `foo.zip!/entry`, one level only — nested zips are
   rejected by design (D6)
+- Any change that alters thumbnail pixel output (rig lights, materials, tone mapping) must
+  bump RIG_VERSION in client/src/three/renderer.ts AND the renderer mock factories in tests
 
 ## Testing
 
@@ -60,3 +64,12 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
     prompt in the headed MCP browser
   - Set React-controlled inputs via the native value setter + `input` event; for
     path-bar navigation, focus the input first and press Enter on the input itself
+  - The MCP script sandbox has no setTimeout/setImmediate: page.route handlers, delays, and
+    locator-click retry loops die with "setTimeout is not defined". Do waits/interception
+    inside page.evaluate (in-page timers); a crashed route handler persists across reloads
+    and silently hangs every matched request — recover with page.unrouteAll()
+  - browser_evaluate runs in an isolated world (own window.* and fetch); run_code_unsafe's
+    page.evaluate is the main world — install fetch wrappers/globals there
+  - Dev servers bind IPv6-only: curl 127.0.0.1:5173 refuses while localhost/[::1] works
+  - Generated STL fixtures need real outward normals: zero normals render black, inverted
+    normals mirror lighting left/right (false bugs in lighting assertions)
