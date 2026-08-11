@@ -17,6 +17,9 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
 
 - Parallel Claude sessions implement/archive changes concurrently — re-read files and
   `git status` before planning or editing against earlier reads
+- Before writing delta specs, read other active changes' specs/ deltas: two changes
+  MODIFYing the same requirement collide at archive — ADD a separate requirement for a
+  new concern, and declare hard ordering in tasks.md when changes share files/constants
 - Work is committed directly to `main` — no feature branches
 - design.md cites specific code (classes, call sites, geometry) — re-check those citations
   against the source when reviewing; plausible-sounding ones have been wrong
