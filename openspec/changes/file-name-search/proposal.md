@@ -9,7 +9,7 @@ Finding a part today means walking folders or flat-listing a whole tree and scan
 - **Filter mode (frontend)**: a search input in the header narrows the tiles already on screen as you type — case-insensitive substring on the tile's name, applied to every kind (folders, zips, models), in nested and flat views alike. Pure view state: no requests, clearing restores the full listing, navigation resets it.
 - **Deep search mode (backend)**: an explicit action (Enter / a Deep button on the search box) sends the query to the server, which reuses the flat walk — same recursive descent, zip handling, symlink/visited rules, step budget, and model cap — returning the models under the current directory whose *file name* matches, labeled by relative path exactly like a flat listing, plus the top-level folder/zip tiles whose names match. Results render in the normal grid (thumbnails, orbit, lightbox, camera persistence all shared), the cap applies to matches (not raw walk output), truncation is reported, and the in-flight skeleton and latest-wins guard apply as for any listing.
 
-Assumptions: matching is case-insensitive substring on the entry's base name (no glob/fuzzy); deep search matches model files recursively but directories only at the top level (the walk's recursive payload is models); leaving deep search (clearing the query or navigating) returns to the ordinary listing for the current path.
+Assumptions: matching is case-insensitive substring on the entry's base name for deep search but on the *displayed* name for the filter (a deliberate asymmetry — flat-view labels are relative paths, so folder fragments match while filtering but not while deep-searching); a blank or whitespace-only query is treated as no query; deep search matches model files recursively but directories only at the top level (the walk's recursive payload is models); the input drives two distinct states — a live `filter` and a separately *committed* `query` — so typing over deep results filters them without re-searching; leaving deep search (clearing a committed query or navigating) returns to the ordinary listing.
 
 ## Capabilities
 
@@ -19,7 +19,7 @@ Assumptions: matching is case-insensitive substring on the entry's base name (no
 
 ### Modified Capabilities
 
-None — the deep search extends the existing flat-walk machinery behind the same listing endpoint, without changing any recorded directory-browsing behavior.
+- `directory-browsing`: MODIFIED requirement — the recursive flat listing's "every model" and explicit-flag clauses are scoped to queryless requests, since a file-search query narrows the walk and a query without the flat flag is rejected.
 
 ## Impact
 

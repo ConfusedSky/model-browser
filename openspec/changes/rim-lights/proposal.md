@@ -6,11 +6,11 @@ The rig lights shape (hemisphere + key + fill) read well but leave silhouettes f
 
 ## What Changes
 
-- **Rim lights in the rig**: two modest-intensity colored directional lights — red at rig-space left, blue at rig-space right, both slightly behind the subject — added to the existing orientable rig `Group`. Because the rig already carries the axis/camera orientation, the tween slerp, and the cancel snap, the rim lights inherit all of it with no new orientation code. Always on in both modes; intensities are accents, not floodlights (exact values tuned at apply).
+- **Rim lights in the rig**: two modest-intensity colored directional lights — red at rig-space −X, blue at +X, both slightly behind the subject — added to the existing orientable rig `Group`. Because the rig already carries the axis/camera orientation, the tween slerp, and the cancel snap, the rim lights inherit all of it with no new orientation code. In `camera` mode this reads as exactly "red screen-left, blue screen-right" at every orbit angle; in `axis` mode the accents are model-fixed (deterministic rig-space directions the model turns through), so which side looks tinted depends on the view. Always on in both modes; intensities are accents, not floodlights (exact values tuned at apply).
 - **Rig version in the thumbnail cache**: adding lights changes every model's pixels, and the recorded handoff guarantee (thumbnail matches live lighting, no shift) requires stale thumbnails to refresh. A rig version rides the cache meta exactly like the lighting mode does: the server stores and echoes it without interpreting; the client treats a hit with a different or absent version as needing re-render (camera state and axis preserved) — the same lazy one-time sweep that upgraded pre-lighting entries.
 - **Spec amendment**: the "default `y` axis is identical to the historical rig" claim is re-scoped to the base rig's *orientation*; the rim accents are an intentional visual change for every model.
 
-Assumptions: the accents are not user-toggleable and apply in both modes; "left/right" means screen left/right in `camera` mode and the spindle frame's yaw-plane left/right in `axis` mode; exact positions/intensities are cosmetic and decided at apply time.
+Assumptions: the accents are not user-toggleable and apply in both modes; "left/right" is literal only in `camera` mode (screen left/right) — in `axis` mode the accents are model-fixed and which screen side looks tinted depends on the view; exact positions/intensities are cosmetic and decided at apply time.
 
 ## Capabilities
 
