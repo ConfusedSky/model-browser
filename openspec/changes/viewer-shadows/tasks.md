@@ -31,6 +31,6 @@
 
 ## 5. Mocks & verification
 
-- [ ] 5.1 Add `stageModel` (and any other new exports) to every full-factory renderer mock (`thumbnailQueue`, `flatToggle`, `listingSkeleton`, `orbitHandoff`, `sessionLighting` test files — re-check the list post-rim-lights)
-- [ ] 5.2 `bun run typecheck` and `bun run test` pass across workspaces
-- [ ] 5.3 Manual E2E via Playwright MCP (rims at default/on except where noted): contact shadow visible under a model in tile thumbnails and the lightbox; orbiting in `camera` mode sweeps the shadow, in `axis` mode it stays put; axis change relocates the floor; cached thumbnails re-render once (rig 3) and hit thereafter; overlay handoff shows no shadow pop; rim-shadow toggle flips rim shadow casting in the live view only (cached thumbnail unchanged)
+- [x] 5.1 Add `stageModel` (and any other new exports) to every full-factory renderer mock (`thumbnailQueue`, `flatToggle`, `listingSkeleton`, `orbitHandoff`, `sessionLighting` test files — re-check the list post-rim-lights)
+- [x] 5.2 `bun run typecheck` and `bun run test` pass across workspaces
+- [x] 5.3 Manual E2E via Playwright MCP (rims at default/on except where noted): contact shadow visible under a model in tile thumbnails and the lightbox; orbiting in `camera` mode sweeps the shadow, in `axis` mode it stays put; axis change relocates the floor; cached thumbnails re-render once (rig 3) and hit thereafter; overlay handoff shows no shadow pop; rim-shadow toggle flips rim shadow casting in the live view only (cached thumbnail unchanged)
