@@ -18,21 +18,16 @@ vi.mock('../src/api/client', () => ({
     putThumb = vi.fn().mockResolvedValue(undefined)
   },
 }))
+// Spread the real module and override only what needs WebGL: everything else
+// (staging, RIG_VERSION) stays real, so a future test here can open a viewer.
 vi.mock('../src/three/renderer', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/three/renderer')>()),
   renderThumbnail: vi.fn(() => Promise.resolve(new Blob())),
   getRenderer: () => ({
     setSize: () => {},
     render: () => {},
     domElement: document.createElement('canvas'),
   }),
-  makeScene: () => ({ scene: { add: () => {}, remove: () => {} }, rig: { quaternion: { copy: () => {} } } }),
-  // Staging exports session.ts imports: a full factory must carry every import
-  // of the real module, or opening a viewer here would hit vitest's throwing
-  // proxy instead of a stub.
-  stageModel: vi.fn(),
-  unstage: vi.fn(),
-  placeFloor: vi.fn(),
-  RIG_VERSION: (await importOriginal<typeof import('../src/three/renderer')>()).RIG_VERSION,
 }))
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 

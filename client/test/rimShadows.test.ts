@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { KEY_LIGHT, RIM_LIGHT } from '../src/three/renderer'
 import { rimShadowsEnabled, setRimShadowsEnabled } from '../src/viewer/rimShadows'
 import { ViewerSession } from '../src/viewer/session'
 
@@ -16,7 +17,7 @@ function makeMesh(): THREE.Mesh {
 
 function rimsOf(session: ViewerSession): THREE.DirectionalLight[] {
   return session.rig.children.filter(
-    (l): l is THREE.DirectionalLight => l instanceof THREE.DirectionalLight && l.name === 'rim',
+    (l): l is THREE.DirectionalLight => l instanceof THREE.DirectionalLight && l.name === RIM_LIGHT,
   )
 }
 
@@ -27,7 +28,7 @@ describe('SCAFFOLDING rim-shadow toggle', () => {
     expect(rimShadowsEnabled()).toBe(false)
     const session = new ViewerSession(makeMesh())
     session.render(100, 100)
-    expect(session.rig.children.filter((l) => l.castShadow).map((l) => l.name)).toEqual(['key'])
+    expect(session.rig.children.filter((l) => l.castShadow).map((l) => l.name)).toEqual([KEY_LIGHT])
     // The rims are unaffected as lights — only their casting is in question.
     expect(rimsOf(session).every((l) => l.visible)).toBe(true)
   })

@@ -10,7 +10,14 @@ import {
   type Bounds,
   type SpindleFrame,
 } from '../three/camera'
-import { getRenderer, makeScene, placeFloor, renderThumbnail, stageModel } from '../three/renderer'
+import {
+  getRenderer,
+  makeScene,
+  placeFloor,
+  renderThumbnail,
+  RIM_LIGHT,
+  stageModel,
+} from '../three/renderer'
 import { getLightingMode } from './lighting'
 import { rimShadowsEnabled } from './rimShadows'
 
@@ -116,7 +123,9 @@ export class ViewerSession {
     // renderThumbnail, which builds a fresh key-only-casting scene. Their
     // shadow cameras were fitted at stage time, so this is the whole switch.
     const rimShadows = rimShadowsEnabled()
-    for (const light of this.rig.children) if (light.name === 'rim') light.castShadow = rimShadows
+    for (const light of this.rig.children) {
+      if (light.name === RIM_LIGHT) light.castShadow = rimShadows
+    }
     r.render(this.scene, this.camera)
   }
 
@@ -251,11 +260,11 @@ export class ViewerSession {
     this.pivot.remove(this.object)
     // The scene dies with the session; its key light owns a shadow-map
     // texture, and so do the rims if the comparison toggle had them casting
-    // (D5). Its floor owns geometry/material. The model belongs to the LRU —
-    // only detached, above.
+    // (D5). Every directional light is disposed — same rule as renderThumbnail's
+    // teardown — so no future caster can be missed here. The floor owns
+    // geometry/material. The model belongs to the LRU — only detached, above.
     for (const light of this.rig.children) {
-      if (!(light instanceof THREE.DirectionalLight)) continue
-      if (light.name === 'key' || light.name === 'rim') light.dispose()
+      if (light instanceof THREE.DirectionalLight) light.dispose()
     }
     this.floor.geometry.dispose()
     this.floor.material.dispose()

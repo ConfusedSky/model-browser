@@ -2,7 +2,9 @@ import * as THREE from 'three'
 import { describe, expect, it, vi } from 'vitest'
 import { frameFor } from '../src/three/camera'
 import {
+  KEY_LIGHT,
   makeScene,
+  RIM_LIGHT,
   stageModel,
   unstage,
   type LitScene,
@@ -57,7 +59,7 @@ function stageRadius(radius: number): { lit: LitScene; key: THREE.DirectionalLig
   const lit = makeScene()
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(side, side, side), new THREE.MeshBasicMaterial())
   const staged = stageModel(lit, mesh, 'y')
-  const key = lit.rig.getObjectByName('key') as THREE.DirectionalLight
+  const key = lit.rig.getObjectByName(KEY_LIGHT) as THREE.DirectionalLight
   return { lit, key, radius: staged.bounds.radius }
 }
 
@@ -97,7 +99,7 @@ describe('key-light shadow fit', () => {
   })
 
   it('moves the key along its own direction, so the shading is untouched', () => {
-    const tuned = (makeScene().rig.getObjectByName('key') as THREE.DirectionalLight).position
+    const tuned = (makeScene().rig.getObjectByName(KEY_LIGHT) as THREE.DirectionalLight).position
       .clone()
       .normalize()
     for (const radius of [1, 100]) {
@@ -110,7 +112,7 @@ describe('key-light shadow fit', () => {
 /** The rig's two rim lights, found the way stageModel and the session find them. */
 function rimsOf(lit: LitScene): THREE.DirectionalLight[] {
   return lit.rig.children.filter(
-    (l): l is THREE.DirectionalLight => l instanceof THREE.DirectionalLight && l.name === 'rim',
+    (l): l is THREE.DirectionalLight => l instanceof THREE.DirectionalLight && l.name === RIM_LIGHT,
   )
 }
 

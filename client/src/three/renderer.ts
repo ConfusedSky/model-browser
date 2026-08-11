@@ -40,6 +40,12 @@ export interface LitScene {
   rig: THREE.Group
 }
 
+// Rig light names — the contract makeScene writes and stageModel/ViewerSession
+// read (shadow fit, casting policy). Constants, not literals: a typo in a
+// literal silently drops a light out of the fit or the toggle.
+export const KEY_LIGHT = 'key'
+export const RIM_LIGHT = 'rim'
+
 export function makeScene(): LitScene {
   const scene = new THREE.Scene()
   const rig = new THREE.Group()
@@ -47,7 +53,7 @@ export function makeScene(): LitScene {
   // The only caster in the shipped recipe (D2): named so stageModel can fit
   // its shadow camera without depending on child order.
   const key = new THREE.DirectionalLight(0xffffff, 1.6)
-  key.name = 'key'
+  key.name = KEY_LIGHT
   key.position.set(1, 2, 1.5)
   rig.add(key)
   const fill = new THREE.DirectionalLight(0xffffff, 0.5)
@@ -58,11 +64,11 @@ export function makeScene(): LitScene {
   // carries more intensity: the hemisphere ground already tints the scene
   // cool, so equal intensities read red-dominant.
   const rimRed = new THREE.DirectionalLight(0xff4444, 1.4)
-  rimRed.name = 'rim'
+  rimRed.name = RIM_LIGHT
   rimRed.position.set(-1.5, 0.3, -0.6)
   rig.add(rimRed)
   const rimBlue = new THREE.DirectionalLight(0x3355ff, 2.5)
-  rimBlue.name = 'rim'
+  rimBlue.name = RIM_LIGHT
   rimBlue.position.set(1.5, 0.3, -0.6)
   rig.add(rimBlue)
   scene.add(rig)
@@ -172,9 +178,9 @@ export function stageModel(lit: LitScene, object: THREE.Object3D, axis: OrbitAxi
   // turns it on.
   for (const light of lit.rig.children) {
     if (!(light instanceof THREE.DirectionalLight)) continue
-    if (light.name !== 'key' && light.name !== 'rim') continue
+    if (light.name !== KEY_LIGHT && light.name !== RIM_LIGHT) continue
     fitShadow(light, raw.radius)
-    light.castShadow = light.name === 'key'
+    light.castShadow = light.name === KEY_LIGHT
   }
   const bounds: Bounds = {
     center: new THREE.Vector3(),
@@ -240,11 +246,14 @@ export function renderThumbnail(
     r.setRenderTarget(prevTarget)
     target.dispose()
     unstage(object, pivot, originalParent)
-    // This scene is per-call: the key light owns a shadow-map texture and the
-    // floor its own geometry/material (D5). The model is LRU-shared — it is
-    // never disposed here.
-    const key = rig.getObjectByName('key')
-    if (key instanceof THREE.DirectionalLight) key.dispose()
+    // This scene is per-call: any light that cast owns a shadow-map texture and
+    // the floor owns its geometry/material (D5). Disposing every directional
+    // light — not just today's caster — keeps this teardown independent of
+    // which lights stageModel happened to switch on. The model is LRU-shared —
+    // it is never disposed here.
+    for (const light of rig.children) {
+      if (light instanceof THREE.DirectionalLight) light.dispose()
+    }
     floor.geometry.dispose()
     floor.material.dispose()
   }
