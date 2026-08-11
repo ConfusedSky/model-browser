@@ -1,6 +1,7 @@
 import type {
   CameraState,
   DirListing,
+  LightingMode,
   OrbitAxis,
   ThumbGetResponse,
   ThumbStatus,
@@ -11,6 +12,8 @@ export interface ThumbResult {
   camera?: CameraState
   /** Stored spindle axis; absent when the path is unknown (read as 'y'). */
   axis?: OrbitAxis
+  /** Lighting mode the PNG was rendered with; absent on pre-lighting entries. */
+  lighting?: LightingMode
   /** Object URL for the cached PNG, present on 'hit'. */
   pngUrl?: string
 }
@@ -21,6 +24,7 @@ export interface ThumbSave {
   png?: Blob
   camera?: CameraState
   axis?: OrbitAxis
+  lighting?: LightingMode
 }
 
 /**
@@ -100,6 +104,7 @@ export class HttpApiClient implements ApiClient {
       status: body.status,
       camera: body.camera,
       axis: body.axis,
+      lighting: body.lighting,
       pngUrl: body.png !== undefined ? base64ToBlobUrl(body.png) : undefined,
     }
   }
@@ -114,6 +119,7 @@ export class HttpApiClient implements ApiClient {
         png: save.png !== undefined ? await blobToBase64(save.png) : undefined,
         camera: save.camera,
         axis: save.axis,
+        lighting: save.lighting,
       }),
     })
     if (!res.ok) {

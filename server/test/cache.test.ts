@@ -65,6 +65,28 @@ describe('ThumbCache maintenance', () => {
     expect((await cache.get(path, 2)).axis).toBe('-x')
   })
 
+  it('round-trips the lighting mode and preserves it across partial puts', async () => {
+    const cache = tempCache()
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const path = join(fx.dir, 'loose.stl')
+    await cache.put(path, { mtime: 1, png: Buffer.from('png'), camera: CAM })
+    expect((await cache.get(path, 1)).lighting).toBeUndefined() // legacy entry: no stored mode
+    await cache.put(path, { mtime: 1, png: Buffer.from('png'), lighting: 'camera' })
+    expect((await cache.get(path, 1)).lighting).toBe('camera')
+    // A camera-only put must not drop the stored lighting mode.
+    await cache.put(path, { mtime: 1, camera: CAM })
+    const res = await cache.get(path, 1)
+    expect(res.lighting).toBe('camera')
+    expect(res.status).toBe('hit')
+    // The mode also rides along on stale reads (new mtime).
+    expect((await cache.get(path, 2)).lighting).toBe('camera')
+    // But a PNG-replacing put without a mode clears it — the old label must
+    // not describe new pixels.
+    await cache.put(path, { mtime: 3, png: Buffer.from('png3') })
+    expect((await cache.get(path, 3)).lighting).toBeUndefined()
+  })
+
   it('tests virtual-path existence against the containing zip, not the entry', async () => {
     const cache = tempCache()
     const fx = makeFixtures()

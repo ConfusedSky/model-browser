@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type * as THREE from 'three'
-import type { DirEntry } from '../../shared/types'
+import type { DirEntry, LightingMode } from '../../shared/types'
 import { HttpApiClient } from './api/client'
 import ChatPanel from './components/ChatPanel'
 import Grid from './components/Grid'
@@ -15,6 +15,7 @@ import { MeshLru } from './three/lru'
 import { disposeModel, embedded3mfThumbnail, formatOf, geometryBytes, parseModel } from './three/models'
 import { RenderQueue } from './three/queue'
 import ViewerLayer, { type ViewerState } from './viewer/ViewerLayer'
+import { getLightingMode, LIGHTING_MODES, setLightingMode } from './viewer/lighting'
 import type { ViewerSession } from './viewer/session'
 
 export default function App() {
@@ -44,6 +45,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
   const [viewer, setViewer] = useState<ViewerState | null>(null)
+  const [lighting, setLightingState] = useState<LightingMode>(getLightingMode)
   const trackerRef = useRef(new GestureTracker())
 
   const showSkeleton = useDelayedFlag(pending, SKELETON_DELAY_MS)
@@ -166,9 +168,10 @@ export default function App() {
       const entry = viewer?.entry
       if (entry === undefined) return
       try {
-        // Capture before the await: a rapid axis change mid-snapshot must not
-        // pair this PNG with the newer axis/state in one PUT.
+        // Capture before the await: a rapid axis change or lighting toggle
+        // mid-snapshot must not pair this PNG with newer values in one PUT.
         const { state, axis } = session
+        const lighting = getLightingMode()
         const png = await session.snapshot()
         const url = URL.createObjectURL(png)
         // Decode before applying, so when this promise resolves the tile's
@@ -184,7 +187,14 @@ export default function App() {
         )
         await Promise.all([
           decode,
-          api.putThumb({ path: entry.path, mtime: entry.mtime, png, camera: state, axis }),
+          api.putThumb({
+            path: entry.path,
+            mtime: entry.mtime,
+            png,
+            camera: state,
+            axis,
+            lighting,
+          }),
         ])
         setThumb(entry.path, { status: 'ready', url, camera: state, axis })
       } catch {
@@ -268,11 +278,31 @@ export default function App() {
         </main>
         <ChatPanel />
       </div>
+      {/* EXPERIMENTAL lighting-mode picker — remove once a winner is chosen */}
+      <div className="fixed bottom-3 left-3 z-50 flex items-center gap-1 rounded-full border border-zinc-700 bg-zinc-900/90 p-1 text-xs">
+        <span className="px-2 text-zinc-500">light</span>
+        {LIGHTING_MODES.map((m) => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => {
+              setLightingMode(m)
+              setLightingState(m)
+            }}
+            className={`rounded-full px-2.5 py-1 ${
+              m === lighting ? 'bg-sky-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            {m}
+          </button>
+        ))}
+      </div>
       {viewer !== null && (
         <ViewerLayer
           viewer={viewer}
           camera={thumbs.get(viewer.entry.path)?.camera}
           axis={thumbs.get(viewer.entry.path)?.axis}
+          lighting={lighting}
           api={api}
           lru={lru}
           tracker={trackerRef.current}

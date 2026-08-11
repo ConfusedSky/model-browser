@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { mkdir, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { CameraState, OrbitAxis, ThumbGetResponse } from '../../shared/types'
+import type { CameraState, LightingMode, OrbitAxis, ThumbGetResponse } from '../../shared/types'
 import { parseVPath } from './vpath'
 
 interface Meta {
@@ -12,6 +12,8 @@ interface Meta {
   camera?: CameraState
   /** Orbit spindle axis; undefined reads as 'y' (pre-axis entries). */
   axis?: OrbitAxis
+  /** Lighting mode the PNG was rendered with; stored and echoed, never interpreted. */
+  lighting?: LightingMode
 }
 
 const DEFAULT_CAP = 2 * 1024 ** 3
@@ -64,12 +66,13 @@ export class ThumbCache {
     const meta = await this.readMeta(key)
     if (meta === null) return { status: 'miss' }
     const axis = meta.axis ?? 'y'
-    if (meta.mtime !== mtime) return { status: meta.camera !== undefined || meta.mtime !== undefined ? 'stale' : 'miss', camera: meta.camera, axis }
+    const lighting = meta.lighting
+    if (meta.mtime !== mtime) return { status: meta.camera !== undefined || meta.mtime !== undefined ? 'stale' : 'miss', camera: meta.camera, axis, lighting }
     let png
     try {
       png = await readFile(this.pngFile(key))
     } catch {
-      return { status: 'stale', camera: meta.camera, axis }
+      return { status: 'stale', camera: meta.camera, axis, lighting }
     }
     // LRU clock for size-cap eviction is the png file's mtime. Bumping it via
     // utimes (instead of rewriting the meta json) keeps reads race-free
@@ -77,10 +80,10 @@ export class ThumbCache {
     // caught mid-write by the sweep's meta parse.
     const now = new Date()
     await utimes(this.pngFile(key), now, now).catch(() => {})
-    return { status: 'hit', camera: meta.camera, axis, png: png.toString('base64') }
+    return { status: 'hit', camera: meta.camera, axis, lighting, png: png.toString('base64') }
   }
 
-  async put(path: string, opts: { mtime: number; png?: Buffer; camera?: CameraState; axis?: OrbitAxis }): Promise<void> {
+  async put(path: string, opts: { mtime: number; png?: Buffer; camera?: CameraState; axis?: OrbitAxis; lighting?: LightingMode }): Promise<void> {
     const key = this.key(path)
     const prev = await this.readMeta(key)
     const meta: Meta = {
@@ -88,6 +91,9 @@ export class ThumbCache {
       mtime: opts.png !== undefined ? opts.mtime : prev?.mtime,
       camera: opts.camera ?? prev?.camera,
       axis: opts.axis ?? prev?.axis,
+      // Like mtime, lighting describes the pixels: a PUT replacing the PNG
+      // without declaring a mode must not keep the old label on new pixels.
+      lighting: opts.png !== undefined ? opts.lighting : (opts.lighting ?? prev?.lighting),
     }
     if (opts.png !== undefined) {
       await mkdir(this.dir, { recursive: true })

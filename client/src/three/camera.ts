@@ -46,6 +46,17 @@ export function frameFor(axis: OrbitAxis): SpindleFrame {
   return FRAMES[axis]
 }
 
+/**
+ * Light-rig orientation for a spindle: maps x̂→a, ŷ→s, ẑ→b. The frame
+ * invariant a×b = −s makes this a proper rotation for every spindle, and the
+ * 'y' frame gives the identity — default-axis models keep the historical
+ * world-fixed lighting.
+ */
+export function rigQuaternion(axis: OrbitAxis): THREE.Quaternion {
+  const { s, a, b } = frameFor(axis)
+  return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(a, s, b))
+}
+
 /** Unit view direction (target → camera) for spindle-relative az/el. */
 function stateDirection(state: CameraState, frame: SpindleFrame): THREE.Vector3 {
   return new THREE.Vector3()

@@ -6,6 +6,7 @@ import { DEFAULT_CAMERA } from '../three/camera'
 import type { MeshLru } from '../three/lru'
 import type { RenderQueue } from '../three/queue'
 import { renderThumbnail } from '../three/renderer'
+import { getLightingMode } from '../viewer/lighting'
 
 export interface ThumbState {
   status: 'loading' | 'ready' | 'error'
@@ -109,7 +110,11 @@ export function useThumbnails(
               if (cached.pngUrl !== undefined) URL.revokeObjectURL(cached.pngUrl)
               return
             }
-            if (cached.status === 'hit' && cached.pngUrl !== undefined) {
+            if (
+              cached.status === 'hit' &&
+              cached.pngUrl !== undefined &&
+              cached.lighting === getLightingMode()
+            ) {
               setThumb(entry.path, {
                 status: 'ready',
                 url: cached.pngUrl,
@@ -118,35 +123,64 @@ export function useThumbnails(
               })
               return
             }
+            // A hit lit under another mode (or none — pre-lighting entry) is
+            // stale pixels over good camera state: re-render, but keep the old
+            // PNG until the replacement exists — a failed tail falls back to
+            // it rather than degrading a previously fine tile to an error.
+            let staleUrl = cached.pngUrl
+            const dropStale = () => {
+              if (staleUrl !== undefined) {
+                URL.revokeObjectURL(staleUrl)
+                staleUrl = undefined
+              }
+            }
+            // A cancelled job never runs — cleanup must release the URL.
+            cancels.push(dropStale)
             // Only the miss/stale tail touches the shared renderer — it alone
             // goes through the queue. Registered synchronously after the
             // `alive` check above, so cleanup always sees this handle.
             cancels.push(
               queue.push(async () => {
-                if (!alive) return
+                if (!alive) return dropStale()
                 try {
                   // In-flight jobs must not parse or drive the shared renderer
                   // while an orbit/lightbox is active — wait out the
                   // suspension first.
                   await queue.whenResumed()
-                  if (!alive) return
+                  if (!alive) return dropStale()
                   const object = await lru.acquire(entry.path)
-                  if (!alive) return
+                  if (!alive) return dropStale()
                   await queue.whenResumed()
-                  if (!alive) return
+                  if (!alive) return dropStale()
                   const camera = cached.camera ?? DEFAULT_CAMERA
                   const axis = cached.axis ?? 'y'
+                  const lighting = getLightingMode() // the mode this render uses
                   const png = await renderThumbnail(object, camera, axis)
-                  await api.putThumb({ path: entry.path, mtime: entry.mtime, png })
-                  if (!alive) return
+                  await api.putThumb({ path: entry.path, mtime: entry.mtime, png, lighting })
+                  if (!alive) return dropStale()
                   setThumb(entry.path, {
                     status: 'ready',
                     url: URL.createObjectURL(png),
                     camera: cached.camera,
                     axis: cached.axis,
                   })
+                  dropStale()
                 } catch {
-                  if (alive) setThumb(entry.path, { status: 'error' })
+                  if (alive && staleUrl !== undefined) {
+                    // Displayed now — ownership moves to the thumbs map.
+                    const url = staleUrl
+                    staleUrl = undefined
+                    setThumb(entry.path, {
+                      status: 'ready',
+                      url,
+                      camera: cached.camera,
+                      axis: cached.axis,
+                    })
+                  } else if (alive) {
+                    setThumb(entry.path, { status: 'error' })
+                  } else {
+                    dropStale()
+                  }
                 }
               }),
             )

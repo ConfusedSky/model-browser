@@ -218,4 +218,24 @@ describe('thumbnail cache API', () => {
     })
     expect(put.status).toBe(400)
   })
+
+  it('put stores the lighting mode and get serves it back', async () => {
+    const put = await app.request('/api/thumb', {
+      method: 'PUT',
+      headers: { ...LOOPBACK, 'content-type': 'application/json' },
+      body: JSON.stringify({ path, mtime: 111, png, lighting: 'camera' }),
+    })
+    expect(put.status).toBe(200)
+    const res = await get(`/api/thumb?path=${encodeURIComponent(path)}&mtime=111`)
+    expect(((await res.json()) as ThumbGetResponse).lighting).toBe('camera')
+  })
+
+  it('rejects an invalid lighting mode', async () => {
+    const put = await app.request('/api/thumb', {
+      method: 'PUT',
+      headers: { ...LOOPBACK, 'content-type': 'application/json' },
+      body: JSON.stringify({ path, mtime: 111, lighting: 'disco' }),
+    })
+    expect(put.status).toBe(400)
+  })
 })

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type * as THREE from 'three'
-import type { CameraState, DirEntry, OrbitAxis } from '../../../shared/types'
+import type { CameraState, DirEntry, LightingMode, OrbitAxis } from '../../../shared/types'
 import type { ApiClient } from '../api/client'
 import { formatBytes, formatDate } from '../lib/format'
 import { GestureTracker } from '../lib/gesture'
@@ -20,6 +20,8 @@ interface Props {
   viewer: ViewerState
   camera: CameraState | undefined
   axis: OrbitAxis | undefined
+  /** Active lighting mode — a prop (not read from the store) so toggling repaints the live view. */
+  lighting: LightingMode
   api: ApiClient
   lru: MeshLru<THREE.Object3D>
   tracker: GestureTracker
@@ -42,6 +44,7 @@ export default function ViewerLayer({
   viewer,
   camera,
   axis,
+  lighting,
   api,
   lru,
   tracker,
@@ -140,7 +143,8 @@ export default function ViewerLayer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewer.entry.path, lru])
 
-  // Attach the shared canvas and render whenever session/mode/size changes.
+  // Attach the shared canvas and render whenever session/mode/size changes —
+  // and on a lighting toggle, so the experiment is visible without a drag.
   useEffect(() => {
     if (session === null) return
     const host = canvasHostRef.current
@@ -155,7 +159,7 @@ export default function ViewerLayer({
       if (canvas.parentElement === host) host.removeChild(canvas)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, viewer.mode])
+  }, [session, viewer.mode, lighting])
 
   function renderNow(): void {
     const s = sessionRef.current

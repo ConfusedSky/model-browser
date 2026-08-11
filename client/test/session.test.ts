@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
 import type { OrbitAxis } from '../../shared/types'
-import { DEFAULT_CAMERA } from '../src/three/camera'
+import { DEFAULT_CAMERA, rigQuaternion } from '../src/three/camera'
 import { AXIS_TWEEN_MS, ViewerSession } from '../src/viewer/session'
 
 const EL_LIMIT = Math.PI / 2 - 0.01
@@ -162,5 +162,48 @@ describe('ViewerSession axis change', () => {
     tick(AXIS_TWEEN_MS + 1)
     s.advance()
     expect(s.animating).toBe(false)
+  })
+})
+
+describe('ViewerSession light rig', () => {
+  it('starts at the spindle frame orientation for every axis', () => {
+    for (const axis of AXES) {
+      const s = makeSession(axis)
+      expect(s.rig.quaternion.angleTo(rigQuaternion(axis))).toBeLessThan(1e-12)
+    }
+  })
+
+  it('slerps between frame orientations on the tween clock and lands exactly', () => {
+    const { s, tick } = makeClockedSession('y')
+    const from = rigQuaternion('y')
+    const to = rigQuaternion('z')
+    s.setAxis('z')
+    tick(AXIS_TWEEN_MS / 2)
+    s.advance()
+    // Mid-tween the rig is strictly between the endpoints — no snap.
+    expect(s.rig.quaternion.angleTo(from)).toBeGreaterThan(0.05)
+    expect(s.rig.quaternion.angleTo(to)).toBeGreaterThan(0.05)
+    tick(AXIS_TWEEN_MS)
+    s.advance()
+    expect(s.animating).toBe(false)
+    expect(s.rig.quaternion.angleTo(to)).toBeLessThan(1e-9)
+  })
+
+  it('a drag cancelling the tween snaps the rig to the new frame', () => {
+    const { s, tick } = makeClockedSession('y')
+    s.setAxis('-x')
+    tick(AXIS_TWEEN_MS / 2)
+    s.orbit(1, 0)
+    expect(s.animating).toBe(false)
+    expect(s.rig.quaternion.angleTo(rigQuaternion('-x'))).toBeLessThan(1e-12)
+  })
+
+  it('zoom cancelling the tween snaps the rig with the camera up', () => {
+    const { s, tick } = makeClockedSession('y')
+    s.setAxis('z')
+    tick(AXIS_TWEEN_MS / 2)
+    s.zoom(1.1)
+    expect(s.animating).toBe(false)
+    expect(s.rig.quaternion.angleTo(rigQuaternion('z'))).toBeLessThan(1e-12)
   })
 })

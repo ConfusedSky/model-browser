@@ -3,7 +3,7 @@ import { stat } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
 import { Readable } from 'node:stream'
 import { Hono } from 'hono'
-import type { OrbitAxis, ThumbPutRequest } from '../../shared/types'
+import type { LightingMode, OrbitAxis, ThumbPutRequest } from '../../shared/types'
 import { ThumbCache } from './cache'
 import { guard } from './guard'
 import { ListingError, complete, listDir, listFlat } from './listing'
@@ -11,6 +11,7 @@ import { VPathError, parseVPath } from './vpath'
 import { ZipError, extractEntry } from './zip'
 
 const ORBIT_AXES: readonly OrbitAxis[] = ['x', '-x', 'y', '-y', 'z', '-z']
+const LIGHTING_MODES: readonly LightingMode[] = ['axis', 'camera']
 
 export function createApp(cache: ThumbCache = new ThumbCache()): Hono {
   const app = new Hono()
@@ -76,11 +77,15 @@ export function createApp(cache: ThumbCache = new ThumbCache()): Hono {
     if (body.axis !== undefined && !ORBIT_AXES.includes(body.axis)) {
       return c.json({ error: `invalid axis: ${String(body.axis)}` }, 400)
     }
+    if (body.lighting !== undefined && !LIGHTING_MODES.includes(body.lighting)) {
+      return c.json({ error: `invalid lighting: ${String(body.lighting)}` }, 400)
+    }
     await cache.put(body.path, {
       mtime: body.mtime,
       png: body.png !== undefined ? Buffer.from(body.png, 'base64') : undefined,
       camera: body.camera,
       axis: body.axis,
+      lighting: body.lighting,
     })
     return c.json({ ok: true })
   })

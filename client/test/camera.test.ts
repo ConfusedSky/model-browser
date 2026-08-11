@@ -6,6 +6,7 @@ import {
   boundsOf,
   captureState,
   frameFor,
+  rigQuaternion,
   statePosition,
   stateTarget,
   type Bounds,
@@ -116,5 +117,22 @@ describe('bounds-relative camera state', () => {
     const bounds = boundsOf(mesh)
     expect(bounds.center.x).toBeCloseTo(10, 5)
     expect(bounds.radius).toBeGreaterThan(0)
+  })
+})
+
+describe('rigQuaternion', () => {
+  it('maps the world basis onto every spindle frame as a proper rotation', () => {
+    for (const axis of AXES) {
+      const q = rigQuaternion(axis)
+      const { s, a, b } = frameFor(axis)
+      expect(new THREE.Vector3(0, 1, 0).applyQuaternion(q).distanceTo(s)).toBeLessThan(1e-12)
+      expect(new THREE.Vector3(1, 0, 0).applyQuaternion(q).distanceTo(a)).toBeLessThan(1e-12)
+      expect(new THREE.Vector3(0, 0, 1).applyQuaternion(q).distanceTo(b)).toBeLessThan(1e-12)
+    }
+  })
+
+  it('is the identity for the default y spindle (historical lighting preserved)', () => {
+    const q = rigQuaternion('y')
+    expect(q.angleTo(new THREE.Quaternion())).toBeLessThan(1e-12)
   })
 })

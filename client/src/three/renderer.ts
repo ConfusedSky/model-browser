@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import type { CameraState, OrbitAxis } from '../../../shared/types'
-import { applyState, boundsOf, DEFAULT_CAMERA } from './camera'
+import { getLightingMode } from '../viewer/lighting'
+import { applyState, boundsOf, DEFAULT_CAMERA, rigQuaternion } from './camera'
 import { encodeSrgbInPlace } from './srgb'
 
 export const THUMB_SIZE = 512
@@ -20,16 +21,24 @@ export function getRenderer(): THREE.WebGLRenderer {
   return renderer
 }
 
-export function makeScene(): THREE.Scene {
+export interface LitScene {
+  scene: THREE.Scene
+  /** The light rig. Orient via quaternion; identity = the historical world-fixed lighting. */
+  rig: THREE.Group
+}
+
+export function makeScene(): LitScene {
   const scene = new THREE.Scene()
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 1.4))
+  const rig = new THREE.Group()
+  rig.add(new THREE.HemisphereLight(0xffffff, 0x445566, 1.4))
   const key = new THREE.DirectionalLight(0xffffff, 1.6)
   key.position.set(1, 2, 1.5)
-  scene.add(key)
+  rig.add(key)
   const fill = new THREE.DirectionalLight(0xffffff, 0.5)
   fill.position.set(-1.5, -0.5, -1)
-  scene.add(fill)
-  return scene
+  rig.add(fill)
+  scene.add(rig)
+  return { scene, rig }
 }
 
 /**
@@ -42,7 +51,7 @@ export function renderThumbnail(
   axis: OrbitAxis = 'y',
 ): Promise<Blob> {
   const r = getRenderer()
-  const scene = makeScene()
+  const { scene, rig } = makeScene()
   // scene.add() reparents — the object may belong to a live ViewerSession
   // scene (it is LRU-shared), so its original parent must be restored after.
   const originalParent = object.parent
@@ -50,6 +59,8 @@ export function renderThumbnail(
   const bounds = boundsOf(object)
   const camera = new THREE.PerspectiveCamera(40, 1)
   applyState(camera, state, bounds, axis)
+  if (getLightingMode() === 'camera') rig.quaternion.copy(camera.quaternion)
+  else rig.quaternion.copy(rigQuaternion(axis))
 
   const target = new THREE.WebGLRenderTarget(THUMB_SIZE, THUMB_SIZE, {
     samples: 4,

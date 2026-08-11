@@ -15,7 +15,7 @@ vi.mock('../src/three/renderer', () => ({
     render: () => {},
     domElement: document.createElement('canvas'),
   }),
-  makeScene: () => new THREE.Scene(),
+  makeScene: () => ({ scene: new THREE.Scene(), rig: new THREE.Group() }),
   renderThumbnail: () => Promise.resolve(new Blob()),
 }))
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -47,6 +47,7 @@ function makeProps() {
       viewer,
       camera: undefined,
       axis: undefined,
+      lighting: 'axis' as const,
       api: { getThumb: vi.fn().mockResolvedValue({ status: 'miss' }) } as unknown as ApiClient,
       lru: { acquire: vi.fn().mockResolvedValue(mesh) } as unknown as MeshLru<THREE.Object3D>,
       tracker: new GestureTracker(),

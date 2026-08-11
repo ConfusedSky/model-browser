@@ -5,12 +5,14 @@ import {
   captureState,
   DEFAULT_CAMERA,
   frameFor,
+  rigQuaternion,
   statePosition,
   stateTarget,
   type Bounds,
   type SpindleFrame,
 } from '../three/camera'
 import { getRenderer, makeScene, renderThumbnail } from '../three/renderer'
+import { getLightingMode } from './lighting'
 
 const ROT_SPEED = 0.01
 const EL_LIMIT = Math.PI / 2 - 0.01
@@ -32,6 +34,9 @@ interface AxisTween {
   upRot: THREE.Quaternion
   toLen: number
   toTarget: THREE.Vector3
+  /** Light-rig orientation endpoints (axis mode, D4). */
+  fromRigQ: THREE.Quaternion
+  toRigQ: THREE.Quaternion
 }
 
 /**
@@ -42,6 +47,8 @@ interface AxisTween {
  */
 export class ViewerSession {
   private scene: THREE.Scene
+  /** Light rig — public so tests can assert its orientation. */
+  readonly rig: THREE.Group
   private camera = new THREE.PerspectiveCamera(40, 1)
   private bounds: Bounds
   private frame: SpindleFrame
@@ -60,7 +67,10 @@ export class ViewerSession {
     initial: CameraState = DEFAULT_CAMERA,
     private readonly now: () => number = () => performance.now(),
   ) {
-    this.scene = makeScene()
+    const { scene, rig } = makeScene()
+    this.scene = scene
+    this.rig = rig
+    this.rig.quaternion.copy(rigQuaternion(axis))
     this.scene.add(object)
     this.bounds = boundsOf(object)
     this._axis = axis
@@ -90,6 +100,11 @@ export class ViewerSession {
     this.camera.up.copy(this.up)
     this.camera.lookAt(this.target)
     this.camera.updateProjectionMatrix()
+    // Rig orientation per mode (D2): camera space every frame in 'camera'
+    // mode; the spindle frame in 'axis' mode, where advance() owns it while a
+    // tween is running (D4).
+    if (getLightingMode() === 'camera') this.rig.quaternion.copy(this.camera.quaternion)
+    else if (this.tween === null) this.rig.quaternion.copy(rigQuaternion(this._axis))
     r.render(this.scene, this.camera)
   }
 
@@ -108,6 +123,7 @@ export class ViewerSession {
     const uq = new THREE.Quaternion().slerpQuaternions(new THREE.Quaternion(), tw.upRot, e)
     this.up.copy(tw.fromUp).applyQuaternion(uq)
     this.target.lerpVectors(tw.fromTarget, tw.toTarget, e)
+    this.rig.quaternion.slerpQuaternions(tw.fromRigQ, tw.toRigQ, e)
     if (t >= 1) {
       this.tween = null
       this.up.copy(this.frame.s)
@@ -145,13 +161,18 @@ export class ViewerSession {
       ),
       toLen,
       toTarget,
+      fromRigQ: this.rig.quaternion.clone(),
+      toRigQ: rigQuaternion(axis),
     }
   }
 
   /** Clamped turntable around the spindle. A drag cancels any axis tween. */
   orbit(dx: number, dy: number): void {
     this.advance() // cancel from the pose of *now*, not the last rendered frame
-    this.tween = null
+    if (this.tween !== null) {
+      this.tween = null
+      this.rig.quaternion.copy(rigQuaternion(this._axis))
+    }
     const { s, a, b } = this.frame
     const len = this.offset.length()
     const dir = this.offset.clone().divideScalar(len)
@@ -175,9 +196,10 @@ export class ViewerSession {
     if (this.tween !== null) {
       // Cancelling mid-tween must re-lock up to the spindle — nothing else
       // ever restores it, and a half-slerped up would stick as a permanent
-      // camera roll.
+      // camera roll. The rig snaps with it.
       this.tween = null
       this.up.copy(this.frame.s)
+      this.rig.quaternion.copy(rigQuaternion(this._axis))
     }
     const len = THREE.MathUtils.clamp(
       this.offset.length() * factor,

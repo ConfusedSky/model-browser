@@ -41,11 +41,19 @@ export interface CameraState {
 
 export type ThumbStatus = 'hit' | 'stale' | 'miss'
 
+/**
+ * How the light rig is oriented: 'axis' aligns it to the model's spindle,
+ * 'camera' fixes it in camera space (headlight). Global client setting.
+ */
+export type LightingMode = 'axis' | 'camera'
+
 export interface ThumbGetResponse {
   status: ThumbStatus
   camera?: CameraState
   /** Stored spindle axis; absent when the path is unknown (read as 'y'). */
   axis?: OrbitAxis
+  /** Lighting mode the PNG was rendered with; absent on pre-lighting entries. */
+  lighting?: LightingMode
   /** base64 PNG, present when status === 'hit'. */
   png?: string
 }
@@ -57,6 +65,7 @@ export interface ThumbPutRequest {
   png?: string
   camera?: CameraState
   axis?: OrbitAxis
+  lighting?: LightingMode
 }
 
 export interface ApiError {

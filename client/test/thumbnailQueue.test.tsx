@@ -8,6 +8,7 @@ import type { ApiClient } from '../src/api/client'
 import { useThumbnails } from '../src/hooks/useThumbnails'
 import type { MeshLru } from '../src/three/lru'
 import { RenderQueue } from '../src/three/queue'
+import { setLightingMode } from '../src/viewer/lighting'
 
 // The hook only reaches the renderer through renderThumbnail — fake it.
 vi.mock('../src/three/renderer', () => ({
@@ -83,12 +84,13 @@ afterEach(async () => {
   root = null
   container = null
   vi.unstubAllGlobals()
+  setLightingMode('axis')
 })
 
 describe('thumbnail cache lookups vs the render queue', () => {
   it('cache hits resolve while the queue is suspended — lookups never occupy a slot', async () => {
     const api = {
-      getThumb: vi.fn().mockResolvedValue({ status: 'hit', pngUrl: 'blob:cached' }),
+      getThumb: vi.fn().mockResolvedValue({ status: 'hit', pngUrl: 'blob:cached', lighting: 'axis' }),
     } as unknown as ApiClient
     const lru = { acquire: vi.fn() } as unknown as MeshLru<THREE.Object3D>
     const queue = new RenderQueue(2)
@@ -124,6 +126,91 @@ describe('thumbnail cache lookups vs the render queue', () => {
 
     expect(statuses()).toEqual(['ready', 'ready'])
     expect(api.putThumb).toHaveBeenCalledTimes(2)
+    expect(api.putThumb).toHaveBeenCalledWith(expect.objectContaining({ lighting: 'axis' }))
+  })
+
+  it('a hit lit under another mode re-renders, preserving camera and axis', async () => {
+    const camera = { az: 1, el: 0.5, distR: 2, target: [0, 0, 0] }
+    const api = {
+      getThumb: vi.fn().mockResolvedValue({
+        status: 'hit',
+        pngUrl: 'blob:otherMode',
+        camera,
+        axis: '-z',
+        lighting: 'camera', // active mode is the default 'axis'
+      }),
+      putThumb: vi.fn().mockResolvedValue(undefined),
+    } as unknown as ApiClient
+    const lru = { acquire: vi.fn().mockResolvedValue({}) } as unknown as MeshLru<THREE.Object3D>
+
+    await render(<Harness entries={models(1)} api={api} lru={lru} queue={new RenderQueue(2)} />)
+    await settle()
+
+    // The mismatched PNG was dropped and replaced through the render queue…
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:otherMode')
+    expect(lru.acquire).toHaveBeenCalledTimes(1)
+    expect(statuses()).toEqual(['ready'])
+    // …with the render PUT recording the active mode, and no camera write —
+    // the stored camera state is preserved by omission.
+    expect(api.putThumb).toHaveBeenCalledWith(expect.objectContaining({ lighting: 'axis' }))
+    const put = vi.mocked(api.putThumb).mock.calls[0]![0]
+    expect(put.camera).toBeUndefined()
+  })
+
+  it('in camera mode, a camera-lit hit serves directly and an axis-lit one re-renders', async () => {
+    setLightingMode('camera')
+    const api = {
+      getThumb: vi
+        .fn()
+        .mockResolvedValueOnce({ status: 'hit', pngUrl: 'blob:cam', lighting: 'camera' })
+        .mockResolvedValueOnce({ status: 'hit', pngUrl: 'blob:ax', lighting: 'axis' }),
+      putThumb: vi.fn().mockResolvedValue(undefined),
+    } as unknown as ApiClient
+    const lru = { acquire: vi.fn().mockResolvedValue({}) } as unknown as MeshLru<THREE.Object3D>
+
+    await render(<Harness entries={models(2)} api={api} lru={lru} queue={new RenderQueue(2)} />)
+    await settle()
+
+    expect(statuses()).toEqual(['ready', 'ready'])
+    expect(lru.acquire).toHaveBeenCalledTimes(1) // only the axis-lit one re-rendered
+    expect(api.putThumb).toHaveBeenCalledTimes(1)
+    expect(api.putThumb).toHaveBeenCalledWith(expect.objectContaining({ lighting: 'camera' }))
+  })
+
+  it('a failed re-render falls back to the mismatched PNG instead of an error tile', async () => {
+    const api = {
+      getThumb: vi.fn().mockResolvedValue({
+        status: 'hit',
+        pngUrl: 'blob:fallback',
+        camera: { az: 1, el: 0, distR: 2, target: [0, 0, 0] },
+        lighting: 'camera',
+      }),
+      putThumb: vi.fn().mockResolvedValue(undefined),
+    } as unknown as ApiClient
+    const lru = {
+      acquire: vi.fn().mockRejectedValue(new Error('load failed')),
+    } as unknown as MeshLru<THREE.Object3D>
+
+    await render(<Harness entries={models(1)} api={api} lru={lru} queue={new RenderQueue(2)} />)
+    await settle()
+
+    expect(statuses()).toEqual(['ready']) // not 'error' — the old PNG still shows
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith('blob:fallback')
+  })
+
+  it('a legacy hit with no stored mode also re-renders', async () => {
+    const api = {
+      getThumb: vi.fn().mockResolvedValue({ status: 'hit', pngUrl: 'blob:legacy' }),
+      putThumb: vi.fn().mockResolvedValue(undefined),
+    } as unknown as ApiClient
+    const lru = { acquire: vi.fn().mockResolvedValue({}) } as unknown as MeshLru<THREE.Object3D>
+
+    await render(<Harness entries={models(1)} api={api} lru={lru} queue={new RenderQueue(2)} />)
+    await settle()
+
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:legacy')
+    expect(api.putThumb).toHaveBeenCalledWith(expect.objectContaining({ lighting: 'axis' }))
+    expect(statuses()).toEqual(['ready'])
   })
 
   it('abandoning a listing cancels its queued lookups', async () => {
