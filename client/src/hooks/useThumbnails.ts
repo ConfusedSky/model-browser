@@ -5,7 +5,7 @@ import type { ApiClient } from '../api/client'
 import { DEFAULT_CAMERA } from '../three/camera'
 import type { MeshLru } from '../three/lru'
 import type { RenderQueue } from '../three/queue'
-import { renderThumbnail } from '../three/renderer'
+import { RIG_VERSION, renderThumbnail } from '../three/renderer'
 import { getLightingMode } from '../viewer/lighting'
 
 export interface ThumbState {
@@ -113,7 +113,8 @@ export function useThumbnails(
             if (
               cached.status === 'hit' &&
               cached.pngUrl !== undefined &&
-              cached.lighting === getLightingMode()
+              cached.lighting === getLightingMode() &&
+              cached.rig === RIG_VERSION
             ) {
               setThumb(entry.path, {
                 status: 'ready',
@@ -156,7 +157,7 @@ export function useThumbnails(
                   const axis = cached.axis ?? 'y'
                   const lighting = getLightingMode() // the mode this render uses
                   const png = await renderThumbnail(object, camera, axis)
-                  await api.putThumb({ path: entry.path, mtime: entry.mtime, png, lighting })
+                  await api.putThumb({ path: entry.path, mtime: entry.mtime, png, lighting, rig: RIG_VERSION })
                   if (!alive) return dropStale()
                   setThumb(entry.path, {
                     status: 'ready',

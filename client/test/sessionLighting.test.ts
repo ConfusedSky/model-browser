@@ -10,6 +10,7 @@ vi.mock('../src/three/renderer', () => ({
   getRenderer: () => ({ setSize: () => {}, render: () => {} }),
   makeScene: () => ({ scene: new THREE.Scene(), rig: new THREE.Group() }),
   renderThumbnail: vi.fn(() => Promise.resolve(new Blob())),
+  RIG_VERSION: 2,
 }))
 
 function makeMesh(): THREE.Mesh {

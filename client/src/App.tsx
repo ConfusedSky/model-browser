@@ -13,6 +13,7 @@ import { fitSquareBox, type Box } from './lib/layout'
 import { getLastPath, pushRecent } from './lib/recents'
 import { MeshLru } from './three/lru'
 import { disposeModel, embedded3mfThumbnail, formatOf, geometryBytes, parseModel } from './three/models'
+import { RIG_VERSION } from './three/renderer'
 import { RenderQueue } from './three/queue'
 import ViewerLayer, { type ViewerState } from './viewer/ViewerLayer'
 import { getLightingMode, LIGHTING_MODES, setLightingMode } from './viewer/lighting'
@@ -194,6 +195,7 @@ export default function App() {
             camera: state,
             axis,
             lighting,
+            rig: RIG_VERSION,
           }),
         ])
         setThumb(entry.path, { status: 'ready', url, camera: state, axis })

@@ -14,6 +14,8 @@ interface Meta {
   axis?: OrbitAxis
   /** Lighting mode the PNG was rendered with; stored and echoed, never interpreted. */
   lighting?: LightingMode
+  /** Pixel-recipe (rig) version the PNG was rendered with; stored and echoed, never interpreted. */
+  rig?: number
 }
 
 const DEFAULT_CAP = 2 * 1024 ** 3
@@ -67,12 +69,13 @@ export class ThumbCache {
     if (meta === null) return { status: 'miss' }
     const axis = meta.axis ?? 'y'
     const lighting = meta.lighting
-    if (meta.mtime !== mtime) return { status: meta.camera !== undefined || meta.mtime !== undefined ? 'stale' : 'miss', camera: meta.camera, axis, lighting }
+    const rig = meta.rig
+    if (meta.mtime !== mtime) return { status: meta.camera !== undefined || meta.mtime !== undefined ? 'stale' : 'miss', camera: meta.camera, axis, lighting, rig }
     let png
     try {
       png = await readFile(this.pngFile(key))
     } catch {
-      return { status: 'stale', camera: meta.camera, axis, lighting }
+      return { status: 'stale', camera: meta.camera, axis, lighting, rig }
     }
     // LRU clock for size-cap eviction is the png file's mtime. Bumping it via
     // utimes (instead of rewriting the meta json) keeps reads race-free
@@ -80,10 +83,10 @@ export class ThumbCache {
     // caught mid-write by the sweep's meta parse.
     const now = new Date()
     await utimes(this.pngFile(key), now, now).catch(() => {})
-    return { status: 'hit', camera: meta.camera, axis, lighting, png: png.toString('base64') }
+    return { status: 'hit', camera: meta.camera, axis, lighting, rig, png: png.toString('base64') }
   }
 
-  async put(path: string, opts: { mtime: number; png?: Buffer; camera?: CameraState; axis?: OrbitAxis; lighting?: LightingMode }): Promise<void> {
+  async put(path: string, opts: { mtime: number; png?: Buffer; camera?: CameraState; axis?: OrbitAxis; lighting?: LightingMode; rig?: number }): Promise<void> {
     const key = this.key(path)
     const prev = await this.readMeta(key)
     const meta: Meta = {
@@ -91,9 +94,10 @@ export class ThumbCache {
       mtime: opts.png !== undefined ? opts.mtime : prev?.mtime,
       camera: opts.camera ?? prev?.camera,
       axis: opts.axis ?? prev?.axis,
-      // Like mtime, lighting describes the pixels: a PUT replacing the PNG
-      // without declaring a mode must not keep the old label on new pixels.
+      // Like mtime, lighting and rig describe the pixels: a PUT replacing the
+      // PNG without declaring them must not keep old labels on new pixels.
       lighting: opts.png !== undefined ? opts.lighting : (opts.lighting ?? prev?.lighting),
+      rig: opts.png !== undefined ? opts.rig : (opts.rig ?? prev?.rig),
     }
     if (opts.png !== undefined) {
       await mkdir(this.dir, { recursive: true })

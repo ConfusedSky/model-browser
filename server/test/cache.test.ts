@@ -87,6 +87,25 @@ describe('ThumbCache maintenance', () => {
     expect((await cache.get(path, 3)).lighting).toBeUndefined()
   })
 
+  it('round-trips the rig version, preserves it across partial puts, clears it on unlabeled png puts', async () => {
+    const cache = tempCache()
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const path = join(fx.dir, 'loose.stl')
+    await cache.put(path, { mtime: 1, png: Buffer.from('png'), camera: CAM })
+    expect((await cache.get(path, 1)).rig).toBeUndefined() // legacy entry: no stored version
+    await cache.put(path, { mtime: 1, png: Buffer.from('png'), rig: 2 })
+    expect((await cache.get(path, 1)).rig).toBe(2)
+    // A camera-only put must not drop the stored version.
+    await cache.put(path, { mtime: 1, camera: CAM })
+    expect((await cache.get(path, 1)).rig).toBe(2)
+    // The version rides along on stale reads (new mtime).
+    expect((await cache.get(path, 5)).rig).toBe(2)
+    // A PNG-replacing put without a version clears it — old label, new pixels.
+    await cache.put(path, { mtime: 2, png: Buffer.from('png2') })
+    expect((await cache.get(path, 2)).rig).toBeUndefined()
+  })
+
   it('tests virtual-path existence against the containing zip, not the entry', async () => {
     const cache = tempCache()
     const fx = makeFixtures()

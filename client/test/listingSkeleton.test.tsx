@@ -26,6 +26,7 @@ vi.mock('../src/three/renderer', () => ({
     domElement: document.createElement('canvas'),
   }),
   makeScene: () => ({ scene: { add: () => {}, remove: () => {} }, rig: { quaternion: { copy: () => {} } } }),
+  RIG_VERSION: 2,
 }))
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 

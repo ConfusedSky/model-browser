@@ -7,6 +7,14 @@ import { encodeSrgbInPlace } from './srgb'
 export const THUMB_SIZE = 512
 
 /**
+ * Version of the pixel recipe thumbnails are rendered with — bumped whenever
+ * rendered output changes for the same input (rig contents, materials, tone
+ * mapping). Cached PNGs carrying another (or no) version are re-rendered.
+ * 1 = the pre-rim rig (implicit), 2 = red/blue rim accents.
+ */
+export const RIG_VERSION = 2
+
+/**
  * The app's single WebGL context (design D2/D3): one WebGLRenderer shared by
  * the thumbnail render queue (offscreen render target) and the orbit
  * overlay/lightbox (visible canvas).
@@ -37,6 +45,14 @@ export function makeScene(): LitScene {
   const fill = new THREE.DirectionalLight(0xffffff, 0.5)
   fill.position.set(-1.5, -0.5, -1)
   rig.add(fill)
+  // Rim accents: rig-space −X/+X, slightly behind the subject — exact
+  // screen-left/right in camera mode, model-fixed in axis mode (D1).
+  const rimRed = new THREE.DirectionalLight(0xff4444, 0.5)
+  rimRed.position.set(-1.5, 0.3, -0.6)
+  rig.add(rimRed)
+  const rimBlue = new THREE.DirectionalLight(0x4466ff, 0.5)
+  rimBlue.position.set(1.5, 0.3, -0.6)
+  rig.add(rimBlue)
   scene.add(rig)
   return { scene, rig }
 }

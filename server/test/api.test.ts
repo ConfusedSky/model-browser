@@ -238,4 +238,24 @@ describe('thumbnail cache API', () => {
     })
     expect(put.status).toBe(400)
   })
+
+  it('put stores the rig version and get serves it back', async () => {
+    const put = await app.request('/api/thumb', {
+      method: 'PUT',
+      headers: { ...LOOPBACK, 'content-type': 'application/json' },
+      body: JSON.stringify({ path, mtime: 111, png, rig: 2 }),
+    })
+    expect(put.status).toBe(200)
+    const res = await get(`/api/thumb?path=${encodeURIComponent(path)}&mtime=111`)
+    expect(((await res.json()) as ThumbGetResponse).rig).toBe(2)
+  })
+
+  it('rejects a non-numeric rig version', async () => {
+    const put = await app.request('/api/thumb', {
+      method: 'PUT',
+      headers: { ...LOOPBACK, 'content-type': 'application/json' },
+      body: JSON.stringify({ path, mtime: 111, rig: 'two' }),
+    })
+    expect(put.status).toBe(400)
+  })
 })

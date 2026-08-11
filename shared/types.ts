@@ -54,6 +54,8 @@ export interface ThumbGetResponse {
   axis?: OrbitAxis
   /** Lighting mode the PNG was rendered with; absent on pre-lighting entries. */
   lighting?: LightingMode
+  /** Pixel-recipe (rig) version the PNG was rendered with; absent on pre-rim entries. */
+  rig?: number
   /** base64 PNG, present when status === 'hit'. */
   png?: string
 }
@@ -66,6 +68,7 @@ export interface ThumbPutRequest {
   camera?: CameraState
   axis?: OrbitAxis
   lighting?: LightingMode
+  rig?: number
 }
 
 export interface ApiError {

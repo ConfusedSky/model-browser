@@ -80,12 +80,16 @@ export function createApp(cache: ThumbCache = new ThumbCache()): Hono {
     if (body.lighting !== undefined && !LIGHTING_MODES.includes(body.lighting)) {
       return c.json({ error: `invalid lighting: ${String(body.lighting)}` }, 400)
     }
+    if (body.rig !== undefined && typeof body.rig !== 'number') {
+      return c.json({ error: `invalid rig: ${String(body.rig)}` }, 400)
+    }
     await cache.put(body.path, {
       mtime: body.mtime,
       png: body.png !== undefined ? Buffer.from(body.png, 'base64') : undefined,
       camera: body.camera,
       axis: body.axis,
       lighting: body.lighting,
+      rig: body.rig,
     })
     return c.json({ ok: true })
   })

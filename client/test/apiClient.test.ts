@@ -49,11 +49,11 @@ describe('HttpApiClient contract', () => {
     const png = btoa('png-bytes')
     const fetchFn = vi
       .fn()
-      .mockResolvedValue(jsonResponse({ status: 'hit', png, camera: CAM, axis: '-z', lighting: 'camera' }))
+      .mockResolvedValue(jsonResponse({ status: 'hit', png, camera: CAM, axis: '-z', lighting: 'camera', rig: 2 }))
     const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
     const res = await api.getThumb('/m.stl', 42)
     expect(fetchFn).toHaveBeenCalledWith(`/api/thumb?path=${encodeURIComponent('/m.stl')}&mtime=42`)
-    expect(res).toEqual({ status: 'hit', camera: CAM, axis: '-z', lighting: 'camera', pngUrl: 'blob:mock' })
+    expect(res).toEqual({ status: 'hit', camera: CAM, axis: '-z', lighting: 'camera', rig: 2, pngUrl: 'blob:mock' })
   })
 
   it('getThumb on miss has no pngUrl', async () => {
@@ -73,6 +73,7 @@ describe('HttpApiClient contract', () => {
       camera: CAM,
       axis: '-z',
       lighting: 'camera',
+      rig: 2,
     })
     const [url, init] = fetchFn.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('/api/thumb')
@@ -85,6 +86,7 @@ describe('HttpApiClient contract', () => {
       camera: CAM,
       axis: '-z',
       lighting: 'camera',
+      rig: 2,
     })
   })
 

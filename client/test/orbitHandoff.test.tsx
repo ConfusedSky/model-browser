@@ -16,6 +16,7 @@ vi.mock('../src/three/renderer', () => ({
     domElement: document.createElement('canvas'),
   }),
   makeScene: () => ({ scene: new THREE.Scene(), rig: new THREE.Group() }),
+  RIG_VERSION: 2,
   renderThumbnail: () => Promise.resolve(new Blob()),
 }))
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
