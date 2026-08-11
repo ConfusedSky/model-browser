@@ -44,8 +44,8 @@ export function makeScene(): LitScene {
   const scene = new THREE.Scene()
   const rig = new THREE.Group()
   rig.add(new THREE.HemisphereLight(0xffffff, 0x445566, 1.4))
-  // The only caster in the rig (D2): named so stageModel can fit its shadow
-  // camera without depending on child order.
+  // The only caster in the shipped recipe (D2): named so stageModel can fit
+  // its shadow camera without depending on child order.
   const key = new THREE.DirectionalLight(0xffffff, 1.6)
   key.name = 'key'
   key.position.set(1, 2, 1.5)
@@ -69,13 +69,13 @@ export function makeScene(): LitScene {
   return { scene, rig }
 }
 
-// Key-light shadow fit (D2), every constant a multiple of the staged model's
+// Shadow fit (D2), every constant a multiple of the staged model's
 // bounding-sphere radius: the rig is unitless and models run from miniatures
 // to busts, so each distance the shadow camera cares about scales with the
 // subject. Frozen in test/stageModel.test.ts — changing one changes pixels and
 // needs a RIG_VERSION bump.
-/** How far out the key sits along its tuned direction. */
-const KEY_DISTANCE_R = 3
+/** How far out a caster sits along its tuned direction. */
+const CASTER_DISTANCE_R = 3
 /** Ortho half-extent: the model sphere plus the floor area its shadow sweeps. */
 const SHADOW_EXTENT_R = 2
 /** Slack on near/far so a grazing light direction never clips the sphere. */
@@ -85,19 +85,20 @@ const SHADOW_NORMAL_BIAS_R = 0.02
 const SHADOW_MAP_SIZE = 2048
 
 /**
- * Aim the key light's shadow camera at an origin-centered model of this
+ * Aim one rig light's shadow camera at an origin-centered model of this
  * radius. `setLength` keeps the light's direction — and therefore the shading
  * — exactly as `makeScene` tuned it; only the shadow camera's placement moves.
+ * Configuration only, never `castShadow`: three allocates a shadow map for a
+ * light while it actually casts, so fitting an idle rim costs nothing.
  */
-function fitKeyShadow(key: THREE.DirectionalLight, radius: number): void {
-  const distance = KEY_DISTANCE_R * radius
+function fitShadow(light: THREE.DirectionalLight, radius: number): void {
+  const distance = CASTER_DISTANCE_R * radius
   const extent = SHADOW_EXTENT_R * radius
   const margin = SHADOW_DEPTH_MARGIN_R * radius
-  key.castShadow = true
-  key.position.setLength(distance)
-  key.shadow.mapSize.set(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE)
-  key.shadow.normalBias = SHADOW_NORMAL_BIAS_R * radius
-  const cam = key.shadow.camera
+  light.position.setLength(distance)
+  light.shadow.mapSize.set(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE)
+  light.shadow.normalBias = SHADOW_NORMAL_BIAS_R * radius
+  const cam = light.shadow.camera
   cam.left = -extent
   cam.right = extent
   cam.top = extent
@@ -164,8 +165,17 @@ export function stageModel(lit: LitScene, object: THREE.Object3D, axis: OrbitAxi
   pivot.add(object)
   const raw = boundsOf(object)
   pivot.position.copy(raw.center).negate()
-  const key = lit.rig.getObjectByName('key')
-  if (key instanceof THREE.DirectionalLight) fitKeyShadow(key, raw.radius)
+  // Fit every light that can cast (D2/D5): the key, which casts in the shipped
+  // recipe, and the rims, which only cast while the live-view comparison
+  // toggle adds them — fitted here so an enabled rim shadow is well-formed at
+  // any model size. Rim casting is off at stage time; only ViewerSession
+  // turns it on.
+  for (const light of lit.rig.children) {
+    if (!(light instanceof THREE.DirectionalLight)) continue
+    if (light.name !== 'key' && light.name !== 'rim') continue
+    fitShadow(light, raw.radius)
+    light.castShadow = light.name === 'key'
+  }
   const bounds: Bounds = {
     center: new THREE.Vector3(),
     radius: raw.radius,

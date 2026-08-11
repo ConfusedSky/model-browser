@@ -12,7 +12,7 @@ import {
 } from '../three/camera'
 import { getRenderer, makeScene, placeFloor, renderThumbnail, stageModel } from '../three/renderer'
 import { getLightingMode } from './lighting'
-import { rimsEnabled } from './rims'
+import { rimShadowsEnabled } from './rimShadows'
 
 const ROT_SPEED = 0.01
 const EL_LIMIT = Math.PI / 2 - 0.01
@@ -111,10 +111,12 @@ export class ViewerSession {
     // tween is running (D4).
     if (getLightingMode() === 'camera') this.rig.quaternion.copy(this.camera.quaternion)
     else if (this.tween === null) this.rig.quaternion.copy(rigQuaternion(this._axis))
-    // SCAFFOLDING: the rim-comparison toggle, live view only — snapshot()
-    // goes through renderThumbnail, which builds a fresh full-recipe scene.
-    const rims = rimsEnabled()
-    for (const light of this.rig.children) if (light.name === 'rim') light.visible = rims
+    // SCAFFOLDING: the rim-shadow comparison toggle, live view only — the rims
+    // stay lit either way, only their casting changes. snapshot() goes through
+    // renderThumbnail, which builds a fresh key-only-casting scene. Their
+    // shadow cameras were fitted at stage time, so this is the whole switch.
+    const rimShadows = rimShadowsEnabled()
+    for (const light of this.rig.children) if (light.name === 'rim') light.castShadow = rimShadows
     r.render(this.scene, this.camera)
   }
 
@@ -248,10 +250,13 @@ export class ViewerSession {
   close(): void {
     this.pivot.remove(this.object)
     // The scene dies with the session; its key light owns a shadow-map
-    // texture and its floor owns geometry/material (D5). The model belongs to
-    // the LRU — only detached, above.
-    const key = this.rig.getObjectByName('key')
-    if (key instanceof THREE.DirectionalLight) key.dispose()
+    // texture, and so do the rims if the comparison toggle had them casting
+    // (D5). Its floor owns geometry/material. The model belongs to the LRU —
+    // only detached, above.
+    for (const light of this.rig.children) {
+      if (!(light instanceof THREE.DirectionalLight)) continue
+      if (light.name === 'key' || light.name === 'rim') light.dispose()
+    }
     this.floor.geometry.dispose()
     this.floor.material.dispose()
   }
