@@ -27,6 +27,12 @@ vi.mock('../src/three/renderer', async (importOriginal) => ({
     domElement: document.createElement('canvas'),
   }),
   makeScene: () => ({ scene: { add: () => {}, remove: () => {} }, rig: { quaternion: { copy: () => {} } } }),
+  // Staging exports session.ts imports: a full factory must carry every import
+  // of the real module, or opening a viewer here would hit vitest's throwing
+  // proxy instead of a stub.
+  stageModel: vi.fn(),
+  unstage: vi.fn(),
+  placeFloor: vi.fn(),
   // The real constant, never a literal: a literal would keep passing across a
   // RIG_VERSION bump while asserting a version the app no longer writes.
   RIG_VERSION: (await importOriginal<typeof import('../src/three/renderer')>()).RIG_VERSION,
