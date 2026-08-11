@@ -17,7 +17,7 @@ This change depends on rim-lights being implemented first: it bumps `RIG_VERSION
 **Non-Goals:**
 - Screen-space ambient occlusion or any post-processing (separate change).
 - Shadows from the hemisphere, fill, or rim lights — one caster only.
-- A user toggle; shadows are part of the rig recipe like the rim accents.
+- A user toggle for shadows; shadows are part of the rig recipe like the rim accents. (The temporary rim toggle in D5 is verification scaffolding, removed before archive — not a shipped toggle.)
 - Rebalancing existing light colors/intensities.
 
 ## Decisions
@@ -54,6 +54,12 @@ Scene population currently happens twice with subtle duplication (session.ts con
 
 Shadows change every model's pixels; per rim-lights D2 this bumps the shared `RIG_VERSION` (2 → 3) and rides the existing lazy invalidation — no new cache fields, no server or API changes. Renderer-mock factories in client tests must gain the new export (`stageModel`) — the full-factory mocks throw on missing exports, the same sweep rim-lights task 2.3 does.
 
+### D5: A live-view rim toggle — verification scaffolding only
+
+To judge whether the rim accents still earn their keep once shadows land, the viewer gains a visible toggle that turns the red/blue rims (renderer.ts:52–57) off and on in the live view. It follows the lighting-mode precedent (viewer/lighting.ts plus its corner pill in ViewerLayer): a module-level flag consulted by `ViewerSession` on each render — implemented as `visible = flag` on the two accent lights, nothing removed from the rig — with the existing render-on-toggle effect (ViewerLayer.tsx:148–162) making the change visible without a drag. Unlike the lighting mode it is NOT persisted (in-memory, default on): it is a comparison instrument, not a preference.
+
+Scope guard: only `ViewerSession` consults the flag; `renderThumbnail` always renders the full rig recipe, so thumbnails, `RIG_VERSION`, and the cache are untouched. While rims are toggled off the live view intentionally diverges from the cached thumbnail — the handoff no-shift guarantee is knowingly suspended for the comparison; that divergence is the toggle's purpose. The toggle is scaffolding: a final task records the verdict and removes the control before archive, which is why it carries no spec delta. If key-only wins, removing the rims from the rig is a separate follow-up change (it MODIFYs the main-spec rim requirement and bumps `RIG_VERSION` again); if the toggle itself proves worth keeping, promoting it is likewise its own spec'd change (viewer-ssao's proposal cites the shared no-toggle stance and would need reconciling).
+
 ## Risks / Trade-offs
 
 - [Depth pre-pass doubles per-frame geometry cost on million-triangle STLs] → one caster only, 2048 map, and the existing render-queue suspension during interaction already bounds contention; map size is a single tunable if weak GPUs struggle.
@@ -63,6 +69,9 @@ Shadows change every model's pixels; per rim-lights D2 this bumps the shared `RI
 - [Origin-centering perturbs anything that secretly assumed world coordinates] → audit at apply: camera math is bounds-relative by design (D4); the only world-coordinate consumers are `boundsOf` itself and the reparenting sites listed in D1.
 - [Two browsers on different app versions fight over `rig`] → same accepted churn as rim-lights D2.
 
+- [The D5 rim toggle outlives the change if the removal task is skipped] → task 4.4 removes it before archive is reachable; if it is instead kept deliberately, that decision must become its own change with a spec delta.
+
 ## Open Questions
 
 - Floor opacity and whether the contact shadow reads well on the dark app background at thumbnail size — judged visually at apply; if it reads as dirt rather than grounding, the floor can ship disabled-by-default behind the same constants without touching the self-shadowing.
+- Key-only vs. key+rim under shadows: which reads better? Judged via the D5 toggle on small and large fixtures in both lighting modes (task 4.3); the verdict is recorded here and drives a follow-up change (rim removal or toggle promotion) — it does not alter this change's scope.

@@ -22,8 +22,15 @@
 - [ ] 3.2 `ViewerSession.setAxis` snaps the floor to the new spindle via the floor handle; `close()` disposes floor geometry and material
 - [ ] 3.3 Unit tests: floor position/orientation correct for all six spindles on an asymmetric box; disposed on close; absent from bounds
 
-## 4. Mocks & verification
+## 4. Rim-comparison toggle (verification scaffolding, D5)
 
-- [ ] 4.1 Add `stageModel` (and any other new exports) to every full-factory renderer mock (`thumbnailQueue`, `flatToggle`, `listingSkeleton`, `orbitHandoff`, `sessionLighting` test files — re-check the list post-rim-lights)
-- [ ] 4.2 `bun run typecheck` and `bun run test` pass across workspaces
-- [ ] 4.3 Manual E2E via Playwright MCP: contact shadow visible under a model in tile thumbnails and the lightbox; orbiting in `camera` mode sweeps the shadow, in `axis` mode it stays put; axis change relocates the floor; cached thumbnails re-render once (rig 3) and hit thereafter; overlay handoff shows no shadow pop
+- [ ] 4.1 Add an in-memory rims-enabled flag (lighting.ts pattern, not persisted, default on); `ViewerSession` applies it per render as `visible` on the two rim lights — `renderThumbnail` never consults it
+- [ ] 4.2 Add the toggle control to the viewer UI (lighting-pill precedent, ViewerLayer.tsx) wired to the render-on-toggle effect so the change shows without a drag
+- [ ] 4.3 With shadows tuned (2.2), compare key-only vs. key+rim on a small and a large fixture in both lighting modes; record the verdict in design.md (Open Questions)
+- [ ] 4.4 After the verdict: remove the toggle (flag, UI control, session hook) before archive — rim removal or toggle promotion, if chosen, each become their own follow-up change
+
+## 5. Mocks & verification
+
+- [ ] 5.1 Add `stageModel` (and any other new exports) to every full-factory renderer mock (`thumbnailQueue`, `flatToggle`, `listingSkeleton`, `orbitHandoff`, `sessionLighting` test files — re-check the list post-rim-lights)
+- [ ] 5.2 `bun run typecheck` and `bun run test` pass across workspaces
+- [ ] 5.3 Manual E2E via Playwright MCP (rims at default/on except where noted): contact shadow visible under a model in tile thumbnails and the lightbox; orbiting in `camera` mode sweeps the shadow, in `axis` mode it stays put; axis change relocates the floor; cached thumbnails re-render once (rig 3) and hit thereafter; overlay handoff shows no shadow pop; rim toggle flips the accents in the live view only (cached thumbnail unchanged)
