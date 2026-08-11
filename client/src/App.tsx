@@ -17,6 +17,7 @@ import { RenderQueue } from './three/queue'
 import { RIG_VERSION } from './three/renderer'
 import ViewerLayer, { type ViewerState } from './viewer/ViewerLayer'
 import { getLightingMode, LIGHTING_MODES, setLightingMode } from './viewer/lighting'
+import { rimsEnabled, setRimsEnabled } from './viewer/rims'
 import type { ViewerSession } from './viewer/session'
 
 export default function App() {
@@ -47,6 +48,7 @@ export default function App() {
   const [pending, setPending] = useState(false)
   const [viewer, setViewer] = useState<ViewerState | null>(null)
   const [lighting, setLightingState] = useState<LightingMode>(getLightingMode)
+  const [rims, setRimsState] = useState(rimsEnabled)
   const trackerRef = useRef(new GestureTracker())
 
   const showSkeleton = useDelayedFlag(pending, SKELETON_DELAY_MS)
@@ -298,6 +300,22 @@ export default function App() {
             {m}
           </button>
         ))}
+        {/* SCAFFOLDING: rim on/off, live view only — removed after the comparison */}
+        <span className="h-4 w-px bg-zinc-700" />
+        <button
+          type="button"
+          aria-pressed={rims}
+          title="Show the red/blue rim accents in the live view"
+          onClick={() => {
+            setRimsEnabled(!rims)
+            setRimsState(!rims)
+          }}
+          className={`rounded-full px-2.5 py-1 ${
+            rims ? 'bg-sky-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
+          }`}
+        >
+          rims
+        </button>
       </div>
       {viewer !== null && (
         <ViewerLayer
@@ -305,6 +323,7 @@ export default function App() {
           camera={thumbs.get(viewer.entry.path)?.camera}
           axis={thumbs.get(viewer.entry.path)?.axis}
           lighting={lighting}
+          rims={rims}
           api={api}
           lru={lru}
           tracker={trackerRef.current}

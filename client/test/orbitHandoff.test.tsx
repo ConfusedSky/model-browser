@@ -50,6 +50,7 @@ function makeProps() {
       camera: undefined,
       axis: undefined,
       lighting: 'axis' as const,
+      rims: true,
       api: { getThumb: vi.fn().mockResolvedValue({ status: 'miss' }) } as unknown as ApiClient,
       lru: { acquire: vi.fn().mockResolvedValue(mesh) } as unknown as MeshLru<THREE.Object3D>,
       tracker: new GestureTracker(),
