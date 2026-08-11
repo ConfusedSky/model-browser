@@ -166,7 +166,7 @@ export function stageModel(lit: LitScene, object: THREE.Object3D, axis: OrbitAxi
   pivot.add(object)
   const raw = boundsOf(object)
   pivot.position.copy(raw.center).negate()
-  // The key is the rig's only caster (D2/D5): fit its shadow camera to this
+  // The key is the rig's only caster (D2): fit its shadow camera to this
   // model's radius, found by name so the fit never depends on child order.
   const key = lit.rig.getObjectByName(KEY_LIGHT)
   if (key instanceof THREE.DirectionalLight) {
