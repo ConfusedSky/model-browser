@@ -1,7 +1,15 @@
 import * as THREE from 'three'
-import { describe, expect, it } from 'vitest'
-import { makeScene, stageModel, unstage, type LitScene } from '../src/three/renderer'
+import { describe, expect, it, vi } from 'vitest'
+import { frameFor } from '../src/three/camera'
+import {
+  makeScene,
+  stageModel,
+  unstage,
+  type LitScene,
+  type StagedModel,
+} from '../src/three/renderer'
 import { ViewerSession } from '../src/viewer/session'
+import type { OrbitAxis } from '../../shared/types'
 
 function makeMesh(offset: THREE.Vector3): THREE.Mesh {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(2, 4, 6), new THREE.MeshBasicMaterial())
@@ -96,6 +104,107 @@ describe('key-light shadow fit', () => {
       const { key } = stageRadius(radius)
       expect(key.position.clone().normalize().distanceTo(tuned)).toBeLessThan(1e-9)
     }
+  })
+})
+
+const AXES: OrbitAxis[] = ['x', '-x', 'y', '-y', 'z', '-z']
+/** makeMesh's half-extents: distinct per axis, so every spindle rests on a different face. */
+const HALF = new THREE.Vector3(1, 2, 3)
+/** Frozen floor constants (D3): opacity, sink ε·radius, size 8·radius. */
+const FLOOR_OPACITY = 0.35
+const FLOOR_SINK_R = 0.002
+const FLOOR_SIZE_R = 8
+
+/** Stage an asymmetric, off-center box and hand back its scene + floor. */
+function stageFloor(axis: OrbitAxis): LitScene & StagedModel {
+  const lit = makeScene()
+  // Off-center raw geometry: staging recenters it and the floor must follow.
+  const staged = stageModel(lit, makeMesh(new THREE.Vector3(7, -3, 11)), axis)
+  lit.scene.updateMatrixWorld(true)
+  return { ...lit, ...staged }
+}
+
+/** The unit plane's +z normal, carried into world space. */
+function floorNormal(floor: THREE.Mesh): THREE.Vector3 {
+  return new THREE.Vector3(0, 0, 1).applyQuaternion(floor.getWorldQuaternion(new THREE.Quaternion()))
+}
+
+/** The floor mesh a live session staged, found the way the renderer parents it. */
+function sessionFloor(session: ViewerSession): THREE.Mesh<THREE.PlaneGeometry, THREE.ShadowMaterial> {
+  const floor = session.rig.parent?.children.find(
+    (child): child is THREE.Mesh<THREE.PlaneGeometry, THREE.ShadowMaterial> =>
+      child instanceof THREE.Mesh && child.material instanceof THREE.ShadowMaterial,
+  )
+  if (floor === undefined) throw new Error('session scene has no contact floor')
+  return floor
+}
+
+describe('contact floor', () => {
+  it('rests on the face the spindle points away from, for every spindle', () => {
+    for (const axis of AXES) {
+      const { floor, bounds } = stageFloor(axis)
+      const s = frameFor(axis).s
+      // The face minimizing dot(p, s): on an origin-centered box that is the
+      // half-extent along |s|, and each spindle gets a different one.
+      const half = Math.abs(s.x) * HALF.x + Math.abs(s.y) * HALF.y + Math.abs(s.z) * HALF.z
+      const expected = s.clone().multiplyScalar(-half - FLOOR_SINK_R * bounds.radius)
+      expect(floor.getWorldPosition(new THREE.Vector3()).distanceTo(expected)).toBeLessThan(1e-6)
+      // Normal along +s: the plane faces the model, not away from it.
+      expect(floorNormal(floor).distanceTo(s)).toBeLessThan(1e-6)
+    }
+  })
+
+  it('sinks ε·radius under the resting face and spans 8·radius', () => {
+    const { floor, bounds } = stageFloor('y')
+    const depth = -floor.getWorldPosition(new THREE.Vector3()).y - HALF.y
+    expect(depth).toBeCloseTo(FLOOR_SINK_R * bounds.radius, 9)
+    expect(depth).toBeGreaterThan(0) // under the model, never intersecting it
+    expect(floor.scale.toArray()).toEqual([
+      FLOOR_SIZE_R * bounds.radius,
+      FLOOR_SIZE_R * bounds.radius,
+      FLOOR_SIZE_R * bounds.radius,
+    ])
+  })
+
+  it('catches shadows without casting or showing, at the frozen opacity', () => {
+    const { floor } = stageFloor('z')
+    expect(floor.receiveShadow).toBe(true)
+    expect(floor.castShadow).toBe(false)
+    expect(floor.material.transparent).toBe(true)
+    expect(floor.material.opacity).toBe(FLOOR_OPACITY)
+  })
+
+  it('hangs from the scene, outside the measured bounds', () => {
+    const { scene, floor, pivot, bounds } = stageFloor('y')
+    expect(floor.parent).toBe(scene)
+    // Not under the pivot: an 8·radius plane there would swallow the bounds.
+    const measured = new THREE.Box3().setFromObject(pivot)
+    expect(measured.min.distanceTo(bounds.box.min)).toBeLessThan(1e-6)
+    expect(measured.max.distanceTo(bounds.box.max)).toBeLessThan(1e-6)
+  })
+
+  it('snaps to the new spindle the moment the session changes axis', () => {
+    const session = new ViewerSession(makeMesh(new THREE.Vector3()), 'y')
+    const floor = sessionFloor(session)
+    const sink = FLOOR_SINK_R * Math.sqrt(HALF.x ** 2 + HALF.y ** 2 + HALF.z ** 2)
+    expect(floor.position.distanceTo(new THREE.Vector3(0, -HALF.y - sink, 0))).toBeLessThan(1e-6)
+
+    session.setAxis('-z')
+    // Mid-tween — the camera is still easing, the floor is already there.
+    expect(session.animating).toBe(true)
+    const snapped = new THREE.Vector3(0, 0, HALF.z + sink)
+    expect(floor.position.distanceTo(snapped)).toBeLessThan(1e-6)
+    expect(floorNormal(floor).distanceTo(frameFor('-z').s)).toBeLessThan(1e-6)
+  })
+
+  it('disposes its geometry and material when the session closes', () => {
+    const session = new ViewerSession(makeMesh(new THREE.Vector3(1, 2, 3)))
+    const floor = sessionFloor(session)
+    const geometry = vi.spyOn(floor.geometry, 'dispose')
+    const material = vi.spyOn(floor.material, 'dispose')
+    session.close()
+    expect(geometry).toHaveBeenCalledOnce()
+    expect(material).toHaveBeenCalledOnce()
   })
 })
 

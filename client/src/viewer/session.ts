@@ -10,7 +10,7 @@ import {
   type Bounds,
   type SpindleFrame,
 } from '../three/camera'
-import { getRenderer, makeScene, renderThumbnail, stageModel } from '../three/renderer'
+import { getRenderer, makeScene, placeFloor, renderThumbnail, stageModel } from '../three/renderer'
 import { getLightingMode } from './lighting'
 import { rimsEnabled } from './rims'
 
@@ -51,6 +51,8 @@ export class ViewerSession {
   readonly rig: THREE.Group
   /** Origin-centering group the model hangs from (D1). */
   private pivot: THREE.Group
+  /** Contact floor, snapped to the spindle's resting face (D3). */
+  private floor: THREE.Mesh<THREE.PlaneGeometry, THREE.ShadowMaterial>
   private camera = new THREE.PerspectiveCamera(40, 1)
   private bounds: Bounds
   private frame: SpindleFrame
@@ -76,6 +78,7 @@ export class ViewerSession {
     const staged = stageModel(lit, object, axis)
     this.pivot = staged.pivot
     this.bounds = staged.bounds
+    this.floor = staged.floor
     this._axis = axis
     this.frame = frameFor(axis)
     this.state = initial
@@ -148,6 +151,9 @@ export class ViewerSession {
     this.advance()
     this._axis = axis
     this.frame = frameFor(axis)
+    // The floor snaps while the camera tweens: an eased floor would read as
+    // the model's resting face interpolating, which means nothing (D3).
+    placeFloor(this.floor, this.bounds, axis)
     this.state = { ...DEFAULT_CAMERA }
     const toTarget = stateTarget(this.state, this.bounds)
     const toOffset = statePosition(this.state, this.bounds, axis).sub(toTarget)
@@ -242,8 +248,11 @@ export class ViewerSession {
   close(): void {
     this.pivot.remove(this.object)
     // The scene dies with the session; its key light owns a shadow-map
-    // texture (D5). The model belongs to the LRU — only detached, above.
+    // texture and its floor owns geometry/material (D5). The model belongs to
+    // the LRU — only detached, above.
     const key = this.rig.getObjectByName('key')
     if (key instanceof THREE.DirectionalLight) key.dispose()
+    this.floor.geometry.dispose()
+    this.floor.material.dispose()
   }
 }

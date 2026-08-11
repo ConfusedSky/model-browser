@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import type { CameraState, OrbitAxis } from '../../../shared/types'
 import { getLightingMode } from '../viewer/lighting'
-import { applyState, boundsOf, DEFAULT_CAMERA, rigQuaternion, type Bounds } from './camera'
+import { applyState, boundsOf, DEFAULT_CAMERA, frameFor, rigQuaternion, type Bounds } from './camera'
 import { encodeSrgbInPlace } from './srgb'
 
 export const THUMB_SIZE = 512
@@ -109,10 +109,43 @@ function fitKeyShadow(key: THREE.DirectionalLight, radius: number): void {
   cam.updateProjectionMatrix()
 }
 
+// Contact-floor constants (D3), again in radius units so the floor scales with
+// the subject. Frozen in test/stageModel.test.ts.
+/** Shadow darkness where the model touches down; the floor is invisible elsewhere. */
+const FLOOR_OPACITY = 0.35
+/** Sunk this far under the resting face — a flat print bed would z-fight otherwise. */
+const FLOOR_SINK_R = 0.002
+/** Wide enough that a camera-mode shadow sweep stays on it. */
+const FLOOR_SIZE_R = 8
+
+/** The floor's unit-plane geometry faces +z; this turns that normal onto the spindle. */
+const PLANE_NORMAL = new THREE.Vector3(0, 0, 1)
+
 export interface StagedModel {
   /** Centered bounds: center is the origin, box translated by −rawCenter. */
   bounds: Bounds
   pivot: THREE.Group
+  /** Contact floor — a scene-level shadow catcher, not part of the model (D3). */
+  floor: THREE.Mesh<THREE.PlaneGeometry, THREE.ShadowMaterial>
+}
+
+/**
+ * Lay the contact floor perpendicular to the spindle, at the model's lowest
+ * extent along it (D3): the box face minimizing `dot(p, s)`, sunk ε·radius
+ * further so a flat-bottomed print doesn't z-fight it. Called once by
+ * `stageModel` and again by `ViewerSession.setAxis` — the floor snaps to the
+ * new spindle, it never tweens.
+ */
+export function placeFloor(floor: THREE.Mesh, bounds: Bounds, axis: OrbitAxis): void {
+  const s = frameFor(axis).s
+  const { min, max } = bounds.box
+  // min over the 8 corners of dot(p, s), one independent component at a time.
+  const support = (c: number, lo: number, hi: number): number => Math.min(c * lo, c * hi)
+  const depth =
+    support(s.x, min.x, max.x) + support(s.y, min.y, max.y) + support(s.z, min.z, max.z)
+  floor.position.copy(s).multiplyScalar(depth - FLOOR_SINK_R * bounds.radius)
+  floor.quaternion.setFromUnitVectors(PLANE_NORMAL, s)
+  floor.scale.setScalar(FLOOR_SIZE_R * bounds.radius)
 }
 
 /**
@@ -121,9 +154,11 @@ export interface StagedModel {
  * the model straddles the world origin (D1). Camera state is bounds-relative,
  * so the centering moves no pixels.
  *
- * `_axis` is unused here — later work places a contact floor per spindle axis.
+ * The contact floor joins the SCENE — never the rig (in 'camera' mode a
+ * rig-parented floor would face the camera) and never the measured object,
+ * which is why it is added after the measurement (D3).
  */
-export function stageModel(lit: LitScene, object: THREE.Object3D, _axis: OrbitAxis): StagedModel {
+export function stageModel(lit: LitScene, object: THREE.Object3D, axis: OrbitAxis): StagedModel {
   const pivot = new THREE.Group()
   lit.scene.add(pivot)
   pivot.add(object)
@@ -131,14 +166,20 @@ export function stageModel(lit: LitScene, object: THREE.Object3D, _axis: OrbitAx
   pivot.position.copy(raw.center).negate()
   const key = lit.rig.getObjectByName('key')
   if (key instanceof THREE.DirectionalLight) fitKeyShadow(key, raw.radius)
-  return {
-    bounds: {
-      center: new THREE.Vector3(),
-      radius: raw.radius,
-      box: raw.box.translate(pivot.position),
-    },
-    pivot,
+  const bounds: Bounds = {
+    center: new THREE.Vector3(),
+    radius: raw.radius,
+    box: raw.box.translate(pivot.position),
   }
+  // A unit plane placeFloor scales: re-placing it never rebuilds geometry.
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, 1),
+    new THREE.ShadowMaterial({ opacity: FLOOR_OPACITY }),
+  )
+  floor.receiveShadow = true
+  placeFloor(floor, bounds, axis)
+  lit.scene.add(floor)
+  return { bounds, pivot, floor }
 }
 
 /**
@@ -169,7 +210,7 @@ export function renderThumbnail(
   // Staging reparents — the object may belong to a live ViewerSession scene
   // (it is LRU-shared), so its original parent must be restored after.
   const originalParent = object.parent
-  const { bounds, pivot } = stageModel(lit, object, axis)
+  const { bounds, pivot, floor } = stageModel(lit, object, axis)
   const camera = new THREE.PerspectiveCamera(40, 1)
   applyState(camera, state, bounds, axis)
   if (getLightingMode() === 'camera') rig.quaternion.copy(camera.quaternion)
@@ -189,10 +230,13 @@ export function renderThumbnail(
     r.setRenderTarget(prevTarget)
     target.dispose()
     unstage(object, pivot, originalParent)
-    // This scene is per-call and the key light owns a shadow-map texture
-    // (D5). The model is LRU-shared — it is never disposed here.
+    // This scene is per-call: the key light owns a shadow-map texture and the
+    // floor its own geometry/material (D5). The model is LRU-shared — it is
+    // never disposed here.
     const key = rig.getObjectByName('key')
     if (key instanceof THREE.DirectionalLight) key.dispose()
+    floor.geometry.dispose()
+    floor.material.dispose()
   }
 
   // Render-target readback is linear; the visible canvas gets sRGB output
