@@ -23,8 +23,11 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
 - Work is committed directly to `main` — no feature branches
 - design.md cites specific code (classes, call sites, geometry) — re-check those citations
   against the source when reviewing; plausible-sounding ones have been wrong
-- A dev instance is usually already running (ports 3177/5173, EADDRINUSE on a second
-  `bun run dev`) — server (`bun --hot`) and client (Vite HMR) pick up edits live
+- A dev instance is usually already running (check first — not always up; ports 3177/5173,
+  EADDRINUSE on a second `bun run dev`) — server (`bun --hot`) and client (Vite HMR) pick
+  up edits live
+- tasks.md lines that bundle code with a visual-tuning clause ("tune … then freeze") are not
+  done when the code lands — leave them open until the pixels are judged
 - Archive changes with plain `openspec archive` (it applies delta specs); if the deltas
   were already synced via /opsx:sync, archive with `--skip-specs` or it errors on collisions
 
@@ -44,20 +47,19 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
 - Zip entries use virtual paths `foo.zip!/entry`, one level only — nested zips are
   rejected by design (D6)
 - Any change that alters thumbnail pixel output (rig lights, materials, tone mapping) must
-  bump RIG_VERSION in client/src/three/renderer.ts AND the renderer mock factories in tests
+  bump RIG_VERSION in client/src/three/renderer.ts — never re-declare its value in a test
+  mock (spread the real module; a literal silently masks the bump)
+- Scene population goes through `stageModel` (three/renderer.ts) for both thumbnails and
+  live sessions — it pivots the model's bounds to the origin and fits the key light found
+  by name (KEY_LIGHT); a light added to makeScene without that name is silently never fitted
+- Scene teardown (renderThumbnail's finally, ViewerSession.close) disposes every
+  DirectionalLight — shadow maps are VRAM; the model is LRU-owned and never disposed there
 
 ## Testing
 
-- Component tests: `// @vitest-environment happy-dom` pragma, render with plain
-  react-dom (no testing-library), vi.mock `three/renderer` (no WebGL in tests) —
-  see client/test/orbitHandoff.test.tsx
+- Suite-specific conventions live with the tests: client/test/CLAUDE.md, server/test/CLAUDE.md
 - Run vitest from the workspace dir (`cd client && bunx vitest run …`) — from the
   repo root bunx fetches an unpinned vitest that can't resolve workspace deps
-- Server tests via Hono app.request() MUST pass a loopback `host` header — the
-  same-origin guard 403s requests without one
-- Zip fixtures: fflate zipSync (see server/test/helpers.ts); cache dir per-test via
-  MODEL_BROWSER_CACHE env var; ad-hoc `bun -e` fixture scripts must run from server/
-  (fflate is a workspace dep, not a root one)
 - Manual/E2E: Playwright MCP works here including headless WebGL
   - Model tiles respond only to PointerEvents: dispatch pointerdown on the tile, wait
     ~300ms for the overlay to mount its window listeners, then pointerup on window —
