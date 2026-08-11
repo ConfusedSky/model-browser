@@ -12,13 +12,13 @@
 ## 2. Shadow mapping
 
 - [x] 2.1 Enable PCF-soft `shadowMap` in `getRenderer`; set `castShadow`/`receiveShadow` on meshes in client/src/three/models.ts
-- [x] 2.2 In `stageModel`, fit the key light: `position.setLength(k·radius)` (direction preserved), ortho frustum ≈ ±2·radius, near/far spanning, `normalBias` ∝ radius, ~2048 map — tune constants visually on small and large fixtures, then freeze (D2)
+- [ ] 2.2 In `stageModel`, fit the key light: `position.setLength(k·radius)` (direction preserved), ortho frustum ≈ ±2·radius, near/far spanning, `normalBias` ∝ radius, ~2048 map — tune constants visually on small and large fixtures, then freeze (D2) — *code landed with principled defaults frozen in tests; the VISUAL tuning pass is outstanding and runs with 4.3: `SHADOW_NORMAL_BIAS_R` (acne vs. peter-panning) and `SHADOW_EXTENT_R` (sized before the floor existed — bounds how far a grazing camera-mode shadow reaches across the 8R floor)*
 - [x] 2.3 Bump `RIG_VERSION` 2 → 3 in renderer.ts (D4)
 - [x] 2.4 Unit tests: only the key casts; frustum/bias scale linearly between a radius-1 and radius-100 stage; key direction unchanged by the fit
 
 ## 3. Contact floor
 
-- [x] 3.1 In `stageModel`, build the `ShadowMaterial` floor: perpendicular to `frameFor(axis).s`, at the box face minimizing `dot(p, s)` minus ε·radius, sized ≈ 8·radius, `receiveShadow` only, added to the scene after bounds measurement (D3)
+- [ ] 3.1 In `stageModel`, build the `ShadowMaterial` floor: perpendicular to `frameFor(axis).s`, at the box face minimizing `dot(p, s)` minus ε·radius, sized ≈ 8·radius, `receiveShadow` only, added to the scene after bounds measurement (D3) — *code landed with defaults frozen in tests; VISUAL tuning outstanding, runs with 4.3: `FLOOR_OPACITY` 0.35 measured only ~10–20/255 darker than the panel, and axis-mode shadows read much weaker than camera-mode*
 - [x] 3.2 `ViewerSession.setAxis` snaps the floor to the new spindle via the floor handle; `close()` disposes floor geometry and material
 - [x] 3.3 Unit tests: floor position/orientation correct for all six spindles on an asymmetric box; disposed on close; absent from bounds
 
