@@ -15,6 +15,12 @@ import {
 const STATE: CameraState = { az: 0.8, el: 0.4, distR: 3, target: [0.1, -0.2, 0.05] }
 const AXES: OrbitAxis[] = ['x', '-x', 'y', '-y', 'z', '-z']
 
+/** Camera math reads only center/radius; the box is along for the ride. */
+function boundsAt(center: THREE.Vector3, radius: number): Bounds {
+  const box = new THREE.Box3().setFromCenterAndSize(center, new THREE.Vector3(radius, radius, radius))
+  return { center, radius, box }
+}
+
 function roundTrip(state: CameraState, bounds: Bounds, axis?: OrbitAxis): CameraState {
   const pos = statePosition(state, bounds, axis)
   const target = stateTarget(state, bounds)
@@ -30,13 +36,13 @@ function expectClose(a: CameraState, b: CameraState): void {
 
 describe('bounds-relative camera state', () => {
   it('capture(apply(state)) round-trips', () => {
-    const bounds: Bounds = { center: new THREE.Vector3(5, 2, -3), radius: 7 }
+    const bounds = boundsAt(new THREE.Vector3(5, 2, -3), 7)
     expectClose(roundTrip(STATE, bounds), STATE)
   })
 
   it('survives a re-scaled re-export: same state, different bounds → same view', () => {
-    const mm: Bounds = { center: new THREE.Vector3(10, 0, 0), radius: 25.4 }
-    const inches: Bounds = { center: new THREE.Vector3(0.39, 0, 0), radius: 1 }
+    const mm = boundsAt(new THREE.Vector3(10, 0, 0), 25.4)
+    const inches = boundsAt(new THREE.Vector3(0.39, 0, 0), 1)
 
     // The state is unit-free: capturing from either sized world recovers it.
     expectClose(roundTrip(STATE, mm), STATE)
@@ -52,7 +58,7 @@ describe('bounds-relative camera state', () => {
   })
 
   it('applyState aims the camera at the state target', () => {
-    const bounds: Bounds = { center: new THREE.Vector3(0, 0, 0), radius: 2 }
+    const bounds = boundsAt(new THREE.Vector3(0, 0, 0), 2)
     const camera = new THREE.PerspectiveCamera(40, 1)
     applyState(camera, STATE, bounds)
     const forward = new THREE.Vector3()
@@ -62,13 +68,13 @@ describe('bounds-relative camera state', () => {
   })
 
   it('capture(apply(state)) round-trips under every spindle axis', () => {
-    const bounds: Bounds = { center: new THREE.Vector3(5, 2, -3), radius: 7 }
+    const bounds = boundsAt(new THREE.Vector3(5, 2, -3), 7)
     for (const axis of AXES) expectClose(roundTrip(STATE, bounds, axis), STATE)
   })
 
   it('spindle round-trip survives a re-scaled re-export', () => {
-    const mm: Bounds = { center: new THREE.Vector3(10, 0, 0), radius: 25.4 }
-    const inches: Bounds = { center: new THREE.Vector3(0.39, 0, 0), radius: 1 }
+    const mm = boundsAt(new THREE.Vector3(10, 0, 0), 25.4)
+    const inches = boundsAt(new THREE.Vector3(0.39, 0, 0), 1)
     for (const axis of AXES) {
       expectClose(roundTrip(STATE, mm, axis), STATE)
       expectClose(roundTrip(STATE, inches, axis), STATE)
@@ -76,7 +82,7 @@ describe('bounds-relative camera state', () => {
   })
 
   it('the default axis reproduces the historical world-Y representation', () => {
-    const bounds: Bounds = { center: new THREE.Vector3(1, 2, 3), radius: 4 }
+    const bounds = boundsAt(new THREE.Vector3(1, 2, 3), 4)
     const legacy = statePosition(STATE, bounds) // axis omitted
     const explicit = statePosition(STATE, bounds, 'y')
     expect(legacy.distanceTo(explicit)).toBeLessThan(1e-9)
@@ -101,7 +107,7 @@ describe('bounds-relative camera state', () => {
   })
 
   it('applyState locks camera up to the spindle', () => {
-    const bounds: Bounds = { center: new THREE.Vector3(0, 0, 0), radius: 2 }
+    const bounds = boundsAt(new THREE.Vector3(0, 0, 0), 2)
     for (const axis of AXES) {
       const camera = new THREE.PerspectiveCamera(40, 1)
       applyState(camera, STATE, bounds, axis)

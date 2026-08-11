@@ -9,7 +9,8 @@ import type { MeshLru } from '../src/three/lru'
 import ViewerLayer, { type ViewerState } from '../src/viewer/ViewerLayer'
 
 // The overlay drives real ViewerSession math; only the WebGL renderer is faked.
-vi.mock('../src/three/renderer', () => ({
+vi.mock('../src/three/renderer', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/three/renderer')>()),
   getRenderer: () => ({
     setSize: () => {},
     render: () => {},

@@ -6,7 +6,8 @@ import { AXIS_TWEEN_MS, ViewerSession } from '../src/viewer/session'
 
 // render() needs the shared renderer — stub it so the session's rig
 // orientation can be asserted without WebGL.
-vi.mock('../src/three/renderer', () => ({
+vi.mock('../src/three/renderer', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/three/renderer')>()),
   getRenderer: () => ({ setSize: () => {}, render: () => {} }),
   makeScene: () => ({ scene: new THREE.Scene(), rig: new THREE.Group() }),
   renderThumbnail: vi.fn(() => Promise.resolve(new Blob())),

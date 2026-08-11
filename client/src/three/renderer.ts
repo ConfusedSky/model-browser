@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import type { CameraState, OrbitAxis } from '../../../shared/types'
 import { getLightingMode } from '../viewer/lighting'
-import { applyState, boundsOf, DEFAULT_CAMERA, rigQuaternion } from './camera'
+import { applyState, boundsOf, DEFAULT_CAMERA, rigQuaternion, type Bounds } from './camera'
 import { encodeSrgbInPlace } from './srgb'
 
 export const THUMB_SIZE = 512
@@ -59,6 +59,49 @@ export function makeScene(): LitScene {
   return { scene, rig }
 }
 
+export interface StagedModel {
+  /** Centered bounds: center is the origin, box translated by −rawCenter. */
+  bounds: Bounds
+  pivot: THREE.Group
+}
+
+/**
+ * Put a model into a scene the one way every view uses (D4): parent it to a
+ * fresh pivot group, measure its raw bounds, then shift the pivot by −center so
+ * the model straddles the world origin (D1). Camera state is bounds-relative,
+ * so the centering moves no pixels.
+ *
+ * `_axis` is unused here — later work places a contact floor per spindle axis.
+ */
+export function stageModel(lit: LitScene, object: THREE.Object3D, _axis: OrbitAxis): StagedModel {
+  const pivot = new THREE.Group()
+  lit.scene.add(pivot)
+  pivot.add(object)
+  const raw = boundsOf(object)
+  pivot.position.copy(raw.center).negate()
+  return {
+    bounds: {
+      center: new THREE.Vector3(),
+      radius: raw.radius,
+      box: raw.box.translate(pivot.position),
+    },
+    pivot,
+  }
+}
+
+/**
+ * Undo a stageModel borrow. three's `add` reparents, so a borrowed object goes
+ * home with a plain add; one that had no parent is only detached.
+ */
+export function unstage(
+  object: THREE.Object3D,
+  pivot: THREE.Group,
+  originalParent: THREE.Object3D | null,
+): void {
+  if (originalParent === null) pivot.remove(object)
+  else originalParent.add(object)
+}
+
 /**
  * Render a model to a 512×512 transparent PNG via an offscreen render target
  * on the shared renderer (never the visible canvas).
@@ -69,12 +112,12 @@ export function renderThumbnail(
   axis: OrbitAxis = 'y',
 ): Promise<Blob> {
   const r = getRenderer()
-  const { scene, rig } = makeScene()
-  // scene.add() reparents — the object may belong to a live ViewerSession
-  // scene (it is LRU-shared), so its original parent must be restored after.
+  const lit = makeScene()
+  const { scene, rig } = lit
+  // Staging reparents — the object may belong to a live ViewerSession scene
+  // (it is LRU-shared), so its original parent must be restored after.
   const originalParent = object.parent
-  scene.add(object)
-  const bounds = boundsOf(object)
+  const { bounds, pivot } = stageModel(lit, object, axis)
   const camera = new THREE.PerspectiveCamera(40, 1)
   applyState(camera, state, bounds, axis)
   if (getLightingMode() === 'camera') rig.quaternion.copy(camera.quaternion)
@@ -93,8 +136,7 @@ export function renderThumbnail(
   } finally {
     r.setRenderTarget(prevTarget)
     target.dispose()
-    scene.remove(object)
-    originalParent?.add(object)
+    unstage(object, pivot, originalParent)
   }
 
   // Render-target readback is linear; the visible canvas gets sRGB output

@@ -1,7 +1,6 @@
 import * as THREE from 'three'
 import type { CameraState, OrbitAxis } from '../../../shared/types'
 import {
-  boundsOf,
   captureState,
   DEFAULT_CAMERA,
   frameFor,
@@ -11,7 +10,7 @@ import {
   type Bounds,
   type SpindleFrame,
 } from '../three/camera'
-import { getRenderer, makeScene, renderThumbnail } from '../three/renderer'
+import { getRenderer, makeScene, renderThumbnail, stageModel } from '../three/renderer'
 import { getLightingMode } from './lighting'
 
 const ROT_SPEED = 0.01
@@ -49,6 +48,8 @@ export class ViewerSession {
   private scene: THREE.Scene
   /** Light rig — public so tests can assert its orientation. */
   readonly rig: THREE.Group
+  /** Origin-centering group the model hangs from (D1). */
+  private pivot: THREE.Group
   private camera = new THREE.PerspectiveCamera(40, 1)
   private bounds: Bounds
   private frame: SpindleFrame
@@ -67,12 +68,13 @@ export class ViewerSession {
     initial: CameraState = DEFAULT_CAMERA,
     private readonly now: () => number = () => performance.now(),
   ) {
-    const { scene, rig } = makeScene()
-    this.scene = scene
-    this.rig = rig
+    const lit = makeScene()
+    this.scene = lit.scene
+    this.rig = lit.rig
     this.rig.quaternion.copy(rigQuaternion(axis))
-    this.scene.add(object)
-    this.bounds = boundsOf(object)
+    const staged = stageModel(lit, object, axis)
+    this.pivot = staged.pivot
+    this.bounds = staged.bounds
     this._axis = axis
     this.frame = frameFor(axis)
     this.state = initial
@@ -233,6 +235,6 @@ export class ViewerSession {
   }
 
   close(): void {
-    this.scene.remove(this.object)
+    this.pivot.remove(this.object)
   }
 }

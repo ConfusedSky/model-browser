@@ -4,13 +4,15 @@ import type { CameraState, OrbitAxis } from '../../../shared/types'
 export interface Bounds {
   center: THREE.Vector3
   radius: number
+  /** The measured box — translated alongside the model when it is staged (D1). */
+  box: THREE.Box3
 }
 
 export function boundsOf(object: THREE.Object3D): Bounds {
   const box = new THREE.Box3().setFromObject(object)
   const center = box.getCenter(new THREE.Vector3())
   const sphere = box.getBoundingSphere(new THREE.Sphere())
-  return { center, radius: Math.max(sphere.radius, 1e-6) }
+  return { center, radius: Math.max(sphere.radius, 1e-6), box }
 }
 
 export const DEFAULT_CAMERA: CameraState = {
