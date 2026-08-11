@@ -11,7 +11,7 @@ The rig SHALL additionally carry two colored rim accents — red at rig-space �
 - **WHEN** a model whose spindle is ±X or ±Z is viewed in `axis` mode
 - **THEN** it is lit as if from above relative to its spindle (key light and hemisphere sky aligned to the spindle), not from world +Y
 
-#### Scenario: Default axis keeps the historical base-rig orientation
+#### Scenario: Default axis keeps historical lighting
 - **WHEN** a model with the default `y` spindle is viewed in `axis` mode
 - **THEN** the hemisphere, key, and fill lights light it exactly as the historical world-fixed rig did, with only the rim accents added
 
