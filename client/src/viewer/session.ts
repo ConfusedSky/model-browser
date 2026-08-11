@@ -241,5 +241,9 @@ export class ViewerSession {
 
   close(): void {
     this.pivot.remove(this.object)
+    // The scene dies with the session; its key light owns a shadow-map
+    // texture (D5). The model belongs to the LRU — only detached, above.
+    const key = this.rig.getObjectByName('key')
+    if (key instanceof THREE.DirectionalLight) key.dispose()
   }
 }

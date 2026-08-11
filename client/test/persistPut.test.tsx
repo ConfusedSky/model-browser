@@ -19,7 +19,7 @@ vi.mock('../src/api/client', () => ({
     putThumb = putThumb
   },
 }))
-vi.mock('../src/three/renderer', () => ({
+vi.mock('../src/three/renderer', async (importOriginal) => ({
   renderThumbnail: vi.fn(() => Promise.resolve(new Blob())),
   getRenderer: () => ({
     setSize: () => {},
@@ -27,7 +27,9 @@ vi.mock('../src/three/renderer', () => ({
     domElement: document.createElement('canvas'),
   }),
   makeScene: () => ({ scene: { add: () => {}, remove: () => {} }, rig: { quaternion: { copy: () => {} } } }),
-  RIG_VERSION: 2,
+  // The real constant, never a literal: a literal would keep passing across a
+  // RIG_VERSION bump while asserting a version the app no longer writes.
+  RIG_VERSION: (await importOriginal<typeof import('../src/three/renderer')>()).RIG_VERSION,
 }))
 // The viewer itself is out of scope: a stub that persists one settled session
 // on mount lets this file pin App's persist PUT payload alone.
@@ -48,6 +50,7 @@ vi.mock('../src/viewer/ViewerLayer', () => ({
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 const { default: App } = await import('../src/App')
+const { RIG_VERSION } = await import('../src/three/renderer')
 
 const MODEL = {
   name: 'm.stl',
@@ -71,7 +74,7 @@ beforeEach(async () => {
   listDir.mockReset()
   listDir.mockResolvedValue(LISTING)
   getThumb.mockReset()
-  getThumb.mockResolvedValue({ status: 'hit', pngUrl: 'blob:t', lighting: 'axis', rig: 2 })
+  getThumb.mockResolvedValue({ status: 'hit', pngUrl: 'blob:t', lighting: 'axis', rig: RIG_VERSION })
   putThumb.mockReset()
   putThumb.mockResolvedValue(undefined)
   container = document.createElement('div')
@@ -111,6 +114,6 @@ describe('orbit-release persist PUT', () => {
     expect(save.camera).toEqual(SETTLED)
     expect(save.axis).toBe('-z')
     expect(save.lighting).toBe('axis')
-    expect(save.rig).toBe(2)
+    expect(save.rig).toBe(RIG_VERSION)
   })
 })

@@ -18,7 +18,7 @@ vi.mock('../src/api/client', () => ({
     putThumb = vi.fn().mockResolvedValue(undefined)
   },
 }))
-vi.mock('../src/three/renderer', () => ({
+vi.mock('../src/three/renderer', async (importOriginal) => ({
   renderThumbnail: vi.fn(() => Promise.resolve(new Blob())),
   getRenderer: () => ({
     setSize: () => {},
@@ -26,7 +26,7 @@ vi.mock('../src/three/renderer', () => ({
     domElement: document.createElement('canvas'),
   }),
   makeScene: () => ({ scene: { add: () => {}, remove: () => {} }, rig: { quaternion: { copy: () => {} } } }),
-  RIG_VERSION: 2,
+  RIG_VERSION: (await importOriginal<typeof import('../src/three/renderer')>()).RIG_VERSION,
 }))
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 

@@ -8,12 +8,15 @@ import type { ApiClient } from '../src/api/client'
 import { useThumbnails } from '../src/hooks/useThumbnails'
 import type { MeshLru } from '../src/three/lru'
 import { RenderQueue } from '../src/three/queue'
+import { RIG_VERSION } from '../src/three/renderer'
 import { setLightingMode } from '../src/viewer/lighting'
 
 // The hook only reaches the renderer through renderThumbnail — fake it.
-vi.mock('../src/three/renderer', () => ({
+vi.mock('../src/three/renderer', async (importOriginal) => ({
   renderThumbnail: vi.fn(() => Promise.resolve(new Blob())),
-  RIG_VERSION: 2,
+  // The real constant, never a literal: a literal would keep passing across a
+  // RIG_VERSION bump while asserting a version the app no longer writes.
+  RIG_VERSION: (await importOriginal<typeof import('../src/three/renderer')>()).RIG_VERSION,
 }))
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -91,7 +94,7 @@ afterEach(async () => {
 describe('thumbnail cache lookups vs the render queue', () => {
   it('cache hits resolve while the queue is suspended — lookups never occupy a slot', async () => {
     const api = {
-      getThumb: vi.fn().mockResolvedValue({ status: 'hit', pngUrl: 'blob:cached', lighting: 'axis', rig: 2 }),
+      getThumb: vi.fn().mockResolvedValue({ status: 'hit', pngUrl: 'blob:cached', lighting: 'axis', rig: RIG_VERSION }),
     } as unknown as ApiClient
     const lru = { acquire: vi.fn() } as unknown as MeshLru<THREE.Object3D>
     const queue = new RenderQueue(2)
@@ -139,7 +142,7 @@ describe('thumbnail cache lookups vs the render queue', () => {
         camera,
         axis: '-z',
         lighting: 'camera', // active mode is the default 'axis'
-        rig: 2, // current rig — the lighting clause alone must trigger this
+        rig: RIG_VERSION, // current rig — the lighting clause alone must trigger this
       }),
       putThumb: vi.fn().mockResolvedValue(undefined),
     } as unknown as ApiClient
@@ -164,8 +167,8 @@ describe('thumbnail cache lookups vs the render queue', () => {
     const api = {
       getThumb: vi
         .fn()
-        .mockResolvedValueOnce({ status: 'hit', pngUrl: 'blob:cam', lighting: 'camera', rig: 2 })
-        .mockResolvedValueOnce({ status: 'hit', pngUrl: 'blob:ax', lighting: 'axis', rig: 2 }),
+        .mockResolvedValueOnce({ status: 'hit', pngUrl: 'blob:cam', lighting: 'camera', rig: RIG_VERSION })
+        .mockResolvedValueOnce({ status: 'hit', pngUrl: 'blob:ax', lighting: 'axis', rig: RIG_VERSION }),
       putThumb: vi.fn().mockResolvedValue(undefined),
     } as unknown as ApiClient
     const lru = { acquire: vi.fn().mockResolvedValue({}) } as unknown as MeshLru<THREE.Object3D>
@@ -220,7 +223,7 @@ describe('thumbnail cache lookups vs the render queue', () => {
 
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:oldRig')
     expect(statuses()).toEqual(['ready'])
-    expect(api.putThumb).toHaveBeenCalledWith(expect.objectContaining({ lighting: 'axis', rig: 2 }))
+    expect(api.putThumb).toHaveBeenCalledWith(expect.objectContaining({ lighting: 'axis', rig: RIG_VERSION }))
     const put = vi.mocked(api.putThumb).mock.calls[0]![0]
     expect(put.camera).toBeUndefined() // stored camera preserved by omission
   })

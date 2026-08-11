@@ -15,6 +15,20 @@ function makeMaterial(): THREE.MeshStandardMaterial {
   return new THREE.MeshStandardMaterial({ color: 0x9aa4b2, metalness: 0.1, roughness: 0.75 })
 }
 
+/**
+ * Every mesh both casts and receives, so a model self-shadows under the key
+ * light (D2) and takes its own shadow on the contact floor.
+ */
+function withShadows<T extends THREE.Object3D>(object: T): T {
+  object.traverse((o) => {
+    if (o instanceof THREE.Mesh) {
+      o.castShadow = true
+      o.receiveShadow = true
+    }
+  })
+  return object
+}
+
 /** Parse model bytes into an Object3D with consistent materials. */
 export function parseModel(bytes: ArrayBuffer, format: ModelFormat): THREE.Object3D {
   if (format === 'stl') {
@@ -24,20 +38,20 @@ export function parseModel(bytes: ArrayBuffer, format: ModelFormat): THREE.Objec
     // conversion into the geometry so models stand upright. (3MFLoader does
     // this itself; OBJ is conventionally Y-up already.)
     geometry.rotateX(-Math.PI / 2)
-    return new THREE.Mesh(geometry, makeMaterial())
+    return withShadows(new THREE.Mesh(geometry, makeMaterial()))
   }
   if (format === 'obj') {
     const group = new OBJLoader().parse(new TextDecoder().decode(bytes))
     group.traverse((o) => {
       if (o instanceof THREE.Mesh) o.material = makeMaterial()
     })
-    return group
+    return withShadows(group)
   }
   const group = new ThreeMFLoader().parse(bytes)
   group.traverse((o) => {
     if (o instanceof THREE.Mesh) o.material = makeMaterial()
   })
-  return group
+  return withShadows(group)
 }
 
 /** Byte size of all geometry attribute arrays — the LRU accounting unit. */
