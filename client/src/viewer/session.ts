@@ -18,6 +18,7 @@ import {
   renderThumbnail,
   stageModel,
 } from '../three/renderer'
+import { aoEnabled } from './aoToggle'
 import { getLightingMode } from './lighting'
 
 const ROT_SPEED = 0.01
@@ -120,7 +121,9 @@ export class ViewerSession {
     // Never a direct renderer.render: ambient occlusion lives in the shared
     // live chain, which sizes itself to this host only when it actually
     // changed and re-points its passes at this scene every frame (D1).
-    getLiveChain(width, height).render(this.scene, this.camera, this.bounds)
+    // SCAFFOLDING: the AO comparison flag is consulted here and only here —
+    // thumbnails never see it, so the cache stays on the shipped recipe.
+    getLiveChain(width, height).render(this.scene, this.camera, this.bounds, aoEnabled())
   }
 
   /**

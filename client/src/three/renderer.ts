@@ -73,8 +73,13 @@ export interface RenderChain {
    * Point every pass at this frame's scene/camera, fit the occlusion to the
    * staged model, then run the chain. Both happen per render because the chain
    * is shared: the previous caller left its own scene and its own fit behind.
+   *
+   * SCAFFOLDING: `ao` skips the GTAO pass for this render (composers skip
+   * disabled passes; RenderPass → OutputPass still swap the same way). Only
+   * the live view ever passes false — `renderThumbnail` never sets it, so the
+   * default keeps thumbnails on the shipped recipe. Removed with the toggle.
    */
-  render(scene: THREE.Scene, camera: THREE.PerspectiveCamera, bounds: Bounds): void
+  render(scene: THREE.Scene, camera: THREE.PerspectiveCamera, bounds: Bounds, ao?: boolean): void
 }
 
 /**
@@ -115,7 +120,9 @@ function makeChain(width: number, height: number, type: THREE.TextureDataType): 
       sized.set(w, h)
       composer.setSize(w, h)
     },
-    render(callerScene, callerCamera, bounds) {
+    render(callerScene, callerCamera, bounds, ao = true) {
+      // SCAFFOLDING (with the toggle): the composer skips disabled passes.
+      aoPass.enabled = ao
       scenePass.scene = callerScene
       scenePass.camera = callerCamera
       aoPass.scene = callerScene

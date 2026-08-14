@@ -31,6 +31,7 @@ function makeProps(mode: 'orbit' | 'lightbox') {
     camera: undefined,
     axis: undefined,
     lighting: 'axis' as const,
+    ao: true,
     api: {
       getThumb: vi.fn().mockRejectedValue(new Error('offline')),
     } as unknown as ApiClient,

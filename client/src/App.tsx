@@ -16,6 +16,7 @@ import { disposeModel, embedded3mfThumbnail, formatOf, geometryBytes, parseModel
 import { RenderQueue } from './three/queue'
 import { RIG_VERSION } from './three/renderer'
 import ViewerLayer, { type ViewerState } from './viewer/ViewerLayer'
+import { aoEnabled, setAoEnabled } from './viewer/aoToggle'
 import { getLightingMode, LIGHTING_MODES, setLightingMode } from './viewer/lighting'
 import type { ViewerSession } from './viewer/session'
 
@@ -53,6 +54,8 @@ export default function App() {
   const [query, setQuery] = useState<string | null>(null)
   const [viewer, setViewer] = useState<ViewerState | null>(null)
   const [lighting, setLightingState] = useState<LightingMode>(getLightingMode)
+  // SCAFFOLDING: AO comparison pill state — removed with the toggle.
+  const [ao, setAoState] = useState(aoEnabled)
   const trackerRef = useRef(new GestureTracker())
 
   const showSkeleton = useDelayedFlag(pending, SKELETON_DELAY_MS)
@@ -404,6 +407,22 @@ export default function App() {
             {m}
           </button>
         ))}
+        {/* SCAFFOLDING: ambient occlusion on/off, live view only — removed after the comparison */}
+        <span className="h-4 w-px bg-zinc-700" />
+        <button
+          type="button"
+          aria-pressed={ao}
+          title="Ambient occlusion in the live view, for comparison — thumbnails keep the shipped recipe"
+          onClick={() => {
+            setAoEnabled(!ao)
+            setAoState(!ao)
+          }}
+          className={`rounded-full px-2.5 py-1 ${
+            ao ? 'bg-sky-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
+          }`}
+        >
+          ssao
+        </button>
       </div>
       {viewer !== null && (
         <ViewerLayer
@@ -411,6 +430,7 @@ export default function App() {
           camera={thumbs.get(viewer.entry.path)?.camera}
           axis={thumbs.get(viewer.entry.path)?.axis}
           lighting={lighting}
+          ao={ao}
           api={api}
           lru={lru}
           tracker={trackerRef.current}
