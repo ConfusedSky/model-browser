@@ -1,5 +1,6 @@
 import { readdir, realpath, stat } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join } from 'node:path'
+import { baseName } from '../../shared/names'
 import type { DirEntry, DirListing } from '../../shared/types'
 import { joinVPath, parseVPath, VPathError } from './vpath'
 import { ZipError, listZipEntries } from './zip'
@@ -300,11 +301,10 @@ export async function listFlat(vpath: string): Promise<DirListing> {
   }
 
   const cap = envLimit('MODEL_BROWSER_FLAT_CAP', 500)
-  const base = (n: string) => n.slice(n.lastIndexOf('/') + 1)
   // Not sortEntries: its model comparison is the full name, i.e. the relative
   // path — flat ordering is by file name so same-named parts sit together (D2).
   walk.models.sort(
-    (a, b) => base(a.name).localeCompare(base(b.name)) || a.name.localeCompare(b.name),
+    (a, b) => baseName(a.name).localeCompare(baseName(b.name)) || a.name.localeCompare(b.name),
   )
   if (walk.models.length > cap) {
     walk.truncated = true

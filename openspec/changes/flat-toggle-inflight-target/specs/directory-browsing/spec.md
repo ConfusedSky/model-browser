@@ -3,13 +3,13 @@
 ## MODIFIED Requirements
 
 ### Requirement: Flat view toggle
-The client SHALL offer a flat-view toggle alongside the path bar. While active, the grid SHALL show the current folder's flat listing — the top-level folder and zip tiles first, navigable exactly as in the nested view, then model tiles labeled by relative path — and hover-warm, drag-to-orbit, the lightbox, and thumbnail/camera persistence SHALL behave exactly as in the nested view for the same models. The toggle SHALL remain in effect across navigation within the session, including navigation into a zip, and a truncated listing SHALL be indicated to the user.
+The client SHALL offer a flat-view toggle alongside the path bar. While active, the grid SHALL show the current folder's flat listing — the top-level folder and zip tiles first, navigable exactly as in the nested view, then model tiles labeled by **file name**, with the entry's full relative path carried in the tile's tooltip and accessible name — and hover-warm, drag-to-orbit, the lightbox, and thumbnail/camera persistence SHALL behave exactly as in the nested view for the same models. The toggle SHALL remain in effect across navigation within the session, including navigation into a zip, and a truncated listing SHALL be indicated to the user.
 
 Toggling SHALL re-request the user's newest navigation target: the in-flight target while a navigation is still loading, otherwise the committed path of the listing on screen. When the newest navigation has failed, the toggle SHALL fall back to the committed path.
 
 #### Scenario: Toggling flat view
 - **WHEN** the user activates the flat toggle on a folder with nested models
-- **THEN** the grid re-renders showing the folder's top-level containers followed by all models recursively with relative-path labels, and deactivating it restores the nested view
+- **THEN** the grid re-renders showing the folder's top-level containers followed by all models recursively, each labeled by file name with its relative path in the tooltip, and deactivating it restores the nested view
 
 #### Scenario: Navigating down while flat
 - **WHEN** flat view is active and the user clicks one of the top-level folder tiles

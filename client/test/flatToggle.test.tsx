@@ -135,7 +135,13 @@ describe('flat toggle', () => {
     await settle()
 
     expect(flatButton().getAttribute('aria-pressed')).toBe('true')
-    expect(labels()).toContain('a/deep.stl')
+    // Tile labels show only the file name; the relative path survives on the tile
+    // itself, as the tooltip and the accessible name.
+    expect(labels()).toEqual(['a', 'deep.stl'])
+    const tile = container.querySelector('main button[data-model-tile]')!
+    expect(tile.getAttribute('title')).toBe('a/deep.stl')
+    // The accessible name may carry a thumbnail-state suffix; the path is the point.
+    expect(tile.getAttribute('aria-label')).toContain('a/deep.stl')
     expect(container.textContent).toContain('Showing 1 models; some were omitted.')
   })
 })

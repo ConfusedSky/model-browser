@@ -9,7 +9,7 @@
 ## 2. Client
 
 - [ ] 2.1 `ApiClient.listDir` options gain `q`, encoded onto the request (with wire test)
-- [ ] 2.2 Header search input in `client/src/App.tsx`: separate `filter` (live text, narrows rendered entries by displayed name at render time — no requests, thumbnails untouched) and `query` (committed on submit) states; typing over deep results filters them; both cleared on navigation (D2)
+- [ ] 2.2 Header search input in `client/src/App.tsx`: separate `filter` (live text, narrows rendered entries by their full `name` — the relative path in flat/deep views, not the shortened tile label — at render time — no requests, thumbnails untouched) and `query` (committed on submit) states; typing over deep results filters them; both cleared on navigation (D2)
 - [ ] 2.3 Deep search: Enter (or the input's Deep affordance) commits the query and issues `fetchListing` with `{ flat: true, q }` at the newest requested target (`targetRef.current ?? path` — depends on flat-toggle-inflight-target landing first); clearing a committed query re-issues the ordinary listing per the flat toggle; navigation drops the query (D3)
 - [ ] 2.4 Component tests beside `flatToggle.test.tsx`: typing filters all tile kinds without new `listDir` calls and erasing restores; deep search request carries `q` and renders relative-path results with the truncation notice; editing text over results filters without a new request; clearing a committed query re-requests the plain listing; a search submitted mid-navigation targets the in-flight destination; a superseding navigation discards a late search response
 

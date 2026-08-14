@@ -8,7 +8,7 @@
 
 **Goals:**
 - Typing narrows the current grid instantly with zero requests.
-- An explicit deep search finds models by name anywhere under the current directory, with flat-listing ergonomics (relative-path labels, shared thumbnails/camera, truncation, skeleton).
+- An explicit deep search finds models by name anywhere under the current directory, with flat-listing ergonomics (file-name labels over relative-path names, shared thumbnails/camera, truncation, skeleton).
 - Both modes work from nested and flat views, and inside zips.
 
 **Non-Goals:**
@@ -26,7 +26,7 @@
 
 ### D2: The filter is client view state layered over `listing`
 
-Two distinct pieces of state share the one input: `filter`, the live text, and `query`, the last *committed* deep search (set on submit, null otherwise). `filter` narrows the rendered entries (`entries.filter(e => e.name.toLowerCase().includes(q))` at render time) without touching `listing`, requests, or `useThumbnails` (whose effect keys on `entries` — the unfiltered listing — so already-warm thumbnails stay warm while filtering). It applies over whatever listing is showing, deep-search results included: after a submit, editing the text filters the results client-side and only another submit re-searches. Every tile kind is matched by its display name — in flat view a model's name is its relative path, so path fragments match too. Emptying the input issues no request while no query is committed; with one committed, it clears both states and re-issues the ordinary listing (D3). Navigation clears both without an extra request — the navigation is the request. The truncation notice keeps describing the underlying listing, not the filtered view.
+Two distinct pieces of state share the one input: `filter`, the live text, and `query`, the last *committed* deep search (set on submit, null otherwise). `filter` narrows the rendered entries (`entries.filter(e => e.name.toLowerCase().includes(q))` at render time) without touching `listing`, requests, or `useThumbnails` (whose effect keys on `entries` — the unfiltered listing — so already-warm thumbnails stay warm while filtering). It applies over whatever listing is showing, deep-search results included: after a submit, editing the text filters the results client-side and only another submit re-searches. Every tile kind is matched by its full `name` — in flat view a model's name is its relative path, so path fragments match too, even though the tile is *labeled* by file name alone (`baseName` in `Grid.tsx`, path in the tooltip). Matching the label instead would make a folder fragment stop matching in exactly the view that exists to search across folders. Emptying the input issues no request while no query is committed; with one committed, it clears both states and re-issues the ordinary listing (D3). Navigation clears both without an extra request — the navigation is the request. The truncation notice keeps describing the underlying listing, not the filtered view.
 
 ### D3: Deep search rides `fetchListing`; the query is part of the request, not the toggle
 

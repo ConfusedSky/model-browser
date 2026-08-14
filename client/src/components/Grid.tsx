@@ -1,3 +1,4 @@
+import { baseName } from '../../../shared/names'
 import type { DirEntry } from '../../../shared/types'
 import type { ThumbState } from '../hooks/useThumbnails'
 
@@ -52,7 +53,7 @@ function Tile({
 
   if (entry.kind !== 'model') {
     return (
-      <button type="button" className={base} onClick={() => onEnter(entry)}>
+      <button type="button" title={entry.name} className={base} onClick={() => onEnter(entry)}>
         <span className="text-4xl">{entry.kind === 'dir' ? '📁' : '🗜️'}</span>
         <span className="w-full truncate text-center text-xs">{entry.name}</span>
       </button>
@@ -63,6 +64,11 @@ function Tile({
     <button
       type="button"
       data-model-tile={entry.path}
+      title={entry.name}
+      // The label is shortened to the file name, so the accessible name carries
+      // the full one — in flat view that path is the only thing telling two
+      // same-named parts apart.
+      aria-label={thumb?.status === 'error' ? `${entry.name} — failed to load` : entry.name}
       className={`${base} touch-none select-none`}
       onPointerDown={(e) => onModelPointerDown(e, entry, e.currentTarget)}
       onKeyDown={(e) => {
@@ -81,7 +87,7 @@ function Tile({
         ) : thumb?.url !== undefined ? (
           <img
             src={thumb.url}
-            alt={entry.name}
+            alt="" // decorative: the button's aria-label names the model
             draggable={false}
             className="max-h-full max-w-full object-contain"
           />
@@ -89,7 +95,9 @@ function Tile({
           <span className="size-6 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-400" />
         )}
       </div>
-      <span className="w-full truncate text-center text-xs">{entry.name}</span>
+      {/* Flat-view names carry the relative path (`dir/foo.stl`, `a.zip!/b.stl`) — the
+          tile shows just the file name; the path is in the title and aria-label. */}
+      <span className="w-full truncate text-center text-xs">{baseName(entry.name)}</span>
     </button>
   )
 }
