@@ -28,7 +28,11 @@ export function createApp(cache: ThumbCache = new ThumbCache()): Hono {
   app.get('/api/dir', async (c) => {
     const path = c.req.query('path')
     if (path === undefined || path === '') return c.json({ error: 'path is required' }, 400)
-    if (c.req.query('flat') === 'true') return c.json(await listFlat(path))
+    const flat = c.req.query('flat') === 'true'
+    const q = c.req.query('q')
+    const blankQ = q === undefined || q.trim() === ''
+    if (!blankQ && !flat) return c.json({ error: 'q requires flat=true' }, 400)
+    if (flat) return c.json(await listFlat(path, q))
     return c.json(await listDir(path))
   })
 

@@ -38,6 +38,18 @@ describe('HttpApiClient contract', () => {
     expect(fetchFn.mock.calls.filter(([url]) => url.includes('flat'))).toHaveLength(1)
   })
 
+  it('listDir appends q, escaped, only when non-blank', async () => {
+    const fetchFn = vi.fn((_url: string) => Promise.resolve(jsonResponse({ path: '', entries: [] })))
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
+    await api.listDir('/models', { flat: true, q: 'nuts & bolts' })
+    expect(fetchFn).toHaveBeenCalledWith(
+      `/api/dir?path=${encodeURIComponent('/models')}&flat=true&q=${encodeURIComponent('nuts & bolts')}`,
+    )
+    fetchFn.mockClear()
+    await api.listDir('/models', { flat: true, q: '   ' })
+    expect(fetchFn).toHaveBeenCalledWith(`/api/dir?path=${encodeURIComponent('/models')}&flat=true`)
+  })
+
   it('throws HttpError with the server message on failure', async () => {
     const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ error: 'nested zips are unsupported' }, 400))
     const api = new HttpApiClient(fetchFn as unknown as typeof fetch)

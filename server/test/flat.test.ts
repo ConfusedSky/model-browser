@@ -52,9 +52,10 @@ afterEach(() => {
   delete process.env.MODEL_BROWSER_FLAT_BUDGET
 })
 
-async function flat(path: string, flag = 'true'): Promise<DirListing> {
+async function flat(path: string, flag = 'true', q?: string): Promise<DirListing> {
+  const qs = q === undefined ? '' : `&q=${encodeURIComponent(q)}`
   const res = await app.request(
-    `/api/dir?path=${encodeURIComponent(path)}&flat=${flag}`,
+    `/api/dir?path=${encodeURIComponent(path)}&flat=${flag}${qs}`,
     { headers: LOOPBACK },
   )
   expect(res.status).toBe(200)
@@ -248,5 +249,89 @@ describe('flag and errors', () => {
       chmodSync(dir, 0o755)
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+})
+
+describe('deep name search (q parameter)', () => {
+  it('matches models across depths and inside zips, by file name, in the usual order', async () => {
+    const body = await flat(root, 'true', 'bracket')
+    expect(body.entries.map((e) => e.name)).toEqual(['a/bracket.stl', 'z/bracket.stl'])
+  })
+
+  it('matches a model several levels inside a zip', async () => {
+    const body = await flat(root, 'true', 'left')
+    expect(body.entries.map((e) => e.name)).toEqual(['kit.zip!/arms/left.stl'])
+  })
+
+  it('is case-insensitive', async () => {
+    const body = await flat(root, 'true', 'BrAcKeT')
+    expect(body.entries.map((e) => e.name)).toEqual(['a/bracket.stl', 'z/bracket.stl'])
+  })
+
+  it('excludes a model matched only via a containing folder name, not its file name', async () => {
+    // "arms" is a folder in kit.zip containing left.stl — the folder name is a
+    // substring of the relative path but not of the file's own base name.
+    const body = await flat(root, 'true', 'arms')
+    expect(body.entries).toEqual([])
+  })
+
+  it('matches top-level containers by the same predicate', async () => {
+    const body = await flat(root, 'true', 'kit')
+    expect(body.entries.map((e) => e.name)).toEqual(['kit.zip'])
+  })
+
+  it('deep search rooted in a zip', async () => {
+    const body = await flat(zipPath, 'true', 'left')
+    expect(body.entries.map((e) => e.name)).toEqual(['arms/left.stl'])
+  })
+
+  it('deep search rooted in a directory inside a zip', async () => {
+    const body = await flat(`${zipPath}!/arms`, 'true', 'left')
+    expect(body.entries.map((e) => e.name)).toEqual(['left.stl'])
+  })
+
+  it('caps matches (not raw walk output) and flags truncated', async () => {
+    process.env.MODEL_BROWSER_FLAT_CAP = '1'
+    const body = await flat(root, 'true', 'bracket')
+    expect(body.entries.map((e) => e.name)).toEqual(['a/bracket.stl'])
+    expect(body.truncated).toBe(true)
+  })
+
+  it('still reports budget truncation when the search matches nothing', async () => {
+    process.env.MODEL_BROWSER_FLAT_BUDGET = '2'
+    const body = await flat(root, 'true', 'nope-does-not-exist')
+    expect(body.entries).toEqual([])
+    expect(body.truncated).toBe(true)
+  })
+
+  it('a blank or whitespace-only query is a plain flat listing', async () => {
+    const blank = await flat(root, 'true', '')
+    expect(blank.entries.map((e) => e.name)).toEqual([...CONTAINERS, ...MODELS])
+    const whitespace = await flat(root, 'true', '   ')
+    expect(whitespace.entries.map((e) => e.name)).toEqual([...CONTAINERS, ...MODELS])
+  })
+
+  it('rejects a non-blank query without the flat flag', async () => {
+    const res = await app.request(
+      `/api/dir?path=${encodeURIComponent(root)}&q=bracket`,
+      { headers: LOOPBACK },
+    )
+    expect(res.status).toBe(400)
+  })
+
+  it('rejects a non-blank query when flat is explicitly false', async () => {
+    const res = await app.request(
+      `/api/dir?path=${encodeURIComponent(root)}&flat=false&q=bracket`,
+      { headers: LOOPBACK },
+    )
+    expect(res.status).toBe(400)
+  })
+
+  it('a blank query without the flat flag is not rejected', async () => {
+    const res = await app.request(
+      `/api/dir?path=${encodeURIComponent(root)}&q=`,
+      { headers: LOOPBACK },
+    )
+    expect(res.status).toBe(200)
   })
 })

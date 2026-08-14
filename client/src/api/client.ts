@@ -36,7 +36,7 @@ export interface ThumbSave {
  * touching callers.
  */
 export interface ApiClient {
-  listDir(path: string, opts?: { flat?: boolean }): Promise<DirListing>
+  listDir(path: string, opts?: { flat?: boolean; q?: string }): Promise<DirListing>
   complete(prefix: string): Promise<string[]>
   fetchModel(path: string): Promise<ArrayBuffer>
   getThumb(path: string, mtime: number): Promise<ThumbResult>
@@ -78,9 +78,12 @@ async function blobToBase64(blob: Blob): Promise<string> {
 export class HttpApiClient implements ApiClient {
   constructor(private fetchFn: typeof fetch = (...args) => fetch(...args)) {}
 
-  async listDir(path: string, opts?: { flat?: boolean }): Promise<DirListing> {
+  async listDir(path: string, opts?: { flat?: boolean; q?: string }): Promise<DirListing> {
     const flat = opts?.flat === true ? '&flat=true' : ''
-    const res = await this.fetchFn(`/api/dir?path=${encodeURIComponent(path)}${flat}`)
+    // Free-form user text, unlike the boolean `flat` — the URL is built by
+    // concatenation, so an unescaped `&` or `#` would silently truncate it.
+    const q = opts?.q !== undefined && opts.q.trim() !== '' ? `&q=${encodeURIComponent(opts.q)}` : ''
+    const res = await this.fetchFn(`/api/dir?path=${encodeURIComponent(path)}${flat}${q}`)
     return jsonOrThrow<DirListing>(res)
   }
 

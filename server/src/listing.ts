@@ -139,6 +139,11 @@ async function listZipDir(zipPath: string, prefix: string): Promise<DirEntry[]> 
   return sortEntries(entries)
 }
 
+/** Case-insensitive substring match on an entry's base name (D1). */
+function matchesQuery(name: string, q: string): boolean {
+  return baseName(name).toLowerCase().includes(q)
+}
+
 function sortEntries(entries: DirEntry[]): DirEntry[] {
   const rank: Record<string, number> = { dir: 0, zip: 1, model: 2 }
   return entries.sort(
@@ -267,8 +272,15 @@ function envLimit(name: string, fallback: number): number {
  * name (basename, full relative path as tiebreak). Walk work is bounded by a
  * step budget; the response by a model cap. Either dropping models sets
  * `truncated`.
+ *
+ * `query`, when non-blank, narrows both the container tiles and the walked
+ * models to those whose base name contains it case-insensitively, applied
+ * before the cap so the cap bounds matches rather than raw walk output (D1).
+ * A blank or whitespace-only query is treated as absent.
  */
-export async function listFlat(vpath: string): Promise<DirListing> {
+export async function listFlat(vpath: string, query?: string): Promise<DirListing> {
+  const q = query?.trim().toLowerCase()
+  const hasQuery = q !== undefined && q !== ''
   const { fsPath, entry } = parseVPath(vpath)
   if (!isAbsolute(fsPath)) throw new ListingError(400, 'path must be absolute')
   const walk: FlatWalk = {
@@ -306,6 +318,10 @@ export async function listFlat(vpath: string): Promise<DirListing> {
   walk.models.sort(
     (a, b) => baseName(a.name).localeCompare(baseName(b.name)) || a.name.localeCompare(b.name),
   )
+  if (hasQuery) {
+    containers = containers.filter((e) => matchesQuery(e.name, q))
+    walk.models = walk.models.filter((m) => matchesQuery(m.name, q))
+  }
   if (walk.models.length > cap) {
     walk.truncated = true
     walk.models.length = cap

@@ -45,6 +45,12 @@ export default function App() {
   const [truncated, setTruncated] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
+  // `filter` is live typed text, narrowing rendered entries with zero
+  // requests; `query` is the last *committed* deep search (set on submit,
+  // null otherwise). Kept apart so typing over deep results filters them
+  // client-side without re-searching (D2).
+  const [filter, setFilter] = useState('')
+  const [query, setQuery] = useState<string | null>(null)
   const [viewer, setViewer] = useState<ViewerState | null>(null)
   const [lighting, setLightingState] = useState<LightingMode>(getLightingMode)
   const trackerRef = useRef(new GestureTracker())
@@ -65,12 +71,12 @@ export default function App() {
   const [target, setTarget] = useState<string | null>(null)
 
   const fetchListing = useCallback(
-    (target: string, asFlat: boolean, onFail?: () => void) => {
+    (target: string, asFlat: boolean, q: string | null, onFail?: () => void) => {
       const req = ++requestRef.current
       setTarget(target)
       setPending(true)
       void api
-        .listDir(target, { flat: asFlat })
+        .listDir(target, { flat: asFlat, q: q ?? undefined })
         .then((res) => {
           if (req !== requestRef.current) return
           setPending(false)
@@ -91,7 +97,16 @@ export default function App() {
     [api],
   )
 
-  const navigate = useCallback((target: string) => fetchListing(target, flat), [fetchListing, flat])
+  const navigate = useCallback(
+    (target: string) => {
+      // Navigation is itself the request that clears search state (D2/D3) —
+      // no extra fetch needed to drop a filter or a committed query.
+      setFilter('')
+      setQuery(null)
+      fetchListing(target, flat, null)
+    },
+    [fetchListing, flat],
+  )
 
   // The place the user most recently asked for, in flight or committed (D4).
   // Every header control keys off this one value: the bar shows it, ↑ ascends
@@ -101,13 +116,37 @@ export default function App() {
   function toggleFlat(): void {
     const next = !flat
     setFlat(next)
+    // Deep results are flat-shaped regardless of the toggle; pressing it
+    // issues an ordinary request that supersedes the search by latest-wins,
+    // so the query stops being "committed" the moment that happens (D4).
+    setQuery(null)
     // The button reflects the request immediately so a second click reads as
     // "turn it back off", but a failed request must not leave it lit over a
     // grid that never changed — nor make every later navigation go flat.
     // Re-request the newest place the user asked for — not just the committed
     // path — so untoggling mid-navigation follows the user rather than
     // snapping back to where they started.
-    if (dest !== '') fetchListing(dest, next, () => setFlat(!next))
+    if (dest !== '') fetchListing(dest, next, null, () => setFlat(!next))
+  }
+
+  function handleFilterChange(value: string): void {
+    setFilter(value)
+    // Emptying the input while a query is committed is how deep search is
+    // left — it clears both states and re-issues the ordinary listing (D2/D3).
+    if (value.trim() === '' && query !== null) {
+      setQuery(null)
+      fetchListing(dest, flat, null)
+    }
+  }
+
+  function submitSearch(): void {
+    const q = filter.trim()
+    // A blank/whitespace-only submit is not a search (D1) — nothing to commit.
+    if (q === '') return
+    setQuery(q)
+    // Targeted at the newest requested directory, not the committed path, so
+    // a search submitted mid-navigation follows the user there (D3).
+    fetchListing(dest, true, q)
   }
 
   useEffect(() => {
@@ -123,6 +162,18 @@ export default function App() {
   }, [viewer, queue])
 
   const hover = useMemo(() => createHoverWarmer((p) => lru.warm(p)), [lru])
+
+  // Pure view state over `listing` — never reaches useThumbnails, whose effect
+  // resets the whole thumb map to `loading` on any `entries` identity change
+  // (D2). Matches each entry's full `name`, which in flat/deep views is its
+  // relative path, not the shortened tile label.
+  const filteredListing = useMemo(() => {
+    if (filter === '') return listing
+    const needle = filter.toLowerCase()
+    return listing.filter((e) => e.name.toLowerCase().includes(needle))
+  }, [listing, filter])
+  const filterHidesAll = filter.trim() !== '' && listing.length > 0 && filteredListing.length === 0
+  const searchHasNoMatches = query !== null && listing.length === 0
 
   /**
    * The overlay replaces the thumbnail image, not the whole tile: same pixels,
@@ -244,6 +295,26 @@ export default function App() {
           ↑
         </button>
         <PathBar path={dest} error={error} api={api} onNavigate={navigate} />
+        <input
+          value={filter}
+          onChange={(e) => handleFilterChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') submitSearch()
+          }}
+          placeholder="Filter or search by name…"
+          aria-label="Filter or search by name"
+          spellCheck={false}
+          className="w-40 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none focus:w-64 focus:border-zinc-500"
+        />
+        <button
+          type="button"
+          onClick={submitSearch}
+          disabled={filter.trim() === ''}
+          title="Search this folder and everything below it by file name"
+          className="rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-500 disabled:opacity-40"
+        >
+          Deep
+        </button>
         <button
           type="button"
           onClick={toggleFlat}
@@ -286,14 +357,30 @@ export default function App() {
                   omitted.
                 </p>
               )}
-              <Grid
-                entries={listing}
-                thumbs={thumbs}
-                onEnter={enterEntry}
-                onModelPointerDown={onModelPointerDown}
-                onModelOpen={openLightbox}
-                onModelHover={(p) => (p !== null ? hover.enter(p) : hover.leave())}
-              />
+              {/* While a query is committed the grid reads as search results,
+                  not the directory's contents (D4) — same slot/register as
+                  the truncation notice above. */}
+              {query !== null && !searchHasNoMatches && (
+                <p className="px-4 pt-3 text-xs text-zinc-400">Search results for "{query}".</p>
+              )}
+              {searchHasNoMatches ? (
+                <p className="mt-16 text-center text-sm text-zinc-600">
+                  No models matched "{query}".
+                </p>
+              ) : filterHidesAll ? (
+                <p className="mt-16 text-center text-sm text-zinc-600">
+                  The filter is hiding everything below.
+                </p>
+              ) : (
+                <Grid
+                  entries={filteredListing}
+                  thumbs={thumbs}
+                  onEnter={enterEntry}
+                  onModelPointerDown={onModelPointerDown}
+                  onModelOpen={openLightbox}
+                  onModelHover={(p) => (p !== null ? hover.enter(p) : hover.leave())}
+                />
+              )}
             </>
           )}
         </main>
