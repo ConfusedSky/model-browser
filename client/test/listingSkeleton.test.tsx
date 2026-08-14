@@ -1,45 +1,25 @@
 // @vitest-environment happy-dom
-import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DirEntry, DirListing } from '../../shared/types'
+import type { DirListing } from '../../shared/types'
+import { SKELETON_DELAY_MS } from '../src/hooks/useDelayedFlag'
+import {
+  click,
+  container,
+  dir,
+  listDir,
+  model,
+  mountApp,
+  settle,
+  skeleton,
+  tiles,
+  unmountApp,
+  wait,
+} from './appHarness'
 
-const listDir = vi.fn()
-
-// App constructs HttpApiClient itself (D1 keeps all I/O behind it), so the
-// module is the seam — there is no prop to inject a fake through.
-vi.mock('../src/api/client', () => ({
-  HttpError: class extends Error {},
-  HttpApiClient: class {
-    listDir = listDir
-    complete = vi.fn().mockResolvedValue([])
-    fetchModel = vi.fn()
-    getThumb = vi.fn().mockResolvedValue({ status: 'miss' })
-    putThumb = vi.fn().mockResolvedValue(undefined)
-  },
-}))
-// Spread the real module and override only what needs WebGL: everything else
-// (staging, RIG_VERSION) stays real, so a future test here can open a viewer.
-vi.mock('../src/three/renderer', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../src/three/renderer')>()),
-  renderThumbnail: vi.fn(() => Promise.resolve(new Blob())),
-  getRenderer: () => ({
-    setSize: () => {},
-    render: () => {},
-    domElement: document.createElement('canvas'),
-  }),
-}))
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
-const { default: App } = await import('../src/App')
-const { SKELETON_DELAY_MS } = await import('../src/hooks/useDelayedFlag')
-
-function dir(name: string): DirEntry {
-  return { name, path: `/models/${name}`, kind: 'dir', size: 0, mtime: 1 }
-}
-function model(name: string): DirEntry {
-  return { name, path: `/models/${name}`, kind: 'model', format: 'stl', size: 1, mtime: 1 }
-}
+vi.mock('../src/api/client', async () => (await import('./appHarness')).apiClientModule())
+vi.mock('../src/three/renderer', async (importOriginal) =>
+  (await import('./appHarness')).rendererModule(importOriginal),
+)
 
 const NESTED: DirListing = { path: '/models', entries: [dir('a')] }
 const CHILD: DirListing = { path: '/models/a', entries: [dir('a/b')] }
@@ -49,40 +29,10 @@ const FLAT: DirListing = {
   truncated: true,
 }
 
-let root: Root | null = null
-let container: HTMLElement
-
-const wait = (ms: number) => act(() => new Promise((r) => setTimeout(r, ms)))
-const settle = () => wait(20)
 const pastDelay = () => wait(SKELETON_DELAY_MS + 50)
 
-const skeleton = () => container.querySelector('.animate-pulse')
-const tiles = () => Array.from(container.querySelectorAll<HTMLButtonElement>('main button'))
-const click = (el: HTMLElement) => act(async () => el.click())
-
-beforeEach(async () => {
-  localStorage.setItem('model-browser:last-path', '/models')
-  vi.stubGlobal('URL', { ...URL, createObjectURL: () => 'blob:m', revokeObjectURL: () => {} })
-  listDir.mockReset()
-  listDir.mockResolvedValue(NESTED)
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
-  await act(async () => {
-    root!.render(<App />)
-  })
-  await settle()
-})
-
-afterEach(async () => {
-  await act(async () => {
-    root?.unmount()
-  })
-  container.remove()
-  root = null
-  localStorage.clear()
-  vi.unstubAllGlobals()
-})
+beforeEach(() => mountApp('/models', NESTED))
+afterEach(() => unmountApp())
 
 describe('listing skeleton', () => {
   it('a slow listing shows the skeleton after the delay, hiding the stale tiles', async () => {

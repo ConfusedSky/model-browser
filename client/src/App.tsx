@@ -56,10 +56,18 @@ export default function App() {
   // A flat walk can take seconds while a nested listing returns immediately,
   // so responses can land out of order — only the newest request may write.
   const requestRef = useRef(0)
+  // The newest requested target, in flight or committed — reset to null on
+  // failure so the toggle and ↑ fall back to the committed path instead of
+  // re-chasing a destination that just failed. A still-pending request keeps
+  // its claim: the user asked to go there, and later actions should follow.
+  // State, not a ref: the path bar shows it the moment it is requested (D4),
+  // so consecutive ↑ presses read as movement while the listing loads.
+  const [target, setTarget] = useState<string | null>(null)
 
   const fetchListing = useCallback(
     (target: string, asFlat: boolean, onFail?: () => void) => {
       const req = ++requestRef.current
+      setTarget(target)
       setPending(true)
       void api
         .listDir(target, { flat: asFlat })
@@ -76,6 +84,7 @@ export default function App() {
           if (req !== requestRef.current) return
           setPending(false)
           setError(err instanceof Error ? err.message : String(err))
+          setTarget(null)
           onFail?.()
         })
     },
@@ -84,13 +93,21 @@ export default function App() {
 
   const navigate = useCallback((target: string) => fetchListing(target, flat), [fetchListing, flat])
 
+  // The place the user most recently asked for, in flight or committed (D4).
+  // Every header control keys off this one value: the bar shows it, ↑ ascends
+  // from it (and disables at its root), the flat toggle re-requests it.
+  const dest = target ?? path
+
   function toggleFlat(): void {
     const next = !flat
     setFlat(next)
     // The button reflects the request immediately so a second click reads as
     // "turn it back off", but a failed request must not leave it lit over a
     // grid that never changed — nor make every later navigation go flat.
-    if (path !== '') fetchListing(path, next, () => setFlat(!next))
+    // Re-request the newest place the user asked for — not just the committed
+    // path — so untoggling mid-navigation follows the user rather than
+    // snapping back to where they started.
+    if (dest !== '') fetchListing(dest, next, () => setFlat(!next))
   }
 
   useEffect(() => {
@@ -150,18 +167,20 @@ export default function App() {
   }
 
   function goUp(): void {
-    const zipSep = path.lastIndexOf('!/')
+    // Ascend from `dest`, not the committed path (D3): pressing ↑ twice during
+    // a slow listing must reach the grandparent, not re-request the same parent.
+    const zipSep = dest.lastIndexOf('!/')
     if (zipSep !== -1) {
-      const entry = path.slice(zipSep + 2)
+      const entry = dest.slice(zipSep + 2)
       const parent = entry.includes('/')
-        ? path.slice(0, zipSep + 2) + entry.slice(0, entry.lastIndexOf('/'))
-        : path.slice(0, zipSep)
+        ? dest.slice(0, zipSep + 2) + entry.slice(0, entry.lastIndexOf('/'))
+        : dest.slice(0, zipSep)
       navigate(parent)
       return
     }
-    const slash = path.lastIndexOf('/')
-    if (slash > 0) navigate(path.slice(0, slash))
-    else if (path !== '/') navigate('/')
+    const slash = dest.lastIndexOf('/')
+    if (slash > 0) navigate(dest.slice(0, slash))
+    else if (dest !== '/') navigate('/')
   }
 
   const persist = useCallback(
@@ -218,13 +237,13 @@ export default function App() {
         <button
           type="button"
           onClick={goUp}
-          disabled={path === '' || path === '/'}
+          disabled={dest === '' || dest === '/'}
           aria-label="Parent directory"
           className="rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-500 disabled:opacity-40"
         >
           ↑
         </button>
-        <PathBar path={path} error={error} api={api} onNavigate={navigate} />
+        <PathBar path={dest} error={error} api={api} onNavigate={navigate} />
         <button
           type="button"
           onClick={toggleFlat}

@@ -2,6 +2,38 @@
 
 ## MODIFIED Requirements
 
+### Requirement: Thumbnail grid navigation
+The client SHALL display directory contents as a responsive grid. Activating a subdirectory or zip tile SHALL navigate into it; the current location SHALL always be reflected in the path bar.
+
+Navigating to the parent SHALL derive it from the user's newest navigation target — the in-flight target while a navigation is still loading, otherwise the committed path — so repeated parent navigations during a slow listing ascend the ancestry rather than re-requesting the same parent. When the newest navigation has failed, parent navigation SHALL ascend from the committed path.
+
+#### Scenario: Entering a subdirectory
+- **WHEN** the user clicks a subdirectory tile
+- **THEN** the grid shows that directory's contents and the path bar updates to its path
+
+#### Scenario: Navigating up
+- **WHEN** the user navigates to the parent of the current location
+- **THEN** the grid and path bar reflect the parent directory
+
+#### Scenario: Navigating up twice during a slow listing
+- **WHEN** the user navigates up while that parent's listing is still loading and navigates up again
+- **THEN** the second navigation requests the grandparent, and the listing that renders is the grandparent's
+
+### Requirement: Editable path bar
+The UI SHALL show the current directory path in an editable text input at the top. The input SHALL reflect the user's newest navigation target as soon as the navigation is requested — before its listing arrives — and SHALL revert to the committed path when that navigation fails. Submitting a valid path SHALL navigate there; an invalid path SHALL show an error and leave the current view unchanged.
+
+#### Scenario: Typing a valid path
+- **WHEN** the user edits the path bar to a valid directory and submits
+- **THEN** the grid shows that directory's contents
+
+#### Scenario: Typing an invalid path
+- **WHEN** the user submits a nonexistent path
+- **THEN** an error is shown and the current grid remains
+
+#### Scenario: The bar reflects an in-flight navigation
+- **WHEN** the user navigates while the destination's listing is still loading
+- **THEN** the path bar already shows the destination, and if the navigation fails it reverts to the committed path alongside the error
+
 ### Requirement: Flat view toggle
 The client SHALL offer a flat-view toggle alongside the path bar. While active, the grid SHALL show the current folder's flat listing — the top-level folder and zip tiles first, navigable exactly as in the nested view, then model tiles labeled by **file name**, with the entry's full relative path carried in the tile's tooltip and accessible name — and hover-warm, drag-to-orbit, the lightbox, and thumbnail/camera persistence SHALL behave exactly as in the nested view for the same models. The toggle SHALL remain in effect across navigation within the session, including navigation into a zip, and a truncated listing SHALL be indicated to the user.
 
