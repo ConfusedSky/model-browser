@@ -1,8 +1,11 @@
 import * as THREE from 'three'
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
+import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js'
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import type { CameraState, OrbitAxis } from '../../../shared/types'
 import { getLightingMode } from '../viewer/lighting'
 import { applyState, boundsOf, DEFAULT_CAMERA, frameFor, rigQuaternion, type Bounds } from './camera'
-import { encodeSrgbInPlace } from './srgb'
 
 export const THUMB_SIZE = 512
 
@@ -11,9 +14,10 @@ export const THUMB_SIZE = 512
  * rendered output changes for the same input (rig contents, materials, tone
  * mapping). Cached PNGs carrying another (or no) version are re-rendered.
  * 1 = the pre-rim rig (implicit), 2 = red/blue rim accents, 3 = key-light
- * shadows, 4 = contact floor at the tuned opacity (0.35 → 0.7).
+ * shadows, 4 = contact floor at the tuned opacity (0.35 → 0.7),
+ * 5 = screen-space ambient occlusion.
  */
-export const RIG_VERSION = 4
+export const RIG_VERSION = 5
 
 /**
  * The app's single WebGL context (design D2/D3): one WebGLRenderer shared by
@@ -32,6 +36,132 @@ export function getRenderer(): THREE.WebGLRenderer {
     renderer.shadowMap.type = THREE.PCFSoftShadowMap
   }
   return renderer
+}
+
+// Ambient-occlusion fit (D3), every constant in units of the staged model's
+// bounding-sphere radius or a pure exponent: GTAO's radius and thickness are
+// world-space, and models run from miniatures to busts, so a 5 mm print and a
+// 300 mm bust must get the same depth cue. Frozen in test/composer.test.ts.
+//
+// Tuned visually on the e2e fixtures (2026-08-14): strength 1 → 1.5 makes
+// crevices legible at thumbnail size; reach kept at 0.15 — it doubles as the
+// clip-box feather width, so widening it also widens the band where occlusion
+// can approach the silhouette (re-run the 3.1 edge gate after any change here).
+/** Occlusion reach: how far a neighbouring surface can still darken a pixel. */
+const AO_RADIUS_R = 0.15
+/** Assumed depth behind a surface — past it a sample is a separate object, not
+ *  an occluder. Wider than the reach, so thin printed walls don't leak light. */
+const AO_THICKNESS_R = 0.3
+/** Strength: the shader raises the occlusion term to this power, so >1 darkens. */
+const AO_SCALE = 1.5
+/** Falloff shape across the reach; 1 is linear. */
+const AO_DISTANCE_EXPONENT = 1
+/** Horizon samples per pixel — quality against per-frame cost. */
+const AO_SAMPLES = 16
+
+/**
+ * A post-process chain on the shared renderer (D1): `RenderPass → GTAOPass →
+ * OutputPass` over an explicitly constructed 4× MSAA target. Chains are
+ * renderer-scoped and long-lived — one for the live view, one pinned at 512²
+ * for thumbnails — so opening an overlay or queueing a thumbnail allocates
+ * nothing, and neither chain is ever disposed.
+ */
+export interface RenderChain {
+  /** The composer itself; after `render`, `readBuffer` holds the finished frame. */
+  readonly composer: EffectComposer
+  /**
+   * Point every pass at this frame's scene/camera, fit the occlusion to the
+   * staged model, then run the chain. Both happen per render because the chain
+   * is shared: the previous caller left its own scene and its own fit behind.
+   */
+  render(scene: THREE.Scene, camera: THREE.PerspectiveCamera, bounds: Bounds): void
+}
+
+/**
+ * A chain plus the resize its owner needs. `setSize` stays off `RenderChain`:
+ * only `getLiveChain` may resize, and only through its guard.
+ */
+type SizedChain = RenderChain & { setSize: (width: number, height: number) => void }
+
+function makeChain(width: number, height: number, type: THREE.TextureDataType): SizedChain {
+  // EffectComposer's own default target is single-sample AND half-float:
+  // taking it would silently drop today's 4× MSAA, and half-float cannot be
+  // read back into a Uint8Array. Both targets are therefore built by hand.
+  const target = new THREE.WebGLRenderTarget(width, height, {
+    samples: 4,
+    type,
+    depthBuffer: true,
+  })
+  const composer = new EffectComposer(getRenderer(), target)
+  // Placeholders only: every render re-points both passes at the caller's.
+  const scene = new THREE.Scene()
+  const camera = new THREE.PerspectiveCamera(40, 1)
+  const scenePass = new RenderPass(scene, camera)
+  const aoPass = new GTAOPass(scene, camera, width, height)
+  // OutputPass owns the linear→sRGB conversion for both paths (D2) — which is
+  // why the thumbnail readback no longer encodes anything by hand.
+  const outputPass = new OutputPass()
+  composer.addPass(scenePass)
+  composer.addPass(aoPass)
+  composer.addPass(outputPass)
+
+  const sized = new THREE.Vector2(width, height)
+  return {
+    composer,
+    setSize(w, h) {
+      // ViewerSession sizes the canvas every frame; resizing composer targets
+      // every frame would reallocate constantly, so this is guarded.
+      if (w === sized.x && h === sized.y) return
+      sized.set(w, h)
+      composer.setSize(w, h)
+    },
+    render(callerScene, callerCamera, bounds) {
+      scenePass.scene = callerScene
+      scenePass.camera = callerCamera
+      aoPass.scene = callerScene
+      aoPass.camera = callerCamera
+      // `distanceFallOff` is deliberately absent: GTAOPass flags the shader for
+      // a rebuild whenever it is passed, which per frame would recompile forever.
+      aoPass.updateGtaoMaterial({
+        radius: AO_RADIUS_R * bounds.radius,
+        thickness: AO_THICKNESS_R * bounds.radius,
+        scale: AO_SCALE,
+        distanceExponent: AO_DISTANCE_EXPONENT,
+        samples: AO_SAMPLES,
+      })
+      // Occlusion fades out one reach beyond this box, so the contact floor
+      // and the empty background are left alone (D4).
+      aoPass.setSceneClipBox(bounds.box)
+      composer.render()
+    },
+  }
+}
+
+let liveChain: SizedChain | null = null
+let thumbChain: RenderChain | null = null
+
+/**
+ * The live view's chain, sized to its host. Built on first use and then
+ * resized only when the host dimensions actually change (D1).
+ */
+export function getLiveChain(width: number, height: number): RenderChain {
+  if (liveChain === null) liveChain = makeChain(width, height, THREE.HalfFloatType)
+  else liveChain.setSize(width, height)
+  return liveChain
+}
+
+/**
+ * The thumbnail chain: fixed at 512² and pinned to `UnsignedByteType`, because
+ * `readRenderTargetPixels` into a `Uint8Array` needs an 8-bit target (D1).
+ */
+export function getThumbChain(): RenderChain {
+  if (thumbChain === null) {
+    const chain = makeChain(THUMB_SIZE, THUMB_SIZE, THREE.UnsignedByteType)
+    // Offscreen only — this chain never touches the visible canvas.
+    chain.composer.renderToScreen = false
+    thumbChain = chain
+  }
+  return thumbChain
 }
 
 export interface LitScene {
@@ -204,8 +334,8 @@ export function unstage(
 }
 
 /**
- * Render a model to a 512×512 transparent PNG via an offscreen render target
- * on the shared renderer (never the visible canvas).
+ * Render a model to a 512×512 transparent PNG through the thumbnail
+ * post-process chain on the shared renderer (never the visible canvas).
  */
 export function renderThumbnail(
   object: THREE.Object3D,
@@ -224,19 +354,19 @@ export function renderThumbnail(
   if (getLightingMode() === 'camera') rig.quaternion.copy(camera.quaternion)
   else rig.quaternion.copy(rigQuaternion(axis))
 
-  const target = new THREE.WebGLRenderTarget(THUMB_SIZE, THUMB_SIZE, {
-    samples: 4,
-    depthBuffer: true,
-  })
+  const chain = getThumbChain()
   const prevTarget = r.getRenderTarget()
   const pixels = new Uint8Array(THUMB_SIZE * THUMB_SIZE * 4)
   try {
-    r.setRenderTarget(target)
-    r.render(scene, camera)
-    r.readRenderTargetPixels(target, 0, 0, THUMB_SIZE, THUMB_SIZE, pixels)
+    chain.render(scene, camera, bounds)
+    // `OutputPass` leaves `needsSwap` at the `Pass` default, so the composer
+    // swaps after it: the finished frame is in `readBuffer`, not writeBuffer
+    // (D1). Those pixels are already sRGB — OutputPass converted them (D2).
+    r.readRenderTargetPixels(chain.composer.readBuffer, 0, 0, THUMB_SIZE, THUMB_SIZE, pixels)
   } finally {
+    // The composer restores this itself, but not if a pass throws. The chain
+    // and its targets are renderer-scoped and long-lived — never disposed here.
     r.setRenderTarget(prevTarget)
-    target.dispose()
     unstage(object, pivot, originalParent)
     // This scene is per-call: any light that cast owns a shadow-map texture and
     // the floor owns its geometry/material (D5). Disposing every directional
@@ -249,10 +379,6 @@ export function renderThumbnail(
     floor.geometry.dispose()
     floor.material.dispose()
   }
-
-  // Render-target readback is linear; the visible canvas gets sRGB output
-  // encoding from the renderer. Encode here so thumbnails match the live view.
-  encodeSrgbInPlace(pixels)
 
   // GL readback is bottom-up; flip rows into ImageData.
   const canvas = document.createElement('canvas')

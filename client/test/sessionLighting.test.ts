@@ -9,6 +9,9 @@ import { AXIS_TWEEN_MS, ViewerSession } from '../src/viewer/session'
 vi.mock('../src/three/renderer', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/three/renderer')>()),
   getRenderer: () => ({ setSize: () => {}, render: () => {} }),
+  // The live post-process chain needs a GL context of its own; render() reaches
+  // it through this export, so stubbing it here keeps the seam WebGL-free.
+  getLiveChain: () => ({ render: () => {} }),
   makeScene: () => ({ scene: new THREE.Scene(), rig: new THREE.Group() }),
   renderThumbnail: vi.fn(() => Promise.resolve(new Blob())),
 }))

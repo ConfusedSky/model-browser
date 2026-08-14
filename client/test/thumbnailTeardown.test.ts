@@ -10,6 +10,9 @@ vi.mock('three', async (importOriginal) => {
   class FakeWebGLRenderer {
     shadowMap = { enabled: false, type: 0 }
     setClearColor(): void {}
+    getPixelRatio(): number {
+      return 1
+    }
     getRenderTarget(): null {
       return null
     }
@@ -20,7 +23,7 @@ vi.mock('three', async (importOriginal) => {
   return { ...actual, WebGLRenderer: FakeWebGLRenderer }
 })
 
-const { makeScene, renderThumbnail } = await import('../src/three/renderer')
+const { getThumbChain, makeScene, renderThumbnail } = await import('../src/three/renderer')
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -34,6 +37,9 @@ describe('renderThumbnail teardown', () => {
     const expected = directionalCount()
     expect(expected).toBeGreaterThan(1)
     const dispose = vi.spyOn(THREE.DirectionalLight.prototype, 'dispose')
+    // The chain's passes want a real GL context to run; this file is about
+    // teardown, so only the composer's own render is stubbed out.
+    vi.spyOn(getThumbChain().composer, 'render').mockImplementation(() => {})
 
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshBasicMaterial())
     // happy-dom has no 2d canvas context, so the encode step at the very end

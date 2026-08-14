@@ -10,7 +10,14 @@ import {
   type Bounds,
   type SpindleFrame,
 } from '../three/camera'
-import { getRenderer, makeScene, placeFloor, renderThumbnail, stageModel } from '../three/renderer'
+import {
+  getLiveChain,
+  getRenderer,
+  makeScene,
+  placeFloor,
+  renderThumbnail,
+  stageModel,
+} from '../three/renderer'
 import { getLightingMode } from './lighting'
 
 const ROT_SPEED = 0.01
@@ -110,7 +117,10 @@ export class ViewerSession {
     // tween is running (D4).
     if (getLightingMode() === 'camera') this.rig.quaternion.copy(this.camera.quaternion)
     else if (this.tween === null) this.rig.quaternion.copy(rigQuaternion(this._axis))
-    r.render(this.scene, this.camera)
+    // Never a direct renderer.render: ambient occlusion lives in the shared
+    // live chain, which sizes itself to this host only when it actually
+    // changed and re-points its passes at this scene every frame (D1).
+    getLiveChain(width, height).render(this.scene, this.camera, this.bounds)
   }
 
   /**

@@ -15,6 +15,10 @@ import type { DirEntry, DirListing } from '../../shared/types'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 export const listDir = vi.fn()
+// Shared (not per-instance) so tests can assert thumbnails are untouched —
+// e.g. typing a filter keystroke must not re-trigger useThumbnails' lookups.
+// mountApp clears it, so counts are still test-scoped.
+export const getThumb = vi.fn().mockResolvedValue({ status: 'miss' })
 
 // App constructs HttpApiClient itself (D1 keeps all I/O behind it), so the
 // module is the seam — there is no prop to inject a fake through.
@@ -25,7 +29,7 @@ export function apiClientModule(): Record<string, unknown> {
       listDir = listDir
       complete = vi.fn().mockResolvedValue([])
       fetchModel = vi.fn()
-      getThumb = vi.fn().mockResolvedValue({ status: 'miss' })
+      getThumb = getThumb
       putThumb = vi.fn().mockResolvedValue(undefined)
     },
   }
@@ -45,6 +49,12 @@ export async function rendererModule(
         render: () => {},
         domElement: document.createElement('canvas'),
       }) as unknown as ReturnType<typeof import('../src/three/renderer').getRenderer>,
+    // ViewerSession.render() reaches the live post-process chain through this
+    // export; a real one would build an EffectComposer on a real GL context.
+    getLiveChain: () =>
+      ({ render: () => {} }) as unknown as ReturnType<
+        typeof import('../src/three/renderer').getLiveChain
+      >,
   }
 }
 
@@ -78,6 +88,18 @@ export const wait = (ms: number): Promise<void> =>
 export const settle = (): Promise<void> => wait(20)
 export const click = (el: HTMLElement): Promise<void> => act(async () => el.click())
 
+/** Native setter + input event — a plain `el.value =` is masked by React's value tracker. */
+export const type = (el: HTMLInputElement, value: string): Promise<void> =>
+  act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
+    setter.call(el, value)
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+export const pressEnter = (el: HTMLElement): Promise<void> =>
+  act(async () => {
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+  })
+
 export function flatButton(): HTMLButtonElement {
   return container.querySelector<HTMLButtonElement>('button[aria-pressed]')!
 }
@@ -97,12 +119,21 @@ export function skeleton(): Element | null {
 export function pathInput(): HTMLInputElement {
   return container.querySelector<HTMLInputElement>('input[placeholder="Type a directory path…"]')!
 }
+export function searchInput(): HTMLInputElement {
+  return container.querySelector<HTMLInputElement>('input[aria-label="Filter or search by name"]')!
+}
+export function deepButton(): HTMLButtonElement {
+  return Array.from(container.querySelectorAll<HTMLButtonElement>('header button')).find(
+    (b) => b.textContent === 'Deep',
+  )!
+}
 
 export async function mountApp(lastPath: string, initial: DirListing): Promise<void> {
   localStorage.setItem('model-browser:last-path', lastPath)
   vi.stubGlobal('URL', { ...URL, createObjectURL: () => 'blob:m', revokeObjectURL: () => {} })
   listDir.mockReset()
   listDir.mockResolvedValue(initial)
+  getThumb.mockClear()
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)

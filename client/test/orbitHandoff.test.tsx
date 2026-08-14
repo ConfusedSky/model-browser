@@ -16,6 +16,9 @@ vi.mock('../src/three/renderer', async (importOriginal) => ({
     render: () => {},
     domElement: document.createElement('canvas'),
   }),
+  // ViewerSession.render() drives the live post-process chain through this
+  // export — stubbed, since a real chain would want a GL context.
+  getLiveChain: () => ({ render: () => {} }),
   makeScene: () => ({ scene: new THREE.Scene(), rig: new THREE.Group() }),
   renderThumbnail: () => Promise.resolve(new Blob()),
 }))
