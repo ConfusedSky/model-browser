@@ -112,7 +112,7 @@ const AXES: OrbitAxis[] = ['x', '-x', 'y', '-y', 'z', '-z']
 /** makeMesh's half-extents: distinct per axis, so every spindle rests on a different face. */
 const HALF = new THREE.Vector3(1, 2, 3)
 /** Frozen floor constants (D3): opacity, sink ε·radius, size 8·radius. */
-const FLOOR_OPACITY = 0.35
+const FLOOR_OPACITY = 0.7
 const FLOOR_SINK_R = 0.002
 const FLOOR_SIZE_R = 8
 

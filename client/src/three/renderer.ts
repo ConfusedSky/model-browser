@@ -11,9 +11,9 @@ export const THUMB_SIZE = 512
  * rendered output changes for the same input (rig contents, materials, tone
  * mapping). Cached PNGs carrying another (or no) version are re-rendered.
  * 1 = the pre-rim rig (implicit), 2 = red/blue rim accents, 3 = key-light
- * shadows.
+ * shadows, 4 = contact floor at the tuned opacity (0.35 → 0.7).
  */
-export const RIG_VERSION = 3
+export const RIG_VERSION = 4
 
 /**
  * The app's single WebGL context (design D2/D3): one WebGLRenderer shared by
@@ -112,9 +112,10 @@ function fitShadow(light: THREE.DirectionalLight, radius: number): void {
 }
 
 // Contact-floor constants (D3), again in radius units so the floor scales with
-// the subject. Frozen in test/stageModel.test.ts.
+// the subject. Frozen in test/stageModel.test.ts — changing one changes pixels
+// and needs a RIG_VERSION bump.
 /** Shadow darkness where the model touches down; the floor is invisible elsewhere. */
-const FLOOR_OPACITY = 0.35
+const FLOOR_OPACITY = 0.7
 /** Sunk this far under the resting face — a flat print bed would z-fight otherwise. */
 const FLOOR_SINK_R = 0.002
 /** Wide enough that a camera-mode shadow sweep stays on it. */

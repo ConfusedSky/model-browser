@@ -12,11 +12,11 @@
 ## 2. GTAO tuning
 
 - [ ] 2.1 Scale GTAO radius/thickness by staged `bounds.radius` and set the pass's scene clip box from the staged bounds box; tune constants visually on small and large fixtures, then freeze in a unit test (D3)
-- [ ] 2.2 Bump `RIG_VERSION` 3 → 4 in renderer.ts (D5)
+- [ ] 2.2 Bump `RIG_VERSION` 4 → 5 in renderer.ts (D5)
 - [ ] 2.3 Update every full-factory renderer mock with new exports (re-check the file list post-viewer-shadows)
 
 ## 3. Verification
 
 - [ ] 3.1 Silhouette-halo check *before* the version bump ships: render a fixture thumbnail with and without AO, assert silhouette-adjacent pixels show no darkening beyond tolerance; if it fails, depth-mask the AO application and re-verify (D4)
 - [ ] 3.2 `bun run typecheck` and `bun run test` pass across workspaces
-- [ ] 3.3 Manual E2E via Playwright MCP: crevices visibly darkened in tiles and lightbox; overlay handoff shows no AO or brightness pop (D5's arbiter); thumbnails re-render once (rig 4) and hit thereafter; orbiting stays smooth with the queue suspended
+- [ ] 3.3 Manual E2E via Playwright MCP: crevices visibly darkened in tiles and lightbox; overlay handoff shows no AO or brightness pop (D5's arbiter); thumbnails re-render once (rig 5) and hit thereafter; orbiting stays smooth with the queue suspended
