@@ -239,6 +239,40 @@ describe('file name search', () => {
     expect(container.textContent).not.toContain('Search results for "boom"')
   })
 
+  it('overlapping failed searches revert the label to the search that actually landed', async () => {
+    let failB!: (e: Error) => void
+    let failC!: (e: Error) => void
+    listDir.mockImplementation((_target: string, opts?: { q?: string }) => {
+      if (opts?.q === 'found') return Promise.resolve(SEARCH_RESULT)
+      if (opts?.q === 'bee') return new Promise<DirListing>((_res, rej) => (failB = rej))
+      if (opts?.q === 'cee') return new Promise<DirListing>((_res, rej) => (failC = rej))
+      return Promise.resolve(NESTED)
+    })
+
+    await type(searchInput(), 'found')
+    await pressEnter(searchInput())
+    await settle()
+    expect(container.textContent).toContain('Search results for "found".')
+
+    // Two searches go up while "found"'s results are on screen; both fail.
+    // The superseded first failure must be a no-op, and the second must revert
+    // the label to the search that landed — never to the optimistic "bee".
+    await type(searchInput(), 'bee')
+    await pressEnter(searchInput())
+    await type(searchInput(), 'cee')
+    await pressEnter(searchInput())
+    failB(new Error('b exploded'))
+    await settle()
+    expect(container.textContent).not.toContain('b exploded') // superseded error stays buried
+
+    failC(new Error('c exploded'))
+    await settle()
+    expect(container.textContent).toContain('c exploded')
+    expect(container.textContent).toContain('Search results for "found".')
+    expect(container.textContent).not.toContain('Search results for "bee"')
+    expect(container.textContent).not.toContain('Search results for "cee"')
+  })
+
   it('a whitespace-only filter is no filter, not a filter that hides everything', async () => {
     listDir.mockClear()
 

@@ -73,6 +73,12 @@ export default function App() {
   // so consecutive ↑ presses read as movement while the listing loads.
   const [target, setTarget] = useState<string | null>(null)
 
+  // The query of the last listing that actually LANDED (null for a plain
+  // listing) — what a failed search's label revert restores. `query` itself is
+  // optimistic (set at submit), so reverting to a previous `query` could name
+  // a search that never produced the results on screen.
+  const landedQueryRef = useRef<string | null>(null)
+
   const fetchListing = useCallback(
     (target: string, asFlat: boolean, q: string | null, onFail?: () => void) => {
       const req = ++requestRef.current
@@ -82,6 +88,7 @@ export default function App() {
         .listDir(target, { flat: asFlat, q: q ?? undefined })
         .then((res) => {
           if (req !== requestRef.current) return
+          landedQueryRef.current = q
           setPending(false)
           setPath(target)
           setListing(res.entries)
@@ -147,14 +154,14 @@ export default function App() {
     // A blank/whitespace-only submit is not a search (D1) — nothing to commit.
     if (q === '') return
     // The label reflects the request immediately, but a failed search must not
-    // leave the grid — still the pre-search listing — claiming to be results.
-    // Reverting to the *previous* query, not null, keeps the label describing
-    // whatever is actually on screen: an older search's results, or a listing.
-    const previous = query
+    // leave the grid — still showing whatever last landed — claiming to be its
+    // results. Reverting to the last *landed* query (not the previous optimistic
+    // one) keeps the label describing what is actually on screen even when two
+    // in-flight searches fail on top of each other.
     setQuery(q)
     // Targeted at the newest requested directory, not the committed path, so
     // a search submitted mid-navigation follows the user there (D3).
-    fetchListing(dest, true, q, () => setQuery(previous))
+    fetchListing(dest, true, q, () => setQuery(landedQueryRef.current))
   }
 
   useEffect(() => {
