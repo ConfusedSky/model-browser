@@ -6,6 +6,7 @@ import { formatBytes, formatDate } from '../lib/format'
 import { GestureTracker } from '../lib/gesture'
 import type { MeshLru } from '../three/lru'
 import { getRenderer } from '../three/renderer'
+import { liveRenderSize } from './renderSize'
 import { ViewerSession } from './session'
 
 export interface ViewerState {
@@ -168,10 +169,15 @@ export default function ViewerLayer({
     const s = sessionRef.current
     const host = canvasHostRef.current
     if (s === null || host === null) return
-    const dpr = window.devicePixelRatio || 1
-    const w = Math.max(1, Math.round(host.clientWidth * dpr))
-    const h = Math.max(1, Math.round(host.clientHeight * dpr))
-    s.render(w, h)
+    // Above device resolution, so the browser downsamples: a thumbnail is a
+    // 512² render shown in a ~176 px tile, and matching that sample density is
+    // what keeps the live view from reading as the aliased one at handoff.
+    const { width, height } = liveRenderSize(
+      host.clientWidth,
+      host.clientHeight,
+      window.devicePixelRatio || 1,
+    )
+    s.render(width, height)
   }
 
   // Global gesture handling: the press that opened the overlay is already in
