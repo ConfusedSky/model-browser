@@ -199,4 +199,59 @@ describe('file name search', () => {
     expect(container.textContent).toContain('The filter is hiding everything below.')
     expect(container.textContent).not.toContain('No models matched')
   })
+
+  it('a failed search leaves no results label over the listing it never replaced', async () => {
+    listDir.mockImplementation((_target: string, opts?: { q?: string }) =>
+      opts?.q === undefined ? Promise.resolve(NESTED) : Promise.reject(new Error('walk exploded')),
+    )
+
+    await type(searchInput(), 'widget')
+    await pressEnter(searchInput())
+    await settle()
+
+    // The grid is still the pre-search listing (narrowed by the live filter
+    // text, which is the filter working) — so nothing may call it results.
+    expect(container.textContent).toContain('walk exploded')
+    expect(container.textContent).not.toContain('Search results for')
+    expect(labels()).toEqual(['widget.stl'])
+  })
+
+  it('a failed search reverts the label to the results still on screen', async () => {
+    listDir.mockImplementation((_target: string, opts?: { q?: string }) => {
+      if (opts?.q === 'found') return Promise.resolve(SEARCH_RESULT)
+      if (opts?.q === undefined) return Promise.resolve(NESTED)
+      return Promise.reject(new Error('walk exploded'))
+    })
+
+    await type(searchInput(), 'found')
+    await pressEnter(searchInput())
+    await settle()
+    expect(container.textContent).toContain('Search results for "found".')
+
+    // A second search fails: the first search's results are what remains on
+    // screen, so the label goes back to naming them — not to naming nothing.
+    await type(searchInput(), 'boom')
+    await pressEnter(searchInput())
+    await settle()
+
+    expect(container.textContent).toContain('walk exploded')
+    expect(container.textContent).toContain('Search results for "found".')
+    expect(container.textContent).not.toContain('Search results for "boom"')
+  })
+
+  it('a whitespace-only filter is no filter, not a filter that hides everything', async () => {
+    listDir.mockClear()
+
+    await type(searchInput(), '   ')
+    await settle()
+
+    expect(labels()).toEqual(['Alpha', 'Bravo', 'widget.stl'])
+    expect(container.textContent).not.toContain('The filter is hiding')
+    expect(listDir).not.toHaveBeenCalled()
+  })
+
+  it('ignores whitespace around a filter, so a trailing space keeps matching', async () => {
+    await type(searchInput(), 'ravo ')
+    expect(labels()).toEqual(['Bravo'])
+  })
 })

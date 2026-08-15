@@ -146,10 +146,15 @@ export default function App() {
     const q = filter.trim()
     // A blank/whitespace-only submit is not a search (D1) — nothing to commit.
     if (q === '') return
+    // The label reflects the request immediately, but a failed search must not
+    // leave the grid — still the pre-search listing — claiming to be results.
+    // Reverting to the *previous* query, not null, keeps the label describing
+    // whatever is actually on screen: an older search's results, or a listing.
+    const previous = query
     setQuery(q)
     // Targeted at the newest requested directory, not the committed path, so
     // a search submitted mid-navigation follows the user there (D3).
-    fetchListing(dest, true, q)
+    fetchListing(dest, true, q, () => setQuery(previous))
   }
 
   useEffect(() => {
@@ -170,12 +175,15 @@ export default function App() {
   // resets the whole thumb map to `loading` on any `entries` identity change
   // (D2). Matches each entry's full `name`, which in flat/deep views is its
   // relative path, not the shortened tile label.
+  // Trimmed once and used everywhere the filter is read: whitespace-only text
+  // is no filter (the same rule a submitted query follows), and a trailing
+  // space mid-word must not blank a grid full of names that contain spaces.
+  const needle = filter.trim().toLowerCase()
   const filteredListing = useMemo(() => {
-    if (filter === '') return listing
-    const needle = filter.toLowerCase()
+    if (needle === '') return listing
     return listing.filter((e) => e.name.toLowerCase().includes(needle))
-  }, [listing, filter])
-  const filterHidesAll = filter.trim() !== '' && listing.length > 0 && filteredListing.length === 0
+  }, [listing, needle])
+  const filterHidesAll = needle !== '' && listing.length > 0 && filteredListing.length === 0
   const searchHasNoMatches = query !== null && listing.length === 0
 
   /**
