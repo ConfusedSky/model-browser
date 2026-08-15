@@ -26,3 +26,7 @@
 - [x] 4.1 In-memory AO flag (`viewer/aoToggle.ts`, rim-shadows pattern, not persisted, default ON — the shipped recipe includes AO); `ViewerSession.render` forwards it to the live chain, whose `render` gains a scaffolding `ao` argument flipping the GTAO pass's `enabled`; `renderThumbnail` never passes it. Scaffolding test `aoToggle.test.ts` pins: default on, the pass skip, live-view forwarding, thumbnails ignoring the flag
 - [x] 4.2 "ssao" pill beside the lighting modes (App.tsx, lighting-pill precedent), wired through a ViewerLayer prop to the render-on-toggle effect so the change shows without a drag
 - [ ] 4.3 After the verdict: remove the toggle (flag module, pill, ViewerLayer prop, the `ao` render argument, aoToggle.test.ts) before archive — an adverse verdict (no-AO preferred) becomes its own change, not a silent removal
+
+## 5. Live-view sample density (D7)
+
+- [x] 5.1 `liveRenderSize` (client/src/viewer/renderSize.ts): 1.5× supersample over device resolution, 6M-pixel ceiling that caps the factor without dropping below device resolution; `ViewerLayer.renderNow` sizes the session render through it, canvas CSS box unchanged (`setSize(…, false)`). Constants and boundary behavior frozen in renderSize.test.ts; no `RIG_VERSION` bump (thumbnail path untouched) — *handoff no-pop re-verified after the change: overlay backing 218² in a 145 px box at DPR 1, clips pixel-indistinguishable*
