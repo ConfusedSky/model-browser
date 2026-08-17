@@ -284,7 +284,13 @@ export async function listFlat(vpath: string, query?: string): Promise<DirListin
   const { fsPath, entry } = parseVPath(vpath)
   if (!isAbsolute(fsPath)) throw new ListingError(400, 'path must be absolute')
   const walk: FlatWalk = {
-    budget: envLimit('MODEL_BROWSER_FLAT_BUDGET', 20000),
+    // A search affords a far larger walk than a browse (D5): the flat view
+    // must render everything it walks as tiles, while a search discards
+    // non-matches and returns at most the cap — so its budget buys reach, not
+    // payload. 10× default; independently tunable.
+    budget: hasQuery
+      ? envLimit('MODEL_BROWSER_SEARCH_BUDGET', 200_000)
+      : envLimit('MODEL_BROWSER_FLAT_BUDGET', 20000),
     visited: new Set(),
     models: [],
     truncated: false,

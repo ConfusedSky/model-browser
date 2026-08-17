@@ -18,3 +18,9 @@
 
 - [x] 3.1 `bun run typecheck` and `bun run test` pass across workspaces
 - [x] 3.2 Manual E2E via Playwright MCP: filter narrows the fixture grid live (and its tiles' thumbnails do not reload as you type); deep search from the fixture root finds nested and zipped models by name; results are labeled as search results; a no-match query and an all-hiding filter each state why the grid is empty; skeleton shows on a slowed search; clearing restores browsing — *verified 2026-08-14: filter → [fat_cat.stl] with img srcs stable; deep search from the tasks root found the nested model, and from a library folder found matches inside `…Heroes.zip!/…` labeled by file name with relative-path tooltips; both empty states and the results label rendered; skeleton appeared under a 900ms-delayed walk; clearing restored the nested listing*
+
+## 4. Search budget & truncated-empty honesty (D5, added post-implementation)
+
+- [x] 4.1 `listFlat` budgets a queried walk from `MODEL_BROWSER_SEARCH_BUDGET` (default 200000) instead of `MODEL_BROWSER_FLAT_BUDGET`; server tests prove the separation (a browse that truncates at budget 2 while a search under the same env still finds the nested match) and that `MODEL_BROWSER_SEARCH_BUDGET` bounds the search walk
+- [x] 4.2 A truncated empty search renders "ran out of budget — try a deeper folder" instead of "No models matched", suppressing the generic omitted-notice; component test pins the message choice
+- [x] 4.3 Manual E2E: the search that surfaced this (`MechGunslinger` from the library root, previously a false empty) returns its matches — *verified 2026-08-17: 32 results in 0.85s from the root, walk completed (no truncation), loose files and their zip-entry twins both found, results label rendered*

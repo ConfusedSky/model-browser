@@ -43,6 +43,12 @@ A deep search replaces the grid with entries from arbitrary depths while the pat
 
 Deep results are flat-shaped whatever the flat toggle reads, since the search always requests `flat=true`. Rather than driving the toggle from the search (which would leave it lit over an ordinary listing after the query clears), the toggle keeps its own state, the search indicator explains why the grid looks flat, and pressing the toggle issues its ordinary request — superseding the search by latest-wins, exactly as any navigation does.
 
+### D5: Search walks on its own, larger budget; a truncated empty search says so (added post-implementation)
+
+Found in use: a search for a name deep in an 80-folder library returned empty with `truncated: true` — the shared 20k-step walk budget died in the alphabet before reaching the match, and the UI's "No models matched" claim was false. Two fixes, one concern. Server: when a non-blank query is present, `listFlat` budgets from `MODEL_BROWSER_SEARCH_BUDGET` (default 200k) instead of `MODEL_BROWSER_FLAT_BUDGET` (20k) — a browse must render everything it walks as tiles, so its budget bounds payload; a search discards non-matches and returns at most the cap, so its budget buys reach and can afford 10×, behind the existing skeleton. Client: an empty search response carrying `truncated` renders "ran out of budget — try a deeper folder" instead of "No models matched", and suppresses the generic omitted-notice (which would double-speak). A non-truncated empty search keeps the plain no-match sentence.
+
+*Alternative — one bigger shared budget:* punishes the flat view, which would walk (and render) 10× the tiles. *Alternative — resumable/streaming search:* real fix for arbitrarily large libraries, real complexity; deferred until a 200k horizon proves too small.
+
 ## Risks / Trade-offs
 
 - [Two inputs in the header (path bar, search) compete for width] → the search input stays compact (fixed basis, grows on focus); cosmetic, tuned at apply.

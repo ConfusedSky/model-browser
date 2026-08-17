@@ -50,6 +50,7 @@ afterAll(() => {
 afterEach(() => {
   delete process.env.MODEL_BROWSER_FLAT_CAP
   delete process.env.MODEL_BROWSER_FLAT_BUDGET
+  delete process.env.MODEL_BROWSER_SEARCH_BUDGET
 })
 
 async function flat(path: string, flag = 'true', q?: string): Promise<DirListing> {
@@ -298,10 +299,22 @@ describe('deep name search (q parameter)', () => {
   })
 
   it('still reports budget truncation when the search matches nothing', async () => {
-    process.env.MODEL_BROWSER_FLAT_BUDGET = '2'
+    process.env.MODEL_BROWSER_SEARCH_BUDGET = '2'
     const body = await flat(root, 'true', 'nope-does-not-exist')
     expect(body.entries).toEqual([])
     expect(body.truncated).toBe(true)
+  })
+
+  it('search walks on its own budget: reach the browse budget cannot afford (D5)', async () => {
+    // A browse this constrained truncates almost immediately…
+    process.env.MODEL_BROWSER_FLAT_BUDGET = '2'
+    const browse = await flat(root)
+    expect(browse.truncated).toBe(true)
+    // …but a search under the same environment still finds the nested model,
+    // because MODEL_BROWSER_SEARCH_BUDGET (default 200k) governs it instead.
+    const search = await flat(root, 'true', 'bracket')
+    expect(search.entries.map((e) => e.name)).toContain('a/bracket.stl')
+    expect(search.truncated).not.toBe(true) // omitted when the walk completed
   })
 
   it('a blank or whitespace-only query is a plain flat listing', async () => {

@@ -34,6 +34,7 @@ const SEARCH_RESULT: DirListing = {
   truncated: true,
 }
 const NO_MATCHES: DirListing = { path: '/models', entries: [] }
+const NO_MATCHES_TRUNCATED: DirListing = { path: '/models', entries: [], truncated: true }
 
 beforeEach(() => mountApp('/models', NESTED))
 afterEach(() => unmountApp())
@@ -237,6 +238,22 @@ describe('file name search', () => {
     expect(container.textContent).toContain('walk exploded')
     expect(container.textContent).toContain('Search results for "found".')
     expect(container.textContent).not.toContain('Search results for "boom"')
+  })
+
+  it('a truncated empty search says it ran out, never "no models matched"', async () => {
+    listDir.mockImplementation((_target: string, opts?: { q?: string }) =>
+      Promise.resolve(opts?.q === undefined ? NESTED : NO_MATCHES_TRUNCATED),
+    )
+
+    await type(searchInput(), 'buried')
+    await pressEnter(searchInput())
+    await settle()
+
+    // The walk never finished, so "no match" would be a false claim (D5) —
+    // and the generic "some were omitted" notice stays out of the way too.
+    expect(container.textContent).toContain('ran out of budget')
+    expect(container.textContent).not.toContain('No models matched')
+    expect(container.textContent).not.toContain('omitted')
   })
 
   it('overlapping failed searches revert the label to the search that actually landed', async () => {

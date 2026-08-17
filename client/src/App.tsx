@@ -369,7 +369,7 @@ export default function App() {
             </div>
           ) : (
             <>
-              {truncated && (
+              {truncated && !searchHasNoMatches && (
                 <p className="px-4 pt-3 text-xs text-amber-400">
                   Showing {listing.filter((e) => e.kind === 'model').length} models; some were
                   omitted.
@@ -382,9 +382,18 @@ export default function App() {
                 <p className="px-4 pt-3 text-xs text-zinc-400">Search results for "{query}".</p>
               )}
               {searchHasNoMatches ? (
-                <p className="mt-16 text-center text-sm text-zinc-600">
-                  No models matched "{query}".
-                </p>
+                // An empty truncated search never finished: claiming "no match"
+                // would be false — the walk ran out before covering the tree (D5).
+                truncated ? (
+                  <p className="mt-16 text-center text-sm text-zinc-600">
+                    Nothing matched "{query}" in the part of the tree the search could cover — it
+                    ran out of budget before finishing. Try searching from a deeper folder.
+                  </p>
+                ) : (
+                  <p className="mt-16 text-center text-sm text-zinc-600">
+                    No models matched "{query}".
+                  </p>
+                )
               ) : filterHidesAll ? (
                 <p className="mt-16 text-center text-sm text-zinc-600">
                   The filter is hiding everything below.
