@@ -33,7 +33,12 @@ function withShadows<T extends THREE.Object3D>(object: T): T {
 export function parseModel(bytes: ArrayBuffer, format: ModelFormat): THREE.Object3D {
   if (format === 'stl') {
     const geometry = new STLLoader().parse(bytes)
-    if (geometry.getAttribute('normal') === undefined) geometry.computeVertexNormals()
+    // Stored STL facet normals are exporter-asserted and redundant with the
+    // triangle winding, which the spec makes authoritative — and files exist
+    // whose normal field is zeroed, stale, or rotated into another up-axis
+    // convention than the vertices. Shade from winding, always (D1).
+    geometry.deleteAttribute('normal')
+    geometry.computeVertexNormals()
     // STL is Z-up (print-bed convention); the scene is Y-up. Bake the
     // conversion into the geometry so models stand upright. (3MFLoader does
     // this itself; OBJ is conventionally Y-up already.)

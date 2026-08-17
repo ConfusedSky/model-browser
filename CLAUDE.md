@@ -77,5 +77,6 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
     page.evaluate is the main world — install fetch wrappers/globals there
   - Vite (5173) binds IPv6-only: curl 127.0.0.1:5173 refuses while localhost/[::1]
     works; the API (3177) binds IPv4 127.0.0.1
-  - Generated STL fixtures need real outward normals: zero normals render black, inverted
-    normals mirror lighting left/right (false bugs in lighting assertions)
+  - Generated STL fixtures need outward *winding* (vertex order): parsing ignores stored
+    facet normals and recomputes from winding, so a zeroed normal field is fine — but
+    inverted winding still mirrors lighting left/right (false bugs in lighting assertions)

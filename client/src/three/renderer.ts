@@ -15,9 +15,9 @@ export const THUMB_SIZE = 512
  * mapping). Cached PNGs carrying another (or no) version are re-rendered.
  * 1 = the pre-rim rig (implicit), 2 = red/blue rim accents, 3 = key-light
  * shadows, 4 = contact floor at the tuned opacity (0.35 → 0.7),
- * 5 = screen-space ambient occlusion.
+ * 5 = screen-space ambient occlusion, 6 = STL normals from winding.
  */
-export const RIG_VERSION = 5
+export const RIG_VERSION = 6
 
 /**
  * The app's single WebGL context (design D2/D3): one WebGLRenderer shared by
