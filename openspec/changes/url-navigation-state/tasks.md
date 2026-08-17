@@ -1,0 +1,26 @@
+# Tasks — url-navigation-state
+
+> Ordering: **satisfied** — `file-name-search` archived (commit `36610f4`), so its committed-`query` semantics, which D2's composite popstate restore depends on, are now in main. Still re-read App.tsx and ViewerLayer.tsx against main before starting (parallel sessions); the line numbers cited throughout these tasks were taken at revision time.
+
+## 1. URL state module
+
+- [ ] 1.1 `client/src/lib/urlState.ts`: parse the current URL into `{ path?, flat, q?, model? }`; serialize back (omit-empty: `flat` present only when on, params absent rather than blank); `commitUrl(view, { replace })` that reads the live URL at write time and pushes only on difference, replacing otherwise-noop pushes away (D1/D2)
+- [ ] 1.2 Unit tests: round-trip with spaces, unicode, and zip `!/` paths — `URLSearchParams` is the only encoder, so a case that would double-encode (a path containing `%`) belongs here; omit-empty rules; push-only-on-difference and replace behavior against a happy-dom `history`
+
+## 2. App wiring
+
+- [ ] 2.1 `fetchListing`'s `.then` commits `{ path, flat, q }` to the URL — `pushState` on change, `replaceState` when *this request* is a restoration. Mark restorations by request id (the existing `++requestRef.current`, App.tsx:67/84), never by a boolean held across the fetch: a commit landing mid-restore would otherwise replace the entry it should push (D2)
+- [ ] 2.2 `popstate` handler: parse URL, restore composite state (`setFlat`, `setQuery`, `setFilter` to the query, then one `fetchListing(path, flat, q)` marked as a restoration) — deliberately not `navigate()`, which clears search state by design; and open or request-close the lightbox per the `model` param (D2/D3)
+- [ ] 2.3 Boot precedence (D4): URL params override localStorage last-path; a bare URL keeps today's boot and `replaceState`s the resolved view in; `pushRecent` unchanged either way
+- [ ] 2.4 Lightbox history — push side (D3): hook `model=<vpath>` to the *transition into* `'lightbox'` mode, so it fires for both entrances — `openLightbox` (App.tsx:223, reached only from Grid's `onKeyDown`, Grid.tsx:74-78) and the pointer route's promotion (`onPromote`, ViewerLayer.tsx:209 → App.tsx:463). Record on the viewer whether *this* entry was pushed; a `model` restored at boot was not (D4). A `model` param is honored once the listing contains the entry, and silently dropped (`replaceState`) after a successful listing that lacks it
+- [ ] 2.5 Lightbox history — close side (D3): all three affordances (✕ ViewerLayer.tsx:523, Escape :267, backdrop pointerdown :398-400) route through history when this lightbox's entry was pushed, and drop `model` via `replaceState` when it was not (deep link — `history.back()` would leave the app). `ViewerLayer` keeps ownership of the teardown: App's popstate handler raises a close *request*, and `ViewerLayer` answers it by running its existing `closeLightbox` (:293-300 — `settle` → `onPersist` → `onDismiss`), because `sessionRef` is private to it and App's `closeViewer` (App.tsx:296) would skip settle and persist
+
+## 3. Tests
+
+- [ ] 3.1 Component tests on the shared `client/test/appHarness.tsx` (happy-dom provides `history`/`popstate`): committed navigation/flat/search each push one entry and re-commits don't stack; popstate restores a search view with query, label, and results (not a plain listing); popstate restoration replaces rather than pushes; a commit landing *while* a restoration is in flight still pushes (the request-id guard, 2.1 — a boolean guard passes every other test in this list and fails this one); a failed replay surfaces the error without new entries; deep-link boot with `path`+`flat`+`q` skips last-path; stale `model` param drops silently
+- [ ] 3.2 Lightbox history tests (D3): the **pointer** route (tile pointerdown → pointerup without drag → promote, per the PointerEvent recipe in the root CLAUDE.md) pushes an entry and a `model` param, not just the keyboard route; each of ✕, Escape, and backdrop click closes with `onPersist` called and leaves the same history position; back closes with persist called and forward re-opens; a lightbox restored from a boot URL closes *without* a `history.back()` (assert the app is still mounted and `model` is gone); an orbit drag that never promotes pushes nothing
+
+## 4. Verification
+
+- [ ] 4.1 `bun run typecheck` and `bun run test` pass across workspaces
+- [ ] 4.2 Manual E2E via Playwright MCP: walk directories → flat → search, then back/forward through every view including the search (label restored); reload mid-search reproduces the view; copy the URL into a new context and land there; lightbox opened *by pointer* (the tile PointerEvent recipe in the root CLAUDE.md — pointerdown, ~300ms, pointerup on window) back-closes and forward-reopens with the thumbnail persisted; a URL pasted straight to a `model=` link closes into its listing without leaving the app; orbit drags add no history entries
