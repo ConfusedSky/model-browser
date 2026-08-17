@@ -28,7 +28,14 @@ let renderer: THREE.WebGLRenderer | null = null
 
 export function getRenderer(): THREE.WebGLRenderer {
   if (renderer === null) {
-    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
+    // On dual-GPU machines, ask the browser for the discrete adapter — the
+    // AO + supersample chain is bandwidth-bound and iGPUs feel it first. A
+    // hint, not a guarantee (on Linux the browser's own GPU selection wins).
+    renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: true,
+      powerPreference: 'high-performance',
+    })
     renderer.setClearColor(0x000000, 0)
     // Shadow maps render identically into the visible canvas and the thumbnail
     // render target, so the one shared renderer enables them once (D2).
