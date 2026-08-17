@@ -80,7 +80,7 @@ The client SHALL persist recently visited directories in localStorage and offer 
 - **THEN** recent directories are listed and selecting one navigates there
 
 ### Requirement: Recursive flat listing
-The server SHALL support a flat variant of the directory listing, requested by an explicit query flag; any other value of that flag, or its absence, SHALL yield the ordinary nested listing. A flat listing SHALL return the requested root's immediate subdirectory and zip entries (top level only — deeper folders are not listed as tiles) followed by every model file recursively under the root, the models ordered by **file name** with ties broken by the full relative path. The walk SHALL descend into subdirectories and into zip files' contents (one archive level; nested zip *file entries* are skipped, while a directory inside an archive whose name ends in `.zip` is walked normally), and SHALL skip hidden (dot-prefixed) directories and unreadable subdirectories without failing the request.
+The server SHALL support a flat variant of the directory listing, requested by an explicit query flag; any other value of that flag, or its absence, SHALL yield the ordinary nested listing — except that a request carrying a file-search query without the flat flag SHALL be rejected rather than silently ignored (see the file-search capability). A flat listing SHALL return the requested root's immediate subdirectory and zip entries (top level only — deeper folders are not listed as tiles) followed by every model file recursively under the root — all of them when no file-search query narrows the walk; only matching ones when one does — the models ordered by **file name** with ties broken by the full relative path. The walk SHALL descend into subdirectories and into zip files' contents (one archive level; nested zip *file entries* are skipped, while a directory inside an archive whose name ends in `.zip` is walked normally), and SHALL skip hidden (dot-prefixed) directories and unreadable subdirectories without failing the request.
 
 The walk SHALL enter each real directory at most once, keyed by its resolved real path. Symlink cycles therefore terminate, and a directory reachable by several routes SHALL contribute its models once — under the first route walked — rather than once per route; consequently a flat listing is not required to include models that nested browsing shows under an aliased route.
 
@@ -97,7 +97,7 @@ The walk SHALL be bounded by a hard budget on the work it does, charged once per
 - **THEN** the two entries are adjacent in the listing, ordered by file name rather than by containing folder
 
 #### Scenario: Flag must be explicit
-- **WHEN** the listing is requested without the flat flag, or with a value that does not enable it
+- **WHEN** the listing is requested without the flat flag, or with a value that does not enable it, and no file-search query accompanies it
 - **THEN** the ordinary single-level nested listing is returned
 
 #### Scenario: Zip contents included
