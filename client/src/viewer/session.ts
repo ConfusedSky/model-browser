@@ -121,8 +121,8 @@ export class ViewerSession {
     // Never a direct renderer.render: ambient occlusion lives in the shared
     // live chain, which sizes itself to this host only when it actually
     // changed and re-points its passes at this scene every frame (D1).
-    // SCAFFOLDING: the AO comparison flag is consulted here and only here —
-    // thumbnails never see it, so the cache stays on the shipped recipe.
+    // The AO preference is consulted here and only here — thumbnails never
+    // see it, so the cache stays on the shipped recipe.
     getLiveChain(width, height).render(this.scene, this.camera, this.bounds, aoEnabled())
   }
 

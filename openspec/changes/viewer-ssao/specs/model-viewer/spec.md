@@ -3,7 +3,7 @@
 ## ADDED Requirements
 
 ### Requirement: Ambient-occlusion shading
-Models SHALL be rendered with screen-space ambient occlusion that darkens crevices, recesses, and contact regions, applied identically in the orbit overlay, the lightbox, and thumbnails. The effect SHALL run as a post-process chain on the app's single shared renderer — introducing no additional WebGL context — and the thumbnail path SHALL produce its PNG from the post-processed output, under the color-pipeline parity and transparency that `model-thumbnails` already requires of it. Occlusion parameters SHALL scale with the model's bounds so models of any physical size receive equivalent depth-cueing. Occlusion SHALL affect only model pixels, in coverage as well as in color: silhouette edges over the transparent background SHALL NOT acquire dark halos, background pixels SHALL stay fully transparent, and model-interior pixels SHALL stay fully opaque. The effect is always on in both lighting modes and is not user-toggleable.
+Models SHALL be rendered with screen-space ambient occlusion that darkens crevices, recesses, and contact regions, applied identically in the orbit overlay, the lightbox, and thumbnails. The effect SHALL run as a post-process chain on the app's single shared renderer — introducing no additional WebGL context — and the thumbnail path SHALL produce its PNG from the post-processed output, under the color-pipeline parity and transparency that `model-thumbnails` already requires of it. Occlusion parameters SHALL scale with the model's bounds so models of any physical size receive equivalent depth-cueing. Occlusion SHALL affect only model pixels, in coverage as well as in color: silhouette edges over the transparent background SHALL NOT acquire dark halos, background pixels SHALL stay fully transparent, and model-interior pixels SHALL stay fully opaque. The effect applies in both lighting modes and is on by default; the viewer SHALL offer a toggle that disables occlusion in the live view only — a performance preference for weaker GPUs, persisted per browser profile — while thumbnails SHALL always render with occlusion, so the cache and the pixel-recipe version never depend on the preference.
 
 #### Scenario: Crevices read at thumbnail size
 - **WHEN** a model with recesses or fine surface detail is thumbnailed
@@ -24,6 +24,10 @@ Models SHALL be rendered with screen-space ambient occlusion that darkens crevic
 #### Scenario: Occlusion does not disturb transparency
 - **WHEN** a thumbnail PNG rendered with ambient occlusion is inspected pixel by pixel
 - **THEN** background pixels are still fully transparent and pixels inside the model are still fully opaque, so the model composites over the app background exactly as an occlusion-free thumbnail does
+
+#### Scenario: Toggling occlusion off for performance
+- **WHEN** the user turns the occlusion toggle off, orbits with it off, and reloads the app in the same browser profile
+- **THEN** the live view renders without occlusion (and faster) across sessions until toggled back on, while tile thumbnails — cached or newly rendered — keep their occluded shipped look throughout
 
 #### Scenario: Size-independent occlusion
 - **WHEN** a very small and a very large model with similar shapes are each rendered

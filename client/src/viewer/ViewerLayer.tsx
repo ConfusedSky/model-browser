@@ -23,7 +23,7 @@ interface Props {
   axis: OrbitAxis | undefined
   /** Active lighting mode — a prop (not read from the store) so toggling repaints the live view. */
   lighting: LightingMode
-  /** SCAFFOLDING: ambient occlusion on/off — a prop for the same reason as `lighting`. */
+  /** Ambient occlusion on/off — a prop for the same reason as `lighting`. */
   ao: boolean
   api: ApiClient
   lru: MeshLru<THREE.Object3D>

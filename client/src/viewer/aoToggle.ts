@@ -1,12 +1,21 @@
 /**
- * SCAFFOLDING: ambient-occlusion comparison toggle (rim-shadows precedent).
- * The live view renders without GTAO while this is off, so the shipped AO
- * recipe and a no-AO render can be compared in place. Deliberately in-memory
- * and default ON — the shipped recipe includes AO — and only `ViewerSession`
- * consults it: thumbnails always render the shipped recipe, so the cache and
- * `RIG_VERSION` are untouched. Removed after the verdict, before archive.
+ * Ambient-occlusion toggle for the live view (lighting-mode precedent). The
+ * GTAO pass is bandwidth-bound and integrated GPUs feel it first — measured
+ * 17 → 56 fps on an orbit drag when disabled — so the pill is a per-browser
+ * performance preference, persisted like the lighting mode (localStorage is
+ * per profile: an iGPU browser can keep AO off while a dGPU profile keeps it
+ * on). Only `ViewerSession` consults it: thumbnails always render the shipped
+ * recipe, so the cache and `RIG_VERSION` never see the preference.
  */
-let enabled = true
+const KEY = 'model-browser:ao-enabled'
+
+let enabled: boolean = (() => {
+  try {
+    return localStorage.getItem(KEY) !== 'off'
+  } catch {
+    return true
+  }
+})()
 
 export function aoEnabled(): boolean {
   return enabled
@@ -14,4 +23,9 @@ export function aoEnabled(): boolean {
 
 export function setAoEnabled(on: boolean): void {
   enabled = on
+  try {
+    localStorage.setItem(KEY, on ? 'on' : 'off')
+  } catch {
+    // no localStorage (tests) — in-memory only
+  }
 }

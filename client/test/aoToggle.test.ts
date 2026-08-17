@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// SCAFFOLDING test for the AO comparison toggle — deleted with the toggle.
+// The AO toggle: a persisted live-view preference; thumbnails never consult it.
 import * as THREE from 'three'
 import type { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -50,7 +50,7 @@ function stagedArgs(): { scene: THREE.Scene; camera: THREE.PerspectiveCamera; bo
 const gtaoOf = (chain: { composer: { passes: unknown[] } }): GTAOPass =>
   chain.composer.passes[1] as GTAOPass
 
-describe('AO comparison toggle', () => {
+describe('AO toggle', () => {
   it('defaults to the shipped recipe: AO on', () => {
     expect(aoEnabled()).toBe(true)
   })
@@ -81,7 +81,35 @@ describe('AO comparison toggle', () => {
     session.close()
   })
 
-  it('thumbnails never consult the flag: shipped recipe even while comparing', () => {
+  it('persists the preference per profile, like the lighting mode', () => {
+    setAoEnabled(false)
+    expect(localStorage.getItem('model-browser:ao-enabled')).toBe('off')
+    setAoEnabled(true)
+    expect(localStorage.getItem('model-browser:ao-enabled')).toBe('on')
+  })
+
+  it('reads the persisted preference back at module init — the reload half', async () => {
+    // A fresh module instance must honor what a previous session stored; this
+    // is the "across sessions" half of the spec scenario, distinct from the
+    // write path above.
+    localStorage.setItem('model-browser:ao-enabled', 'off')
+    vi.resetModules()
+    const fresh = await import('../src/viewer/aoToggle')
+    expect(fresh.aoEnabled()).toBe(false)
+
+    localStorage.setItem('model-browser:ao-enabled', 'on')
+    vi.resetModules()
+    const again = await import('../src/viewer/aoToggle')
+    expect(again.aoEnabled()).toBe(true)
+
+    // Absent key (first run) defaults on.
+    localStorage.removeItem('model-browser:ao-enabled')
+    vi.resetModules()
+    const first = await import('../src/viewer/aoToggle')
+    expect(first.aoEnabled()).toBe(true)
+  })
+
+  it('thumbnails never consult the flag: shipped recipe regardless of the preference', () => {
     const chain = getThumbChain()
     vi.spyOn(chain.composer, 'render').mockImplementation(() => {})
 

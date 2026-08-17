@@ -54,7 +54,7 @@ export default function App() {
   const [query, setQuery] = useState<string | null>(null)
   const [viewer, setViewer] = useState<ViewerState | null>(null)
   const [lighting, setLightingState] = useState<LightingMode>(getLightingMode)
-  // SCAFFOLDING: AO comparison pill state — removed with the toggle.
+  // AO preference pill state (persisted per browser profile, aoToggle.ts).
   const [ao, setAoState] = useState(aoEnabled)
   const trackerRef = useRef(new GestureTracker())
 
@@ -404,7 +404,9 @@ export default function App() {
         </main>
         <ChatPanel />
       </div>
-      {/* EXPERIMENTAL lighting-mode picker — remove once a winner is chosen */}
+      {/* Corner pill: the EXPERIMENTAL lighting-mode picker (remove those buttons
+          once a winner is chosen) plus the SHIPPED ssao preference — the container
+          outlives the lighting experiment. */}
       <div className="fixed bottom-3 left-3 z-50 flex items-center gap-1 rounded-full border border-zinc-700 bg-zinc-900/90 p-1 text-xs">
         <span className="px-2 text-zinc-500">light</span>
         {LIGHTING_MODES.map((m) => (
@@ -422,12 +424,12 @@ export default function App() {
             {m}
           </button>
         ))}
-        {/* SCAFFOLDING: ambient occlusion on/off, live view only — removed after the comparison */}
+        {/* Ambient occlusion on/off, live view only — a per-profile performance preference */}
         <span className="h-4 w-px bg-zinc-700" />
         <button
           type="button"
           aria-pressed={ao}
-          title="Ambient occlusion in the live view, for comparison — thumbnails keep the shipped recipe"
+          title="Ambient occlusion in the live view — turn off to speed up orbiting on weaker GPUs; thumbnails keep the shipped recipe"
           onClick={() => {
             setAoEnabled(!ao)
             setAoState(!ao)
