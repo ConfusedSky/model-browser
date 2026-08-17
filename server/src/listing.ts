@@ -319,15 +319,20 @@ export async function listFlat(vpath: string, query?: string): Promise<DirListin
   }
 
   const cap = envLimit('MODEL_BROWSER_FLAT_CAP', 500)
+  // Filter before sorting, not after: a search walks up to its own budget
+  // (200k steps) but keeps only matches, and the comparator below runs
+  // `localeCompare` — collation over the whole walk to return a handful of
+  // rows. Discarding first is the same output (a sorted subset equals the
+  // sorted set filtered) for a fraction of the comparisons.
+  if (hasQuery) {
+    containers = containers.filter((e) => matchesQuery(e.name, q))
+    walk.models = walk.models.filter((m) => matchesQuery(m.name, q))
+  }
   // Not sortEntries: its model comparison is the full name, i.e. the relative
   // path — flat ordering is by file name so same-named parts sit together (D2).
   walk.models.sort(
     (a, b) => baseName(a.name).localeCompare(baseName(b.name)) || a.name.localeCompare(b.name),
   )
-  if (hasQuery) {
-    containers = containers.filter((e) => matchesQuery(e.name, q))
-    walk.models = walk.models.filter((m) => matchesQuery(m.name, q))
-  }
   if (walk.models.length > cap) {
     walk.truncated = true
     walk.models.length = cap
