@@ -49,6 +49,8 @@ Found in use: a search for a name deep in an 80-folder library returned empty wi
 
 *Alternative — one bigger shared budget:* punishes the flat view, which would walk (and render) 10× the tiles. *Alternative — resumable/streaming search:* real fix for arbitrarily large libraries, real complexity; deferred until a 200k horizon proves too small.
 
+**Known limit — an abandoned search still runs to completion.** Latest-wins is client-side only: `requestRef` discards the superseded *response*, but nothing cancels the walk, and `server/src` has no abort or timeout path at all. Submitting several searches in a row therefore stacks that many concurrent walks, each free to spend 200k steps of sequential `stat` calls — an amplification the 10× budget makes 10× worse, since the same pattern previously topped out at 20k apiece. The step budget bounds *work per request*, not time and not concurrent load. Accepted for a single-user localhost app, where the realistic worst case is a few impatient Enters against a warm page cache. The fix, if it ever bites, is to thread the request's `AbortSignal` down into `takeStep` so an abandoned search stops at its next step; that is new server behavior (cancellation semantics, and what a cancelled request returns), so it belongs in its own change with a spec delta rather than riding along here.
+
 ## Risks / Trade-offs
 
 - [Two inputs in the header (path bar, search) compete for width] → the search input stays compact (fixed basis, grows on focus); cosmetic, tuned at apply.

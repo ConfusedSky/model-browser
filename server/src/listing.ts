@@ -22,7 +22,10 @@ function modelFormat(name: string): 'stl' | '3mf' | 'obj' | undefined {
 }
 
 interface FlatWalk {
-  /** Walk steps left: every directory entry examined costs 1. */
+  /**
+   * Walk steps left: every directory entry examined costs 1. Seeded from the
+   * search budget or the browse budget depending on the request (D5).
+   */
   budget: number
   /** Realpaths of directories already entered — cycle guard and alias dedup. */
   visited: Set<string>
@@ -277,6 +280,13 @@ function envLimit(name: string, fallback: number): number {
  * models to those whose base name contains it case-insensitively, applied
  * before the cap so the cap bounds matches rather than raw walk output (D1).
  * A blank or whitespace-only query is treated as absent.
+ *
+ * Which step budget applies depends on that query: a queried walk runs on the
+ * search budget, an unqueried one on the (smaller) browse budget — see the
+ * `budget` assignment below for why they differ (D5). A truncated response
+ * with *no* entries therefore always means budget exhaustion, never the cap:
+ * the cap is applied after the query filter, so an empty result cannot trip
+ * it. The client's "the search ran out" message depends on that.
  */
 export async function listFlat(vpath: string, query?: string): Promise<DirListing> {
   const q = query?.trim().toLowerCase()
