@@ -322,7 +322,7 @@ export default function App() {
           placeholder="Filter or search by name…"
           aria-label="Filter or search by name"
           spellCheck={false}
-          className="w-40 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none focus:w-64 focus:border-zinc-500"
+          className="w-64 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-500"
         />
         <button
           type="button"
