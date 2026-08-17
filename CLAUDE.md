@@ -61,6 +61,18 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
 - Run vitest from the workspace dir (`cd client && bunx vitest run …`) — from the
   repo root bunx fetches an unpinned vitest that can't resolve workspace deps
 - Manual/E2E: Playwright MCP works here including headless WebGL
+  - E2E fixture models: `.superpowers/sdd/tasks/e2e-models/` — six STLs spanning small
+    (Enforcer), large-flat (paint-rack), flat-faced (bod_test_cube, the acne/AO test), and
+    organic (fat_cat) cases
+  - Thumbnail cache: `~/.cache/model-browser/<hash>.{png,json}`; the .json sidecar carries
+    `{path, mtime, lighting, rig}` — grep it to map fixtures to hashes or verify a
+    RIG_VERSION sweep; `rm -rf` the dir to force re-renders during visual tuning
+  - Orbit/lightbox E2E persists path-keyed cameras — tile thumbnails later re-render from
+    the new angles; that is not a pixel regression. The pointerup also queues a full
+    thumbnail re-render (persist), so wait ~5s before frame-time measurements
+  - Playwright MCP writes files only under the repo root or `.playwright-mcp/`; and
+    `browser_run_code_unsafe` has no require()/import — move bytes via in-page fetch/canvas,
+    or serve them over localhost with a CORS header
   - Model tiles respond only to PointerEvents: dispatch pointerdown on the tile, wait
     ~300ms for the overlay to mount its window listeners, then pointerup on window —
     same-tick release is silently missed. Dir/zip tiles take normal clicks.
