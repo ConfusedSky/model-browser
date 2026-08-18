@@ -1,6 +1,13 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it } from 'vitest'
-import { commitUrl, parseUrl, serializeView, type UrlView } from '../src/lib/urlState'
+import {
+  commitUrl,
+  isLightboxEntry,
+  LIGHTBOX_ENTRY,
+  parseUrl,
+  serializeView,
+  type UrlView,
+} from '../src/lib/urlState'
 
 beforeEach(() => {
   window.history.replaceState(null, '', '/')
@@ -42,6 +49,29 @@ describe('url state', () => {
     expect(parseUrl('?path=%2Fa&flat').flat).toBe(true)
     expect(parseUrl('?path=%2Fa&flat=1').flat).toBe(true)
     expect(parseUrl('?path=%2Fa').flat).toBe(false)
+  })
+
+  it('a query implies flat: a trimmed link that lost the flag must not 400', () => {
+    // The API rejects `q` without `flat=true`, and deep results are flat-shaped
+    // regardless of the toggle — so `?path=…&q=…` is honored, not sent as-is.
+    expect(parseUrl('?path=%2Fa&q=gear').flat).toBe(true)
+    expect(parseUrl('?path=%2Fa&flat=1&q=gear').flat).toBe(true)
+    // A blank query is no query, and cannot switch flat on by itself.
+    expect(parseUrl('?path=%2Fa&q=')).toEqual({
+      path: '/a',
+      flat: false,
+      q: undefined,
+      model: undefined,
+    })
+  })
+
+  it('marks the entries a lightbox push mints, and only those', () => {
+    commitUrl({ path: '/a', flat: false })
+    expect(isLightboxEntry()).toBe(false)
+    commitUrl({ path: '/a', flat: false, model: '/a/m.stl' }, { state: LIGHTBOX_ENTRY })
+    expect(isLightboxEntry()).toBe(true)
+    // The marker rides the entry, so it outlives any in-memory flag.
+    expect(window.history.state).toEqual({ lightbox: true })
   })
 
   it('pushes only on difference: a re-commit of the same view stacks nothing', () => {

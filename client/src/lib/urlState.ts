@@ -18,10 +18,15 @@ export interface UrlView {
 
 export function parseUrl(search: string = window.location.search): UrlView {
   const p = new URLSearchParams(search)
+  const raw = p.get('q')
+  const q = raw === null || raw === '' ? undefined : raw
   return {
     path: p.get('path') ?? undefined,
-    flat: p.has('flat'),
-    q: p.get('q') ?? undefined,
+    // A query implies the flat shape: deep-search results are flat whatever
+    // the toggle reads, and the API rejects `q` without `flat` (app.ts) — so a
+    // hand-trimmed link that kept `q` but lost `flat` must not land on a 400.
+    flat: p.has('flat') || q !== undefined,
+    q,
     model: p.get('model') ?? undefined,
   }
 }
@@ -47,9 +52,27 @@ function sameView(a: UrlView, b: UrlView): boolean {
  * not stack history entries); otherwise pushes, or replaces when the write is
  * a history restoration or a boot seed (D2/D4).
  */
-export function commitUrl(view: UrlView, opts: { replace?: boolean } = {}): void {
+export function commitUrl(
+  view: UrlView,
+  opts: { replace?: boolean; state?: unknown } = {},
+): void {
   if (sameView(parseUrl(), view)) return
   const url = `${window.location.pathname}${serializeView(view)}`
-  if (opts.replace === true) window.history.replaceState(null, '', url)
-  else window.history.pushState(null, '', url)
+  const state = opts.state ?? null
+  if (opts.replace === true) window.history.replaceState(state, '', url)
+  else window.history.pushState(state, '', url)
+}
+
+/**
+ * Stamped into the entry a lightbox push mints, and read back when it closes:
+ * an entry we pushed always has a predecessor, so `history.back()` returns to
+ * the listing, while one restored from a deep link is the session's first and
+ * back would leave the app entirely. The browser keeps state per entry, so
+ * this survives reload and forward/back — an in-memory flag does not, and a
+ * forward-reopened lightbox would then close down the deep-link path.
+ */
+export const LIGHTBOX_ENTRY = { lightbox: true }
+
+export function isLightboxEntry(): boolean {
+  return (window.history.state as { lightbox?: boolean } | null)?.lightbox === true
 }

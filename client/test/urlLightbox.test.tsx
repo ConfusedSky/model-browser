@@ -119,6 +119,64 @@ describe('lightbox history', () => {
     back.mockRestore()
   })
 
+  it('a forward-reopened lightbox still closes through history, not the deep-link path', async () => {
+    // The entry is the one we pushed, so it has the listing behind it. An
+    // in-memory "did we push this" flag is false by now (the re-open came from
+    // popstate), which would wrongly take the deep-link branch and consume the
+    // entry — leaving a dead back press.
+    await openByPointer()
+    // A real back/forward moves between entries, each keeping its own state;
+    // these tests fake it with replaceState, so carry the entry's state by
+    // hand or the simulation loses what the browser would have preserved.
+    const lightboxEntryState = window.history.state
+
+    window.history.replaceState(null, '', '/?path=%2Fmodels')
+    await pop()
+    await wait(200)
+    expect(dialog()).toBeNull()
+
+    window.history.replaceState(
+      lightboxEntryState,
+      '',
+      '/?path=%2Fmodels&model=%2Fmodels%2Fwidget.stl',
+    )
+    await pop()
+    await wait(200)
+    expect(dialog()).not.toBeNull()
+
+    const back = vi.spyOn(window.history, 'back').mockImplementation(() => {
+      window.history.replaceState(null, '', '/?path=%2Fmodels')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!.click()
+    })
+    await wait(200)
+    expect(back).toHaveBeenCalledOnce()
+    expect(dialog()).toBeNull()
+    back.mockRestore()
+  })
+
+  it('the backdrop closes like every other affordance', async () => {
+    await openByPointer()
+    const back = vi.spyOn(window.history, 'back').mockImplementation(() => {
+      window.history.replaceState(null, '', '/?path=%2Fmodels')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+    // The backdrop is the overlay itself: only a press landing on it, not on
+    // the dialog inside, closes.
+    const backdrop = container.querySelector<HTMLElement>('.fixed.inset-0.z-40')!
+    await act(async () => {
+      backdrop.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+    })
+    await wait(200)
+    expect(back).toHaveBeenCalledOnce()
+    expect(dialog()).toBeNull()
+    expect(putThumb).toHaveBeenCalled() // same persisting teardown as ✕ and Escape
+    expect(search()).not.toContain('model=')
+    back.mockRestore()
+  })
+
   it('an orbit drag that never promotes touches neither history nor the URL', async () => {
     const len = window.history.length
     const tile = container.querySelector<HTMLElement>('main button[data-model-tile]')!

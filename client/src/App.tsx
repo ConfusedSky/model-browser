@@ -11,7 +11,7 @@ import { GestureTracker } from './lib/gesture'
 import { createHoverWarmer } from './lib/hover'
 import { fitSquareBox, type Box } from './lib/layout'
 import { getLastPath, pushRecent } from './lib/recents'
-import { commitUrl, parseUrl } from './lib/urlState'
+import { commitUrl, isLightboxEntry, LIGHTBOX_ENTRY, parseUrl } from './lib/urlState'
 import { MeshLru } from './three/lru'
 import { disposeModel, embedded3mfThumbnail, formatOf, geometryBytes, parseModel } from './three/models'
 import { RenderQueue } from './three/queue'
@@ -95,10 +95,6 @@ export default function App() {
   // Whether any listing has landed yet — the deep-link `model` effect must
   // not judge (or drop) the param against the empty pre-boot listing.
   const hasLandedRef = useRef(false)
-  // Whether the CURRENT lightbox's history entry was pushed by us — a
-  // deep-linked lightbox was not, and closing it must not history.back()
-  // out of the app (url-navigation D3/D4).
-  const viewerPushedRef = useRef(false)
   // Set when the next lightbox open comes from history/deep-link restore, so
   // the mode-transition effect skips its push.
   const suppressViewerPushRef = useRef(false)
@@ -228,7 +224,6 @@ export default function App() {
   /** Enter lightbox mode from history/deep-link restore — no tile element, no push. */
   const openRestoredLightbox = useCallback((entry: DirEntry) => {
     suppressViewerPushRef.current = true
-    viewerPushedRef.current = false
     const size = Math.min(window.innerWidth, window.innerHeight) / 4
     setViewer({
       mode: 'lightbox',
@@ -252,7 +247,6 @@ export default function App() {
       // no viewer → re-open without pushing (forward), if the entry is here.
       const openModel = cur.viewer?.mode === 'lightbox' ? cur.viewer.entry.path : undefined
       if (openModel !== undefined && v.model === undefined) {
-        viewerPushedRef.current = false
         setCloseSignal((n) => n + 1)
       } else if (v.model !== undefined && v.model !== openModel) {
         const entry = cur.listing.find((e) => e.kind === 'model' && e.path === v.model)
@@ -298,10 +292,11 @@ export default function App() {
       // Restored from history or a deep link: the entry (if any) is the
       // browser's, not ours — record the view without minting one.
       suppressViewerPushRef.current = false
-      commitUrl(view, { replace: true })
+      // Preserve whatever state this entry already carries: a forward-restored
+      // lightbox is sitting on the entry we originally pushed, marker included.
+      commitUrl(view, { replace: true, state: window.history.state })
     } else {
-      viewerPushedRef.current = true
-      commitUrl(view)
+      commitUrl(view, { state: LIGHTBOX_ENTRY })
     }
   }, [viewer, path, flat, query])
 
@@ -310,7 +305,7 @@ export default function App() {
   // path; a deep-linked one has nothing behind it — back would leave the app —
   // so its param drops via replaceState and the teardown is signalled direct.
   const onViewerCloseIntent = useCallback(() => {
-    if (viewerPushedRef.current) {
+    if (isLightboxEntry()) {
       window.history.back()
     } else {
       const v = parseUrl()
@@ -438,7 +433,6 @@ export default function App() {
   function closeViewer(): void {
     const origin = viewer?.originEl
     setViewer(null)
-    viewerPushedRef.current = false
     // Safety net for dismissals that bypass the history routes (e.g. a mesh
     // load failure): never leave a dangling model param on a closed viewer.
     const v = parseUrl()
