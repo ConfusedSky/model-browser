@@ -57,6 +57,8 @@ function makeProps() {
       lru: { acquire: vi.fn().mockResolvedValue(mesh) } as unknown as MeshLru<THREE.Object3D>,
       tracker: new GestureTracker(),
       onPromote: vi.fn(),
+      onCloseIntent: vi.fn(),
+      closeSignal: 0,
       onDismiss: vi.fn(),
       onPersist: vi.fn(() => persistGate),
       onLoadError: vi.fn(),

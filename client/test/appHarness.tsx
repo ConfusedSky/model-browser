@@ -19,6 +19,19 @@ export const listDir = vi.fn()
 // e.g. typing a filter keystroke must not re-trigger useThumbnails' lookups.
 // mountApp clears it, so counts are still test-scoped.
 export const getThumb = vi.fn().mockResolvedValue({ status: 'miss' })
+// Shared so lightbox tests can assert the close path persisted (settle →
+// snapshot → putThumb); cleared per mount like getThumb.
+export const putThumb = vi.fn().mockResolvedValue(undefined)
+
+/** A minimal valid binary STL (one facet) — enough for parseModel to build a real mesh. */
+export function tinyStl(): ArrayBuffer {
+  const buf = new ArrayBuffer(84 + 50)
+  const dv = new DataView(buf)
+  dv.setUint32(80, 1, true)
+  const f = [0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0]
+  f.forEach((v, i) => dv.setFloat32(84 + i * 4, v, true))
+  return buf
+}
 
 // App constructs HttpApiClient itself (D1 keeps all I/O behind it), so the
 // module is the seam — there is no prop to inject a fake through.
@@ -28,9 +41,9 @@ export function apiClientModule(): Record<string, unknown> {
     HttpApiClient: class {
       listDir = listDir
       complete = vi.fn().mockResolvedValue([])
-      fetchModel = vi.fn()
+      fetchModel = vi.fn().mockImplementation(() => Promise.resolve(tinyStl()))
       getThumb = getThumb
-      putThumb = vi.fn().mockResolvedValue(undefined)
+      putThumb = putThumb
     },
   }
 }
@@ -128,12 +141,15 @@ export function deepButton(): HTMLButtonElement {
   )!
 }
 
-export async function mountApp(lastPath: string, initial: DirListing): Promise<void> {
-  localStorage.setItem('model-browser:last-path', lastPath)
+async function mount(initial: DirListing): Promise<void> {
   vi.stubGlobal('URL', { ...URL, createObjectURL: () => 'blob:m', revokeObjectURL: () => {} })
   listDir.mockReset()
   listDir.mockResolvedValue(initial)
   getThumb.mockClear()
+  putThumb.mockClear()
+  // The persist chain decodes its PNG via createImageBitmap, which happy-dom
+  // lacks — a resolving stub lets the close path run through to putThumb.
+  vi.stubGlobal('createImageBitmap', () => Promise.resolve({ close() {} }))
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
@@ -144,6 +160,20 @@ export async function mountApp(lastPath: string, initial: DirListing): Promise<v
     root!.render(<App />)
   })
   await settle()
+}
+
+export async function mountApp(lastPath: string, initial: DirListing): Promise<void> {
+  // The app writes navigation state into the URL; happy-dom's location
+  // persists across tests in a file, so every mount starts from a clean one.
+  window.history.replaceState(null, '', '/')
+  localStorage.setItem('model-browser:last-path', lastPath)
+  await mount(initial)
+}
+
+/** Mount with a URL already in place — the deep-link boot path (url-navigation D4). */
+export async function mountAppAtCurrentUrl(url: string, initial: DirListing): Promise<void> {
+  window.history.replaceState(null, '', url)
+  await mount(initial)
 }
 
 export async function unmountApp(): Promise<void> {

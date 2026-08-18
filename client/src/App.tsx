@@ -11,6 +11,7 @@ import { GestureTracker } from './lib/gesture'
 import { createHoverWarmer } from './lib/hover'
 import { fitSquareBox, type Box } from './lib/layout'
 import { getLastPath, pushRecent } from './lib/recents'
+import { commitUrl, parseUrl } from './lib/urlState'
 import { MeshLru } from './three/lru'
 import { disposeModel, embedded3mfThumbnail, formatOf, geometryBytes, parseModel } from './three/models'
 import { RenderQueue } from './three/queue'
@@ -40,9 +41,13 @@ export default function App() {
     [api],
   )
 
-  const [path, setPath] = useState(getLastPath)
+  // Boot view (url-navigation D4): a URL carrying `path` wins over the
+  // localStorage last-path; a bare URL keeps the last-path behavior and the
+  // first commit seeds the URL via replaceState.
+  const boot = useMemo(() => parseUrl(), [])
+  const [path, setPath] = useState(boot.path ?? getLastPath)
   const [listing, setListing] = useState<DirEntry[]>([])
-  const [flat, setFlat] = useState(false)
+  const [flat, setFlat] = useState(boot.flat)
   const [truncated, setTruncated] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
@@ -50,8 +55,12 @@ export default function App() {
   // requests; `query` is the last *committed* deep search (set on submit,
   // null otherwise). Kept apart so typing over deep results filters them
   // client-side without re-searching (D2).
-  const [filter, setFilter] = useState('')
-  const [query, setQuery] = useState<string | null>(null)
+  const [filter, setFilter] = useState(boot.q ?? '')
+  const [query, setQuery] = useState<string | null>(boot.q ?? null)
+  // A `model` param waiting for its listing (deep link or history forward):
+  // honored once the entry exists in a landed listing, silently dropped after
+  // a successful listing that lacks it (url-navigation D3).
+  const [pendingModel, setPendingModel] = useState<string | null>(boot.model ?? null)
   const [viewer, setViewer] = useState<ViewerState | null>(null)
   const [lighting, setLightingState] = useState<LightingMode>(getLightingMode)
   // AO preference pill state (persisted per browser profile, aoToggle.ts).
@@ -79,9 +88,28 @@ export default function App() {
   // a search that never produced the results on screen.
   const landedQueryRef = useRef<string | null>(null)
 
+  // Which request id is a history restoration (url-navigation D2). Never a
+  // boolean held across the fetch: an ordinary commit landing mid-restore
+  // must still push, and it is classified by its own id, not shared state.
+  const restoreReqRef = useRef(0)
+  // Whether any listing has landed yet — the deep-link `model` effect must
+  // not judge (or drop) the param against the empty pre-boot listing.
+  const hasLandedRef = useRef(false)
+  // Whether the CURRENT lightbox's history entry was pushed by us — a
+  // deep-linked lightbox was not, and closing it must not history.back()
+  // out of the app (url-navigation D3/D4).
+  const viewerPushedRef = useRef(false)
+  // Set when the next lightbox open comes from history/deep-link restore, so
+  // the mode-transition effect skips its push.
+  const suppressViewerPushRef = useRef(false)
+  // Increment to ask ViewerLayer to run its persisting close (url-navigation
+  // D3: App cannot run the teardown — the session is private to ViewerLayer).
+  const [closeSignal, setCloseSignal] = useState(0)
+
   const fetchListing = useCallback(
-    (target: string, asFlat: boolean, q: string | null, onFail?: () => void) => {
+    (target: string, asFlat: boolean, q: string | null, onFail?: () => void, restore = false) => {
       const req = ++requestRef.current
+      if (restore) restoreReqRef.current = req
       setTarget(target)
       setPending(true)
       void api
@@ -89,12 +117,22 @@ export default function App() {
         .then((res) => {
           if (req !== requestRef.current) return
           landedQueryRef.current = q
+          hasLandedRef.current = true
           setPending(false)
           setPath(target)
           setListing(res.entries)
           setTruncated(res.truncated === true)
           setError(null)
           pushRecent(target)
+          // The view is real now — record it (url-navigation D1/D2). A
+          // restoration replaces (back must not mint forward-erasing entries)
+          // and keeps the URL's own `model`; a user navigation pushes, and any
+          // lightbox is necessarily closed, so `model` drops.
+          const restoring = req === restoreReqRef.current
+          commitUrl(
+            { path: target, flat: asFlat, q: q ?? undefined, model: restoring ? parseUrl().model : undefined },
+            { replace: restoring },
+          )
         })
         .catch((err: unknown) => {
           if (req !== requestRef.current) return
@@ -165,7 +203,11 @@ export default function App() {
   }
 
   useEffect(() => {
-    if (path !== '') navigate(path)
+    // Boot fetch (url-navigation D4): honors the URL's flat/q (navigate()
+    // would clear them by design) and lands as a restoration, so the resolved
+    // view is seeded into the URL via replaceState — pushed entries start
+    // with the user's first real navigation.
+    if (path !== '') fetchListing(path, boot.flat, boot.q ?? null, undefined, true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -177,6 +219,105 @@ export default function App() {
   }, [viewer, queue])
 
   const hover = useMemo(() => createHoverWarmer((p) => lru.warm(p)), [lru])
+
+  // Live mirror for the popstate handler: subscribed once, it reads current
+  // state through this ref instead of re-subscribing every render.
+  const stateRef = useRef({ path, flat, query, viewer, listing })
+  stateRef.current = { path, flat, query, viewer, listing }
+
+  /** Enter lightbox mode from history/deep-link restore — no tile element, no push. */
+  const openRestoredLightbox = useCallback((entry: DirEntry) => {
+    suppressViewerPushRef.current = true
+    viewerPushedRef.current = false
+    const size = Math.min(window.innerWidth, window.innerHeight) / 4
+    setViewer({
+      mode: 'lightbox',
+      entry,
+      rect: {
+        left: (window.innerWidth - size) / 2,
+        top: (window.innerHeight - size) / 2,
+        width: size,
+        height: size,
+      },
+      originEl: null,
+    })
+  }, [])
+
+  useEffect(() => {
+    function onPop(): void {
+      const v = parseUrl()
+      const cur = stateRef.current
+      // Lightbox side (url-navigation D3): `model` gone while a lightbox is
+      // open → ask ViewerLayer for its persisting close; `model` present with
+      // no viewer → re-open without pushing (forward), if the entry is here.
+      const openModel = cur.viewer?.mode === 'lightbox' ? cur.viewer.entry.path : undefined
+      if (openModel !== undefined && v.model === undefined) {
+        viewerPushedRef.current = false
+        setCloseSignal((n) => n + 1)
+      } else if (v.model !== undefined && v.model !== openModel) {
+        const entry = cur.listing.find((e) => e.kind === 'model' && e.path === v.model)
+        if (entry !== undefined) openRestoredLightbox(entry)
+        else setPendingModel(v.model)
+      }
+      // Listing side (url-navigation D2): restore the composite view in one
+      // request — not navigate(), which clears search state by design.
+      if (v.path === undefined) return
+      const q = v.q ?? null
+      if (v.path !== cur.path || v.flat !== cur.flat || q !== cur.query) {
+        setFlat(v.flat)
+        setQuery(q)
+        setFilter(v.q ?? '')
+        fetchListing(v.path, v.flat, q, undefined, true)
+      }
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [fetchListing, openRestoredLightbox])
+
+  // A waiting `model` param (url-navigation D3): honored once its entry is in
+  // a landed listing; dropped silently after a successful listing lacks it.
+  useEffect(() => {
+    if (pendingModel === null || pending || error !== null || !hasLandedRef.current) return
+    const entry = listing.find((e) => e.kind === 'model' && e.path === pendingModel)
+    if (entry !== undefined) openRestoredLightbox(entry)
+    else commitUrl({ path, flat, q: query ?? undefined }, { replace: true })
+    setPendingModel(null)
+  }, [pendingModel, listing, pending, error, path, flat, query, openRestoredLightbox])
+
+  // The lightbox history push hooks the transition INTO 'lightbox' mode, not
+  // openLightbox — that function is the keyboard entrance only; the pointer
+  // route promotes the orbit overlay in place (url-navigation D3).
+  const prevModeRef = useRef<'orbit' | 'lightbox' | null>(null)
+  useEffect(() => {
+    const mode = viewer?.mode ?? null
+    const prev = prevModeRef.current
+    prevModeRef.current = mode
+    if (mode !== 'lightbox' || prev === 'lightbox' || viewer === null) return
+    const view = { path, flat, q: query ?? undefined, model: viewer.entry.path }
+    if (suppressViewerPushRef.current) {
+      // Restored from history or a deep link: the entry (if any) is the
+      // browser's, not ours — record the view without minting one.
+      suppressViewerPushRef.current = false
+      commitUrl(view, { replace: true })
+    } else {
+      viewerPushedRef.current = true
+      commitUrl(view)
+    }
+  }, [viewer, path, flat, query])
+
+  // In-app close affordances route here (url-navigation D3): a lightbox whose
+  // entry we pushed closes through history so ✕ and browser-back are one
+  // path; a deep-linked one has nothing behind it — back would leave the app —
+  // so its param drops via replaceState and the teardown is signalled direct.
+  const onViewerCloseIntent = useCallback(() => {
+    if (viewerPushedRef.current) {
+      window.history.back()
+    } else {
+      const v = parseUrl()
+      if (v.model !== undefined) commitUrl({ ...v, model: undefined }, { replace: true })
+      setCloseSignal((n) => n + 1)
+    }
+  }, [])
 
   // Pure view state over `listing` — never reaches useThumbnails, whose effect
   // resets the whole thumb map to `loading` on any `entries` identity change
@@ -297,6 +438,11 @@ export default function App() {
   function closeViewer(): void {
     const origin = viewer?.originEl
     setViewer(null)
+    viewerPushedRef.current = false
+    // Safety net for dismissals that bypass the history routes (e.g. a mesh
+    // load failure): never leave a dangling model param on a closed viewer.
+    const v = parseUrl()
+    if (v.model !== undefined) commitUrl({ ...v, model: undefined }, { replace: true })
     origin?.focus()
   }
 
@@ -461,6 +607,8 @@ export default function App() {
           lru={lru}
           tracker={trackerRef.current}
           onPromote={() => setViewer((v) => (v !== null ? { ...v, mode: 'lightbox' } : v))}
+          closeSignal={closeSignal}
+          onCloseIntent={onViewerCloseIntent}
           onDismiss={closeViewer}
           onPersist={persist}
           onLoadError={() => setThumb(viewer.entry.path, { status: 'error' })}

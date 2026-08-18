@@ -40,6 +40,8 @@ function makeProps(mode: 'orbit' | 'lightbox') {
     } as unknown as MeshLru<THREE.Object3D>,
     tracker: new GestureTracker(),
     onPromote: vi.fn(),
+    onCloseIntent: vi.fn(),
+    closeSignal: 0,
     onDismiss: vi.fn(),
     onPersist: vi.fn().mockResolvedValue(undefined),
     onLoadError: vi.fn(),
@@ -89,11 +91,20 @@ describe('ViewerLayer missing-model error', () => {
     expect(el.querySelector('button[aria-label="Copy path"]')).not.toBeNull()
   })
 
-  it('closing an errored lightbox dismisses without persisting', async () => {
+  it('closing an errored lightbox raises the close intent, then dismisses without persisting', async () => {
+    // Escape raises an intent — App owns the history question — and App's
+    // answer (a closeSignal bump) runs the teardown, which skips persist when
+    // the session never existed.
     const props = makeProps('lightbox')
     await render(props)
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    })
+    expect(props.onCloseIntent).toHaveBeenCalled()
+    expect(props.onDismiss).not.toHaveBeenCalled() // not until App answers
+
+    await act(async () => {
+      root!.render(<ViewerLayer {...props} closeSignal={1} />)
     })
     expect(props.onDismiss).toHaveBeenCalled()
     expect(props.onPersist).not.toHaveBeenCalled()

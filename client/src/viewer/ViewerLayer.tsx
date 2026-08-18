@@ -29,6 +29,14 @@ interface Props {
   lru: MeshLru<THREE.Object3D>
   tracker: GestureTracker
   onPromote: () => void
+  /**
+   * Lightbox close affordances (✕, Escape, backdrop) raise an intent instead
+   * of closing: App owns the history question — back out of a pushed entry,
+   * or drop a deep-linked param — and answers via `closeSignal`.
+   */
+  onCloseIntent: () => void
+  /** Increments when App wants the persisting close to run (url-navigation D3). */
+  closeSignal: number
   onDismiss: () => void
   onPersist: (session: ViewerSession) => Promise<void>
   onLoadError: (message: string) => void
@@ -53,6 +61,8 @@ export default function ViewerLayer({
   lru,
   tracker,
   onPromote,
+  onCloseIntent,
+  closeSignal,
   onDismiss,
   onPersist,
   onLoadError,
@@ -264,7 +274,7 @@ export default function ViewerLayer({
     if (viewer.mode !== 'lightbox') return
     containerRef.current?.focus()
     function onKey(e: KeyboardEvent): void {
-      if (e.key === 'Escape') void closeLightbox()
+      if (e.key === 'Escape') onCloseIntent()
       if (e.key === 'Tab') {
         // Real trap: cycle focus through the dialog and its controls.
         e.preventDefault()
@@ -298,6 +308,17 @@ export default function ViewerLayer({
     }
     onDismiss()
   }
+
+  // App's answer to a close intent (and the browser-back path): run the SAME
+  // async teardown as every in-app affordance — settle, persist, dismiss. The
+  // session is private to this component, so no one else can run it.
+  const handledCloseRef = useRef(closeSignal)
+  useEffect(() => {
+    if (closeSignal === handledCloseRef.current) return
+    handledCloseRef.current = closeSignal
+    if (viewer.mode === 'lightbox') void closeLightbox()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closeSignal])
 
   function startGesture(e: React.PointerEvent): void {
     pointer.current = { down: true, lastX: e.clientX, lastY: e.clientY }
@@ -396,7 +417,7 @@ export default function ViewerLayer({
     <div
       className="fixed inset-0 z-40 flex items-center justify-center bg-black/70"
       onPointerDown={(e) => {
-        if (e.target === e.currentTarget) void closeLightbox()
+        if (e.target === e.currentTarget) onCloseIntent()
       }}
     >
       <div
@@ -522,7 +543,7 @@ export default function ViewerLayer({
           type="button"
           aria-label="Close"
           className="absolute right-3 top-3 rounded-full bg-zinc-800 px-3 py-1 text-sm text-zinc-300 hover:bg-zinc-700"
-          onClick={() => void closeLightbox()}
+          onClick={() => onCloseIntent()}
         >
           ✕
         </button>
