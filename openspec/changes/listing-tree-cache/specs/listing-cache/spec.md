@@ -3,7 +3,7 @@
 ## ADDED Requirements
 
 ### Requirement: Walked trees are cached across restarts
-The server SHALL persist what a recursive walk discovers — entry names, kinds, sizes, and modification times, keyed by the walked root — to durable storage that survives process restarts, and SHALL answer subsequent flat listings and deep searches for that root from it rather than re-walking the filesystem. The cached content SHALL be metadata only; model bytes are not cached by this capability. The cache SHALL share the storage location, size budget, and maintenance sweep of the existing thumbnail cache rather than introducing a second policy. What a listing *contains* — its entries, ordering, caps, and truncation reporting — SHALL be unchanged by whether it was served from cache or from a walk.
+The server SHALL persist what a recursive walk discovers — entry names, kinds, sizes, and modification times, keyed by the walked root — to durable storage that survives process restarts, and SHALL answer subsequent flat listings and deep searches for that root from it rather than re-walking the filesystem. The cached content SHALL be metadata only; model bytes are not cached by this capability. What is cached SHALL be the traversed tree itself, independent of any query or option applied to it, so that one cached tree serves every query and every option setting against that root; a query or option SHALL be applied over the cached tree rather than forming part of what identifies it. Only a traversal that examined the whole tree SHALL be cached: a traversal that stopped early — against a work limit or otherwise — SHALL NOT be stored, since a partial tree kept as though whole is indistinguishable from a complete one. The cache SHALL share the storage location, size budget, and maintenance sweep of the existing thumbnail cache rather than introducing a second policy. What a listing *contains* — its entries, ordering, caps, and truncation reporting — SHALL be unchanged by whether it was served from cache or from a walk.
 
 #### Scenario: A cold search costs what a warm one costs
 - **WHEN** the user searches a large library for the first time after starting the app, having previously walked that root
@@ -12,6 +12,14 @@ The server SHALL persist what a recursive walk discovers — entry names, kinds,
 #### Scenario: A cached listing is indistinguishable in content
 - **WHEN** the same query is answered from the cache and from a full walk of an unchanged tree
 - **THEN** the two responses hold the same entries in the same order with the same truncation reporting
+
+#### Scenario: One cached tree serves every query
+- **WHEN** a user searches a root, then searches it again for something else, then changes a search option
+- **THEN** each answer is filtered from the one cached tree and none of them re-traverses the filesystem
+
+#### Scenario: A partial traversal is not cached
+- **WHEN** a traversal stops early against a work limit
+- **THEN** nothing is cached for that root, and the next request traverses rather than inheriting a tree that was never fully examined
 
 ### Requirement: Archive directories are cached against the archive
 The server SHALL cache each archive's directory listing keyed on that archive's own identity — its modification time and size — and SHALL re-read an archive's directory only when that identity changes. An archive whose identity is unchanged SHALL NOT be opened during a walk.

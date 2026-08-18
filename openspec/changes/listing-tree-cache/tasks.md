@@ -1,6 +1,6 @@
 # Tasks — listing-tree-cache
 
-> Ordering: after `search-matches-folder-names` (the walk's predicate and its container collection both change there, and this caches that walk's output). Independent of `search-options`, but the cache key must include whatever options reach the server — coordinate before either lands. Re-read `listing.ts` against main before starting (parallel sessions).
+> Ordering: after `search-matches-folder-names` (its container collection changes what the walk gathers). This caches **the tree the walk gathers, not a walk's filtered output** — the distinction is the whole design: `q` and the search options are filters applied over the snapshot, so they are not part of its key, and a toggle re-filters rather than re-walking. Independent of `search-options` for the same reason. Re-read `listing.ts` against main before starting (parallel sessions).
 
 ## 1. Validate the freshness signal before building on it
 
@@ -20,7 +20,8 @@
 
 ## 4. Walk integration and revalidation
 
-- [ ] 4.1 `listFlat` serves from the snapshot when one exists for the root; a miss walks and populates
+- [ ] 4.1 `listFlat` serves from the snapshot when one exists for the root; a miss walks and populates. The snapshot is keyed by **root alone** — not by `q`, not by the search options — and filtering runs over it exactly as it runs over a live walk (D1)
+- [ ] 4.1a Only a **complete** traversal is persisted: a walk that stopped against its step budget populates nothing, or a partial tree is stored as though whole and is permanently wrong (D1). Test that a budget-truncated walk leaves no snapshot behind, and that the next unbudgeted request traverses
 - [ ] 4.2 Incremental revalidation: one `stat` per directory, re-reading only those whose freshness signal moved (D4). Never a background full re-walk — that reintroduces the cold cost off-screen (D5)
 - [ ] 4.3 Revalidation failure invalidates; an unreadable or unmounted root fails as it does today rather than serving cached entries (D6)
 
@@ -31,7 +32,7 @@
 
 ## 6. Tests
 
-- [ ] 6.1 Server: cached and walked responses are entry-for-entry identical on an unchanged tree (including ordering and truncation); a second walk opens no archives; adding, removing, and renaming a model is picked up; an unreadable root invalidates rather than serving; a different mountpoint for the same tree is a miss; the on-disk format version invalidates a stale snapshot
+- [ ] 6.1 Server: cached and walked responses are entry-for-entry identical on an unchanged tree (including ordering and truncation); one cached tree serves several different queries and both settings of the folder-matching option without re-traversing (instrument the walk, do not infer from timing); a second walk opens no archives; adding, removing, and renaming a model is picked up; an unreadable root invalidates rather than serving; a different mountpoint for the same tree is a miss; the on-disk format version invalidates a stale snapshot
 - [ ] 6.2 Client: a stale-marked listing renders immediately with the refreshing affordance and reconciles on the follow-up; an unmarked listing shows no affordance; a superseded reconciliation is discarded by latest-wins
 
 ## 7. Verification

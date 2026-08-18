@@ -1,6 +1,6 @@
 # Tasks — search-options
 
-> Ordering: **hard dependency on `search-matches-folder-names`** — this gates the predicate that change introduces, and is meaningless before it. Coordinate with `listing-tree-cache`: any option reaching the server must be part of that cache's key, or a walk computed under one predicate answers a request made under another. Re-read `App.tsx`, `urlState.ts`, and `listing.ts` against main before starting (parallel sessions).
+> Ordering: **hard dependency on `search-matches-folder-names`** — this gates the predicate that change introduces, and is meaningless before it. Composes with `listing-tree-cache` **without entering its key**: that cache holds the gathered tree, and this option filters over it just as `q` does. Keying on it would duplicate the tree per setting and force a cold walk on every toggle. Re-read `App.tsx`, `urlState.ts`, and `listing.ts` against main before starting (parallel sessions).
 
 ## 1. Preference storage
 
@@ -16,7 +16,7 @@
 ## 3. Server
 
 - [ ] 3.1 The folder-matching option reaches `listFlat` as an additive `/api/dir` parameter gating the relative-path predicate from `search-matches-folder-names`; absent means the default (on). Server tests for both settings against the same fixture
-- [ ] 3.2 Confirm the option is included in whatever key `listing-tree-cache` ends up using — if that change has landed, add the key coverage here; if not, leave the note in its tasks
+- [ ] 3.2 Apply the option as a **filter over the gathered tree**, never as a walk parameter — `matchesQuery` and its callers stay outside `walkFsLevel`/`walkZip`, so the walk's output still depends on the root alone. Assert it: the same fixture walked with the option on and off collects the same set and differs only after filtering. This is what keeps `listing-tree-cache` able to key on root alone and `search-cancellation` able to share one traversal across requests
 
 ## 4. Client behavior
 

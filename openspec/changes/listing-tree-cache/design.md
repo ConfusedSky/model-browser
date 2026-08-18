@@ -27,6 +27,12 @@ A per-query cache only helps a repeated query. The measured pain is the *first* 
 
 *Alternative — cache each query's result set:* smaller and simpler, and genuinely useless for the case that motivated the change.
 
+**What makes this sound: the walk gathers, the query filters.** `matchesQuery` lives only in `listFlat` (`listing.ts:338-339`) and never inside `walkFsLevel` or `walkZip`, so a walk's output is a function of the root alone. That is why `q` is absent from the cache key, and why the search options (`search-options`) are absent too: both are filters applied over the snapshot exactly as they are applied over a live walk. Keying on either would store a duplicate copy of the same tree per setting and force a fresh cold walk — the ~32s case this change exists to remove — every time a user toggled an option or retyped a query.
+
+The invariant is load-bearing and fragile: `search-matches-folder-names` collects directories during the walk, and collecting them *conditionally on the query* would silently make the snapshot query-specific. That change's D2 keeps the collection unconditional and filters afterwards for this reason, and pins it with a test. If that ever regresses, this cache serves wrong answers rather than failing to build.
+
+**The one genuine exception is truncation.** The step budget *is* query-dependent (`listing.ts:301` — 200k for a search, 20k for a browse), so a browse walk can stop early where a search walk would not. That is not a key component; it means a truncated walk is not a snapshot at all. Only a walk that ran to completion may be persisted — the same rule `search-cancellation` applies to a stopped traversal, and for the same reason: a partial tree stored as a whole one is indistinguishable from the real thing and permanently wrong.
+
 ### D2: On disk, beside the thumbnail cache
 
 Warm walks are already fast on both media (0.030–0.039 ms/entry) — the OS page cache is doing that job well. An in-process cache would duplicate it and, like it, be empty at the moment that matters. Persisting to `~/.cache/model-browser` is what makes the *first* walk after a restart cheap, and it inherits `ThumbCache`'s directory, its size accounting, and its eviction sweep rather than inventing a second policy.
