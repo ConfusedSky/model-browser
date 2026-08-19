@@ -2,51 +2,49 @@
 
 ## ADDED Requirements
 
-### Requirement: Meaning search is its own action
-The client SHALL offer a search-by-meaning action distinct from the name-search submit, taking the text already in the search input and requesting a ranked set of models from the semantic index, rooted at the directory the user is browsing. Results SHALL replace the grid and SHALL render as an ordinary listing — thumbnails, orbit, lightbox, and camera persistence behave identically, and the in-flight skeleton and latest-wins supersession apply. Results SHALL be presented in the order the index returned them, which is by relevance and is never re-sorted by name.
+### Requirement: Meaning search is a mode of the search input
+The client SHALL offer meaning search as a mode the search input runs in, selected by an option carried with the other search options, so that submitting from the input runs whichever search is in force. The option SHALL be sticky per browser profile and carried in the URL under the same rules as the other options that determine which results exist, and changing it while a query is committed SHALL re-run that query in the newly selected mode without the user retyping it. Which mode is in force SHALL be visible without opening the panel, since it is what explains the grid.
 
-Whenever meaning results are presented — committed by the user, restored from browser history, or opened from a deep link — the live filter input SHALL start empty rather than holding the phrase. The live filter matches names, and a meaning search exists to return models whose names do not contain the phrase, so a filter left holding that phrase would hide the very results the search was run to find. The filter SHALL remain available over meaning results and SHALL narrow them by name as it narrows any listing; it simply SHALL NOT begin populated. Because erasing the input is therefore no longer the way out of a meaning search, the client SHALL offer an explicit way to dismiss the results and return to the ordinary listing for the current path. Seeding the input from the URL remains correct for a name search, where the filter and the query match the same string; it is wrong for a meaning search for the same reason pre-populating it at commit is wrong, and the rule therefore follows the corpus rather than the entry path. Navigating, toggling flat, or submitting a name search SHALL likewise supersede the results.
+Meaning results SHALL replace the grid and SHALL render as an ordinary listing — thumbnails, orbit, lightbox, and camera persistence behave identically, and the in-flight skeleton and latest-wins supersession apply. Results SHALL be presented in the order the index returned them, which is by relevance and is never re-sorted by name. Navigating, toggling flat, or committing another search SHALL supersede them, and clearing the query SHALL restore the ordinary listing for the current path.
 
 The UI SHALL make clear that the grid holds meaning matches for the committed phrase and that they came from the index rather than from the directory listing. The number of results SHALL be bounded by this app's own choice of how many ranked models a grid should hold, and that bound SHALL be presented as showing the strongest matches rather than as truncation: a relevance ranking has no horizon it can run out at, so the truncation affordance a name search uses does not apply and SHALL NOT be reused.
 
+Options that do not apply to the mode in force SHALL be hidden rather than shown inert.
+
 #### Scenario: A phrase finds models whose names do not contain it
-- **WHEN** the user runs a meaning search for a phrase describing a subject
+- **WHEN** the user commits a search in meaning mode for a phrase describing a subject
 - **THEN** models matching that description are shown, ranked by relevance, including models whose file names and folders contain none of the words
+
+#### Scenario: Flipping the mode re-runs the same text
+- **WHEN** a name search returns nothing and the user switches to meaning mode
+- **THEN** the same text is run against the index without being retyped, and the results replace the grid
 
 #### Scenario: Meaning results are an ordinary grid
 - **WHEN** meaning results are on screen
-- **THEN** tiles render thumbnails, orbit, and the lightbox as in any listing, and typing in the search input narrows them without a request
-
-#### Scenario: The committed phrase does not filter its own results
-- **WHEN** the user commits a meaning search for a phrase that appears in no result's name
-- **THEN** every result is visible, because committing the search cleared the filter input rather than leaving the phrase in it
-
-#### Scenario: A shared meaning link opens to its results, not to an empty grid
-- **WHEN** a recipient opens a URL naming a meaning search whose phrase appears in no result's name
-- **THEN** they see the results the sender saw, because the filter input starts empty on that path as it does at commit
-
-#### Scenario: Going back into a meaning view does not blank it
-- **WHEN** the user commits a meaning search, navigates away, and presses Back
-- **THEN** the restored results are all visible and the filter input is empty
-
-#### Scenario: Leaving a meaning search without erasing anything
-- **WHEN** meaning results are on screen and the filter input is empty
-- **THEN** an explicit dismiss affordance returns the user to the ordinary listing for the current path
+- **THEN** tiles render thumbnails, orbit, and the lightbox as in any listing
 
 #### Scenario: Relevance order survives
 - **WHEN** the index returns hits ordered by score
 - **THEN** the grid presents them in that order rather than in name order
 
-#### Scenario: Name search still answers Enter
-- **WHEN** the user submits from the search input
+#### Scenario: The mode is visible from the grid
+- **WHEN** meaning results are on screen and the side panel is collapsed
+- **THEN** the user can still tell that the grid holds meaning matches rather than a name search's results
+
+#### Scenario: Name search still answers the input's submit
+- **WHEN** the user submits while name mode is in force
 - **THEN** a recursive name search runs as before, unaffected by the presence of the index
+
+#### Scenario: Inapplicable options are absent
+- **WHEN** meaning mode is in force
+- **THEN** options that only govern name matching are not shown, rather than shown with no effect
 
 #### Scenario: Leaving the results restores browsing
 - **WHEN** meaning results are shown and the user clears the query or navigates
 - **THEN** the ordinary listing for the current path is requested and rendered
 
 ### Requirement: The index's absence costs nothing
-The client and server SHALL treat the semantic index as an optional, independently-operated service. All access SHALL be from the server, on the user's behalf, and SHALL reach the client only through the existing API client interface. The server SHALL determine availability by probing the index's status endpoint at startup, on failure, and on explicit retry — never once per query — and SHALL distinguish an index that is still loading from one that is not running, so that a service restarting does not read as a service absent. The action SHALL be offered only where it can work: while the index reports itself ready, and while the browsed path lies within the collection the index covers, compared by resolved path so that remounting removable media at a different mount point is not mistaken for a different tree. It SHALL NOT be offered while browsing an archive or a directory inside one, and no archive-relative path SHALL be sent to the index. When the index is unavailable, every other behavior of the app — browsing, name search, thumbnails, the viewer — SHALL be unchanged. A meaning search that fails SHALL surface its error and SHALL NOT label the unchanged grid as its results.
+The client and server SHALL treat the semantic index as an optional, independently-operated service. All access SHALL be from the server, on the user's behalf, and SHALL reach the client only through the existing API client interface. The server SHALL determine availability by probing the index's status endpoint at startup, on failure, and on explicit retry — never once per query — and SHALL distinguish an index that is still loading from one that is not running, so that a service restarting does not read as a service absent. The action SHALL be offered only where it can work: while the index reports itself ready, and while the browsed path lies within the collection the index covers, compared by resolved path so that remounting removable media at a different mount point is not mistaken for a different tree. It SHALL NOT be offered while browsing an archive or a directory inside one, and no archive-relative path SHALL be sent to the index. When the index is unavailable, every other behavior of the app — browsing, name search, thumbnails, the viewer — SHALL be unchanged, and meaning mode SHALL NOT be selectable. A stored or URL-carried selection of meaning mode arriving where the index is unavailable SHALL fall back to name search and SHALL say so, rather than silently answering a different question than the one the URL names. A meaning search that fails SHALL surface its error and SHALL NOT label the unchanged grid as its results.
 
 #### Scenario: Nothing offered when nothing is listening
 - **WHEN** the semantic index is not running
@@ -55,6 +53,10 @@ The client and server SHALL treat the semantic index as an optional, independent
 #### Scenario: A restarting index is not a missing one
 - **WHEN** the index is running but still loading its model
 - **THEN** the app reports it as not yet ready rather than absent, and the action becomes available once it is, without the user reloading
+
+#### Scenario: A shared meaning link on a machine without the index
+- **WHEN** a URL naming a meaning search is opened where the index is unavailable
+- **THEN** the app falls back to a name search of the same text and says that the meaning results need the index, rather than presenting the fallback as though it were what the URL named
 
 #### Scenario: Out of the indexed collection
 - **WHEN** the user browses a directory outside the collection the index covers, or a zip, or a directory inside one
@@ -133,7 +135,7 @@ Where the index supplies an orientation for a model, the client SHALL use it to 
 - **THEN** no camera is persisted for it and its thumbnail is unchanged
 
 ### Requirement: The meaning view is nameable
-The client SHALL reflect a committed meaning search in the page URL alongside the browsed path, distinguishably from a name search of the same text, so that copying the URL reproduces the same view. Committing and dismissing a meaning search SHALL participate in browser history exactly as committing and clearing a name search does — one entry each, restored through the same request path. As with any other view, the URL SHALL name only a view that actually rendered. Opening such a URL where the index is unavailable SHALL show the location's ordinary listing and explain that the results cannot be reproduced without the index, rather than presenting an empty grid or an error page.
+The client SHALL reflect a committed meaning search in the page URL alongside the browsed path — the phrase as the committed query and the mode as the option that selected it — so that copying the URL reproduces the same view rather than a name search of the same text. Committing and clearing a meaning search SHALL participate in browser history exactly as committing and clearing a name search does — one entry each, restored through the same request path. As with any other view, the URL SHALL name only a view that actually rendered. Opening such a URL where the index is unavailable SHALL show the location's ordinary listing and explain that the results cannot be reproduced without the index, rather than presenting an empty grid or an error page.
 
 #### Scenario: A meaning search is shareable
 - **WHEN** meaning results are on screen and the user copies the URL into another tab

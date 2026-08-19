@@ -23,7 +23,10 @@
 - [ ] 4.1 Kind option applied client-side over `kind`, like the existing filter — instant, no request (D3)
 - [ ] 4.2 With a query committed, changing the matching option re-issues the search through the existing `fetchListing` path (the `toggleFlat` precedent: re-request, land, commit), inheriting latest-wins, the skeleton, and the history entry
 - [ ] 4.3 Truncation notice and empty states keep describing the view actually in force — the notice describes the underlying listing, not the kind-filtered subset (D3)
-- [ ] 4.4 Controls beside the search input, following the shipped-pill pattern (D5); state reflected so a control reads as on/off at a glance
+- [ ] 4.4 A search tab on the existing side panel (D5): `ChatPanel.tsx` becomes a tab host — chat and search — keeping its persisted collapse state and making no network calls of its own. Tab selection persists like collapse does; neither belongs in the URL
+- [ ] 4.5 The controls live in that tab, each reading as on/off at a glance
+- [ ] 4.6 The tab mirrors the committed search: the query in force and the options under which it ran. The search input and the results label stay in the bar and over the grid respectively — the panel reads the search back, it does not own it
+- [ ] 4.7 Non-default options in force are visible without opening the panel (a badge on the tab or equivalent), so "why are my results strange" is answerable from the grid
 
 ## 5. Tests
 

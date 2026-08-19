@@ -49,21 +49,37 @@ listing data that lives server-side anyway. The index's URL is an `envLimit`-sty
 setting, and `fetch` with `AbortSignal.timeout` keeps the Hono app runnable on Node
 unchanged.
 
-### D2: A distinct action, not a mode that reroutes Enter
+### D2: A search mode, not a second action
 
-A mode toggle beside the input would be fewer controls, and it is the wrong shape twice.
-Specification: `file-search`'s "Deep name search" requirement says an explicit submit
-requests a *recursive name search*; rerouting submit contradicts it, and that requirement
-already carries deltas from two active changes, so a third rewrite collides at archive
-(CLAUDE.md's rule: ADD for a new concern). Behaviour: name search and meaning search have
-different coverage — the name walk sees `.stl`, `.3mf`, `.obj`, and archive interiors, the
-index sees `.stl` outside archives — so a single control that silently changes which
-corpus is consulted makes an empty grid unattributable. A separate action means the user
-always knows which question they asked.
+Meaning search is a **mode** the search input runs in, selected by an option that lives
+with the other search options in the panel tab and is reflected where the grid can be
+seen. Enter submits whichever search is in force.
 
-*Alternative — a pill beside the search options:* revisit once `search-options` has
-landed and the pill row exists; the cost is the spec collision above, which is only worth
-paying if the two searches converge in coverage.
+The alternative this change carried until now — a separate action beside Enter — was
+argued on two grounds and both were wrong. Specification: it avoided a `file-search`
+MODIFY, which is worth something, but not the shape of the feature; and the ordering that
+avoids the collision (behind `search-matches-folder-names`) is one this change needs
+anyway. Behaviour: it claimed a distinct action keeps an empty grid attributable, when in
+fact two buttons leave nothing on screen recording which one was pressed, while a mode is
+persistent visible state. The attribution argument favours the mode and was stated
+backwards.
+
+A mode also inherits machinery this app is already building. `search-options` establishes
+that an option which changes *which results exist* is sticky per profile, carried in the
+URL, and re-issues a committed search when it changes. A corpus selector is that kind of
+option in its strongest form, and the re-issue rule gives the feature its best affordance
+for free: search a phrase by name, get nothing, flip the mode, and the same text runs
+against the index without being retyped.
+
+**An unavailable mode must not be a silent one.** Mode is persisted and shareable, so a
+stored or linked `meaning` can arrive on a machine where the index is absent. The client
+falls back to name search and says why. Silently answering a different question than the
+one the URL names is the failure this whole change is trying to avoid.
+
+**Options that do not apply to the mode in force are hidden rather than inert.** Folder
+matching has no meaning against an embedding index, and the folders/models kind option
+nearly none, since the index returns models only. A control that is visible but does
+nothing is worse than one that is absent.
 
 ### D3: Hits are joined to this app's own listing data, never trusted for tile metadata
 
@@ -226,39 +242,29 @@ fundamentally a ranking has no horizon: there is always an N+1th model, so "ther
 more" is not news. The honest statement is that these are the strongest matches, which is
 a different sentence from the name search's "the walk ran out".
 
-### D9: Committing a meaning search clears the filter input
+### D9: The search input holds the query; filtering is not its job
 
-This is the one place the existing search UI actively breaks under a new corpus.
-`submitSearch` (`client/src/App.tsx:186`) commits `filter.trim()` as the query and leaves
-the text in the input; `filteredListing` (`:325`) then applies that same text to whatever
-is on screen. For name search the two are coherent — `search-matches-folder-names` makes
-them match the same string deliberately — so the filter is a no-op refinement over the
-results. A meaning search returns models whose names do *not* contain the phrase, which is
-its entire purpose, so leaving the phrase in the filter renders "The filter is hiding
-everything below." (`:537`) over exactly the results the user asked for. The failure is
-total and it is the default path, not an edge case.
+An earlier version of this change cleared the search input at commit, because
+`submitSearch` (`client/src/App.tsx:186`) leaves the committed text in the box and
+`filteredListing` (`:325`) applies it to whatever is on screen. For name search those two
+agree by design — `search-matches-folder-names` makes both match the relative path — so
+filtering over results is a refinement. A meaning search returns models whose names do not
+contain the phrase, which is its purpose, so the same text would render "The filter is
+hiding everything below." (`:537`) over exactly the results the user asked for.
 
-So the input starts empty whenever meaning results are on screen. The filter stays
-available over them — it is genuinely useful for narrowing 60 hits — it just does not
-begin populated.
+Clearing the input fixed the hiding and cost the phrase: refining a query meant retyping
+it, in the workflow where getting the phrase right first try is least likely.
 
-**Commit is not the only entry into that view, and the other two seed the input from the
-URL.** Boot does it at `useState(boot.q ?? '')` (`App.tsx:58`) and history restoration does
-it at `setFilter(v.q ?? '')` (`:263`). Both are right for a name search, where filter and
-query match the same string by design; both reproduce this bug exactly if a meaning phrase
-is seeded the same way — and they reproduce it on the two paths that matter most. A shared
-link is the whole point of putting the phrase in the URL, and its recipient would see the
-empty grid the sender never saw. Back into a meaning view would blank results the user had
-just been looking at, which also contradicts this change's own promise that a meaning
-search participates in history like a name search. The rule is therefore stated over the
-view, not over the commit.
+`find-in-listing` removes the cause instead. Once filtering is a summoned find control,
+the search input holds the query and nothing else, and every symptom goes with it — no
+clearing at commit, no suppressing the boot and popstate seedings (`:58`, `:263`), no
+dismiss affordance invented to replace erase-to-exit, and narrowing still available over
+meaning results. This change therefore states nothing about filtering beyond depending on
+that separation having happened.
 
-That costs the exit affordance, and the replacement has to be explicit: erasing the input
-is how a user leaves a name search (`App.tsx:180`), and after this the input is already
-empty, so there is nothing to erase. An explicit dismiss on the results label is the
-substitute. The alternative — exempting meaning results from the filter — was rejected
-because it makes the filter's behaviour depend on where the grid came from, which is a
-rule the user cannot see, and it would forfeit narrowing where narrowing is most useful.
+*Recorded because the reasoning is easy to lose:* the defect was never that the phrase was
+in the box. It was that one box had two jobs and only one of them was ever going to be
+right for a new corpus.
 
 ## Risks / Trade-offs
 

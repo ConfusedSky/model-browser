@@ -35,20 +35,19 @@ indistinguishable from a real one.
 
 ## What Changes
 
-- **A semantic search action, distinct from Enter.** Enter keeps meaning name search, per
-  the shipped `file-search` requirement. Meaning-search is its own control beside the
-  input, because it queries a different index with different coverage and a user is owed
-  the ability to tell which question they asked. (D2 — this also keeps the change free of
-  a `file-search` MODIFY while two changes are in flight against that capability.)
+- **A search mode, selected like any other search option.** Submitting from the search
+  input runs whichever search is in force; the mode is sticky per profile, carried in the
+  URL, and visible without opening the panel, because it is what explains the grid (D2).
+  Changing it with a query committed re-runs that query in the new mode — search by name,
+  find nothing, flip the mode, and the same words go to the index without being retyped.
 - **Results replace the grid**, ranked by score, rendered as an ordinary listing:
   thumbnails, orbit, lightbox, and camera persistence behave identically, and the
   in-flight skeleton and latest-wins supersession apply. Score order is the server's and
   is never re-sorted — the client sorts nothing today and must keep not doing so.
-- **Committing clears the live filter input**, which today keeps the submitted phrase and
-  applies it to whatever is on screen. That is coherent for name search, where the filter
-  and the search match the same string, and catastrophic for a search whose entire purpose
-  is returning models the phrase does not name (D9). The filter stays available over the
-  results; a dismiss affordance replaces erase-to-exit.
+- **Filtering is `find-in-listing`'s concern, not this change's.** The search input holding
+  both a query and a live filter is what would have hidden meaning results behind their own
+  phrase; that change separates the two, and this one depends on it rather than working
+  around it (D9).
 - **Availability is a first-class state, not an error path.** The Hono server probes the
   index's `/status`, caches the answer, and distinguishes *loading* (SigLIP takes real
   seconds) from *absent*. The affordance appears only where it can work: inside the
@@ -73,12 +72,16 @@ indistinguishable from a real one.
 
 ### New Capabilities
 
-- `semantic-search`: the meaning-search affordance and its results — the distinct action,
-  availability and degradation, result assembly from local listing data, stated coverage
-  and its three empty states, weak-match presentation, pose application, and the view's
-  URL representation.
+- `semantic-search`: the meaning-search mode and its results — mode selection and its
+  fallback when the index is absent, availability and degradation, result assembly from
+  local listing data, stated coverage and its three empty states, weak-match presentation,
+  pose application, and the view's URL representation.
 
 ### Modified Capabilities
+
+- `file-search`: **MODIFIED** *Deep name search* — submit runs the mode in force, and the
+  requirement's name-search rules become that mode's rules. Unavoidable once meaning search
+  is a mode; the ordering behind `search-matches-folder-names` is declared in tasks.md.
 
 - `url-navigation`: **MODIFIED** — "The URL names the committed view" enumerates its
   parameters as a closed list, so a meaning-search parameter has to join it or the shipped
@@ -87,9 +90,6 @@ indistinguishable from a real one.
   holding that requirement, and the URL work is already gated behind it, so the two never
   need to be resolved together.
 
-`file-search` is deliberately **not** modified. Its "Deep name search" requirement stays
-literally true because Enter still routes to the name walk, and its live-filter
-requirement stays true because the filter still applies to whatever listing is on screen —
-this change only stops pre-populating it (D9). Two active changes already carry
-`file-search` deltas (`search-matches-folder-names`, `search-options`), and a third MODIFY
-of the same requirement would collide at archive for no gain.
+`file-search`'s *Live name filter* requirement is untouched here: `find-in-listing` owns
+the move of filtering out of the search input, and this change depends on it rather than
+duplicating it.

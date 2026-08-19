@@ -1,13 +1,14 @@
 # Tasks — semantic-search
 
 > **Ordering.** Blocked on the index side: `mini-classify`'s `docs/api/surface.md` is a
-> proposal and nothing behind it is implemented. Nothing below 1.x can be verified until
-> `/status` and `/query` answer. **Hard dependency on `search-options`** for 5.x only — it
-> reshapes `UrlView`/`serializeView`, and adding a second search kind to a moving
-> serializer is a merge conflict for no reason. **Composes with `listing-tree-cache`
-> without depending on it** (D3): the snapshot is the join's fast path, the bounded `stat`
-> fallback is the contract. Re-read `App.tsx`, `urlState.ts`, `listing.ts`, and
-> `api/client.ts` against main before starting — parallel sessions.
+> proposal and nothing behind it is implemented. **Hard dependencies, all UI-side:**
+> `search-matches-folder-names` (this change MODIFIES the same `file-search` requirement),
+> `search-options` (the mode is one of its options and lives in the panel tab it builds),
+> and `find-in-listing` (which separates filtering from the search input — without it the
+> committed phrase filters its own results away). **Composes with `listing-tree-cache`
+> without depending on it** (D3): the snapshot is an opportunistic shortcut, the bounded
+> `stat` is the contract. Re-read `App.tsx`, `urlState.ts`, `listing.ts`, `ChatPanel.tsx`,
+> and `api/client.ts` against main before starting — parallel sessions.
 
 ## 1. Server: reaching the index
 
@@ -59,36 +60,38 @@
 - [ ] 3.1 `ApiClient` gains the semantic calls — availability and query. No raw `fetch` in
       components (architecture D1); the in-memory fake used by the component tests gains
       the same methods
-- [ ] 3.2 A meaning-search control beside the input, distinct from submit (D2), shown only
-      when the index is ready and the browsed path is in range. Absent otherwise — no
-      disabled control explaining a service the user may not have
-- [ ] 3.3 Results replace the grid through the existing listing commit path, inheriting
+- [ ] 3.2 A search-mode option added to `search-options`' set — same persistence, same URL
+      carriage, same re-issue-on-change behavior (D2). Meaning mode is selectable only when
+      the index is ready and the browsed path is in range; otherwise absent rather than
+      disabled
+- [ ] 3.3 Changing the mode with a query committed re-runs that query in the new mode
+      through the existing re-issue path. Test the flip explicitly: a name search returning
+      nothing, flipped, returns index results for the same text without retyping
+- [ ] 3.4 Results replace the grid through the existing listing commit path, inheriting
       the skeleton, latest-wins supersession, and history behavior. **Do not sort** — the
       client sorts nothing today and relevance order depends on that staying true
-- [ ] 3.4 **Committing a meaning search clears the filter input** (D9). `submitSearch`
-      (`App.tsx:186`) leaves the phrase in `filter` and `filteredListing` (`:325`) applies
-      it to whatever is on screen — for a meaning search that hides the results by
-      definition and renders "The filter is hiding everything below." (`:537`). Regression
-      test: commit a phrase matching no result's name, assert every result is visible
-- [ ] 3.5 The same rule on the two non-commit entries: boot (`App.tsx:58`, `useState(boot.q
-      ?? '')`) and history restoration (`:263`, `setFilter(v.q ?? '')`) seed the input from
-      the URL, which is correct for `q` and wrong for a meaning phrase. Tests for both — a
-      deep link into meaning results whose phrase matches no result's name, and Back into a
-      meaning view — each asserting every result visible and the input empty
-- [ ] 3.6 An explicit dismiss on the results label restores the ordinary listing, since
-      erase-to-exit (`App.tsx:180`) no longer applies to an input that is already empty.
-      Programmatic clearing must not route through the filter-change handler, or it would
-      trip that exit path at commit time
-- [ ] 3.7 The filter still narrows meaning results once the user types — available, just
-      not pre-populated
+- [ ] 3.5 Verify `find-in-listing` has landed before this ships: with filtering still on
+      the search input, committing a meaning phrase hides its own results behind that
+      phrase. One regression test here regardless — commit a phrase matching no result's
+      name, assert every result is visible — since this is the failure mode most likely to
+      return
+- [ ] 3.6 Options that do not apply in meaning mode (folder matching, and the kind option
+      insofar as the index returns only models) are hidden rather than shown inert (D2)
+- [ ] 3.7 A stored or URL-carried meaning mode arriving where the index is unavailable
+      falls back to name search and says so — never a silent substitution (D2). Test both
+      entries: a fresh boot with the preference stored, and a shared URL
 - [ ] 3.8 The client re-checks availability so a warming index becomes usable without a
       reload (spec: "without the user reloading"). Cheapest shape consistent with D1: the
       client re-reads availability on the interactions it already makes — mount, landed
       listing, navigation — rather than a timer of its own; the server's backoff (1.2) is
       what makes those re-reads cheap
-- [ ] 3.9 Results label identifies them as meaning matches for the phrase, and a failed
-      search leaves the previous label alone (the shipped `file-search` rule)
-- [ ] 3.10 Weak sets rendered marked rather than suppressed; per-result strength surfaced
+- [ ] 3.9 Results label identifies which search produced the grid, readable with the panel
+      collapsed, and a failed search leaves the previous label alone (the shipped
+      `file-search` rule)
+- [ ] 3.10 The panel's search tab mirrors the meaning search too: mode in force, phrase,
+      index status (ready/warming/absent), and what the corpus covers — the read-back
+      `search-options` builds, extended rather than duplicated
+- [ ] 3.11 Weak sets rendered marked rather than suppressed; per-result strength surfaced
       (tooltip or tile affordance — settle at apply, it is the one new tile decoration)
 
 ## 4. Client: empty states and coverage
@@ -102,14 +105,13 @@
 
 ## 5. URL  *(after `search-options`)*
 
-- [ ] 5.1 Land the `url-navigation` MODIFY together with the code: that requirement
-      enumerates its parameters as a closed list, so the shipped spec is false the moment a
-      meaning parameter exists without it. The delta is written against the
-      post-`search-options` text — re-check it against main before applying, since that
-      change owns the same requirement
-- [ ] 5.2 `UrlView` carries the meaning phrase distinguishably from `q`; a name search URL
-      stays byte-identical to today's
-- [ ] 5.3 Commit and dismiss each push exactly one history entry, restored through the same
+- [ ] 5.1 Land both spec MODIFYs with the code — `url-navigation` (its parameter list is
+      closed) and `file-search` (submit runs the mode in force). Both deltas are written
+      against post-`search-matches-folder-names`/`search-options` text; re-check them
+      against main before applying, since those changes own the same requirements
+- [ ] 5.2 `UrlView` carries the mode alongside `q`, omitted at its default so a name search
+      URL stays byte-identical to today's
+- [ ] 5.3 Committing and clearing a search each push exactly one history entry, restored through the same
       request path as any other committed view (`url-navigation`'s history requirement
       covers "a committed or cleared search"; a meaning search is one)
 - [ ] 5.4 Opening a meaning URL with the index unavailable renders the location's ordinary

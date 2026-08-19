@@ -14,6 +14,7 @@ So they live in both places, deliberately: persisted per browser profile like th
 
 - **A folder-matching option**: whether the deep-search predicate considers a model's containing folders and archives, or only its own file name. On by default — the default `search-matches-folder-names` establishes.
 - **A result-kind option**: folders only, models only, or both. Applied to what a search returns.
+- **Both live in a search tab on the side panel**, alongside the existing chat tab, which mirrors the committed search back — the query in force, the options, and what the results cover — while the search input itself stays in the bar with the grid it describes (D5).
 - **Both are sticky**: persisted per browser profile, so the next search uses the last-used settings, following the `lighting.ts` / `aoToggle.ts` pattern exactly.
 - **Both are in the URL**: a copied search link reproduces the sender's results, not the recipient's preferences.
 - **A link does not rewrite your settings**: options from a URL govern that session's searches; only touching a control writes to storage. Otherwise a link someone sends you silently reconfigures your app.
@@ -28,6 +29,7 @@ None.
 ### Modified Capabilities
 
 - `file-search`: gains an **ADDED** requirement covering the two options — what they control, that they persist, and how changing one affects a committed search. Deliberately additive rather than a modification of *Deep name search*: `search-matches-folder-names` already modifies that requirement, and two active changes modifying one requirement collide at archive.
+- `chat-panel`: the shipped requirement describes a single-purpose collapsible panel. It becomes a **tab host** — chat plus a search tab — keeping its collapse persistence and its no-backend-calls guarantee. No active change touches this capability, so the modification is free.
 - `url-navigation`: the **The URL names the committed view** requirement currently says preference state SHALL stay out of the URL, naming the lighting mode and the AO preference. That has to admit an exception, with a line that holds: those preferences change how a model *looks*; search options change *which models are returned*. The first is a rendering choice, the second is part of the view's identity — which is what the URL is for.
 
 ## Impact

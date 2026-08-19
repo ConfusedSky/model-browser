@@ -7,14 +7,14 @@
 ## MODIFIED Requirements
 
 ### Requirement: The URL names the committed view
-The client SHALL reflect the committed view in the page URL as query parameters on its single route: the current directory or zip path, whether the flat view is active, the committed deep-search query, the options under which that query was run, the committed meaning-search phrase when one is in force, and the open lightbox's model path. A meaning-search phrase SHALL be distinguishable in the URL from a name-search query of the same text, since the two name different views over different corpora. The URL SHALL describe only views that actually rendered — in-flight navigation targets, failed requests, and superseded responses SHALL NOT reach it. Ephemeral and preference state (the live filter text, the orbit overlay, lighting mode, the ambient-occlusion preference) SHALL stay out of the URL. A stored preference SHALL nonetheless appear in the URL when it determines *which* entries a view contains rather than how they are drawn: search options qualify and are carried, because a shared search that omitted them would reproduce different results for the recipient than the sender saw, whereas the lighting mode and the ambient-occlusion preference change only a model's appearance and stay out. Options carried this way SHALL govern the view named by the URL without overwriting the viewer's own stored preferences.
+The client SHALL reflect the committed view in the page URL as query parameters on its single route: the current directory or zip path, whether the flat view is active, the committed search query, the options under which that query was run — including which search mode produced it — and the open lightbox's model path. The mode SHALL be carried whenever it is not the default, since the same query text under a different mode names a different view over a different corpus. The URL SHALL describe only views that actually rendered — in-flight navigation targets, failed requests, and superseded responses SHALL NOT reach it. Ephemeral and preference state (the live filter text, the orbit overlay, lighting mode, the ambient-occlusion preference) SHALL stay out of the URL. A stored preference SHALL nonetheless appear in the URL when it determines *which* entries a view contains rather than how they are drawn: search options qualify and are carried, because a shared search that omitted them would reproduce different results for the recipient than the sender saw, whereas the lighting mode and the ambient-occlusion preference change only a model's appearance and stay out. Options carried this way SHALL govern the view named by the URL without overwriting the viewer's own stored preferences.
 
 #### Scenario: The URL tracks navigation
 - **WHEN** the user navigates to a directory, toggles flat, or commits a search, and the listing renders
 - **THEN** the URL updates to name that exact view, and copying it reproduces the view in another tab
 
-#### Scenario: A meaning search and a name search of the same text are different URLs
-- **WHEN** the user commits the same text once as a name search and once as a meaning search
+#### Scenario: The same text under two modes is two views
+- **WHEN** the user commits the same text once in each search mode
 - **THEN** the two views produce different URLs, each reproducing the search that was actually run
 
 #### Scenario: A preference that selects content travels with the view

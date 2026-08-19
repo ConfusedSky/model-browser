@@ -54,9 +54,17 @@ One consequence to handle rather than discover: the server's caps bound what it 
 
 `UrlView` gains both options; `serializeView` omits them at their defaults, so an ordinary search URL is unchanged and no history entry appears merely because defaults were made explicit. `commitUrl`'s push-only-on-difference already prevents a no-op write. The `URLSearchParams`-only rule holds — a second encoding pass double-encodes, as `urlState.test.ts` pins.
 
-### D5: Controls live with the existing pills
+### D5: Controls live in a search tab on the side panel, and the panel mirrors the search
 
-The lighting and AO pills are the precedent for a small persistent control, and the AO pill's promotion (`viewer-ssao` D6) is the precedent for one that ships rather than scaffolds. These sit near the search input, since they modify a search rather than the viewer, and the container comment already distinguishes shipped controls from the experimental lighting picker.
+A pill row was the obvious home and it does not scale to where search is going. Two options today become more as search grows a second corpus, and some of them are meaningless in some modes — a row that reflows as the user changes what they are searching is worse than a panel that simply shows different contents. A panel also has room for the things that currently have nowhere to go: what a search covers, how many models a scope holds, and eventually whether a second index is even answering. Those belong beside the controls, not squeezed into the sentence under an empty grid.
+
+`chat-panel` already ships the container — a collapsible right-edge panel whose collapse state persists — so this adds a tab alongside chat rather than inventing a second drawer.
+
+**The panel mirrors the committed search; it does not own it.** The search input stays in the bar, because search is the app's primary action and the panel is collapsible: a user who left it closed must not have to open a drawer to search. The frequency asymmetry decides it — you search constantly and tune options occasionally. So the panel reads back what is in force (the committed query, the options, what the results cover) and offers the controls, while the input and its results label stay with the grid they describe.
+
+*Alternative — pills beside the input:* rejected above, and rejected now rather than later specifically because building the row and dismantling it two changes on is the expensive order.
+
+*Alternative — move the search input into the panel too:* rejected. It divorces the input from the results label over the grid, and it puts the app's primary action behind a collapsed drawer.
 
 ## Risks / Trade-offs
 
