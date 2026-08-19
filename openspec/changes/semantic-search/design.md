@@ -177,9 +177,15 @@ turn, not a skew. Note the offset is not a function of `azimuth_zero` alone: fou
 six ups report the same `[1,0,0]` and split between 0° and +90°, because the spindle frame
 is half the calculation.
 
-The failure shape is what makes this a decision rather than a code comment: on the live
-cache 114 of 133 models are `z`/`-y`/`-x` and look right, and the 19 that do not are
-silently a quarter turn out. That passes a demo.
+The failure shape is what makes this a decision rather than a code comment, and it is
+structural rather than a property of any one cache: the shortcut is wrong for three of the
+six axes, and `y` — the most common up axis in the library — is one of them. Measured on
+the primary cache (`embed-cache2`, 2,945 models): `y` 1118, `z` 1043, `-z` 226, `-y` 207,
+`x` 176, `-x` 175, so passing `azimuth_deg` through is a quarter turn out for 1,520 of
+2,945 — 52%. Cite the cache when citing that number; the smaller test cache
+(`embed-cache4`, 133 models) is 106 `z`-up and gives 14%, which reads as a bug that hides
+rather than one that announces itself. Both argue for the same decision, and all 2,945
+poses being one of the six is the strongest evidence yet that the enumeration is real.
 
 `azimuth_zero` is perpendicular to `up` by construction, which makes it self-checking: a
 pose where it is not is malformed in the same way an `up` outside the six is, and gets the

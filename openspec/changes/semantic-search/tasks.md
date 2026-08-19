@@ -124,16 +124,16 @@
 - [ ] 6.2 Apply front angles as az/el under that spindle **plus an azimuth offset derived
       from the pose's `azimuth_zero`** — `atan2(u₀·a, u₀·b)` against `frameFor(axis)` (D5).
       Do not hard-code the six constants: derived means a change to the index's rotation
-      arrives as a value we already read. Passing `azimuth_deg` through unmodified is
-      correct for 114 of the 133 models in the live cache and a quarter turn out for the
-      other 19; degrees→radians alone is the bug, not the conversion. The viewer keeps
-      `distR` and `target`
+      arrives as a value we already read. Passing `azimuth_deg` through unmodified is a
+      quarter turn out for three of the six axes — 1,520 of the 2,945 models in the primary
+      cache, 52%, including `y`, the library's most common up axis; degrees→radians alone
+      is the bug, not the conversion. The viewer keeps `distR` and `target`
 - [ ] 6.3 Test the derivation over all six axes against a known camera direction via
       `statePosition` — not a round-trip, which passes under any consistent wrong offset.
       Assert it lands on 0/0/0/+90/+90/−90 for `z`/`-y`/`-x`/`y`/`-z`/`x` as an
       *expectation* of the current index behavior, distinct from the derivation being the
-      contract. A `y`-up model is the mandatory case: second most common axis in the
-      collection, and one the shortcut gets wrong
+      contract. A `y`-up model is the mandatory case: the *most* common axis in the
+      collection (1,118 of 2,945) and one the shortcut gets wrong
 - [ ] 6.4 Validate `azimuth_zero ⟂ up` and treat a violation as an index fault alongside a
       non-enumerated `up` (D5) — not a projection onto the plane, which would hide it
 - [ ] 6.5 Handle `front: null` — the index prescribes falling back to azimuth 0 at the
