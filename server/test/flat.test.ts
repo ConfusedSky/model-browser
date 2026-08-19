@@ -39,11 +39,37 @@ writeFileSync(
   }),
 )
 
+/**
+ * A second root for folder-matching, where every directory but `spares` holds
+ * the fragment `Set`, so a narrower query is a strict filter of a broader
+ * one's collection.
+ *
+ * root2/
+ *   SetDunes/{base.stl, body.stl, spares/clip.stl}
+ *   SetRocks/base.stl
+ *   SetKit.zip { top.stl, lvl1/SetInner/x.stl }
+ */
+const root2 = mkdtempSync(join(tmpdir(), 'mb-folder-'))
+mkdirSync(join(root2, 'SetDunes', 'spares'), { recursive: true })
+writeFileSync(join(root2, 'SetDunes', 'base.stl'), stlBytes(11))
+writeFileSync(join(root2, 'SetDunes', 'body.stl'), stlBytes(12))
+writeFileSync(join(root2, 'SetDunes', 'spares', 'clip.stl'), stlBytes(13))
+mkdirSync(join(root2, 'SetRocks'))
+writeFileSync(join(root2, 'SetRocks', 'base.stl'), stlBytes(14))
+writeFileSync(
+  join(root2, 'SetKit.zip'),
+  zipSync({
+    'top.stl': new Uint8Array(stlBytes(15)),
+    'lvl1/SetInner/x.stl': new Uint8Array(stlBytes(16)),
+  }),
+)
+
 const cacheDir = mkdtempSync(join(tmpdir(), 'mb-cache-'))
 const app = createApp(new ThumbCache(cacheDir))
 
 afterAll(() => {
   rmSync(root, { recursive: true, force: true })
+  rmSync(root2, { recursive: true, force: true })
   rmSync(cacheDir, { recursive: true, force: true })
 })
 
@@ -51,6 +77,7 @@ afterEach(() => {
   delete process.env.MODEL_BROWSER_FLAT_CAP
   delete process.env.MODEL_BROWSER_FLAT_BUDGET
   delete process.env.MODEL_BROWSER_SEARCH_BUDGET
+  delete process.env.MODEL_BROWSER_FOLDER_CAP
 })
 
 async function flat(path: string, flag = 'true', q?: string): Promise<DirListing> {
@@ -269,16 +296,104 @@ describe('deep name search (q parameter)', () => {
     expect(body.entries.map((e) => e.name)).toEqual(['a/bracket.stl', 'z/bracket.stl'])
   })
 
-  it('excludes a model matched only via a containing folder name, not its file name', async () => {
-    // "arms" is a folder in kit.zip containing left.stl — the folder name is a
-    // substring of the relative path but not of the file's own base name.
+  it('returns a model matched only via a containing folder, and that folder as a tile', async () => {
+    // "arms" is a folder in kit.zip containing left.stl: the fragment is in the
+    // relative path, not in the file's own base name. Both come back — the
+    // model because the path matches, the folder because its own name does.
     const body = await flat(root, 'true', 'arms')
+    expect(body.entries.map((e) => `${e.kind}:${e.name}`)).toEqual([
+      'dir:kit.zip!/arms',
+      'model:kit.zip!/arms/left.stl',
+    ])
+  })
+
+  it('a matching archive returns its contents, as a matching folder does', async () => {
+    const body = await flat(root, 'true', 'kit')
+    expect(body.entries.map((e) => e.name)).toEqual([
+      'kit.zip',
+      'kit.zip!/arms/left.stl',
+      'kit.zip!/box.stl',
+      'kit.zip!/v2.zip/deep2.stl',
+    ])
+  })
+
+  it('a folder several levels below the root matches, like a child of the root does', async () => {
+    const body = await flat(root2, 'true', 'inner')
+    expect(body.entries.map((e) => `${e.kind}:${e.name}`)).toEqual([
+      'dir:SetKit.zip!/lvl1/SetInner',
+      'model:SetKit.zip!/lvl1/SetInner/x.stl',
+    ])
+  })
+
+  it('the search root does not match itself', async () => {
+    // Names are relative to the root, so the root's own name is not in them:
+    // searching a folder for its own name returns what is beneath, not all.
+    const body = await flat(join(root2, 'SetDunes'), 'true', 'setdunes')
     expect(body.entries).toEqual([])
   })
 
-  it('matches top-level containers by the same predicate', async () => {
-    const body = await flat(root, 'true', 'kit')
-    expect(body.entries.map((e) => e.name)).toEqual(['kit.zip'])
+  it('a folder inside a matching folder is not itself a tile, but its models are results', async () => {
+    const body = await flat(root2, 'true', 'setdunes')
+    expect(body.entries.map((e) => `${e.kind}:${e.name}`)).toEqual([
+      'dir:SetDunes',
+      'model:SetDunes/base.stl',
+      'model:SetDunes/body.stl',
+      'model:SetDunes/spares/clip.stl',
+    ])
+  })
+
+  it('a matching child of the root appears exactly once', async () => {
+    // listFlat hands the root's entries to both the container collection and
+    // the walk; an unguarded push returns one folder as two identical tiles.
+    const body = await flat(root2, 'true', 'setrocks')
+    expect(body.entries.filter((e) => e.name === 'SetRocks')).toHaveLength(1)
+  })
+
+  it('a narrower query returns exactly the filter of a broader one — the walk does not vary with q', async () => {
+    // What search-cancellation shares between requests and listing-tree-cache
+    // snapshots: the walk gathers, the query filters. Collection conditional on
+    // q would work here and be wrong there. This pins it through the only
+    // surface available — a subset relation that a query-shaped walk breaks.
+    const broad = await flat(root2, 'true', 'set')
+    const narrow = await flat(root2, 'true', 'setk')
+    const expected = broad.entries.filter((e) =>
+      e.kind === 'model'
+        ? e.name.toLowerCase().includes('setk')
+        : e.name.slice(e.name.lastIndexOf('/') + 1).toLowerCase().includes('setk'),
+    )
+    expect(narrow.entries).toEqual(expected)
+    expect(expected.length).toBeGreaterThan(0)
+  })
+
+  it('queried results order by relative path, keeping each folder contiguous', async () => {
+    const body = await flat(root2, 'true', 'set')
+    expect(body.entries.filter((e) => e.kind === 'model').map((e) => e.name)).toEqual([
+      'SetDunes/base.stl',
+      'SetDunes/body.stl',
+      'SetDunes/spares/clip.stl',
+      'SetKit.zip!/lvl1/SetInner/x.stl',
+      'SetKit.zip!/top.stl',
+      'SetRocks/base.stl',
+    ])
+  })
+
+  it('matching containers lead as a block, dirs before zips', async () => {
+    const body = await flat(root2, 'true', 'set')
+    expect(body.entries.filter((e) => e.kind !== 'model').map((e) => `${e.kind}:${e.name}`)).toEqual([
+      'dir:SetDunes',
+      'dir:SetKit.zip!/lvl1/SetInner',
+      'dir:SetRocks',
+      'zip:SetKit.zip',
+    ])
+    expect(body.entries.findIndex((e) => e.kind === 'model')).toBe(4)
+  })
+
+  it('the folder cap bounds containers without reducing models, and flags truncated', async () => {
+    process.env.MODEL_BROWSER_FOLDER_CAP = '2'
+    const body = await flat(root2, 'true', 'set')
+    expect(body.entries.filter((e) => e.kind !== 'model')).toHaveLength(2)
+    expect(body.entries.filter((e) => e.kind === 'model')).toHaveLength(6)
+    expect(body.truncated).toBe(true)
   })
 
   it('deep search rooted in a zip', async () => {

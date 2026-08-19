@@ -186,7 +186,7 @@ describe('file name search', () => {
     await pressEnter(searchInput())
     await settle()
 
-    expect(container.textContent).toContain('No models matched "zzz".')
+    expect(container.textContent).toContain('Nothing matched "zzz".')
     expect(container.textContent).not.toContain('The filter is hiding')
 
     // Clear the no-match search and instead filter the original listing down
@@ -198,7 +198,7 @@ describe('file name search', () => {
 
     expect(listDir).not.toHaveBeenCalled()
     expect(container.textContent).toContain('The filter is hiding everything below.')
-    expect(container.textContent).not.toContain('No models matched')
+    expect(container.textContent).not.toContain('Nothing matched "zzz".')
   })
 
   it('a failed search leaves no results label over the listing it never replaced', async () => {
@@ -252,7 +252,9 @@ describe('file name search', () => {
     // The walk never finished, so "no match" would be a false claim (D5) —
     // and the generic "some were omitted" notice stays out of the way too.
     expect(container.textContent).toContain('ran out of budget')
-    expect(container.textContent).not.toContain('No models matched')
+    // Both empty states now open with "Nothing matched" — the completed-search
+    // one ends the sentence at the query, the truncated one keeps going.
+    expect(container.textContent).not.toContain('Nothing matched "buried".')
     expect(container.textContent).not.toContain('omitted')
   })
 

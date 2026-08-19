@@ -459,8 +459,8 @@ export default function App() {
           onKeyDown={(e) => {
             if (e.key === 'Enter') submitSearch()
           }}
-          placeholder="Filter or search by name…"
-          aria-label="Filter or search by name"
+          placeholder="Filter, or search names and folders…"
+          aria-label="Filter, or search names and folders"
           spellCheck={false}
           className="w-64 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-500"
         />
@@ -468,7 +468,7 @@ export default function App() {
           type="button"
           onClick={submitSearch}
           disabled={filter.trim() === ''}
-          title="Search this folder and everything below it by file name"
+          title="Search this folder and everything below it by name — files and folders"
           className="rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-500 disabled:opacity-40"
         >
           Deep
@@ -531,7 +531,7 @@ export default function App() {
                   </p>
                 ) : (
                   <p className="mt-16 text-center text-sm text-zinc-600">
-                    No models matched "{query}".
+                    Nothing matched "{query}".
                   </p>
                 )
               ) : filterHidesAll ? (

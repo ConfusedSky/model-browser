@@ -30,6 +30,19 @@ interface FlatWalk {
   /** Realpaths of directories already entered — cycle guard and alias dedup. */
   visited: Set<string>
   models: DirEntry[]
+  /**
+   * Every container *below* the root level, named by root-relative path like
+   * the models are (D2). The root's own children are not here — they are the
+   * containers path's job in `listFlat`, and collecting them twice would
+   * return two tiles for one folder.
+   *
+   * Collected unconditionally: the query is applied afterwards, in `listFlat`.
+   * Collecting these conditionally on `q` would make a walk's output depend on
+   * the query, which `search-cancellation` (one traversal shared across
+   * requests) and `listing-tree-cache` (tree snapshot keyed by root alone)
+   * both assume is false.
+   */
+  dirs: DirEntry[]
   truncated: boolean
 }
 
@@ -142,16 +155,35 @@ async function listZipDir(zipPath: string, prefix: string): Promise<DirEntry[]> 
   return sortEntries(entries)
 }
 
-/** Case-insensitive substring match on an entry's base name (D1). */
+/**
+ * Case-insensitive substring match on an entry's whole root-relative name
+ * (D1): the query matches anywhere in the path below the search root — the
+ * file's own name, any containing folder, or a containing archive. This is the
+ * same string the client's live filter matches, so typing and submitting mean
+ * the same thing.
+ */
 function matchesQuery(name: string, q: string): boolean {
+  return name.toLowerCase().includes(q)
+}
+
+/**
+ * A container matches on its **own** name, not its path (D2) — deliberately a
+ * different predicate from `matchesQuery`. A folder inside a matching folder is
+ * not itself a tile, or one hit would return a subtree of them; its models
+ * still come back through the path predicate above.
+ */
+function matchesOwnName(name: string, q: string): boolean {
   return baseName(name).toLowerCase().includes(q)
 }
 
+const KIND_RANK: Record<string, number> = { dir: 0, zip: 1, model: 2 }
+
+function kindRank(kind: DirEntry['kind']): number {
+  return KIND_RANK[kind] ?? 9
+}
+
 function sortEntries(entries: DirEntry[]): DirEntry[] {
-  const rank: Record<string, number> = { dir: 0, zip: 1, model: 2 }
-  return entries.sort(
-    (a, b) => (rank[a.kind] ?? 9) - (rank[b.kind] ?? 9) || a.name.localeCompare(b.name),
-  )
+  return entries.sort((a, b) => kindRank(a.kind) - kindRank(b.kind) || a.name.localeCompare(b.name))
 }
 
 export async function listDir(vpath: string): Promise<DirListing> {
@@ -182,8 +214,14 @@ async function walkFsLevel(level: DirEntry[], rel: string, walk: FlatWalk): Prom
       } catch {
         continue // unreadable subdirectory: skipped, only an unreadable root fails
       }
+      // `rel === ''` is the root's own level, whose containers `listFlat`
+      // already collected: pushing here too would return one folder as two
+      // identical tiles. Pushed after the listing succeeds, so an unreadable
+      // directory stays skipped rather than becoming a tile that 404s.
+      if (rel !== '') walk.dirs.push({ ...e, name: `${rel}${e.name}` })
       await walkFsLevel(sub, `${rel}${e.name}/`, walk)
     } else {
+      if (rel !== '') walk.dirs.push({ ...e, name: `${rel}${e.name}` })
       await walkZip(e.path, '', `${rel}${e.name}!/`, walk)
     }
   }
@@ -225,6 +263,11 @@ async function walkZip(
     }
   }
   const dirs = new Set<string>()
+  // Every directory *path* below `norm`, not just this level's names: a folder
+  // three levels into an archive matches like one three levels into the tree,
+  // which is the depth-independence this rule exists for (D2). `dirs` above
+  // stays the immediate level, because that is what the container tiles are.
+  const interior = new Set<string>()
   for (const e of zipEntries) {
     if (walk.truncated) break
     if (!e.name.startsWith(norm)) continue
@@ -233,6 +276,12 @@ async function walkZip(
     if (!takeStep(walk)) break
     const slash = rest.indexOf('/')
     if (slash !== -1) dirs.add(rest.slice(0, slash))
+    for (let i = slash; i !== -1; i = rest.indexOf('/', i + 1)) {
+      const d = rest.slice(0, i)
+      // A root walk's immediate children are the containers path's job, exactly
+      // as `rel === ''` is on the filesystem side; everything deeper is ours.
+      if (!root || d.includes('/')) interior.add(d)
+    }
     // Only model extensions match — nested zip *file* entries fall out here,
     // while models under a directory named *.zip match like any other.
     const format = modelFormat(rest)
@@ -243,6 +292,15 @@ async function walkZip(
       kind: 'model',
       format,
       size: e.size,
+      mtime: zipStat.mtimeMs,
+    })
+  }
+  for (const d of interior) {
+    walk.dirs.push({
+      name: `${namePrefix}${d}`,
+      path: joinVPath(zipPath, `${norm}${d}`),
+      kind: 'dir',
+      size: 0,
       mtime: zipStat.mtimeMs,
     })
   }
@@ -303,6 +361,7 @@ export async function listFlat(vpath: string, query?: string): Promise<DirListin
       : envLimit('MODEL_BROWSER_FLAT_BUDGET', 20000),
     visited: new Set(),
     models: [],
+    dirs: [],
     truncated: false,
   }
   let containers: DirEntry[]
@@ -337,11 +396,35 @@ export async function listFlat(vpath: string, query?: string): Promise<DirListin
   if (hasQuery) {
     containers = containers.filter((e) => matchesQuery(e.name, q))
     walk.models = walk.models.filter((m) => matchesQuery(m.name, q))
+    // Two predicates on purpose: a model matches anywhere in its path, a
+    // container only on its own name (D2).
+    containers = [...containers, ...walk.dirs.filter((d) => matchesOwnName(d.name, q))]
+    // Containers normally arrive pre-ranked from `listFsDir` and are never
+    // re-sorted here; appending deeper matches to them makes that untrue, so a
+    // queried listing sorts the block explicitly. Same kind rank as everywhere
+    // else — dirs before zips — with the root-relative path as the tiebreak,
+    // which needs no special case for the root's own bare-named children,
+    // since a bare name is its own root-relative path (D3).
+    containers.sort((a, b) => kindRank(a.kind) - kindRank(b.kind) || a.name.localeCompare(b.name))
+    // Containers get their own bound rather than sharing the model cap, so a
+    // fragment matching many folders cannot spend the models' budget (D4).
+    const folderCap = envLimit('MODEL_BROWSER_FOLDER_CAP', 50)
+    if (containers.length > folderCap) {
+      walk.truncated = true
+      containers.length = folderCap
+    }
   }
   // Not sortEntries: its model comparison is the full name, i.e. the relative
   // path — flat ordering is by file name so same-named parts sit together (D2).
+  // A queried listing orders by that relative path instead, so each matching
+  // folder's contents stay contiguous rather than scattering among every
+  // same-named part in the tree — the sort key would otherwise be the one part
+  // of the name the user did not type (D3).
   walk.models.sort(
-    (a, b) => baseName(a.name).localeCompare(baseName(b.name)) || a.name.localeCompare(b.name),
+    hasQuery
+      ? (a, b) => a.name.localeCompare(b.name)
+      : (a, b) =>
+          baseName(a.name).localeCompare(baseName(b.name)) || a.name.localeCompare(b.name),
   )
   if (walk.models.length > cap) {
     walk.truncated = true

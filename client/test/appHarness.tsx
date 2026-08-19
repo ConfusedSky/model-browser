@@ -133,7 +133,7 @@ export function pathInput(): HTMLInputElement {
   return container.querySelector<HTMLInputElement>('input[placeholder="Type a directory path…"]')!
 }
 export function searchInput(): HTMLInputElement {
-  return container.querySelector<HTMLInputElement>('input[aria-label="Filter or search by name"]')!
+  return container.querySelector<HTMLInputElement>('input[aria-label="Filter, or search names and folders"]')!
 }
 export function deepButton(): HTMLButtonElement {
   return Array.from(container.querySelectorAll<HTMLButtonElement>('header button')).find(
