@@ -511,8 +511,9 @@ export default function App() {
             <>
               {truncated && !searchHasNoMatches && (
                 <p className="px-4 pt-3 text-xs text-amber-400">
-                  Showing {listing.filter((e) => e.kind === 'model').length} models; some were
-                  omitted.
+                  Showing {listing.filter((e) => e.kind === 'model').length} models
+                  {query !== null && ` and ${listing.filter((e) => e.kind !== 'model').length} folders`}
+                  ; some entries were omitted.
                 </p>
               )}
               {/* While a query is committed the grid reads as search results,

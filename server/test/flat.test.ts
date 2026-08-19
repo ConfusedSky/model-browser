@@ -1,4 +1,5 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { zipSync } from 'fflate'
@@ -56,6 +57,11 @@ writeFileSync(join(root2, 'SetDunes', 'body.stl'), stlBytes(12))
 writeFileSync(join(root2, 'SetDunes', 'spares', 'clip.stl'), stlBytes(13))
 mkdirSync(join(root2, 'SetRocks'))
 writeFileSync(join(root2, 'SetRocks', 'base.stl'), stlBytes(14))
+mkdirSync(join(root2, 'nested'))
+writeFileSync(
+  join(root2, 'nested', 'SetDeep.zip'),
+  zipSync({ 'inner.stl': new Uint8Array(stlBytes(17)) }),
+)
 writeFileSync(
   join(root2, 'SetKit.zip'),
   zipSync({
@@ -317,10 +323,11 @@ describe('deep name search (q parameter)', () => {
     ])
   })
 
-  it('a folder several levels below the root matches, like a child of the root does', async () => {
+  it('a folder several levels inside an archive matches, like a child of the root does', async () => {
     const body = await flat(root2, 'true', 'inner')
     expect(body.entries.map((e) => `${e.kind}:${e.name}`)).toEqual([
       'dir:SetKit.zip!/lvl1/SetInner',
+      'model:nested/SetDeep.zip!/inner.stl',
       'model:SetKit.zip!/lvl1/SetInner/x.stl',
     ])
   })
@@ -349,25 +356,67 @@ describe('deep name search (q parameter)', () => {
     expect(body.entries.filter((e) => e.name === 'SetRocks')).toHaveLength(1)
   })
 
-  it('a narrower query returns exactly the filter of a broader one — the walk does not vary with q', async () => {
-    // What search-cancellation shares between requests and listing-tree-cache
-    // snapshots: the walk gathers, the query filters. Collection conditional on
-    // q would work here and be wrong there. This pins it through the only
-    // surface available — a subset relation that a query-shaped walk breaks.
-    const broad = await flat(root2, 'true', 'set')
-    const narrow = await flat(root2, 'true', 'setk')
-    const expected = broad.entries.filter((e) =>
-      e.kind === 'model'
-        ? e.name.toLowerCase().includes('setk')
-        : e.name.slice(e.name.lastIndexOf('/') + 1).toLowerCase().includes('setk'),
+  it('the walk collects without consulting the query', async () => {
+    // The invariant search-cancellation (one traversal shared across requests
+    // carrying different queries) and listing-tree-cache (snapshot keyed by
+    // root alone) are both built on. It cannot be observed through listFlat:
+    // filtering inside the walk with the same monotone predicate listFlat
+    // applies afterwards produces byte-identical output, so a behavioural test
+    // here can assert only a theorem about filters. This asserts the source
+    // shape instead, which is the thing that actually regresses.
+    const src = await readFile(new URL('../src/listing.ts', import.meta.url), 'utf8')
+    const walkSrc = src.slice(
+      src.indexOf('async function walkFsLevel'),
+      src.indexOf('function envLimit'),
     )
-    expect(narrow.entries).toEqual(expected)
-    expect(expected.length).toBeGreaterThan(0)
+    expect(walkSrc).not.toMatch(/matchesQuery|matchesOwnName|\bhasQuery\b|walk\.q\b/)
+  })
+
+  it('a filesystem folder several levels below the root matches, at any depth', async () => {
+    // The motivating case, and the one no zip fixture covers: both walkFsLevel
+    // pushes could be deleted without any other test noticing.
+    const body = await flat(root, 'true', 'deep')
+    expect(body.entries.map((e) => `${e.kind}:${e.name}`)).toEqual([
+      'dir:a/deep',
+      'model:a/deep/part.stl',
+      'model:kit.zip!/v2.zip/deep2.stl',
+    ])
+  })
+
+  it('an archive below the root level matches as a container', async () => {
+    const body = await flat(root2, 'true', 'setdeep')
+    expect(body.entries.map((e) => `${e.kind}:${e.name}`)).toEqual([
+      'zip:nested/SetDeep.zip',
+      'model:nested/SetDeep.zip!/inner.stl',
+    ])
+  })
+
+  it('a folder at the top of a zip root appears exactly once', async () => {
+    // The root call's immediate children are listFlat's containers; without the
+    // guard the walk collects them too and every one comes back twice.
+    const body = await flat(zipPath, 'true', 'arms')
+    expect(body.entries.map((e) => `${e.kind}:${e.name}`)).toEqual([
+      'dir:arms',
+      'model:arms/left.stl',
+    ])
+  })
+
+  it('a directory reached through a symlink is findable by the name it was reached by', async () => {
+    // `alias -> a` is skipped by the visited set for traversal, but its own name
+    // is still a name under the root, and whichever of the two sorts first must
+    // not make the other unfindable.
+    const aliased = await flat(root, 'true', 'alias')
+    expect(aliased.entries.map((e) => `${e.kind}:${e.name}`)).toContain('dir:alias')
+    // ...and the real tree beneath it is still reachable under its own names,
+    // rather than being consumed by whichever path the walk reached first.
+    const real = await flat(root, 'true', 'deep')
+    expect(real.entries.map((e) => e.name)).toContain('a/deep')
   })
 
   it('queried results order by relative path, keeping each folder contiguous', async () => {
     const body = await flat(root2, 'true', 'set')
     expect(body.entries.filter((e) => e.kind === 'model').map((e) => e.name)).toEqual([
+      'nested/SetDeep.zip!/inner.stl',
       'SetDunes/base.stl',
       'SetDunes/body.stl',
       'SetDunes/spares/clip.stl',
@@ -383,16 +432,17 @@ describe('deep name search (q parameter)', () => {
       'dir:SetDunes',
       'dir:SetKit.zip!/lvl1/SetInner',
       'dir:SetRocks',
+      'zip:nested/SetDeep.zip',
       'zip:SetKit.zip',
     ])
-    expect(body.entries.findIndex((e) => e.kind === 'model')).toBe(4)
+    expect(body.entries.findIndex((e) => e.kind === 'model')).toBe(5)
   })
 
   it('the folder cap bounds containers without reducing models, and flags truncated', async () => {
     process.env.MODEL_BROWSER_FOLDER_CAP = '2'
     const body = await flat(root2, 'true', 'set')
     expect(body.entries.filter((e) => e.kind !== 'model')).toHaveLength(2)
-    expect(body.entries.filter((e) => e.kind === 'model')).toHaveLength(6)
+    expect(body.entries.filter((e) => e.kind === 'model')).toHaveLength(7)
     expect(body.truncated).toBe(true)
   })
 

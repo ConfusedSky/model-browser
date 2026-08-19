@@ -205,6 +205,16 @@ async function walkFsLevel(level: DirEntry[], rel: string, walk: FlatWalk): Prom
     if (e.kind === 'model') {
       walk.models.push({ ...e, name: `${rel}${e.name}` })
     } else if (e.kind === 'dir') {
+      // Pushed before the visited check, and before descending: the spec's rule
+      // is every directory under the root whose own name matches, and a
+      // directory reached through a symlink alias is one. Deduping it here
+      // would make the *aliased* name unfindable, or — when the alias sorts
+      // first — make the real folder's name unfindable while the alias stands
+      // in for it. The visited set exists to bound the traversal, not to decide
+      // which names exist. Guarded on `rel !== ''` because the root's own level
+      // is `listFlat`'s containers, and pushing here too would return one
+      // folder as two identical tiles.
+      if (rel !== '') walk.dirs.push({ ...e, name: `${rel}${e.name}` })
       const real = await realpath(e.path).catch(() => null)
       if (real === null || walk.visited.has(real)) continue
       walk.visited.add(real)
@@ -214,11 +224,6 @@ async function walkFsLevel(level: DirEntry[], rel: string, walk: FlatWalk): Prom
       } catch {
         continue // unreadable subdirectory: skipped, only an unreadable root fails
       }
-      // `rel === ''` is the root's own level, whose containers `listFlat`
-      // already collected: pushing here too would return one folder as two
-      // identical tiles. Pushed after the listing succeeds, so an unreadable
-      // directory stays skipped rather than becoming a tile that 404s.
-      if (rel !== '') walk.dirs.push({ ...e, name: `${rel}${e.name}` })
       await walkFsLevel(sub, `${rel}${e.name}/`, walk)
     } else {
       if (rel !== '') walk.dirs.push({ ...e, name: `${rel}${e.name}` })
@@ -328,15 +333,21 @@ function envLimit(name: string, fallback: number): number {
 }
 
 /**
- * Flat listing: the root's immediate dir/zip entries as tiles, then every
- * model recursively under it, named by root-relative path and ordered by file
- * name (basename, full relative path as tiebreak). Walk work is bounded by a
+ * Flat listing: the root's immediate dir/zip entries as tiles (plus, when a
+ * query is given, every matching container below them), then every model
+ * recursively under it, named by root-relative path and ordered by file name
+ * (basename, full relative path as tiebreak) — or by relative path when a query
+ * is given, so each matching folder's contents stay contiguous (D3). Walk work is bounded by a
  * step budget; the response by a model cap. Either dropping models sets
  * `truncated`.
  *
- * `query`, when non-blank, narrows both the container tiles and the walked
- * models to those whose base name contains it case-insensitively, applied
- * before the cap so the cap bounds matches rather than raw walk output (D1).
+ * `query`, when non-blank, narrows the walked models to those whose whole
+ * root-relative name contains it case-insensitively — the query matches
+ * anywhere in the path below the root (D1) — and narrows containers, the
+ * root's own children and every matching directory found below them alike, to
+ * those whose *own* name contains it (D2). Both are applied before the caps, so
+ * a cap bounds matches rather than raw walk output. Containers carry their own
+ * bound, so neither kind can crowd out the other (D4).
  * A blank or whitespace-only query is treated as absent.
  *
  * Which step budget applies depends on that query: a queried walk runs on the

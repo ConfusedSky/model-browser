@@ -50,6 +50,29 @@ Client-side this needs nothing new: deep-search results have always been able to
 
 *Alternative — synthesize folder tiles on the client from the returned model paths:* no server change, but it can only surface folders that happen to contain a matching model, which is precisely the folder-with-no-matching-filenames case this change exists for.
 
+### D2a: Corrections found while implementing
+
+Three, recorded because the text above is wrong about the source and a reader
+comparing it to the code would otherwise assume the code drifted.
+
+**`walkZip` does not "synthesize each level's directory names".** It synthesizes the
+immediate children of the level being listed, and nothing deeper. Collecting only those
+would leave a folder three levels inside an archive unmatchable while an identical
+filesystem folder matched — the depth-dependence this change exists to remove, and
+contrary to the delta's "every directory and archive under the root". It now collects
+every interior directory path.
+
+**The dedup guard cannot be `root` alone** (task 1.2a). A zip root's containers are its
+*immediate* children only, so guarding on `root` drops every deeper interior directory,
+which nothing else returns. The guard is `!root || d.includes('/')`.
+
+**The visited set does not decide which names exist.** A directory reached through a
+symlink alias was skipped before its tile was pushed, which made the aliased name
+unfindable — and, when the alias sorted first, made the *real* folder's name unfindable
+while the alias stood in for it. The push moved ahead of the visited check: that set
+bounds the traversal, and the spec's rule is every directory under the root whose own
+name matches.
+
 ### D3: A queried listing orders by relative path; a plain browse keeps base-name order
 
 Flat browse sorts by base name so same-named parts from different sets sit together (`flat-folder-view` D2) — that is right when the grid is the whole library. It is wrong for a folder search: `Sandy Dunes/base.stl` and `Sandy Dunes/body.stl` would scatter among every other `base.stl` and `body.stl` in the tree, and the results would read as unordered because the sort key is the one part of the name the user did not type. A queried listing therefore sorts by relative path, which keeps each folder's contents contiguous — every part under `Sandy Dunes/` together, in path order.
@@ -62,7 +85,14 @@ The model comparator gains one branch on `hasQuery`, beside the existing comment
 
 ### D4: Folders get their own bound, ahead of the model cap
 
-Matched directories are capped separately (`MODEL_BROWSER_FOLDER_CAP`, default 50) rather than sharing `MODEL_BROWSER_FLAT_CAP` (500). Sharing would let a fragment matching many folders consume the budget for models, and the two are not interchangeable: 50 folders is already more than a person scans, while 500 models is a working result set. Either bound dropping entries sets `truncated`, so the existing notice and the `empty + truncated` honesty rule (`file-name-search` D5) keep working unchanged.
+Matched directories are capped separately (`MODEL_BROWSER_FOLDER_CAP`, default 50) rather than sharing `MODEL_BROWSER_FLAT_CAP` (500). Sharing would let a fragment matching many folders consume the budget for models, and the two are not interchangeable: 50 folders is already more than a person scans, while 500 models is a working result set. Either bound dropping entries sets `truncated`.
+
+The `empty + truncated` honesty rule (`file-name-search` D5) keeps working unchanged, but
+the notice itself did **not**: it read "Showing N models; some were omitted", which was
+true only while `truncated` implied models were dropped. With a separate container bound
+it can fire when every matching model was returned — measured on the real library, the
+query `unsupported` returns 446 models against a cap of 500 with the folder bound full —
+so the notice now counts both kinds and says *entries* were omitted.
 
 ## Risks / Trade-offs
 

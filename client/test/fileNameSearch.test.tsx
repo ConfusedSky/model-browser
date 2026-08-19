@@ -15,6 +15,7 @@ import {
   pressEnter,
   searchInput,
   settle,
+  tiles,
   type,
   unmountApp,
 } from './appHarness'
@@ -31,6 +32,12 @@ const NESTED: DirListing = {
 const SEARCH_RESULT: DirListing = {
   path: '/models',
   entries: [model('a/found.stl'), model('b/foundation.stl')],
+  truncated: true,
+}
+// A folder search's results: containers named by relative path, like the models.
+const FOLDER_RESULT: DirListing = {
+  path: '/models',
+  entries: [dir('Sets/Sandy Dunes'), model('Sets/Sandy Dunes/base.stl')],
   truncated: true,
 }
 const NO_MATCHES: DirListing = { path: '/models', entries: [] }
@@ -175,6 +182,37 @@ describe('file name search', () => {
 
     expect(labels()).toEqual(['sub'])
     expect(container.textContent).not.toContain('Search results for')
+  })
+
+  it('a deep-search folder tile is labeled by its own name, with the path in the title', async () => {
+    // Containers used to be root children with bare names; a folder match now
+    // carries a relative path, and truncating that in a tile shows the head of
+    // the path rather than the folder the user searched for.
+    listDir.mockImplementation((_t: string, opts?: { q?: string }) =>
+      Promise.resolve(opts?.q === 'sandy' ? FOLDER_RESULT : NESTED),
+    )
+
+    await type(searchInput(), 'sandy')
+    await pressEnter(searchInput())
+    await settle()
+
+    expect(labels()).toEqual(['Sandy Dunes', 'base.stl'])
+    expect(tiles().map((b) => b.getAttribute('title'))).toEqual([
+      'Sets/Sandy Dunes',
+      'Sets/Sandy Dunes/base.stl',
+    ])
+  })
+
+  it('the truncation notice counts containers too, so folders-only truncation is not a claim about models', async () => {
+    listDir.mockImplementation((_t: string, opts?: { q?: string }) =>
+      Promise.resolve(opts?.q === 'sandy' ? FOLDER_RESULT : NESTED),
+    )
+
+    await type(searchInput(), 'sandy')
+    await pressEnter(searchInput())
+    await settle()
+
+    expect(container.textContent).toContain('Showing 1 models and 1 folders; some entries were omitted.')
   })
 
   it('a deep search with no matches says so, distinct from a filter hiding everything', async () => {

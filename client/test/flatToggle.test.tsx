@@ -84,6 +84,6 @@ describe('flat toggle', () => {
     expect(tile.getAttribute('title')).toBe('a/deep.stl')
     // The accessible name may carry a thumbnail-state suffix; the path is the point.
     expect(tile.getAttribute('aria-label')).toContain('a/deep.stl')
-    expect(container.textContent).toContain('Showing 1 models; some were omitted.')
+    expect(container.textContent).toContain('Showing 1 models; some entries were omitted.')
   })
 })

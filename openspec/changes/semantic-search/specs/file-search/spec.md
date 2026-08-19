@@ -6,7 +6,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Deep name search
-On an explicit submit action, the client SHALL commit the input text as a search query and run the search selected by the search mode in force, targeted at the user's newest requested directory (the in-flight navigation target when one exists, the committed path otherwise). **In name mode** — the default, and the only mode when no other corpus is available — the server SHALL reuse the flat walk for it: the same recursive descent, zip-entry handling, hidden/unreadable-directory skipping, symlink visited-set, step budget, and result cap, returning the models under the root whose relative path contains the query (case-insensitive), named by root-relative path, plus matching directories and zip entries. When the root is a zip or a directory inside one, the same rules apply within the archive. The cap SHALL bound matching models, not raw walk output, and the response SHALL carry the truncation flag under the same rules as a flat listing. The search walk SHALL run on its own step budget, independently configurable and larger by default than the browse walk's, since a search returns matches rather than everything it visits.
+On an explicit submit action, the client SHALL commit the input text as a search query and run the search selected by the search mode in force, targeted at the user's newest requested directory (the in-flight navigation target when one exists, the committed path otherwise). **In name mode** — the default, and the only mode when no other corpus is available — the server SHALL reuse the flat walk for it: the same recursive descent, zip-entry handling, hidden/unreadable-directory skipping, symlink visited-set, step budget, and result cap, returning the models under the root whose **root-relative path** contains the query (case-insensitive) — matching a containing folder's name, a containing archive's name, or the file's own — each named by that path, plus every directory and archive under the root whose **own** name matches, likewise named by its root-relative path and navigable like any container tile. Matched containers SHALL be bounded independently of the model cap, so neither kind can crowd out the other, and either bound dropping entries SHALL set the truncation flag. Matching containers SHALL lead the response as a group, ahead of the models, ordered directories before archives as every other listing orders them and by root-relative path within a kind; the models SHALL follow in root-relative-path order, so a folder's contents stay contiguous. A folder SHALL appear exactly once however it was matched. A plain flat listing without a query keeps its file-name ordering. When the root is a zip or a directory inside one, the same rules apply within the archive. The cap SHALL bound matching models, not raw walk output, and the response SHALL carry the truncation flag under the same rules as a flat listing. The search walk SHALL run on its own step budget, independently configurable and larger by default than the browse walk's, since a search returns matches rather than everything it visits.
 
 When a name search returns no matches AND the walk was truncated, the UI SHALL say the search ran out before covering the tree — suggesting a narrower root — rather than claiming nothing matched; the plain no-match message is reserved for searches that completed. A blank or whitespace-only query SHALL be treated as no query. A non-blank query SHALL only be honored together with the flat listing flag; one without it SHALL be rejected.
 
@@ -14,7 +14,15 @@ Results of any mode SHALL render as an ordinary listing — thumbnails, orbit, l
 
 #### Scenario: A buried part is found by name
 - **WHEN** the user submits in name mode a fragment that matches models several directories down and inside zips
-- **THEN** the matching models are returned with relative-path names, and no non-matching models appear
+- **THEN** the matching models are returned with relative-path names in relative-path order, and no non-matching models appear
+
+#### Scenario: Matching includes containing folders
+- **WHEN** a model's containing folder matches the query but its own file name does not
+- **THEN** that model is in the name-search results, named by its relative path, and the matching folder is there too as a navigable tile
+
+#### Scenario: Folders cannot crowd out models
+- **WHEN** a name search matches far more folders than the container bound allows
+- **THEN** the response still carries its full share of matching models, and the truncation flag reports that entries were dropped
 
 #### Scenario: Submit runs the mode in force
 - **WHEN** the user submits the same text under each available search mode

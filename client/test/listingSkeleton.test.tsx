@@ -59,7 +59,9 @@ describe('listing skeleton', () => {
 
     await pastDelay() // the reveal timer must have been cleaned up, not merely outrun
     expect(skeleton()).toBeNull()
-    expect(tiles().map((b) => b.textContent)).toEqual(['📁a/b'])
+    // Container tiles are labeled by their own name now that a deep search can
+    // return one named by a relative path; the full name stays in the title.
+    expect(tiles().map((b) => b.textContent)).toEqual(['📁b'])
   })
 
   it('a newer navigation while pending wins and clears the skeleton', async () => {

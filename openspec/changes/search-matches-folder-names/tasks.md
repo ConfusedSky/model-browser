@@ -1,6 +1,11 @@
 # Tasks — search-matches-folder-names
 
-> Ordering: no hard dependency on another change, but `url-navigation-state` is unarchived and edits `client/src/App.tsx`; this change's client work is confined to wording, so conflicts are unlikely — still re-read against main before starting (parallel sessions). Line numbers below were taken at proposal time.
+> Ordering: no change blocks this one, but two now depend on it and must archive **after**
+> it: `find-in-listing` MODIFIES *Live name filter* and `semantic-search` MODIFIES *Deep
+> name search*, both written against the text this change leaves behind. Whichever archives
+> second wins, so re-base those deltas onto this one's wording before archiving them.
+> (`url-navigation-state`, named here at proposal time, archived in `5a85992`.) Line numbers
+> below were taken at proposal time.
 
 ## 1. Server predicate and folder results
 

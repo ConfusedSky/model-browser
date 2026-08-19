@@ -55,7 +55,10 @@ function Tile({
     return (
       <button type="button" title={entry.name} className={base} onClick={() => onEnter(entry)}>
         <span className="text-4xl">{entry.kind === 'dir' ? '📁' : '🗜️'}</span>
-        <span className="w-full truncate text-center text-xs">{entry.name}</span>
+        {/* Labeled by its own name like a model tile is: a deep-search container
+            carries a relative path, and truncating that to fit shows the head of
+            the path rather than the folder the user searched for. Path in title. */}
+        <span className="w-full truncate text-center text-xs">{baseName(entry.name)}</span>
       </button>
     )
   }
