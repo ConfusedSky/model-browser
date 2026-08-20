@@ -43,6 +43,10 @@ control that submits searches.
   its request-free behavior, and its clearing rules, and changes how it is opened and
   where it is typed. The requirement's coupling of filtering to the search input is the
   part that goes.
+- `file-search`: **MODIFIED** *Deep name search*, for one clause only. It opens "distinct
+  from typing, which only filters", which this change makes false. `semantic-search` also
+  modifies this requirement, later in the chain and for its own reason; leaving the clause
+  to that change would ship a spec contradicting itself in between.
 
 ## Impact
 

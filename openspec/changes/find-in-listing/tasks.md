@@ -1,10 +1,16 @@
 # Tasks — find-in-listing
 
-> **Ordering: hard dependency on `search-matches-folder-names`**, which modifies this same
-> requirement — this delta is written against the text that change leaves behind. Pairs
-> with `search-options` (the panel) and `semantic-search` (which stops needing its D9 once
-> this lands) but depends on neither. Re-read `App.tsx` against main before starting —
-> parallel sessions.
+> **Ordering: hard dependency on `search-matches-folder-names`**, which modifies both
+> requirements this change touches — these deltas are written against the text that change
+> leaves behind. This change depends on nothing else; `semantic-search` depends on **it**
+> and must re-base its own *Deep name search* MODIFY onto the text this one leaves. Pairs
+> with `search-options` (the panel) without depending on it. Re-read `App.tsx` against main
+> before starting — parallel sessions.
+>
+> Note this change MODIFIES *Deep name search* as well as *Live name filter*, for one
+> clause: it opens "distinct from typing, which only filters", which this change makes
+> false. Leaving it to `semantic-search`'s later MODIFY would ship a self-contradicting
+> spec in between.
 
 ## 1. Separate the two jobs
 
@@ -15,6 +21,12 @@
       box; the query now seeds the query input and the filter starts empty (D4)
 - [ ] 1.3 Keep `filteredListing` (`:325`) and the hides-everything message (`:537`) exactly
       as they are — this change moves where text is typed, not what filtering does
+- [ ] 1.4 **Preserve clear-to-restore.** `handleFilterChange` (`:177-183`) is being rewritten
+      by 1.1, and it is also where emptying the input while a query is committed restores the
+      ordinary listing (`setQuery(null)` + refetch, `:180-183`). That rule belongs to *Deep
+      name search* and survives this change — it just moves to the query input, which is now
+      the only thing that box holds. A test asserting it still fires, since nothing else
+      covers a behavior whose implementation this change deletes and rebuilds
 
 ## 2. The find control
 

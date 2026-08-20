@@ -1,7 +1,10 @@
 # file-search Delta
 
-> Written against the text `search-matches-folder-names` leaves behind — that change
-> modifies this same requirement and is a hard prerequisite (tasks.md §0).
+> Written against the text `search-matches-folder-names` and then `find-in-listing` leave
+> behind — both modify this requirement and both are hard prerequisites (tasks.md). Every
+> scenario those changes established is carried forward here: a MODIFIED requirement
+> replaces prose *and* scenarios at archive, so one dropped silently on the way through is
+> one deleted from the shipped spec.
 
 ## MODIFIED Requirements
 
@@ -19,6 +22,30 @@ Results of any mode SHALL render as an ordinary listing — thumbnails, orbit, l
 #### Scenario: Matching includes containing folders
 - **WHEN** a model's containing folder matches the query but its own file name does not
 - **THEN** that model is in the name-search results, named by its relative path, and the matching folder is there too as a navigable tile
+
+#### Scenario: A folder deeper than the root's children still matches
+- **WHEN** the query matches a folder several levels below the search root
+- **THEN** that folder comes back as a tile just as a matching child of the root does — depth does not decide whether a folder can match
+
+#### Scenario: An archive matches like a folder
+- **WHEN** the query matches a zip's name
+- **THEN** the models inside it are results, on the same rule that makes a folder's contents results
+
+#### Scenario: The search root does not match itself
+- **WHEN** the user searches from inside a folder for a fragment of that folder's own name
+- **THEN** only entries beneath it whose own relative paths match are returned — the root matching itself does not return everything
+
+#### Scenario: A folder is returned once, not once per way it matched
+- **WHEN** the query matches a folder that is an immediate child of the search root
+- **THEN** exactly one tile for it appears in the results
+
+#### Scenario: A folder's contents stay together
+- **WHEN** a search matches folders whose files share common names with files elsewhere in the tree
+- **THEN** each folder's models are listed contiguously rather than interleaved with same-named files from other folders
+
+#### Scenario: Matching containers keep the listing's kind order
+- **WHEN** a search matches both directories and archives
+- **THEN** they lead the results as one group, directories before archives, exactly as an ordinary listing orders them — the query changes which containers appear, not how kinds are ranked
 
 #### Scenario: Folders cannot crowd out models
 - **WHEN** a name search matches far more folders than the container bound allows
