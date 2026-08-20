@@ -132,7 +132,9 @@ export default function App() {
   const [mode, setModeState] = useState<SearchMode>(optionsOf(boot).mode)
   // Availability of the semantic index, re-read on the interactions this app
   // already makes rather than on a timer of its own (D4/3.8).
-  const [index, setIndex] = useState<IndexAvailability>({ state: 'absent' })
+  // `null` until the first probe answers — distinct from a known-absent index,
+  // because a meaning link must wait for the answer rather than act on a guess.
+  const [index, setIndex] = useState<IndexAvailability | null>(null)
   const [scope, setScope] = useState<SemanticScope | null>(null)
   const [weak, setWeak] = useState(false)
   // Orientations the index supplied for the tiles on screen. Advisory: a stored
@@ -406,7 +408,7 @@ export default function App() {
     setModeState(next)
     modeRef.current = next
     if (query === null) return
-    if (next === 'meaning' && index.state === 'ready') {
+    if (next === 'meaning' && index?.state === 'ready') {
       fetchSemantic(dest, query, () => setQuery(landedQueryRef.current))
     } else {
       setScope(null)
@@ -446,7 +448,7 @@ export default function App() {
     // Targeted at the newest requested directory, not the committed path, so
     // a search submitted mid-navigation follows the user there (D3).
     if (modeRef.current === 'meaning') {
-      if (index.state === 'ready') {
+      if (index?.state === 'ready') {
         fetchSemantic(dest, q, () => setQuery(landedQueryRef.current))
         return
       }
@@ -473,11 +475,16 @@ export default function App() {
     // view is seeded into the URL via replaceState — pushed entries start
     // with the user's first real navigation.
     if (path === '') return
-    // A meaning link is not a name search: render the location's ordinary
-    // listing and leave the URL naming what was asked for (the deferred query
-    // above runs it as soon as the index answers).
+    // A meaning link fetches nothing here. The obvious thing — render the
+    // ordinary listing while the index is asked — is wrong twice over on a URL
+    // like `?path=/library&flat=1&q=…&mode=meaning`: `flat=1` came from the
+    // search, so it lists the *whole volume*, and those hundreds of tiles
+    // render and cache thumbnails at the default angle moments before the
+    // meaning results arrive with orientations for the same models. The
+    // deferred effect below waits for the one availability call and then either
+    // runs the query or falls back — see it for what happens when it cannot.
     if (boot.mode === 'meaning' && boot.q !== undefined && boot.q !== '') {
-      fetchListing(path, boot.flat, null, undefined, true, true)
+      setPending(true)
       return
     }
     fetchListing(path, boot.flat, boot.q ?? null, undefined, true)
@@ -538,13 +545,27 @@ export default function App() {
     boot.mode === 'meaning' && boot.q !== undefined && boot.q !== '' ? boot.q : null,
   )
 
+  // Whether the ordinary listing has been drawn in place of a deferred query,
+  // so it is fetched once rather than on every availability re-read.
+  const standInRef = useRef(false)
+
   useEffect(() => {
-    if (deferred === null || index.state !== 'ready') return
-    setDeferred(null)
-    setQuery(deferred)
-    fetchSemantic(dest, deferred, () => setQuery(landedQueryRef.current))
+    if (deferred === null || index === null) return // not probed yet: wait
+    if (index.state === 'ready') {
+      standInRef.current = false
+      setDeferred(null)
+      setQuery(deferred)
+      fetchSemantic(dest, deferred, () => setQuery(landedQueryRef.current))
+      return
+    }
+    if (standInRef.current) return
+    standInRef.current = true
+    // Cannot answer: stand in with the location's own contents. Nested, not
+    // flat — the URL's `flat` belonged to the search being deferred, and
+    // flattening a volume to fill time is the opposite of standing in.
+    fetchListing(dest, false, null, undefined, true, true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deferred, index.state])
+  }, [deferred, index?.state])
 
   // Ctrl-F / Cmd-F takes the browser's find, deliberately: the app's own is the
   // better one on this content — it matches the full relative path a tile is
@@ -666,7 +687,7 @@ export default function App() {
           setScope(null)
           setWeak(false)
           setPoses({})
-          if (index.state === 'ready') {
+          if (index?.state === 'ready') {
             setQuery(q)
             fetchSemantic(v.path, q)
           } else {
@@ -1042,7 +1063,7 @@ export default function App() {
               {deferred !== null && (
                 <p className="px-4 pt-1 text-xs text-amber-400">
                   This view is a meaning search for &ldquo;{deferred}&rdquo;, and the index is{' '}
-                  {index.state === 'warming' ? 'still starting up' : 'not answering'}. Showing this
+                  {index?.state === 'warming' ? 'still starting up' : 'not answering'}. Showing this
                   folder meanwhile — it runs as soon as the index answers.{' '}
                   <button
                     type="button"
@@ -1109,7 +1130,7 @@ export default function App() {
           folderMatching={folderMatching}
           kinds={kinds}
           mode={mode}
-          index={index}
+          index={index ?? { state: 'absent' }}
           scope={scope}
           onFolderMatching={setFolderMatching}
           onKinds={setKinds}

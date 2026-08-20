@@ -356,6 +356,23 @@ describe('meaning search', () => {
     expect(putThumb.mock.calls.at(-1)?.[0]?.posed).toBe(true)
   })
 
+  it('a meaning link renders no stand-in listing while the index is being asked', async () => {
+    // `?path=/library&flat=1&q=…&mode=meaning` — the flat flag belongs to the
+    // search. Rendering the ordinary listing while waiting flattens the whole
+    // volume, and those hundreds of tiles render and cache thumbnails at the
+    // default angle moments before the meaning results arrive with
+    // orientations for the same models. Nothing is fetched until the one
+    // availability call answers.
+    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models', covers: ['stl'] })
+    semanticSearch.mockResolvedValue(MEANING)
+    listDir.mockClear()
+    await mountAppAtCurrentUrl('/?path=/models&flat=1&q=demon&mode=meaning', NESTED)
+    await settle()
+
+    expect(listDir).not.toHaveBeenCalled()
+    expect(semanticSearch).toHaveBeenCalledWith('demon', '/models')
+  })
+
   it('a link opened without the index keeps naming the meaning search', async () => {
     // Substituting a name search would answer a different question unasked, and
     // rewriting the URL to name that answer would destroy the link: no retry

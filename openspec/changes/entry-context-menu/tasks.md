@@ -81,22 +81,42 @@
       strength. Similarity cosines run 0.85–0.99 against text queries' ~0.1, and the index
       reports no `weak` flag here for that reason
 
-## 4b. Thumbnail actions  *(independent of the index — can land with §1–3)*
+## 4b. Thumbnail actions  *(the actions land with §1–3; their posed cases need the index)*
 
-- [ ] 4b.1 Re-render: render the tile through the existing queue and `putThumb` the result
-      with the model's stored `camera` and `axis` and the current `lighting` / `RIG_VERSION`
-      (D7). No new server route — `putThumb` already writes all five together
-- [ ] 4b.2 Reset framing: `putThumb` `DEFAULT_CAMERA` in place of the stored camera and
-      render there. Test that the *viewer* subsequently opens the model at the default too —
-      camera is keyed by path and shared with the lightbox (architecture D4), so this is
-      stated behavior rather than a leak
-- [ ] 4b.3 Neither touches `axis`. Test with a non-`y` spindle stored: it survives both
+- [ ] 4b.1 Re-render: resolve the orientation exactly as the sweep does
+      (`useThumbnails.ts:174-179` — stored camera/axis, else the pose when *both* are absent,
+      else the default), render through the queue, and `putThumb` **pixels only**. Do not
+      persist a pose: `semantic-search`'s *A pose orients the model without becoming its
+      stored camera* forbids it, and the sweep's own comment says the same. Test a posed
+      model: after re-render it still has no stored camera, so a re-classification still
+      governs it
+- [ ] 4b.2 The camera store gains *discard* (`model-thumbnails` MODIFY). `cache.ts:98` is
+      `camera: opts.camera ?? prev?.camera`, so silence means keep and there is no way to
+      clear — add an explicit discard to `ThumbPutRequest`/`ThumbCache.put` and keep silence
+      meaning keep. Server test both: a write that omits the camera preserves it, a write
+      that discards it leaves none
+- [ ] 4b.3 Reset framing discards rather than writes `DEFAULT_CAMERA`. The distinction is the
+      task, not a nicety: a stored default makes `cached.camera !== undefined`, which at
+      `useThumbnails.ts:174-175` permanently disqualifies the model from the pose path — the
+      fix for a badly framed thumbnail would guarantee one. Test that a posed model, after
+      reset framing, renders at the pose and not at the default
+- [ ] 4b.4 Reset framing also updates the in-memory thumb state, not just the server:
+      `App.tsx:1159` sources the lightbox's camera from `thumbs.get(path)?.camera`, so a
+      server-only write leaves the viewer opening at the old camera for the rest of the
+      session. Test the viewer within one session, not only after a reload
+- [ ] 4b.5 Neither touches `axis`. Test with a non-`y` spindle stored: it survives both
       actions and the re-render is drawn about it, since a reset that silently laid a Z-up
-      model on its side is the failure D7 refuses
-- [ ] 4b.4 Both go through the render queue like any other thumbnail work, so they suspend
-      under an active orbit or lightbox rather than competing for the single renderer
-      (architecture D2/D3). Neither bumps `RIG_VERSION` — they consume the current recipe
-- [ ] 4b.5 Absent on dir and zip tiles (D6): container tiles are glyphs, not renders
+      model on its side is the failure D7 refuses. Note the consequence to assert alongside
+      it — a model keeping its own axis is framed by *default* about that axis after reset
+      framing, not by the pose, because `cameraForPose` derives camera and axis together and
+      the pose's angles are measured about the pose's axis (`three/pose.ts:61-73`)
+- [ ] 4b.6 Both `await queue.whenResumed()` before touching the renderer, as the sweep does
+      at `useThumbnails.ts:155,161` — `queue.push` alone is not enough, since `queue.ts:41-46`
+      documents that `suspend()` cannot stop a job that has started, and this is the single
+      shared `WebGLRenderer` (architecture D2/D3). Neither bumps `RIG_VERSION`
+- [ ] 4b.7 Offered on every model tile including one whose thumbnail is missing or errored
+      (`useThumbnails.ts:203,211` → `Grid.tsx:89`) — a failed image is a case re-render exists
+      for. Absent on dir and zip tiles (D6): container tiles are glyphs, not renders
 
 ## 5. Verification
 

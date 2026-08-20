@@ -7,9 +7,10 @@ Switching the lighting mode leaves the grid you are looking at drawn under the o
 This is not a bug against the spec — it is the spec. `model-thumbnails`' *Lighting-mode-aware
 thumbnails* already requires the client to treat a hit whose stored mode or rig version
 differs as needing re-render, and the client does exactly that (`useThumbnails.ts:123-124`).
-But every scenario in that requirement times the upgrade to a *visit*: "the user switches
-lighting mode and **revisits** a directory", "a directory **is visited** whose cache entries
-predate lighting-mode storage". The effect that performs the sweep takes
+But three of that requirement's four scenarios time the upgrade to a *visit*: "the user
+switches lighting mode and **revisits** a directory", "a directory **is visited** whose cache
+entries predate lighting-mode storage" (the fourth is about lighting matching at handoff and
+says nothing about when). The effect that performs the sweep takes
 `[entries, api, lru, queue, setThumb]` (`:220`), so a mode change does not re-run it.
 
 Lazy-on-visit was the right call for the case it was written against — a rig version bumped
@@ -26,6 +27,10 @@ guess.
 - **A lighting-mode change refreshes the thumbnails on screen**, through the same staleness
   rule and the same render queue that a visit uses. Nothing about *what* re-renders changes;
   only *when* the check runs.
+- **The sweep keeps each tile's image while its replacement renders.** It does not today —
+  it resets every tile to a spinner on each run, which is invisible while runs only follow a
+  listing change. Making a toggle re-run it would blank the grid, so preserving displayed
+  images is part of this change rather than a property it inherits.
 - **Camera state and axis are preserved**, exactly as on a visit — this replaces pixels.
 - **The rig-version path stays lazy.** A new rig version arrives with a new build, where
   there is no gesture to respond to and nothing on screen waiting for an answer, and

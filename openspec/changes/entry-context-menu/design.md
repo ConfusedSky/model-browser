@@ -36,14 +36,17 @@ calls `scrollIntoView`.
 
 ### D1: Commands are shared; the lightbox keeps its controls
 
-The shared module holds **commands**: one-shot, stateless, identical wherever invoked — open,
-reveal, copy path, find similar. The lightbox's orbit-axis picker and spindle flip are
-**controls**: stateful, bound to the live camera, meaningless without a rendered model. They
-stay where they are.
+The shared module holds **commands**: one-shot, stateless, identical wherever invoked —
+open, reveal, copy path, find similar, re-render thumbnail, reset framing. The lightbox's
+orbit-axis picker and spindle flip are **controls**: stateful, bound to the live camera,
+meaningless without a rendered model. They stay where they are.
 
 The line matters because "show the same actions in both places" reads, at a glance, as
-"move the axis buttons into the menu too". A menu item that mutates the model's persisted
-spindle without showing the result is a worse affordance than the one it copies.
+"move the axis buttons into the menu too". A spindle is the case that defines the line: the
+picker changes one *and animates the model rotating to it*, which is how a user learns what
+the choice means. A menu item mutating the same persisted value is the same write without
+the thing that made it legible. D7 applies this to the two thumbnail commands, which are on
+the command side of it.
 
 ### D2: Copy path copies what the lightbox copies
 
@@ -207,21 +210,47 @@ the viewer (architecture D4), so this also resets where the lightbox opens that 
 is the honest behavior rather than a side effect, and it is why the item says *framing*
 rather than *thumbnail*.
 
-Neither needs a new server route. `putThumb` already writes png, camera, axis, lighting and
-rig together, so re-render writes back what it read and reset framing writes the default
-in place of it.
+**Reset framing has to discard the camera, and the store cannot express that yet.** The
+obvious implementation is to `putThumb` `DEFAULT_CAMERA` in place of the stored one. It is
+wrong, and the reason only shows up next to `semantic-search`: `cache.ts:98` merges with
+`camera: opts.camera ?? prev?.camera`, so an omitted camera means *keep* and there is no way
+to clear one — and a written default is not a discard. `useThumbnails.ts:174-175` offers a
+model the index's pose only when it has neither a stored camera nor a stored axis, so
+storing a default would permanently disqualify that model from being posed. Reset framing
+would leave a model strictly worse off than one nobody had ever touched: the action for a
+badly framed thumbnail would be the action that guarantees one.
+
+So this change carries a `model-thumbnails` MODIFY adding *discard* as a third thing a write
+can say about the camera, alongside *set* and *say nothing*. That is a small protocol
+addition rather than a new route — `putThumb` still writes png, camera, axis, lighting and
+rig together, and re-render still writes back what it read.
+
+**A discarded camera resolves the way an untouched model resolves**, which is the pose when
+the index has one and the default otherwise. There is one limit, and it is arithmetic rather
+than policy: `cameraForPose` (`client/src/three/pose.ts:61-73`) derives the camera *and* the
+axis together, because the azimuth offset is computed in `frameFor(axis)` — a pose's angles
+describe a view about the pose's own up axis and mean something else about another. So a
+model that keeps an axis of its own is framed by default about that axis, not by the pose.
+Since this change deliberately leaves the axis alone, that is the case where "hand it back to
+the index" does not apply.
 
 **The axis is not a third item**, by D1. The orbit-axis picker is a control: it is bound to
 a live view and shows the spindle rotating to screen-up as it changes. A menu item that
-reset a persisted spindle with nothing on screen showing the result is precisely the
-affordance D1 rules out — and on a Z-up model it would silently lay the model on its side.
+reset a persisted spindle is a spindle change made outside the view that shows what a
+spindle change means — and on a Z-up model it would lay the model on its side, which is the
+outcome the picker's animated rotation exists to make legible. (The earlier form of this
+argument said a menu item would show *nothing* of the result. These two items falsify that:
+the tile re-renders in place, and the axis does change tile pixels, since `stageModel` and
+`applyState` both take it. The command/control line and the Z-up outcome carry the decision;
+"nothing shows it" no longer does.)
 It stays in the lightbox, which already has the picker and its flip toggle. Once
 `semantic-search` lands, the index supplies the axis anyway.
 
 *Refreshing the visible grid on a mode change is a separate change.* Note this is not a
 defect being worked around: `model-thumbnails`' *Lighting-mode-aware thumbnails* specifies
-the upgrade as lazy, and every one of its scenarios says so — "revisits a directory", "a
-directory is visited". The code matches its spec. Making the grid you are looking at
+the upgrade as lazy, and three of its four scenarios time it to a visit — "revisits a
+directory", "a directory is visited" (the fourth is about lighting matching at handoff and
+says nothing about when). The code matches its spec. Making the grid you are looking at
 refresh is a change to that requirement, which belongs to that capability rather than to a
 menu. Until it lands, navigating away and back is the bulk answer and these items are the
 per-tile one; afterwards they still are, because a tile can be wrong for reasons a sweep

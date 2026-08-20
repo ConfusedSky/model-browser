@@ -34,9 +34,12 @@ not be written twice.
   version in force now, keeping its camera and axis. The staleness check for those already
   exists (`useThumbnails.ts:123-124`); what is missing is any way to ask for it on the grid
   you are looking at, since the sweep does not re-run when the mode changes (D7).
-- **Reset framing** — drop the camera stored for the model back to the default view and
-  re-render there. This is the answer to a badly framed thumbnail, which re-rendering alone
-  cannot fix: the thumbnail is rendered *from* that stored camera.
+- **Reset framing** — *discard* the camera stored for the model and re-render at whatever
+  orientation it then resolves to: the semantic index's pose where there is one for it, the
+  default otherwise. This is the answer to a badly framed thumbnail, which re-rendering alone
+  cannot fix, since the thumbnail is rendered *from* that stored camera. Discarding rather
+  than writing a default is load-bearing — a stored default is an orientation of the user's
+  own and would lock the model out of being posed (D7).
 - Deliberately not included: opening the OS file manager (a process spawn this server has no
   business doing — see design D5), resetting the orbit axis (a control, not a command — D7),
   and "search in this folder" (reveal plus a search, with less control).
@@ -53,6 +56,11 @@ not be written twice.
 - `url-navigation`: **MODIFIED** *The URL names the committed view* — a find-similar result
   set is a view, named by the model it was derived from. Written against the text
   `semantic-search` leaves behind.
+- `model-thumbnails`: **MODIFIED** *Camera state stored alongside thumbnails* — a write gains
+  a third thing it can say about the camera: *discard*, alongside *set* and *say nothing*.
+  The store merges with `camera: opts.camera ?? prev?.camera` today, so there is no way to
+  clear one, and writing a default is not equivalent (D7). No other active change modifies
+  this requirement.
 - `model-viewer`: **MODIFIED** *Lightbox expanded view* — the panel's copy affordance becomes
   a call into the shared action module, and its failure path changes with the move: a brief
   report instead of selecting the path text. The selection fallback existed for non-secure

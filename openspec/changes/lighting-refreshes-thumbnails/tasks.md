@@ -19,18 +19,35 @@
       `getLightingMode()` for the dependency (D1)
 - [ ] 1.2 Pass a primitive, not an object rebuilt per render: an equal mode must not
       re-trigger the sweep. This is the failure that turns a toggle into a render loop
+- [ ] 1.2a Leave `poses` (`useThumbnails.ts:79`) out of the dependency list, deliberately and
+      with a comment. It is the other value read inside the effect and absent from the deps,
+      and it is absent on purpose — `App.tsx` sets it after the sweep starts. Adding `lighting`
+      beside it without a word invites a later "consistency fix" that adds both and re-runs
+      the sweep mid-flight
+- [ ] 1.2b `client/test/thumbnailQueue.test.tsx:45` calls the hook with four arguments — fix
+      the call sites when the signature changes
 - [ ] 1.3 The rig version stays out of the dependency list (D2) — it changes with a build,
       not with a gesture, and nothing on screen is waiting on it
 
 ## 2. Behaviour under teardown
 
-- [ ] 2.1 A mode change tears the in-flight sweep down exactly as a navigation does: queue
-      handles cancelled, minted object URLs released through `dropStale`, no writes from the
-      abandoned pass. This path exists and is exercised by navigation; the task is to assert
-      it holds when the entries are unchanged and only the mode differs
-- [ ] 2.2 Each tile keeps its previous image until its replacement exists, so a toggle over
-      a full grid never flashes empty (D3)
-- [ ] 2.3 Two toggles in quick succession settle under the mode chosen last
+- [ ] 2.1 **Keep displayed images across a re-run.** `useThumbnails.ts:105` resets every tile
+      to `{ status: 'loading' }`, and the stale branch's `staleUrl` (`:138-146`) is read only
+      by the failure path — so with the mode in the deps a toggle blanks the grid to spinners.
+      Carry each tile's current image into the new pass and replace it only when its render
+      lands (D3). This is the change's real work, not an assertion about existing behaviour
+- [ ] 2.2 Own the object URLs across re-runs. Today the URLs of *displayed* tiles (`:126`,
+      `:186`) are never revoked when the map is discarded at `:105` — one leak per navigation.
+      A mode dependency turns that into a decoded PNG per visible model per toggle, and D3
+      invites repeated toggling, so track ownership and revoke on replacement
+- [ ] 2.3 A mode change cancels the in-flight sweep's queued renders as a navigation does.
+      Note what cancellation does **not** cover: `useThumbnails.ts:181-182` renders and
+      `await api.putThumb(...)` before the `if (!alive)` check at `:183`, and `queue.ts:41-43`
+      documents that a started job cannot be stopped — so a tile already rendering writes the
+      cache under the outgoing mode and can land after the new pass's write. Move the `alive`
+      check above the PUT, or accept it and say so; do not assert "no writes from the
+      abandoned pass" without one of the two
+- [ ] 2.4 Two toggles in quick succession settle under the mode chosen last
 
 ## 3. Tests
 
@@ -38,6 +55,8 @@
       mode re-renders them without a navigation, preserving camera and axis
 - [ ] 3.2 A re-render that is *not* a mode change does not re-run the sweep — assert the
       render count, since 1.2's regression is invisible to a correctness-only assertion
+- [ ] 3.2a A toggle over a grid of rendered tiles never shows a spinner where an image was
+      (2.1), and the object-URL count does not grow across repeated toggles (2.2)
 - [ ] 3.3 A rig-version difference still upgrades lazily on the next visit, not eagerly:
       the shipped scenario "A rig revision refreshes stale thumbnails once" keeps passing
 - [ ] 3.4 Do not re-declare `RIG_VERSION` in a test mock — spread the real module

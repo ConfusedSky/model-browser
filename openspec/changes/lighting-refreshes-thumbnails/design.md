@@ -4,8 +4,10 @@
 
 `useThumbnails.ts:113-131` reads the cache for each model and accepts a hit only when
 `cached.lighting === getLightingMode() && cached.rig === RIG_VERSION`; anything else falls
-through to the re-render tail, which keeps the stale PNG on screen until the replacement
-exists. That rule is `model-thumbnails`' *Lighting-mode-aware thumbnails*, and it works.
+through to the re-render tail. That rule is `model-thumbnails`' *Lighting-mode-aware
+thumbnails*, and it works. Note what the tail does *not* do: it holds the old object URL in
+a closure for the failure path only (`:138-146`), while `:105` has already reset every tile
+to `{ status: 'loading' }` — see D3.
 
 What decides when it runs is the effect's dependency list, `[entries, api, lru, queue,
 setThumb]` (`:220`). `getLightingMode()` is called inside the effect but is not a
@@ -37,14 +39,15 @@ re-renders them. That would be a second implementation of the rule at `:123-124`
 drift from it — the first time an entry has neither value stored, the two disagree about
 whether it is stale.
 
-So the mode is passed into the hook and joins the dependency list. A mode change then does
-precisely what a navigation does: tear down the in-flight sweep, cancel its queue handles,
-release the object URLs it minted, and run the same loop again. Every tile whose stored mode
-now differs falls through the same tail it would have on a later visit.
+So the mode is passed into the hook and joins the dependency list. A mode change then runs
+the same loop against the same staleness test, and every tile whose stored mode now differs
+falls through the same tail it would have on a later visit.
 
-The cleanup path is already the load-bearing part and is already exercised: navigating
-mid-sweep is the common case today, and the hook releases stale URLs (`dropStale`) and
-cancels queued renders on teardown. A mode change is that case with the same entries.
+It is *not* simply "what a navigation does", and D3 is where that bites. Teardown today
+cancels queued renders and releases the stale branch's URLs through `dropStale`, but it does
+not release the URLs of tiles that were displaying (`:126`, `:186`), and it does not carry
+any image into the next pass — both are acceptable when the next pass is a different listing
+and become defects when it is the same one.
 
 ### D2: The rig version stays lazy, and the asymmetry is the point
 
@@ -67,12 +70,26 @@ own meaning — the user asked for every thumbnail to look different — and the
 already bounds concurrency and suspends under an active orbit or lightbox (architecture
 D2/D3), so the work yields to interaction rather than competing with it.
 
-Two properties keep it from being felt as a stall: the stale PNG stays on screen until its
-replacement exists, so the grid never flashes empty, and a second toggle before the first
-finishes tears the sweep down rather than stacking a second one.
+One property keeps it from being felt as a stall, and it is **work this change has to do
+rather than a property it inherits**. `useThumbnails.ts:105` opens the effect with
+`setThumbs(new Map(models.map(e => [e.path, { status: 'loading' }])))` — every tile drops to
+a spinner, and the stale branch parks the old object URL in a closure (`:138-146`) that only
+the failure path reads. Today that is invisible: the effect re-runs on a listing change,
+where the old images belong to a listing that is leaving. Re-running it on a mode change
+makes the entries the same, so a toggle would blank the whole grid to spinners until each
+render lands — the eager refresh would look worse than the lazy one it replaces, which would
+be a strange thing to ship.
+
+So the sweep must carry displayed images across a re-run and drop each only as its
+replacement arrives, which also means tracking which object URLs it still owns. That is the
+substance of the change; the dependency-list edit is one line of it.
 
 ## Risks / Trade-offs
 
+- [Blanking the grid to spinners on every toggle] → D3; the sweep has to preserve displayed
+  images across a re-run, which it does not do today. This is the risk that decides whether
+  the change is worth having, since a toggle that empties the grid is worse than one that
+  leaves it stale.
 - [A mode toggle becomes expensive on a large grid] → D3; bounded by the queue, and it is
   the work the control exists to do. Someone toggling to compare modes pays it each way,
   which is the same cost they pay today by navigating away and back.
