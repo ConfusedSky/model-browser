@@ -418,6 +418,34 @@ describe('file name search', () => {
     expect(labels()).toEqual(['Alpha', 'Bravo', 'widget.stl'])
   })
 
+  it('the shortcut does not fire while a viewer owns the keyboard', async () => {
+    // The lightbox traps focus; a find control opening behind it would pull
+    // focus out of the trap into a box the user cannot see.
+    const tile = tiles().find((b) => b.hasAttribute('data-model-tile'))!
+    await act(async () => {
+      tile.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))
+    })
+    await act(async () => {
+      window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))
+    })
+    await settle()
+
+    await openFind()
+
+    expect(findInput()).toBeNull()
+  })
+
+  it('asking for the control again refocuses it rather than doing nothing', async () => {
+    await openFind()
+    await type(findInput()!, 'ravo')
+    // Focus a tile — not another text field, where the shortcut is required to
+    // stay out of the way — and ask for find again: the docstring's promise.
+    tiles()[0]!.focus()
+    await openFind()
+
+    expect(document.activeElement).toBe(findInput())
+  })
+
   it('navigating clears the filter and the control', async () => {
     await openFind()
     await type(findInput()!, 'ravo')

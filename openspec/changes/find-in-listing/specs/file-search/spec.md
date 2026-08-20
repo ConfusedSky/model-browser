@@ -19,7 +19,7 @@ The client SHALL offer a name filter that narrows the tiles currently on screen 
 
 Filtering SHALL be pure view state layered over the current listing: while no deep-search query is committed, it SHALL issue no requests; it SHALL NOT disturb already-loaded thumbnails for entries it hides; and it SHALL be cleared by emptying or dismissing the find control, or by navigating. Note the filter matches the entry's full name, which in flat and deep-search views is its relative path: folder fragments match here, and tiles in those views are *labeled* by file name alone (the path shows in the tooltip). The truncation notice, when present, SHALL keep describing the underlying listing rather than the filtered view. When the filter hides every tile, the UI SHALL say that the filter is hiding the listing rather than presenting an empty grid. A whitespace-only filter SHALL be treated as no filter, and whitespace surrounding the typed text SHALL be ignored when matching.
 
-#### Scenario: Summoning the filter narrows the grid
+#### Scenario: Typing narrows the grid
 - **WHEN** the user opens the find control over a listing and types a fragment
 - **THEN** only tiles whose names contain the fragment (case-insensitive) remain visible, and dismissing the control restores the full listing
 
@@ -47,7 +47,7 @@ Filtering SHALL be pure view state layered over the current listing: while no de
 - **WHEN** the find control holds only whitespace, or a fragment padded with whitespace
 - **THEN** whitespace-only text filters nothing, and a padded fragment matches as if unpadded
 
-#### Scenario: Filtering search results
+#### Scenario: Typing over deep-search results filters them
 - **WHEN** search results are shown and the user narrows them with the find control
 - **THEN** the results narrow client-side by full name, with no new search request, whatever selected those results
 

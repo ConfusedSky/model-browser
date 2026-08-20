@@ -14,20 +14,31 @@ import { useEffect, useRef } from 'react'
 export default function FindBar({
   value,
   count,
+  focusSignal,
   onChange,
   onClose,
 }: {
   value: string
-  /** Entries currently visible, so the user can see the filter working. */
-  count: number
+  /**
+   * Entries currently visible, so the user can see the filter working — null
+   * while a listing is in flight, when the count would describe the listing
+   * being replaced rather than the one arriving.
+   */
+  count: number | null
+  /** Bumped when the user asks for the control again; refocuses it. */
+  focusSignal: number
   onChange: (value: string) => void
   onClose: () => void
 }) {
   const ref = useRef<HTMLInputElement>(null)
 
-  // Focused on open: a control the user summoned and then has to click into
-  // has not finished appearing.
-  useEffect(() => ref.current?.focus(), [])
+  // Focused on open, and again whenever the user asks for it while it is
+  // already open — a control you summon and then have to click into has not
+  // finished appearing.
+  useEffect(() => {
+    ref.current?.focus()
+    ref.current?.select()
+  }, [focusSignal])
 
   return (
     <div data-find-bar className="flex items-center gap-2 border-b border-zinc-800 bg-zinc-900 px-4 py-2">
@@ -49,7 +60,7 @@ export default function FindBar({
         spellCheck={false}
         className="min-w-0 flex-1 bg-transparent text-sm text-zinc-100 outline-none"
       />
-      <span className="shrink-0 text-xs text-zinc-500">{count} shown</span>
+      {count !== null && <span className="shrink-0 text-xs text-zinc-500">{count} shown</span>}
       <button
         type="button"
         onClick={onClose}

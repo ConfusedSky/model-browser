@@ -34,7 +34,14 @@
       focused on open, dismissed on `Escape` and by clearing
 - [x] 2.2 `Ctrl-F` / `Cmd-F` opens it, with `preventDefault` (D2). The handler must not
       fire while focus is in another text input — search bar, path bar, chat box — nor
-      while the lightbox or orbit overlay owns the keyboard
+      while the lightbox or orbit overlay owns the keyboard. **Both halves**: the first
+      shipped and the second did not, and a find control opening behind the focus-trapped
+      lightbox pulls focus out of the trap into a box the user cannot see. The listener
+      subscribes once, so the viewer state reaches it through a ref
+- [x] 2.5 The control survives a listing it outlives: it stays mounted across the
+      skeleton, showing no count while one is in flight (the count would describe the
+      listing being replaced). Unmounting it there shifted the grid and re-stole focus
+      when the new listing landed
 - [x] 2.3 A visible control with the results opens the same box (D3)
 - [x] 2.4 Dismissing clears the filter, so a dismissed control never leaves the grid
       silently narrowed

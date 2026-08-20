@@ -49,9 +49,9 @@ Clicking a model tile — a press released without exceeding the drag threshold 
 - **WHEN** the user activates the copy affordance and the clipboard write succeeds
 - **THEN** the model's full virtual path is placed on the clipboard and brief feedback confirms it
 
-#### Scenario: A failed copy says so
-- **WHEN** the user activates the copy affordance and the clipboard write fails
-- **THEN** the failure is reported briefly and no copied confirmation is shown
+#### Scenario: Copy failure falls back to selection
+- **WHEN** a copy of the path fails
+- **THEN** the failure is reported briefly and no copied confirmation is shown; the panel does **not** select the path text, the fallback this scenario is named for having been retired with the move to a shared action that has no rendered path to select
 
 #### Scenario: Panel is available without a mesh
 - **WHEN** the lightbox is open while the mesh is still loading, or after the mesh failed to load

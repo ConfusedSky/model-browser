@@ -96,6 +96,10 @@ export default function App() {
   const [query, setQuery] = useState<string | null>(boot.q ?? null)
   const [findText, setFindText] = useState('')
   const [findOpen, setFindOpen] = useState(false)
+  const [findFocus, setFindFocus] = useState(0)
+  // Read by the window-level Ctrl-F listener, which subscribes once and would
+  // otherwise close over the viewer state as it was at mount.
+  const viewerRef = useRef<ViewerState | null>(null)
   // A `model` param waiting for its listing (deep link or history forward):
   // honored once the entry exists in a landed listing, silently dropped after
   // a successful listing that lacks it (url-navigation D3).
@@ -267,6 +271,7 @@ export default function App() {
   /** Open the find control, or focus it if it is already open. */
   function openFind(): void {
     setFindOpen(true)
+    setFindFocus((n) => n + 1)
   }
 
   /** Dismissing clears the filter: a closed control must never leave the grid
@@ -355,11 +360,17 @@ export default function App() {
         el instanceof HTMLTextAreaElement ||
         (el instanceof HTMLElement && el.isContentEditable)
       if (typing && el.closest('[data-find-bar]') === null) return
+      // Not while a viewer owns the keyboard. The lightbox traps focus, and
+      // opening a find control behind it would pull focus out of the trap into
+      // a box the user cannot see — and the orbit overlay has no listing to
+      // narrow either. Filtering is about the grid; both of these cover it.
+      if (viewerRef.current !== null) return
       e.preventDefault()
-      setFindOpen(true)
+      openFind()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const hover = useMemo(() => createHoverWarmer((p) => lru.warm(p)), [lru])
@@ -368,6 +379,7 @@ export default function App() {
   // state through this ref instead of re-subscribing every render.
   const stateRef = useRef({ path, flat, query, viewer, listing, folderMatching, kinds })
   stateRef.current = { path, flat, query, viewer, listing, folderMatching, kinds }
+  viewerRef.current = viewer
 
   /** Enter lightbox mode from history/deep-link restore — no tile element, no push. */
   const openRestoredLightbox = useCallback((entry: DirEntry) => {
@@ -741,6 +753,15 @@ export default function App() {
             // The notice line is rendered empty rather than omitted, so the
             // skeleton's tiles sit where the real ones will.
             <>
+              {findOpen && (
+                <FindBar
+                  value={findText}
+                  count={null}
+                  focusSignal={findFocus}
+                  onChange={setFindText}
+                  onClose={closeFind}
+                />
+              )}
               {noticeBar('', '')}
               <div
                 aria-hidden="true"
@@ -760,6 +781,7 @@ export default function App() {
                 <FindBar
                   value={findText}
                   count={filteredListing.length}
+                  focusSignal={findFocus}
                   onChange={setFindText}
                   onClose={closeFind}
                 />
