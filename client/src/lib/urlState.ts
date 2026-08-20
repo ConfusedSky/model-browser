@@ -49,7 +49,7 @@ export function parseUrl(search: string = window.location.search): UrlView {
     // error, since a hand-edited link should degrade to the ordinary view.
     folderMatching: p.has('nofolders') ? false : undefined,
     kinds: kinds === 'folders' || kinds === 'models' ? kinds : undefined,
-    mode: mode === 'meaning' ? 'meaning' : undefined,
+    mode: mode === 'meaning' ? 'meaning' : mode === 'name' ? 'name' : undefined,
     model: p.get('model') ?? undefined,
   }
 }
@@ -65,7 +65,13 @@ export function serializeView(view: UrlView): string {
   // mints a history entry.
   if (view.folderMatching === false) p.set('nofolders', '1')
   if (view.kinds === 'folders' || view.kinds === 'models') p.set('kinds', view.kinds)
-  if (view.mode === 'meaning') p.set('mode', 'meaning')
+  // Written whenever a query is committed, including the default. The other
+  // options are omitted at their defaults so an ordinary search URL stays what
+  // it was — but which *corpus* answered is not a preference among results, it
+  // is what the query means. Leaving it implicit makes the link depend on the
+  // reader's default: change that default later, or hand the link to a profile
+  // that reads absence differently, and the same URL asks a different question.
+  if (view.q !== undefined && view.q !== '') p.set('mode', view.mode ?? 'name')
   if (view.model !== undefined && view.model !== '') p.set('model', view.model)
   const s = p.toString()
   return s === '' ? '' : `?${s}`

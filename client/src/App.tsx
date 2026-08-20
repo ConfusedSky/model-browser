@@ -189,7 +189,15 @@ export default function App() {
   const [closeSignal, setCloseSignal] = useState(0)
 
   const fetchListing = useCallback(
-    (target: string, asFlat: boolean, q: string | null, onFail?: () => void, restore = false) => {
+    (
+      target: string,
+      asFlat: boolean,
+      q: string | null,
+      onFail?: () => void,
+      restore = false,
+      /** Render without renaming the view — see the deferred-meaning comment. */
+      keepUrl = false,
+    ) => {
       const req = ++requestRef.current
       if (restore) restoreReqRef.current = req
       setTarget(target)
@@ -218,6 +226,10 @@ export default function App() {
           // and keeps the URL's own `model`; a user navigation pushes, and any
           // lightbox is necessarily closed, so `model` drops.
           const restoring = req === restoreReqRef.current
+          // `keepUrl`: the URL already names a view this app intends to render
+          // and cannot yet — a meaning link opened before the index answers.
+          // Overwriting it here would destroy the link rather than defer it.
+          if (keepUrl) return
           // Options appear only alongside a committed query and only when not
           // the default: they describe which entries this view contains, and
           // over a plain listing they select nothing (D1/D4).
@@ -229,6 +241,7 @@ export default function App() {
               q: q ?? undefined,
               folderMatching: searching && !matchingRef.current ? false : undefined,
               kinds: searching && kindsRef.current !== 'both' ? kindsRef.current : undefined,
+              mode: searching ? 'name' : undefined,
               model: restoring ? parseUrl().model : undefined,
             },
             { replace: restoring },
@@ -342,6 +355,21 @@ export default function App() {
     }
   }
 
+  /**
+   * Run the deferred phrase as a name search. Offered rather than done for the
+   * user: substituting the corpus is only honest when it was asked for, and
+   * this is the asking. Being a user action, it may rename the view.
+   */
+  function runDeferredByName(): void {
+    const q = deferred
+    if (q === null) return
+    setDeferred(null)
+    setModeState('name')
+    modeRef.current = 'name'
+    setQuery(q)
+    fetchListing(dest, true, q, () => setQuery(landedQueryRef.current))
+  }
+
   /** Open the find control, or focus it if it is already open. */
   function openFind(): void {
     setFindOpen(true)
@@ -400,6 +428,7 @@ export default function App() {
         q: query,
         folderMatching: folderMatching ? undefined : false,
         kinds: next === 'both' ? undefined : next,
+        mode,
       })
     }
   }
@@ -416,8 +445,20 @@ export default function App() {
     setQuery(q)
     // Targeted at the newest requested directory, not the committed path, so
     // a search submitted mid-navigation follows the user there (D3).
-    if (modeRef.current === 'meaning' && index.state === 'ready') {
-      fetchSemantic(dest, q, () => setQuery(landedQueryRef.current))
+    if (modeRef.current === 'meaning') {
+      if (index.state === 'ready') {
+        fetchSemantic(dest, q, () => setQuery(landedQueryRef.current))
+        return
+      }
+      // Asked for meaning, cannot run it: hold the request rather than answer a
+      // different one, and let the URL name the view that was asked for.
+      setDeferred(q)
+      setQuery(null)
+      setScope(null)
+      setWeak(false)
+      setPoses({})
+      commitUrl({ path: dest, flat: true, q, mode: 'meaning' })
+      fetchListing(dest, flat, null, undefined, false, true)
       return
     }
     setScope(null)
@@ -431,7 +472,15 @@ export default function App() {
     // would clear them by design) and lands as a restoration, so the resolved
     // view is seeded into the URL via replaceState — pushed entries start
     // with the user's first real navigation.
-    if (path !== '') fetchListing(path, boot.flat, boot.q ?? null, undefined, true)
+    if (path === '') return
+    // A meaning link is not a name search: render the location's ordinary
+    // listing and leave the URL naming what was asked for (the deferred query
+    // above runs it as soon as the index answers).
+    if (boot.mode === 'meaning' && boot.q !== undefined && boot.q !== '') {
+      fetchListing(path, boot.flat, null, undefined, true, true)
+      return
+    }
+    fetchListing(path, boot.flat, boot.q ?? null, undefined, true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -450,16 +499,30 @@ export default function App() {
     void api.indexAvailability().then(setIndex, () => setIndex({ state: 'absent' }))
   }, [api, path])
 
-  // A stored or URL-carried meaning mode arriving where the index cannot answer
-  // falls back to name search and says so — never a silent substitution (D2).
-  const [fellBack, setFellBack] = useState(false)
+  /**
+   * A meaning search the app has been asked for and cannot run yet — from a
+   * link, or from a submit while the index is down.
+   *
+   * It is *deferred*, not substituted. Running a name search for the same words
+   * would answer a different question without being asked, and rewriting the
+   * URL to name that answer would destroy the link: the recipient could not
+   * retry it after starting the index, a reload would not help, and copying it
+   * on would pass the substitution along. So the URL keeps naming the meaning
+   * view, the grid shows the location's ordinary listing, a notice says which
+   * of the two is on screen — and when the index becomes ready the query runs,
+   * which is the link finally doing what it named (D2).
+   */
+  const [deferred, setDeferred] = useState<string | null>(
+    boot.mode === 'meaning' && boot.q !== undefined && boot.q !== '' ? boot.q : null,
+  )
+
   useEffect(() => {
-    if (mode === 'meaning' && index.state !== 'ready') {
-      setModeState('name')
-      modeRef.current = 'name'
-      setFellBack(true)
-    }
-  }, [mode, index.state])
+    if (deferred === null || index.state !== 'ready') return
+    setDeferred(null)
+    setQuery(deferred)
+    fetchSemantic(dest, deferred, () => setQuery(landedQueryRef.current))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deferred, index.state])
 
   // Ctrl-F / Cmd-F takes the browser's find, deliberately: the app's own is the
   // better one on this content — it matches the full relative path a tile is
@@ -504,8 +567,8 @@ export default function App() {
 
   // Live mirror for the popstate handler: subscribed once, it reads current
   // state through this ref instead of re-subscribing every render.
-  const stateRef = useRef({ path, flat, query, viewer, listing, folderMatching, kinds })
-  stateRef.current = { path, flat, query, viewer, listing, folderMatching, kinds }
+  const stateRef = useRef({ path, flat, query, viewer, listing, folderMatching, kinds, mode })
+  stateRef.current = { path, flat, query, viewer, listing, folderMatching, kinds, mode }
   viewerRef.current = viewer
 
   /** Enter lightbox mode from history/deep-link restore — no tile element, no push. */
@@ -554,7 +617,8 @@ export default function App() {
         v.flat !== cur.flat ||
         q !== cur.query ||
         opts.folderMatching !== cur.folderMatching ||
-        opts.kinds !== cur.kinds
+        opts.kinds !== cur.kinds ||
+        opts.mode !== cur.mode
       if (changed) {
         setFlat(v.flat)
         setQuery(q)
@@ -568,8 +632,31 @@ export default function App() {
         // options and land results the URL does not describe.
         setFolderMatchingState(opts.folderMatching)
         setKindsState(opts.kinds)
+        setModeState(opts.mode)
         matchingRef.current = opts.folderMatching
         kindsRef.current = opts.kinds
+        modeRef.current = opts.mode
+        // The corpus is part of the view: restoring a meaning view by running a
+        // name search would put different models under the same URL. When the
+        // index cannot answer, the view is deferred rather than substituted —
+        // the same rule a link gets.
+        if (opts.mode === 'meaning' && q !== null) {
+          setScope(null)
+          setWeak(false)
+          setPoses({})
+          if (index.state === 'ready') {
+            setQuery(q)
+            fetchSemantic(v.path, q)
+          } else {
+            setQuery(null)
+            setDeferred(q)
+            fetchListing(v.path, v.flat, null, undefined, true, true)
+          }
+          return
+        }
+        setScope(null)
+        setWeak(false)
+        setPoses({})
         fetchListing(v.path, v.flat, q, undefined, true)
       }
     }
@@ -921,9 +1008,18 @@ export default function App() {
                   onClose={closeFind}
                 />
               )}
-              {fellBack && (
+              {deferred !== null && (
                 <p className="px-4 pt-1 text-xs text-amber-400">
-                  Meaning search is unavailable here — searching by name instead.
+                  This view is a meaning search for &ldquo;{deferred}&rdquo;, and the index is{' '}
+                  {index.state === 'warming' ? 'still starting up' : 'not answering'}. Showing this
+                  folder meanwhile — it runs as soon as the index answers.{' '}
+                  <button
+                    type="button"
+                    onClick={() => runDeferredByName()}
+                    className="underline hover:text-amber-300"
+                  >
+                    Search names instead
+                  </button>
                 </p>
               )}
               {noticeBar(resultsLabel, omittedNotice, listing.length > 0)}

@@ -168,13 +168,88 @@ describe('meaning search', () => {
     expect(history.length).toBe(before + 2)
   })
 
-  it('a linked meaning search on a machine without the index falls back and says so', async () => {
-    indexAvailability.mockResolvedValue({ state: 'absent' })
-    listDir.mockImplementation(() => Promise.resolve(NESTED))
-    await mountAppAtCurrentUrl('/?path=/models&flat=1&q=dragon&mode=meaning', NESTED)
+  it('every committed search names its corpus, so a link never inherits a reader’s default', async () => {
+    // The failure this prevents: a name-search link opened by someone whose
+    // default is meaning. Absence would have to be read as "name" by every
+    // reader forever, including after the default changes — so the URL says it.
+    setSearchMode('meaning')
+    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models', covers: ['stl'] })
+    semanticSearch.mockResolvedValue(MEANING)
+    await mountApp('/models', NESTED)
+    await settle()
+    await click(searchTab())
+    await click(modeButton('name')!)
+
+    await type(searchInput(), 'widget')
+    await pressEnter(searchInput())
+    await settle()
+
+    expect(location.search).toContain('mode=name')
+    expect(semanticSearch).not.toHaveBeenCalled()
+  })
+
+  it('a name link is a name search even where the reader prefers meaning', async () => {
+    setSearchMode('meaning')
+    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models', covers: ['stl'] })
+    semanticSearch.mockResolvedValue(MEANING)
+    await mountAppAtCurrentUrl('/?path=/models&flat=1&q=widget&mode=name', NESTED)
     await settle()
 
     expect(semanticSearch).not.toHaveBeenCalled()
-    expect(container.textContent).toContain('searching by name instead')
+    expect(listDir).toHaveBeenCalledWith('/models', expect.objectContaining({ q: 'widget' }))
   })
+
+  it('a link opened without the index keeps naming the meaning search', async () => {
+    // Substituting a name search would answer a different question unasked, and
+    // rewriting the URL to name that answer would destroy the link: no retry
+    // after starting the index, no help from a reload, and the substitution
+    // passed on to whoever it is copied to.
+    indexAvailability.mockResolvedValue({ state: 'absent' })
+    await mountAppAtCurrentUrl('/?path=/models&flat=1&q=a+winged+demon&mode=meaning', NESTED)
+    await settle()
+
+    expect(location.search).toContain('mode=meaning')
+    expect(location.search).toContain('q=a+winged+demon')
+    expect(semanticSearch).not.toHaveBeenCalled()
+    // Not a name search either — the grid is the folder, and says so.
+    expect(listDir).not.toHaveBeenCalledWith('/models', expect.objectContaining({ q: 'a winged demon' }))
+    expect(labels()).toEqual(['Alpha', 'widget.stl'])
+    expect(container.textContent).toContain('meaning search for')
+    expect(container.textContent).toContain('not answering')
+  })
+
+  it('the deferred query runs itself once the index answers', async () => {
+    indexAvailability.mockResolvedValue({ state: 'absent' })
+    semanticSearch.mockResolvedValue(MEANING)
+    await mountAppAtCurrentUrl('/?path=/models&flat=1&q=a+winged+demon&mode=meaning', NESTED)
+    await settle()
+    expect(semanticSearch).not.toHaveBeenCalled()
+
+    // The index starts; the next availability read finds it, and the link
+    // finally does what it named without the user retyping or reloading.
+    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models', covers: ['stl'] })
+    await click(container.querySelector<HTMLButtonElement>('main .grid button')!)
+    await settle()
+
+    expect(semanticSearch).toHaveBeenCalledWith('a winged demon', expect.any(String))
+    expect(container.textContent).toContain('Meaning matches for "a winged demon".')
+  })
+
+  it('offers the name search rather than performing it', async () => {
+    indexAvailability.mockResolvedValue({ state: 'absent' })
+    await mountAppAtCurrentUrl('/?path=/models&flat=1&q=widget&mode=meaning', NESTED)
+    await settle()
+    listDir.mockClear()
+
+    const escape = Array.from(container.querySelectorAll<HTMLButtonElement>('main button')).find(
+      (b) => b.textContent?.includes('Search names instead'),
+    )!
+    await click(escape)
+    await settle()
+
+    // A user action, so renaming the view is legitimate now.
+    expect(listDir).toHaveBeenCalledWith('/models', expect.objectContaining({ q: 'widget' }))
+    expect(location.search).not.toContain('mode=meaning')
+  })
+
 })

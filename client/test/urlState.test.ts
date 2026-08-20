@@ -36,7 +36,8 @@ describe('url state', () => {
 
   it('round-trips the full view and omits empty parameters', () => {
     const view: UrlView = { path: '/a', flat: true, q: 'mech gun', model: '/a/kit.zip!/m.stl' }
-    expect(roundTrip(view)).toEqual(view)
+    // A committed query always names its corpus, so it comes back explicit.
+    expect(roundTrip(view)).toEqual({ ...view, mode: 'name' })
     // Omit-empty: flat only when on, blank strings absent rather than empty.
     expect(serializeView({ path: '/a', flat: false })).not.toContain('flat')
     expect(serializeView({ path: '/a', flat: false, q: '', model: '' })).toBe(
@@ -98,20 +99,22 @@ describe('url state', () => {
 
 describe('search options in the URL', () => {
   it('omits both at their defaults — an ordinary search URL is unchanged', () => {
+    // The corpus is always named — see 'every search names its corpus'. The
+    // other options still omit at their defaults, which is what this pins.
     expect(serializeView({ path: '/m', flat: true, q: 'dragon' })).toBe(
-      '?path=%2Fm&flat=1&q=dragon',
+      '?path=%2Fm&flat=1&q=dragon&mode=name',
     )
   })
 
   it('carries them when they are not the default', () => {
     expect(
       serializeView({ path: '/m', flat: true, q: 'dragon', folderMatching: false, kinds: 'models' }),
-    ).toBe('?path=%2Fm&flat=1&q=dragon&nofolders=1&kinds=models')
+    ).toBe('?path=%2Fm&flat=1&q=dragon&nofolders=1&kinds=models&mode=name')
   })
 
   it('round-trips without a second encoding pass', () => {
     const view = { path: '/a b/c.zip!/d', flat: true, q: 'x y', folderMatching: false, kinds: 'folders' as const }
-    expect(parseUrl(serializeView(view))).toEqual({ ...view, model: undefined })
+    expect(parseUrl(serializeView(view))).toEqual({ ...view, mode: 'name', model: undefined })
   })
 
   it('an unrecognised kinds reads as the default rather than an error', () => {

@@ -71,10 +71,26 @@ option in its strongest form, and the re-issue rule gives the feature its best a
 for free: search a phrase by name, get nothing, flip the mode, and the same text runs
 against the index without being retyped.
 
-**An unavailable mode must not be a silent one.** Mode is persisted and shareable, so a
-stored or linked `meaning` can arrive on a machine where the index is absent. The client
-falls back to name search and says why. Silently answering a different question than the
-one the URL names is the failure this whole change is trying to avoid.
+**A committed query always names its corpus, even the default.** `search-options` omits
+options at their defaults so an ordinary search URL stays byte-identical to what it was;
+this change makes `mode` the exception. The other options select among results — which
+entries a view contains. The corpus decides *what the query means*, and leaving it implicit
+makes a link depend on its reader: a name search shared by one profile and opened by
+another whose default is meaning would ask a different question under the same URL, and a
+later change to the default would silently re-point every link ever written. One parameter
+of explicitness is cheaper than a link whose meaning is contextual.
+
+**An unavailable mode must not be a silent one — and must not be a substituted one.** Mode is persisted and shareable, so a
+stored or linked `meaning` can arrive on a machine where the index is absent.
+
+The request is **deferred**, not substituted. Running a name search for the same words
+answers a different question without being asked; worse, committing that answer to the URL
+destroys the link — the recipient cannot retry it once the index is running, a reload does
+not help, and copying it on passes the substitution to the next person. So the URL keeps
+naming the meaning view, the grid shows the location's ordinary listing, a notice says
+which of the two is on screen, and the query runs by itself the moment the index answers.
+The name search is *offered* beside that notice, because substituting the corpus is honest
+only when it was asked for, and the offer is the asking.
 
 **Options that do not apply to the mode in force are hidden rather than inert.** Folder
 matching has no meaning against an embedding index, and the folders/models kind option
