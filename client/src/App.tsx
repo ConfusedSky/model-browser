@@ -22,11 +22,15 @@ import {
   folderMatchingEnabled,
   searchKinds,
   searchMode,
+  searchTuning,
   setFolderMatchingEnabled,
   setSearchKinds,
   setSearchMode,
+  setSearchTuning,
+  TUNING_DEFAULTS,
   type SearchKinds,
   type SearchMode,
+  type Tuning,
 } from './lib/searchOptions'
 import { commitUrl, isLightboxEntry, LIGHTBOX_ENTRY, parseUrl, type UrlView } from './lib/urlState'
 import { MeshLru } from './three/lru'
@@ -58,14 +62,23 @@ function optionsOf(view: UrlView): {
   folderMatching: boolean
   kinds: SearchKinds
   mode: SearchMode
+  tuning: Tuning
 } {
   if (view.q === undefined || view.q === '') {
-    return { folderMatching: folderMatchingEnabled(), kinds: searchKinds(), mode: searchMode() }
+    return {
+      folderMatching: folderMatchingEnabled(),
+      kinds: searchKinds(),
+      mode: searchMode(),
+      tuning: searchTuning(),
+    }
   }
   return {
     folderMatching: view.folderMatching ?? true,
     kinds: view.kinds ?? 'both',
     mode: view.mode ?? 'name',
+    // Absent means the default here too — a tuned link that omitted a field
+    // must not pick up the reader's setting for it.
+    tuning: { ...TUNING_DEFAULTS, ...view.tuning },
   }
 }
 
@@ -130,6 +143,7 @@ export default function App() {
   const [folderMatching, setFolderMatchingState] = useState(optionsOf(boot).folderMatching)
   const [kinds, setKindsState] = useState<SearchKinds>(optionsOf(boot).kinds)
   const [mode, setModeState] = useState<SearchMode>(optionsOf(boot).mode)
+  const [tuning, setTuningState] = useState<Tuning>(optionsOf(boot).tuning)
   // Availability of the semantic index, re-read on the interactions this app
   // already makes rather than on a timer of its own (D4/3.8).
   // `null` until the first probe answers — distinct from a known-absent index,
@@ -137,6 +151,8 @@ export default function App() {
   const [index, setIndex] = useState<IndexAvailability | null>(null)
   const [scope, setScope] = useState<SemanticScope | null>(null)
   const [weak, setWeak] = useState(false)
+  // The index's own ceiling bit — distinct from a ranking's horizon (D2).
+  const [capped, setCapped] = useState(false)
   // Orientations the index supplied for the tiles on screen. Advisory: a stored
   // axis wins, and applying one persists nothing (D5).
   const [poses, setPoses] = useState<Record<string, IndexPose>>({})
@@ -146,9 +162,11 @@ export default function App() {
   const matchingRef = useRef(folderMatching)
   const kindsRef = useRef(kinds)
   const modeRef = useRef(mode)
+  const tuningRef = useRef(tuning)
   matchingRef.current = folderMatching
   kindsRef.current = kinds
   modeRef.current = mode
+  tuningRef.current = tuning
   const [viewer, setViewer] = useState<ViewerState | null>(null)
   const [lighting, setLightingState] = useState<LightingMode>(getLightingMode)
   // AO preference pill state (persisted per browser profile, aoToggle.ts).
@@ -271,7 +289,7 @@ export default function App() {
       setTarget(target)
       setPending(true)
       void api
-        .semanticSearch(text, target)
+        .semanticSearch(text, target, tuningRef.current)
         .then((res) => {
           if (req !== requestRef.current) return
           landedQueryRef.current = text
@@ -283,9 +301,16 @@ export default function App() {
           setTruncated(false)
           setScope(res.scope)
           setWeak(res.weak)
+          setCapped(res.capped)
           setPoses(res.poses)
           setError(null)
-          commitUrl({ path: target, flat: true, q: text, mode: 'meaning' })
+          commitUrl({
+            path: target,
+            flat: true,
+            q: text,
+            mode: 'meaning',
+            tuning: tuningRef.current,
+          })
         })
         .catch((err: unknown) => {
           if (req !== requestRef.current) return
@@ -313,6 +338,7 @@ export default function App() {
       setQuery(null)
       setScope(null)
       setWeak(false)
+      setCapped(false)
       setPoses({})
       const own = { folderMatching: folderMatchingEnabled(), kinds: searchKinds() }
       setFolderMatchingState(own.folderMatching)
@@ -417,6 +443,21 @@ export default function App() {
     }
   }
 
+  /**
+   * Tuning shapes what the index returns, so changing it with a meaning query
+   * committed re-runs that query — the same rule the mode and folder matching
+   * follow. Trying a parameter is the point, and a setting that only applied to
+   * the *next* search would make trying it a two-step.
+   */
+  function setTuning(next: Tuning): void {
+    setSearchTuning(next)
+    setTuningState(next)
+    tuningRef.current = next
+    if (query !== null && mode === 'meaning' && index?.state === 'ready') {
+      fetchSemantic(dest, query, () => setQuery(landedQueryRef.current))
+    }
+  }
+
   /** The kind option only selects among entries already returned — no request. */
   function setKinds(next: SearchKinds): void {
     setSearchKinds(next)
@@ -458,6 +499,7 @@ export default function App() {
       setQuery(null)
       setScope(null)
       setWeak(false)
+      setCapped(false)
       setPoses({})
       commitUrl({ path: dest, flat: true, q, mode: 'meaning' })
       fetchListing(dest, flat, null, undefined, false, true)
@@ -941,6 +983,10 @@ export default function App() {
           // The set is weak, not the results: these are the best the index
           // found and none of them stood out (D10 — no per-result numbers).
           weak ? ' Nothing stood out — these are the closest.' : ''
+        }${
+          // Not the ranking's horizon (there is always an N+1th) but the
+          // index's own ceiling, met by a bound the user set (D2).
+          capped ? ' The index returned fewer than asked for — its cap.' : ''
         }`
       : ''
   // Counted over `byKind`, not the whole listing: the kind option is part of
@@ -1130,6 +1176,8 @@ export default function App() {
           folderMatching={folderMatching}
           kinds={kinds}
           mode={mode}
+          tuning={tuning}
+          onTuning={setTuning}
           index={index ?? { state: 'absent' }}
           scope={scope}
           onFolderMatching={setFolderMatching}

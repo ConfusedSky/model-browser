@@ -78,7 +78,16 @@ export function createApp(cache: ThumbCache = new ThumbCache()): Hono {
    * running is a state this app reports, not an error it raises (D1).
    */
   app.post('/api/semantic', async (c) => {
-    const body = (await c.req.json().catch(() => null)) as { text?: string; path?: string } | null
+    const body = (await c.req.json().catch(() => null)) as
+      | {
+          text?: string
+          path?: string
+          raw?: boolean
+          pool?: 'mean' | 'max' | 'softmax'
+          top?: number
+          minScore?: number
+        }
+      | null
     const text = body?.text
     if (typeof text !== 'string' || text.trim() === '') {
       return c.json({ error: 'text is required' }, 400)
@@ -100,7 +109,12 @@ export function createApp(cache: ThumbCache = new ThumbCache()): Hono {
     }
     let result
     try {
-      result = await indexQuery(text, scope)
+      result = await indexQuery(text, scope, {
+        raw: body?.raw,
+        pool: body?.pool,
+        top: body?.top,
+        minScore: body?.minScore,
+      })
     } catch (err) {
       if (err instanceof IndexError) {
         return c.json({ error: err.message, state: err.state }, 503)
@@ -113,6 +127,9 @@ export function createApp(cache: ThumbCache = new ThumbCache()): Hono {
       entries,
       poses,
       weak: result.weak,
+      // The index's ceiling, not the ranking's horizon (D2): it returned fewer
+      // than was asked for, and what was asked for is the user's control.
+      capped: result.truncated === true,
       scope: {
         path: result.scope.path,
         status: result.scope.status,

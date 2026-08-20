@@ -14,6 +14,7 @@
 const MODE_KEY = 'model-browser:search-mode'
 const MATCH_KEY = 'model-browser:search-folder-matching'
 const KINDS_KEY = 'model-browser:search-kinds'
+const TUNING_KEY = 'model-browser:search-tuning'
 
 /**
  * Which corpus a submit consults. A mode rather than a second action: two
@@ -67,6 +68,57 @@ export function setSearchMode(next: SearchMode): void {
   mode = next
   try {
     localStorage.setItem(MODE_KEY, next)
+  } catch {
+    // no localStorage (tests) — in-memory only
+  }
+}
+
+/**
+ * How a meaning query is shaped. Sticky like every other option that decides
+ * which entries a view contains — and carried in the URL for the same reason:
+ * the first thing anyone does after finding a setting that works is send
+ * someone the results (tuning D3).
+ */
+export interface Tuning {
+  raw: boolean
+  pool: 'mean' | 'max' | 'softmax'
+  /** Result count. Ignored when `minScore` is set — they are one choice (D1). */
+  top: number
+  minScore?: number
+}
+
+export const TUNING_DEFAULTS: Tuning = { raw: false, pool: 'softmax', top: 60 }
+
+const POOLS = ['mean', 'max', 'softmax']
+
+function readTuning(): Tuning {
+  try {
+    const raw = localStorage.getItem(TUNING_KEY)
+    if (raw === null) return { ...TUNING_DEFAULTS }
+    const v = JSON.parse(raw) as Partial<Tuning>
+    // Each field validated on its own: a malformed one falls back rather than
+    // discarding a whole stored set that is otherwise usable.
+    return {
+      raw: v.raw === true,
+      pool: POOLS.includes(v.pool as string) ? (v.pool as Tuning['pool']) : TUNING_DEFAULTS.pool,
+      top: Number.isFinite(v.top) && (v.top as number) > 0 ? Math.floor(v.top as number) : TUNING_DEFAULTS.top,
+      minScore: Number.isFinite(v.minScore) ? (v.minScore as number) : undefined,
+    }
+  } catch {
+    return { ...TUNING_DEFAULTS }
+  }
+}
+
+let tuning: Tuning = readTuning()
+
+export function searchTuning(): Tuning {
+  return tuning
+}
+
+export function setSearchTuning(next: Tuning): void {
+  tuning = next
+  try {
+    localStorage.setItem(TUNING_KEY, JSON.stringify(next))
   } catch {
     // no localStorage (tests) — in-memory only
   }

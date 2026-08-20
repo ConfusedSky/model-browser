@@ -110,6 +110,18 @@ export interface IndexPose {
   front: { view: number; azimuth_deg: number; elevation_deg: number } | null
 }
 
+/** How a meaning query is shaped, beyond the phrase and the scope. */
+export interface SemanticTuning {
+  /** Read the phrase as written rather than through the index's templates. */
+  raw?: boolean
+  /** How a model's per-view scores reduce to one. */
+  pool?: 'mean' | 'max' | 'softmax'
+  /** How many results — ignored when a floor is set; they are one choice. */
+  top?: number
+  /** Everything at or above this score, instead of a count. */
+  minScore?: number
+}
+
 export interface SemanticListing {
   path: string
   entries: DirEntry[]
@@ -118,6 +130,8 @@ export interface SemanticListing {
   scope: SemanticScope
   /** The index found nothing standing out — the set is weak, not the results. */
   weak: boolean
+  /** The index's own ceiling stopped it returning what was asked for. */
+  capped: boolean
 }
 
 /** Availability of the semantic index, read from the wire (semantic-search D4). */

@@ -25,7 +25,7 @@ import {
   type,
   unmountApp,
 } from './appHarness'
-import { setSearchMode } from '../src/lib/searchOptions'
+import { setSearchMode, setSearchTuning, TUNING_DEFAULTS } from '../src/lib/searchOptions'
 import { POSE_VERSION } from '../src/three/pose'
 import { RIG_VERSION } from '../src/three/renderer'
 
@@ -49,6 +49,7 @@ const MEANING: SemanticListing = {
   poses: {},
   scope: scope(),
   weak: false,
+  capped: false,
 }
 
 function modeButton(name: string): HTMLButtonElement | undefined {
@@ -65,6 +66,7 @@ function searchTab(): HTMLButtonElement {
 beforeEach(() => {
   localStorage.clear()
   setSearchMode('name')
+  setSearchTuning({ ...TUNING_DEFAULTS })
 })
 afterEach(() => unmountApp())
 
@@ -87,7 +89,9 @@ describe('meaning search', () => {
     await pressEnter(searchInput())
     await settle()
 
-    expect(semanticSearch).toHaveBeenCalledWith('a winged demon', '/models')
+    // The third argument is the tuning in force — defaults here, and asserted
+    // rather than ignored so a silently-dropped parameter cannot pass.
+    expect(semanticSearch).toHaveBeenCalledWith('a winged demon', '/models', TUNING_DEFAULTS)
     expect(listDir).not.toHaveBeenCalledWith('/models', expect.objectContaining({ q: 'a winged demon' }))
     // None of the results contain the phrase — the whole point, and the case
     // that would have been hidden if the search input still filtered.
@@ -114,7 +118,7 @@ describe('meaning search', () => {
     await click(modeButton('meaning')!)
     await settle()
 
-    expect(semanticSearch).toHaveBeenCalledWith('winged demon', '/models')
+    expect(semanticSearch).toHaveBeenCalledWith('winged demon', '/models', TUNING_DEFAULTS)
     expect(searchInput().value).toBe('winged demon')
   })
 
@@ -373,7 +377,49 @@ describe('meaning search', () => {
     await settle()
 
     expect(listDir).not.toHaveBeenCalled()
-    expect(semanticSearch).toHaveBeenCalledWith('demon', '/models')
+    expect(semanticSearch).toHaveBeenCalledWith('demon', '/models', TUNING_DEFAULTS)
+  })
+
+  it('changing a parameter re-runs the committed query under it, and sticks', async () => {
+    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models', covers: ['stl'] })
+    semanticSearch.mockResolvedValue(MEANING)
+    await mountApp('/models', NESTED)
+    await settle()
+    await click(searchTab())
+    await click(modeButton('meaning')!)
+    await type(searchInput(), 'winged demon')
+    await pressEnter(searchInput())
+    await settle()
+
+    const maxBtn = Array.from(container.querySelectorAll<HTMLButtonElement>('aside button')).find(
+      (b) => b.textContent?.trim() === 'max',
+    )!
+    await click(maxBtn)
+    await settle()
+
+    // Trying a parameter is the point: it re-runs rather than applying to some
+    // later search the user has to remember to make.
+    expect(semanticSearch).toHaveBeenLastCalledWith('winged demon', '/models', {
+      ...TUNING_DEFAULTS,
+      pool: 'max',
+    })
+    expect(location.search).toContain('pool=max')
+    expect(JSON.parse(localStorage.getItem('model-browser:search-tuning')!).pool).toBe('max')
+  })
+
+  it('a tuned link reproduces the sender’s parameters, not the reader’s', async () => {
+    setSearchTuning({ ...TUNING_DEFAULTS, pool: 'mean', top: 5 })
+    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models', covers: ['stl'] })
+    semanticSearch.mockResolvedValue(MEANING)
+    await mountAppAtCurrentUrl('/?path=/models&flat=1&q=demon&mode=meaning&raw=1', NESTED)
+    await settle()
+
+    // The link carries `raw` and omits the rest: omitted means default, never
+    // the reader's stored setting — the same rule the other options follow.
+    expect(semanticSearch).toHaveBeenCalledWith('demon', '/models', {
+      ...TUNING_DEFAULTS,
+      raw: true,
+    })
   })
 
   it('a link opened without the index keeps naming the meaning search', async () => {
@@ -408,7 +454,7 @@ describe('meaning search', () => {
     await click(container.querySelector<HTMLButtonElement>('main .grid button')!)
     await settle()
 
-    expect(semanticSearch).toHaveBeenCalledWith('a winged demon', expect.any(String))
+    expect(semanticSearch).toHaveBeenCalledWith('a winged demon', expect.any(String), TUNING_DEFAULTS)
     expect(container.textContent).toContain('Meaning matches for "a winged demon".')
   })
 

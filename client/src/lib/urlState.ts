@@ -1,4 +1,5 @@
-import type { SearchKinds, SearchMode } from './searchOptions'
+import type { SearchKinds, SearchMode, Tuning } from './searchOptions'
+import { TUNING_DEFAULTS } from './searchOptions'
 
 /**
  * The URL as a record of the committed view (url-navigation D1): query
@@ -28,6 +29,8 @@ export interface UrlView {
   kinds?: SearchKinds
   /** Which corpus the query ran against, default 'name' — carried only when not. */
   mode?: SearchMode
+  /** How a meaning query was shaped; each field carried only when not default. */
+  tuning?: Partial<Tuning>
   model?: string
 }
 
@@ -37,6 +40,14 @@ export function parseUrl(search: string = window.location.search): UrlView {
   const q = raw === null || raw === '' ? undefined : raw
   const kinds = p.get('kinds')
   const mode = p.get('mode')
+  const pool = p.get('pool')
+  const top = Number(p.get('top'))
+  const min = Number(p.get('min'))
+  const tuning: Partial<Tuning> = {}
+  if (p.get('raw') === '1') tuning.raw = true
+  if (pool === 'mean' || pool === 'max' || pool === 'softmax') tuning.pool = pool
+  if (Number.isFinite(top) && top > 0 && p.has('top')) tuning.top = Math.floor(top)
+  if (Number.isFinite(min) && p.has('min')) tuning.minScore = min
   return {
     path: p.get('path') ?? undefined,
     // A query implies the flat shape: deep-search results are flat whatever
@@ -50,6 +61,7 @@ export function parseUrl(search: string = window.location.search): UrlView {
     folderMatching: p.has('nofolders') ? false : undefined,
     kinds: kinds === 'folders' || kinds === 'models' ? kinds : undefined,
     mode: mode === 'meaning' ? 'meaning' : mode === 'name' ? 'name' : undefined,
+    tuning: Object.keys(tuning).length > 0 ? tuning : undefined,
     model: p.get('model') ?? undefined,
   }
 }
@@ -72,6 +84,15 @@ export function serializeView(view: UrlView): string {
   // reader's default: change that default later, or hand the link to a profile
   // that reads absence differently, and the same URL asks a different question.
   if (view.q !== undefined && view.q !== '') p.set('mode', view.mode ?? 'name')
+  // Omitted at their defaults, so an ordinary meaning link is unchanged (D3).
+  if (view.tuning?.raw === true) p.set('raw', '1')
+  if (view.tuning?.pool !== undefined && view.tuning.pool !== TUNING_DEFAULTS.pool) {
+    p.set('pool', view.tuning.pool)
+  }
+  if (view.tuning?.minScore !== undefined) p.set('min', String(view.tuning.minScore))
+  else if (view.tuning?.top !== undefined && view.tuning.top !== TUNING_DEFAULTS.top) {
+    p.set('top', String(view.tuning.top))
+  }
   if (view.model !== undefined && view.model !== '') p.set('model', view.model)
   const s = p.toString()
   return s === '' ? '' : `?${s}`
@@ -85,6 +106,10 @@ function sameView(a: UrlView, b: UrlView): boolean {
     a.folderMatching === b.folderMatching &&
     a.kinds === b.kinds &&
     a.mode === b.mode &&
+    a.tuning?.raw === b.tuning?.raw &&
+    a.tuning?.pool === b.tuning?.pool &&
+    a.tuning?.top === b.tuning?.top &&
+    a.tuning?.minScore === b.tuning?.minScore &&
     a.model === b.model
   )
 }

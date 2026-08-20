@@ -227,6 +227,41 @@ describe('semantic query', () => {
     expect(body.entries.map((e) => e.path)).toEqual([join(root, 'dragon.stl')])
   })
 
+  it('sends the tuning it is given, and a count by default', async () => {
+    stubIndex(READY, result)
+    await post({ text: 'dragon' })
+    const body = JSON.parse(
+      ((globalThis.fetch as unknown as { mock: { calls: [string, { body: string }][] } }).mock.calls
+        .filter((c) => !String(c[0]).endsWith('/status'))
+        .at(-1)![1].body),
+    ) as Record<string, unknown>
+    expect(body.top).toBe(60)
+    expect(body).not.toHaveProperty('raw')
+    expect(body).not.toHaveProperty('pool')
+  })
+
+  it('a floor replaces the count rather than accompanying it', async () => {
+    // The index ignores `top` when `min_score` is set, so sending both would
+    // state a relationship that does not exist.
+    stubIndex(READY, result)
+    await post({ text: 'dragon', minScore: 0.2, top: 5, raw: true, pool: 'max' })
+    const body = JSON.parse(
+      ((globalThis.fetch as unknown as { mock: { calls: [string, { body: string }][] } }).mock.calls
+        .filter((c) => !String(c[0]).endsWith('/status'))
+        .at(-1)![1].body),
+    ) as Record<string, unknown>
+    expect(body.min_score).toBe(0.2)
+    expect(body).not.toHaveProperty('top')
+    expect(body.raw).toBe(true)
+    expect(body.pool).toBe('max')
+  })
+
+  it('reports the index’s own ceiling, distinct from a ranking having more', async () => {
+    stubIndex(READY, { ...result, truncated: true })
+    const body = (await (await post({ text: 'dragon', top: 900 })).json()) as { capped: boolean }
+    expect(body.capped).toBe(true)
+  })
+
   it('an unavailable index is a state to render, not a 500', async () => {
     stubIndex('refused')
     const res = await post({ text: 'dragon' })

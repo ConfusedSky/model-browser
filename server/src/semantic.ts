@@ -183,16 +183,34 @@ export interface Scope {
 export interface QueryResult {
   scope: Scope
   weak: boolean
+  /** The index's own cap bit — it returned fewer than was asked for (D2). */
+  truncated?: boolean
   results: Hit[]
 }
 
 /**
- * One text query. `top` is this app's own bound (D8), never the index's default
- * of 10: ten tiles is not a grid, and 500 would be ~168s of thumbnail I/O.
+ * Default result bound — a default now, not a rule (tuning D1). Ten tiles (the
+ * index's own default) is not a grid, and 500 is ~168s of thumbnail I/O.
  */
 export const TOP = 60
 
-export async function query(text: string, scope: string | null): Promise<QueryResult> {
+/** What shapes a query beyond the phrase and the scope. */
+export interface Tuning {
+  /** Read the phrase as written rather than through the index's templates. */
+  raw?: boolean
+  /** How a model's per-view scores reduce to one. */
+  pool?: 'mean' | 'max' | 'softmax'
+  /** How many results; ignored by the index when a floor is set. */
+  top?: number
+  /** Everything at or above this score, instead of a count. */
+  minScore?: number
+}
+
+export async function query(
+  text: string,
+  scope: string | null,
+  tuning: Tuning = {},
+): Promise<QueryResult> {
   const base = baseUrl()
   if (base === null) throw new IndexError('absent', 'semantic index is not configured')
   let res: Response
@@ -200,7 +218,18 @@ export async function query(text: string, scope: string | null): Promise<QueryRe
     res = await fetch(`${base}/query`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ text, path: scope ?? undefined, top: TOP }),
+      body: JSON.stringify({
+        text,
+        path: scope ?? undefined,
+        // A floor and a count are alternatives: the index ignores `top` when
+        // `min_score` is set, so sending both would state a relationship that
+        // does not exist (D1).
+        ...(tuning.minScore !== undefined
+          ? { min_score: tuning.minScore }
+          : { top: tuning.top ?? TOP }),
+        ...(tuning.raw === true ? { raw: true } : {}),
+        ...(tuning.pool !== undefined ? { pool: tuning.pool } : {}),
+      }),
       signal: AbortSignal.timeout(QUERY_TIMEOUT_MS),
     })
   } catch {

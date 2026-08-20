@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { IndexAvailability, SemanticScope } from '../../../shared/types'
-import type { SearchKinds, SearchMode } from '../lib/searchOptions'
+import type { SearchKinds, SearchMode, Tuning } from '../lib/searchOptions'
+import { TUNING_DEFAULTS } from '../lib/searchOptions'
 
 const COLLAPSE_KEY = 'model-browser:chat-collapsed'
 const TAB_KEY = 'model-browser:panel-tab'
@@ -27,11 +28,13 @@ export default function SidePanel({
   folderMatching,
   kinds,
   mode,
+  tuning,
   index,
   scope,
   onFolderMatching,
   onKinds,
   onMode,
+  onTuning,
 }: {
   query: string | null
   /** The directory in view — meaning search only covers part of the filesystem. */
@@ -39,12 +42,15 @@ export default function SidePanel({
   folderMatching: boolean
   kinds: SearchKinds
   mode: SearchMode
+  /** How a meaning query is shaped — the index's own parameters. */
+  tuning: Tuning
   index: IndexAvailability
   /** The index's own account of what it holds here — null outside a meaning search. */
   scope: SemanticScope | null
   onFolderMatching: (on: boolean) => void
   onKinds: (kinds: SearchKinds) => void
   onMode: (mode: SearchMode) => void
+  onTuning: (tuning: Tuning) => void
 }) {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === '1')
   const [tab, setTab] = useState<Tab>(() =>
@@ -173,6 +179,90 @@ export default function SidePanel({
                       : `${scope.indexed} models indexed.`}{' '}
                   Covers {scope.covers.join(', ')}.
                 </p>
+              )}
+              {mode === 'meaning' && meaningRunnable && (
+                <div className="space-y-2 border-t border-zinc-800 pt-3">
+                  <p className="text-zinc-500">Tuning</p>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={tuning.raw}
+                    aria-label="Read the phrase as written"
+                    onClick={() => onTuning({ ...tuning, raw: !tuning.raw })}
+                    className={`w-full rounded-lg border px-3 py-2 text-left ${tuning.raw ? 'border-zinc-500 text-zinc-100' : 'border-zinc-800 text-zinc-500'}`}
+                  >
+                    Phrase as written
+                    <span className="float-right">{tuning.raw ? 'on' : 'templated'}</span>
+                  </button>
+                  <div className="flex gap-1" role="group" aria-label="Pool views by">
+                    {(['mean', 'max', 'softmax'] as const).map((p) => (
+                      <button
+                        key={p}
+                        type="button"
+                        aria-pressed={tuning.pool === p}
+                        onClick={() => onTuning({ ...tuning, pool: p })}
+                        className={`flex-1 rounded-lg border px-2 py-1.5 ${tuning.pool === p ? 'border-zinc-500 text-zinc-100' : 'border-zinc-800 text-zinc-500'}`}
+                      >
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                  {/* A count and a floor are one choice: the index ignores the
+                      count when a floor is set, so showing both as live would
+                      state a relationship that does not exist (D1). */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      aria-pressed={tuning.minScore === undefined}
+                      onClick={() => onTuning({ ...tuning, minScore: undefined })}
+                      className={`rounded-lg border px-2 py-1.5 ${tuning.minScore === undefined ? 'border-zinc-500 text-zinc-100' : 'border-zinc-800 text-zinc-500'}`}
+                    >
+                      top
+                    </button>
+                    <input
+                      type="number"
+                      min={1}
+                      aria-label="Number of results"
+                      value={tuning.top}
+                      disabled={tuning.minScore !== undefined}
+                      onChange={(e) =>
+                        onTuning({ ...tuning, top: Math.max(1, Number(e.target.value) || 1) })
+                      }
+                      className="w-16 rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-zinc-100 disabled:opacity-40"
+                    />
+                    <button
+                      type="button"
+                      aria-pressed={tuning.minScore !== undefined}
+                      onClick={() =>
+                        onTuning({ ...tuning, minScore: tuning.minScore ?? 0.2 })
+                      }
+                      className={`rounded-lg border px-2 py-1.5 ${tuning.minScore !== undefined ? 'border-zinc-500 text-zinc-100' : 'border-zinc-800 text-zinc-500'}`}
+                    >
+                      score ≥
+                    </button>
+                    <input
+                      type="number"
+                      step={0.01}
+                      aria-label="Minimum score"
+                      value={tuning.minScore ?? ''}
+                      disabled={tuning.minScore === undefined}
+                      onChange={(e) => onTuning({ ...tuning, minScore: Number(e.target.value) })}
+                      className="w-16 rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-zinc-100 disabled:opacity-40"
+                    />
+                  </div>
+                  {(tuning.raw !== TUNING_DEFAULTS.raw ||
+                    tuning.pool !== TUNING_DEFAULTS.pool ||
+                    tuning.top !== TUNING_DEFAULTS.top ||
+                    tuning.minScore !== undefined) && (
+                    <button
+                      type="button"
+                      onClick={() => onTuning({ ...TUNING_DEFAULTS })}
+                      className="text-zinc-500 underline hover:text-zinc-300"
+                    >
+                      Reset tuning
+                    </button>
+                  )}
+                </div>
               )}
               {/* Options that cannot apply to the mode in force are absent, not
                   inert: a visible control that does nothing is worse than one
