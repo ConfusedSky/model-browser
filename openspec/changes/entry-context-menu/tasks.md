@@ -12,13 +12,20 @@
 - [ ] 1.1 An entry-actions module owning one definition per command — open, reveal, copy
       path, find similar — each taking an entry and the app callbacks it needs, with the
       per-kind availability table from D6 in one place rather than at each call site
-- [ ] 1.2 Move `copyPath` out of `ViewerLayer.tsx:344-357` **intact**. The synchronous-throw
-      fallback is the part to preserve: outside a secure context `navigator.clipboard` is
-      `undefined` and the call throws before any promise exists, so a bare `.catch()` misses
-      it and the panel must select the path text instead. It keeps copying `entry.path`, the
-      virtual path, unchanged (D2)
-- [ ] 1.3 The lightbox's copy affordance calls the shared command; its existing tests keep
-      passing untouched, which is the check that the move changed nothing
+- [ ] 1.2 `copyPath` becomes a command over the entry: it takes the row and reads
+      `entry.path`, the virtual path, unchanged (D2). It does **not** carry
+      `selectPathText` (`ViewerLayer.tsx:331-342`) with it — that fallback ranges over
+      `pathRef.current`, the panel's rendered `<p>` (`:519`), which a menu does not have,
+      and it defends a non-secure context this app does not target. A failed write shows a
+      brief toast instead, from whichever surface invoked it
+- [ ] 1.3 The lightbox's copy affordance calls the shared command. `selectPathText`,
+      `pathRef`, and the panel's bespoke try/catch go with it; the `copied` confirmation is
+      presentation and stays per surface. Its existing tests need updating for the new
+      failure path — that is the one behavior this move deliberately changes
+- [ ] 1.4 Land the `model-viewer` MODIFY with it: *Lightbox expanded view* currently
+      requires the panel to select the path text on failure, so the shipped spec is false
+      the moment the toast replaces it. Every other scenario of that requirement is carried
+      forward in the delta
 
 ## 2. The menu
 
@@ -51,6 +58,10 @@
 
 - [ ] 4.1 `ApiClient` gains the similar call, beside the semantic query; the server proxies
       it and joins hits to listing data through the same path `semantic-search` builds
+- [ ] 4.1a Send no scope: neighbours come from the whole indexed collection (D4). State it
+      rather than inheriting the index's default, and note that this differs from meaning
+      search, which is rooted at the browsed directory — a reviewer seeing two sibling
+      result views scoped differently should find the reason written down
 - [ ] 4.2 Choose `k` deliberately rather than inheriting either default: the index's is 10,
       this app's text-query bound is 60. Neighbours degrade faster than text matches, and
       D8's thumbnail-sweep argument barely applies at this size

@@ -11,7 +11,7 @@ Which actions an entry offers SHALL follow from what the entry is, and an action
 
 #### Scenario: The same action, two ways in
 - **WHEN** the user copies an entry's path from the context menu, and again from the expanded viewer
-- **THEN** the same text is placed on the clipboard by the same implementation, with the same behavior when the clipboard is unavailable
+- **THEN** the same text is placed on the clipboard by the same implementation, and a write that fails is reported the same way from either surface
 
 #### Scenario: Actions that need no model do not load one
 - **WHEN** the user raises the context menu on a model tile and invokes an action
@@ -39,6 +39,17 @@ The client SHALL raise a context menu on a grid tile in response to the platform
 #### Scenario: The menu stays on screen
 - **WHEN** the menu is raised on a tile at the edge of the window
 - **THEN** it is positioned so that all of its items are visible
+
+### Requirement: Open and copy are offered on every entry
+The client SHALL offer, on every listing entry whatever its kind, an action that opens it — doing exactly what activating the tile does, so that a directory or archive is browsed into and a model is presented in the expanded viewer — and an action that copies the entry's full virtual path, including the `zip!/entry` notation for archive contents, to the clipboard. A copy that succeeds SHALL confirm briefly; a write that fails SHALL report the failure briefly instead, on whichever surface invoked it.
+
+#### Scenario: Opening from the menu matches opening the tile
+- **WHEN** the user opens an entry from the context menu
+- **THEN** the same thing happens as activating the tile directly — a container is browsed into, a model is presented in the expanded viewer
+
+#### Scenario: Copying the path of any entry
+- **WHEN** the user copies the path of a model, a directory, and an archive entry
+- **THEN** each entry's full virtual path is placed on the clipboard, with archive contents carrying their `zip!/entry` notation
 
 ### Requirement: Reveal an entry in its containing folder
 The client SHALL offer an action that navigates to the entry's containing folder, brings the entry into view, and marks it briefly so that it can be found among its siblings — the marking fading on its own shortly after arrival. For an entry inside an archive the containing folder is the directory within that archive.
@@ -68,13 +79,17 @@ The marking SHALL be ephemeral: it SHALL NOT appear in the URL, SHALL NOT be res
 - **THEN** the folder is presented normally, with no error and nothing marked
 
 ### Requirement: Find models similar to this one
-Where a semantic index is available, the client SHALL offer an action on a model that requests its nearest neighbours from that index and presents them as a set of results in place of the listing, ordered by similarity, with the model itself excluded. The result SHALL be a view like any other: named in the URL by the model the neighbours were derived from, participating in history, and reproducing for anyone who opens that URL. It SHALL be left through the same explicit dismissal that other result sets offer, since there is no typed text to clear.
+Where a semantic index is available, the client SHALL offer an action on a model that requests its nearest neighbours from that index and presents them as a set of results in place of the listing, ordered by similarity, with the model itself excluded. Neighbours SHALL be drawn from the whole indexed collection rather than from the folder the model is browsed in, since a model's nearest neighbours are a question about the collection and the folder's own answer is already on screen. The result SHALL be a view like any other: named in the URL by the model the neighbours were derived from, participating in history, and reproducing for anyone who opens that URL. It SHALL be left through the same explicit dismissal that other result sets offer, since there is no typed text to clear.
 
 The action SHALL be offered only where it could apply — on a model, within the collection the index covers, and outside an archive — and SHALL distinguish a model the index has not yet embedded from one it can never embed, since only the first is fixed by indexing again. Where the index is unavailable the action SHALL be absent, and opening a URL naming such a view SHALL present the location's ordinary listing with an explanation rather than an empty grid.
 
 #### Scenario: More like this one
 - **WHEN** the user asks for models similar to one on screen
 - **THEN** its nearest neighbours replace the grid, ordered by similarity, without the model itself among them
+
+#### Scenario: Neighbours come from the whole collection
+- **WHEN** the user asks for models similar to one held in a deeply nested folder
+- **THEN** matches from anywhere in the indexed collection are returned, not only from that folder
 
 #### Scenario: A similarity view is shareable
 - **WHEN** the user copies the URL of a similarity result and opens it elsewhere

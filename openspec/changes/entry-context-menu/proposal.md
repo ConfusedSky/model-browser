@@ -36,12 +36,6 @@ not be written twice.
 
 ## Capabilities
 
-`model-viewer` is deliberately **not** modified. Its *Lightbox expanded view* requirement
-says the panel has an affordance to copy the full path, and describes what happens when the
-clipboard is unavailable — all of which stays true. Where that behavior is *implemented*
-is not something that requirement claims, so the new capability's define-once rule adds a
-constraint rather than contradicting one.
-
 ### New Capabilities
 
 - `entry-actions`: the actions available on a listing entry, their availability per kind,
@@ -52,6 +46,12 @@ constraint rather than contradicting one.
 - `url-navigation`: **MODIFIED** *The URL names the committed view* — a find-similar result
   set is a view, named by the model it was derived from. Written against the text
   `semantic-search` leaves behind.
+- `model-viewer`: **MODIFIED** *Lightbox expanded view* — the panel's copy affordance becomes
+  a call into the shared action module, and its failure path changes with the move: a brief
+  report instead of selecting the path text. The selection fallback existed for non-secure
+  contexts, which this app does not target — loopback and Electron are both secure — and it
+  cannot be shared with a menu that has no rendered path to select (D2). No other active
+  change touches this capability.
 
 ## Impact
 

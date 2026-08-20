@@ -53,8 +53,33 @@ panel shows and copies today, what the path bar accepts, and what a shared link 
 absolute-fs-path variant is a reasonable future addition and is not worth a second menu item
 now.
 
-The implementation moves out of `ViewerLayer` intact, including the synchronous-throw
-fallback, and the lightbox calls it.
+**The command takes the entry, not a DOM node.** It needs `entry.path` and nothing else,
+and the tile already holds the row the server returned — `Grid.tsx` renders `DirEntry`
+objects — so the menu hands the same object to the same function the panel does.
+
+That is why the existing fallback does not move with it. `selectPathText`
+(`ViewerLayer.tsx:331-342`) takes a `Range` over `pathRef.current`, the `<p>` at `:519`
+that renders the path inside the info panel: manual copying needs the text rendered and
+selectable, which is a fact about the panel rather than about the path. A context menu has
+nothing on screen to select, so the fallback has no target there.
+
+It is also defending a case this app does not have. `navigator.clipboard` is undefined only
+outside a secure context; the app is served over loopback and headed for Electron, and both
+are secure contexts. There is no plan for it to be reachable over plain HTTP. So the copy
+succeeds, and the failure path is a brief toast reporting that it did not — one sentence of
+behavior, identical on both surfaces because it is built from the entry rather than from
+whatever happens to be rendered.
+
+This changes shipped behavior, so it costs a `model-viewer` MODIFY: *Lightbox expanded
+view* currently requires the panel to select the path text on failure. No other active
+change touches that capability, so the modification is free.
+
+*Alternative — `document.execCommand('copy')` over a temporary off-screen textarea:* this
+is the standard trick for copying without a secure context or a rendered element, and it
+would let the fallback be genuinely shared. Rejected: it is machinery for a deployment
+this app does not have, on a deprecated API, and the case it rescues (loopback served over
+plain HTTP, or reached by LAN IP) is one nothing in the roadmap creates. Recorded because
+it is the obvious clever answer and would otherwise be proposed again as an easy win.
 
 ### D3: Reveal navigates, locates, and does not editorialize
 
@@ -86,6 +111,15 @@ on reload. It describes an event, not a view.
 It goes in the URL, in history, and reproduces for whoever opens the link, like every other
 view in this app. The URL names the model the neighbours came from rather than a query
 string, since there is no text to carry.
+
+**Neighbours are drawn from the whole collection, not the browsed folder.** The index's
+`/similar` takes an optional scope and defaults to the collection; this change states that
+default as a decision rather than inheriting it, the same way it refuses to inherit `k`.
+Meaning search is rooted at the browsed directory because a phrase is a question about a
+place — "dragons in this kit". "More like this one" is not: scoped to the folder the model
+sits in, it would mostly return that kit's other parts, which is the one answer the user
+already has on screen. Collection-wide also keeps the URL honest — the source model is then
+the complete description of the view, which is what naming it by model alone claims.
 
 Two consequences worth stating. There is no typed text to clear, so it needs the same
 explicit dismiss affordance `semantic-search` introduces for meaning results — one
@@ -123,9 +157,14 @@ Copy path         Copy path       Copy path
 Find similar      —               —
 ```
 
-Find similar is model-only because the index embeds models. Everything else applies to every
-kind, which keeps the menu predictable: three items always, four on the tiles where the
-fourth means something.
+Find similar is model-only because the index embeds models — and it carries a second
+condition the table cannot show: the index is a separate service that may not be running,
+and the requirement says the action is absent when it is unavailable. So the honest reading
+of the table is **three items always, and a fourth on model tiles when the index is
+answering**. A model tile with three items is not a bug; it is the degradation
+`semantic-search` designs for, arriving here.
+
+Everything else applies to every kind, which is what keeps the menu predictable.
 
 Rejected: re-rendering a thumbnail (a real gap — a badly framed thumbnail has no manual
 invalidation — but not this change's), and "search in this folder" (reveal followed by a
