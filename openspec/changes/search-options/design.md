@@ -42,6 +42,24 @@ On load, options from the URL govern — matching `url-navigation` D4's existing
 
 The visible consequence, worth stating so it does not read as a bug: after opening someone's link and then navigating away and searching fresh, options snap back to yours. That is correct — the link governed the view it named, not your setup.
 
+### D2a: Over a URL-named search, an absent option means the *default*
+
+D4 omits options at their defaults so an ordinary search URL stays what it always
+was. That only reproduces the sender's view if the recipient reads the omission the way
+the sender wrote it — as *the default*, never as "my stored preference". Read the other
+way, the two rules cancel: a sender whose options are default sends a URL carrying
+nothing, and a recipient with non-default settings sees a different result set from the
+same link, which is exactly what D1 says the URL exists to prevent.
+
+The same reading fixes history. A restored entry is a past view, and restoring it under
+present settings is the same bug wearing a different hat — worse, since the options are
+part of what makes two entries different views, comparing entries without them left Back
+changing the URL and nothing else.
+
+Stored preferences therefore govern exactly one thing: a search this profile starts
+fresh, where there is no view to reproduce. Leaving a link's view — navigating away —
+puts them back in force.
+
 ### D3: The kind option is client-side; the matching option cannot be
 
 Entries already carry `kind`, so restricting to folders or models is view state over the response — like the existing filter, and instant. Folder matching decides what the *walk* returns and must be a request parameter.

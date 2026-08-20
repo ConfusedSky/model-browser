@@ -2,6 +2,7 @@
 // Search options end to end through App: persistence, the URL, the re-issue
 // asymmetry (matching is a server predicate, kind is a view filter), and the
 // rule that a shared link governs its view without rewriting your settings.
+import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DirListing } from '../../shared/types'
 import { setFolderMatchingEnabled, setSearchKinds } from '../src/lib/searchOptions'
@@ -16,6 +17,7 @@ import {
   pressEnter,
   searchInput,
   settle,
+  tiles,
   type,
   unmountApp,
 } from './appHarness'
@@ -162,6 +164,77 @@ describe('search options', () => {
     // The truncation notice, when present, keeps describing the underlying
     // listing rather than this restricted view (D3).
     expect(container.textContent).not.toContain('Nothing matched')
+  })
+
+  it('a link without options reproduces the sender\u2019s view, not the recipient\u2019s settings', async () => {
+    // The bug this pins: the sender\u2019s options were the defaults, so the URL
+    // carries none — and a recipient whose stored options differ must still see
+    // what was sent. Absent means default, not "mine".
+    await unmountApp()
+    setFolderMatchingEnabled(false)
+    setSearchKinds('folders')
+    listDir.mockImplementation(() => Promise.resolve(RESULTS))
+
+    await mountAppAtCurrentUrl('/?path=/models&flat=1&q=sandy', RESULTS)
+    await settle()
+
+    expect(listDir).toHaveBeenCalledWith('/models', {
+      flat: true,
+      q: 'sandy',
+      folderMatching: undefined,
+    })
+    // …and the recipient's kind preference does not hide the models either.
+    expect(container.querySelectorAll('main button[data-model-tile]').length).toBe(2)
+  })
+
+  it('history restores the options the entry ran under', async () => {
+    await type(searchInput(), 'sandy')
+    await pressEnter(searchInput())
+    await settle()
+    await click(panelButton('Match folder names'))
+    await settle()
+    expect(location.search).toContain('nofolders=1')
+
+    listDir.mockClear()
+    // Play the browser, as urlLightbox.test.tsx does: the harness stubs `URL`
+    // for object URLs, which happy-dom's own history.back() needs.
+    await act(async () => {
+      history.replaceState(null, '', '/?path=/models&flat=1&q=sandy')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+    await settle()
+
+    // The two entries differ only by an option, which is exactly the case a
+    // path/flat/q comparison misses: Back must re-request under the restored
+    // option rather than leave the grid as it is.
+    expect(location.search).not.toContain('nofolders')
+    expect(listDir).toHaveBeenLastCalledWith('/models', {
+      flat: true,
+      q: 'sandy',
+      folderMatching: undefined,
+    })
+    expect(panelButton('Match folder names').getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('leaving a link\u2019s view restores this profile\u2019s own options', async () => {
+    await unmountApp()
+    setFolderMatchingEnabled(true)
+    setSearchKinds('both')
+    listDir.mockImplementation((_t: string, opts?: { q?: string }) =>
+      Promise.resolve(opts?.q === 'sandy' ? RESULTS : NESTED),
+    )
+    await mountAppAtCurrentUrl('/?path=/models&flat=1&q=sandy&nofolders=1', RESULTS)
+    await settle()
+    // unmountApp cleared storage, so the panel is back on its default tab.
+    await click(searchTab())
+    expect(panelButton('Match folder names').getAttribute('aria-checked')).toBe('false')
+
+    // Navigate away by entering the folder the search returned — the grid holds
+    // the link's results, not the directory listing, so there is no 'Alpha' here.
+    await click(tiles().find((b) => !b.hasAttribute('data-model-tile'))!)
+    await settle()
+
+    expect(panelButton('Match folder names').getAttribute('aria-checked')).toBe('true')
   })
 
   it('a plain listing carries no options, whatever they are set to', async () => {

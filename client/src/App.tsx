@@ -18,7 +18,7 @@ import {
   setSearchKinds,
   type SearchKinds,
 } from './lib/searchOptions'
-import { commitUrl, isLightboxEntry, LIGHTBOX_ENTRY, parseUrl } from './lib/urlState'
+import { commitUrl, isLightboxEntry, LIGHTBOX_ENTRY, parseUrl, type UrlView } from './lib/urlState'
 import { MeshLru } from './three/lru'
 import { disposeModel, embedded3mfThumbnail, formatOf, geometryBytes, parseModel } from './three/models'
 import { RenderQueue } from './three/queue'
@@ -27,6 +27,29 @@ import ViewerLayer, { type ViewerState } from './viewer/ViewerLayer'
 import { aoEnabled, setAoEnabled } from './viewer/aoToggle'
 import { getLightingMode, LIGHTING_MODES, setLightingMode } from './viewer/lighting'
 import type { ViewerSession } from './viewer/session'
+
+/**
+ * The options a view runs under.
+ *
+ * When the URL names a committed search, an absent option means the
+ * **default** — never this profile's stored preference. Omitting defaults
+ * keeps an ordinary search URL byte-identical to what it was before options
+ * existed (D4), but that only reproduces the sender's view if the recipient
+ * reads the omission the same way the sender wrote it. Reading it as "my
+ * preference" would hand two people different results from one link, and would
+ * make Back restore a past view under present settings — which is the same bug
+ * wearing a different hat.
+ *
+ * With no committed search in the URL there is no view to reproduce, so the
+ * stored preferences govern: they are what this profile's next fresh search
+ * uses.
+ */
+function optionsOf(view: UrlView): { folderMatching: boolean; kinds: SearchKinds } {
+  if (view.q === undefined || view.q === '') {
+    return { folderMatching: folderMatchingEnabled(), kinds: searchKinds() }
+  }
+  return { folderMatching: view.folderMatching ?? true, kinds: view.kinds ?? 'both' }
+}
 
 export default function App() {
   const api = useMemo(() => new HttpApiClient(), [])
@@ -70,12 +93,10 @@ export default function App() {
   const [pendingModel, setPendingModel] = useState<string | null>(boot.model ?? null)
   // Search options: the URL governs the view it names and is NOT written back
   // to storage — a link from someone else must not reconfigure this profile
-  // (D2). Absent from the URL means the stored preference, which is what a
-  // fresh search in this profile uses.
-  const [folderMatching, setFolderMatchingState] = useState(
-    boot.folderMatching ?? folderMatchingEnabled(),
-  )
-  const [kinds, setKindsState] = useState<SearchKinds>(boot.kinds ?? searchKinds())
+  // (D2). See `optionsOf`: over a URL-named search, absent means the *default*,
+  // not this profile's preference.
+  const [folderMatching, setFolderMatchingState] = useState(optionsOf(boot).folderMatching)
+  const [kinds, setKindsState] = useState<SearchKinds>(optionsOf(boot).kinds)
   // Read inside `fetchListing`, which is memoised on `api` alone: several
   // effects key off its identity, so the options travel by ref rather than
   // widening its deps and re-creating it whenever a control is touched.
@@ -184,9 +205,16 @@ export default function App() {
   const navigate = useCallback(
     (target: string) => {
       // Navigation is itself the request that clears search state (D2/D3) —
-      // no extra fetch needed to drop a filter or a committed query.
+      // no extra fetch needed to drop a filter or a committed query. That
+      // includes the options: a link's options governed the view it named, so
+      // once the user leaves it their own stored preferences are in force again.
       setFilter('')
       setQuery(null)
+      const own = { folderMatching: folderMatchingEnabled(), kinds: searchKinds() }
+      setFolderMatchingState(own.folderMatching)
+      setKindsState(own.kinds)
+      matchingRef.current = own.folderMatching
+      kindsRef.current = own.kinds
       fetchListing(target, flat, null)
     },
     [fetchListing, flat],
@@ -288,8 +316,8 @@ export default function App() {
 
   // Live mirror for the popstate handler: subscribed once, it reads current
   // state through this ref instead of re-subscribing every render.
-  const stateRef = useRef({ path, flat, query, viewer, listing })
-  stateRef.current = { path, flat, query, viewer, listing }
+  const stateRef = useRef({ path, flat, query, viewer, listing, folderMatching, kinds })
+  stateRef.current = { path, flat, query, viewer, listing, folderMatching, kinds }
 
   /** Enter lightbox mode from history/deep-link restore — no tile element, no push. */
   const openRestoredLightbox = useCallback((entry: DirEntry) => {
@@ -327,10 +355,28 @@ export default function App() {
       // request — not navigate(), which clears search state by design.
       if (v.path === undefined) return
       const q = v.q ?? null
-      if (v.path !== cur.path || v.flat !== cur.flat || q !== cur.query) {
+      // Options are part of the view, so they decide whether this entry differs
+      // — two entries that share a path and query but ran under different
+      // options are different views, and comparing without them made Back
+      // change the URL and nothing else.
+      const opts = optionsOf(v)
+      const changed =
+        v.path !== cur.path ||
+        v.flat !== cur.flat ||
+        q !== cur.query ||
+        opts.folderMatching !== cur.folderMatching ||
+        opts.kinds !== cur.kinds
+      if (changed) {
         setFlat(v.flat)
         setQuery(q)
         setFilter(v.q ?? '')
+        // Before the fetch: `fetchListing` reads the matching option through
+        // its ref, so restoring after would request under the outgoing view's
+        // options and land results the URL does not describe.
+        setFolderMatchingState(opts.folderMatching)
+        setKindsState(opts.kinds)
+        matchingRef.current = opts.folderMatching
+        kindsRef.current = opts.kinds
         fetchListing(v.path, v.flat, q, undefined, true)
       }
     }
