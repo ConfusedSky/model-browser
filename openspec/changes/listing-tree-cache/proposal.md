@@ -19,8 +19,16 @@ volume.
 
 The spinning exfat volume was **not attached** and its column could not be re-measured. It
 is the column the whole design is priced against: without a ~32 s cold case, the cache is
-buying ~3 s. Whether that volume is still a target is a scoping question this change should
-answer before it is implemented, not one to discover at task 7.2.
+buying ~3 s on the volume actually present.
+
+That makes one question decisive, and it is about intent rather than hardware — *is the
+spinning volume retired, or is it somewhere this library might live again?* Those give
+opposite answers. Retired, this change is complexity bought for three seconds. A possible
+future home, it is insurance written while the cost of writing it is low: the design's value
+is precisely that it holds up on the slow disk, and a library on removable media that has
+already lived on two volumes is not obviously done moving. Settle it before implementing —
+task 7.2's re-measurement assumes both volumes are still measurable, which today they are
+not.
 
 Three facts follow, and together they decide the design.
 
