@@ -242,6 +242,22 @@ fundamentally a ranking has no horizon: there is always an N+1th model, so "ther
 more" is not news. The honest statement is that these are the strongest matches, which is
 a different sentence from the name search's "the walk ran out".
 
+### D10: Strength is the order, not a number on the tile
+
+Ranked results arrive with a `score` and a `z`, and the obvious move is to show them. The
+index's own `/similar` contract is the argument against it: model-to-model cosines run
+0.85–0.99 while text-query cosines run around 0.1, measured over 200 random query models,
+which is why that endpoint carries no `weak` flag at all — the threshold `/query` uses was
+fitted to a different distribution. Two result sets in the same grid affordance, showing
+0.9 and 0.2, would invite exactly the comparison those numbers cannot support.
+
+So the ranking carries the strength and nothing is printed on the tile. Set-level weakness
+is still reported, because "these are the best I found and none of them are good" is a
+statement about the set that survives any distribution. This also removes the only new tile
+decoration this change needed, and with it the question of where a per-result number would
+live — `DirEntry` has no room for one, so the alternative was widening a shared type or
+threading a parallel map through the grid.
+
 ### D9: The search input holds the query; filtering is not its job
 
 An earlier version of this change cleared the search input at commit, because

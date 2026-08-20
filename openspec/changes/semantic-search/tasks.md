@@ -91,8 +91,9 @@
 - [ ] 3.10 The panel's search tab mirrors the meaning search too: mode in force, phrase,
       index status (ready/warming/absent), and what the corpus covers — the read-back
       `search-options` builds, extended rather than duplicated
-- [ ] 3.11 Weak sets rendered marked rather than suppressed; per-result strength surfaced
-      (tooltip or tile affordance — settle at apply, it is the one new tile decoration)
+- [ ] 3.11 Weak **sets** rendered marked rather than suppressed. No per-result score or z on
+      the tile — order carries strength (D10). This removes the change's only new tile
+      decoration: no `DirEntry` widening and no parallel score map through the grid
 
 ## 4. Client: empty states and coverage
 

@@ -105,11 +105,15 @@ The UI SHALL distinguish three outcomes rather than presenting one empty grid: a
 - **THEN** the UI explains that those models are outside the index rather than reporting that nothing matched
 
 ### Requirement: Weak matches are shown and marked
-When the index reports a result set as weak — its best match not standing out from the collection — the client SHALL still present the results, visibly marked as weak, rather than suppressing them. The marking SHALL apply to the set, and per-result strength SHALL be available to the user rather than only to the ranking.
+When the index reports a result set as weak — its best match not standing out from the collection — the client SHALL still present the results, visibly marked as weak, rather than suppressing them. The marking SHALL apply to the **set**. Per-result strength SHALL be carried by the ranking alone: the client SHALL NOT display a per-result score or z value, since the numbers behind them come from different distributions depending on what produced the set, and showing them side by side would invite a comparison that is not meaningful.
 
 #### Scenario: A weak query still shows its guesses
 - **WHEN** a phrase produces no result that stands out from the collection
 - **THEN** the matches are shown, marked as weak, and the user can judge them rather than being told nothing matched
+
+#### Scenario: Strength is the order, not a number on the tile
+- **WHEN** results of any kind are presented
+- **THEN** their order expresses their relative strength and no per-result score is shown
 
 ### Requirement: A pose orients the model without becoming its stored camera
 Where the index supplies an orientation for a model, the client SHALL use it to open that model the right way up: its up axis SHALL correspond to one of the app's six orbit spindles and SHALL be mapped to that spindle directly, and any front-view angles SHALL be applied as the live view's orientation, leaving framing distance and target to the viewer. An up axis that does not correspond to one of the six, or an orientation that is internally inconsistent, SHALL be treated as a fault in the index — the orientation ignored and the model opened as though none were supplied — and SHALL NOT be rounded to the nearest spindle, since rounding would conceal an upstream defect behind a plausible result and then persist it if the user orbited. The orientation presented SHALL be the one the index describes for every up axis it reports, not only for models already modelled about the app's default frame. Where the index supplies an up axis but no front view for it, the client SHALL present the model upright at the index's own stated default starting angle rather than discarding the orientation entirely. An orientation from the index SHALL NOT override an axis the user has already established for that model, and applying one SHALL NOT persist a camera or re-render a stored thumbnail — only the user's own manipulation of the view SHALL do that.
