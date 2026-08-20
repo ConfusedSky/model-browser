@@ -120,7 +120,10 @@ export function upButton(): HTMLButtonElement {
   return container.querySelector<HTMLButtonElement>('button[aria-label="Parent directory"]')!
 }
 export function tiles(): HTMLButtonElement[] {
-  return Array.from(container.querySelectorAll<HTMLButtonElement>('main button'))
+  // The grid's buttons, not every button under `main` — the results header now
+  // carries a control of its own, and a selector that cannot tell a tile from
+  // an affordance beside it reports the affordance as an entry.
+  return Array.from(container.querySelectorAll<HTMLButtonElement>('main .grid button'))
 }
 /** Each tile's label is the last child of its button. */
 export function labels(): string[] {
@@ -133,7 +136,17 @@ export function pathInput(): HTMLInputElement {
   return container.querySelector<HTMLInputElement>('input[placeholder="Type a directory path…"]')!
 }
 export function searchInput(): HTMLInputElement {
-  return container.querySelector<HTMLInputElement>('input[aria-label="Filter, or search names and folders"]')!
+  return container.querySelector<HTMLInputElement>('input[aria-label="Search names and folders"]')!
+}
+/** The summoned find control's input — absent until it is opened. */
+export function findInput(): HTMLInputElement | null {
+  return container.querySelector<HTMLInputElement>('input[aria-label="Narrow these by name"]')
+}
+/** Open the find control the way a user does. */
+export async function openFind(): Promise<void> {
+  await act(async () => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true }))
+  })
 }
 export function deepButton(): HTMLButtonElement {
   return Array.from(container.querySelectorAll<HTMLButtonElement>('header button')).find(

@@ -114,7 +114,7 @@ describe('flat toggle follows the in-flight navigation target', () => {
       return Promise.reject(new Error(`unexpected listDir(${target})`))
     })
 
-    await click(container.querySelector<HTMLButtonElement>('main button')!) // into 'sub'
+    await click(container.querySelector<HTMLButtonElement>('main .grid button')!) // into 'sub'
     expect(pathInput().value).toBe('/models/a/sub') // optimistic, before any response
 
     failSub(new Error('boom'))
@@ -131,7 +131,7 @@ describe('flat toggle follows the in-flight navigation target', () => {
       return Promise.reject(new Error(`unexpected listDir(${target}, ${JSON.stringify(opts)})`))
     })
 
-    await click(container.querySelector<HTMLButtonElement>('main button')!) // navigate into 'sub' — fails
+    await click(container.querySelector<HTMLButtonElement>('main .grid button')!) // navigate into 'sub' — fails
     await settle()
     expect(container.textContent).toContain('boom')
 

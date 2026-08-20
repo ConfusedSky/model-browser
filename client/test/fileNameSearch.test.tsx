@@ -1,8 +1,10 @@
 // @vitest-environment happy-dom
+import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DirListing } from '../../shared/types'
 import {
   click,
+  findInput,
   container,
   deepButton,
   dir,
@@ -11,6 +13,7 @@ import {
   listDir,
   model,
   mountApp,
+  openFind,
   pathInput,
   pressEnter,
   searchInput,
@@ -47,16 +50,28 @@ beforeEach(() => mountApp('/models', NESTED))
 afterEach(() => unmountApp())
 
 describe('file name search', () => {
-  it('typing filters every entry kind by full name, with no requests; erasing restores', async () => {
+  it('the find control filters every entry kind by full name, with no requests', async () => {
     listDir.mockClear()
 
-    await type(searchInput(), 'ravo')
+    await openFind()
+    await type(findInput()!, 'ravo')
     expect(labels()).toEqual(['Bravo'])
     expect(listDir).not.toHaveBeenCalled()
 
-    await type(searchInput(), '')
+    await type(findInput()!, '')
     expect(labels()).toEqual(['Alpha', 'Bravo', 'widget.stl'])
     expect(listDir).not.toHaveBeenCalled()
+  })
+
+  it('typing in the search input no longer filters, and the text survives to be edited', async () => {
+    listDir.mockClear()
+
+    await type(searchInput(), 'ravo')
+
+    // The grid is untouched until a submit — the box holds a query now.
+    expect(labels()).toEqual(['Alpha', 'Bravo', 'widget.stl'])
+    expect(listDir).not.toHaveBeenCalled()
+    expect(searchInput().value).toBe('ravo')
   })
 
   it('thumbnails are not reset by typing a filter keystroke', async () => {
@@ -106,10 +121,14 @@ describe('file name search', () => {
     await settle()
     listDir.mockClear()
 
-    await type(searchInput(), 'a/found')
+    await openFind()
+    await type(findInput()!, 'a/found')
 
     expect(labels()).toEqual(['found.stl'])
     expect(listDir).not.toHaveBeenCalled()
+    // The committed query is still in the search input, editable — refining a
+    // search no longer means retyping it.
+    expect(searchInput().value).toBe('found')
   })
 
   it('clearing a committed query re-requests the plain listing for the flat toggle in effect', async () => {
@@ -141,7 +160,7 @@ describe('file name search', () => {
       return Promise.reject(new Error(`unexpected listDir(${target}, ${JSON.stringify(opts)})`))
     })
 
-    await click(container.querySelector<HTMLButtonElement>('main button')!) // navigate into Alpha — left pending
+    await click(container.querySelector<HTMLButtonElement>('main .grid button')!) // navigate into Alpha — left pending
     await type(searchInput(), 'found')
     await pressEnter(searchInput())
     await settle()
@@ -232,7 +251,8 @@ describe('file name search', () => {
     await type(searchInput(), '')
     await settle()
     listDir.mockClear()
-    await type(searchInput(), 'zzz')
+    await openFind()
+    await type(findInput()!, 'zzz')
 
     expect(listDir).not.toHaveBeenCalled()
     expect(container.textContent).toContain('The filter is hiding everything below.')
@@ -248,11 +268,11 @@ describe('file name search', () => {
     await pressEnter(searchInput())
     await settle()
 
-    // The grid is still the pre-search listing (narrowed by the live filter
-    // text, which is the filter working) — so nothing may call it results.
+    // The grid is still the pre-search listing, whole — the search input no
+    // longer narrows it, so nothing here may be called results either.
     expect(container.textContent).toContain('walk exploded')
     expect(container.textContent).not.toContain('Search results for')
-    expect(labels()).toEqual(['widget.stl'])
+    expect(labels()).toEqual(['Alpha', 'Bravo', 'widget.stl'])
   })
 
   it('a failed search reverts the label to the results still on screen', async () => {
@@ -342,7 +362,68 @@ describe('file name search', () => {
   })
 
   it('ignores whitespace around a filter, so a trailing space keeps matching', async () => {
-    await type(searchInput(), 'ravo ')
+    await openFind()
+    await type(findInput()!, 'ravo ')
     expect(labels()).toEqual(['Bravo'])
+  })
+
+  it('Escape dismisses the find control and restores the grid', async () => {
+    await openFind()
+    await type(findInput()!, 'ravo')
+    expect(labels()).toEqual(['Bravo'])
+
+    await act(async () => {
+      findInput()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    })
+
+    expect(findInput()).toBeNull()
+    // Dismissing clears the filter: a closed control must never leave the grid
+    // silently narrowed.
+    expect(labels()).toEqual(['Alpha', 'Bravo', 'widget.stl'])
+  })
+
+  it('the shortcut does not fire while the user is typing somewhere else', async () => {
+    await type(searchInput(), 'half-written query')
+    searchInput().focus()
+    await act(async () => {
+      searchInput().dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true }),
+      )
+    })
+    expect(findInput()).toBeNull()
+    expect(searchInput().value).toBe('half-written query')
+  })
+
+  it('a restored search view shows its query in the input and an empty filter', async () => {
+    // The seedings this change deleted (App.tsx boot and popstate) existed only
+    // because the query and the filter shared a box. The query still lands in
+    // the input; the filter starts empty, because nothing in a URL describes a
+    // filter.
+    listDir.mockImplementation((_t: string, opts?: { q?: string }) =>
+      Promise.resolve(opts?.q === 'found' ? SEARCH_RESULT : NESTED),
+    )
+    await type(searchInput(), 'found')
+    await pressEnter(searchInput())
+    await settle()
+    expect(searchInput().value).toBe('found')
+
+    await act(async () => {
+      history.replaceState(null, '', '/?path=/models')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+    await settle()
+
+    expect(searchInput().value).toBe('')
+    expect(findInput()).toBeNull()
+    expect(labels()).toEqual(['Alpha', 'Bravo', 'widget.stl'])
+  })
+
+  it('navigating clears the filter and the control', async () => {
+    await openFind()
+    await type(findInput()!, 'ravo')
+    await click(container.querySelector<HTMLButtonElement>('main .grid button')!)
+    await settle()
+
+    expect(findInput()).toBeNull()
   })
 })

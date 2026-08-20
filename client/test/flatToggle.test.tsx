@@ -64,7 +64,7 @@ describe('flat toggle', () => {
     expect(container.textContent).toContain('walk failed')
     // and the next navigation must not silently ask for a flat listing
     listDir.mockClear()
-    await click(container.querySelector<HTMLButtonElement>('main button')!)
+    await click(container.querySelector<HTMLButtonElement>('main .grid button')!)
     expect(listDir).toHaveBeenCalledWith('/models/a', { flat: false })
   })
 

@@ -59,7 +59,7 @@ describe('url navigation', () => {
     expect(search()).toContain('path=%2Fmodels') // boot seeded via replace
     const len0 = window.history.length
 
-    await click(container.querySelector<HTMLButtonElement>('main button')!) // → Alpha
+    await click(container.querySelector<HTMLButtonElement>('main .grid button')!) // → Alpha
     await settle()
     expect(search()).toContain('path=%2Fmodels%2FAlpha')
     expect(window.history.length).toBe(len0 + 1)

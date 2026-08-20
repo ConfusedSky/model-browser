@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type * as THREE from 'three'
 import type { DirEntry, LightingMode } from '../../shared/types'
 import { HttpApiClient } from './api/client'
+import FindBar from './components/FindBar'
 import Grid from './components/Grid'
 import SidePanel from './components/SidePanel'
 import PathBar from './components/PathBar'
@@ -81,12 +82,20 @@ export default function App() {
   const [truncated, setTruncated] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
-  // `filter` is live typed text, narrowing rendered entries with zero
-  // requests; `query` is the last *committed* deep search (set on submit,
-  // null otherwise). Kept apart so typing over deep results filters them
-  // client-side without re-searching (D2).
-  const [filter, setFilter] = useState(boot.q ?? '')
+  // Three pieces of text, one job each — they shared two controls until
+  // find-in-listing separated them.
+  //
+  // `queryText` is what is typed in the search input, submitted to become a
+  // search. `query` is the last *committed* search (null otherwise); the input
+  // keeps its text after submitting, so refining a query is editing rather
+  // than retyping. `findText` narrows the rendered entries with zero requests
+  // and is typed in the find control, which the user summons — it starts empty
+  // in every state, including one restored from a URL, because a filter is
+  // ephemeral view state and nothing in a URL describes one.
+  const [queryText, setQueryText] = useState(boot.q ?? '')
   const [query, setQuery] = useState<string | null>(boot.q ?? null)
+  const [findText, setFindText] = useState('')
+  const [findOpen, setFindOpen] = useState(false)
   // A `model` param waiting for its listing (deep link or history forward):
   // honored once the entry exists in a landed listing, silently dropped after
   // a successful listing that lacks it (url-navigation D3).
@@ -208,7 +217,9 @@ export default function App() {
       // no extra fetch needed to drop a filter or a committed query. That
       // includes the options: a link's options governed the view it named, so
       // once the user leaves it their own stored preferences are in force again.
-      setFilter('')
+      setQueryText('')
+      setFindText('')
+      setFindOpen(false)
       setQuery(null)
       const own = { folderMatching: folderMatchingEnabled(), kinds: searchKinds() }
       setFolderMatchingState(own.folderMatching)
@@ -241,14 +252,28 @@ export default function App() {
     if (dest !== '') fetchListing(dest, next, null, () => setFlat(!next))
   }
 
-  function handleFilterChange(value: string): void {
-    setFilter(value)
-    // Emptying the input while a query is committed is how deep search is
-    // left — it clears both states and re-issues the ordinary listing (D2/D3).
+  function handleQueryTextChange(value: string): void {
+    setQueryText(value)
+    // Emptying the input while a query is committed is how a search is left —
+    // it clears both states and re-issues the ordinary listing (file-search's
+    // "Clearing a committed query" rule). This survived the filter moving out:
+    // the input still holds the query, so emptying it still means "no search".
     if (value.trim() === '' && query !== null) {
       setQuery(null)
       fetchListing(dest, flat, null)
     }
+  }
+
+  /** Open the find control, or focus it if it is already open. */
+  function openFind(): void {
+    setFindOpen(true)
+  }
+
+  /** Dismissing clears the filter: a closed control must never leave the grid
+   *  silently narrowed. */
+  function closeFind(): void {
+    setFindOpen(false)
+    setFindText('')
   }
 
   /**
@@ -282,7 +307,7 @@ export default function App() {
   }
 
   function submitSearch(): void {
-    const q = filter.trim()
+    const q = queryText.trim()
     // A blank/whitespace-only submit is not a search (D1) — nothing to commit.
     if (q === '') return
     // The label reflects the request immediately, but a failed search must not
@@ -311,6 +336,31 @@ export default function App() {
     if (viewer !== null) queue.suspend()
     else queue.resume()
   }, [viewer, queue])
+
+  // Ctrl-F / Cmd-F takes the browser's find, deliberately: the app's own is the
+  // better one on this content — it matches the full relative path a tile is
+  // only labeled by, it knows when it has hidden everything, and it does not
+  // stop at the tiles the browser happens to have painted.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent): void {
+      if (e.key !== 'f' || !(e.ctrlKey || e.metaKey) || e.altKey) return
+      // Not while the user is typing somewhere else for their own reasons —
+      // Ctrl-F inside a query or a path is a surprise, not a shortcut.
+      // The event's own target, not `document.activeElement`: for a real
+      // keydown they are the same element, and the target is the one the
+      // keystroke actually belongs to.
+      const el = e.target instanceof HTMLElement ? e.target : document.activeElement
+      const typing =
+        el instanceof HTMLInputElement ||
+        el instanceof HTMLTextAreaElement ||
+        (el instanceof HTMLElement && el.isContentEditable)
+      if (typing && el.closest('[data-find-bar]') === null) return
+      e.preventDefault()
+      setFindOpen(true)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   const hover = useMemo(() => createHoverWarmer((p) => lru.warm(p)), [lru])
 
@@ -369,7 +419,11 @@ export default function App() {
       if (changed) {
         setFlat(v.flat)
         setQuery(q)
-        setFilter(v.q ?? '')
+        // The input shows the restored query; the filter is not part of the
+        // view a URL names, so it starts empty here as everywhere else.
+        setQueryText(v.q ?? '')
+        setFindText('')
+        setFindOpen(false)
         // Before the fetch: `fetchListing` reads the matching option through
         // its ref, so restoring after would request under the outgoing view's
         // options and land results the URL does not describe.
@@ -437,7 +491,7 @@ export default function App() {
   // Trimmed once and used everywhere the filter is read: whitespace-only text
   // is no filter (the same rule a submitted query follows), and a trailing
   // space mid-word must not blank a grid full of names that contain spaces.
-  const needle = filter.trim().toLowerCase()
+  const needle = findText.trim().toLowerCase()
   // Two layers over the same listing: the kind option (a committed view
   // setting, in the URL) and the live name filter (ephemeral). Both are view
   // state over what the server returned — neither issues a request. Kept as a
@@ -580,9 +634,24 @@ export default function App() {
    * the second a caveat about it, and giving them opposite ends stops a long
    * query pushing the caveat off screen.
    */
-  const noticeBar = (label: string, caveat: string) => (
+  const noticeBar = (label: string, caveat: string, narrow = false) => (
     <div className="flex h-8 shrink-0 items-baseline justify-between gap-4 px-4 pt-3 text-xs">
-      <p className="min-w-0 truncate text-zinc-400">{label}</p>
+      <div className="flex min-w-0 items-baseline gap-2">
+        {/* The find control is otherwise Ctrl-F-or-nothing, which is invisible
+            to anyone who does not try it — a regression against a filter that
+            used to be a box on screen. */}
+        {narrow && !findOpen && (
+          <button
+            type="button"
+            onClick={openFind}
+            title="Narrow these by name (Ctrl-F)"
+            className="shrink-0 rounded px-1.5 text-zinc-500 hover:text-zinc-200"
+          >
+            ⌕ Narrow
+          </button>
+        )}
+        <p className="min-w-0 truncate text-zinc-400">{label}</p>
+      </div>
       <p className="shrink-0 text-amber-400">{caveat}</p>
     </div>
   )
@@ -609,20 +678,20 @@ export default function App() {
         </button>
         <PathBar path={dest} error={error} api={api} onNavigate={navigate} />
         <input
-          value={filter}
-          onChange={(e) => handleFilterChange(e.target.value)}
+          value={queryText}
+          onChange={(e) => handleQueryTextChange(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') submitSearch()
           }}
-          placeholder="Filter, or search names and folders…"
-          aria-label="Filter, or search names and folders"
+          placeholder="Search names and folders…"
+          aria-label="Search names and folders"
           spellCheck={false}
           className="w-64 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-500"
         />
         <button
           type="button"
           onClick={submitSearch}
-          disabled={filter.trim() === ''}
+          disabled={queryText.trim() === ''}
           title="Search this folder and everything below it by name — files and folders"
           className="rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-500 disabled:opacity-40"
         >
@@ -676,7 +745,15 @@ export default function App() {
             </>
           ) : (
             <>
-              {noticeBar(resultsLabel, omittedNotice)}
+              {findOpen && (
+                <FindBar
+                  value={findText}
+                  count={filteredListing.length}
+                  onChange={setFindText}
+                  onClose={closeFind}
+                />
+              )}
+              {noticeBar(resultsLabel, omittedNotice, listing.length > 0)}
               {searchHasNoMatches ? (
                 // An empty truncated search never finished: claiming "no match"
                 // would be false — the walk ran out before covering the tree (D5).
