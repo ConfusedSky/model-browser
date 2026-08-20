@@ -572,6 +572,29 @@ export default function App() {
     origin?.focus()
   }
 
+  /**
+   * One line, always present, so the grid starts at the same height in every
+   * state — including the skeleton, whose tiles used to sit 56px above where
+   * the real ones would land. What the view *is* reads on the left, what was
+   * left out on the right: the first is the answer to "what am I looking at",
+   * the second a caveat about it, and giving them opposite ends stops a long
+   * query pushing the caveat off screen.
+   */
+  const noticeBar = (label: string, caveat: string) => (
+    <div className="flex h-8 shrink-0 items-baseline justify-between gap-4 px-4 pt-3 text-xs">
+      <p className="min-w-0 truncate text-zinc-400">{label}</p>
+      <p className="shrink-0 text-amber-400">{caveat}</p>
+    </div>
+  )
+
+  const resultsLabel = query !== null && !searchHasNoMatches ? `Search results for "${query}".` : ''
+  const omittedNotice =
+    truncated && !searchHasNoMatches
+      ? `Showing ${listing.filter((e) => e.kind === 'model').length} models${
+          query !== null ? ` and ${listing.filter((e) => e.kind !== 'model').length} folders` : ''
+        }; some entries were omitted.`
+      : ''
+
   return (
     <div className="flex h-screen flex-col bg-zinc-950 text-zinc-100">
       <header className="flex items-center gap-2 border-b border-zinc-800 p-3">
@@ -620,7 +643,14 @@ export default function App() {
         </button>
       </header>
       <div className="flex min-h-0 flex-1">
-        <main className="min-w-0 flex-1 overflow-auto" aria-busy={showSkeleton || undefined}>
+        {/* `scrollbar-gutter: stable` keeps the gutter reserved whether or not
+            this scrolls. Without it a listing that fits and one that does not
+            differ by the scrollbar's ~15px, which is enough to drop the grid's
+            auto-fill from 7 columns to 6 and resize every tile by ~29px. */}
+        <main
+          className="min-w-0 flex-1 overflow-auto [scrollbar-gutter:stable]"
+          aria-busy={showSkeleton || undefined}
+        >
           {path === '' && !showSkeleton ? (
             <p className="mt-24 text-center text-sm text-zinc-500">
               Enter a directory path above to browse your models.
@@ -628,32 +658,25 @@ export default function App() {
           ) : showSkeleton ? (
             // The old tiles are stale navigation targets while a slower listing
             // is fetched — unmounting the grid is what makes them unclickable.
-            <div
-              aria-hidden="true"
-              className="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-3 p-4"
-            >
-              {Array.from({ length: 12 }, (_, i) => (
-                <div
-                  key={i}
-                  className="aspect-square animate-pulse rounded-xl border border-zinc-800 bg-zinc-900"
-                />
-              ))}
-            </div>
+            // The notice line is rendered empty rather than omitted, so the
+            // skeleton's tiles sit where the real ones will.
+            <>
+              {noticeBar('', '')}
+              <div
+                aria-hidden="true"
+                className="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-3 p-4"
+              >
+                {Array.from({ length: 12 }, (_, i) => (
+                  <div
+                    key={i}
+                    className="aspect-square animate-pulse rounded-xl border border-zinc-800 bg-zinc-900"
+                  />
+                ))}
+              </div>
+            </>
           ) : (
             <>
-              {truncated && !searchHasNoMatches && (
-                <p className="px-4 pt-3 text-xs text-amber-400">
-                  Showing {listing.filter((e) => e.kind === 'model').length} models
-                  {query !== null && ` and ${listing.filter((e) => e.kind !== 'model').length} folders`}
-                  ; some entries were omitted.
-                </p>
-              )}
-              {/* While a query is committed the grid reads as search results,
-                  not the directory's contents (D4) — same slot/register as
-                  the truncation notice above. */}
-              {query !== null && !searchHasNoMatches && (
-                <p className="px-4 pt-3 text-xs text-zinc-400">Search results for "{query}".</p>
-              )}
+              {noticeBar(resultsLabel, omittedNotice)}
               {searchHasNoMatches ? (
                 // An empty truncated search never finished: claiming "no match"
                 // would be false — the walk ran out before covering the tree (D5).
