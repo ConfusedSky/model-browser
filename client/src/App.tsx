@@ -657,11 +657,22 @@ export default function App() {
   )
 
   const resultsLabel = query !== null && !searchHasNoMatches ? `Search results for "${query}".` : ''
+  // Counted over `byKind`, not the whole listing: the kind option is part of
+  // the view's identity — in the URL, in history, shareable — so a notice that
+  // counted entries the option is hiding would describe a view nobody is
+  // looking at. (The live filter is the opposite case and still does not enter
+  // here: it is ephemeral, so the notice keeps describing the listing beneath
+  // it.) Suppressed when the restriction leaves nothing, since `kindHidesAll`
+  // already says what happened and "showing 0 folders" adds only noise.
+  const shownModels = byKind.filter((e) => e.kind === 'model').length
+  const shownFolders = byKind.length - shownModels
+  const shownParts = [
+    kinds !== 'folders' ? `${shownModels} models` : '',
+    kinds !== 'models' && query !== null ? `${shownFolders} folders` : '',
+  ].filter((part) => part !== '')
   const omittedNotice =
-    truncated && !searchHasNoMatches
-      ? `Showing ${listing.filter((e) => e.kind === 'model').length} models${
-          query !== null ? ` and ${listing.filter((e) => e.kind !== 'model').length} folders` : ''
-        }; some entries were omitted.`
+    truncated && !searchHasNoMatches && !kindHidesAll
+      ? `Showing ${shownParts.join(' and ')}; some entries were omitted.`
       : ''
 
   return (

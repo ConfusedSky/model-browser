@@ -66,7 +66,11 @@ Entries already carry `kind`, so restricting to folders or models is view state 
 
 That asymmetry drives the behavior when a query is committed: the matching option re-issues the search (the `toggleFlat` path is the precedent — it re-requests, lands, and commits), while the kind option re-presents what is already there. Both are in the URL regardless: the kind option is a mode like `flat`, not typed text like `filter`.
 
-One consequence to handle rather than discover: the server's caps bound what it returns *before* a client-side kind filter runs, so "models only" over a capped response shows the models within the cap, not the first N models overall. The truncation notice must keep describing the underlying listing — which is already what `file-search` requires of it for the live filter.
+One consequence to handle rather than discover: the server's caps bound what it returns *before* a client-side kind filter runs, so "models only" over a capped response shows the models within the cap, not the first N models overall.
+
+**Correction, found in review after implementing.** This originally added "the truncation notice must keep describing the underlying listing — which is already what `file-search` requires of it for the live filter", and the implementation followed it. That transfer is wrong. The live filter is ephemeral, request-free, and outside the view's identity, so a notice describing the listing beneath it is right. The kind option is the opposite on every count — it is in the URL, in history, shareable, and D1 calls it a setting that determines which entries the view contains — so a notice counting entries it hides describes a view nobody is looking at. The capping observation above argues the notice matters *more* under a restriction, not less.
+
+So the notice counts the view in force, and is suppressed when the restriction leaves nothing: the empty state already says what happened, and "showing 0 folders; some entries were omitted" beside "No folders matched" is two sentences disagreeing about the same grid.
 
 ### D4: Two more parameters, one encoder
 

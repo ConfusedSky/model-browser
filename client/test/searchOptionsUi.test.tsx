@@ -32,6 +32,8 @@ const RESULTS: DirListing = {
   path: '/models',
   entries: [dir('Sets/Sandy'), model('Sets/Sandy/base.stl'), model('Sets/Sandy/body.stl')],
 }
+/** Truncated: the caps are independent, so a full model set says nothing about folders. */
+const TRUNCATED: DirListing = { ...RESULTS, truncated: true }
 
 function panelButton(label: string): HTMLButtonElement {
   return container.querySelector<HTMLButtonElement>(`aside button[aria-label="${label}"]`)!
@@ -235,6 +237,45 @@ describe('search options', () => {
     await settle()
 
     expect(panelButton('Match folder names').getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('the truncation notice counts the view in force, not the entries the option hides', async () => {
+    listDir.mockImplementation((_t: string, opts?: { q?: string }) =>
+      Promise.resolve(opts?.q === 'sandy' ? TRUNCATED : NESTED),
+    )
+    await type(searchInput(), 'sandy')
+    await pressEnter(searchInput())
+    await settle()
+    expect(container.textContent).toContain('Showing 2 models and 1 folders; some entries were omitted.')
+
+    await click(kindButton('folders'))
+    await settle()
+
+    // The grid holds one folder; a notice still counting the two hidden models
+    // would describe a view nobody is looking at.
+    expect(container.textContent).toContain('Showing 1 folders; some entries were omitted.')
+    expect(container.textContent).not.toContain('2 models')
+  })
+
+  it('the notice is silent when the restriction leaves nothing to describe', async () => {
+    // The worst pairing: a truncated response whose visible half is empty would
+    // otherwise render "showing 0 folders; some entries were omitted" beside
+    // "No folders matched".
+    listDir.mockImplementation((_t: string, opts?: { q?: string }) =>
+      Promise.resolve(
+        opts?.q === 'sandy'
+          ? { path: '/models', entries: [model('a/sandy.stl')], truncated: true }
+          : NESTED,
+      ),
+    )
+    await type(searchInput(), 'sandy')
+    await pressEnter(searchInput())
+    await settle()
+    await click(kindButton('folders'))
+    await settle()
+
+    expect(container.textContent).toContain('No folders matched')
+    expect(container.textContent).not.toContain('omitted')
   })
 
   it('a plain listing carries no options, whatever they are set to', async () => {

@@ -22,7 +22,7 @@
 
 - [x] 4.1 Kind option applied client-side over `kind`, like the existing filter — instant, no request (D3)
 - [x] 4.2 With a query committed, changing the matching option re-issues the search through the existing `fetchListing` path (the `toggleFlat` precedent: re-request, land, commit), inheriting latest-wins, the skeleton, and the history entry
-- [x] 4.3 Truncation notice and empty states keep describing the view actually in force — the notice describes the underlying listing, not the kind-filtered subset (D3)
+- [x] 4.3 Truncation notice and empty states describe the view actually in force: counted over the kind-restricted entries, not the whole listing, and silent when the restriction leaves nothing (D3's correction). The live filter stays outside this — it is ephemeral, so the notice keeps describing the listing beneath it
 - [x] 4.4 A search tab on the existing side panel (D5): `ChatPanel.tsx` becomes a tab host — chat and search — keeping its persisted collapse state and making no network calls of its own. Tab selection persists like collapse does; neither belongs in the URL
 - [x] 4.5 The controls live in that tab, each reading as on/off at a glance
 - [x] 4.6 The tab mirrors the committed search: the query in force and the options under which it ran. The search input and the results label stay in the bar and over the grid respectively — the panel reads the search back, it does not own it
@@ -30,7 +30,9 @@
 
 ## 5. Tests
 
-- [x] 5.1 Component tests on the shared harness: options persist across searches; changing the matching option with a query committed re-issues and pushes one history entry; changing the kind option re-presents without a request; a URL with non-default options reproduces those results and leaves storage alone; navigating away and searching fresh uses stored options; both empty states and the truncation notice read correctly under a kind restriction
+- [x] 5.1 Component tests on the shared harness — including the notice under a kind
+      restriction, which this task claimed and did not have, which is how the wording
+      diverged from the requirement unnoticed: options persist across searches; changing the matching option with a query committed re-issues and pushes one history entry; changing the kind option re-presents without a request; a URL with non-default options reproduces those results and leaves storage alone; navigating away and searching fresh uses stored options; both empty states and the truncation notice read correctly under a kind restriction
 
 ## 6. Verification
 
