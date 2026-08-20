@@ -58,7 +58,11 @@ export function axisOf(up: [number, number, number]): OrbitAxis | null {
  * the six axes — 1,520 of 2,945 models in the primary cache, `y` (the library's
  * commonest up axis) among them.
  */
-export function cameraForPose(pose: IndexPose, base: CameraState): { camera: CameraState; axis: OrbitAxis } | null {
+export function cameraForPose(
+  pose: IndexPose | undefined,
+  base: CameraState,
+): { camera: CameraState; axis: OrbitAxis } | null {
+  if (pose === undefined) return null
   const axis = axisOf(pose.up)
   if (axis === null) return null
   const { s, a, b } = frameFor(axis)

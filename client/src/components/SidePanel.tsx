@@ -70,9 +70,12 @@ export default function SidePanel({
   // cannot leave is a trap: a link can put this app in meaning mode on a
   // machine that has no index.
   const showMode = meaningRunnable || mode === 'meaning'
-  // Name-search options apply whenever a submit would run a name search, which
-  // includes meaning mode that cannot reach its index.
-  const nameOptionsApply = mode === 'name' || !meaningRunnable
+  // Name-search options belong to the name corpus and nothing else. An earlier
+  // version showed them whenever meaning could not run, on the grounds that a
+  // submit would then be a name search — which stopped being true when such a
+  // submit began deferring instead. Showing folder-matching under a mode that
+  // says Meaning states a contradiction about what the next search will do.
+  const nameOptionsApply = mode === 'name'
   // An absent index is not worth reporting to someone searching by name — most
   // machines will never run it. It is worth reporting to someone whose mode
   // says meaning, who is otherwise looking at a panel that explains nothing.
@@ -162,7 +165,8 @@ export default function SidePanel({
               {/* Options that cannot apply to the mode in force are absent, not
                   inert: a visible control that does nothing is worse than one
                   that is not there (D2). */}
-              <div className={nameOptionsApply ? 'space-y-2' : 'hidden'}>
+              {nameOptionsApply && (
+                <div className="space-y-2">
                 <button
                   type="button"
                   role="switch"
@@ -186,8 +190,9 @@ export default function SidePanel({
                       {k}
                     </button>
                   ))}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           ) : (
             <>

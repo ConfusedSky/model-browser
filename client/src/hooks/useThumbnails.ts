@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import type * as THREE from 'three'
-import type { CameraState, DirEntry, OrbitAxis } from '../../../shared/types'
+import type { CameraState, DirEntry, IndexPose, OrbitAxis } from '../../../shared/types'
 import type { ApiClient } from '../api/client'
 import { DEFAULT_CAMERA } from '../three/camera'
 import type { MeshLru } from '../three/lru'
+import { cameraForPose } from '../three/pose'
 import type { RenderQueue } from '../three/queue'
 import { RIG_VERSION, renderThumbnail } from '../three/renderer'
 import { getLightingMode } from '../viewer/lighting'
@@ -70,6 +71,12 @@ export function useThumbnails(
   api: ApiClient,
   lru: MeshLru<THREE.Object3D>,
   queue: RenderQueue,
+  /**
+   * Orientations the semantic index supplied for these entries. Used only when
+   * the cache holds no camera or axis of its own: the index's opinion is a
+   * default, never an override of the user's (semantic-search D5).
+   */
+  poses: Record<string, IndexPose> = {},
 ) {
   const [thumbs, setThumbs] = useState<Map<string, ThumbState>>(new Map())
 
@@ -153,8 +160,23 @@ export function useThumbnails(
                   if (!alive) return dropStale()
                   await queue.whenResumed()
                   if (!alive) return dropStale()
-                  const camera = cached.camera ?? DEFAULT_CAMERA
-                  const axis = cached.axis ?? 'y'
+                  // Nothing stored for this model: render it the way the index
+                  // says it stands rather than at the default three-quarter
+                  // view. The grid is where most models are looked at, so an
+                  // orientation that only reached the viewer was an
+                  // orientation almost nobody saw.
+                  //
+                  // Deliberately not persisted as camera/axis — the putThumb
+                  // below sends pixels only. The index's opinion produces the
+                  // picture without becoming the user's stored orientation, so
+                  // their own orbit still wins and a re-classification is not
+                  // locked out by this render.
+                  const posed =
+                    cached.camera === undefined && cached.axis === undefined
+                      ? cameraForPose(poses[entry.path], DEFAULT_CAMERA)
+                      : null
+                  const camera = cached.camera ?? posed?.camera ?? DEFAULT_CAMERA
+                  const axis = cached.axis ?? posed?.axis ?? 'y'
                   const lighting = getLightingMode() // the mode this render uses
                   const png = await renderThumbnail(object, camera, axis)
                   await api.putThumb({ path: entry.path, mtime: entry.mtime, png, lighting, rig: RIG_VERSION })

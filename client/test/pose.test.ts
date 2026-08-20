@@ -92,3 +92,9 @@ describe('index pose → camera', () => {
     expect(out.camera.distR).toBe(DEFAULT_CAMERA.distR)
   })
 })
+
+describe('cameraForPose on the no-pose path', () => {
+  it('answers null rather than making every caller check first', () => {
+    expect(cameraForPose(undefined, DEFAULT_CAMERA)).toBeNull()
+  })
+})

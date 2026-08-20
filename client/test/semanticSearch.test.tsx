@@ -7,6 +7,7 @@ import {
   click,
   container,
   dir,
+  getThumb,
   indexAvailability,
   labels,
   listDir,
@@ -14,6 +15,8 @@ import {
   mountApp,
   mountAppAtCurrentUrl,
   pressEnter,
+  putThumb,
+  renderThumbnail,
   searchInput,
   semanticSearch,
   settle,
@@ -216,11 +219,14 @@ describe('meaning search', () => {
 
     await click(modeButton('name')!)
     await settle()
-    // Name options apply again, and the mode control still reads correctly.
+    // Switching to the name corpus brings its options back.
     expect(panel.querySelector('button[aria-label="Match folder names"]')).not.toBeNull()
   })
 
-  it('meaning mode that cannot reach its index still offers the name options', async () => {
+  it('meaning mode does not show name-search options, running or not', async () => {
+    // A submit in meaning mode defers; it does not become a name search. So
+    // folder-matching under a mode that says Meaning would describe a search
+    // that is not going to happen.
     indexAvailability.mockResolvedValue({ state: 'warming', elapsed: 4 })
     await mountAppAtCurrentUrl('/?path=/models&flat=1&q=demon&mode=meaning', NESTED)
     await settle()
@@ -228,8 +234,49 @@ describe('meaning search', () => {
 
     const panel = container.querySelector('aside')!
     expect(panel.textContent).toContain('starting up')
-    // A submit right now runs a name search, so its options are what apply.
-    expect(panel.querySelector('button[aria-label="Match folder names"]')).not.toBeNull()
+    expect(panel.querySelector('button[aria-label="Match folder names"]')).toBeNull()
+    // Still not a trap: the mode is visible and leaving it is one click.
+    expect(modeButton('name')).toBeDefined()
+  })
+
+  it('tiles render at the index’s pose when nothing is cached', async () => {
+    // The grid is where models are looked at, so an orientation that reached
+    // only the viewer reached almost nobody.
+    const POSE = {
+      up: [0, 1, 0] as [number, number, number],
+      azimuth_zero: [1, 0, 0] as [number, number, number],
+      source: 'siglip',
+      confidence: 0.9,
+      front: { view: 5, azimuth_deg: 225, elevation_deg: 20 },
+    }
+    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models', covers: ['stl'] })
+    semanticSearch.mockResolvedValue({
+      ...MEANING,
+      entries: [model('Kits/hero.stl')],
+      poses: { '/models/Kits/hero.stl': POSE },
+    })
+    getThumb.mockResolvedValue({ status: 'miss' })
+    await mountApp('/models', NESTED)
+    await settle()
+    await click(searchTab())
+    await click(modeButton('meaning')!)
+    await type(searchInput(), 'hero')
+    await pressEnter(searchInput())
+    await settle()
+
+    const call = renderThumbnail.mock.calls.at(-1)
+    expect(call).toBeDefined()
+    const [, camera, axis] = call! as unknown as [unknown, { az: number; el: number }, string]
+    // y-up: the derived offset puts azimuth 225 at 315°, not at 225°.
+    expect(axis).toBe('y')
+    expect((camera.az * 180) / Math.PI).toBeCloseTo(315, 4)
+    expect((camera.el * 180) / Math.PI).toBeCloseTo(20, 4)
+
+    // …and the pose is not persisted as the user's orientation: pixels only.
+    const put = putThumb.mock.calls.at(-1)?.[0]
+    expect(put?.png).toBeDefined()
+    expect(put?.camera).toBeUndefined()
+    expect(put?.axis).toBeUndefined()
   })
 
   it('a link opened without the index keeps naming the meaning search', async () => {

@@ -154,7 +154,7 @@ export default function App() {
   const trackerRef = useRef(new GestureTracker())
 
   const showSkeleton = useDelayedFlag(pending, SKELETON_DELAY_MS)
-  const { thumbs, setThumb, setPlaceholder } = useThumbnails(listing, api, lru, queue)
+  const { thumbs, setThumb, setPlaceholder } = useThumbnails(listing, api, lru, queue, poses)
   placeholderRef.current = setPlaceholder
 
   // A flat walk can take seconds while a nested listing returns immediately,

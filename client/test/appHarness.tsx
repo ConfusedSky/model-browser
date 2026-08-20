@@ -25,6 +25,9 @@ export const putThumb = vi.fn().mockResolvedValue(undefined)
 // The semantic index is a separate service; the default is the state most
 // machines are in — not running — so a test opts *into* it existing.
 export const indexAvailability = vi.fn().mockResolvedValue({ state: 'absent' })
+// Shared (like listDir) so a test can assert *how* a thumbnail was rendered —
+// the camera and axis a pose produced, not just that pixels appeared.
+export const renderThumbnail = vi.fn(() => Promise.resolve(new Blob()))
 export const semanticSearch = vi.fn()
 
 /** A minimal valid binary STL (one facet) — enough for parseModel to build a real mesh. */
@@ -61,7 +64,7 @@ export async function rendererModule(
 ): Promise<typeof import('../src/three/renderer')> {
   return {
     ...(await importOriginal()),
-    renderThumbnail: vi.fn(() => Promise.resolve(new Blob())),
+    renderThumbnail,
     getRenderer: () =>
       ({
         setSize: () => {},
@@ -200,6 +203,7 @@ export async function unmountApp(): Promise<void> {
   // mount, so a test has to be able to configure it *before* mounting.
   indexAvailability.mockResolvedValue({ state: 'absent' })
   semanticSearch.mockReset()
+  renderThumbnail.mockClear()
   await act(async () => {
     root?.unmount()
   })

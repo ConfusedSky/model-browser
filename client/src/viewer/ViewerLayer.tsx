@@ -139,7 +139,7 @@ export default function ViewerLayer({
     // An index orientation is the *default* only: a stored axis or camera is
     // the user's own and wins, and applying a pose persists nothing — the
     // sidecar is written by orbiting, not by opening (semantic-search D5).
-    const fromPose = pose !== undefined ? cameraForPose(pose, DEFAULT_CAMERA) : null
+    const fromPose = cameraForPose(pose, DEFAULT_CAMERA)
     const savedPromise: Promise<{ camera?: CameraState; axis: OrbitAxis }> =
       camera !== undefined
         ? Promise.resolve({ camera, axis: axis ?? 'y' })
