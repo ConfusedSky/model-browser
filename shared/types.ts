@@ -57,12 +57,14 @@ export interface ThumbGetResponse {
   /** Pixel-recipe (rig) version the PNG was rendered with; absent on pre-rim entries. */
   rig?: number
   /**
-   * Whether the PNG was rendered at an index-supplied orientation. Recorded
-   * because the pose is an input to the pixels that the cache key does not
-   * carry: without it, a thumbnail rendered before the index had an opinion
-   * stays at the default angle forever, since path+mtime still match.
+   * Which pose recipe the PNG was rendered under, absent when it was rendered
+   * without one. A version rather than a flag for the same reason `rig` is:
+   * the pose is an input to the pixels that the cache key does not carry, and
+   * the mapping from the index's coordinates to the scene's can change — it
+   * did once already, and every posed thumbnail rendered under the old one was
+   * wrong while looking perfectly fresh.
    */
-  posed?: boolean
+  posed?: number
   /** base64 PNG, present when status === 'hit'. */
   png?: string
 }
@@ -76,8 +78,8 @@ export interface ThumbPutRequest {
   axis?: OrbitAxis
   lighting?: LightingMode
   rig?: number
-  /** Whether the PNG was rendered at an index-supplied orientation. */
-  posed?: boolean
+  /** Pose recipe version the PNG was rendered under; absent when unposed. */
+  posed?: number
 }
 
 /**

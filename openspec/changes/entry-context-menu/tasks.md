@@ -90,26 +90,30 @@
       stored camera* forbids it, and the sweep's own comment says the same. Test a posed
       model: after re-render it still has no stored camera, so a re-classification still
       governs it
-- [ ] 4b.2 The camera store gains *discard* (`model-thumbnails` MODIFY). `cache.ts:98` is
-      `camera: opts.camera ?? prev?.camera`, so silence means keep and there is no way to
-      clear — add an explicit discard to `ThumbPutRequest`/`ThumbCache.put` and keep silence
-      meaning keep. Server test both: a write that omits the camera preserves it, a write
-      that discards it leaves none
+- [ ] 4b.2 The orientation store gains *discard* (`model-thumbnails` MODIFY), for the axis as
+      well as the camera. `cache.ts:98-99` is `camera: opts.camera ?? prev?.camera` /
+      `axis: opts.axis ?? prev?.axis`, so silence means keep and there is no way to clear —
+      add an explicit discard to `ThumbPutRequest`/`ThumbCache.put`, keeping silence meaning
+      keep. Server test all three states per field: set, silent, discarded
 - [ ] 4b.3 Reset framing discards rather than writes `DEFAULT_CAMERA`. The distinction is the
       task, not a nicety: a stored default makes `cached.camera !== undefined`, which at
       `useThumbnails.ts:174-175` permanently disqualifies the model from the pose path — the
       fix for a badly framed thumbnail would guarantee one. Test that a posed model, after
       reset framing, renders at the pose and not at the default
+- [ ] 4b.3a Reset framing discards the **axis too when a usable pose exists** for that model,
+      so the pose applies entire (D7). Gate on `cameraForPose(...) !== null`, not on the raw
+      presence of a pose: a malformed one (off-axis `up`, non-perpendicular `azimuth_zero`)
+      returns null, and trading a real axis for `'y'` there would be worse than keeping it.
+      With no usable pose, discard the camera alone. Test all three: posed + stored axis →
+      both discarded and the pose applies; malformed pose → axis kept; no pose → axis kept
 - [ ] 4b.4 Reset framing also updates the in-memory thumb state, not just the server:
       `App.tsx:1159` sources the lightbox's camera from `thumbs.get(path)?.camera`, so a
       server-only write leaves the viewer opening at the old camera for the rest of the
       session. Test the viewer within one session, not only after a reload
-- [ ] 4b.5 Neither touches `axis`. Test with a non-`y` spindle stored: it survives both
-      actions and the re-render is drawn about it, since a reset that silently laid a Z-up
-      model on its side is the failure D7 refuses. Note the consequence to assert alongside
-      it — a model keeping its own axis is framed by *default* about that axis after reset
-      framing, not by the pose, because `cameraForPose` derives camera and axis together and
-      the pose's angles are measured about the pose's axis (`three/pose.ts:61-73`)
+- [ ] 4b.5 Re-render never touches `axis`. Test with a non-`y` spindle stored: it survives
+      re-render whether or not a pose exists, and the render is drawn about it. Reset framing
+      is the only path that moves the axis, and only under 4b.3a's gate — a discard that left
+      a Z-up model laid on its side with nothing to replace the axis is the failure D7 refuses
 - [ ] 4b.6 Both `await queue.whenResumed()` before touching the renderer, as the sweep does
       at `useThumbnails.ts:155,161` — `queue.push` alone is not enough, since `queue.ts:41-46`
       documents that `suspend()` cannot stop a job that has started, and this is the single

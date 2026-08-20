@@ -4,7 +4,7 @@ import type { CameraState, DirEntry, IndexPose, OrbitAxis } from '../../../share
 import type { ApiClient } from '../api/client'
 import { DEFAULT_CAMERA } from '../three/camera'
 import type { MeshLru } from '../three/lru'
-import { cameraForPose } from '../three/pose'
+import { cameraForPose, POSE_VERSION } from '../three/pose'
 import type { RenderQueue } from '../three/queue'
 import { RIG_VERSION, renderThumbnail } from '../three/renderer'
 import { getLightingMode } from '../viewer/lighting'
@@ -123,7 +123,7 @@ export function useThumbnails(
             // forever, and the orientation appears only once the user opens the
             // model and the lightbox's close persists a posed snapshot.
             const wantsPose = poses[entry.path] !== undefined
-            const poseStale = wantsPose && cached.posed !== true
+            const poseStale = wantsPose && cached.posed !== POSE_VERSION
             if (
               cached.status === 'hit' &&
               cached.pngUrl !== undefined &&
@@ -193,7 +193,7 @@ export function useThumbnails(
                     png,
                     lighting,
                     rig: RIG_VERSION,
-                    posed: posed !== null,
+                    posed: posed !== null ? POSE_VERSION : undefined,
                   })
                   if (!alive) return dropStale()
                   setThumb(entry.path, {

@@ -18,8 +18,8 @@ export interface ThumbResult {
   lighting?: LightingMode
   /** Pixel-recipe (rig) version the PNG was rendered with; absent on pre-rim entries. */
   rig?: number
-  /** Whether the PNG was rendered at an index-supplied orientation. */
-  posed?: boolean
+  /** Pose recipe version the PNG was rendered under; absent when unposed. */
+  posed?: number
   /** Object URL for the cached PNG, present on 'hit'. */
   pngUrl?: string
 }
@@ -32,7 +32,7 @@ export interface ThumbSave {
   axis?: OrbitAxis
   lighting?: LightingMode
   rig?: number
-  posed?: boolean
+  posed?: number
 }
 
 /**

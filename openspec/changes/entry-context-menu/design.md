@@ -225,14 +225,28 @@ can say about the camera, alongside *set* and *say nothing*. That is a small pro
 addition rather than a new route — `putThumb` still writes png, camera, axis, lighting and
 rig together, and re-render still writes back what it read.
 
-**A discarded camera resolves the way an untouched model resolves**, which is the pose when
-the index has one and the default otherwise. There is one limit, and it is arithmetic rather
-than policy: `cameraForPose` (`client/src/three/pose.ts:61-73`) derives the camera *and* the
-axis together, because the azimuth offset is computed in `frameFor(axis)` — a pose's angles
-describe a view about the pose's own up axis and mean something else about another. So a
-model that keeps an axis of its own is framed by default about that axis, not by the pose.
-Since this change deliberately leaves the axis alone, that is the case where "hand it back to
-the index" does not apply.
+**A discarded orientation resolves the way an untouched model resolves**, which is the pose
+when the index has one and the default otherwise — and that is why reset framing discards the
+axis too whenever a pose is there to replace it.
+
+The axis is not separable from the pose's angles. `cameraForPose`
+(`client/src/three/pose.ts:61-73`) derives camera *and* axis together, because the azimuth
+offset is computed in `frameFor(axis)`: a pose's angles describe a view about the pose's own
+up axis and mean something else about another. And `useThumbnails.ts:174-175` offers the pose
+only when *both* stored values are absent, precisely because half a pose is not a pose. So
+"hand the model back to the index" has to hand back both or neither.
+
+Hence the rule: reset framing always discards the camera, and discards the stored axis as
+well **when a usable pose exists for that model** — usable meaning `cameraForPose` returns
+non-null, so a malformed pose (an off-axis `up`, an `azimuth_zero` that is not perpendicular)
+leaves the axis alone rather than trading a real axis for a default one. With no pose
+available there is nothing better to fall back to, so the axis stays and the model is framed
+by default about it.
+
+This is the one place the axis moves, and it is not the affordance D1 rules out: the tile
+re-renders in place at the new orientation, so the result is visible, and the user asked for
+the stored orientation to be given up rather than for a particular spindle to be set.
+Re-render still never touches the axis.
 
 **The axis is not a third item**, by D1. The orbit-axis picker is a control: it is bound to
 a live view and shows the spindle rotating to screen-up as it changes. A menu item that

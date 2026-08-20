@@ -16,8 +16,8 @@ interface Meta {
   lighting?: LightingMode
   /** Pixel-recipe (rig) version the PNG was rendered with; stored and echoed, never interpreted. */
   rig?: number
-  /** Whether the PNG was rendered at an index-supplied pose; same contract as `rig`. */
-  posed?: boolean
+  /** Pose recipe version the PNG was rendered under; same contract as `rig`. */
+  posed?: number
 }
 
 const DEFAULT_CAP = 2 * 1024 ** 3
@@ -89,7 +89,7 @@ export class ThumbCache {
     return { status: 'hit', camera: meta.camera, axis, lighting, rig, posed, png: png.toString('base64') }
   }
 
-  async put(path: string, opts: { mtime: number; png?: Buffer; camera?: CameraState; axis?: OrbitAxis; lighting?: LightingMode; rig?: number; posed?: boolean }): Promise<void> {
+  async put(path: string, opts: { mtime: number; png?: Buffer; camera?: CameraState; axis?: OrbitAxis; lighting?: LightingMode; rig?: number; posed?: number }): Promise<void> {
     const key = this.key(path)
     const prev = await this.readMeta(key)
     const meta: Meta = {

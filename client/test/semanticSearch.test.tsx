@@ -25,6 +25,7 @@ import {
   unmountApp,
 } from './appHarness'
 import { setSearchMode } from '../src/lib/searchOptions'
+import { POSE_VERSION } from '../src/three/pose'
 import { RIG_VERSION } from '../src/three/renderer'
 
 vi.mock('../src/api/client', async () => (await import('./appHarness')).apiClientModule())
@@ -269,8 +270,9 @@ describe('meaning search', () => {
     const call = renderThumbnail.mock.calls.at(-1)
     expect(call).toBeDefined()
     const [, camera, axis] = call! as unknown as [unknown, { az: number; el: number }, string]
-    // y-up: the derived offset puts azimuth 225 at 315°, not at 225°.
-    expect(axis).toBe('y')
+    // A file Y-up model is the `-z` spindle in the scene (the loader bakes
+    // rotateX(-π/2) into STL), and the derived offset puts azimuth 225 at 315°.
+    expect(axis).toBe('-z')
     expect((camera.az * 180) / Math.PI).toBeCloseTo(315, 4)
     expect((camera.el * 180) / Math.PI).toBeCloseTo(20, 4)
 
@@ -353,7 +355,7 @@ describe('meaning search', () => {
     await settle()
 
     expect(renderThumbnail).toHaveBeenCalled()
-    expect(putThumb.mock.calls.at(-1)?.[0]?.posed).toBe(true)
+    expect(putThumb.mock.calls.at(-1)?.[0]?.posed).toBe(POSE_VERSION)
   })
 
   it('a meaning link renders no stand-in listing while the index is being asked', async () => {
