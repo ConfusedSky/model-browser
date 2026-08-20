@@ -7,6 +7,7 @@ import type { LightingMode, OrbitAxis, ThumbPutRequest } from '../../shared/type
 import { ThumbCache } from './cache'
 import { guard } from './guard'
 import { ListingError, complete, listDir, listFlat } from './listing'
+import { IndexError, hitsToEntries, indexStatus, query as indexQuery, scopeWithin } from './semantic'
 import { VPathError, parseVPath } from './vpath'
 import { ZipError, extractEntry } from './zip'
 
@@ -59,6 +60,67 @@ export function createApp(cache: ThumbCache = new ThumbCache()): Hono {
     if (s === null || !s.isFile()) return c.json({ error: `no such file: ${fsPath}` }, 404)
     const stream = Readable.toWeb(createReadStream(fsPath)) as ReadableStream
     return c.body(stream, 200, { ...headers, 'content-length': String(s.size) })
+  })
+
+  /**
+   * Availability of the semantic index. Cached per state by `indexStatus`, so
+   * this is cheap enough for the client to re-read on the interactions it
+   * already makes; `fresh=true` is the explicit retry (D4).
+   */
+  app.get('/api/semantic/status', async (c) => {
+    const s = await indexStatus({ fresh: c.req.query('fresh') === 'true' })
+    return c.json(s)
+  })
+
+  /**
+   * A meaning query. Deliberately not folded into `/api/dir`: it consults a
+   * different corpus, and its failure modes are its own — an index that is not
+   * running is a state this app reports, not an error it raises (D1).
+   */
+  app.post('/api/semantic', async (c) => {
+    const body = (await c.req.json().catch(() => null)) as { text?: string; path?: string } | null
+    const text = body?.text
+    if (typeof text !== 'string' || text.trim() === '') {
+      return c.json({ error: 'text is required' }, 400)
+    }
+    const status = await indexStatus()
+    if (status.state !== 'ready' || status.collectionRoot === undefined) {
+      // Not a 500: "the index is not there" is a state the UI renders, and the
+      // state itself is what tells the user which thing to do about it.
+      return c.json({ error: 'index unavailable', state: status.state, detail: status.detail }, 503)
+    }
+    // Virtual paths never leave this server (D7), and a scope outside the
+    // collection is not the index's to answer.
+    const scope =
+      body?.path === undefined || body.path === ''
+        ? null
+        : await scopeWithin(body.path, status.collectionRoot)
+    if (body?.path !== undefined && body.path !== '' && scope === null) {
+      return c.json({ error: 'path is outside the indexed collection' }, 400)
+    }
+    let result
+    try {
+      result = await indexQuery(text, scope)
+    } catch (err) {
+      if (err instanceof IndexError) {
+        return c.json({ error: err.message, state: err.state }, 503)
+      }
+      throw err
+    }
+    const { entries, poses } = await hitsToEntries(result.results, status.collectionRoot)
+    return c.json({
+      path: scope ?? status.collectionRoot,
+      entries,
+      poses,
+      weak: result.weak,
+      scope: {
+        path: result.scope.path,
+        status: result.scope.status,
+        indexed: result.scope.n_indexed,
+        scanned: result.scope.n_scanned,
+        covers: result.scope.covers,
+      },
+    })
   })
 
   app.get('/api/complete', async (c) => {

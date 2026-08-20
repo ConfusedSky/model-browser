@@ -1,10 +1,18 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type * as THREE from 'three'
-import type { CameraState, DirEntry, LightingMode, OrbitAxis } from '../../../shared/types'
+import type {
+  CameraState,
+  DirEntry,
+  IndexPose,
+  LightingMode,
+  OrbitAxis,
+} from '../../../shared/types'
 import type { ApiClient } from '../api/client'
 import { formatBytes, formatDate } from '../lib/format'
 import { GestureTracker } from '../lib/gesture'
 import type { MeshLru } from '../three/lru'
+import { DEFAULT_CAMERA } from '../three/camera'
+import { cameraForPose } from '../three/pose'
 import { getRenderer } from '../three/renderer'
 import { liveRenderSize } from './renderSize'
 import { ViewerSession } from './session'
@@ -21,6 +29,8 @@ interface Props {
   viewer: ViewerState
   camera: CameraState | undefined
   axis: OrbitAxis | undefined
+  /** The index's orientation for this model, when it has one. Advisory (D5). */
+  pose: IndexPose | undefined
   /** Active lighting mode — a prop (not read from the store) so toggling repaints the live view. */
   lighting: LightingMode
   /** Ambient occlusion on/off — a prop for the same reason as `lighting`. */
@@ -55,6 +65,7 @@ export default function ViewerLayer({
   viewer,
   camera,
   axis,
+  pose,
   lighting,
   ao,
   api,
@@ -125,13 +136,20 @@ export default function ViewerLayer({
   // same cache entry, so a present camera means the axis prop is settled too.
   useEffect(() => {
     let alive = true
+    // An index orientation is the *default* only: a stored axis or camera is
+    // the user's own and wins, and applying a pose persists nothing — the
+    // sidecar is written by orbiting, not by opening (semantic-search D5).
+    const fromPose = pose !== undefined ? cameraForPose(pose, DEFAULT_CAMERA) : null
     const savedPromise: Promise<{ camera?: CameraState; axis: OrbitAxis }> =
       camera !== undefined
         ? Promise.resolve({ camera, axis: axis ?? 'y' })
         : api
             .getThumb(viewer.entry.path, viewer.entry.mtime)
-            .then((r) => ({ camera: r.camera, axis: r.axis ?? ('y' as OrbitAxis) }))
-            .catch(() => ({ axis: 'y' as OrbitAxis }))
+            .then((r) => ({
+              camera: r.camera ?? (r.axis === undefined ? fromPose?.camera : undefined),
+              axis: r.axis ?? fromPose?.axis ?? ('y' as OrbitAxis),
+            }))
+            .catch(() => ({ camera: fromPose?.camera, axis: fromPose?.axis ?? ('y' as OrbitAxis) }))
     void Promise.all([lru.acquire(viewer.entry.path), savedPromise])
       .then(([object, saved]) => {
         if (!alive) return

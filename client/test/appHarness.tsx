@@ -22,6 +22,10 @@ export const getThumb = vi.fn().mockResolvedValue({ status: 'miss' })
 // Shared so lightbox tests can assert the close path persisted (settle →
 // snapshot → putThumb); cleared per mount like getThumb.
 export const putThumb = vi.fn().mockResolvedValue(undefined)
+// The semantic index is a separate service; the default is the state most
+// machines are in — not running — so a test opts *into* it existing.
+export const indexAvailability = vi.fn().mockResolvedValue({ state: 'absent' })
+export const semanticSearch = vi.fn()
 
 /** A minimal valid binary STL (one facet) — enough for parseModel to build a real mesh. */
 export function tinyStl(): ArrayBuffer {
@@ -44,6 +48,8 @@ export function apiClientModule(): Record<string, unknown> {
       fetchModel = vi.fn().mockImplementation(() => Promise.resolve(tinyStl()))
       getThumb = getThumb
       putThumb = putThumb
+      indexAvailability = indexAvailability
+      semanticSearch = semanticSearch
     },
   }
 }
@@ -190,6 +196,10 @@ export async function mountAppAtCurrentUrl(url: string, initial: DirListing): Pr
 }
 
 export async function unmountApp(): Promise<void> {
+  // Reset on teardown, not on mount: the index's availability is read during
+  // mount, so a test has to be able to configure it *before* mounting.
+  indexAvailability.mockResolvedValue({ state: 'absent' })
+  semanticSearch.mockReset()
   await act(async () => {
     root?.unmount()
   })

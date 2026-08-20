@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import type { SearchKinds } from '../lib/searchOptions'
+import type { IndexAvailability, SemanticScope } from '../../../shared/types'
+import type { SearchKinds, SearchMode } from '../lib/searchOptions'
 
 const COLLAPSE_KEY = 'model-browser:chat-collapsed'
 const TAB_KEY = 'model-browser:panel-tab'
@@ -24,14 +25,23 @@ export default function SidePanel({
   query,
   folderMatching,
   kinds,
+  mode,
+  index,
+  scope,
   onFolderMatching,
   onKinds,
+  onMode,
 }: {
   query: string | null
   folderMatching: boolean
   kinds: SearchKinds
+  mode: SearchMode
+  index: IndexAvailability
+  /** The index's own account of what it holds here — null outside a meaning search. */
+  scope: SemanticScope | null
   onFolderMatching: (on: boolean) => void
   onKinds: (kinds: SearchKinds) => void
+  onMode: (mode: SearchMode) => void
 }) {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === '1')
   const [tab, setTab] = useState<Tab>(() =>
@@ -95,7 +105,48 @@ export default function SidePanel({
                   </p>
                 )}
               </div>
-              <div className="space-y-2">
+              {index.state === 'ready' && (
+                <div className="flex gap-1" role="group" aria-label="Search by">
+                  {(['name', 'meaning'] as const).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      aria-pressed={mode === m}
+                      onClick={() => onMode(m)}
+                      className={`flex-1 rounded-lg border px-2 py-1.5 capitalize ${mode === m ? 'border-zinc-500 text-zinc-100' : 'border-zinc-800 text-zinc-500'}`}
+                    >
+                      {m}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {/* The index's own words about itself: which of its states it is
+                  in, and what it can hold at all. Absent is not an error to
+                  report — most machines will never run it (D4). */}
+              {index.state !== 'ready' && index.state !== 'absent' && (
+                <p className="text-zinc-500">
+                  {index.state === 'warming'
+                    ? `Meaning search is starting up${index.elapsed !== undefined ? ` (${Math.round(index.elapsed)}s)` : ''}…`
+                    : index.state === 'volume-gone'
+                      ? 'Meaning search is running, but its library volume is not mounted.'
+                      : 'Meaning search did not finish starting.'}
+                  {index.detail !== undefined && ` ${index.detail}`}
+                </p>
+              )}
+              {scope !== null && (
+                <p className="text-zinc-500">
+                  {scope.status === 'unindexed'
+                    ? 'Nothing here has been indexed yet.'
+                    : scope.status === 'partial'
+                      ? `${scope.indexed} of ${scope.scanned} models here are indexed.`
+                      : `${scope.indexed} models indexed.`}{' '}
+                  Covers {scope.covers.join(', ')}.
+                </p>
+              )}
+              {/* Options that cannot apply to the mode in force are absent, not
+                  inert: a visible control that does nothing is worse than one
+                  that is not there (D2). */}
+              <div className={mode === 'meaning' ? 'hidden' : 'space-y-2'}>
                 <button
                   type="button"
                   role="switch"

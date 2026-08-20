@@ -30,6 +30,7 @@ function makeProps(mode: 'orbit' | 'lightbox') {
     viewer,
     camera: undefined,
     axis: undefined,
+    pose: undefined,
     lighting: 'axis' as const,
     ao: true,
     api: {

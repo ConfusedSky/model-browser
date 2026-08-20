@@ -51,6 +51,7 @@ function makeProps() {
       viewer,
       camera: undefined,
       axis: undefined,
+      pose: undefined,
       lighting: 'axis' as const,
       ao: true,
       api: { getThumb: vi.fn().mockResolvedValue({ status: 'miss' }) } as unknown as ApiClient,

@@ -1,4 +1,4 @@
-import type { SearchKinds } from './searchOptions'
+import type { SearchKinds, SearchMode } from './searchOptions'
 
 /**
  * The URL as a record of the committed view (url-navigation D1): query
@@ -26,6 +26,8 @@ export interface UrlView {
   folderMatching?: boolean
   /** Which kinds the results present, default 'both'. */
   kinds?: SearchKinds
+  /** Which corpus the query ran against, default 'name' — carried only when not. */
+  mode?: SearchMode
   model?: string
 }
 
@@ -34,6 +36,7 @@ export function parseUrl(search: string = window.location.search): UrlView {
   const raw = p.get('q')
   const q = raw === null || raw === '' ? undefined : raw
   const kinds = p.get('kinds')
+  const mode = p.get('mode')
   return {
     path: p.get('path') ?? undefined,
     // A query implies the flat shape: deep-search results are flat whatever
@@ -46,6 +49,7 @@ export function parseUrl(search: string = window.location.search): UrlView {
     // error, since a hand-edited link should degrade to the ordinary view.
     folderMatching: p.has('nofolders') ? false : undefined,
     kinds: kinds === 'folders' || kinds === 'models' ? kinds : undefined,
+    mode: mode === 'meaning' ? 'meaning' : undefined,
     model: p.get('model') ?? undefined,
   }
 }
@@ -61,6 +65,7 @@ export function serializeView(view: UrlView): string {
   // mints a history entry.
   if (view.folderMatching === false) p.set('nofolders', '1')
   if (view.kinds === 'folders' || view.kinds === 'models') p.set('kinds', view.kinds)
+  if (view.mode === 'meaning') p.set('mode', 'meaning')
   if (view.model !== undefined && view.model !== '') p.set('model', view.model)
   const s = p.toString()
   return s === '' ? '' : `?${s}`
@@ -73,6 +78,7 @@ function sameView(a: UrlView, b: UrlView): boolean {
     a.q === b.q &&
     a.folderMatching === b.folderMatching &&
     a.kinds === b.kinds &&
+    a.mode === b.mode &&
     a.model === b.model
   )
 }

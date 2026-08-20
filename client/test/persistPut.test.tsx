@@ -17,6 +17,10 @@ vi.mock('../src/api/client', () => ({
     fetchModel = vi.fn()
     getThumb = getThumb
     putThumb = putThumb
+    // Hand-listed rather than shared, so it goes stale on new methods — see
+    // client/test/CLAUDE.md's note about spreading the real module.
+    indexAvailability = vi.fn().mockResolvedValue({ state: 'absent' })
+    semanticSearch = vi.fn()
   },
 }))
 // Spread the real module and override only what needs WebGL. RIG_VERSION comes

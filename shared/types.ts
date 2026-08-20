@@ -71,6 +71,52 @@ export interface ThumbPutRequest {
   rig?: number
 }
 
+/**
+ * What a semantic result set is, beside the entries themselves. Counts are the
+ * index's claims about itself, never about the folder: `indexed` is what it
+ * holds, `scanned` is what the last classify run walked and still found present
+ * when the index loaded, so it tracks the folder loosely and can shift.
+ */
+export interface SemanticScope {
+  path: string | null
+  status: 'indexed' | 'partial' | 'unindexed'
+  indexed: number
+  scanned: number
+  /** Extensions the index can hold at all — published by it, not assumed here. */
+  covers: string[]
+}
+
+export interface IndexPose {
+  up: [number, number, number]
+  /** The model-space direction the index's azimuth 0 is measured from. */
+  azimuth_zero: [number, number, number]
+  source: string
+  confidence: number
+  front: { view: number; azimuth_deg: number; elevation_deg: number } | null
+}
+
+export interface SemanticListing {
+  path: string
+  entries: DirEntry[]
+  /** Orientation per tile path, where the index has one. Advisory (D5). */
+  poses: Record<string, IndexPose>
+  scope: SemanticScope
+  /** The index found nothing standing out — the set is weak, not the results. */
+  weak: boolean
+}
+
+/** Availability of the semantic index, read from the wire (semantic-search D4). */
+export type IndexState = 'ready' | 'warming' | 'wedged' | 'volume-gone' | 'absent'
+
+export interface IndexAvailability {
+  state: IndexState
+  /** Present when the index answered: the collection it covers. */
+  collectionRoot?: string
+  covers?: string[]
+  elapsed?: number
+  detail?: string
+}
+
 export interface ApiError {
   error: string
 }

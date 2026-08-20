@@ -11,8 +11,17 @@
  * (D1). Storage is the default for the next search; the URL governs the view
  * it names, and opening someone's link never writes to storage (D2).
  */
+const MODE_KEY = 'model-browser:search-mode'
 const MATCH_KEY = 'model-browser:search-folder-matching'
 const KINDS_KEY = 'model-browser:search-kinds'
+
+/**
+ * Which corpus a submit consults. A mode rather than a second action: two
+ * buttons leave nothing on screen recording which was pressed, while a mode is
+ * persistent visible state, and it inherits this module's stickiness, the URL
+ * carriage, and re-issue-on-change for free (D2).
+ */
+export type SearchMode = 'name' | 'meaning'
 
 /** Which kinds a search presents. Applied client-side over `kind` (D3). */
 export type SearchKinds = 'both' | 'folders' | 'models'
@@ -22,6 +31,14 @@ const KINDS: readonly SearchKinds[] = ['both', 'folders', 'models']
 function isKinds(v: string | null): v is SearchKinds {
   return v !== null && (KINDS as readonly string[]).includes(v)
 }
+
+let mode: SearchMode = (() => {
+  try {
+    return localStorage.getItem(MODE_KEY) === 'meaning' ? 'meaning' : 'name'
+  } catch {
+    return 'name'
+  }
+})()
 
 let folderMatching: boolean = (() => {
   try {
@@ -41,6 +58,19 @@ let kinds: SearchKinds = (() => {
     return 'both'
   }
 })()
+
+export function searchMode(): SearchMode {
+  return mode
+}
+
+export function setSearchMode(next: SearchMode): void {
+  mode = next
+  try {
+    localStorage.setItem(MODE_KEY, next)
+  } catch {
+    // no localStorage (tests) — in-memory only
+  }
+}
 
 export function folderMatchingEnabled(): boolean {
   return folderMatching

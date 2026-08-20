@@ -1,6 +1,8 @@
 import type {
   CameraState,
   DirListing,
+  IndexAvailability,
+  SemanticListing,
   LightingMode,
   OrbitAxis,
   ThumbGetResponse,
@@ -42,6 +44,10 @@ export interface ApiClient {
   ): Promise<DirListing>
   complete(prefix: string): Promise<string[]>
   fetchModel(path: string): Promise<ArrayBuffer>
+  /** Availability of the semantic index — cheap, cached server-side (D4). */
+  indexAvailability(opts?: { fresh?: boolean }): Promise<IndexAvailability>
+  /** A meaning query. Throws HttpError(503) carrying the index's state. */
+  semanticSearch(text: string, path?: string): Promise<SemanticListing>
   getThumb(path: string, mtime: number): Promise<ThumbResult>
   putThumb(save: ThumbSave): Promise<void>
 }
@@ -94,6 +100,21 @@ export class HttpApiClient implements ApiClient {
     const folders = opts?.folderMatching === false ? '&folders=false' : ''
     const res = await this.fetchFn(`/api/dir?path=${encodeURIComponent(path)}${flat}${q}${folders}`)
     return jsonOrThrow<DirListing>(res)
+  }
+
+  async indexAvailability(opts?: { fresh?: boolean }): Promise<IndexAvailability> {
+    const q = opts?.fresh === true ? '?fresh=true' : ''
+    const res = await this.fetchFn(`/api/semantic/status${q}`)
+    return jsonOrThrow<IndexAvailability>(res)
+  }
+
+  async semanticSearch(text: string, path?: string): Promise<SemanticListing> {
+    const res = await this.fetchFn('/api/semantic', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text, path }),
+    })
+    return jsonOrThrow<SemanticListing>(res)
   }
 
   async complete(prefix: string): Promise<string[]> {

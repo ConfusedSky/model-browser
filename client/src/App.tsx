@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type * as THREE from 'three'
-import type { DirEntry, LightingMode } from '../../shared/types'
+import type {
+  DirEntry,
+  IndexAvailability,
+  IndexPose,
+  LightingMode,
+  SemanticScope,
+} from '../../shared/types'
 import { HttpApiClient } from './api/client'
 import FindBar from './components/FindBar'
 import Grid from './components/Grid'
@@ -15,9 +21,12 @@ import { getLastPath, pushRecent } from './lib/recents'
 import {
   folderMatchingEnabled,
   searchKinds,
+  searchMode,
   setFolderMatchingEnabled,
   setSearchKinds,
+  setSearchMode,
   type SearchKinds,
+  type SearchMode,
 } from './lib/searchOptions'
 import { commitUrl, isLightboxEntry, LIGHTBOX_ENTRY, parseUrl, type UrlView } from './lib/urlState'
 import { MeshLru } from './three/lru'
@@ -45,11 +54,19 @@ import type { ViewerSession } from './viewer/session'
  * stored preferences govern: they are what this profile's next fresh search
  * uses.
  */
-function optionsOf(view: UrlView): { folderMatching: boolean; kinds: SearchKinds } {
+function optionsOf(view: UrlView): {
+  folderMatching: boolean
+  kinds: SearchKinds
+  mode: SearchMode
+} {
   if (view.q === undefined || view.q === '') {
-    return { folderMatching: folderMatchingEnabled(), kinds: searchKinds() }
+    return { folderMatching: folderMatchingEnabled(), kinds: searchKinds(), mode: searchMode() }
   }
-  return { folderMatching: view.folderMatching ?? true, kinds: view.kinds ?? 'both' }
+  return {
+    folderMatching: view.folderMatching ?? true,
+    kinds: view.kinds ?? 'both',
+    mode: view.mode ?? 'name',
+  }
 }
 
 export default function App() {
@@ -112,13 +129,24 @@ export default function App() {
   // not this profile's preference.
   const [folderMatching, setFolderMatchingState] = useState(optionsOf(boot).folderMatching)
   const [kinds, setKindsState] = useState<SearchKinds>(optionsOf(boot).kinds)
+  const [mode, setModeState] = useState<SearchMode>(optionsOf(boot).mode)
+  // Availability of the semantic index, re-read on the interactions this app
+  // already makes rather than on a timer of its own (D4/3.8).
+  const [index, setIndex] = useState<IndexAvailability>({ state: 'absent' })
+  const [scope, setScope] = useState<SemanticScope | null>(null)
+  const [weak, setWeak] = useState(false)
+  // Orientations the index supplied for the tiles on screen. Advisory: a stored
+  // axis wins, and applying one persists nothing (D5).
+  const [poses, setPoses] = useState<Record<string, IndexPose>>({})
   // Read inside `fetchListing`, which is memoised on `api` alone: several
   // effects key off its identity, so the options travel by ref rather than
   // widening its deps and re-creating it whenever a control is touched.
   const matchingRef = useRef(folderMatching)
   const kindsRef = useRef(kinds)
+  const modeRef = useRef(mode)
   matchingRef.current = folderMatching
   kindsRef.current = kinds
+  modeRef.current = mode
   const [viewer, setViewer] = useState<ViewerState | null>(null)
   const [lighting, setLightingState] = useState<LightingMode>(getLightingMode)
   // AO preference pill state (persisted per browser profile, aoToggle.ts).
@@ -217,6 +245,47 @@ export default function App() {
     [api],
   )
 
+  /**
+   * A meaning search. Shares the listing commit path's shape — same request
+   * counter, same latest-wins, same skeleton — because the results replace the
+   * grid and must behave like any other view that does (3.4).
+   */
+  const fetchSemantic = useCallback(
+    (target: string, text: string, onFail?: () => void) => {
+      const req = ++requestRef.current
+      setTarget(target)
+      setPending(true)
+      void api
+        .semanticSearch(text, target)
+        .then((res) => {
+          if (req !== requestRef.current) return
+          landedQueryRef.current = text
+          hasLandedRef.current = true
+          setPending(false)
+          setPath(target)
+          // Relevance order is the server's; the client sorts nothing (3.4).
+          setListing(res.entries)
+          setTruncated(false)
+          setScope(res.scope)
+          setWeak(res.weak)
+          setPoses(res.poses)
+          setError(null)
+          commitUrl({ path: target, flat: true, q: text, mode: 'meaning' })
+        })
+        .catch((err: unknown) => {
+          if (req !== requestRef.current) return
+          setPending(false)
+          // A 503 carries the index's own state; re-read it so the affordance
+          // and the message agree about what is wrong.
+          void api.indexAvailability({ fresh: true }).then(setIndex, () => {})
+          setError(err instanceof Error ? err.message : String(err))
+          setTarget(null)
+          onFail?.()
+        })
+    },
+    [api],
+  )
+
   const navigate = useCallback(
     (target: string) => {
       // Navigation is itself the request that clears search state (D2/D3) —
@@ -227,6 +296,9 @@ export default function App() {
       setFindText('')
       setFindOpen(false)
       setQuery(null)
+      setScope(null)
+      setWeak(false)
+      setPoses({})
       const own = { folderMatching: folderMatchingEnabled(), kinds: searchKinds() }
       setFolderMatchingState(own.folderMatching)
       setKindsState(own.kinds)
@@ -296,6 +368,25 @@ export default function App() {
     if (query !== null) fetchListing(dest, true, query, () => setQuery(landedQueryRef.current))
   }
 
+  /**
+   * The mode decides which corpus a submit consults, so changing it with a
+   * query committed re-runs that query there — search by name, find nothing,
+   * flip, and the same words go to the index without being retyped (D2).
+   */
+  function setMode(next: SearchMode): void {
+    setSearchMode(next)
+    setModeState(next)
+    modeRef.current = next
+    if (query === null) return
+    if (next === 'meaning' && index.state === 'ready') {
+      fetchSemantic(dest, query, () => setQuery(landedQueryRef.current))
+    } else {
+      setScope(null)
+      setWeak(false)
+      fetchListing(dest, true, query, () => setQuery(landedQueryRef.current))
+    }
+  }
+
   /** The kind option only selects among entries already returned — no request. */
   function setKinds(next: SearchKinds): void {
     setSearchKinds(next)
@@ -325,6 +416,13 @@ export default function App() {
     setQuery(q)
     // Targeted at the newest requested directory, not the committed path, so
     // a search submitted mid-navigation follows the user there (D3).
+    if (modeRef.current === 'meaning' && index.state === 'ready') {
+      fetchSemantic(dest, q, () => setQuery(landedQueryRef.current))
+      return
+    }
+    setScope(null)
+    setWeak(false)
+    setPoses({})
     fetchListing(dest, true, q, () => setQuery(landedQueryRef.current))
   }
 
@@ -343,6 +441,25 @@ export default function App() {
     if (viewer !== null) queue.suspend()
     else queue.resume()
   }, [viewer, queue])
+
+  // Re-read availability on mount and whenever a listing lands: the index is a
+  // separate service that may start after this app did, and a warming one must
+  // become usable without a reload. No timer of its own — these are the
+  // interactions the app already makes (3.8).
+  useEffect(() => {
+    void api.indexAvailability().then(setIndex, () => setIndex({ state: 'absent' }))
+  }, [api, path])
+
+  // A stored or URL-carried meaning mode arriving where the index cannot answer
+  // falls back to name search and says so — never a silent substitution (D2).
+  const [fellBack, setFellBack] = useState(false)
+  useEffect(() => {
+    if (mode === 'meaning' && index.state !== 'ready') {
+      setModeState('name')
+      modeRef.current = 'name'
+      setFellBack(true)
+    }
+  }, [mode, index.state])
 
   // Ctrl-F / Cmd-F takes the browser's find, deliberately: the app's own is the
   // better one on this content — it matches the full relative path a tile is
@@ -678,7 +795,15 @@ export default function App() {
     </div>
   )
 
-  const resultsLabel = query !== null && !searchHasNoMatches ? `Search results for "${query}".` : ''
+  const meaning = scope !== null
+  const resultsLabel =
+    query !== null && !searchHasNoMatches
+      ? `${meaning ? 'Meaning matches' : 'Search results'} for "${query}".${
+          // The set is weak, not the results: these are the best the index
+          // found and none of them stood out (D10 — no per-result numbers).
+          weak ? ' Nothing stood out — these are the closest.' : ''
+        }`
+      : ''
   // Counted over `byKind`, not the whole listing: the kind option is part of
   // the view's identity — in the URL, in history, shareable — so a notice that
   // counted entries the option is hiding would describe a view nobody is
@@ -796,6 +921,11 @@ export default function App() {
                   onClose={closeFind}
                 />
               )}
+              {fellBack && (
+                <p className="px-4 pt-1 text-xs text-amber-400">
+                  Meaning search is unavailable here — searching by name instead.
+                </p>
+              )}
               {noticeBar(resultsLabel, omittedNotice, listing.length > 0)}
               {searchHasNoMatches ? (
                 // An empty truncated search never finished: claiming "no match"
@@ -804,6 +934,19 @@ export default function App() {
                   <p className="mt-16 text-center text-sm text-zinc-600">
                     Nothing matched "{query}" in the part of the tree the search could cover — it
                     ran out of budget before finishing. Try searching from a deeper folder.
+                  </p>
+                ) : meaning ? (
+                  // Three outcomes, not one empty grid: nothing matched, nothing
+                  // here is indexed, or what is here is outside the corpus. Only
+                  // the second is fixed by indexing again (4.1).
+                  <p className="mt-16 text-center text-sm text-zinc-600">
+                    {scope.status === 'unindexed'
+                      ? `Nothing here has been indexed yet — meaning search covers ${scope.covers.join(', ')} files outside archives.`
+                      : `Nothing matched "${query}".${
+                          scope.status === 'partial'
+                            ? ` ${scope.indexed} of ${scope.scanned} models here are indexed.`
+                            : ''
+                        }`}
                   </p>
                 ) : (
                   <p className="mt-16 text-center text-sm text-zinc-600">
@@ -837,8 +980,12 @@ export default function App() {
           query={query}
           folderMatching={folderMatching}
           kinds={kinds}
+          mode={mode}
+          index={index}
+          scope={scope}
           onFolderMatching={setFolderMatching}
           onKinds={setKinds}
+          onMode={setMode}
         />
       </div>
       {/* Corner pill: the EXPERIMENTAL lighting-mode picker (remove those buttons
@@ -883,6 +1030,7 @@ export default function App() {
           viewer={viewer}
           camera={thumbs.get(viewer.entry.path)?.camera}
           axis={thumbs.get(viewer.entry.path)?.axis}
+          pose={poses[viewer.entry.path]}
           lighting={lighting}
           ao={ao}
           api={api}
