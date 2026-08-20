@@ -199,6 +199,39 @@ describe('meaning search', () => {
     expect(listDir).toHaveBeenCalledWith('/models', expect.objectContaining({ q: 'widget' }))
   })
 
+  it('the panel is never empty: meaning mode with no index still explains itself', async () => {
+    // The trap this prevents: a link puts the app in meaning mode on a machine
+    // with no index, and the panel hides the mode control (meaning cannot run),
+    // the status (absent is not worth reporting), and the name options (mode is
+    // meaning) — leaving nothing on screen and no way back.
+    indexAvailability.mockResolvedValue({ state: 'absent' })
+    await mountAppAtCurrentUrl('/?path=/models&flat=1&q=demon&mode=meaning', NESTED)
+    await settle()
+    await click(searchTab())
+
+    const panel = container.querySelector('aside')!
+    expect(panel.textContent).toContain('not running')
+    // …and a way out of the mode, which is the part that made it a trap.
+    expect(modeButton('name')).toBeDefined()
+
+    await click(modeButton('name')!)
+    await settle()
+    // Name options apply again, and the mode control still reads correctly.
+    expect(panel.querySelector('button[aria-label="Match folder names"]')).not.toBeNull()
+  })
+
+  it('meaning mode that cannot reach its index still offers the name options', async () => {
+    indexAvailability.mockResolvedValue({ state: 'warming', elapsed: 4 })
+    await mountAppAtCurrentUrl('/?path=/models&flat=1&q=demon&mode=meaning', NESTED)
+    await settle()
+    await click(searchTab())
+
+    const panel = container.querySelector('aside')!
+    expect(panel.textContent).toContain('starting up')
+    // A submit right now runs a name search, so its options are what apply.
+    expect(panel.querySelector('button[aria-label="Match folder names"]')).not.toBeNull()
+  })
+
   it('a link opened without the index keeps naming the meaning search', async () => {
     // Substituting a name search would answer a different question unasked, and
     // rewriting the URL to name that answer would destroy the link: no retry

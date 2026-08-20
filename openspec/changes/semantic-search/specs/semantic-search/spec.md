@@ -9,7 +9,7 @@ Meaning results SHALL replace the grid and SHALL render as an ordinary listing �
 
 The UI SHALL make clear that the grid holds meaning matches for the committed phrase and that they came from the index rather than from the directory listing. The number of results SHALL be bounded by this app's own choice of how many ranked models a grid should hold, and that bound SHALL be presented as showing the strongest matches rather than as truncation: a relevance ranking has no horizon it can run out at, so the truncation affordance a name search uses does not apply and SHALL NOT be reused.
 
-Options that do not apply to the mode in force SHALL be hidden rather than shown inert.
+Options that do not apply to the mode in force SHALL be hidden rather than shown inert — but the controls that explain the current view SHALL NOT be hidden with them. Where meaning mode is in force and the index cannot answer it, the client SHALL still show which mode is in force, a way to leave it, why it cannot run, and the options that govern the search a submit would actually perform. A mode a user can neither see nor leave is a trap, and a link can put this app in one on a machine that has no index.
 
 #### Scenario: A phrase finds models whose names do not contain it
 - **WHEN** the user commits a search in meaning mode for a phrase describing a subject
@@ -34,6 +34,10 @@ Options that do not apply to the mode in force SHALL be hidden rather than shown
 #### Scenario: Name search still answers the input's submit
 - **WHEN** the user submits while name mode is in force
 - **THEN** a recursive name search runs as before, unaffected by the presence of the index
+
+#### Scenario: An unrunnable mode still explains itself
+- **WHEN** meaning mode is in force on a machine where the index is not running
+- **THEN** the search controls show that mode, why it cannot run, a way back to name search, and the options governing the search a submit would perform — rather than hiding everything that does not apply to a mode that cannot run
 
 #### Scenario: Inapplicable options are absent
 - **WHEN** meaning mode is in force

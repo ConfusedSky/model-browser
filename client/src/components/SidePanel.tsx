@@ -64,6 +64,20 @@ export default function SidePanel({
   // Answers "why are my results strange?" without opening the panel (D5).
   const nonDefault = !folderMatching || kinds !== 'both'
 
+  const meaningRunnable = index.state === 'ready'
+  // The mode control is offered when meaning could run — and whenever meaning
+  // is *in force*, however it got there, because a mode you cannot see and
+  // cannot leave is a trap: a link can put this app in meaning mode on a
+  // machine that has no index.
+  const showMode = meaningRunnable || mode === 'meaning'
+  // Name-search options apply whenever a submit would run a name search, which
+  // includes meaning mode that cannot reach its index.
+  const nameOptionsApply = mode === 'name' || !meaningRunnable
+  // An absent index is not worth reporting to someone searching by name — most
+  // machines will never run it. It is worth reporting to someone whose mode
+  // says meaning, who is otherwise looking at a panel that explains nothing.
+  const showIndexState = !meaningRunnable && (mode === 'meaning' || index.state !== 'absent')
+
   return (
     <aside
       className={`flex h-full shrink-0 flex-col border-l border-zinc-800 bg-zinc-950 transition-all ${collapsed ? 'w-10' : 'w-80'}`}
@@ -105,7 +119,7 @@ export default function SidePanel({
                   </p>
                 )}
               </div>
-              {index.state === 'ready' && (
+              {showMode && (
                 <div className="flex gap-1" role="group" aria-label="Search by">
                   {(['name', 'meaning'] as const).map((m) => (
                     <button
@@ -123,13 +137,15 @@ export default function SidePanel({
               {/* The index's own words about itself: which of its states it is
                   in, and what it can hold at all. Absent is not an error to
                   report — most machines will never run it (D4). */}
-              {index.state !== 'ready' && index.state !== 'absent' && (
+              {showIndexState && (
                 <p className="text-zinc-500">
                   {index.state === 'warming'
                     ? `Meaning search is starting up${index.elapsed !== undefined ? ` (${Math.round(index.elapsed)}s)` : ''}…`
                     : index.state === 'volume-gone'
                       ? 'Meaning search is running, but its library volume is not mounted.'
-                      : 'Meaning search did not finish starting.'}
+                      : index.state === 'wedged'
+                        ? 'Meaning search did not finish starting.'
+                        : 'Meaning search is not running — start the index to use it.'}
                   {index.detail !== undefined && ` ${index.detail}`}
                 </p>
               )}
@@ -146,7 +162,7 @@ export default function SidePanel({
               {/* Options that cannot apply to the mode in force are absent, not
                   inert: a visible control that does nothing is worse than one
                   that is not there (D2). */}
-              <div className={mode === 'meaning' ? 'hidden' : 'space-y-2'}>
+              <div className={nameOptionsApply ? 'space-y-2' : 'hidden'}>
                 <button
                   type="button"
                   role="switch"
