@@ -2,12 +2,14 @@
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DirListing } from '../../shared/types'
+import { SKELETON_DELAY_MS } from '../src/hooks/useDelayedFlag'
 import {
   click,
-  findInput,
   container,
   deepButton,
   dir,
+  findInput,
+  flatButton,
   getThumb,
   labels,
   listDir,
@@ -18,10 +20,14 @@ import {
   pressEnter,
   searchInput,
   settle,
+  skeleton,
   tiles,
   type,
   unmountApp,
+  wait,
 } from './appHarness'
+
+const pastDelay = (): Promise<void> => wait(SKELETON_DELAY_MS + 50)
 
 vi.mock('../src/api/client', async () => (await import('./appHarness')).apiClientModule())
 vi.mock('../src/three/renderer', async (importOriginal) =>
@@ -444,6 +450,40 @@ describe('file name search', () => {
     await openFind()
 
     expect(document.activeElement).toBe(findInput())
+  })
+
+  it('Escape dismisses it from anywhere, not only from inside its own input', async () => {
+    await openFind()
+    await type(findInput()!, 'ravo')
+    tiles()[0]!.focus()
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    })
+
+    expect(findInput()).toBeNull()
+    expect(labels()).toEqual(['Alpha', 'Bravo', 'widget.stl'])
+  })
+
+  it('the control survives a listing that outlives the reveal delay', async () => {
+    // Unmounting it across the skeleton shifted the grid by its height and
+    // re-stole focus when the new listing landed — the movement 27cb4df had
+    // just removed by reserving the notice line, reachable again through a
+    // re-request with find open.
+    await openFind()
+    await type(findInput()!, 'ravo')
+
+    let release: (v: DirListing) => void = () => {}
+    listDir.mockImplementationOnce(() => new Promise<DirListing>((r) => (release = r)))
+    await click(flatButton())
+    await pastDelay()
+
+    expect(skeleton()).not.toBeNull()
+    expect(findInput()).not.toBeNull()
+
+    await act(async () => release(NESTED))
+    await settle()
+    expect(findInput()).not.toBeNull()
   })
 
   it('navigating clears the filter and the control', async () => {

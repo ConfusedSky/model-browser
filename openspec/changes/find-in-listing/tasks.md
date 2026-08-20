@@ -31,7 +31,10 @@
 ## 2. The find control
 
 - [x] 2.1 A find control that mounts on demand over the listing, with its own input,
-      focused on open, dismissed on `Escape` and by clearing
+      focused on open, dismissed on `Escape` — from anywhere while it is open, not only
+      from inside its own field, since the user may have clicked a tile since opening it.
+      Clearing the text clears the *filter* and leaves the control up; this task read as
+      though clearing dismissed it, which the spec never required and the code never did
 - [x] 2.2 `Ctrl-F` / `Cmd-F` opens it, with `preventDefault` (D2). The handler must not
       fire while focus is in another text input — search bar, path bar, chat box — nor
       while the lightbox or orbit overlay owns the keyboard. **Both halves**: the first

@@ -100,6 +100,8 @@ export default function App() {
   // Read by the window-level Ctrl-F listener, which subscribes once and would
   // otherwise close over the viewer state as it was at mount.
   const viewerRef = useRef<ViewerState | null>(null)
+  const findOpenRef = useRef(false)
+  findOpenRef.current = findOpen
   // A `model` param waiting for its listing (deep link or history forward):
   // honored once the entry exists in a landed listing, silently dropped after
   // a successful listing that lacks it (url-navigation D3).
@@ -348,6 +350,14 @@ export default function App() {
   // stop at the tiles the browser happens to have painted.
   useEffect(() => {
     function onKey(e: KeyboardEvent): void {
+      // Escape dismisses the find control from anywhere, not only from inside
+      // its own input: the user opens it, clicks a tile, and Escape is what
+      // they reach for. Not while a viewer is up — the lightbox owns Escape
+      // then, and closing a control behind it is not what was asked.
+      if (e.key === 'Escape' && findOpenRef.current && viewerRef.current === null) {
+        closeFind()
+        return
+      }
       if (e.key !== 'f' || !(e.ctrlKey || e.metaKey) || e.altKey) return
       // Not while the user is typing somewhere else for their own reasons —
       // Ctrl-F inside a query or a path is a surprise, not a shortcut.
