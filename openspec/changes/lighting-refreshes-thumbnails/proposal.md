@@ -6,12 +6,12 @@ Switching the lighting mode leaves the grid you are looking at drawn under the o
 
 This is not a bug against the spec — it is the spec. `model-thumbnails`' *Lighting-mode-aware
 thumbnails* already requires the client to treat a hit whose stored mode or rig version
-differs as needing re-render, and the client does exactly that (`useThumbnails.ts:123-124`).
+differs as needing re-render, and the client does exactly that (`useThumbnails.ts:130-131`).
 But three of that requirement's four scenarios time the upgrade to a *visit*: "the user
 switches lighting mode and **revisits** a directory", "a directory **is visited** whose cache
 entries predate lighting-mode storage" (the fourth is about lighting matching at handoff and
 says nothing about when). The effect that performs the sweep takes
-`[entries, api, lru, queue, setThumb]` (`:220`), so a mode change does not re-run it.
+`[entries, api, lru, queue, setThumb]` (`:235`), so a mode change does not re-run it.
 
 Lazy-on-visit was the right call for the case it was written against — a rig version bumped
 between releases, upgrading a library as the user wanders through it, with no moment where
@@ -32,6 +32,11 @@ guess.
   listing change. Making a toggle re-run it would blank the grid, so preserving displayed
   images is part of this change rather than a property it inherits.
 - **Camera state and axis are preserved**, exactly as on a visit — this replaces pixels.
+- **A staleness bug in the sweep is fixed on the way past** (§2b): `poseStale` asks whether a
+  pose exists rather than whether the render would use one, so a model that has been orbited
+  *and* has an index pose re-renders and re-uploads on every meaning-grid visit, permanently.
+  It predates this change; it is fixed here because this change adds a second trigger to the
+  same sweep, and because the fix belongs beside the rule it corrects.
 - **The rig-version path stays lazy.** A new rig version arrives with a new build, where
   there is no gesture to respond to and nothing on screen waiting for an answer, and
   re-rendering every visible tile at startup is work nobody asked for.

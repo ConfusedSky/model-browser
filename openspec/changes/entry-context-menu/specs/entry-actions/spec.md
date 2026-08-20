@@ -5,7 +5,7 @@
 ### Requirement: Entry actions are defined once and offered on every surface that hosts them
 The client SHALL define each action available on a listing entry once, and every surface offering that action SHALL invoke that definition rather than reimplementing it. The surfaces are a context menu raised on a grid tile and the expanded viewer's information panel. An action SHALL behave identically whichever surface invoked it.
 
-Shared actions are one-shot commands that need no rendered model. Controls that operate on a live view — those that change how the model is currently displayed and show the result as they do it — SHALL remain with that view rather than being offered as menu items.
+Shared actions are one-shot commands: each completes on its own and leaves no mode behind. Most need no rendered model at all and SHALL NOT load one; the exceptions are the actions whose whole purpose is to produce a rendering, which SHALL obtain the model the same way the listing does rather than by opening the expanded viewer. Controls that operate on a live view — those that change how the model is currently displayed and show the result as they do it — SHALL remain with that view rather than being offered as menu items.
 
 Which actions an entry offers SHALL follow from what the entry is, and an action that cannot apply to an entry SHALL be absent rather than present and inert.
 
@@ -14,8 +14,12 @@ Which actions an entry offers SHALL follow from what the entry is, and an action
 - **THEN** the same text is placed on the clipboard by the same implementation, and a write that fails is reported the same way from either surface
 
 #### Scenario: Actions that need no model do not load one
-- **WHEN** the user raises the context menu on a model tile and invokes an action
-- **THEN** the model's mesh is not fetched or rendered for that action's sake
+- **WHEN** the user raises the context menu on a model tile and invokes an action that does not produce a rendering
+- **THEN** the model's mesh is not fetched or rendered for that action's sake, and the expanded viewer does not open
+
+#### Scenario: An action that renders does not open the viewer
+- **WHEN** the user invokes an action whose purpose is to produce a rendering
+- **THEN** the model is obtained and drawn as the listing draws it, without the expanded view opening or taking over the window
 
 #### Scenario: Live-view controls stay with the live view
 - **WHEN** the user raises the context menu on a model tile
@@ -79,7 +83,7 @@ The marking SHALL be ephemeral: it SHALL NOT appear in the URL, SHALL NOT be res
 - **THEN** the folder is presented normally, with no error and nothing marked
 
 ### Requirement: Refreshing a model's thumbnail and its framing
-The client SHALL offer, on a model, an action that renders its thumbnail again under the thumbnail settings in force at that moment and replaces the cached image with the result. It SHALL render from the orientation that model would be rendered from on an ordinary visit — the camera stored for it where there is one, otherwise whatever an orientation source supplies for it, otherwise the default — and SHALL leave that orientation as it found it, storing pixels rather than a viewpoint. It SHALL be offered whether or not the cached image is considered current, since the settings a thumbnail was rendered under can change without the view it is shown in being rebuilt, and since an image can be wrong for reasons no staleness test detects.
+The client SHALL offer, on a model, an action that renders its thumbnail again under the thumbnail settings in force at that moment and replaces the cached image with the result. It SHALL render from the orientation that model would be rendered from on an ordinary visit — the camera stored for it where there is one, otherwise an orientation source's where the model has neither a camera nor an axis of its own, otherwise the default about whichever axis it has — and SHALL leave that orientation as it found it, storing pixels rather than a viewpoint. Where it renders under an orientation source, it SHALL record which recipe produced those pixels, exactly as an ordinary visit does, so that the image is not mistaken for one rendered without a source and is not re-rendered on the next visit for want of a label. It SHALL be offered whether or not the cached image is considered current, since the settings a thumbnail was rendered under can change without the view it is shown in being rebuilt, and since an image can be wrong for reasons no staleness test detects.
 
 The client SHALL also offer, on a model, a distinct action that gives up the orientation stored for that model, returning it to however it would be shown had the user never set one. It SHALL **discard** that orientation rather than store a default in its place, and render the thumbnail at whatever the model then resolves to — an index-supplied orientation where one exists for it, the default otherwise. Discarding rather than overwriting is the whole of the action: a stored default is an orientation of the user's own, and would suppress the very source that would otherwise frame the model well. The action is needed because a thumbnail is rendered *from* the stored orientation, so rendering again without discarding it reproduces the same image. Giving up the orientation SHALL also govern where the model opens in the expanded viewer, since a model has one stored orientation rather than one per surface, and SHALL take effect there within the session rather than only after the next load.
 

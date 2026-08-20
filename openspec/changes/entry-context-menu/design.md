@@ -2,16 +2,16 @@
 
 ## Context
 
-`App.tsx:349` opens `onModelPointerDown` with `if (e.button !== 0) return`, so a secondary
+`App.tsx:846` opens `onModelPointerDown` with `if (e.button !== 0) return`, so a secondary
 press already starts no orbit and mounts no overlay — the collision a context menu would
 otherwise have with the drag-to-orbit gesture does not exist.
 
-`ViewerLayer.tsx:344-357` holds `copyPath`, the one entry action that ships today. Its
+`ViewerLayer.tsx:380-393` holds `copyPath`, the one entry action that ships today. Its
 fallback is load-bearing and easy to lose in a rewrite: outside a secure context
 `navigator.clipboard` is `undefined` and the call throws **synchronously**, which a bare
 `.catch()` misses, so it selects the path text for manual copying instead.
 
-`App.tsx:60-63` holds `pendingModel`: a URL param "honored once the entry exists in a
+`App.tsx:135-138` holds `pendingModel`: a URL param "honored once the entry exists in a
 landed listing, silently dropped after a successful listing that lacks it (url-navigation
 D3)". Reveal is that pattern with a different payload.
 
@@ -61,7 +61,7 @@ and the tile already holds the row the server returned — `Grid.tsx` renders `D
 objects — so the menu hands the same object to the same function the panel does.
 
 That is why the existing fallback does not move with it. `selectPathText`
-(`ViewerLayer.tsx:331-342`) takes a `Range` over `pathRef.current`, the `<p>` at `:519`
+(`ViewerLayer.tsx:367-378`) takes a `Range` over `pathRef.current`, the `<p>` at `:555`
 that renders the path inside the info panel: manual copying needs the text rendered and
 selectable, which is a fact about the panel rather than about the path. A context menu has
 nothing on screen to select, so the fallback has no target there.
@@ -173,9 +173,9 @@ Reset framing        —               —
 Find similar is model-only because the index embeds models — and it carries a second
 condition the table cannot show: the index is a separate service that may not be running,
 and the requirement says the action is absent when it is unavailable. So the honest reading
-of the table is **three items always, and a fourth on model tiles when the index is
-answering**. A model tile with three items is not a bug; it is the degradation
-`semantic-search` designs for, arriving here.
+of the table is **three items on a container, five on a model, and a sixth on a model when
+the index is answering**. A model tile without *find similar* is not a bug; it is the
+degradation `semantic-search` designs for, arriving here.
 
 The two thumbnail items are model-only for the same structural reason: container tiles are
 drawn as glyphs, not renders, so there is no thumbnail to act on.
@@ -195,15 +195,15 @@ reached from a tile, and there is nowhere else for it to live.
 
 *Re-render thumbnail* re-renders from the model's stored camera and axis, under the
 lighting mode and `RIG_VERSION` in force now. It is not a no-op, and the reason is
-mechanical: `useThumbnails.ts:123-124` already treats a cached hit whose `lighting` or
+mechanical: `useThumbnails.ts:130-131` already treats a cached hit whose `lighting` or
 `rig` differs from the current values as stale, but that check only runs when the effect
-re-runs, and its deps are `[entries, api, lru, queue, setThumb]` (`:220`) — lighting is not
+re-runs, and its deps are `[entries, api, lru, queue, setThumb]` (`:235`) — lighting is not
 among them. So changing the mode leaves the grid in front of you rendered under the old
 one until the listing changes. Re-render is the manual trigger for that, and it also covers
 a tile whose PNG came out of a mesh that loaded badly.
 
-*Reset framing* drops the camera stored for that path back to `DEFAULT_CAMERA` and
-re-renders there. This is the badly-framed case, and it needs its own item because the
+*Reset framing* discards the orientation stored for that path and re-renders at whatever the
+model then resolves to. This is the badly-framed case, and it needs its own item because the
 thumbnail is rendered *from* that stored camera — re-rendering without dropping it
 reproduces the same picture. Note the scope: camera state is keyed by path and shared with
 the viewer (architecture D4), so this also resets where the lightbox opens that model. That
@@ -212,9 +212,9 @@ rather than *thumbnail*.
 
 **Reset framing has to discard the camera, and the store cannot express that yet.** The
 obvious implementation is to `putThumb` `DEFAULT_CAMERA` in place of the stored one. It is
-wrong, and the reason only shows up next to `semantic-search`: `cache.ts:98` merges with
+wrong, and the reason only shows up next to `semantic-search`: `cache.ts:104` merges with
 `camera: opts.camera ?? prev?.camera`, so an omitted camera means *keep* and there is no way
-to clear one — and a written default is not a discard. `useThumbnails.ts:174-175` offers a
+to clear one — and a written default is not a discard. `useThumbnails.ts:183-184` offers a
 model the index's pose only when it has neither a stored camera nor a stored axis, so
 storing a default would permanently disqualify that model from being posed. Reset framing
 would leave a model strictly worse off than one nobody had ever touched: the action for a
@@ -230,9 +230,9 @@ when the index has one and the default otherwise — and that is why reset frami
 axis too whenever a pose is there to replace it.
 
 The axis is not separable from the pose's angles. `cameraForPose`
-(`client/src/three/pose.ts:61-73`) derives camera *and* axis together, because the azimuth
+(`client/src/three/pose.ts:93-105`) derives camera *and* axis together, because the azimuth
 offset is computed in `frameFor(axis)`: a pose's angles describe a view about the pose's own
-up axis and mean something else about another. And `useThumbnails.ts:174-175` offers the pose
+up axis and mean something else about another. And `useThumbnails.ts:183-184` offers the pose
 only when *both* stored values are absent, precisely because half a pose is not a pose. So
 "hand the model back to the index" has to hand back both or neither.
 
@@ -242,6 +242,15 @@ non-null, so a malformed pose (an off-axis `up`, an `azimuth_zero` that is not p
 leaves the axis alone rather than trading a real axis for a default one. With no pose
 available there is nothing better to fall back to, so the axis stays and the model is framed
 by default about it.
+
+**"Usable" is `cameraForPose`'s answer and nothing else.** A pose with no cached front view
+is a tempting exception — its angles default to 0, so it orients the model without framing
+it — and taking it would be wrong twice. `pose.ts:110-112` keeps that pose on purpose ("the
+orientation is still worth keeping — only the angles are missing"), and the sweep already
+applies it to every model that has no orientation of its own. Reset framing's promise is that
+the model ends up where an untouched one would be; a second opinion about what counts as
+usable would break that promise and split one rule across two call sites, which is the drift
+`lighting-refreshes-thumbnails` D1 exists to prevent.
 
 This is the one place the axis moves, and it is not the affordance D1 rules out: the tile
 re-renders in place at the new orientation, so the result is visible, and the user asked for

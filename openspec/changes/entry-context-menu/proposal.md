@@ -14,7 +14,7 @@ path bar. `semantic-search` makes that worse in the good way: results come back 
 anywhere in the collection, so "where is this" stops being an occasional question.
 
 The lightbox already answers one of these. It has a copy-path affordance with a careful
-fallback (`ViewerLayer.tsx:344` — outside a secure context `navigator.clipboard` is
+fallback (`ViewerLayer.tsx:380` — outside a secure context `navigator.clipboard` is
 undefined and throws *synchronously*, so it selects the text instead). That behavior should
 not be written twice.
 
@@ -32,7 +32,7 @@ not be written twice.
   in the URL, in history, reproducible by whoever opens the link.
 - **Re-render thumbnail** — render this model's tile again under the lighting mode and rig
   version in force now, keeping its camera and axis. The staleness check for those already
-  exists (`useThumbnails.ts:123-124`); what is missing is any way to ask for it on the grid
+  exists (`useThumbnails.ts:130-131`); what is missing is any way to ask for it on the grid
   you are looking at, since the sweep does not re-run when the mode changes (D7).
 - **Reset framing** — *discard* the orientation stored for the model and re-render at
   whatever it then resolves to: the semantic index's pose where there is one for it, the
@@ -73,10 +73,10 @@ not be written twice.
 
 ## Impact
 
-- `client/src/components/Grid.tsx` — the context-menu trigger. `App.tsx:349` already returns
+- `client/src/components/Grid.tsx` — the context-menu trigger. `App.tsx:846` already returns
   early on `e.button !== 0`, so a secondary press starts no orbit and mounts no overlay.
 - `client/src/App.tsx` — reveal's navigate-then-locate, which extends the `pendingModel`
-  pattern (`:60`, "honored once the entry exists in a landed listing, silently dropped after
+  pattern (`:135`, "honored once the entry exists in a landed listing, silently dropped after
   a successful listing that lacks it").
 - `client/src/viewer/ViewerLayer.tsx` — copy-path moves out to the shared action module.
 - `client/src/api/client.ts` — the similar call, alongside `semantic-search`'s.
