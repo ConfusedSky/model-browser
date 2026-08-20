@@ -69,7 +69,13 @@ export class ThumbCache {
     const key = this.key(path)
     const meta = await this.readMeta(key)
     if (meta === null) return { status: 'miss' }
-    const axis = meta.axis ?? 'y'
+    // Not defaulted here: the *absence* of a stored axis is information a
+    // client needs. Defaulting it to 'y' made "nothing stored" indistinguishable
+    // from "stored as y", so a model whose thumbnail was rendered at an
+    // index-supplied pose (which deliberately stores no axis) reported `y`, and
+    // the viewer abandoned the pose the moment it opened. Every caller already
+    // applies its own default.
+    const axis = meta.axis
     const lighting = meta.lighting
     const rig = meta.rig
     const posed = meta.posed

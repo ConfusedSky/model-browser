@@ -185,6 +185,39 @@ describe('orbit → thumbnail handoff', () => {
   }, 8000)
 })
 
+describe('an index pose survives into the live session', () => {
+  it('a posed thumbnail stores no axis, and the viewer must not read that as y', async () => {
+    // The symptom: the tile rendered at the pose and the live view abandoned it
+    // the moment you dragged. A posed thumbnail deliberately stores no axis,
+    // and the cache used to answer 'y' for that absence, so the viewer read a
+    // stored orientation where there was none. File Y-up is the '-z' spindle in
+    // the scene, so the axis picker must show Z, flipped.
+    const { props } = makeProps()
+    const posed: React.ComponentProps<typeof ViewerLayer> = {
+      ...props,
+      viewer: { ...props.viewer, mode: 'lightbox' as const },
+      api: {
+        getThumb: vi.fn().mockResolvedValue({ status: 'hit', posed: 2 }),
+      } as unknown as ApiClient,
+      pose: {
+        up: [0, 1, 0] as [number, number, number],
+        azimuth_zero: [1, 0, 0] as [number, number, number],
+        source: 'siglip',
+        confidence: 0.9,
+        front: { view: 6, azimuth_deg: 270, elevation_deg: 20 },
+      },
+    }
+    await render(posed as unknown as ReturnType<typeof makeProps>['props'])
+
+    const pressed = Array.from(
+      container!.querySelectorAll<HTMLButtonElement>('[aria-label="Orbit axis"] button'),
+    ).filter((b) => b.getAttribute('aria-pressed') === 'true')
+    // Z *and* the flip toggle: the spindle is '-z', not 'z'. Asserting both is
+    // what distinguishes the right axis from its negation.
+    expect(pressed.map((b) => b.textContent)).toEqual(['Z', 'flip'])
+  })
+})
+
 describe('an index pose is advisory', () => {
   it('opening at a pose and closing without touching it stores no camera', async () => {
     // The failure this pins: the index's suggestion becoming the user's stored

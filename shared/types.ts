@@ -50,7 +50,11 @@ export type LightingMode = 'axis' | 'camera'
 export interface ThumbGetResponse {
   status: ThumbStatus
   camera?: CameraState
-  /** Stored spindle axis; absent when the path is unknown (read as 'y'). */
+  /**
+   * Stored spindle axis, absent when none is stored — which is not the same as
+   * 'y'. A caller defaults it; a caller that needs to know whether the user has
+   * chosen an orientation reads the absence.
+   */
   axis?: OrbitAxis
   /** Lighting mode the PNG was rendered with; absent on pre-lighting entries. */
   lighting?: LightingMode

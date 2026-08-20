@@ -49,13 +49,15 @@ describe('ThumbCache maintenance', () => {
     expect(readdirSync(cache.dir)).toHaveLength(0)
   })
 
-  it('stores the axis beside the camera and defaults a missing axis to y', async () => {
+  it('stores the axis beside the camera and reports a missing one as missing', async () => {
     const cache = tempCache()
     const fx = makeFixtures()
     cleanups.push(fx.dir)
     const path = join(fx.dir, 'loose.stl')
     await cache.put(path, { mtime: 1, png: Buffer.from('png'), camera: CAM })
-    expect((await cache.get(path, 1)).axis).toBe('y') // pre-axis entry reads as +Y
+    // A pre-axis entry stores none, and says so — callers read 'y' from that,
+    // but only a caller can tell whether the absence matters to it.
+    expect((await cache.get(path, 1)).axis).toBeUndefined()
     await cache.put(path, { mtime: 1, camera: CAM, axis: '-x' })
     const res = await cache.get(path, 1)
     expect(res.axis).toBe('-x')

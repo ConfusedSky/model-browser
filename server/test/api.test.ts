@@ -192,9 +192,12 @@ describe('thumbnail cache API', () => {
     expect(body.camera).toEqual(cam2)
   })
 
-  it('an entry without a stored axis is served as y', async () => {
+  it('an entry without a stored axis reports none, rather than reporting y', async () => {
+    // The absence is information: a caller distinguishing "the user chose an
+    // orientation" from "nothing is stored" cannot do it if the cache answers
+    // 'y' either way. Defaulting is the caller's job, and every caller does it.
     const res = await get(`/api/thumb?path=${encodeURIComponent(path)}&mtime=111`)
-    expect(((await res.json()) as ThumbGetResponse).axis).toBe('y')
+    expect(((await res.json()) as ThumbGetResponse).axis).toBeUndefined()
   })
 
   it('put stores the axis and get serves it back', async () => {

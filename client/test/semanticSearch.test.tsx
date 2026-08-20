@@ -21,6 +21,7 @@ import {
   searchInput,
   semanticSearch,
   settle,
+  tiles,
   type,
   unmountApp,
 } from './appHarness'
