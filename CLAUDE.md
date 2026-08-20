@@ -30,6 +30,11 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   done when the code lands — leave them open until the pixels are judged
 - Archive changes with plain `openspec archive` (it applies delta specs); if the deltas
   were already synced via /opsx:sync, archive with `--skip-specs` or it errors on collisions
+- `openspec archive` refuses to drop a scenario the MODIFIED block does not carry — a
+  MODIFIED requirement replaces prose *and* scenarios. Re-base every delta against
+  **current** main first (diff scenario titles), because main moves under long-lived
+  deltas: nothing is wrong when they are written. To retire a scenario a change
+  invalidates, rewrite it to state what the change preserves rather than deleting it
 
 ## Architecture constraints (violating these breaks recorded design decisions)
 

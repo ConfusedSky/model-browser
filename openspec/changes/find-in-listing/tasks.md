@@ -53,6 +53,11 @@
 
 ## 4. Verification
 
+- [ ] 4.0 **Before archiving**, diff this delta's scenario titles against current
+      `openspec/specs/file-search/spec.md`: a MODIFIED requirement replaces scenarios, and
+      main moved under this delta once already (`search-matches-folder-names` repurposed
+      "Matching is on the file name" during its own archive, after this was written)
+
 - [x] 4.1 `bun run typecheck` and `bun run test` pass across workspaces
 - [x] 4.2 Manual E2E via Playwright MCP: `Ctrl-F` over a large listing narrows it; the
       browser's own find does not open; `Escape` restores; a committed search's text is

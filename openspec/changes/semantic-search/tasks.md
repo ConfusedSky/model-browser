@@ -155,6 +155,11 @@
 
 ## 7. Verification
 
+- [ ] 7.0 **Before archiving**, diff this delta's scenario titles against current
+      `openspec/specs/file-search/spec.md`: a MODIFIED requirement replaces scenarios, and
+      main moved under this delta once already (`search-matches-folder-names` repurposed
+      "Matching is on the file name" during its own archive, after this was written)
+
 - [ ] 7.1 `bun run typecheck` and `bun run test` pass across workspaces
 - [ ] 7.2 Server tests with the index stubbed: ready, loading, absent, timeout, and a
       response holding stale hits — each producing its own client-visible state
