@@ -31,11 +31,18 @@ entries.
 
 So the design is not priced against a ~32 s cold walk. It is priced against *not knowing*
 what a cold walk costs on the machine it lands on, where the fast case is 2.92 s and the
-slow case is the one the user is complaining about. That also raises the stakes on D4's
-recorded risk: exfat timestamp granularity was a quirk of one volume, and it is now a class
-— FAT-family and network filesystems generally have coarser or less dependable mtimes than
-ext4 — so the readdir-fingerprint fallback stops being a contingency and becomes something
-that will be exercised somewhere.
+slow case is the one the user is complaining about. That also bears on D4's recorded
+risk: exfat timestamp granularity was a quirk of one volume, and it is a class — FAT-family
+and network filesystems generally have coarser or less dependable mtimes than ext4.
+
+**This is not licence to generalise now.** The scope, as stated: finish the feature,
+optimise against the machine in hand, and prefer the general form only where it is free. So
+D4's readdir-fingerprint fallback stays what it was — a contingency, validated against the
+volume actually attached when this is implemented — rather than work to do up front because
+a wider range exists. What changes is that it is known to be load-bearing for someone
+eventually, so it should not be deleted as dead weight if this machine turns out not to need
+it. (The narrower scoping reached this session via a parallel one; the wider target came
+from Masa directly.)
 
 Task 7.2 still asks for both volumes. When the spinning one is unattached, measure what is
 present and record which column is missing rather than silently reporting one number.
