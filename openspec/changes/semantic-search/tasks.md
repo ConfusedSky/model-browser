@@ -16,18 +16,21 @@
 
 ## 1. Server: reaching the index
 
-- [ ] 1.1 An index-client module in `server/src`: base URL from an env setting (absent =
-      feature off), `fetch` with `AbortSignal.timeout`, no Bun-only APIs — the Hono app
+- [ ] 1.1 An index-client module in `server/src`: base URL from an env setting defaulting to
+      `http://127.0.0.1:8077` (the setting cleared = feature off), `fetch` with
+      `AbortSignal.timeout`, no Bun-only APIs — the Hono app
       must still run on Node unchanged (architecture D1). Note `envLimit` (`listing.ts:265`)
       is an unexported numeric parser and `app.ts` has no config plumbing at all, so this
       is a new helper in its spirit, not a reuse of it
 - [ ] 1.2 Availability state: probe `/status` at startup, on failure, on explicit retry,
       and on a bounded backoff while the index reports itself warming; never per query
-      (D4). Model **four** states — ready, warming, absent, and running-with-its-volume-gone
-      (`status.volume.present === false`, the likeliest failure on removable media and the
-      only one the user repairs in a second) — from the `ready` flag and `volume`,
-      and hold `collection_root` from the ready answer. The backoff is what makes an index
-      that was loading at startup become available without the user intervening
+      (D4). Model **four** states, each read from the wire rather than guessed: absent
+      (connection refused — the only one `/status` cannot report), warming (`ready: false`,
+      or a 503 from a query racing the probe; ~16 s for SigLIP), volume-gone
+      (`status.volume.present === false` — the likeliest failure on removable media and the
+      one the user repairs in a second), ready. Hold `collection_root` from the ready
+      answer. The backoff is what makes an index that was loading at startup become
+      available without the user intervening
 - [ ] 1.3 Use elapsed-since-start from `/status` to stop re-probing a load that has plainly
       gone wrong, and to distinguish *warming* from *wedged* in what the UI says. Treat it
       as elapsed only — the index does not estimate remaining time and this app SHALL NOT

@@ -118,8 +118,17 @@ is fully browsable and wholly unindexable.
 
 ### D4: Availability is probed and cached, not discovered per query
 
-The probe is `GET /status`, issued at server start, on failure, on explicit retry, and —
-while the index reports itself warming — on a bounded backoff. Never per query. Two states
+The probe is `GET /status` — the index listens on `127.0.0.1:8077`, started by hand and
+never by `bun run dev` — issued at server start, on failure, on explicit retry, and while
+the index reports itself warming, on a bounded backoff. Never per query.
+
+**The four states are distinguished on the wire, not guessed at.** A refused connection
+means nobody started it; a reply with `ready: false`, or a 503 from a query, means it is
+running and loading (~16 s for SigLIP); `volume.present === false` means it is loaded but
+its library's storage is gone; anything else is ready. Only the first is invisible to
+`/status`, which is why "the request failed" is not enough information to act on: the four
+want different words and different retry behaviour, and three of them are fixed by
+something the user can do. Two states
 must be distinguished, and a probe that only checks for a response cannot: SigLIP takes
 seconds to load, so a *warming* index looks exactly like an *absent* one, and the
 affordance would flicker on every restart of that service. The index binds before it warms

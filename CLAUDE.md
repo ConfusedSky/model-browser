@@ -7,6 +7,10 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
 ## Commands
 
 - `bun run dev` - start server + client together
+- Semantic search needs a second server, not started by `bun run dev`:
+  `cd ~/Documents/tests/mini-classify && .venv/bin/python serve_api.py --cache-dir embed-cache2 --port 8077`
+  — it answers `/status` at once with `ready:false` and 503s queries for ~16s
+  while SigLIP loads, so a connection refusal means not started, not warming
 - `bun run test` / `bun run typecheck` - vitest + tsc across workspaces
 - `scripts/spec-diff.sh [change | capability change [requirement]]` - diff delta specs
   vs main specs (no args = all active changes; prints `new spec <path>` for new capabilities)
@@ -30,11 +34,17 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   done when the code lands — leave them open until the pixels are judged
 - Archive changes with plain `openspec archive` (it applies delta specs); if the deltas
   were already synced via /opsx:sync, archive with `--skip-specs` or it errors on collisions
-- `openspec archive` refuses to drop a scenario the MODIFIED block does not carry — a
-  MODIFIED requirement replaces prose *and* scenarios. Re-base every delta against
-  **current** main first (diff scenario titles), because main moves under long-lived
-  deltas: nothing is wrong when they are written. To retire a scenario a change
-  invalidates, rewrite it to state what the change preserves rather than deleting it
+- `openspec archive` needs `--yes` non-interactively, and refuses to drop a scenario the
+  MODIFIED block does not carry (MODIFIED replaces prose *and* scenarios). Gate every
+  archive on a dry run — `T=$(mktemp -d); cp -r openspec $T/; (cd $T && openspec archive
+  <change> --yes)` — **one fresh copy per change**: a successful archive mutates the copy,
+  so a loop over one copy reports phantom blocks for later changes. Main moves under
+  long-lived deltas, so nothing is wrong when they are written. To retire a scenario a
+  change invalidates, rewrite its body under the same title — RENAMED/REMOVED exist for
+  requirements, never for scenarios
+- A tasks.md line claiming test coverage is not coverage — grep the test file before
+  checking it off; `search-options` 5.1 claimed the truncation notice was tested, it was
+  not, and the notice contradicted its own requirement through two reviews
 
 ## Architecture constraints (violating these breaks recorded design decisions)
 
@@ -94,6 +104,8 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
     page.evaluate is the main world — install fetch wrappers/globals there
   - Vite (5173) binds IPv6-only: curl 127.0.0.1:5173 refuses while localhost/[::1]
     works; the API (3177) binds IPv4 127.0.0.1
+  - Verify layout claims by measuring (`getBoundingClientRect` via `browser_evaluate`), not
+    screenshots — the MCP screenshot file may not land anywhere findable in the repo
   - Generated STL fixtures need outward *winding* (vertex order): parsing ignores stored
     facet normals and recomputes from winding, so a zeroed normal field is fine — but
     inverted winding still mirrors lighting left/right (false bugs in lighting assertions)
