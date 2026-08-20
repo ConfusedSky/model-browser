@@ -18,6 +18,8 @@ export interface ThumbResult {
   lighting?: LightingMode
   /** Pixel-recipe (rig) version the PNG was rendered with; absent on pre-rim entries. */
   rig?: number
+  /** Whether the PNG was rendered at an index-supplied orientation. */
+  posed?: boolean
   /** Object URL for the cached PNG, present on 'hit'. */
   pngUrl?: string
 }
@@ -30,6 +32,7 @@ export interface ThumbSave {
   axis?: OrbitAxis
   lighting?: LightingMode
   rig?: number
+  posed?: boolean
 }
 
 /**
@@ -142,6 +145,7 @@ export class HttpApiClient implements ApiClient {
       axis: body.axis,
       lighting: body.lighting,
       rig: body.rig,
+      posed: body.posed,
       pngUrl: body.png !== undefined ? base64ToBlobUrl(body.png) : undefined,
     }
   }
@@ -158,6 +162,7 @@ export class HttpApiClient implements ApiClient {
         axis: save.axis,
         lighting: save.lighting,
         rig: save.rig,
+        posed: save.posed,
       }),
     })
     if (!res.ok) {

@@ -117,11 +117,19 @@ export function useThumbnails(
               if (cached.pngUrl !== undefined) URL.revokeObjectURL(cached.pngUrl)
               return
             }
+            // A pose is an input to the pixels that path+mtime does not carry —
+            // the same shape as a RIG_VERSION bump. Without this, a thumbnail
+            // rendered before the index had an opinion keeps its default angle
+            // forever, and the orientation appears only once the user opens the
+            // model and the lightbox's close persists a posed snapshot.
+            const wantsPose = poses[entry.path] !== undefined
+            const poseStale = wantsPose && cached.posed !== true
             if (
               cached.status === 'hit' &&
               cached.pngUrl !== undefined &&
               cached.lighting === getLightingMode() &&
-              cached.rig === RIG_VERSION
+              cached.rig === RIG_VERSION &&
+              !poseStale
             ) {
               setThumb(entry.path, {
                 status: 'ready',
@@ -179,7 +187,14 @@ export function useThumbnails(
                   const axis = cached.axis ?? posed?.axis ?? 'y'
                   const lighting = getLightingMode() // the mode this render uses
                   const png = await renderThumbnail(object, camera, axis)
-                  await api.putThumb({ path: entry.path, mtime: entry.mtime, png, lighting, rig: RIG_VERSION })
+                  await api.putThumb({
+                    path: entry.path,
+                    mtime: entry.mtime,
+                    png,
+                    lighting,
+                    rig: RIG_VERSION,
+                    posed: posed !== null,
+                  })
                   if (!alive) return dropStale()
                   setThumb(entry.path, {
                     status: 'ready',

@@ -16,6 +16,8 @@ interface Meta {
   lighting?: LightingMode
   /** Pixel-recipe (rig) version the PNG was rendered with; stored and echoed, never interpreted. */
   rig?: number
+  /** Whether the PNG was rendered at an index-supplied pose; same contract as `rig`. */
+  posed?: boolean
 }
 
 const DEFAULT_CAP = 2 * 1024 ** 3
@@ -70,12 +72,13 @@ export class ThumbCache {
     const axis = meta.axis ?? 'y'
     const lighting = meta.lighting
     const rig = meta.rig
-    if (meta.mtime !== mtime) return { status: meta.camera !== undefined || meta.mtime !== undefined ? 'stale' : 'miss', camera: meta.camera, axis, lighting, rig }
+    const posed = meta.posed
+    if (meta.mtime !== mtime) return { status: meta.camera !== undefined || meta.mtime !== undefined ? 'stale' : 'miss', camera: meta.camera, axis, lighting, rig, posed }
     let png
     try {
       png = await readFile(this.pngFile(key))
     } catch {
-      return { status: 'stale', camera: meta.camera, axis, lighting, rig }
+      return { status: 'stale', camera: meta.camera, axis, lighting, rig, posed }
     }
     // LRU clock for size-cap eviction is the png file's mtime. Bumping it via
     // utimes (instead of rewriting the meta json) keeps reads race-free
@@ -83,10 +86,10 @@ export class ThumbCache {
     // caught mid-write by the sweep's meta parse.
     const now = new Date()
     await utimes(this.pngFile(key), now, now).catch(() => {})
-    return { status: 'hit', camera: meta.camera, axis, lighting, rig, png: png.toString('base64') }
+    return { status: 'hit', camera: meta.camera, axis, lighting, rig, posed, png: png.toString('base64') }
   }
 
-  async put(path: string, opts: { mtime: number; png?: Buffer; camera?: CameraState; axis?: OrbitAxis; lighting?: LightingMode; rig?: number }): Promise<void> {
+  async put(path: string, opts: { mtime: number; png?: Buffer; camera?: CameraState; axis?: OrbitAxis; lighting?: LightingMode; rig?: number; posed?: boolean }): Promise<void> {
     const key = this.key(path)
     const prev = await this.readMeta(key)
     const meta: Meta = {
@@ -98,6 +101,7 @@ export class ThumbCache {
       // PNG without declaring them must not keep old labels on new pixels.
       lighting: opts.png !== undefined ? opts.lighting : (opts.lighting ?? prev?.lighting),
       rig: opts.png !== undefined ? opts.rig : (opts.rig ?? prev?.rig),
+      posed: opts.png !== undefined ? opts.posed : (opts.posed ?? prev?.posed),
     }
     if (opts.png !== undefined) {
       await mkdir(this.dir, { recursive: true })

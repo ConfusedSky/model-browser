@@ -158,6 +158,7 @@ export function createApp(cache: ThumbCache = new ThumbCache()): Hono {
       axis: body.axis,
       lighting: body.lighting,
       rig: body.rig,
+      posed: body.posed,
     })
     return c.json({ ok: true })
   })

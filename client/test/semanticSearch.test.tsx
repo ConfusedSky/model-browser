@@ -25,6 +25,7 @@ import {
   unmountApp,
 } from './appHarness'
 import { setSearchMode } from '../src/lib/searchOptions'
+import { RIG_VERSION } from '../src/three/renderer'
 
 vi.mock('../src/api/client', async () => (await import('./appHarness')).apiClientModule())
 vi.mock('../src/three/renderer', async (importOriginal) =>
@@ -315,6 +316,44 @@ describe('meaning search', () => {
     await settle()
     await click(searchTab())
     expect(modeButton('meaning')).toBeUndefined()
+  })
+
+  it('a thumbnail cached before the pose existed is re-rendered, not kept', async () => {
+    // The symptom this fixes: tiles browsed earlier stay at the default angle
+    // because path+mtime still match, and the orientation appears only after
+    // opening each model, when the lightbox's close persists a posed snapshot.
+    // The pose is an input to the pixels that the key does not carry.
+    const POSE = {
+      up: [0, 1, 0] as [number, number, number],
+      azimuth_zero: [1, 0, 0] as [number, number, number],
+      source: 'siglip',
+      confidence: 0.9,
+      front: { view: 5, azimuth_deg: 225, elevation_deg: 20 },
+    }
+    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models', covers: ['stl'] })
+    semanticSearch.mockResolvedValue({
+      ...MEANING,
+      entries: [model('Kits/hero.stl')],
+      poses: { '/models/Kits/hero.stl': POSE },
+    })
+    // A cached thumbnail from before: current lighting and rig, no pose.
+    getThumb.mockResolvedValue({
+      status: 'hit',
+      pngUrl: 'blob:old',
+      lighting: 'axis',
+      rig: RIG_VERSION,
+      posed: undefined,
+    })
+    await mountApp('/models', NESTED)
+    await settle()
+    await click(searchTab())
+    await click(modeButton('meaning')!)
+    await type(searchInput(), 'hero')
+    await pressEnter(searchInput())
+    await settle()
+
+    expect(renderThumbnail).toHaveBeenCalled()
+    expect(putThumb.mock.calls.at(-1)?.[0]?.posed).toBe(true)
   })
 
   it('a link opened without the index keeps naming the meaning search', async () => {
