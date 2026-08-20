@@ -134,6 +134,20 @@ user as a fact, but as the only cheap way to tell *warming* from *wedged* and to
 re-probing a load that has plainly gone wrong. A query that races the probe and gets a 503
 is folded back into the warming state, not surfaced as a failure.
 
+**There is a fourth state, and it is the one this hardware makes likely.** The implemented
+`/status` reports `volume: {present, root, missing}`, and the index refuses to serve when
+its library's storage is gone rather than answering from a pose cache it cannot check
+against the filesystem. So "running, ready to answer, but the drive holding the collection
+is unplugged" is a real condition, distinct from warming and from absent — and on a library
+that lives on removable media it is the likeliest of the failures. It is also the only one
+whose repair the user can perform in a second, which makes conflating it with "the index is
+not running" the expensive mistake.
+
+Where the index supplies a reason and a hint (`ScopeError.as_dict()` carries `usable`,
+`reason`, `hint`), prefer them to a message invented here. It knows whether the answer is
+"run the classifier", "plug the drive in", or "this cache was built with different
+settings"; this app knows only that a call failed.
+
 `collection_root` from `/status` is the only scoping there is: this app has no configured
 root — `/api/dir` accepts any absolute path and completion spans the filesystem — so
 whether a browsed path is even addressable by the index is a question only `/status` can

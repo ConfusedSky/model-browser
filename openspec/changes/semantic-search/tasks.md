@@ -1,7 +1,11 @@
 # Tasks — semantic-search
 
-> **Ordering.** Blocked on the index side: `mini-classify`'s `docs/api/surface.md` is a
-> proposal and nothing behind it is implemented. **Hard dependencies, all UI-side:**
+> **Ordering.** No longer blocked on the index: it is implemented and verified against this
+> change's assumptions (2026-08-19) — `src/api.py` serves `/status`, `/query`, `/similar`,
+> `/reload`; `/status` carries `ready` from process start plus `elapsed`; the scope block is
+> `{path, status, n_indexed, n_scanned, covers}`; hits carry `rel_path`; `pose` carries
+> `azimuth_zero` as `rotation_to_z_up(up).T @ [1,0,0]`. Start the server before working
+> section 1 rather than stubbing it. **Hard dependencies, all UI-side:**
 > `search-matches-folder-names` (this change MODIFIES the same `file-search` requirement),
 > `search-options` (the mode is one of its options and lives in the panel tab it builds),
 > and `find-in-listing` (which separates filtering from the search input — without it the
@@ -19,7 +23,9 @@
       is a new helper in its spirit, not a reuse of it
 - [ ] 1.2 Availability state: probe `/status` at startup, on failure, on explicit retry,
       and on a bounded backoff while the index reports itself warming; never per query
-      (D4). Model three states — ready, warming, absent — from the required `ready` flag,
+      (D4). Model **four** states — ready, warming, absent, and running-with-its-volume-gone
+      (`status.volume.present === false`, the likeliest failure on removable media and the
+      only one the user repairs in a second) — from the `ready` flag and `volume`,
       and hold `collection_root` from the ready answer. The backoff is what makes an index
       that was loading at startup become available without the user intervening
 - [ ] 1.3 Use elapsed-since-start from `/status` to stop re-probing a load that has plainly
