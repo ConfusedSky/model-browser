@@ -40,6 +40,10 @@ On an explicit submit action — distinct from typing, which only filters — th
 - **WHEN** the user deep-searches a fragment that matches models several directories down and inside zips
 - **THEN** the matching models are returned with relative-path names in relative-path order, and no non-matching models appear
 
+#### Scenario: Matching is on the file name
+- **WHEN** a model's own file name contains the query while nothing in its path does
+- **THEN** it is in the results, as it was before folders could match — widening the predicate adds matches rather than replacing them
+
 #### Scenario: Matching includes containing folders
 - **WHEN** a model's containing folder matches the query but its own file name does not
 - **THEN** that model is in the deep-search results, named by its relative path, and the matching folder is there too as a navigable tile

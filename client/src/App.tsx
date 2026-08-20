@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type * as THREE from 'three'
 import type { DirEntry, LightingMode } from '../../shared/types'
 import { HttpApiClient } from './api/client'
-import ChatPanel from './components/ChatPanel'
 import Grid from './components/Grid'
+import SidePanel from './components/SidePanel'
 import PathBar from './components/PathBar'
 import { SKELETON_DELAY_MS, useDelayedFlag } from './hooks/useDelayedFlag'
 import { useThumbnails } from './hooks/useThumbnails'
@@ -11,6 +11,13 @@ import { GestureTracker } from './lib/gesture'
 import { createHoverWarmer } from './lib/hover'
 import { fitSquareBox, type Box } from './lib/layout'
 import { getLastPath, pushRecent } from './lib/recents'
+import {
+  folderMatchingEnabled,
+  searchKinds,
+  setFolderMatchingEnabled,
+  setSearchKinds,
+  type SearchKinds,
+} from './lib/searchOptions'
 import { commitUrl, isLightboxEntry, LIGHTBOX_ENTRY, parseUrl } from './lib/urlState'
 import { MeshLru } from './three/lru'
 import { disposeModel, embedded3mfThumbnail, formatOf, geometryBytes, parseModel } from './three/models'
@@ -61,6 +68,21 @@ export default function App() {
   // honored once the entry exists in a landed listing, silently dropped after
   // a successful listing that lacks it (url-navigation D3).
   const [pendingModel, setPendingModel] = useState<string | null>(boot.model ?? null)
+  // Search options: the URL governs the view it names and is NOT written back
+  // to storage — a link from someone else must not reconfigure this profile
+  // (D2). Absent from the URL means the stored preference, which is what a
+  // fresh search in this profile uses.
+  const [folderMatching, setFolderMatchingState] = useState(
+    boot.folderMatching ?? folderMatchingEnabled(),
+  )
+  const [kinds, setKindsState] = useState<SearchKinds>(boot.kinds ?? searchKinds())
+  // Read inside `fetchListing`, which is memoised on `api` alone: several
+  // effects key off its identity, so the options travel by ref rather than
+  // widening its deps and re-creating it whenever a control is touched.
+  const matchingRef = useRef(folderMatching)
+  const kindsRef = useRef(kinds)
+  matchingRef.current = folderMatching
+  kindsRef.current = kinds
   const [viewer, setViewer] = useState<ViewerState | null>(null)
   const [lighting, setLightingState] = useState<LightingMode>(getLightingMode)
   // AO preference pill state (persisted per browser profile, aoToggle.ts).
@@ -109,7 +131,14 @@ export default function App() {
       setTarget(target)
       setPending(true)
       void api
-        .listDir(target, { flat: asFlat, q: q ?? undefined })
+        // Sent only when off, so an ordinary request is identical to what it
+        // was before the option existed — absence means the default at every
+        // layer: this call, the query string, and the URL.
+        .listDir(target, {
+          flat: asFlat,
+          q: q ?? undefined,
+          folderMatching: matchingRef.current ? undefined : false,
+        })
         .then((res) => {
           if (req !== requestRef.current) return
           landedQueryRef.current = q
@@ -125,8 +154,19 @@ export default function App() {
           // and keeps the URL's own `model`; a user navigation pushes, and any
           // lightbox is necessarily closed, so `model` drops.
           const restoring = req === restoreReqRef.current
+          // Options appear only alongside a committed query and only when not
+          // the default: they describe which entries this view contains, and
+          // over a plain listing they select nothing (D1/D4).
+          const searching = q !== null && q !== ''
           commitUrl(
-            { path: target, flat: asFlat, q: q ?? undefined, model: restoring ? parseUrl().model : undefined },
+            {
+              path: target,
+              flat: asFlat,
+              q: q ?? undefined,
+              folderMatching: searching && !matchingRef.current ? false : undefined,
+              kinds: searching && kindsRef.current !== 'both' ? kindsRef.current : undefined,
+              model: restoring ? parseUrl().model : undefined,
+            },
             { replace: restoring },
           )
         })
@@ -180,6 +220,36 @@ export default function App() {
     if (value.trim() === '' && query !== null) {
       setQuery(null)
       fetchListing(dest, flat, null)
+    }
+  }
+
+  /**
+   * Folder matching decides what the *server* returns, so changing it with a
+   * query committed re-issues that query — the `toggleFlat` precedent:
+   * re-request, land, commit (D3). Operating a control is also the only thing
+   * that writes to storage (D2).
+   */
+  function setFolderMatching(on: boolean): void {
+    setFolderMatchingEnabled(on)
+    setFolderMatchingState(on)
+    matchingRef.current = on
+    if (query !== null) fetchListing(dest, true, query, () => setQuery(landedQueryRef.current))
+  }
+
+  /** The kind option only selects among entries already returned — no request. */
+  function setKinds(next: SearchKinds): void {
+    setSearchKinds(next)
+    setKindsState(next)
+    kindsRef.current = next
+    // The URL names the view, and this changed which entries it shows.
+    if (query !== null) {
+      commitUrl({
+        path,
+        flat: true,
+        q: query,
+        folderMatching: folderMatching ? undefined : false,
+        kinds: next === 'both' ? undefined : next,
+      })
     }
   }
 
@@ -322,11 +392,27 @@ export default function App() {
   // is no filter (the same rule a submitted query follows), and a trailing
   // space mid-word must not blank a grid full of names that contain spaces.
   const needle = filter.trim().toLowerCase()
-  const filteredListing = useMemo(() => {
-    if (needle === '') return listing
-    return listing.filter((e) => e.name.toLowerCase().includes(needle))
-  }, [listing, needle])
-  const filterHidesAll = needle !== '' && listing.length > 0 && filteredListing.length === 0
+  // Two layers over the same listing: the kind option (a committed view
+  // setting, in the URL) and the live name filter (ephemeral). Both are view
+  // state over what the server returned — neither issues a request. Kept as a
+  // pair because an empty grid has to name the one that emptied it, and the
+  // kind restriction runs first: if it left nothing, the filter never had a
+  // chance to hide anything.
+  const { byKind, filteredListing } = useMemo(() => {
+    const byKind =
+      query !== null && kinds !== 'both'
+        ? listing.filter((e) => (kinds === 'folders' ? e.kind !== 'model' : e.kind === 'model'))
+        : listing
+    const filteredListing =
+      needle === '' ? byKind : byKind.filter((e) => e.name.toLowerCase().includes(needle))
+    return { byKind, filteredListing }
+  }, [listing, needle, kinds, query])
+  // A kind restriction can empty the grid too, and it is a different sentence:
+  // the results are there, this view is not showing them. It is decided first
+  // and from `byKind`, so the message names the control that actually hid the
+  // entries rather than the one that happened to run last.
+  const kindHidesAll = listing.length > 0 && byKind.length === 0
+  const filterHidesAll = needle !== '' && byKind.length > 0 && filteredListing.length === 0
   const searchHasNoMatches = query !== null && listing.length === 0
 
   /**
@@ -535,6 +621,12 @@ export default function App() {
                     Nothing matched "{query}".
                   </p>
                 )
+              ) : kindHidesAll ? (
+                <p className="mt-16 text-center text-sm text-zinc-600">
+                  {kinds === 'folders'
+                    ? 'No folders matched — the results are models only.'
+                    : 'No models matched — the results are folders only.'}
+                </p>
               ) : filterHidesAll ? (
                 <p className="mt-16 text-center text-sm text-zinc-600">
                   The filter is hiding everything below.
@@ -552,7 +644,13 @@ export default function App() {
             </>
           )}
         </main>
-        <ChatPanel />
+        <SidePanel
+          query={query}
+          folderMatching={folderMatching}
+          kinds={kinds}
+          onFolderMatching={setFolderMatching}
+          onKinds={setKinds}
+        />
       </div>
       {/* Corner pill: the EXPERIMENTAL lighting-mode picker (remove those buttons
           once a winner is chosen) plus the SHIPPED ssao preference — the container

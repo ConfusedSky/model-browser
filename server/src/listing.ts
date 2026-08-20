@@ -357,9 +357,16 @@ function envLimit(name: string, fallback: number): number {
  * the cap is applied after the query filter, so an empty result cannot trip
  * it. The client's "the search ran out" message depends on that.
  */
-export async function listFlat(vpath: string, query?: string): Promise<DirListing> {
+export async function listFlat(
+  vpath: string,
+  query?: string,
+  opts: { folderMatching?: boolean } = {},
+): Promise<DirListing> {
   const q = query?.trim().toLowerCase()
   const hasQuery = q !== undefined && q !== ''
+  // Default on: an absent parameter is the shipped predicate, so an old client
+  // and a hand-written URL both get what they got before the option existed.
+  const folderMatching = opts.folderMatching !== false
   const { fsPath, entry } = parseVPath(vpath)
   if (!isAbsolute(fsPath)) throw new ListingError(400, 'path must be absolute')
   const walk: FlatWalk = {
@@ -405,8 +412,12 @@ export async function listFlat(vpath: string, query?: string): Promise<DirListin
   // rows. Discarding first is the same output (a sorted subset equals the
   // sorted set filtered) for a fraction of the comparisons.
   if (hasQuery) {
-    containers = containers.filter((e) => matchesQuery(e.name, q))
-    walk.models = walk.models.filter((m) => matchesQuery(m.name, q))
+    containers = containers.filter((e) => matchesOwnName(e.name, q))
+    // The option narrows the *model* predicate from the whole relative path to
+    // the file's own name; container matching is the other option's business
+    // and is unaffected, so the two stay orthogonal.
+    const modelMatches = folderMatching ? matchesQuery : matchesOwnName
+    walk.models = walk.models.filter((m) => modelMatches(m.name, q))
     // Two predicates on purpose: a model matches anywhere in its path, a
     // container only on its own name (D2).
     containers = [...containers, ...walk.dirs.filter((d) => matchesOwnName(d.name, q))]

@@ -86,8 +86,13 @@ afterEach(() => {
   delete process.env.MODEL_BROWSER_FOLDER_CAP
 })
 
-async function flat(path: string, flag = 'true', q?: string): Promise<DirListing> {
-  const qs = q === undefined ? '' : `&q=${encodeURIComponent(q)}`
+async function flat(
+  path: string,
+  flag = 'true',
+  q?: string,
+  extra = '',
+): Promise<DirListing> {
+  const qs = (q === undefined ? '' : `&q=${encodeURIComponent(q)}`) + extra
   const res = await app.request(
     `/api/dir?path=${encodeURIComponent(path)}&flat=${flag}${qs}`,
     { headers: LOOPBACK },
@@ -444,6 +449,46 @@ describe('deep name search (q parameter)', () => {
     expect(body.entries.filter((e) => e.kind !== 'model')).toHaveLength(2)
     expect(body.entries.filter((e) => e.kind === 'model')).toHaveLength(7)
     expect(body.truncated).toBe(true)
+  })
+
+  it('folders=false narrows the model predicate to the file name', async () => {
+    // 'spares' names a folder under SetDunes and no file: with folder matching
+    // on, its models are results; with it off, they are not.
+    const on = await flat(root2, 'true', 'spares')
+    expect(on.entries.map((e) => `${e.kind}:${e.name}`)).toEqual([
+      'dir:SetDunes/spares',
+      'model:SetDunes/spares/clip.stl',
+    ])
+
+    const off = await flat(root2, 'true', 'spares', '&folders=false')
+    expect(off.entries.map((e) => `${e.kind}:${e.name}`)).toEqual(['dir:SetDunes/spares'])
+  })
+
+  it('folders=false leaves a file-name match alone', async () => {
+    const off = await flat(root2, 'true', 'clip', '&folders=false')
+    expect(off.entries.map((e) => e.name)).toEqual(['SetDunes/spares/clip.stl'])
+  })
+
+  it('an absent folders parameter is the shipped predicate', async () => {
+    const bare = await flat(root2, 'true', 'spares')
+    const explicit = await flat(root2, 'true', 'spares', '&folders=true')
+    expect(explicit.entries).toEqual(bare.entries)
+  })
+
+  it('the option filters the gathered tree; it does not reach the walk', async () => {
+    // What lets listing-tree-cache key on the root alone and search-cancellation
+    // share one traversal: the walk's output must not vary with the query or
+    // with any predicate applied over it. A broad query under each setting
+    // collects the same tree — the results differ only where filtering runs.
+    const on = await flat(root2, 'true', 'set')
+    const off = await flat(root2, 'true', 'set', '&folders=false')
+    const containers = (l: DirListing) => l.entries.filter((e) => e.kind !== 'model').map((e) => e.name)
+    expect(containers(off)).toEqual(containers(on))
+    // Models differ, and every off-model is an on-model: narrowing a predicate
+    // can only remove matches, never surface one the wider walk missed.
+    const models = (l: DirListing) => l.entries.filter((e) => e.kind === 'model').map((e) => e.name)
+    expect(models(on)).toEqual(expect.arrayContaining(models(off)))
+    expect(models(off).length).toBeLessThan(models(on).length)
   })
 
   it('deep search rooted in a zip', async () => {

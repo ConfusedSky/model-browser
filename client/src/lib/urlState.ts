@@ -1,9 +1,18 @@
+import type { SearchKinds } from './searchOptions'
+
 /**
  * The URL as a record of the committed view (url-navigation D1): query
  * parameters on the app's single route — `path` (directory or zip vpath),
- * `flat` (present only when on), `q` (committed deep-search query), `model`
- * (open lightbox's vpath). Ephemeral state (live filter, in-flight targets,
- * the orbit overlay) and preferences (lighting, AO) never appear here.
+ * `flat` (present only when on), `q` (committed deep-search query), the search
+ * options that query ran under (`nofolders`, `kinds`, each present only when
+ * not the default), `model` (open lightbox's vpath). Ephemeral state (live
+ * filter, in-flight targets, the orbit overlay) never appears here, nor do
+ * preferences that change only how a model is *drawn* (lighting, AO).
+ *
+ * Search options are the exception, and the line is stated so it cannot be
+ * stretched: a preference belongs here when it determines *which entries the
+ * view contains*, not how they are drawn (D1). Without them a shared search
+ * link reproduces different models for the recipient than the sender saw.
  *
  * `URLSearchParams` is the only encoder — it percent-encodes spaces and the
  * zip `!/` separator on its own, and an `encodeURIComponent` pass on top
@@ -13,6 +22,10 @@ export interface UrlView {
   path?: string
   flat: boolean
   q?: string
+  /** Folder matching, default on — carried only when off. */
+  folderMatching?: boolean
+  /** Which kinds the results present, default 'both'. */
+  kinds?: SearchKinds
   model?: string
 }
 
@@ -20,6 +33,7 @@ export function parseUrl(search: string = window.location.search): UrlView {
   const p = new URLSearchParams(search)
   const raw = p.get('q')
   const q = raw === null || raw === '' ? undefined : raw
+  const kinds = p.get('kinds')
   return {
     path: p.get('path') ?? undefined,
     // A query implies the flat shape: deep-search results are flat whatever
@@ -27,6 +41,11 @@ export function parseUrl(search: string = window.location.search): UrlView {
     // hand-trimmed link that kept `q` but lost `flat` must not land on a 400.
     flat: p.has('flat') || q !== undefined,
     q,
+    // Defaults are absent from the URL, so their absence is what selects them
+    // — and an unrecognised `kinds` reads as the default rather than as an
+    // error, since a hand-edited link should degrade to the ordinary view.
+    folderMatching: p.has('nofolders') ? false : undefined,
+    kinds: kinds === 'folders' || kinds === 'models' ? kinds : undefined,
     model: p.get('model') ?? undefined,
   }
 }
@@ -37,13 +56,25 @@ export function serializeView(view: UrlView): string {
   if (view.path !== undefined && view.path !== '') p.set('path', view.path)
   if (view.flat) p.set('flat', '1')
   if (view.q !== undefined && view.q !== '') p.set('q', view.q)
+  // Omitted at their defaults (D4): an ordinary search URL stays byte-identical
+  // to what it was before options existed, so making a default explicit never
+  // mints a history entry.
+  if (view.folderMatching === false) p.set('nofolders', '1')
+  if (view.kinds === 'folders' || view.kinds === 'models') p.set('kinds', view.kinds)
   if (view.model !== undefined && view.model !== '') p.set('model', view.model)
   const s = p.toString()
   return s === '' ? '' : `?${s}`
 }
 
 function sameView(a: UrlView, b: UrlView): boolean {
-  return a.path === b.path && a.flat === b.flat && a.q === b.q && a.model === b.model
+  return (
+    a.path === b.path &&
+    a.flat === b.flat &&
+    a.q === b.q &&
+    a.folderMatching === b.folderMatching &&
+    a.kinds === b.kinds &&
+    a.model === b.model
+  )
 }
 
 /**

@@ -95,3 +95,32 @@ describe('url state', () => {
     expect(parseUrl().q).toBe('gear')
   })
 })
+
+describe('search options in the URL', () => {
+  it('omits both at their defaults — an ordinary search URL is unchanged', () => {
+    expect(serializeView({ path: '/m', flat: true, q: 'dragon' })).toBe(
+      '?path=%2Fm&flat=1&q=dragon',
+    )
+  })
+
+  it('carries them when they are not the default', () => {
+    expect(
+      serializeView({ path: '/m', flat: true, q: 'dragon', folderMatching: false, kinds: 'models' }),
+    ).toBe('?path=%2Fm&flat=1&q=dragon&nofolders=1&kinds=models')
+  })
+
+  it('round-trips without a second encoding pass', () => {
+    const view = { path: '/a b/c.zip!/d', flat: true, q: 'x y', folderMatching: false, kinds: 'folders' as const }
+    expect(parseUrl(serializeView(view))).toEqual({ ...view, model: undefined })
+  })
+
+  it('an unrecognised kinds reads as the default rather than an error', () => {
+    expect(parseUrl('?path=/m&flat=1&q=a&kinds=sideways').kinds).toBeUndefined()
+  })
+
+  it('absent options are absent, not false', () => {
+    const v = parseUrl('?path=/m&flat=1&q=a')
+    expect(v.folderMatching).toBeUndefined()
+    expect(v.kinds).toBeUndefined()
+  })
+})

@@ -32,7 +32,9 @@ export function createApp(cache: ThumbCache = new ThumbCache()): Hono {
     const q = c.req.query('q')
     const blankQ = q === undefined || q.trim() === ''
     if (!blankQ && !flat) return c.json({ error: 'q requires flat=true' }, 400)
-    if (flat) return c.json(await listFlat(path, q))
+    // Additive and default-on: absent means the shipped predicate.
+    const folderMatching = c.req.query('folders') !== 'false'
+    if (flat) return c.json(await listFlat(path, q, { folderMatching }))
     return c.json(await listDir(path))
   })
 
