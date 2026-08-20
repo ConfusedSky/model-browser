@@ -11,6 +11,17 @@ Measured 2026-08-18 against the real library on two volumes:
 | complete walk, cold | 2.92s | **~32s** |
 | complete walk, warm | 0.73s | 0.80s |
 
+**Re-verified 2026-08-19, and one row could not be.** The volume mounted today is
+`/dev/sda1` — ext4, `ROTA=0`, 469 GB, 19,134 entries / 5,077 dirs / 453 zips — and a warm
+full-volume search walk measured 0.54–0.86 s, which matches the SSD row above (18,705
+entries, 0.73 s warm) on a library that has grown slightly since. So the SSD column is this
+volume.
+
+The spinning exfat volume was **not attached** and its column could not be re-measured. It
+is the column the whole design is priced against: without a ~32 s cold case, the cache is
+buying ~3 s. Whether that volume is still a target is a scoping question this change should
+answer before it is implemented, not one to discover at task 7.2.
+
 Three facts follow, and together they decide the design.
 
 **Cold is the whole problem.** Warm is media-independent — 0.030 ms/entry on the spinning disk, *faster* than the SSD's 0.039 — because warm means RAM. Everything expensive happens on the first walk after the OS cache is cold, which is exactly the first search after opening the app. A cache that lives in the server process dies with it and never touches that case.
