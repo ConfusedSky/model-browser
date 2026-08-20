@@ -10,8 +10,9 @@
 ## 1. The shared action module
 
 - [ ] 1.1 An entry-actions module owning one definition per command — open, reveal, copy
-      path, find similar — each taking an entry and the app callbacks it needs, with the
-      per-kind availability table from D6 in one place rather than at each call site
+      path, find similar, re-render thumbnail, reset framing — each taking an entry and the
+      app callbacks it needs, with the per-kind availability table from D6 in one place
+      rather than at each call site
 - [ ] 1.2 `copyPath` becomes a command over the entry: it takes the row and reads
       `entry.path`, the virtual path, unchanged (D2). It does **not** carry
       `selectPathText` (`ViewerLayer.tsx:331-342`) with it — that fallback ranges over
@@ -80,13 +81,32 @@
       strength. Similarity cosines run 0.85–0.99 against text queries' ~0.1, and the index
       reports no `weak` flag here for that reason
 
+## 4b. Thumbnail actions  *(independent of the index — can land with §1–3)*
+
+- [ ] 4b.1 Re-render: render the tile through the existing queue and `putThumb` the result
+      with the model's stored `camera` and `axis` and the current `lighting` / `RIG_VERSION`
+      (D7). No new server route — `putThumb` already writes all five together
+- [ ] 4b.2 Reset framing: `putThumb` `DEFAULT_CAMERA` in place of the stored camera and
+      render there. Test that the *viewer* subsequently opens the model at the default too —
+      camera is keyed by path and shared with the lightbox (architecture D4), so this is
+      stated behavior rather than a leak
+- [ ] 4b.3 Neither touches `axis`. Test with a non-`y` spindle stored: it survives both
+      actions and the re-render is drawn about it, since a reset that silently laid a Z-up
+      model on its side is the failure D7 refuses
+- [ ] 4b.4 Both go through the render queue like any other thumbnail work, so they suspend
+      under an active orbit or lightbox rather than competing for the single renderer
+      (architecture D2/D3). Neither bumps `RIG_VERSION` — they consume the current recipe
+- [ ] 4b.5 Absent on dir and zip tiles (D6): container tiles are glyphs, not renders
+
 ## 5. Verification
 
 - [ ] 5.1 `bun run typecheck` and `bun run test` pass across workspaces
 - [ ] 5.2 Component tests: the menu opens on secondary click without orbiting; each item
       appears only for the kinds D6 lists; copy path works from both surfaces with one
       implementation; reveal navigates, marks, pushes history, and leaves the flat toggle
-      alone; the mark does not survive a reload
+      alone; the mark does not survive a reload; re-render re-renders under the current
+      settings from the stored camera, and reset framing renders at the default and moves
+      where the viewer opens the model
 - [ ] 5.3 Manual E2E via Playwright MCP on the real library — note tiles respond only to
       PointerEvents, so the secondary press needs `button: 'right'`, and clipboard reads
       need permissions granted upfront or the call hangs on a prompt. Reveal a model from a

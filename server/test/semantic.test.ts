@@ -5,6 +5,21 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+// ESM exports cannot be spied, so the count comes from a mock that still does
+// the real work — the assertion is about how many stats a query costs, and a
+// fake stat would make the test about the fake.
+const stats = vi.hoisted(() => ({ n: 0 }))
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return {
+    ...actual,
+    stat: (...args: Parameters<typeof actual.stat>) => {
+      stats.n++
+      return actual.stat(...args)
+    },
+  }
+})
 import { createApp } from '../src/app'
 import { ThumbCache } from '../src/cache'
 import { resetIndexStatus } from '../src/semantic'
@@ -99,14 +114,48 @@ describe('semantic index availability', () => {
     expect(body.state).toBe('wedged')
   })
 
-  it('a running index whose library is unmounted is its own state', async () => {
-    // The likeliest failure on removable media, and the only one the user
-    // repairs in a second — reporting it as "not running" hides the repair.
-    stubIndex({ ...READY, volume: { present: false, root, missing: root } })
+  it('a library whose drive is unplugged is volume-gone, not warming', async () => {
+    // Captured from the real service started against a missing volume — the
+    // shape that matters, and not the one an invented fixture produces. It is
+    // `ready: false` *and* `volume.present: false`, because the load could not
+    // finish precisely because the storage is gone. Checking `ready` first
+    // called this "starting up", then "wedged" three minutes later, so the
+    // message never mentioned the drive — the one failure a user fixes in
+    // seconds.
+    stubIndex({
+      ready: false,
+      elapsed: 5.6,
+      loaded_at: null,
+      volume: { present: false, root: '/run/media/masa/NOPE', missing: '/run/media/masa/NOPE' },
+      failure: {
+        reason: 'collection volume is not available: /run/media/masa/NOPE',
+        hint: null,
+        kind: 'VolumeUnavailable',
+      },
+    })
     const body = (await (await app.request('/api/semantic/status', { headers: LOOPBACK })).json()) as {
       state: string
+      detail?: string
     }
     expect(body.state).toBe('volume-gone')
+    // The index's own words, not ours — and a string, not an object rendered
+    // into the panel as [object Object]. `failure` is a dict upstream.
+    expect(body.detail).toContain('collection volume is not available')
+  })
+
+  it('a load error while warming is wedged, and its reason and hint are carried', async () => {
+    stubIndex({
+      ready: false,
+      elapsed: 3,
+      volume: { present: true, root, missing: null },
+      failure: { reason: 'cache built with different settings', hint: 'rerun classify_stls.py', kind: 'CacheMismatch' },
+    })
+    const body = (await (await app.request('/api/semantic/status', { headers: LOOPBACK })).json()) as {
+      state: string
+      detail?: string
+    }
+    expect(body.state).toBe('wedged')
+    expect(body.detail).toBe('cache built with different settings — rerun classify_stls.py')
   })
 
   it('availability is cached, not probed per query', async () => {
@@ -147,12 +196,35 @@ describe('semantic query', () => {
     expect(body.entries).toHaveLength(1)
   })
 
-  it('stats at most once per returned hit — never a walk', async () => {
-    stubIndex(READY, { ...result, results: [hit('dragon.stl'), hit('dragon.stl')] })
+  it('stats once per returned hit — the bound that lets the two caches disagree', async () => {
+    stubIndex(READY, {
+      ...result,
+      results: [hit('dragon.stl'), hit('dragon.stl'), hit('dragon.stl')],
+    })
+    stats.n = 0
     await post({ text: 'dragon' })
-    // Nothing here asserts timing; the bound is structural, and the contract is
-    // that cost tracks the result count rather than the size of the tree.
-    expect(true).toBe(true)
+    // Cost tracks the result count, never the size of the tree. Asserted
+    // rather than asserted-about: this bound is the whole reason a query needs
+    // no walk, and the previous version of this test could not fail.
+    expect(stats.n).toBe(3)
+  })
+
+  it('a hit cannot name a file outside the collection', async () => {
+    // `rel_path` is data from another process. `..` in it, or an absolute
+    // `path` pointing elsewhere, must not become a tile — the spec joins hits
+    // *relative to the collection root*, and the index's own doc says the
+    // absolute path is not the contract.
+    stubIndex(READY, {
+      ...result,
+      results: [
+        { ...hit('dragon.stl'), rel_path: '../escape.stl', path: '/etc/passwd' },
+        { ...hit('dragon.stl'), rel_path: 'dragon.stl', path: '/etc/passwd' },
+      ],
+    })
+    const body = (await (await post({ text: 'dragon' })).json()) as {
+      entries: { path: string }[]
+    }
+    expect(body.entries.map((e) => e.path)).toEqual([join(root, 'dragon.stl')])
   })
 
   it('an unavailable index is a state to render, not a 500', async () => {

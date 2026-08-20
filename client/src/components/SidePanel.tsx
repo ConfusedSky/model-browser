@@ -23,6 +23,7 @@ type Tab = 'chat' | 'search'
  */
 export default function SidePanel({
   query,
+  path,
   folderMatching,
   kinds,
   mode,
@@ -33,6 +34,8 @@ export default function SidePanel({
   onMode,
 }: {
   query: string | null
+  /** The directory in view — meaning search only covers part of the filesystem. */
+  path: string
   folderMatching: boolean
   kinds: SearchKinds
   mode: SearchMode
@@ -64,7 +67,16 @@ export default function SidePanel({
   // Answers "why are my results strange?" without opening the panel (D5).
   const nonDefault = !folderMatching || kinds !== 'both'
 
-  const meaningRunnable = index.state === 'ready'
+  // Ready is necessary and not sufficient: the index covers one collection and
+  // no archive interiors, so offering the mode elsewhere promises an answer the
+  // server will refuse. A prefix check is the right approximation here — the
+  // server still compares resolved paths, and a disagreement costs the
+  // affordance rather than producing a wrong answer.
+  const inRange =
+    index.collectionRoot !== undefined &&
+    !path.includes('!/') &&
+    (path === index.collectionRoot || path.startsWith(`${index.collectionRoot}/`))
+  const meaningRunnable = index.state === 'ready' && inRange
   // The mode control is offered when meaning could run — and whenever meaning
   // is *in force*, however it got there, because a mode you cannot see and
   // cannot leave is a trap: a link can put this app in meaning mode on a

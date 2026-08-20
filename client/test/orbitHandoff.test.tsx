@@ -1,4 +1,6 @@
 // @vitest-environment happy-dom
+import type { CameraState, IndexPose, OrbitAxis } from '../../shared/types'
+import type React from 'react'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import * as THREE from 'three'
@@ -49,9 +51,11 @@ function makeProps() {
     resolvePersist,
     props: {
       viewer,
-      camera: undefined,
-      axis: undefined,
-      pose: undefined,
+      // Typed at the Props widths, not inferred as `undefined`, so a test can
+      // supply a camera, axis, or pose without widening this helper.
+      camera: undefined as CameraState | undefined,
+      axis: undefined as OrbitAxis | undefined,
+      pose: undefined as IndexPose | undefined,
       lighting: 'axis' as const,
       ao: true,
       api: { getThumb: vi.fn().mockResolvedValue({ status: 'miss' }) } as unknown as ApiClient,
@@ -179,4 +183,39 @@ describe('orbit → thumbnail handoff', () => {
     await settle(1700) // past PERSIST_HOLD_MS
     expect(props.onDismiss).toHaveBeenCalledTimes(1)
   }, 8000)
+})
+
+describe('an index pose is advisory', () => {
+  it('opening at a pose and closing without touching it stores no camera', async () => {
+    // The failure this pins: the index's suggestion becoming the user's stored
+    // orientation after a single open — durable, invisible, and thereafter
+    // winning over the re-classification that would have corrected it. The
+    // pixels are still saved, because model-viewer requires a close to persist
+    // a thumbnail like an orbit release does; only the camera is withheld.
+    const { props } = makeProps()
+    const posed: React.ComponentProps<typeof ViewerLayer> = {
+      ...props,
+      viewer: { ...props.viewer, mode: 'lightbox' as const },
+      pose: {
+        up: [0, 1, 0] as [number, number, number],
+        azimuth_zero: [1, 0, 0] as [number, number, number],
+        source: 'siglip',
+        confidence: 0.9,
+        front: { view: 5, azimuth_deg: 270, elevation_deg: 20 },
+      },
+    }
+    await render(posed as unknown as ReturnType<typeof makeProps>['props'])
+
+    // ✕ raises a close *intent*; App answers by bumping closeSignal, which is
+    // what runs the persisting close (url-navigation D3).
+    await act(async () => {
+      root!.render(<ViewerLayer {...posed} closeSignal={1} />)
+    })
+    await act(async () => {})
+
+    expect(posed.onPersist).toHaveBeenCalled()
+    expect((posed.onPersist as ReturnType<typeof vi.fn>).mock.calls[0]![1]).toEqual({
+      camera: false,
+    })
+  })
 })

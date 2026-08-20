@@ -78,6 +78,33 @@ The marking SHALL be ephemeral: it SHALL NOT appear in the URL, SHALL NOT be res
 - **WHEN** the revealed entry is absent from the listing that arrives
 - **THEN** the folder is presented normally, with no error and nothing marked
 
+### Requirement: Refreshing a model's thumbnail and its framing
+The client SHALL offer, on a model, an action that renders its thumbnail again under the thumbnail settings in force at that moment, keeping the camera and orbit axis stored for that model, and replacing the cached image with the result. It SHALL be offered whether or not the cached image is considered current, since the settings a thumbnail was rendered under can change without the view it is shown in being rebuilt.
+
+The client SHALL also offer, on a model, a distinct action that restores that model's default framing — discarding the camera stored for it and rendering the thumbnail at the default view — because a thumbnail is rendered from that stored camera, so rendering again without discarding it reproduces the same image. Restoring the framing SHALL also govern where the model opens in the expanded viewer, since a model has one stored camera rather than one per surface.
+
+Neither action SHALL change the model's orbit axis. Neither SHALL be offered on an entry that has no thumbnail. Both SHALL leave the entry's file untouched: they replace a cached rendering, never the model.
+
+#### Scenario: Refreshing after the thumbnail settings changed
+- **WHEN** the user changes a setting that alters how thumbnails are drawn and then re-renders a tile whose image predates the change
+- **THEN** the tile is drawn again under the new setting, from the same viewpoint as before
+
+#### Scenario: Re-rendering keeps the viewpoint
+- **WHEN** the user re-renders the thumbnail of a model whose camera they had set by orbiting
+- **THEN** the new image is from that same camera, and opening the model still opens it there
+
+#### Scenario: A badly framed thumbnail is recoverable
+- **WHEN** the user restores the default framing of a model whose stored camera frames it poorly
+- **THEN** its thumbnail is rendered at the default view, and opening the model opens it there too
+
+#### Scenario: The axis survives both
+- **WHEN** the user re-renders a thumbnail, and restores default framing, on a model whose orbit axis they had chosen
+- **THEN** the model keeps that axis in both cases, and is drawn about it
+
+#### Scenario: Not offered where there is no thumbnail
+- **WHEN** the user raises the menu on a directory or an archive
+- **THEN** neither action is listed
+
 ### Requirement: Find models similar to this one
 Where a semantic index is available, the client SHALL offer an action on a model that requests its nearest neighbours from that index and presents them as a set of results in place of the listing, ordered by similarity, with the model itself excluded. Neighbours SHALL be drawn from the whole indexed collection rather than from the folder the model is browsed in, since a model's nearest neighbours are a question about the collection and the folder's own answer is already on screen. The result SHALL be a view like any other: named in the URL by the model the neighbours were derived from, participating in history, and reproducing for anyone who opens that URL. It SHALL be left through the same explicit dismissal that other result sets offer, since there is no typed text to clear.
 

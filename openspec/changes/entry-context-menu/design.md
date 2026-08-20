@@ -157,12 +157,14 @@ folder on disk, and it works when the browser is not on the machine holding the 
 ### D6: The menu is per-kind, and it is not a dumping ground
 
 ```
-model tile        dir tile        zip tile
-──────────        ────────        ────────
-Open              Open            Open
-Reveal in app     Reveal in app   Reveal in app
-Copy path         Copy path       Copy path
-Find similar      —               —
+model tile           dir tile        zip tile
+──────────           ────────        ────────
+Open                 Open            Open
+Reveal in app        Reveal in app   Reveal in app
+Copy path            Copy path       Copy path
+Find similar         —               —
+Re-render thumbnail  —               —
+Reset framing        —               —
 ```
 
 Find similar is model-only because the index embeds models — and it carries a second
@@ -172,11 +174,58 @@ of the table is **three items always, and a fourth on model tiles when the index
 answering**. A model tile with three items is not a bug; it is the degradation
 `semantic-search` designs for, arriving here.
 
+The two thumbnail items are model-only for the same structural reason: container tiles are
+drawn as glyphs, not renders, so there is no thumbnail to act on.
+
 Everything else applies to every kind, which is what keeps the menu predictable.
 
-Rejected: re-rendering a thumbnail (a real gap — a badly framed thumbnail has no manual
-invalidation — but not this change's), and "search in this folder" (reveal followed by a
-search, with less control than doing both).
+Rejected: "search in this folder" (reveal followed by a search, with less control than
+doing both), and resetting the orbit axis — see D7.
+
+### D7: Re-render and reset framing are two actions, and the axis is neither
+
+An earlier draft rejected thumbnail re-rendering as "a real gap, but not this change's".
+That was wrong on the second half: the gap is reached from a tile, the menu is the thing
+reached from a tile, and there is nowhere else for it to live.
+
+**They are two actions because they answer two different questions.**
+
+*Re-render thumbnail* re-renders from the model's stored camera and axis, under the
+lighting mode and `RIG_VERSION` in force now. It is not a no-op, and the reason is
+mechanical: `useThumbnails.ts:123-124` already treats a cached hit whose `lighting` or
+`rig` differs from the current values as stale, but that check only runs when the effect
+re-runs, and its deps are `[entries, api, lru, queue, setThumb]` (`:220`) — lighting is not
+among them. So changing the mode leaves the grid in front of you rendered under the old
+one until the listing changes. Re-render is the manual trigger for that, and it also covers
+a tile whose PNG came out of a mesh that loaded badly.
+
+*Reset framing* drops the camera stored for that path back to `DEFAULT_CAMERA` and
+re-renders there. This is the badly-framed case, and it needs its own item because the
+thumbnail is rendered *from* that stored camera — re-rendering without dropping it
+reproduces the same picture. Note the scope: camera state is keyed by path and shared with
+the viewer (architecture D4), so this also resets where the lightbox opens that model. That
+is the honest behavior rather than a side effect, and it is why the item says *framing*
+rather than *thumbnail*.
+
+Neither needs a new server route. `putThumb` already writes png, camera, axis, lighting and
+rig together, so re-render writes back what it read and reset framing writes the default
+in place of it.
+
+**The axis is not a third item**, by D1. The orbit-axis picker is a control: it is bound to
+a live view and shows the spindle rotating to screen-up as it changes. A menu item that
+reset a persisted spindle with nothing on screen showing the result is precisely the
+affordance D1 rules out — and on a Z-up model it would silently lay the model on its side.
+It stays in the lightbox, which already has the picker and its flip toggle. Once
+`semantic-search` lands, the index supplies the axis anyway.
+
+*Refreshing the visible grid on a mode change is a separate change.* Note this is not a
+defect being worked around: `model-thumbnails`' *Lighting-mode-aware thumbnails* specifies
+the upgrade as lazy, and every one of its scenarios says so — "revisits a directory", "a
+directory is visited". The code matches its spec. Making the grid you are looking at
+refresh is a change to that requirement, which belongs to that capability rather than to a
+menu. Until it lands, navigating away and back is the bulk answer and these items are the
+per-tile one; afterwards they still are, because a tile can be wrong for reasons a sweep
+cannot see.
 
 ## Risks / Trade-offs
 

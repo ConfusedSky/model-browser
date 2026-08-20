@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 // Meaning search through App: the mode, the fallback when the index is not
 // there, and the reporting that makes an empty grid attributable.
+import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DirListing, SemanticListing } from '../../shared/types'
 import {
@@ -277,6 +278,43 @@ describe('meaning search', () => {
     expect(put?.png).toBeDefined()
     expect(put?.camera).toBeUndefined()
     expect(put?.axis).toBeUndefined()
+  })
+
+  it('a warming index becomes usable without a navigation or a reload', async () => {
+    // "The interactions the app already makes" is an empty set while a user
+    // waits for SigLIP: nothing they do changes the path, so an availability
+    // read keyed on it never runs again and the mode never appears.
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    indexAvailability.mockResolvedValue({ state: 'warming', elapsed: 2 })
+    await mountApp('/models', NESTED)
+    await settle()
+    await click(searchTab())
+    expect(modeButton('meaning')).toBeUndefined()
+
+    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models', covers: ['stl'] })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2500)
+    })
+
+    expect(modeButton('meaning')).toBeDefined()
+    vi.useRealTimers()
+  })
+
+  it('meaning is not offered outside the collection, nor inside an archive', async () => {
+    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/library', covers: ['stl'] })
+    await mountApp('/models', NESTED)
+    await settle()
+    await click(searchTab())
+    // Ready, but this directory is not one the index covers: offering the mode
+    // here promises an answer the server will refuse with a 400.
+    expect(modeButton('meaning')).toBeUndefined()
+
+    await unmountApp()
+    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/library', covers: ['stl'] })
+    await mountApp('/library/kit.zip!/parts', NESTED)
+    await settle()
+    await click(searchTab())
+    expect(modeButton('meaning')).toBeUndefined()
   })
 
   it('a link opened without the index keeps naming the meaning search', async () => {

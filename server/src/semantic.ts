@@ -1,5 +1,5 @@
 import { realpath, stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { resolve, sep } from 'node:path'
 import type { DirEntry } from '../../shared/types'
 
 /**
@@ -54,7 +54,8 @@ interface RawStatus {
   elapsed?: number
   collection_root?: string
   covers?: string[]
-  failure?: string | null
+  /** One shape for every reason a load did not complete — a dict, not a string. */
+  failure?: { reason?: string; hint?: string | null; kind?: string } | null
   volume?: { present?: boolean; root?: string; missing?: string | null }
 }
 
@@ -85,13 +86,23 @@ async function probe(base: string): Promise<IndexStatus> {
     collectionRoot: raw.collection_root,
     covers: raw.covers,
     elapsed: raw.elapsed,
-    detail: raw.failure ?? undefined,
+    // The index's own words, preferred to any composed here (D4). Reason and
+    // hint are separate fields upstream; joined so a caller renders one string.
+    detail:
+      [raw.failure?.reason, raw.failure?.hint].filter((t) => typeof t === 'string').join(' — ') ||
+      undefined,
   }
+  // Volume before ready, and the order is the point. A library whose drive is
+  // unplugged reports `ready: false` *and* `volume.present: false` — the load
+  // could not finish *because* the storage is gone. Checking `ready` first
+  // classified the one failure a user fixes in seconds as "starting up", and
+  // as "wedged" three minutes later, so the message never mentioned the drive.
+  if (raw.volume?.present === false) return { state: 'volume-gone', ...common }
   if (raw.ready !== true) {
-    const wedged = (raw.elapsed ?? 0) > WEDGED_AFTER_S || typeof raw.failure === 'string'
+    // Any load error means it is not going to finish on its own.
+    const wedged = (raw.elapsed ?? 0) > WEDGED_AFTER_S || (raw.failure ?? null) !== null
     return { state: wedged ? 'wedged' : 'warming', ...common }
   }
-  if (raw.volume?.present === false) return { state: 'volume-gone', ...common }
   return { state: 'ready', ...common }
 }
 
@@ -231,7 +242,13 @@ export async function hitsToEntries(
   const poses: Record<string, Hit['pose']> = {}
   const settled = await Promise.all(
     hits.map(async (h): Promise<DirEntry | null> => {
-      const full = h.path.startsWith('/') ? h.path : join(collectionRoot, h.rel_path)
+      // `rel_path` is the join key and the only field trusted for it: this is
+      // data from another process, and `resolve` normalising `..` is what stops
+      // a hit naming a file outside the collection. The index's absolute `path`
+      // is ignored — preferring it would also undo D4's remount reasoning by
+      // trusting a mount point this app resolved for itself.
+      const full = resolve(collectionRoot, h.rel_path)
+      if (full !== collectionRoot && !full.startsWith(collectionRoot + sep)) return null
       const s = await stat(full).catch(() => null)
       if (s === null || !s.isFile()) return null
       if (h.pose !== null) poses[full] = h.pose

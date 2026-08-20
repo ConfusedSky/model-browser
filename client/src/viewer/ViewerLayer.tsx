@@ -48,7 +48,7 @@ interface Props {
   /** Increments when App wants the persisting close to run (url-navigation D3). */
   closeSignal: number
   onDismiss: () => void
-  onPersist: (session: ViewerSession) => Promise<void>
+  onPersist: (session: ViewerSession, opts?: { camera?: boolean }) => Promise<void>
   onLoadError: (message: string) => void
 }
 
@@ -86,6 +86,7 @@ export default function ViewerLayer({
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasHostRef = useRef<HTMLDivElement>(null)
   const pathRef = useRef<HTMLParagraphElement>(null)
+  const openedFromPoseRef = useRef(false)
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   // A pointer-opened viewer mounts mid-press (orbit); a keyboard-opened one
   // mounts directly in lightbox mode with no pointer down.
@@ -140,16 +141,26 @@ export default function ViewerLayer({
     // the user's own and wins, and applying a pose persists nothing — the
     // sidecar is written by orbiting, not by opening (semantic-search D5).
     const fromPose = cameraForPose(pose, DEFAULT_CAMERA)
+    // Whether this session opened at an orientation the index suggested rather
+    // than one the user stored — read on close, to decide what may be written.
+    openedFromPoseRef.current = false
     const savedPromise: Promise<{ camera?: CameraState; axis: OrbitAxis }> =
       camera !== undefined
         ? Promise.resolve({ camera, axis: axis ?? 'y' })
         : api
             .getThumb(viewer.entry.path, viewer.entry.mtime)
-            .then((r) => ({
-              camera: r.camera ?? (r.axis === undefined ? fromPose?.camera : undefined),
-              axis: r.axis ?? fromPose?.axis ?? ('y' as OrbitAxis),
-            }))
-            .catch(() => ({ camera: fromPose?.camera, axis: fromPose?.axis ?? ('y' as OrbitAxis) }))
+            .then((r) => {
+              const posed = r.camera === undefined && r.axis === undefined && fromPose !== null
+              openedFromPoseRef.current = posed
+              return {
+                camera: posed ? fromPose.camera : r.camera,
+                axis: r.axis ?? (posed ? fromPose.axis : ('y' as OrbitAxis)),
+              }
+            })
+            .catch(() => {
+              openedFromPoseRef.current = fromPose !== null
+              return { camera: fromPose?.camera, axis: fromPose?.axis ?? ('y' as OrbitAxis) }
+            })
     void Promise.all([lru.acquire(viewer.entry.path), savedPromise])
       .then(([object, saved]) => {
         if (!alive) return
@@ -243,7 +254,7 @@ export default function ViewerLayer({
       if (s !== null) {
         const p = s
           .settle(renderNow)
-          .then(() => onPersist(s))
+          .then(() => onPersist(s, { camera: true }))
           .finally(() => {
             if (pendingPersistRef.current === p) pendingPersistRef.current = null
           })
@@ -322,7 +333,14 @@ export default function ViewerLayer({
     const s = sessionRef.current
     if (s !== null) {
       await s.settle(renderNow) // no-op if already level (e.g. Esc mid-drag aside)
-      await onPersist(s)
+      // Always persists — `model-viewer` requires a close to save camera and
+      // thumbnail like an orbit release does. What it may not save is an
+      // orientation the *index* suggested and the user never touched: that
+      // would become their stored camera after one open, and "a stored axis
+      // wins" would then keep it forever, outliving the re-classification that
+      // would have corrected it (semantic-search D5). So the pixels go either
+      // way; the camera goes only when it records a decision.
+      await onPersist(s, { camera: s.everManipulated || !openedFromPoseRef.current })
     }
     onDismiss()
   }

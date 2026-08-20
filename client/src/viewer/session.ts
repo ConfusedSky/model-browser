@@ -154,7 +154,22 @@ export class ViewerSession {
    * pose tweens there — an eased rotation that carries the new axis to
    * screen-up. Called mid-tween it retargets from the current pose.
    */
+  /**
+   * Whether the user has moved this view. An index-supplied orientation is a
+   * default, not a decision: a session opened at one and closed untouched must
+   * leave no camera behind, or the index's opinion becomes the user's stored
+   * orientation after a single open — durably, invisibly, and thereafter
+   * winning over the very re-classification that would correct it
+   * (semantic-search D5).
+   */
+  private manipulated = false
+
+  get everManipulated(): boolean {
+    return this.manipulated
+  }
+
   setAxis(axis: OrbitAxis): void {
+    this.manipulated = true
     if (axis === this._axis) return
     this.advance()
     this._axis = axis
@@ -189,6 +204,7 @@ export class ViewerSession {
 
   /** Clamped turntable around the spindle. A drag cancels any axis tween. */
   orbit(dx: number, dy: number): void {
+    this.manipulated = true
     this.advance() // cancel from the pose of *now*, not the last rendered frame
     if (this.tween !== null) {
       this.tween = null
@@ -213,6 +229,7 @@ export class ViewerSession {
   }
 
   zoom(factor: number): void {
+    this.manipulated = true
     this.advance()
     if (this.tween !== null) {
       // Cancelling mid-tween must re-lock up to the spindle — nothing else

@@ -496,7 +496,29 @@ export default function App() {
   // become usable without a reload. No timer of its own — these are the
   // interactions the app already makes (3.8).
   useEffect(() => {
-    void api.indexAvailability().then(setIndex, () => setIndex({ state: 'absent' }))
+    let alive = true
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const read = (): void => {
+      void api.indexAvailability().then(
+        (s) => {
+          if (!alive) return
+          setIndex(s)
+          // Warming is the one state that must re-check without being asked:
+          // "the interactions the app already makes" is an empty set while a
+          // user waits for SigLIP, because nothing they do changes the path.
+          // The server's own per-state TTL makes this cheap.
+          if (s.state === 'warming') timer = setTimeout(read, 2000)
+        },
+        () => {
+          if (alive) setIndex({ state: 'absent' })
+        },
+      )
+    }
+    read()
+    return () => {
+      alive = false
+      clearTimeout(timer)
+    }
   }, [api, path])
 
   /**
@@ -801,7 +823,7 @@ export default function App() {
   }
 
   const persist = useCallback(
-    async (session: ViewerSession) => {
+    async (session: ViewerSession, opts: { camera?: boolean } = {}) => {
       const entry = viewer?.entry
       if (entry === undefined) return
       try {
@@ -828,13 +850,22 @@ export default function App() {
             path: entry.path,
             mtime: entry.mtime,
             png,
-            camera: state,
-            axis,
+            // Omitted when this view records no decision of the user's — see
+            // ViewerLayer's close path. An absent camera leaves whatever was
+            // stored (nothing, for a posed model) rather than writing the
+            // index's suggestion into their sidecar.
+            camera: opts.camera === false ? undefined : state,
+            axis: opts.camera === false ? undefined : axis,
             lighting,
             rig: RIG_VERSION,
           }),
         ])
-        setThumb(entry.path, { status: 'ready', url, camera: state, axis })
+        setThumb(entry.path, {
+          status: 'ready',
+          url,
+          camera: opts.camera === false ? undefined : state,
+          axis: opts.camera === false ? undefined : axis,
+        })
       } catch {
         // persistence is best-effort; the orbit itself already happened
       }
@@ -1074,6 +1105,7 @@ export default function App() {
         </main>
         <SidePanel
           query={query}
+          path={dest}
           folderMatching={folderMatching}
           kinds={kinds}
           mode={mode}

@@ -30,9 +30,16 @@ not be written twice.
   is the user's choice, not something an action revises.
 - **Find similar** — nearest neighbours from the semantic index, presented as a peer view:
   in the URL, in history, reproducible by whoever opens the link.
+- **Re-render thumbnail** — render this model's tile again under the lighting mode and rig
+  version in force now, keeping its camera and axis. The staleness check for those already
+  exists (`useThumbnails.ts:123-124`); what is missing is any way to ask for it on the grid
+  you are looking at, since the sweep does not re-run when the mode changes (D7).
+- **Reset framing** — drop the camera stored for the model back to the default view and
+  re-render there. This is the answer to a badly framed thumbnail, which re-rendering alone
+  cannot fix: the thumbnail is rendered *from* that stored camera.
 - Deliberately not included: opening the OS file manager (a process spawn this server has no
-  business doing — see design D5), re-rendering a thumbnail, and "search in this folder"
-  (reveal plus a search, with less control).
+  business doing — see design D5), resetting the orbit axis (a control, not a command — D7),
+  and "search in this folder" (reveal plus a search, with less control).
 
 ## Capabilities
 
