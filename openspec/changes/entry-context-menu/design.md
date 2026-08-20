@@ -74,6 +74,14 @@ This changes shipped behavior, so it costs a `model-viewer` MODIFY: *Lightbox ex
 view* currently requires the panel to select the path text on failure. No other active
 change touches that capability, so the modification is free.
 
+**What this rests on, now that the app is meant to run on other machines.** "Loopback and
+Electron are both secure contexts" is true because `guard.ts` enforces it: a request whose
+`Host` is not `localhost`/`127.0.0.1`/`[::1]` is refused 403, so the app cannot be reached
+by LAN IP over plain HTTP in the first place. The clipboard decision is therefore downstream
+of the security design rather than an independent bet — and if that guard is ever relaxed to
+allow LAN access, copy silently stops working before anyone notices the connection. Whoever
+relaxes it owns this decision too.
+
 *Alternative — `document.execCommand('copy')` over a temporary off-screen textarea:* this
 is the standard trick for copying without a secure context or a rendered element, and it
 would let the fallback be genuinely shared. Rejected: it is machinery for a deployment

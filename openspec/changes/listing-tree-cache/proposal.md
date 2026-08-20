@@ -21,14 +21,24 @@ The spinning exfat volume was **not attached** and its column could not be re-me
 is the column the whole design is priced against: without a ~32 s cold case, the cache is
 buying ~3 s on the volume actually present.
 
-That makes one question decisive, and it is about intent rather than hardware — *is the
-spinning volume retired, or is it somewhere this library might live again?* Those give
-opposite answers. Retired, this change is complexity bought for three seconds. A possible
-future home, it is insurance written while the cost of writing it is low: the design's value
-is precisely that it holds up on the slow disk, and a library on removable media that has
-already lived on two volumes is not obviously done moving. Settle it before implementing —
-task 7.2's re-measurement assumes both volumes are still measurable, which today they are
-not.
+**Settled 2026-08-19: the spinning volume is not retired, and the target is wider than
+either drive.** This app is intended to run on other machines, over other libraries, and
+possibly as a public project. That resets what the two columns mean. They stop being a fact
+about two disks in this room and become a sample of two points on a range whose ends nobody
+here controls — and the slow end of the real range is slower than the exfat drive, because
+it includes network mounts, spinning disks on Windows, and libraries larger than 19k
+entries.
+
+So the design is not priced against a ~32 s cold walk. It is priced against *not knowing*
+what a cold walk costs on the machine it lands on, where the fast case is 2.92 s and the
+slow case is the one the user is complaining about. That also raises the stakes on D4's
+recorded risk: exfat timestamp granularity was a quirk of one volume, and it is now a class
+— FAT-family and network filesystems generally have coarser or less dependable mtimes than
+ext4 — so the readdir-fingerprint fallback stops being a contingency and becomes something
+that will be exercised somewhere.
+
+Task 7.2 still asks for both volumes. When the spinning one is unattached, measure what is
+present and record which column is missing rather than silently reporting one number.
 
 Three facts follow, and together they decide the design.
 
