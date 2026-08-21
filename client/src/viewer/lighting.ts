@@ -5,20 +5,19 @@
  * (headlight) — the lit side follows the viewer while orbiting.
  */
 import type { LightingMode } from '../../../shared/types'
+import { stored } from '../lib/stored'
 
 export const LIGHTING_MODES = ['axis', 'camera'] as const
 
 const KEY = 'model-browser:lighting-mode'
 const DEFAULT_MODE: LightingMode = 'axis'
 
-let current: LightingMode = (() => {
-  try {
-    const saved = localStorage.getItem(KEY)
-    return saved === 'axis' || saved === 'camera' ? saved : DEFAULT_MODE
-  } catch {
-    return DEFAULT_MODE
-  }
-})()
+const store = stored<LightingMode>(
+  KEY,
+  (raw) => (raw === 'axis' || raw === 'camera' ? raw : DEFAULT_MODE),
+  (mode) => mode,
+)
+let current: LightingMode = store.read()
 
 export function getLightingMode(): LightingMode {
   return current
@@ -26,9 +25,5 @@ export function getLightingMode(): LightingMode {
 
 export function setLightingMode(mode: LightingMode): void {
   current = mode
-  try {
-    localStorage.setItem(KEY, mode)
-  } catch {
-    // no localStorage (tests) — in-memory only
-  }
+  store.write(mode)
 }

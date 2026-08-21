@@ -1,5 +1,5 @@
 import type { SearchKinds, SearchMode, Tuning } from './searchOptions'
-import { TUNING_DEFAULTS } from './searchOptions'
+import { isKinds, isPool, TUNING_DEFAULTS } from './searchOptions'
 
 /**
  * The URL as a record of the committed view (url-navigation D1): query
@@ -45,7 +45,7 @@ export function parseUrl(search: string = window.location.search): UrlView {
   const min = Number(p.get('min'))
   const tuning: Partial<Tuning> = {}
   if (p.get('raw') === '1') tuning.raw = true
-  if (pool === 'mean' || pool === 'max' || pool === 'softmax') tuning.pool = pool
+  if (isPool(pool)) tuning.pool = pool
   if (Number.isFinite(top) && top > 0 && p.has('top')) tuning.top = Math.floor(top)
   if (Number.isFinite(min) && p.has('min')) tuning.minScore = min
   return {
@@ -57,9 +57,11 @@ export function parseUrl(search: string = window.location.search): UrlView {
     q,
     // Defaults are absent from the URL, so their absence is what selects them
     // — and an unrecognised `kinds` reads as the default rather than as an
-    // error, since a hand-edited link should degrade to the ordinary view.
+    // error, since a hand-edited link should degrade to the ordinary view. An
+    // explicit `kinds=both` is one of those: the default is carried by absence,
+    // so naming it reads as absence too.
     folderMatching: p.has('nofolders') ? false : undefined,
-    kinds: kinds === 'folders' || kinds === 'models' ? kinds : undefined,
+    kinds: isKinds(kinds) && kinds !== 'both' ? kinds : undefined,
     mode: mode === 'meaning' ? 'meaning' : mode === 'name' ? 'name' : undefined,
     tuning: Object.keys(tuning).length > 0 ? tuning : undefined,
     model: p.get('model') ?? undefined,

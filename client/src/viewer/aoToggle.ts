@@ -7,15 +7,16 @@
  * on). Only `ViewerSession` consults it: thumbnails always render the shipped
  * recipe, so the cache and `RIG_VERSION` never see the preference.
  */
+import { stored } from '../lib/stored'
+
 const KEY = 'model-browser:ao-enabled'
 
-let enabled: boolean = (() => {
-  try {
-    return localStorage.getItem(KEY) !== 'off'
-  } catch {
-    return true
-  }
-})()
+const store = stored(
+  KEY,
+  (raw) => raw !== 'off',
+  (on) => (on ? 'on' : 'off'),
+)
+let enabled: boolean = store.read()
 
 export function aoEnabled(): boolean {
   return enabled
@@ -23,9 +24,5 @@ export function aoEnabled(): boolean {
 
 export function setAoEnabled(on: boolean): void {
   enabled = on
-  try {
-    localStorage.setItem(KEY, on ? 'on' : 'off')
-  } catch {
-    // no localStorage (tests) — in-memory only
-  }
+  store.write(on)
 }

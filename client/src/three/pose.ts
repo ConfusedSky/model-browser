@@ -1,18 +1,5 @@
-import type { CameraState, OrbitAxis } from '../../../shared/types'
+import type { CameraState, IndexPose, OrbitAxis } from '../../../shared/types'
 import { frameFor } from './camera'
-
-/**
- * An orientation the semantic index supplies for a model: which way is up, and
- * the angles its front view was rendered from.
- */
-export interface IndexPose {
-  up: [number, number, number]
-  /** The model-space direction the index's azimuth 0 is measured from. */
-  azimuth_zero: [number, number, number]
-  source: string
-  confidence: number
-  front: { view: number; azimuth_deg: number; elevation_deg: number } | null
-}
 
 const AXES: { axis: OrbitAxis; v: [number, number, number] }[] = [
   { axis: 'x', v: [1, 0, 0] },

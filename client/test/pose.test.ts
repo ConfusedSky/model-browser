@@ -7,9 +7,9 @@
 // lying down, which is exactly what shipped before these tests existed.
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
-import type { OrbitAxis } from '../../shared/types'
+import type { IndexPose, OrbitAxis } from '../../shared/types'
 import { boundsOf, DEFAULT_CAMERA, statePosition } from '../src/three/camera'
-import { axisOf, cameraForPose, type IndexPose } from '../src/three/pose'
+import { axisOf, cameraForPose } from '../src/three/pose'
 
 const UP: Record<string, [number, number, number]> = {
   x: [1, 0, 0],

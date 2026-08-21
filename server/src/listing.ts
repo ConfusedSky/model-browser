@@ -16,7 +16,8 @@ export class ListingError extends Error {
 
 const MODEL_EXT = /\.(stl|3mf|obj)$/i
 
-function modelFormat(name: string): 'stl' | '3mf' | 'obj' | undefined {
+/** The format a name — or a whole path — ends in, undefined when it is not a model. */
+export function modelFormat(name: string): 'stl' | '3mf' | 'obj' | undefined {
   const m = MODEL_EXT.exec(name)
   return m ? (m[1]!.toLowerCase() as 'stl' | '3mf' | 'obj') : undefined
 }

@@ -1,6 +1,13 @@
 import { realpath, stat } from 'node:fs/promises'
 import { resolve, sep } from 'node:path'
-import type { DirEntry } from '../../shared/types'
+import type {
+  DirEntry,
+  IndexAvailability,
+  IndexPose,
+  IndexState,
+  SemanticTuning,
+} from '../../shared/types'
+import { modelFormat } from './listing'
 
 /**
  * Client for the semantic index — a separate service (`mini-classify`), started
@@ -36,18 +43,7 @@ function baseUrl(): string | null {
  * `wedged` is `warming` that has gone on too long; it is reported separately so
  * the UI can stop implying that waiting will help.
  */
-export type IndexState = 'ready' | 'warming' | 'wedged' | 'volume-gone' | 'absent'
-
-export interface IndexStatus {
-  state: IndexState
-  /** Present when the index answered at all. */
-  collectionRoot?: string
-  /** Extensions the index can hold — read, never assumed here (D3). */
-  covers?: string[]
-  elapsed?: number
-  /** The index's own words when it has them; preferred to ours (D4). */
-  detail?: string
-}
+export type { IndexState }
 
 interface RawStatus {
   ready?: boolean
@@ -59,7 +55,7 @@ interface RawStatus {
   volume?: { present?: boolean; root?: string; missing?: string | null }
 }
 
-let cached: { status: IndexStatus; at: number } | null = null
+let cached: { status: IndexAvailability; at: number } | null = null
 
 /** How long a state is trusted before re-probing. Warming re-checks often
  *  enough to become usable without a reload; ready is checked rarely because
@@ -72,7 +68,7 @@ const TTL_MS: Record<IndexState, number> = {
   absent: 10_000,
 }
 
-async function probe(base: string): Promise<IndexStatus> {
+async function probe(base: string): Promise<IndexAvailability> {
   let raw: RawStatus
   try {
     const res = await fetch(`${base}/status`, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) })
@@ -110,7 +106,7 @@ async function probe(base: string): Promise<IndexStatus> {
  * Availability, cached per state rather than probed per query (D4). Callers may
  * force a fresh look — the client's explicit retry.
  */
-export async function indexStatus(opts: { fresh?: boolean } = {}): Promise<IndexStatus> {
+export async function indexStatus(opts: { fresh?: boolean } = {}): Promise<IndexAvailability> {
   const base = baseUrl()
   if (base === null) return { state: 'absent' }
   const now = Date.now()
@@ -170,13 +166,7 @@ export interface Hit {
   name: string
   score: number
   z: number
-  pose: {
-    up: [number, number, number]
-    azimuth_zero: [number, number, number]
-    source: string
-    confidence: number
-    front: { view: number; azimuth_deg: number; elevation_deg: number } | null
-  } | null
+  pose: IndexPose | null
 }
 
 export interface Scope {
@@ -201,17 +191,8 @@ export interface QueryResult {
  */
 export const TOP = 60
 
-/** What shapes a query beyond the phrase and the scope. */
-export interface Tuning {
-  /** Read the phrase as written rather than through the index's templates. */
-  raw?: boolean
-  /** How a model's per-view scores reduce to one. */
-  pool?: 'mean' | 'max' | 'softmax'
-  /** How many results; ignored by the index when a floor is set. */
-  top?: number
-  /** Everything at or above this score, instead of a count. */
-  minScore?: number
-}
+/** What shapes a query beyond the phrase and the scope — the wire shape. */
+export type Tuning = SemanticTuning
 
 export async function query(
   text: string,
@@ -277,8 +258,8 @@ export async function query(
 export async function hitsToEntries(
   hits: Hit[],
   collectionRoot: string,
-): Promise<{ entries: DirEntry[]; poses: Record<string, Hit['pose']>; dropped: number }> {
-  const poses: Record<string, Hit['pose']> = {}
+): Promise<{ entries: DirEntry[]; poses: Record<string, IndexPose> }> {
+  const poses: Record<string, IndexPose> = {}
   const settled = await Promise.all(
     hits.map(async (h): Promise<DirEntry | null> => {
       // `rel_path` is the join key and the only field trusted for it: this is
@@ -291,17 +272,15 @@ export async function hitsToEntries(
       const s = await stat(full).catch(() => null)
       if (s === null || !s.isFile()) return null
       if (h.pose !== null) poses[full] = h.pose
-      const format = /\.([^.]+)$/.exec(full)?.[1]?.toLowerCase()
       return {
         name: h.rel_path,
         path: full,
         kind: 'model' as const,
-        format: format === 'stl' || format === '3mf' || format === 'obj' ? format : undefined,
+        format: modelFormat(full),
         size: s.size,
         mtime: s.mtimeMs,
       }
     }),
   )
-  const entries = settled.filter((e) => e !== null)
-  return { entries, poses, dropped: settled.length - entries.length }
+  return { entries: settled.filter((e) => e !== null), poses }
 }

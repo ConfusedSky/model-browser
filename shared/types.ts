@@ -101,6 +101,10 @@ export interface SemanticScope {
   covers: string[]
 }
 
+/**
+ * An orientation the semantic index supplies for a model: which way is up, and
+ * the angles its front view was rendered from.
+ */
 export interface IndexPose {
   up: [number, number, number]
   /** The model-space direction the index's azimuth 0 is measured from. */
@@ -141,8 +145,10 @@ export interface IndexAvailability {
   state: IndexState
   /** Present when the index answered: the collection it covers. */
   collectionRoot?: string
+  /** Extensions the index can hold — read, never assumed (semantic-search D3). */
   covers?: string[]
   elapsed?: number
+  /** The index's own words when it has them; preferred to ours (D4). */
   detail?: string
 }
 

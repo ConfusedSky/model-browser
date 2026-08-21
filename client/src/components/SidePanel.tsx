@@ -2,11 +2,24 @@ import { useState } from 'react'
 import type { IndexAvailability, SemanticScope } from '../../../shared/types'
 import type { SearchKinds, SearchMode, Tuning } from '../lib/searchOptions'
 import { TUNING_DEFAULTS } from '../lib/searchOptions'
+import { stored } from '../lib/stored'
 
+/** Predates the tab host, and kept: renaming it would drop every profile's state. */
 const COLLAPSE_KEY = 'model-browser:chat-collapsed'
 const TAB_KEY = 'model-browser:panel-tab'
 
 type Tab = 'chat' | 'search'
+
+const collapseStore = stored(
+  COLLAPSE_KEY,
+  (raw) => raw === '1',
+  (v) => (v ? '1' : '0'),
+)
+const tabStore = stored<Tab>(
+  TAB_KEY,
+  (raw) => (raw === 'search' ? 'search' : 'chat'),
+  (v) => v,
+)
 
 /**
  * The right-edge panel: a tab host for the placeholder chat and the search
@@ -53,10 +66,8 @@ export default function SidePanel({
   /** `defer` asks the caller to wait out a typing run before re-querying. */
   onTuning: (tuning: Tuning, opts?: { defer?: boolean }) => void
 }) {
-  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === '1')
-  const [tab, setTab] = useState<Tab>(() =>
-    localStorage.getItem(TAB_KEY) === 'search' ? 'search' : 'chat',
-  )
+  const [collapsed, setCollapsed] = useState(() => collapseStore.read())
+  const [tab, setTab] = useState<Tab>(() => tabStore.read())
   const [messages, setMessages] = useState<string[]>([])
   const [draft, setDraft] = useState('')
   /**
@@ -73,12 +84,12 @@ export default function SidePanel({
   function toggle(): void {
     const next = !collapsed
     setCollapsed(next)
-    localStorage.setItem(COLLAPSE_KEY, next ? '1' : '0')
+    collapseStore.write(next)
   }
 
   function selectTab(next: Tab): void {
     setTab(next)
-    localStorage.setItem(TAB_KEY, next)
+    tabStore.write(next)
   }
 
   // Answers "why are my results strange?" without opening the panel (D5).
