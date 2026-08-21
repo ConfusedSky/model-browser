@@ -80,7 +80,7 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
     (Enforcer), large-flat (paint-rack), flat-faced (bod_test_cube, the acne/AO test), and
     organic (fat_cat) cases
   - Thumbnail cache: `~/.cache/model-browser/<hash>.{png,json}`; the .json sidecar carries
-    `{path, mtime, lighting, rig}` — grep it to map fixtures to hashes or verify a
+    `{path, mtime, lighting, rig, posed}` — grep it to map fixtures to hashes or verify a
     RIG_VERSION sweep; `rm -rf` the dir to force re-renders during visual tuning
   - Orbit/lightbox E2E persists path-keyed cameras — tile thumbnails later re-render from
     the new angles; that is not a pixel regression. The pointerup also queues a full
