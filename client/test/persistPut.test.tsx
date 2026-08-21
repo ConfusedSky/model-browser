@@ -36,16 +36,26 @@ vi.mock('../src/three/renderer', async (importOriginal) => ({
   }),
 }))
 // The viewer itself is out of scope: a stub that persists one settled session
-// on mount lets this file pin App's persist PUT payload alone.
+// on mount lets this file pin App's persist PUT payload alone. What it passes
+// as options is a test's to choose — `{camera: false}` is the one close
+// ViewerLayer makes that way: a posed view the user never touched.
+const opts = vi.hoisted(() => ({ persist: undefined as { camera?: boolean } | undefined }))
 const SETTLED = { az: 1, el: 0.2, distR: 2, target: [0, 0, 0] as [number, number, number] }
 vi.mock('../src/viewer/ViewerLayer', () => ({
-  default: ({ onPersist }: { onPersist: (s: ViewerSession) => Promise<void> }) => {
+  default: ({
+    onPersist,
+  }: {
+    onPersist: (s: ViewerSession, o?: { camera?: boolean }) => Promise<void>
+  }) => {
     useEffect(() => {
-      void onPersist({
-        state: SETTLED,
-        axis: '-z',
-        snapshot: () => Promise.resolve(new Blob(['png'])),
-      } as unknown as ViewerSession)
+      void onPersist(
+        {
+          state: SETTLED,
+          axis: '-z',
+          snapshot: () => Promise.resolve(new Blob(['png'])),
+        } as unknown as ViewerSession,
+        opts.persist,
+      )
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
     return null
@@ -55,6 +65,7 @@ vi.mock('../src/viewer/ViewerLayer', () => ({
 
 const { default: App } = await import('../src/App')
 const { RIG_VERSION } = await import('../src/three/renderer')
+const { POSE_VERSION } = await import('../src/three/pose')
 
 const MODEL = {
   name: 'm.stl',
@@ -72,6 +83,7 @@ let container: HTMLElement
 const settle = () => act(() => new Promise((r) => setTimeout(r, 30)))
 
 beforeEach(async () => {
+  opts.persist = undefined
   localStorage.setItem('model-browser:last-path', '/models')
   vi.stubGlobal('URL', { ...URL, createObjectURL: () => 'blob:m', revokeObjectURL: () => {} })
   vi.stubGlobal('createImageBitmap', () => Promise.resolve({ close: () => {} }))
@@ -119,5 +131,28 @@ describe('orbit-release persist PUT', () => {
     expect(save.axis).toBe('-z')
     expect(save.lighting).toBe('axis')
     expect(save.rig).toBe(RIG_VERSION)
+    expect(save.posed).toBeUndefined()
+  })
+
+  it('labels the pixels of a posed view the user never touched', async () => {
+    // The close that declines to write a camera still writes a picture, and
+    // that picture was rendered at the index's pose. Unlabelled, the grid reads
+    // it as stale on the next visit and renders the same view a second time —
+    // the pose is an input to the pixels the cache key does not carry.
+    opts.persist = { camera: false }
+    const tile = container.querySelector<HTMLButtonElement>('[data-model-tile]')!
+    await act(async () => {
+      tile.dispatchEvent(
+        new PointerEvent('pointerdown', { button: 0, bubbles: true, clientX: 10, clientY: 10 }),
+      )
+    })
+    await settle()
+
+    const save = putThumb.mock.calls[0]![0] as Record<string, unknown>
+    expect(save.png).toBeInstanceOf(Blob)
+    // Still not the user's orientation: pixels only (semantic-search D5).
+    expect(save.camera).toBeUndefined()
+    expect(save.axis).toBeUndefined()
+    expect(save.posed).toBe(POSE_VERSION)
   })
 })

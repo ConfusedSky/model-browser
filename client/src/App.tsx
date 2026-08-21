@@ -35,12 +35,20 @@ import {
 import { commitUrl, isLightboxEntry, LIGHTBOX_ENTRY, parseUrl, type UrlView } from './lib/urlState'
 import { MeshLru } from './three/lru'
 import { disposeModel, embedded3mfThumbnail, formatOf, geometryBytes, parseModel } from './three/models'
+import { POSE_VERSION } from './three/pose'
 import { RenderQueue } from './three/queue'
 import { RIG_VERSION } from './three/renderer'
 import ViewerLayer, { type ViewerState } from './viewer/ViewerLayer'
 import { aoEnabled, setAoEnabled } from './viewer/aoToggle'
 import { getLightingMode, LIGHTING_MODES, setLightingMode } from './viewer/lighting'
 import type { ViewerSession } from './viewer/session'
+
+/**
+ * How long a typed tuning value waits before it becomes a query. Long enough
+ * that a number typed digit by digit is one search rather than four, short
+ * enough that a finished value still feels like it ran on its own.
+ */
+const TUNING_DEBOUNCE_MS = 300
 
 /**
  * The options a view runs under.
@@ -167,6 +175,15 @@ export default function App() {
   kindsRef.current = kinds
   modeRef.current = mode
   tuningRef.current = tuning
+  // Same mirror, for the view a *deferred* tuning query was scheduled against:
+  // read at fire time to tell whether it is still the view on screen.
+  const queryRef = useRef(query)
+  const destRef = useRef<string | null>(null)
+  queryRef.current = query
+  // The meaning query in flight, and the deferred re-run waiting to become one.
+  const semanticAbortRef = useRef<AbortController | null>(null)
+  const tuningTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(() => () => clearTimeout(tuningTimerRef.current), [])
   const [viewer, setViewer] = useState<ViewerState | null>(null)
   const [lighting, setLightingState] = useState<LightingMode>(getLightingMode)
   // AO preference pill state (persisted per browser profile, aoToggle.ts).
@@ -288,8 +305,14 @@ export default function App() {
       const req = ++requestRef.current
       setTarget(target)
       setPending(true)
+      // Latest-wins already ignores a superseded answer; aborting stops the
+      // index computing it at all, which is what a run of tuning changes would
+      // otherwise queue up behind the one query the user is waiting for.
+      semanticAbortRef.current?.abort()
+      const controller = new AbortController()
+      semanticAbortRef.current = controller
       void api
-        .semanticSearch(text, target, tuningRef.current)
+        .semanticSearch(text, target, tuningRef.current, controller.signal)
         .then((res) => {
           if (req !== requestRef.current) return
           landedQueryRef.current = text
@@ -354,6 +377,7 @@ export default function App() {
   // Every header control keys off this one value: the bar shows it, ↑ ascends
   // from it (and disables at its root), the flat toggle re-requests it.
   const dest = target ?? path
+  destRef.current = dest
 
   function toggleFlat(): void {
     const next = !flat
@@ -449,13 +473,31 @@ export default function App() {
    * follow. Trying a parameter is the point, and a setting that only applied to
    * the *next* search would make trying it a two-step.
    */
-  function setTuning(next: Tuning): void {
+  function setTuning(next: Tuning, opts: { defer?: boolean } = {}): void {
     setSearchTuning(next)
     setTuningState(next)
     tuningRef.current = next
-    if (query !== null && mode === 'meaning' && index?.state === 'ready') {
+    // Whatever a previous change scheduled is superseded by this one, whether
+    // this one waits or runs now.
+    clearTimeout(tuningTimerRef.current)
+    if (query === null || mode !== 'meaning' || index?.state !== 'ready') return
+    const run = () => {
+      // The view can move inside the debounce window — a navigation, another
+      // search, a mode flip — and this re-run belongs to the view that
+      // scheduled it. Firing it anyway would make it the newest request, so
+      // latest-wins would hand it the grid and the URL, dragging the user back
+      // to the view they just left.
+      if (queryRef.current !== query || destRef.current !== dest || modeRef.current !== 'meaning') {
+        return
+      }
       fetchSemantic(dest, query, () => setQuery(landedQueryRef.current))
     }
+    // A typed number arrives one keystroke at a time and every intermediate
+    // value is a whole query the index would have to answer; a click on a
+    // toggle is the finished value already, and waiting for it would only make
+    // the control feel broken.
+    if (opts.defer === true) tuningTimerRef.current = setTimeout(run, TUNING_DEBOUNCE_MS)
+    else run()
   }
 
   /** The kind option only selects among entries already returned — no request. */
@@ -921,6 +963,12 @@ export default function App() {
             axis: opts.camera === false ? undefined : axis,
             lighting,
             rig: RIG_VERSION,
+            // The pose is an input to these pixels the cache key does not
+            // carry, exactly like `rig`. Declining the camera is what says the
+            // view was the index's and the user never touched it, so the same
+            // condition labels the picture: unlabelled, the grid would read
+            // these posed pixels as stale and render them a second time.
+            posed: opts.camera === false ? POSE_VERSION : undefined,
           }),
         ])
         setThumb(entry.path, {

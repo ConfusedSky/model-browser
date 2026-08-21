@@ -15,6 +15,7 @@ import {
   model,
   mountApp,
   mountAppAtCurrentUrl,
+  pathInput,
   pressEnter,
   putThumb,
   renderThumbnail,
@@ -91,7 +92,14 @@ describe('meaning search', () => {
 
     // The third argument is the tuning in force — defaults here, and asserted
     // rather than ignored so a silently-dropped parameter cannot pass.
-    expect(semanticSearch).toHaveBeenCalledWith('a winged demon', '/models', TUNING_DEFAULTS)
+    expect(semanticSearch).toHaveBeenCalledWith(
+      'a winged demon',
+      '/models',
+      TUNING_DEFAULTS,
+      // The fourth argument is the abort handle: a superseded query is stopped,
+      // not merely ignored.
+      expect.any(AbortSignal),
+    )
     expect(listDir).not.toHaveBeenCalledWith('/models', expect.objectContaining({ q: 'a winged demon' }))
     // None of the results contain the phrase — the whole point, and the case
     // that would have been hidden if the search input still filtered.
@@ -118,7 +126,12 @@ describe('meaning search', () => {
     await click(modeButton('meaning')!)
     await settle()
 
-    expect(semanticSearch).toHaveBeenCalledWith('winged demon', '/models', TUNING_DEFAULTS)
+    expect(semanticSearch).toHaveBeenCalledWith(
+      'winged demon',
+      '/models',
+      TUNING_DEFAULTS,
+      expect.any(AbortSignal),
+    )
     expect(searchInput().value).toBe('winged demon')
   })
 
@@ -363,6 +376,136 @@ describe('meaning search', () => {
     expect(putThumb.mock.calls.at(-1)?.[0]?.posed).toBe(POSE_VERSION)
   })
 
+  it('a thumbnail the user already aimed is left alone, pose or no pose', async () => {
+    // The loop this closes: a model with both an index pose and a stored camera
+    // could never satisfy the staleness check. The re-render deliberately poses
+    // nothing when a camera is stored (the user's orientation wins), so it PUT
+    // the pixels back unlabelled — and every visit to a meaning view rendered
+    // and re-uploaded the identical picture.
+    const POSE = {
+      up: [0, 1, 0] as [number, number, number],
+      azimuth_zero: [1, 0, 0] as [number, number, number],
+      source: 'siglip',
+      confidence: 0.9,
+      front: { view: 5, azimuth_deg: 225, elevation_deg: 20 },
+    }
+    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models', covers: ['stl'] })
+    semanticSearch.mockResolvedValue({
+      ...MEANING,
+      entries: [model('Kits/hero.stl')],
+      poses: { '/models/Kits/hero.stl': POSE },
+    })
+    getThumb.mockResolvedValue({
+      status: 'hit',
+      pngUrl: 'blob:mine',
+      lighting: 'axis',
+      rig: RIG_VERSION,
+      // The user's own orientation, from an earlier orbit — and no pose label,
+      // because these pixels were never posed.
+      camera: { az: 1, el: 0.2, distR: 2, target: [0, 0, 0] },
+      axis: 'y',
+      posed: undefined,
+    })
+    await mountApp('/models', NESTED)
+    await settle()
+    await click(searchTab())
+    await click(modeButton('meaning')!)
+    await type(searchInput(), 'hero')
+    await pressEnter(searchInput())
+    await settle()
+
+    expect(renderThumbnail).not.toHaveBeenCalled()
+    expect(putThumb).not.toHaveBeenCalled()
+  })
+
+  it('a typed parameter is one query at the end, never one per keystroke', async () => {
+    // Each keystroke used to be a whole meaning query with no debounce and no
+    // way to stop it — and clearing the score field asked for the entire
+    // collection at score ≥ 0, since `Number('')` is 0.
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models', covers: ['stl'] })
+    semanticSearch.mockResolvedValue(MEANING)
+    await mountApp('/models', NESTED)
+    await settle()
+    await click(searchTab())
+    await click(modeButton('meaning')!)
+    await type(searchInput(), 'winged demon')
+    await pressEnter(searchInput())
+    await settle()
+
+    const scoreBtn = Array.from(container.querySelectorAll<HTMLButtonElement>('aside button')).find(
+      (b) => b.textContent?.trim().startsWith('score'),
+    )!
+    await click(scoreBtn)
+    await settle()
+    const firstSignal = semanticSearch.mock.calls.at(-1)?.[3] as AbortSignal
+    semanticSearch.mockClear()
+
+    const score = container.querySelector<HTMLInputElement>('input[aria-label="Minimum score"]')!
+    await type(score, '')
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(400)
+    })
+    expect(semanticSearch).not.toHaveBeenCalled()
+
+    await type(score, '0')
+    await type(score, '0.3')
+    await type(score, '0.35')
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(150)
+    })
+    // Mid-run: 0, and 0.3, are values on the way to the one being asked for.
+    expect(semanticSearch).not.toHaveBeenCalled()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300)
+    })
+    expect(semanticSearch).toHaveBeenCalledTimes(1)
+    expect(semanticSearch).toHaveBeenLastCalledWith(
+      'winged demon',
+      '/models',
+      { ...TUNING_DEFAULTS, minScore: 0.35 },
+      expect.any(AbortSignal),
+    )
+    // …and the query it supersedes is stopped, not merely ignored on arrival.
+    expect(firstSignal.aborted).toBe(true)
+    vi.useRealTimers()
+  })
+
+  it('a tuning query scheduled for a view the user has left never fires', async () => {
+    // A deferred re-run belongs to the view that scheduled it. Arriving after a
+    // navigation it would be the newest request, so latest-wins would give it
+    // the grid and the URL — dragging the user back to the search they left.
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models', covers: ['stl'] })
+    semanticSearch.mockResolvedValue(MEANING)
+    await mountApp('/models', NESTED)
+    await settle()
+    await click(searchTab())
+    await click(modeButton('meaning')!)
+    await type(searchInput(), 'winged demon')
+    await pressEnter(searchInput())
+    await settle()
+
+    const top = container.querySelector<HTMLInputElement>('input[aria-label="Number of results"]')!
+    await type(top, '25')
+    semanticSearch.mockClear()
+
+    // Away inside the debounce window, the way a user leaves a search.
+    listDir.mockResolvedValue({ path: '/models/Alpha', entries: [dir('Beta')] })
+    await type(pathInput(), '/models/Alpha')
+    await pressEnter(pathInput())
+    await settle()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500)
+    })
+
+    expect(semanticSearch).not.toHaveBeenCalled()
+    expect(labels()).toEqual(['Beta'])
+    expect(location.search).not.toContain('mode=meaning')
+    vi.useRealTimers()
+  })
+
   it('a meaning link renders no stand-in listing while the index is being asked', async () => {
     // `?path=/library&flat=1&q=…&mode=meaning` — the flat flag belongs to the
     // search. Rendering the ordinary listing while waiting flattens the whole
@@ -377,7 +520,12 @@ describe('meaning search', () => {
     await settle()
 
     expect(listDir).not.toHaveBeenCalled()
-    expect(semanticSearch).toHaveBeenCalledWith('demon', '/models', TUNING_DEFAULTS)
+    expect(semanticSearch).toHaveBeenCalledWith(
+      'demon',
+      '/models',
+      TUNING_DEFAULTS,
+      expect.any(AbortSignal),
+    )
   })
 
   it('changing a parameter re-runs the committed query under it, and sticks', async () => {
@@ -399,10 +547,12 @@ describe('meaning search', () => {
 
     // Trying a parameter is the point: it re-runs rather than applying to some
     // later search the user has to remember to make.
-    expect(semanticSearch).toHaveBeenLastCalledWith('winged demon', '/models', {
-      ...TUNING_DEFAULTS,
-      pool: 'max',
-    })
+    expect(semanticSearch).toHaveBeenLastCalledWith(
+      'winged demon',
+      '/models',
+      { ...TUNING_DEFAULTS, pool: 'max' },
+      expect.any(AbortSignal),
+    )
     expect(location.search).toContain('pool=max')
     expect(JSON.parse(localStorage.getItem('model-browser:search-tuning')!).pool).toBe('max')
   })
@@ -416,10 +566,12 @@ describe('meaning search', () => {
 
     // The link carries `raw` and omits the rest: omitted means default, never
     // the reader's stored setting — the same rule the other options follow.
-    expect(semanticSearch).toHaveBeenCalledWith('demon', '/models', {
-      ...TUNING_DEFAULTS,
-      raw: true,
-    })
+    expect(semanticSearch).toHaveBeenCalledWith(
+      'demon',
+      '/models',
+      { ...TUNING_DEFAULTS, raw: true },
+      expect.any(AbortSignal),
+    )
   })
 
   it('a link opened without the index keeps naming the meaning search', async () => {
@@ -454,7 +606,12 @@ describe('meaning search', () => {
     await click(container.querySelector<HTMLButtonElement>('main .grid button')!)
     await settle()
 
-    expect(semanticSearch).toHaveBeenCalledWith('a winged demon', expect.any(String), TUNING_DEFAULTS)
+    expect(semanticSearch).toHaveBeenCalledWith(
+      'a winged demon',
+      expect.any(String),
+      TUNING_DEFAULTS,
+      expect.any(AbortSignal),
+    )
     expect(container.textContent).toContain('Meaning matches for "a winged demon".')
   })
 

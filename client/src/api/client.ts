@@ -50,8 +50,19 @@ export interface ApiClient {
   fetchModel(path: string): Promise<ArrayBuffer>
   /** Availability of the semantic index — cheap, cached server-side (D4). */
   indexAvailability(opts?: { fresh?: boolean }): Promise<IndexAvailability>
-  /** A meaning query. Throws HttpError(503) carrying the index's state. */
-  semanticSearch(text: string, path?: string, tuning?: SemanticTuning): Promise<SemanticListing>
+  /**
+   * A meaning query. Throws HttpError(503) carrying the index's state.
+   *
+   * `signal` aborts it: a query the user has already superseded (another
+   * keystroke in a tuning field) otherwise runs to the server's 30s timeout
+   * while the index works on an answer nobody will read.
+   */
+  semanticSearch(
+    text: string,
+    path?: string,
+    tuning?: SemanticTuning,
+    signal?: AbortSignal,
+  ): Promise<SemanticListing>
   getThumb(path: string, mtime: number): Promise<ThumbResult>
   putThumb(save: ThumbSave): Promise<void>
 }
@@ -116,11 +127,13 @@ export class HttpApiClient implements ApiClient {
     text: string,
     path?: string,
     tuning: SemanticTuning = {},
+    signal?: AbortSignal,
   ): Promise<SemanticListing> {
     const res = await this.fetchFn('/api/semantic', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ text, path, ...tuning }),
+      signal,
     })
     return jsonOrThrow<SemanticListing>(res)
   }

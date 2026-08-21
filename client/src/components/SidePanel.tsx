@@ -50,7 +50,8 @@ export default function SidePanel({
   onFolderMatching: (on: boolean) => void
   onKinds: (kinds: SearchKinds) => void
   onMode: (mode: SearchMode) => void
-  onTuning: (tuning: Tuning) => void
+  /** `defer` asks the caller to wait out a typing run before re-querying. */
+  onTuning: (tuning: Tuning, opts?: { defer?: boolean }) => void
 }) {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === '1')
   const [tab, setTab] = useState<Tab>(() =>
@@ -58,6 +59,16 @@ export default function SidePanel({
   )
   const [messages, setMessages] = useState<string[]>([])
   const [draft, setDraft] = useState('')
+  /**
+   * What the tuning number fields show while they are being typed in, `null`
+   * when they simply show the value in force.
+   *
+   * A field mid-edit is not a value: cleared, `Number('')` is 0, and committing
+   * that asked the index for the whole collection at score ≥ 0. So the text
+   * lives here until it parses, and only a parsed value is handed up.
+   */
+  const [topText, setTopText] = useState<string | null>(null)
+  const [scoreText, setScoreText] = useState<string | null>(null)
 
   function toggle(): void {
     const next = !collapsed
@@ -214,7 +225,11 @@ export default function SidePanel({
                     <button
                       type="button"
                       aria-pressed={tuning.minScore === undefined}
-                      onClick={() => onTuning({ ...tuning, minScore: undefined })}
+                      onClick={() => {
+                        setTopText(null)
+                        setScoreText(null)
+                        onTuning({ ...tuning, minScore: undefined })
+                      }}
                       className={`rounded-lg border px-2 py-1.5 ${tuning.minScore === undefined ? 'border-zinc-500 text-zinc-100' : 'border-zinc-800 text-zinc-500'}`}
                     >
                       top
@@ -223,19 +238,28 @@ export default function SidePanel({
                       type="number"
                       min={1}
                       aria-label="Number of results"
-                      value={tuning.top}
+                      value={topText ?? String(tuning.top)}
                       disabled={tuning.minScore !== undefined}
-                      onChange={(e) =>
-                        onTuning({ ...tuning, top: Math.max(1, Number(e.target.value) || 1) })
-                      }
+                      onChange={(e) => {
+                        const text = e.target.value
+                        setTopText(text)
+                        const n = Number(text)
+                        // Held, not clamped: a cleared field on its way to "20"
+                        // is not a request for one result.
+                        if (text.trim() === '' || !Number.isFinite(n) || n < 1) return
+                        onTuning({ ...tuning, top: Math.round(n) }, { defer: true })
+                      }}
+                      onBlur={() => setTopText(null)}
                       className="w-16 rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-zinc-100 disabled:opacity-40"
                     />
                     <button
                       type="button"
                       aria-pressed={tuning.minScore !== undefined}
-                      onClick={() =>
+                      onClick={() => {
+                        setTopText(null)
+                        setScoreText(null)
                         onTuning({ ...tuning, minScore: tuning.minScore ?? 0.2 })
-                      }
+                      }}
                       className={`rounded-lg border px-2 py-1.5 ${tuning.minScore !== undefined ? 'border-zinc-500 text-zinc-100' : 'border-zinc-800 text-zinc-500'}`}
                     >
                       score ≥
@@ -244,9 +268,19 @@ export default function SidePanel({
                       type="number"
                       step={0.01}
                       aria-label="Minimum score"
-                      value={tuning.minScore ?? ''}
+                      value={scoreText ?? (tuning.minScore === undefined ? '' : String(tuning.minScore))}
                       disabled={tuning.minScore === undefined}
-                      onChange={(e) => onTuning({ ...tuning, minScore: Number(e.target.value) })}
+                      onChange={(e) => {
+                        const text = e.target.value
+                        setScoreText(text)
+                        const n = Number(text)
+                        // `Number('')` is 0, and a floor of 0 is the whole
+                        // collection — the one value clearing the field must
+                        // never mean.
+                        if (text.trim() === '' || !Number.isFinite(n)) return
+                        onTuning({ ...tuning, minScore: n }, { defer: true })
+                      }}
+                      onBlur={() => setScoreText(null)}
                       className="w-16 rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-zinc-100 disabled:opacity-40"
                     />
                   </div>
@@ -256,7 +290,11 @@ export default function SidePanel({
                     tuning.minScore !== undefined) && (
                     <button
                       type="button"
-                      onClick={() => onTuning({ ...TUNING_DEFAULTS })}
+                      onClick={() => {
+                        setTopText(null)
+                        setScoreText(null)
+                        onTuning({ ...TUNING_DEFAULTS })
+                      }}
                       className="text-zinc-500 underline hover:text-zinc-300"
                     >
                       Reset tuning

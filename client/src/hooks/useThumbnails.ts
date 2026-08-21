@@ -122,8 +122,20 @@ export function useThumbnails(
             // rendered before the index had an opinion keeps its default angle
             // forever, and the orientation appears only once the user opens the
             // model and the lightbox's close persists a posed snapshot.
+            //
+            // Only where nothing of the user's is stored, because that is the
+            // only case the re-render below poses: with a stored camera or
+            // axis it computes `posed = null` and PUTs unlabelled pixels, so
+            // the label could never arrive and every visit re-rendered and
+            // re-uploaded the same picture. A stored camera wins over the
+            // index's opinion anyway (semantic-search D5) — there is nothing
+            // stale about pixels that already show it.
             const wantsPose = poses[entry.path] !== undefined
-            const poseStale = wantsPose && cached.posed !== POSE_VERSION
+            const poseStale =
+              wantsPose &&
+              cached.camera === undefined &&
+              cached.axis === undefined &&
+              cached.posed !== POSE_VERSION
             if (
               cached.status === 'hit' &&
               cached.pngUrl !== undefined &&
