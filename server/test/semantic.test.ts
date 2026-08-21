@@ -276,6 +276,28 @@ describe('semantic query', () => {
     expect((await res.json()).state).toBe('warming')
   })
 
+  it('an index that refuses the request answers as a refusal, not as unavailability', async () => {
+    // Everything non-503 used to come back as 503 with `state: 'ready'` — a
+    // body contradicting its own status, telling the client the service was
+    // down over a request it should have fixed.
+    stubIndex(READY, { detail: 'pool must be one of mean, max, softmax' }, { queryStatus: 400 })
+    const res = await post({ text: 'dragon', pool: 'median' })
+    expect(res.status).toBe(400)
+    const body = (await res.json()) as { error: string; state?: string }
+    expect(body.error).toBe('pool must be one of mean, max, softmax')
+    // Availability is not what went wrong here, so no state is claimed.
+    expect(body.state).toBeUndefined()
+  })
+
+  it('an index that fails on its own side is a bad gateway, not an absent service', async () => {
+    stubIndex(READY, { detail: 'CUDA out of memory' }, { queryStatus: 500 })
+    const res = await post({ text: 'dragon' })
+    expect(res.status).toBe(502)
+    const body = (await res.json()) as { error: string; state?: string }
+    expect(body.error).toBe('CUDA out of memory')
+    expect(body.state).toBeUndefined()
+  })
+
   it('rejects a virtual path rather than letting the index reject it', async () => {
     stubIndex(READY, result)
     const res = await post({ text: 'dragon', path: `${root}/kit.zip!/inner` })

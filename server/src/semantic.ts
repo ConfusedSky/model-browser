@@ -131,6 +131,13 @@ export class IndexError extends Error {
   constructor(
     readonly state: IndexState,
     message: string,
+    /**
+     * The status the index itself answered with, carried only when the failure
+     * was not about availability — an index that is up and refused this
+     * request. Its absence is what marks the availability states, which are
+     * reported to the client as such.
+     */
+    readonly upstreamStatus?: number,
   ) {
     super(message)
   }
@@ -244,7 +251,10 @@ export async function query(
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { detail?: unknown } | null
     const detail = typeof body?.detail === 'string' ? body.detail : `index error ${res.status}`
-    throw new IndexError('ready', detail)
+    // The index answered, so it is up: this is a refused request, not an
+    // unavailable service. Its status travels with the error so the caller can
+    // report it as what it is rather than as availability.
+    throw new IndexError('ready', detail, res.status)
   }
   return (await res.json()) as QueryResult
 }

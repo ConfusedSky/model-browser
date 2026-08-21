@@ -117,6 +117,16 @@ export function createApp(cache: ThumbCache = new ThumbCache()): Hono {
       })
     } catch (err) {
       if (err instanceof IndexError) {
+        // An index that answered and refused is not an unavailable one: a 503
+        // carrying `state: 'ready'` contradicts itself, and it told the client
+        // to re-probe availability over a request it should have fixed. A
+        // refusal comes back as the refusal (400 with the index's own words),
+        // an index-side failure as a bad gateway — and only the availability
+        // states keep the 503 envelope the UI renders.
+        if (err.upstreamStatus !== undefined) {
+          const bad = err.upstreamStatus >= 400 && err.upstreamStatus < 500
+          return c.json({ error: err.message }, bad ? 400 : 502)
+        }
         return c.json({ error: err.message, state: err.state }, 503)
       }
       throw err

@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { baseName } from '../../../shared/names'
 import type { DirEntry } from '../../../shared/types'
 import type { ThumbState } from '../hooks/useThumbnails'
@@ -12,7 +13,13 @@ interface Props {
   onModelHover: (path: string | null) => void
 }
 
-export default function Grid({ entries, thumbs, onEnter, onModelPointerDown, onModelOpen, onModelHover }: Props) {
+/**
+ * Memoized, tiles included: typing in the search box re-renders the app on
+ * every keystroke while nothing here has changed, and a grid is hundreds of
+ * tiles. A tile compares on its entry, its own thumbnail, and the handlers —
+ * which App holds by identity for exactly this reason.
+ */
+function Grid({ entries, thumbs, onEnter, onModelPointerDown, onModelOpen, onModelHover }: Props) {
   if (entries.length === 0) {
     return <p className="mt-16 text-center text-sm text-zinc-600">Nothing to show here.</p>
   }
@@ -33,7 +40,9 @@ export default function Grid({ entries, thumbs, onEnter, onModelPointerDown, onM
   )
 }
 
-function Tile({
+export default memo(Grid)
+
+const Tile = memo(function Tile({
   entry,
   thumb,
   onEnter,
@@ -103,4 +112,4 @@ function Tile({
       <span className="w-full truncate text-center text-xs">{baseName(entry.name)}</span>
     </button>
   )
-}
+})

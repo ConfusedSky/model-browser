@@ -98,20 +98,16 @@ export function serializeView(view: UrlView): string {
   return s === '' ? '' : `?${s}`
 }
 
+/**
+ * Compared by what they write, not field by field: two views name the same
+ * URL exactly when they serialize alike. A field-wise comparison also has to
+ * agree with `serializeView` about which values are absences, and it did not —
+ * `parseUrl` leaves tuning left at its defaults `undefined` while a caller
+ * passes the full defaults object, so an unchanged meaning view read as
+ * different from itself and every re-submit stacked a dead history entry.
+ */
 function sameView(a: UrlView, b: UrlView): boolean {
-  return (
-    a.path === b.path &&
-    a.flat === b.flat &&
-    a.q === b.q &&
-    a.folderMatching === b.folderMatching &&
-    a.kinds === b.kinds &&
-    a.mode === b.mode &&
-    a.tuning?.raw === b.tuning?.raw &&
-    a.tuning?.pool === b.tuning?.pool &&
-    a.tuning?.top === b.tuning?.top &&
-    a.tuning?.minScore === b.tuning?.minScore &&
-    a.model === b.model
-  )
+  return serializeView(a) === serializeView(b)
 }
 
 /**

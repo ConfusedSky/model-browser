@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it } from 'vitest'
+import { TUNING_DEFAULTS } from '../src/lib/searchOptions'
 import {
   commitUrl,
   isLightboxEntry,
@@ -119,6 +120,30 @@ describe('search options in the URL', () => {
 
   it('an unrecognised kinds reads as the default rather than an error', () => {
     expect(parseUrl('?path=/m&flat=1&q=a&kinds=sideways').kinds).toBeUndefined()
+  })
+
+  it('a re-submitted meaning view stacks nothing, though its tuning is spelled out', () => {
+    // The regression: `parseUrl` leaves tuning left at its defaults undefined,
+    // while a committer passes the full defaults object. Compared field by
+    // field those never matched, so every re-submit of an unchanged meaning
+    // search pushed a duplicate entry and Back landed on the same view.
+    const view: UrlView = {
+      path: '/m',
+      flat: true,
+      q: 'dragon',
+      mode: 'meaning',
+      tuning: { ...TUNING_DEFAULTS },
+    }
+    commitUrl(view)
+    const len = window.history.length
+    // The URL says nothing about tuning, because none of it is off default.
+    expect(window.location.search).toBe('?path=%2Fm&flat=1&q=dragon&mode=meaning')
+    commitUrl(view)
+    commitUrl({ ...view, tuning: { ...TUNING_DEFAULTS } })
+    expect(window.history.length).toBe(len)
+    // A tuning change is still a different view, and still pushes.
+    commitUrl({ ...view, tuning: { ...TUNING_DEFAULTS, top: 12 } })
+    expect(window.history.length).toBe(len + 1)
   })
 
   it('absent options are absent, not false', () => {

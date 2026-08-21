@@ -90,6 +90,24 @@ function optionsOf(view: UrlView): {
   }
 }
 
+/**
+ * Whether two availability reads say the same thing. The warming poll asks
+ * every 2s and each answer is a fresh object, so without this the whole app
+ * re-renders on a probe that changed nothing. Every rendered field is
+ * compared, `elapsed` included — the side panel counts the wait out loud.
+ */
+function sameAvailability(a: IndexAvailability | null, b: IndexAvailability): boolean {
+  return (
+    a !== null &&
+    a.state === b.state &&
+    a.collectionRoot === b.collectionRoot &&
+    a.elapsed === b.elapsed &&
+    a.detail === b.detail &&
+    (a.covers ?? []).length === (b.covers ?? []).length &&
+    (a.covers ?? []).every((c, i) => c === (b.covers ?? [])[i])
+  )
+}
+
 export default function App() {
   const api = useMemo(() => new HttpApiClient(), [])
   const queue = useMemo(() => new RenderQueue(2), [])
@@ -593,7 +611,11 @@ export default function App() {
       void api.indexAvailability().then(
         (s) => {
           if (!alive) return
-          setIndex(s)
+          // Kept by identity when nothing about it changed: while the index
+          // warms this re-reads every 2s, and a fresh object each tick
+          // re-rendered the whole app — grid included — for an answer that
+          // said the same thing.
+          setIndex((prev) => (sameAvailability(prev, s) ? prev : s))
           // Warming is the one state that must re-check without being asked:
           // "the interactions the app already makes" is an empty set while a
           // user waits for SigLIP, because nothing they do changes the path.
@@ -874,7 +896,7 @@ export default function App() {
    * stays visible. Falls back to the centered square of the content area when
    * no <img> has rendered yet.
    */
-  function overlayRectFor(el: HTMLElement): Box {
+  const overlayRectFor = useCallback((el: HTMLElement): Box => {
     const img = el.querySelector('img')
     if (img !== null) {
       const r = img.getBoundingClientRect()
@@ -882,20 +904,26 @@ export default function App() {
     }
     const content = el.querySelector('[data-tile-content]') ?? el
     return fitSquareBox(content.getBoundingClientRect())
-  }
+  }, [])
 
-  function onModelPointerDown(e: React.PointerEvent, entry: DirEntry, el: HTMLElement): void {
-    if (e.button !== 0) return
-    trackerRef.current.start(e.clientX, e.clientY)
-    setViewer({
-      mode: 'orbit',
-      entry,
-      rect: overlayRectFor(el),
-      originEl: el,
-    })
-  }
+  // The tile handlers are held by identity rather than rebuilt each render:
+  // they are what a memoized tile compares on, and a fresh function per
+  // keystroke in the search box would re-render every tile in the grid.
+  const onModelPointerDown = useCallback(
+    (e: React.PointerEvent, entry: DirEntry, el: HTMLElement): void => {
+      if (e.button !== 0) return
+      trackerRef.current.start(e.clientX, e.clientY)
+      setViewer({
+        mode: 'orbit',
+        entry,
+        rect: overlayRectFor(el),
+        originEl: el,
+      })
+    },
+    [overlayRectFor],
+  )
 
-  function openLightbox(entry: DirEntry, el: HTMLElement): void {
+  const openLightbox = useCallback((entry: DirEntry, el: HTMLElement): void => {
     trackerRef.current.start(0, 0)
     const r = el.getBoundingClientRect()
     setViewer({
@@ -904,11 +932,19 @@ export default function App() {
       rect: { left: r.left, top: r.top, width: r.width, height: r.height },
       originEl: el,
     })
-  }
+  }, [])
 
-  function enterEntry(entry: DirEntry): void {
-    if (entry.kind === 'dir' || entry.kind === 'zip') navigate(entry.path)
-  }
+  const enterEntry = useCallback(
+    (entry: DirEntry): void => {
+      if (entry.kind === 'dir' || entry.kind === 'zip') navigate(entry.path)
+    },
+    [navigate],
+  )
+
+  const onModelHover = useCallback(
+    (p: string | null) => (p !== null ? hover.enter(p) : hover.leave()),
+    [hover],
+  )
 
   function goUp(): void {
     // Ascend from `dest`, not the committed path (D3): pressing ↑ twice during
@@ -1046,9 +1082,15 @@ export default function App() {
   // already says what happened and "showing 0 folders" adds only noise.
   const shownModels = byKind.filter((e) => e.kind === 'model').length
   const shownFolders = byKind.length - shownModels
+  // The kind option restricts search results only — `byKind` leaves a plain
+  // listing alone — so the notice counts it the same way. Reading the stored
+  // preference here regardless left the sentence with no parts at all under
+  // `kinds=folders` with nothing committed ("Showing ; some entries were
+  // omitted."), while the grid was in fact showing the models it denied.
+  const noticeKinds = query !== null ? kinds : 'both'
   const shownParts = [
-    kinds !== 'folders' ? `${shownModels} models` : '',
-    kinds !== 'models' && query !== null ? `${shownFolders} folders` : '',
+    noticeKinds !== 'folders' ? `${shownModels} models` : '',
+    noticeKinds !== 'models' && query !== null ? `${shownFolders} folders` : '',
   ].filter((part) => part !== '')
   const omittedNotice =
     truncated && !searchHasNoMatches && !kindHidesAll
@@ -1212,7 +1254,7 @@ export default function App() {
                   onEnter={enterEntry}
                   onModelPointerDown={onModelPointerDown}
                   onModelOpen={openLightbox}
-                  onModelHover={(p) => (p !== null ? hover.enter(p) : hover.leave())}
+                  onModelHover={onModelHover}
                 />
               )}
             </>

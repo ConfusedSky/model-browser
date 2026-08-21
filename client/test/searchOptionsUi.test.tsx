@@ -10,6 +10,7 @@ import {
   click,
   container,
   dir,
+  flatButton,
   listDir,
   model,
   mountApp,
@@ -34,6 +35,12 @@ const RESULTS: DirListing = {
 }
 /** Truncated: the caps are independent, so a full model set says nothing about folders. */
 const TRUNCATED: DirListing = { ...RESULTS, truncated: true }
+/** The same, reached by the flat toggle rather than by a search — no query committed. */
+const TRUNCATED_FLAT: DirListing = {
+  path: '/models',
+  entries: [dir('Alpha'), model('Alpha/base.stl'), model('Alpha/body.stl')],
+  truncated: true,
+}
 
 function panelButton(label: string): HTMLButtonElement {
   return container.querySelector<HTMLButtonElement>(`aside button[aria-label="${label}"]`)!
@@ -255,6 +262,25 @@ describe('search options', () => {
     // would describe a view nobody is looking at.
     expect(container.textContent).toContain('Showing 1 folders; some entries were omitted.')
     expect(container.textContent).not.toContain('2 models')
+  })
+
+  it('the notice is a sentence when a stored kind has no query to apply to', async () => {
+    // The kind option restricts search *results*; a plain listing is left
+    // alone. Reading the stored preference here regardless emptied both halves
+    // of the sentence — "Showing ; some entries were omitted." — over a grid
+    // that was in fact showing the models the notice had just denied.
+    await unmountApp()
+    setSearchKinds('folders')
+    await mountApp('/models', NESTED)
+    // After the mount: it resets `listDir` to answer with the initial listing.
+    listDir.mockImplementation((_t: string, opts?: { flat?: boolean }) =>
+      Promise.resolve(opts?.flat === true ? TRUNCATED_FLAT : NESTED),
+    )
+    await click(flatButton())
+    await settle()
+
+    expect(container.textContent).toContain('Showing 2 models; some entries were omitted.')
+    expect(container.textContent).not.toContain('Showing ;')
   })
 
   it('the notice is silent when the restriction leaves nothing to describe', async () => {
