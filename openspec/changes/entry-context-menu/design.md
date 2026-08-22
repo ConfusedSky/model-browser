@@ -485,9 +485,13 @@ requirement's rebased prose — that a read reports a missing axis rather than s
 +Y — is already shipped behavior (`server/src/cache.ts:72-78`, comment and all); it is
 carried in the delta because main's text still says the old thing, not because it is work.
 
-**A discarded orientation resolves the way an untouched model resolves**, which is the pose
-when the index has one and the default otherwise — and that is why reset framing discards the
-axis too whenever a pose is there to replace it.
+**A discarded orientation resolves the way an untouched model resolves, as far as the view
+can know it** — the pose when the view's own landed answer carries one (`host.poses`, populated
+by a meaning or similarity landing; a plain listing carries none) and the default otherwise —
+and that is why reset framing discards the axis too exactly when a usable pose is there to
+replace it, and leaves it standing when the view cannot know of one. The command's reach is
+the view's knowledge (review ruling, 2026-08-22): a kept axis on a plain listing is the user's
+own choice winning, not a gap.
 
 The axis is not separable from the pose's angles. `cameraForPose` (`client/src/three/pose.ts`,
 `:80-110`) derives camera *and* axis together, because the azimuth offset is computed in
