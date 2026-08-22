@@ -9,8 +9,9 @@
  * - `inflight` the question last *asked*, with the id that identifies the
  *              asking event and where it came from. Optimism lives here and
  *              nowhere else, so a failure is "clear it" rather than a revert.
- * - `phase`    `deferred` is a meaning query held for an index that cannot
- *              answer yet. "fetching" is not a phase — it is `inflight !== null`,
+ * - `phase`    `deferred` is a question — a meaning phrase or a model's
+ *              neighbours — held for an index that cannot answer yet.
+ *              "fetching" is not a phase — it is `inflight !== null`,
  *              and a deferral can have a stand-in fetch in flight.
  * - `result`   the question that was *answered*, carrying its own residue. It
  *              is replaced wholesale, never spread (R5).
@@ -86,7 +87,7 @@ export interface Failure {
 }
 
 /**
- * `idle`, or a meaning query held for an index that cannot answer yet — holding
+ * `idle`, or a question the index cannot answer yet — holding
  * its own provenance, because that is the only place left to keep it. Every
  * other question carries its source on `inflight`, but a deferral in the `wait`
  * window has asked for nothing at all, and when the index finally answers, the
@@ -120,8 +121,17 @@ export type Action =
   | { type: 'setTuning'; tuning: Tuning; run: boolean }
   | { type: 'setKinds'; kinds: SearchKinds }
   | { type: 'setFolderMatching'; on: boolean }
-  /** Typing in the search input. Emptying it is how a committed search is left. */
+  /** Typing in the search input. Emptying it is how a committed subject is left. */
   | { type: 'queryText'; text: string }
+  /** Show the neighbours of a model: a similarity subject over the location the
+   *  user is standing in. The corpus decides what that means, exactly as it does
+   *  for a phrase — including deferring it while the index warms (D4). */
+  | { type: 'similar'; model: string }
+  /** Leave whatever subject is committed — a phrase or a model — and re-ask the
+   *  location's ordinary listing (D9). One transition for both kinds, which is
+   *  what makes "the same dismissal" one implementation rather than two that
+   *  resemble each other. */
+  | { type: 'clearSubject' }
   /** The deferred banner's offer: run the held phrase against the name corpus. */
   | { type: 'deferredToName' }
   /** A history entry or a link. The caller resolves the URL into a whole View. */
@@ -145,7 +155,7 @@ export function initialState(view: View, index: IndexAvailability | null = null)
     result: null,
     failure: null,
     index,
-    drafts: { queryText: view.q ?? '' },
+    drafts: { queryText: view.subject.kind === 'query' ? view.subject.text : '' },
     lastId: 0,
   }
 }
@@ -175,8 +185,8 @@ function ask(state: SearchState, view: View, source: Source, standIn?: true): Se
 
 /**
  * A view change that asks nothing: asserted at dispatch, and patched into the
- * request in flight too so its landing cannot revert it. Never `path`/`q` —
- * those change what was asked, which is a new request by definition.
+ * request in flight too so its landing cannot revert it. Never `path`/`subject`
+ * — those change what was asked, which is a new request by definition.
  *
  * It reaches the *answer* as well, for the same reason the landing takes the
  * patched view rather than the asked one: a fetchless change belongs to the
@@ -203,15 +213,16 @@ function patch(state: SearchState, fields: Partial<View>): SearchState {
 }
 
 /**
- * The deferral's exit (R6): the phase ends and the held query stops being
- * asserted, so the banner goes and the URL stops naming a search nobody is
- * waiting for. Every cancel path — navigating, emptying the input, searching
- * by name — goes through here, which is why there is no path that leaves a
- * dead deferral behind to fire later.
+ * The deferral's exit (R6): the phase ends and the held question stops being
+ * asserted — it clears the *subject*, whichever kind it is, so the banner goes
+ * and the URL stops naming a search, or a model's neighbours, that nobody is
+ * waiting for. Every cancel path — navigating, emptying the input, searching by
+ * name, dismissing — goes through here, which is why there is no path that
+ * leaves a dead deferral behind to fire later.
  */
 function endDeferral(state: SearchState): SearchState {
   if (state.phase === 'idle') return state
-  return { ...state, phase: 'idle', view: { ...state.view, q: null } }
+  return { ...state, phase: 'idle', view: { ...state.view, subject: { kind: 'none' } } }
 }
 
 /** Enter the deferred phase for `view`: asserted at dispatch (holding a
@@ -279,6 +290,23 @@ function askCommitted(state: SearchState, view: View, source: Source): SearchSta
   }
 }
 
+/**
+ * Leave the committed subject (D9): it becomes `none`, any deferral ends on the
+ * way through, and the location's ordinary listing is re-asked — asserted at
+ * landing like any other fetch.
+ *
+ * ONE rule for both kinds of subject, and one implementation for both ways of
+ * invoking it: the dismiss control dispatches `clearSubject`, and emptying the
+ * search input delegates here rather than keeping a copy of the rule. Before
+ * the subject existed those were necessarily different code, because the only
+ * exit was emptying an input a similarity view has nothing in.
+ */
+function leaveSubject(state: SearchState): SearchState {
+  const base = liveView(state)
+  if (base.subject.kind === 'none') return state
+  return ask(endDeferral(state), { ...base, subject: { kind: 'none' }, model: null }, 'user')
+}
+
 export function reducer(state: SearchState, action: Action): SearchState {
   switch (action.type) {
     case 'navigate': {
@@ -291,7 +319,7 @@ export function reducer(state: SearchState, action: Action): SearchState {
         ...action.prefs,
         path: action.path,
         flat: liveView(state).flat,
-        q: null,
+        subject: { kind: 'none' },
         model: null,
       }
       return ask(
@@ -305,23 +333,43 @@ export function reducer(state: SearchState, action: Action): SearchState {
       const q = state.drafts.queryText.trim()
       // A blank or whitespace-only submit is not a search — nothing to commit.
       if (q === '') return state
-      const view: View = { ...liveView(state), q, model: null }
+      const view: View = { ...liveView(state), subject: { kind: 'query', text: q }, model: null }
       return askCommitted(state, view, 'user')
     }
 
+    case 'similar': {
+      // A model's neighbours, anchored at the location the user is standing in
+      // — the anchor is what the dismissal returns to, and what tells two
+      // similarity views of one model apart (`requestOf`). Routed through the
+      // one corpus decision, so it defers and waits exactly as meaning does,
+      // and the deferral holds its own provenance.
+      const view: View = {
+        ...liveView(state),
+        subject: { kind: 'similar', model: action.model },
+        model: null,
+      }
+      return askCommitted(state, view, 'user')
+    }
+
+    case 'clearSubject':
+      return leaveSubject(state)
+
     case 'toggleFlat': {
       // Deep results are flat-shaped regardless of the toggle, so pressing it
-      // is an ordinary listing request and the query stops being committed.
+      // is an ordinary listing request and the subject stops being committed.
       const base = liveView(state)
-      const view: View = { ...base, flat: !base.flat, q: null, model: null }
+      const view: View = { ...base, flat: !base.flat, subject: { kind: 'none' }, model: null }
       return ask(endDeferral(state), view, 'user')
     }
 
     case 'setMode': {
       const base = liveView(state)
-      // Nothing committed: the mode is the next search's, and changes nothing
-      // that is on screen.
-      if (base.q === null) return patch(state, { mode: action.mode })
+      // The mode is the corpus a typed *phrase* goes to, so it re-asks only
+      // when a phrase is what the view is about. With nothing committed it is
+      // the next search's; under a similarity subject it is the next search's
+      // too — that view neither reads the mode nor names it in its URL, so
+      // re-asking would spend a request on a question that did not change.
+      if (base.subject.kind !== 'query') return patch(state, { mode: action.mode })
       return askCommitted(state, { ...base, mode: action.mode, model: null }, 'user')
     }
 
@@ -332,7 +380,9 @@ export function reducer(state: SearchState, action: Action): SearchState {
       // Only a runnable meaning query re-runs. A tuning change never defers:
       // it shapes a query the index is already answering, and holding it would
       // turn a slider into a search nobody asked for.
-      if (base.q === null || corpusOf(base, recorded.index) !== 'meaning') return recorded
+      if (base.subject.kind !== 'query' || corpusOf(base, recorded.index) !== 'meaning') {
+        return recorded
+      }
       return ask(recorded, { ...base, model: null }, 'user')
     }
 
@@ -342,27 +392,31 @@ export function reducer(state: SearchState, action: Action): SearchState {
 
     case 'setFolderMatching': {
       const base = liveView(state)
-      // It decides what the *server* returns, so a committed query re-runs.
-      if (base.q === null) return patch(state, { folderMatching: action.on })
+      // It decides which entries the *name corpus* returns, so a committed
+      // query re-runs. A similarity view neither sends it nor names it, so it
+      // records like a plain listing's does — the next search's setting.
+      if (base.subject.kind !== 'query') return patch(state, { folderMatching: action.on })
       return askCommitted(state, { ...base, folderMatching: action.on, model: null }, 'user')
     }
 
     case 'queryText': {
       const typed: SearchState = { ...state, drafts: { ...state.drafts, queryText: action.text } }
       if (action.text.trim() !== '') return typed
-      const base = liveView(state)
-      // Emptying the input while a query is committed is how a search is left:
-      // it drops the query, cancels any deferral, and re-issues the listing.
-      if (base.q === null) return typed
-      return ask(endDeferral(typed), { ...base, q: null, model: null }, 'user')
+      // Emptying the input is how a committed subject is left — delegated to
+      // the one rule (D9) rather than kept as a second copy of it, so the
+      // dismiss control and this path cannot drift apart.
+      return leaveSubject(typed)
     }
 
     case 'deferredToName': {
       // Offered rather than done for the user: substituting the corpus is only
       // honest when it was asked for, and the banner's button is the asking.
-      const q = state.view.q
-      if (state.phase === 'idle' || q === null) return state
-      return ask(endDeferral(state), { ...state.view, q, mode: 'name', model: null }, 'user')
+      // Only a phrase can be offered — a deferred similarity view has no text
+      // to run against the name corpus, so its banner's only offer is the
+      // dismiss.
+      const subject = state.view.subject
+      if (state.phase === 'idle' || subject.kind !== 'query') return state
+      return ask(endDeferral(state), { ...state.view, subject, mode: 'name', model: null }, 'user')
     }
 
     case 'restore': {
@@ -374,8 +428,10 @@ export function reducer(state: SearchState, action: Action): SearchState {
       // changed the request and failed the compare — and patching them is what
       // keeps the asserted view in lockstep with the URL the browser restored.
       // `patch` forwards them to `result.forView` too, which is what re-filters
-      // the grid without asking anything. (`path`/`q` stay out by patch's own
-      // rule; under `sameQuestion` they cannot differ in a way the request sees.)
+      // the grid without asking anything. (`path`/`subject` stay out by patch's
+      // own rule; under `sameQuestion` they cannot differ in a way the request
+      // sees — which for a similarity view is why its anchor is in the request
+      // at all, since patching `path` is exactly what this branch cannot do.)
       if ((state.result !== null || state.inflight !== null) && sameQuestion(v, liveView(state))) {
         return {
           ...patch(state, {
@@ -396,9 +452,16 @@ export function reducer(state: SearchState, action: Action): SearchState {
           failure: null,
         }
       }
-      // The input shows the restored query; the filter is not part of the view
-      // a URL names, so it is the caller's to clear.
-      const seeded: SearchState = { ...state, drafts: { ...state.drafts, queryText: v.q ?? '' } }
+      // The input shows the restored query — and nothing, for a subject that is
+      // not one. The filter is not part of the view a URL names, so it is the
+      // caller's to clear.
+      const seeded: SearchState = {
+        ...state,
+        drafts: {
+          ...state.drafts,
+          queryText: v.subject.kind === 'query' ? v.subject.text : '',
+        },
+      }
       return askCommitted(seeded, v, 'restore')
     }
 
@@ -443,7 +506,7 @@ export function reducer(state: SearchState, action: Action): SearchState {
       const known = sameAvailability(state.index, action.availability)
         ? state
         : { ...state, index: action.availability }
-      if (known.phase === 'idle' || known.view.q === null) return known
+      if (known.phase === 'idle' || known.view.subject.kind === 'none') return known
       const source = known.phase.deferred
       if (action.availability.state === 'ready') {
         // The link finally doing what it named. It runs for the view that

@@ -65,7 +65,7 @@ describe('url state', () => {
     const searched: View = {
       path: '/a',
       flat: false,
-      q: 'gear',
+      subject: { kind: 'query', text: 'gear' },
       mode: 'name',
       kinds: 'both',
       folderMatching: true,
@@ -75,7 +75,10 @@ describe('url state', () => {
     // A flat-less search view still issues `flat: true` to the API…
     expect(requestOf(searched)).toMatchObject({ kind: 'listing', q: 'gear', flat: true })
     // …and the toggle it never asserted survives to the listing left behind.
-    expect(requestOf({ ...searched, q: null })).toMatchObject({ q: null, flat: false })
+    expect(requestOf({ ...searched, subject: { kind: 'none' } })).toMatchObject({
+      q: null,
+      flat: false,
+    })
     // A blank query is no query, and cannot switch flat on by itself.
     expect(parseUrl('?path=%2Fa&q=')).toEqual({
       path: '/a',
@@ -134,6 +137,35 @@ describe('search options in the URL', () => {
   it('round-trips without a second encoding pass', () => {
     const view = { path: '/a b/c.zip!/d', flat: true, q: 'x y', folderMatching: false, kinds: 'folders' as const }
     expect(parseUrl(serializeView(view))).toEqual({ ...view, mode: 'name', model: undefined })
+  })
+
+  it('a similarity view names its model and none of the options it cannot read', () => {
+    // The gate is one sentence now: an option is written only when the view's
+    // subject reads it. A similarity subject reads none of them — the index
+    // answers with models, and there is no phrase to tune or restrict — so the
+    // source model really is the whole of what the view contains.
+    const similar: UrlView = {
+      path: '/a',
+      flat: true,
+      similar: '/a/m.stl',
+      q: 'gear',
+      mode: 'meaning',
+      kinds: 'models',
+      folderMatching: false,
+      tuning: { ...TUNING_DEFAULTS, top: 12 },
+    }
+    expect(serializeView(similar)).toBe('?path=%2Fa&flat=1&similar=%2Fa%2Fm.stl')
+  })
+
+  it('a hand-edited link carrying both q and similar parses as both; similar is what wins', () => {
+    // The parser is the permissive half by design: it reports every param it
+    // knows and lets `resolveView` decide, where the parameter naming a subject
+    // is the more specific one. The serializer is the strict half, so the stray
+    // rides in the address bar unread rather than being read as a search.
+    const both = parseUrl('?path=%2Fa&q=gear&similar=%2Fa%2Fm.stl')
+    expect(both.similar).toBe('/a/m.stl')
+    expect(both.q).toBe('gear')
+    expect(serializeView(both)).toBe('?path=%2Fa&similar=%2Fa%2Fm.stl')
   })
 
   it('an unrecognised kinds reads as the default rather than an error', () => {

@@ -120,7 +120,16 @@ function resolveView(url: UrlView): View {
   return {
     path: url.path ?? getLastPath(),
     flat: url.flat,
-    q: url.q ?? null,
+    // Where the URL's deliberate leniency is resolved (D4): the parameter that
+    // names a subject is the more specific one, so a hand-edited link carrying
+    // both `similar` and `q` is the similarity view, and the stray `q` is read
+    // by nothing.
+    subject:
+      url.similar !== undefined
+        ? { kind: 'similar', model: url.similar }
+        : url.q !== undefined
+          ? { kind: 'query', text: url.q }
+          : { kind: 'none' },
     model: url.model ?? null,
     ...optionsOf(url),
   }
@@ -245,11 +254,21 @@ export default function App() {
   const target = dest(state)
   const live = controls(state)
   const label = labelInputs(state)
+  // The committed *phrase*, where a phrase is what is being rendered — the
+  // side panel's "Results for …", the label, the "nothing matched" sentences.
+  // A similarity subject has none, and Stage 4.6b is what teaches those places
+  // to say what it does have.
+  const liveQuery = live.subject.kind === 'query' ? live.subject.text : null
+  const labelQuery = label.subject.kind === 'query' ? label.subject.text : null
   const scope = state.result?.scope ?? null
   const truncated = state.result?.truncated === true
   const entries = state.result?.entries ?? NO_ENTRIES
   const poses = state.result?.poses ?? NO_POSES
-  const deferred = state.phase !== 'idle' ? state.view.q : null
+  // The banner's phrase. A deferred *similarity* view has none, so it shows no
+  // banner at all today — the known gap task 4.6a closes by naming the model
+  // instead; nothing here invents that sentence.
+  const deferred =
+    state.phase !== 'idle' && state.view.subject.kind === 'query' ? state.view.subject.text : null
   const error = state.failure?.message ?? null
 
   const showSkeleton = useDelayedFlag(busy(state), SKELETON_DELAY_MS)
@@ -319,6 +338,15 @@ export default function App() {
         message: err instanceof Error ? err.message : String(err),
       })
     }
+    if (request.kind === 'similar') {
+      // Not wired yet: task 4.1 gives `ApiClient` the similar call and lands it
+      // here beside the meaning query. Unreachable meanwhile — nothing
+      // dispatches `similar` until the menu that asks for it exists — and if it
+      // were reached before then it would leave `inflight` set with no answer
+      // coming, which is why this names the task rather than trusting anyone to
+      // remember.
+      return () => controller.abort()
+    }
     if (request.kind === 'meaning') {
       void api.semanticSearch(request.text, request.path, request.tuning, controller.signal).then(
         (res) =>
@@ -384,11 +412,12 @@ export default function App() {
   }
 
   function handleQueryTextChange(value: string): void {
-    // Emptying the input while a query is committed is how a search is left: it
-    // drops the query, cancels any deferral, and re-issues the ordinary listing
-    // (file-search's "Clearing a committed query" rule). That cancel asserts the
-    // view at dispatch, so it owns the URL; ordinary typing owns nothing.
-    if (value.trim() === '' && live.query !== null) {
+    // Emptying the input while a subject is committed is how it is left: it
+    // drops the subject, cancels any deferral, and re-issues the ordinary
+    // listing (file-search's "Clearing a committed query" rule, now one rule
+    // for both kinds of subject — D9). That cancel asserts the view at
+    // dispatch, so it owns the URL; ordinary typing owns nothing.
+    if (value.trim() === '' && live.subject.kind !== 'none') {
       commit({ type: 'queryText', text: value })
       return
     }
@@ -746,7 +775,11 @@ export default function App() {
   // entries rather than the one that happened to run last.
   const kindHidesAll = entries.length > 0 && kept.length === 0
   const filterHidesAll = needle !== '' && kept.length > 0 && filteredListing.length === 0
-  const searchHasNoMatches = label.query !== null && entries.length === 0
+  // Gated on the subject, not on a phrase: an empty *similarity* result is an
+  // answer that found nothing, exactly as an empty search is, and reading a
+  // query string here left it falling through to Grid's bare "Nothing to show
+  // here" as though the folder were empty (4.6b).
+  const searchHasNoMatches = label.subject.kind !== 'none' && entries.length === 0
 
   /**
    * The overlay replaces the thumbnail image, not the whole tile: same pixels,
@@ -921,8 +954,8 @@ export default function App() {
   )
 
   const resultsLabel =
-    label.query !== null && !searchHasNoMatches
-      ? `${label.meaning ? 'Meaning matches' : 'Search results'} for "${label.query}".${
+    labelQuery !== null && !searchHasNoMatches
+      ? `${label.meaning ? 'Meaning matches' : 'Search results'} for "${labelQuery}".${
           // The set is weak, not the results: these are the best the index
           // found and none of them stood out (D10 — no per-result numbers).
           label.weak ? ' Nothing stood out — these are the closest.' : ''
@@ -949,7 +982,7 @@ export default function App() {
   const counted = noticeKinds(state)
   const shownParts = [
     counted !== 'folders' ? `${shownModels} models` : '',
-    counted !== 'models' && label.query !== null ? `${shownFolders} folders` : '',
+    counted !== 'models' && labelQuery !== null ? `${shownFolders} folders` : '',
   ].filter((part) => part !== '')
   const omittedNotice =
     truncated && !searchHasNoMatches && !kindHidesAll
@@ -1082,7 +1115,7 @@ export default function App() {
                 // would be false — the walk ran out before covering the tree (D5).
                 truncated ? (
                   <p className="mt-16 text-center text-sm text-zinc-600">
-                    Nothing matched "{label.query}" in the part of the tree the search could cover —
+                    Nothing matched "{labelQuery}" in the part of the tree the search could cover —
                     it ran out of budget before finishing. Try searching from a deeper folder.
                   </p>
                 ) : scope !== null ? (
@@ -1092,7 +1125,7 @@ export default function App() {
                   <p className="mt-16 text-center text-sm text-zinc-600">
                     {scope.status === 'unindexed'
                       ? `Nothing here has been indexed yet — meaning search covers ${scope.covers.join(', ')} files outside archives.`
-                      : `Nothing matched "${label.query}".${
+                      : `Nothing matched "${labelQuery}".${
                           scope.status === 'partial'
                             ? ` ${scope.indexed} of ${scope.scanned} models here are indexed.`
                             : ''
@@ -1100,7 +1133,7 @@ export default function App() {
                   </p>
                 ) : (
                   <p className="mt-16 text-center text-sm text-zinc-600">
-                    Nothing matched "{label.query}".
+                    Nothing matched "{labelQuery}".
                   </p>
                 )
               ) : kindHidesAll ? (
@@ -1127,7 +1160,7 @@ export default function App() {
           )}
         </main>
         <SidePanel
-          query={live.query}
+          query={liveQuery}
           path={target}
           folderMatching={live.folderMatching}
           kinds={live.kinds}

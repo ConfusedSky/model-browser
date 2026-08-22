@@ -14,7 +14,7 @@
 import type { DirEntry } from '../../../shared/types'
 import type { SearchKinds, SearchMode, Tuning } from '../lib/searchOptions'
 import { liveView, type SearchState } from './reducer'
-import { requestOf, type Request, type View } from './view'
+import { requestOf, type Request, type Subject, type View } from './view'
 
 export { liveView, stoodIn } from './reducer'
 
@@ -51,7 +51,11 @@ export function controls(state: SearchState): {
   kinds: SearchKinds
   folderMatching: boolean
   tuning: Tuning
-  query: string | null
+  /** What the live view is about. The subject itself rather than a phrase
+   *  pulled out of it: a control that asks "is anything committed" and one that
+   *  renders the committed text are different questions, and answering both
+   *  from one string is what let a similarity view read as nothing committed. */
+  subject: Subject
 } {
   const v = liveView(state)
   return {
@@ -60,7 +64,7 @@ export function controls(state: SearchState): {
     kinds: v.kinds,
     folderMatching: v.folderMatching,
     tuning: v.tuning,
-    query: v.q,
+    subject: v.subject,
   }
 }
 
@@ -75,10 +79,10 @@ export function pendingRequest(
 
 /**
  * The landed entries the kind option leaves. It restricts *name* search results
- * only, which is the same two-dimensional gate `serializeView` applies — a
- * committed query, under the mode that reads the option — and it has to be the
- * same one, or the URL and the grid disagree about whether the option is even
- * in force. It was not: the option is sticky and the panel hides its control
+ * only, which is the same gate `serializeView` applies — the option is read
+ * only when the subject is a query, under the mode that reads it — and it has
+ * to be the same one, or the URL and the grid disagree about whether the option
+ * is even in force. It was not: the option is sticky and the panel hides its control
  * outside name mode, so a `folders` left over from a name search rode into a
  * meaning view and emptied the grid ("No folders matched") over an option with
  * no control to undo it and, once the URL stopped naming it, nothing on screen
@@ -88,23 +92,31 @@ export function pendingRequest(
 export function byKind(state: SearchState): DirEntry[] {
   const r = state.result
   if (r === null) return []
-  const { q, kinds, mode } = r.forView
-  if (q === null || mode !== 'name' || kinds === 'both') return r.entries
+  const { subject, kinds, mode } = r.forView
+  if (subject.kind !== 'query' || mode !== 'name' || kinds === 'both') return r.entries
   return r.entries.filter((e) => (kinds === 'folders' ? e.kind !== 'model' : e.kind === 'model'))
 }
 
 /** Which kinds the omitted-entries notice counts by — 'both' wherever the
- *  option selects nothing (a plain listing, or a meaning search: `byKind`'s
- *  gate, which is `serializeView`'s), where counting by it produced a sentence
- *  with no parts. */
+ *  option selects nothing (a plain listing, a similarity result, or a meaning
+ *  search: `byKind`'s gate, which is `serializeView`'s), where counting by it
+ *  produced a sentence with no parts. */
 export function noticeKinds(state: SearchState): SearchKinds {
   const v = state.result?.forView
-  return v !== undefined && v.q !== null && v.mode === 'name' ? v.kinds : 'both'
+  return v !== undefined && v.subject.kind === 'query' && v.mode === 'name' ? v.kinds : 'both'
 }
 
-/** Everything the results label is built from, all of it from the answer. */
+/**
+ * Everything the results label is built from, all of it from the answer.
+ *
+ * The subject rather than a query string: the label reads it to say what the
+ * view is, and the "nothing matched" gate reads it to decide whether an empty
+ * grid is an empty *answer* or an empty folder. Pulling a phrase out here made
+ * both wrong at once for a similarity result — a blank label, and an empty
+ * result falling through to Grid's bare "Nothing to show here."
+ */
 export function labelInputs(state: SearchState): {
-  query: string | null
+  subject: Subject
   meaning: boolean
   weak: boolean
   capped: boolean
@@ -112,7 +124,7 @@ export function labelInputs(state: SearchState): {
 } {
   const r = state.result
   return {
-    query: r?.forView.q ?? null,
+    subject: r?.forView.subject ?? { kind: 'none' },
     meaning: r?.scope !== undefined && r.scope !== null,
     weak: r?.weak === true,
     capped: r?.capped === true,

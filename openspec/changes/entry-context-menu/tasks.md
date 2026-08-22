@@ -111,19 +111,19 @@
 
 ## 4. Find similar
 
-- [ ] 4.0 **The view gains a subject (D4), as its own commit.** `View.q: string | null`
+- [x] 4.0 **The view gains a subject (D4), as its own commit.** `View.q: string | null`
       becomes `View.subject: { kind: 'none' } | { kind: 'query'; text } | { kind: 'similar';
       model }`; `View.mode` is untouched and stays the corpus a typed phrase goes to. Every
       `view.q === null` becomes a `.kind` test. Touches `state/view.ts`, `state/reducer.ts`,
       `state/selectors.ts`, `lib/urlState.ts`, `App.tsx`. Judge it by the reducer's existing
       unit suite plus `searchOptionsUi`, `fileNameSearch`, `urlNavigation`, `urlLightbox` and
       `semanticSearch` — the same gate `search-view-reducer` commit 2 was judged by
-- [ ] 4.0a `corpusOf` (`view.ts:155-160`) gains `'similar'`, sharing `defer`/`wait` with
+- [x] 4.0a `corpusOf` (`view.ts:155-160`) gains `'similar'`, sharing `defer`/`wait` with
       meaning: `wait` while the availability probe has not answered, `defer` with a nested
       stand-in once it has said not-ready. `standInOf` sets the subject to `none`;
       `endDeferral` clears the subject rather than nulling `q`. One function, one new case —
       no second opinion about which corpus answers a view (R6)
-- [ ] 4.0b `requestOf` gains `{ kind: 'similar'; path; model; k }` and `sameQuestion` gains
+- [x] 4.0b `requestOf` gains `{ kind: 'similar'; path; model; k }` and `sameQuestion` gains
       its arm. `path` is in the request for **identity**, not for the server — no scope is
       sent (4.1a) — because without it two similarity views of one model at different folders
       compare equal and take `restore`'s patch branch, which cannot patch `path`. Rewrite the
@@ -131,7 +131,7 @@
       of what the server is told": it is the closed list of what *identifies* the question,
       and the anchor is the stated exception. Do **not** widen `sameQuestion` to compare
       `path` generally
-- [ ] 4.0c `serializeView`'s gate generalizes from "a committed query, under the mode that
+- [x] 4.0c `serializeView`'s gate generalizes from "a committed query, under the mode that
       reads the option" to "the subject that reads the option". A `similar` subject writes
       `similar=<vpath>` and no `q`, `mode`, `nofolders`, `kinds`, or tuning; `path`, `flat`
       and `model` are written as before. `parseUrl` reads `similar` and, given both `q` and
@@ -171,7 +171,10 @@
       transition (subject → `none`, `endDeferral` on the way through, re-ask the listing), the
       empty-input path delegating to it rather than keeping its own copy, and **one** visible
       control rendered for any committed subject — query or model — beside the results label.
-      That is what makes the delta's "the same dismissal" literally one control
+      That is what makes the delta's "the same dismissal" literally one control.
+      **State half landed with 4.0**: the `clearSubject` action and the private `leaveSubject`
+      the `queryText` empty path now delegates to, with both-kinds and end-the-deferral cases
+      in `searchReducer.test.ts`. What remains is the visible control
 - [ ] 4.6a A deferred similarity view gets a banner. `App.tsx:252` derives the banner's text
       from `state.view.q`, which is `null` for a similarity subject, so today's code would
       defer silently — the one state whose whole purpose is to explain itself. It names the
@@ -181,7 +184,13 @@
       today, so a similarity result renders a blank label **and** leaves
       `searchHasNoMatches` (`App.tsx:749`) false — which gates every "nothing matched"
       sentence, so an empty similarity result falls through to `Grid`'s bare "Nothing to show
-      here." Test the empty case, not only the populated one
+      here." Test the empty case, not only the populated one.
+      **Selector half landed with 4.0**: `labelInputs` and `controls` return the `subject`
+      rather than a query string, and `searchHasNoMatches` gates on it — so an empty
+      similarity result now reaches the "nothing matched" branch. What remains is the App
+      copy for that branch and for the results label, which still render a *phrase* and are
+      therefore blank for a similarity subject (`labelQuery`, `App.tsx`) — pinned for this
+      task rather than guessed at here
 - [ ] 4.7 No per-result score or z on the tile (`semantic-search` D10): order carries
       strength. Similarity cosines run 0.85–0.99 against text queries' ~0.1, and the index
       reports no `weak` flag here for that reason — `labelInputs`' `weak`/`capped` terms are
@@ -262,7 +271,13 @@
       deep link waits, stands in nested, and fires once the index is ready, under the
       deferral's own provenance so a restored one replaces rather than pushes; `clearSubject`
       leaves both kinds of subject by one rule; a Back between two similarity views of one
-      model at different paths re-asks rather than patching (4.0b)
+      model at different paths re-asks rather than patching (4.0b).
+      **Landed with 4.0** as `describe('the view has a subject')` in
+      `client/test/searchReducer.test.ts` — all four, plus the empty-input delegation, the
+      phrase-options-do-not-re-ask rule, the URL that names nothing it cannot read, the
+      absent name-corpus offer, and 4.6b's empty-result gate. Six of them were falsified
+      against broken code before being trusted. Box stays open only for whatever §4.1–4.6b
+      add on top
 - [ ] 5.3 Manual E2E via Playwright MCP on the real library — note tiles respond only to
       PointerEvents, so the secondary press needs `button: 'right'`, and clipboard reads
       need permissions granted upfront or the call hangs on a prompt. Reveal a model from a

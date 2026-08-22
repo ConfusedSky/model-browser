@@ -16,7 +16,7 @@ import {
   type SearchState,
 } from '../src/state/reducer'
 import { busy, byKind, dest, labelInputs, pendingRequest, stoodIn } from '../src/state/selectors'
-import { toUrlView, type Prefs, type View } from '../src/state/view'
+import { SIMILAR_K, toUrlView, type Prefs, type Subject, type View } from '../src/state/view'
 
 const PREFS: Prefs = {
   mode: 'name',
@@ -28,10 +28,15 @@ const PREFS: Prefs = {
 const READY: IndexAvailability = { state: 'ready' }
 const WARMING: IndexAvailability = { state: 'warming', elapsed: 3 }
 
+/** The two committed subjects, spelled once so a view literal reads as what it
+ *  is about rather than as a union member. */
+const asks = (text: string): Subject => ({ kind: 'query', text })
+const like = (model: string): Subject => ({ kind: 'similar', model })
+
 const view = (over: Partial<View> = {}): View => ({
   path: '/lib',
   flat: false,
-  q: null,
+  subject: { kind: 'none' },
   model: null,
   ...PREFS,
   ...over,
@@ -79,7 +84,7 @@ describe('the reducer, finding by finding', () => {
     // The index arriving later must find nothing waiting for it.
     s = reducer(s, { type: 'index', availability: READY })
     expect(pendingRequest(s)).toBeNull()
-    expect(s.view.q).toBeNull()
+    expect(s.view.subject).toEqual({ kind: 'none' })
   })
 
   it('emptying the input cancels a deferred meaning query', () => {
@@ -107,7 +112,7 @@ describe('the reducer, finding by finding', () => {
     // The name results stand: a ready index does not replace them.
     s = reducer(s, { type: 'index', availability: READY })
     expect(pendingRequest(s)).toBeNull()
-    expect(labelInputs(s).query).toBe('dragon')
+    expect(labelInputs(s).subject).toEqual(asks('dragon'))
   })
 
   it('the deferral fires only for the view that made it', () => {
@@ -126,7 +131,7 @@ describe('the reducer, finding by finding', () => {
   })
 
   it('tuning survives the restore compare, and the restore', () => {
-    const tuned: View = view({ q: 'dragon', mode: 'meaning', flat: true })
+    const tuned: View = view({ subject: asks('dragon'), mode: 'meaning', flat: true })
     let s = land(reducer(start({}, READY), { type: 'restore', view: tuned }), { entries: [] })
 
     // A history entry that differs ONLY in tuning is a different view: the
@@ -229,7 +234,7 @@ describe('the reducer, finding by finding', () => {
 
     for (const mode of ['name', 'meaning'] as const) {
       const full: View = {
-        ...view({ q: 'dragon', mode, flat: true, kinds: 'models', folderMatching: false }),
+        ...view({ subject: asks('dragon'), mode, flat: true, kinds: 'models', folderMatching: false }),
         tuning,
       }
       let s = land(reducer(start({}, READY), { type: 'restore', view: full }), { entries: [] })
@@ -304,13 +309,13 @@ describe('the reducer, finding by finding', () => {
     s = reducer(s, { type: 'setMode', mode: 'meaning' })
     // The view names the meaning search and the banner explains the wait…
     expect(s.phase).toEqual({ deferred: 'user' })
-    expect(s.view).toMatchObject({ q: 'dragon', mode: 'meaning' })
+    expect(s.view).toMatchObject({ subject: asks('dragon'), mode: 'meaning' })
     // …rather than a name search running in its place.
     expect(pendingRequest(s)).toMatchObject({ kind: 'listing', q: null, flat: false })
   })
 
   it('the stand-in listing is nested, whatever flat the deferred URL names', () => {
-    const deep: View = view({ q: 'dragon', mode: 'meaning', flat: true })
+    const deep: View = view({ subject: asks('dragon'), mode: 'meaning', flat: true })
     const s = reducer(start({}, WARMING), { type: 'restore', view: deep })
     // The URL's flat belongs to the search being deferred; flattening a volume
     // to fill time is the opposite of standing in.
@@ -333,7 +338,7 @@ describe('the reducer, finding by finding', () => {
 
   it('navigating re-seeds all four options from the preferences on the action', () => {
     const link: View = {
-      ...view({ q: 'dragon', mode: 'meaning', flat: true, kinds: 'models', folderMatching: false }),
+      ...view({ subject: asks('dragon'), mode: 'meaning', flat: true, kinds: 'models', folderMatching: false }),
       tuning: { ...TUNING_DEFAULTS, top: 12 },
     }
     let s = land(reducer(start({}, READY), { type: 'restore', view: link }), { entries: [] })
@@ -347,9 +352,9 @@ describe('the reducer, finding by finding', () => {
       tuning: { ...TUNING_DEFAULTS, top: 7 },
     }
     s = reducer(s, { type: 'navigate', path: '/other', prefs: own })
-    expect(s.inflight?.view).toMatchObject({ ...own, path: '/other', q: null })
+    expect(s.inflight?.view).toMatchObject({ ...own, path: '/other', subject: { kind: 'none' } })
     s = land(s, { entries: [] })
-    expect(s.view).toMatchObject({ ...own, path: '/other', q: null })
+    expect(s.view).toMatchObject({ ...own, path: '/other', subject: { kind: 'none' } })
   })
   it('a deferral fires under the provenance that made it', () => {
     // A restored deferral resumes a restoration: the entry the link already
@@ -360,7 +365,7 @@ describe('the reducer, finding by finding', () => {
     // for the index into a Back that goes nowhere.
     let s = run(start({}, WARMING), {
       type: 'restore',
-      view: view({ q: 'dragon', mode: 'meaning' }),
+      view: view({ subject: asks('dragon'), mode: 'meaning' }),
     })
     expect(s.phase).toEqual({ deferred: 'restore' })
     s = reducer(s, { type: 'index', availability: READY })
@@ -436,7 +441,7 @@ describe('the reducer, finding by finding', () => {
     // meaning view and emptied the grid — over an option with no control to
     // undo it and, once the URL stopped naming it, nothing on screen to explain
     // it.
-    const v = view({ q: 'dragon', mode: 'meaning', kinds: 'folders' })
+    const v = view({ subject: asks('dragon'), mode: 'meaning', kinds: 'folders' })
     let s = land(run(start({}, READY), { type: 'restore', view: v }), {
       entries: [entry('a.stl'), entry('b.stl')],
     })
@@ -444,12 +449,262 @@ describe('the reducer, finding by finding', () => {
     expect(byKind(s)).toHaveLength(2)
 
     // Under the mode that does name it, it restricts as it always did.
-    const named = view({ q: 'dragon', mode: 'name', kinds: 'folders' })
+    const named = view({ subject: asks('dragon'), mode: 'name', kinds: 'folders' })
     let n = land(run(start({}, READY), { type: 'restore', view: named }), {
       entries: [entry('a.stl'), entry('sets', 'dir')],
     })
     expect(urlOf(n)).toContain('kinds=folders')
     expect(byKind(n).map((e) => e.name)).toEqual(['sets'])
+  })
+})
+
+/**
+ * The subject (design D4): the view is *about* nothing, a phrase, or a model.
+ * One slot, so a transition assigns rather than remembering which of two
+ * nullable fields to clear — these cases ask the questions two fields would
+ * have got wrong, and the ones the third kind of subject asks for the first
+ * time.
+ */
+describe('the view has a subject', () => {
+  it('a similarity subject and a query subject replace each other', () => {
+    let s = land(search(start({}, READY), 'dragon'), { entries: [entry('a.stl')] })
+    expect(s.view.subject).toEqual(asks('dragon'))
+
+    s = reducer(s, { type: 'similar', model: '/lib/a.stl' })
+    expect(pendingRequest(s)).toMatchObject({
+      kind: 'similar',
+      path: '/lib',
+      model: '/lib/a.stl',
+      k: SIMILAR_K,
+    })
+    s = land(s, { entries: [entry('b.stl')] })
+    // One slot: the phrase is gone rather than merely outranked, so nothing on
+    // screen or in the URL can claim the view is still about it.
+    expect(s.view.subject).toEqual(like('/lib/a.stl'))
+    expect(urlOf(s)).toContain('similar=')
+    expect(urlOf(s)).not.toContain('q=')
+
+    s = land(search(s, 'gear'), { entries: [] })
+    expect(s.view.subject).toEqual(asks('gear'))
+    expect(urlOf(s)).toContain('q=gear')
+    expect(urlOf(s)).not.toContain('similar=')
+  })
+
+  it('a similarity deep link waits, stands in nested, and fires under its own provenance', () => {
+    const link: View = view({ path: '/lib/sub', subject: like('/lib/a.stl'), flat: true })
+    let s = reducer(start({ path: '/lib/sub' }, null), { type: 'restore', view: link })
+    // Nothing is fetched while the probe is out — not even a stand-in, for the
+    // same reason a meaning link fetches nothing there.
+    expect(pendingRequest(s)).toBeNull()
+    expect(s.phase).toEqual({ deferred: 'restore' })
+    expect(busy(s)).toBe(true)
+
+    // Not-ready: the location's own contents, nested, whatever `flat` the link
+    // named — that toggle belongs to the question being held.
+    s = reducer(s, { type: 'index', availability: WARMING })
+    expect(pendingRequest(s)).toMatchObject({
+      kind: 'listing',
+      path: '/lib/sub',
+      flat: false,
+      q: null,
+    })
+    s = land(s, { entries: [entry('c.stl')] })
+    expect(stoodIn(s)).toBe(true)
+    expect(s.view.subject).toEqual(like('/lib/a.stl'))
+
+    // Ready: the link finally doing what it named, as a *restoration* — the
+    // fire is that original asking resumed, so it replaces the entry the link
+    // already sits on rather than pushing a second one over it.
+    s = reducer(s, { type: 'index', availability: READY })
+    expect(pendingRequest(s)).toMatchObject({
+      kind: 'similar',
+      path: '/lib/sub',
+      model: '/lib/a.stl',
+    })
+    expect(s.inflight).toMatchObject({ source: 'restore' })
+    expect(s.phase).toBe('idle')
+  })
+
+  it('clearSubject leaves both kinds of subject by the one rule', () => {
+    for (const subject of [asks('dragon'), like('/lib/a.stl')]) {
+      let s = land(
+        reducer(start({}, READY), { type: 'restore', view: view({ subject, flat: true }) }),
+        { entries: [entry('a.stl')] },
+      )
+      expect(s.view.subject).toEqual(subject)
+
+      s = reducer(s, { type: 'clearSubject' })
+      // The listing left behind is the one the flat toggle names (R4) — the
+      // same exit, whether what is being left is a phrase or a model.
+      expect(pendingRequest(s)).toMatchObject({
+        kind: 'listing',
+        path: '/lib',
+        flat: true,
+        q: null,
+      })
+      s = land(s, { entries: [] })
+      expect(s.view.subject).toEqual({ kind: 'none' })
+      expect(urlOf(s)).not.toContain('q=')
+      expect(urlOf(s)).not.toContain('similar=')
+    }
+
+    // And it ends a deferral on the way through, so there is no held question
+    // left to fire once the index answers.
+    let d = reducer(start({}, WARMING), {
+      type: 'restore',
+      view: view({ subject: like('/lib/a.stl') }),
+    })
+    expect(d.phase).toEqual({ deferred: 'restore' })
+    d = reducer(d, { type: 'clearSubject' })
+    expect(d.phase).toBe('idle')
+    d = reducer(land(d), { type: 'index', availability: READY })
+    expect(pendingRequest(d)).toBeNull()
+  })
+
+  it('emptying the input leaves a similarity view by that same rule', () => {
+    // D9: the dismiss control and the empty input are one implementation, not
+    // two that resemble each other. Before the subject existed this exit was
+    // structurally inert here — it returned early unless a *query* was
+    // committed, and a similarity view has no text in the input to empty.
+    let s = land(
+      reducer(start({}, READY), {
+        type: 'restore',
+        view: view({ subject: like('/lib/a.stl') }),
+      }),
+      { entries: [entry('a.stl')] },
+    )
+    s = run(s, { type: 'queryText', text: 'typed' }, { type: 'queryText', text: '' })
+    expect(pendingRequest(s)).toMatchObject({ kind: 'listing', path: '/lib', q: null })
+    expect(s.drafts.queryText).toBe('')
+    s = land(s, { entries: [] })
+    expect(s.view.subject).toEqual({ kind: 'none' })
+  })
+
+  it('two similarity views of one model at different anchors are two questions', () => {
+    const here = view({ subject: like('/lib/a.stl') })
+    const there: View = { ...here, path: '/lib/sub' }
+    let s = land(reducer(start({}, READY), { type: 'restore', view: here }), {
+      entries: [entry('a.stl')],
+    })
+
+    // The anchor is in the request for exactly this: without it these two
+    // compare equal under `sameQuestion` and take `restore`'s patch branch,
+    // which by `patch`'s own rule cannot patch `path` — leaving the path bar,
+    // and the listing a dismissal returns to, naming the folder just left.
+    s = reducer(s, { type: 'restore', view: there })
+    expect(pendingRequest(s)).toMatchObject({
+      kind: 'similar',
+      path: '/lib/sub',
+      model: '/lib/a.stl',
+    })
+    s = land(s, { entries: [] })
+    expect(s.view.path).toBe('/lib/sub')
+
+    // …while a Back that really is the same question still patches, so the
+    // anchor did not widen `sameQuestion` into re-asking everything.
+    const same = reducer(s, { type: 'restore', view: { ...s.view, model: '/lib/a.stl' } })
+    expect(pendingRequest(same)).toBeNull()
+    expect(same.view.model).toBe('/lib/a.stl')
+  })
+
+  it('the phrase options are the next phrase’s: a similarity view does not re-ask for them', () => {
+    // `mode` is the corpus a typed phrase goes to and `nofolders` shapes what
+    // the name corpus returns. A similarity view reads neither and names
+    // neither, so pressing them records a preference instead of spending a
+    // request on a question that did not change.
+    let s = land(
+      reducer(start({}, READY), {
+        type: 'restore',
+        view: view({ subject: like('/lib/a.stl') }),
+      }),
+      { entries: [entry('a.stl')] },
+    )
+    const id = s.lastId
+
+    s = reducer(s, { type: 'setMode', mode: 'meaning' })
+    expect(pendingRequest(s)).toBeNull()
+    expect(s.lastId).toBe(id)
+    expect(s.view.mode).toBe('meaning')
+
+    s = reducer(s, { type: 'setFolderMatching', on: false })
+    expect(pendingRequest(s)).toBeNull()
+    expect(s.lastId).toBe(id)
+    expect(s.view.folderMatching).toBe(false)
+
+    // And the URL is unmoved, because a similarity view names neither.
+    expect(urlOf(s)).not.toContain('mode=')
+    expect(urlOf(s)).not.toContain('nofolders=')
+  })
+
+  it('a similarity URL names the model, the place and the toggle — and nothing else', () => {
+    const full: View = {
+      ...view({
+        subject: like('/lib/a.stl'),
+        flat: true,
+        mode: 'meaning',
+        kinds: 'models',
+        folderMatching: false,
+      }),
+      tuning: { ...TUNING_DEFAULTS, top: 12, pool: 'max' },
+    }
+    const s = land(reducer(start({}, READY), { type: 'restore', view: full }), { entries: [] })
+    const url = urlOf(s)
+    expect(url).toContain('path=%2Flib')
+    expect(url).toContain('flat=1')
+    expect(url).toContain('similar=%2Flib%2Fa.stl')
+    for (const param of ['q=', 'mode=', 'kinds=', 'nofolders=', 'top=', 'pool=', 'min=', 'score-raw']) {
+      expect(url).not.toContain(param)
+    }
+
+    // So two similarity views differing only in options neither of them reads
+    // are one view under `sameView`, and mint no history entry going nowhere.
+    const other: View = { ...full, kinds: 'folders', mode: 'name', tuning: { ...TUNING_DEFAULTS } }
+    expect(serializeView(toUrlView(other))).toBe(url)
+  })
+
+  it('an empty similarity result is an empty answer, not an empty folder', () => {
+    // 4.6b's selector half. `labelInputs` reads the subject, so a similarity
+    // result yields something to label the view with and — the part that
+    // matters — leaves the "nothing matched" gate truthy when it is empty.
+    // Reading a query string there was wrong twice at once: a blank label, and
+    // an empty result falling through to Grid's bare "Nothing to show here" as
+    // though the folder were the empty thing.
+    const empty = land(
+      reducer(start({}, READY), {
+        type: 'restore',
+        view: view({ subject: like('/lib/a.stl') }),
+      }),
+      { entries: [] },
+    )
+    expect(labelInputs(empty).subject).toEqual(like('/lib/a.stl'))
+    expect(labelInputs(empty).subject.kind).not.toBe('none')
+    // The meaning-query residue stays absent rather than reading as `false`:
+    // the index reports no `weak` here, and order carries strength (D10).
+    expect(labelInputs(empty)).toMatchObject({ meaning: false, weak: false, capped: false })
+
+    // A plain listing is still the other thing, so the gate distinguishes them.
+    const listing = land(reducer(start({}, READY), { type: 'restore', view: view() }), {
+      entries: [],
+    })
+    expect(labelInputs(listing).subject.kind).toBe('none')
+  })
+
+  it('a deferred similarity view has no phrase to offer the name corpus', () => {
+    // The banner's "search names instead" needs a phrase, and there is none —
+    // so the offer is absent rather than running an empty search. A deferred
+    // *query* still takes it.
+    let s = reducer(start({}, WARMING), {
+      type: 'restore',
+      view: view({ subject: like('/lib/a.stl') }),
+    })
+    const held = reducer(land(s), { type: 'deferredToName' })
+    expect(held.phase).toEqual({ deferred: 'restore' })
+    expect(held.view.subject).toEqual(like('/lib/a.stl'))
+
+    s = run(start({}, WARMING), { type: 'setMode', mode: 'meaning' })
+    s = reducer(land(search(s, 'dragon')), { type: 'deferredToName' })
+    expect(s.phase).toBe('idle')
+    expect(pendingRequest(s)).toMatchObject({ kind: 'listing', q: 'dragon' })
   })
 })
 

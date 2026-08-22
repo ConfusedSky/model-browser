@@ -270,10 +270,28 @@ distinction no view makes. If it ever becomes user-settable it becomes a view fi
 the gate carries it like tuning. The index's `pool` parameter is left at the server's own
 default for the same reason.
 
+*The value is 16* (`SIMILAR_K`, `state/view.ts`, landed with the subject). Chosen rather
+than inherited from either end: the index's own default is 10 and this app's text-query
+bound is 60. Above the index's, because a grid of ten leaves most of a row empty at the
+`minmax(11rem,1fr)` track width; well under the text bound, because neighbour quality falls
+off faster than text-match quality does — a phrase's 40th hit can still be the one you meant,
+while a model's 40th neighbour is noise. It is compared in `sameQuestion`'s similar arm even
+though it is constant, so the "closed list of what identifies the question" stays literally
+true the day it becomes a variable.
+
 `parseUrl` keeps its deliberate leniency (`urlState.ts:37-45`): a hand-edited URL carrying
 both `q` and `similar` resolves as the similarity view — the parameter naming a subject is
-the more specific one — the stray `q` rides along harmlessly and the first commit rewrites
-the URL without it. `optionsOf` is untouched: a similarity link commits no *query*, so the
+the more specific one — and the stray `q` rides along harmlessly, read by nothing.
+
+*Corrected while implementing this:* that comment claimed the stray is scrubbed by "the
+first commit", and it is not. `commitUrl` declines a write whose serialization already
+matches the address bar's, and a param both sides drop cannot make them differ — so the
+stray stays visible until the view genuinely advances and the whole URL is rewritten. That
+was already true of a `pool` beside `mode=name` and is inherited rather than introduced;
+the comment is now amended to say what the code does. Nothing reads the stray meanwhile,
+which is why it is tolerable rather than a bug this change fixes.
+
+`optionsOf` is untouched: a similarity link commits no *query*, so the
 recipient's own four preferences govern, which is right twice over — the similarity view
 reads none of them, and they are what governs the plain listing the dismiss returns to.
 

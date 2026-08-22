@@ -23,6 +23,14 @@ export interface UrlView {
   path?: string
   flat: boolean
   q?: string
+  /**
+   * The model a similarity view's neighbours were drawn from. Two optional
+   * slots here rather than one union is deliberate and is not the shape `View`
+   * has: this type is the *parser's report*, and reporting both is what lets
+   * `resolveView` implement the rule that `similar` beats a stray `q`.
+   * `toUrlView` never emits both, and `serializeView` never writes both.
+   */
+  similar?: string
   /** Folder matching, default on — carried only when off. */
   folderMatching?: boolean
   /** Which kinds the results present, default 'both'. */
@@ -36,17 +44,28 @@ export interface UrlView {
 
 /**
  * Deliberately more permissive than `serializeView`: it reads every param it
- * knows, including ones the serializer would now omit for this view's mode — a
- * `pool` beside `mode=name`, a `kinds` beside `mode=meaning`. Those come from
- * links written before the mode gate existed, and from hands. Refusing them
- * here would turn tolerance into a 404-shaped surprise over a link that names a
- * perfectly good view; instead the value rides along harmlessly (the mode that
- * reads it is not in force) and the first commit rewrites the URL without it.
+ * knows, including ones the serializer would now omit for this view's subject —
+ * a `pool` beside `mode=name`, a `kinds` beside `mode=meaning`, a `q` beside a
+ * `similar`. Those come from links written before the gate existed, and from
+ * hands. Refusing them here would turn tolerance into a 404-shaped surprise
+ * over a link that names a perfectly good view; instead the value rides along
+ * harmlessly, because the subject or mode that would read it is not in force.
+ * `resolveView` is where the precedence is decided: the parameter naming a
+ * subject is the more specific one, so `similar` wins over a `q` beside it.
+ *
+ * A stray param rides in the address bar *unread*, and it stays there — this
+ * does not scrub it. `commitUrl` declines a write whose serialization already
+ * matches the address bar's, and a param both sides drop cannot make them
+ * differ, so nothing rewrites the URL until the view genuinely advances and
+ * the whole URL is written afresh. Nothing reads the stray meanwhile, which is
+ * why that is tolerable rather than a bug to fix here.
  */
 export function parseUrl(search: string = window.location.search): UrlView {
   const p = new URLSearchParams(search)
   const raw = p.get('q')
   const q = raw === null || raw === '' ? undefined : raw
+  const rawSimilar = p.get('similar')
+  const similar = rawSimilar === null || rawSimilar === '' ? undefined : rawSimilar
   const kinds = p.get('kinds')
   const mode = p.get('mode')
   const pool = p.get('pool')
@@ -68,6 +87,7 @@ export function parseUrl(search: string = window.location.search): UrlView {
     // still parse; their `flat` now honestly means flat.
     flat: p.has('flat'),
     q,
+    similar,
     // Defaults are absent from the URL, so their absence is what selects them
     // — and an unrecognised `kinds` reads as the default rather than as an
     // error, since a hand-edited link should degrade to the ordinary view. An
@@ -85,17 +105,22 @@ export function parseUrl(search: string = window.location.search): UrlView {
  * Omit-empty: absent params rather than blank ones; `flat` only when on.
  *
  * The one writer of every history entry (design R3), which is why the gate
- * below lives here rather than at the call sites. The gate has two dimensions,
- * and an option is written only when it clears both: **a query is committed,
- * and the mode that query ran under is the one that reads the option.** They
- * describe which entries a view contains, and over a plain listing they select
- * nothing — a `?kinds=folders` on a bare directory names a distinction that
- * view does not make. The same is true across modes: a name search has no
- * tuning to spell out, and a meaning search cannot restrict by kind, since the
- * index answers with models and nothing else. The panel already hides each
- * option outside its mode; the URL now says the same thing, so two views that
- * differ only in an option neither of them reads serialize alike and stop
- * minting history entries that go nowhere.
+ * below lives here rather than at the call sites. The gate is one sentence:
+ * **an option is written only when the view's subject actually reads it.**
+ * Options describe which entries a view contains, and over a plain listing they
+ * select nothing — a `?kinds=folders` on a bare directory names a distinction
+ * that view does not make. Under a committed query the subject reads a phrase,
+ * so the reading mode decides the rest: a name search has no tuning to spell
+ * out, and a meaning search cannot restrict by kind, since the index answers
+ * with models and nothing else. Under a `similar` subject none of them are
+ * read at all (D4) — the source model is the whole of what the view contains,
+ * and there is no phrase to tune or restrict — so the URL names the model, the
+ * location and the flat toggle and stops.
+ *
+ * The panel already hides each option outside its mode; the URL says the same
+ * thing, so two views that differ only in an option neither of them reads
+ * serialize alike and stop minting history entries that go nowhere. That
+ * property is what makes naming a similarity view by its model alone honest.
  *
  * Enforced here, one projection of the whole view cannot leak an option onto a
  * listing; enforced at four hand-built literals, three of them dropped a field
@@ -105,7 +130,13 @@ export function serializeView(view: UrlView): string {
   const p = new URLSearchParams()
   if (view.path !== undefined && view.path !== '') p.set('path', view.path)
   if (view.flat) p.set('flat', '1')
-  const searching = view.q !== undefined && view.q !== ''
+  // The subject, and only one of them can be it. `similar` wins for the same
+  // reason `resolveView` resolves it first — it is the more specific parameter
+  // — so a caller that somehow held both writes the similarity view, and every
+  // option gate below is false, since none of them is read by that subject.
+  const similar = view.similar !== undefined && view.similar !== ''
+  if (similar) p.set('similar', view.similar as string)
+  const searching = !similar && view.q !== undefined && view.q !== ''
   if (searching) p.set('q', view.q as string)
   // Absence means name (see the `mode` write below), so a mode-less committed
   // view is a name view and takes the name options.
