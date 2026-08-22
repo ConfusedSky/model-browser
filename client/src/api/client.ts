@@ -42,9 +42,16 @@ export interface ThumbSave {
  * touching callers.
  */
 export interface ApiClient {
+  /**
+   * `signal` aborts it, for the same reason `semanticSearch` has one: a flat
+   * walk the user has already superseded otherwise runs to completion on the
+   * server while nobody waits for it. This is the client half of
+   * `search-cancellation`'s premise.
+   */
   listDir(
     path: string,
     opts?: { flat?: boolean; q?: string; folderMatching?: boolean },
+    signal?: AbortSignal,
   ): Promise<DirListing>
   complete(prefix: string): Promise<string[]>
   fetchModel(path: string): Promise<ArrayBuffer>
@@ -105,6 +112,7 @@ export class HttpApiClient implements ApiClient {
   async listDir(
     path: string,
     opts?: { flat?: boolean; q?: string; folderMatching?: boolean },
+    signal?: AbortSignal,
   ): Promise<DirListing> {
     const flat = opts?.flat === true ? '&flat=true' : ''
     // Free-form user text, unlike the boolean `flat` — the URL is built by

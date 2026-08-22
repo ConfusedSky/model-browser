@@ -50,10 +50,14 @@ export function parseUrl(search: string = window.location.search): UrlView {
   if (Number.isFinite(min) && p.has('min')) tuning.minScore = min
   return {
     path: p.get('path') ?? undefined,
-    // A query implies the flat shape: deep-search results are flat whatever
-    // the toggle reads, and the API rejects `q` without `flat` (app.ts) — so a
-    // hand-trimmed link that kept `q` but lost `flat` must not land on a 400.
-    flat: p.has('flat') || q !== undefined,
+    // The flat *toggle*, and only that (design R4). A search runs flat-shaped
+    // whatever the toggle says — that shape is derived where the request is
+    // built (`requestOf`), never read back out of the URL — so inferring the
+    // toggle from `q` here destroyed it: a deep-linked search whose query was
+    // cleared listed the whole volume, while a typed one listed nested.
+    // Links written before this change carry an explicit `flat=1`, so they
+    // still parse; their `flat` now honestly means flat.
+    flat: p.has('flat'),
     q,
     // Defaults are absent from the URL, so their absence is what selects them
     // — and an unrecognised `kinds` reads as the default rather than as an
@@ -68,34 +72,45 @@ export function parseUrl(search: string = window.location.search): UrlView {
   }
 }
 
-/** Omit-empty: absent params rather than blank ones; `flat` only when on. */
+/**
+ * Omit-empty: absent params rather than blank ones; `flat` only when on.
+ *
+ * The one writer of every history entry (design R3), which is why the gate
+ * below lives here rather than at the call sites: **options exist only
+ * alongside a committed query.** They describe which entries a view contains,
+ * and over a plain listing they select nothing — a `?kinds=folders` on a bare
+ * directory names a distinction that view does not make. Enforced here, one
+ * projection of the whole view cannot leak an option onto a listing; enforced
+ * at four hand-built literals, three of them dropped a field instead.
+ */
 export function serializeView(view: UrlView): string {
   const p = new URLSearchParams()
   if (view.path !== undefined && view.path !== '') p.set('path', view.path)
   if (view.flat) p.set('flat', '1')
-  if (view.q !== undefined && view.q !== '') p.set('q', view.q)
+  const searching = view.q !== undefined && view.q !== ''
+  if (searching) p.set('q', view.q as string)
   // Omitted at their defaults (D4): an ordinary search URL stays byte-identical
   // to what it was before options existed, so making a default explicit never
   // mints a history entry.
-  if (view.folderMatching === false) p.set('nofolders', '1')
-  if (view.kinds === 'folders' || view.kinds === 'models') p.set('kinds', view.kinds)
+  if (searching && view.folderMatching === false) p.set('nofolders', '1')
+  if (searching && (view.kinds === 'folders' || view.kinds === 'models')) p.set('kinds', view.kinds)
   // Written whenever a query is committed, including the default. The other
   // options are omitted at their defaults so an ordinary search URL stays what
   // it was — but which *corpus* answered is not a preference among results, it
   // is what the query means. Leaving it implicit makes the link depend on the
   // reader's default: change that default later, or hand the link to a profile
   // that reads absence differently, and the same URL asks a different question.
-  if (view.q !== undefined && view.q !== '') p.set('mode', view.mode ?? 'name')
+  if (searching) p.set('mode', view.mode ?? 'name')
   // Omitted at their defaults, so an ordinary meaning link is unchanged (D3).
   // Not named `raw`: Vite's dev server 403s any URL whose query contains a
   // `raw`, `url`, or `inline` param (its special import queries, guarded since
   // CVE-2025-30208), killing deep links before the app loads.
-  if (view.tuning?.raw === true) p.set('score-raw', '1')
-  if (view.tuning?.pool !== undefined && view.tuning.pool !== TUNING_DEFAULTS.pool) {
+  if (searching && view.tuning?.raw === true) p.set('score-raw', '1')
+  if (searching && view.tuning?.pool !== undefined && view.tuning.pool !== TUNING_DEFAULTS.pool) {
     p.set('pool', view.tuning.pool)
   }
-  if (view.tuning?.minScore !== undefined) p.set('min', String(view.tuning.minScore))
-  else if (view.tuning?.top !== undefined && view.tuning.top !== TUNING_DEFAULTS.top) {
+  if (searching && view.tuning?.minScore !== undefined) p.set('min', String(view.tuning.minScore))
+  else if (searching && view.tuning?.top !== undefined && view.tuning.top !== TUNING_DEFAULTS.top) {
     p.set('top', String(view.tuning.top))
   }
   if (view.model !== undefined && view.model !== '') p.set('model', view.model)

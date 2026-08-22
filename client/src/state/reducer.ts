@@ -165,9 +165,20 @@ function ask(state: SearchState, view: View, source: Source, standIn?: true): Se
   return { ...state, lastId: id, inflight: { asked: view, view, id, source, standIn } }
 }
 
-/** A view change that asks nothing: asserted at dispatch, and patched into the
- *  request in flight too so its landing cannot revert it. Never `path`/`q` —
- *  those change what was asked, which is a new request by definition. */
+/**
+ * A view change that asks nothing: asserted at dispatch, and patched into the
+ * request in flight too so its landing cannot revert it. Never `path`/`q` —
+ * those change what was asked, which is a new request by definition.
+ *
+ * It reaches the *answer* as well, for the same reason the landing takes the
+ * patched view rather than the asked one: a fetchless change belongs to the
+ * answer it stands beside. The render reads `result.forView` (R1's corollary),
+ * so a patch that stopped at `view` left the kind control inert — the URL said
+ * `kinds=models` while the grid went on showing the folders — and left
+ * `stoodIn` claiming a stand-in after every lightbox open. Only `forView` is
+ * replaced: R5's wholesale rule is about `entries` identity, which useThumbnails
+ * resets on, and this spread preserves it.
+ */
 function patch(state: SearchState, fields: Partial<View>): SearchState {
   return {
     ...state,
@@ -176,6 +187,10 @@ function patch(state: SearchState, fields: Partial<View>): SearchState {
       state.inflight === null
         ? null
         : { ...state.inflight, view: { ...state.inflight.view, ...fields } },
+    result:
+      state.result === null
+        ? null
+        : { ...state.result, forView: { ...state.result.forView, ...fields } },
   }
 }
 

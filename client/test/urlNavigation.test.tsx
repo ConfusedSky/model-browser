@@ -154,7 +154,7 @@ describe('url deep links', () => {
     const { mountAppAtCurrentUrl } = await import('./appHarness')
     await mountAppAtCurrentUrl('/?path=%2Fmodels&flat=1&q=found', SEARCH)
 
-    expect(listDir).toHaveBeenCalledWith('/models', { flat: true, q: 'found' })
+    expect(listDir).toHaveBeenCalledWith('/models', { flat: true, q: 'found' }, expect.any(AbortSignal))
     expect(container.textContent).toContain('Search results for "found".')
     expect(labels()).toEqual(['found.stl'])
   })

@@ -139,7 +139,7 @@ describe('flat toggle follows the in-flight navigation target', () => {
     await click(flatButton())
     await settle()
 
-    expect(listDir).toHaveBeenCalledWith('/models/a', { flat: true })
+    expect(listDir).toHaveBeenCalledWith('/models/a', { flat: true }, expect.any(AbortSignal))
     expect(flatButton().getAttribute('aria-pressed')).toBe('true')
   })
 
@@ -153,7 +153,7 @@ describe('flat toggle follows the in-flight navigation target', () => {
     await click(flatButton())
     await settle()
 
-    expect(listDir).toHaveBeenCalledWith('/models/a', { flat: true })
+    expect(listDir).toHaveBeenCalledWith('/models/a', { flat: true }, expect.any(AbortSignal))
     expect(flatButton().getAttribute('aria-pressed')).toBe('true')
   })
 })

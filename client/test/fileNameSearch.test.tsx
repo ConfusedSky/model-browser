@@ -99,7 +99,7 @@ describe('file name search', () => {
     await pressEnter(searchInput())
     await settle()
 
-    expect(listDir).toHaveBeenCalledWith('/models', { flat: true, q: 'found' })
+    expect(listDir).toHaveBeenCalledWith('/models', { flat: true, q: 'found' }, expect.any(AbortSignal))
     expect(labels()).toEqual(['found.stl', 'foundation.stl'])
     expect(container.textContent).toContain('omitted')
     expect(container.textContent).toContain('Search results for "found".')
@@ -114,7 +114,7 @@ describe('file name search', () => {
     await click(deepButton())
     await settle()
 
-    expect(listDir).toHaveBeenCalledWith('/models', { flat: true, q: 'found' })
+    expect(listDir).toHaveBeenCalledWith('/models', { flat: true, q: 'found' }, expect.any(AbortSignal))
     expect(labels()).toEqual(['found.stl', 'foundation.stl'])
   })
 
@@ -149,7 +149,7 @@ describe('file name search', () => {
     await type(searchInput(), '')
     await settle()
 
-    expect(listDir).toHaveBeenCalledWith('/models', { flat: false })
+    expect(listDir).toHaveBeenCalledWith('/models', { flat: false }, expect.any(AbortSignal))
     expect(labels()).toEqual(['Alpha', 'Bravo', 'widget.stl'])
     expect(container.textContent).not.toContain('Search results for')
   })
@@ -171,7 +171,11 @@ describe('file name search', () => {
     await pressEnter(searchInput())
     await settle()
 
-    expect(listDir).toHaveBeenCalledWith('/models/Alpha', { flat: true, q: 'found' })
+    expect(listDir).toHaveBeenCalledWith(
+      '/models/Alpha',
+      { flat: true, q: 'found' },
+      expect.any(AbortSignal),
+    )
     expect(labels()).toEqual(['found.stl'])
 
     resolveNav(NESTED) // the abandoned nested navigation finally lands — superseded

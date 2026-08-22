@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it } from 'vitest'
 import { TUNING_DEFAULTS } from '../src/lib/searchOptions'
+import { requestOf, type View } from '../src/state/view'
 import {
   commitUrl,
   isLightboxEntry,
@@ -53,11 +54,28 @@ describe('url state', () => {
     expect(parseUrl('?path=%2Fa').flat).toBe(false)
   })
 
-  it('a query implies flat: a trimmed link that lost the flag must not 400', () => {
+  it('the flat param records the toggle; the request shape is derived from the query', () => {
     // The API rejects `q` without `flat=true`, and deep results are flat-shaped
-    // regardless of the toggle — so `?path=…&q=…` is honored, not sent as-is.
-    expect(parseUrl('?path=%2Fa&q=gear').flat).toBe(true)
-    expect(parseUrl('?path=%2Fa&flat=1&q=gear').flat).toBe(true)
+    // regardless of the toggle — but that is the *request's* shape, derived
+    // where the request is built. Reading it back into the toggle gave one slot
+    // two meanings: a deep-linked search whose query was then cleared listed the
+    // whole volume, while a typed one listed nested (design R4).
+    expect(parseUrl('?path=%2Fa&q=gear').flat).toBe(false)
+    expect(parseUrl('?path=%2Fa&flat=1&q=gear').flat).toBe(true) // old links still parse
+    const searched: View = {
+      path: '/a',
+      flat: false,
+      q: 'gear',
+      mode: 'name',
+      kinds: 'both',
+      folderMatching: true,
+      tuning: { ...TUNING_DEFAULTS },
+      model: null,
+    }
+    // A flat-less search view still issues `flat: true` to the API…
+    expect(requestOf(searched)).toMatchObject({ kind: 'listing', q: 'gear', flat: true })
+    // …and the toggle it never asserted survives to the listing left behind.
+    expect(requestOf({ ...searched, q: null })).toMatchObject({ q: null, flat: false })
     // A blank query is no query, and cannot switch flat on by itself.
     expect(parseUrl('?path=%2Fa&q=')).toEqual({
       path: '/a',

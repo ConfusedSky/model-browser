@@ -84,7 +84,7 @@ describe('search options', () => {
       flat: true,
       q: 'sandy',
       folderMatching: undefined,
-    })
+    }, expect.any(AbortSignal))
 
     listDir.mockClear()
     await click(panelButton('Match folder names'))
@@ -94,7 +94,7 @@ describe('search options', () => {
       flat: true,
       q: 'sandy',
       folderMatching: false,
-    })
+    }, expect.any(AbortSignal))
     expect(location.search).toContain('nofolders=1')
     expect(localStorage.getItem('model-browser:search-folder-matching')).toBe('off')
   })
@@ -128,7 +128,7 @@ describe('search options', () => {
       flat: true,
       q: 'sandy',
       folderMatching: false,
-    })
+    }, expect.any(AbortSignal))
     // …and left this profile's stored preference alone.
     expect(localStorage.getItem('model-browser:search-folder-matching')).toBe('on')
   })
@@ -146,7 +146,7 @@ describe('search options', () => {
       flat: true,
       q: 'sandy',
       folderMatching: false,
-    })
+    }, expect.any(AbortSignal))
   })
 
   it('a kind restriction that empties the grid says so, distinctly from the filter', async () => {
@@ -191,7 +191,7 @@ describe('search options', () => {
       flat: true,
       q: 'sandy',
       folderMatching: undefined,
-    })
+    }, expect.any(AbortSignal))
     // …and the recipient's kind preference does not hide the models either.
     expect(container.querySelectorAll('main button[data-model-tile]').length).toBe(2)
   })
@@ -221,7 +221,7 @@ describe('search options', () => {
       flat: true,
       q: 'sandy',
       folderMatching: undefined,
-    })
+    }, expect.any(AbortSignal))
     expect(panelButton('Match folder names').getAttribute('aria-checked')).toBe('true')
   })
 

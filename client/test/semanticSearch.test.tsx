@@ -220,7 +220,11 @@ describe('meaning search', () => {
     await settle()
 
     expect(semanticSearch).not.toHaveBeenCalled()
-    expect(listDir).toHaveBeenCalledWith('/models', expect.objectContaining({ q: 'widget' }))
+    expect(listDir).toHaveBeenCalledWith(
+      '/models',
+      expect.objectContaining({ q: 'widget' }),
+      expect.any(AbortSignal),
+    )
   })
 
   it('the panel is never empty: meaning mode with no index still explains itself', async () => {
@@ -593,26 +597,34 @@ describe('meaning search', () => {
     expect(container.textContent).toContain('not answering')
   })
 
-  it('the deferred query runs itself once the index answers', async () => {
-    indexAvailability.mockResolvedValue({ state: 'absent' })
+  it('the deferred query runs itself once the index answers, for the view that deferred it', async () => {
+    // The deferral belongs to the view that made it: it runs *there*, and every
+    // way of moving on cancels it instead of carrying it along. So the index's
+    // own warming poll is what delivers the answer here — this used to press a
+    // folder tile, which is a navigation, and a deferral that survived one
+    // dragged the user's query into the folder they had just walked into.
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    indexAvailability.mockResolvedValue({ state: 'warming', elapsed: 2 })
     semanticSearch.mockResolvedValue(MEANING)
     await mountAppAtCurrentUrl('/?path=/models&flat=1&q=a+winged+demon&mode=meaning', NESTED)
     await settle()
     expect(semanticSearch).not.toHaveBeenCalled()
 
-    // The index starts; the next availability read finds it, and the link
-    // finally does what it named without the user retyping or reloading.
+    // The index finishes starting; the next availability read finds it, and the
+    // link finally does what it named without the user retyping or reloading.
     indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models', covers: ['stl'] })
-    await click(container.querySelector<HTMLButtonElement>('main .grid button')!)
-    await settle()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2500)
+    })
 
     expect(semanticSearch).toHaveBeenCalledWith(
       'a winged demon',
-      expect.any(String),
+      '/models',
       TUNING_DEFAULTS,
       expect.any(AbortSignal),
     )
     expect(container.textContent).toContain('Meaning matches for "a winged demon".')
+    vi.useRealTimers()
   })
 
   it('offers the name search rather than performing it', async () => {
@@ -628,7 +640,11 @@ describe('meaning search', () => {
     await settle()
 
     // A user action, so renaming the view is legitimate now.
-    expect(listDir).toHaveBeenCalledWith('/models', expect.objectContaining({ q: 'widget' }))
+    expect(listDir).toHaveBeenCalledWith(
+      '/models',
+      expect.objectContaining({ q: 'widget' }),
+      expect.any(AbortSignal),
+    )
     expect(location.search).not.toContain('mode=meaning')
   })
 

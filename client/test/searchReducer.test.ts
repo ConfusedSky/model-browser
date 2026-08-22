@@ -15,7 +15,7 @@ import {
   type Landed,
   type SearchState,
 } from '../src/state/reducer'
-import { busy, byKind, dest, labelInputs, pendingRequest } from '../src/state/selectors'
+import { busy, byKind, dest, labelInputs, pendingRequest, stoodIn } from '../src/state/selectors'
 import { toUrlView, type Prefs, type View } from '../src/state/view'
 
 const PREFS: Prefs = {
@@ -363,5 +363,28 @@ describe('acceptance: one rule for every answer', () => {
     expect(landed.result?.forView.kinds).toBe('models')
     expect(landed.view.kinds).toBe('models')
     expect(byKind(landed).map((e) => e.name)).toEqual(['a.stl'])
+  })
+
+  it('a fetchless patch after the landing reaches the answer it stands beside', () => {
+    // The same sentence as the landing's, for the other side of it: the render
+    // reads `result.forView` (R1's corollary), so a patch that stopped at
+    // `view` left the kind control inert — the URL said `kinds=models` while
+    // the grid went on showing the folders.
+    const entries = [entry('a.stl'), entry('sub', 'dir')]
+    let s = land(search(start(), 'dragon'), { entries })
+    expect(byKind(s).map((e) => e.name)).toEqual(['a.stl', 'sub'])
+
+    s = reducer(s, { type: 'setKinds', kinds: 'models' })
+    expect(s.result?.forView.kinds).toBe('models')
+    expect(byKind(s).map((e) => e.name)).toEqual(['a.stl'])
+    // Wholesale replacement is about `entries` identity — useThumbnails resets
+    // every thumb to `loading` when it changes — and a forView-only spread
+    // keeps it (R5).
+    expect(s.result?.entries).toBe(entries)
+
+    // And the answer keeps standing beside the question: opening a lightbox
+    // patches both, so nothing reads as a stand-in that is not one.
+    s = reducer(s, { type: 'modelOpen', path: '/lib/a.stl' })
+    expect(stoodIn(s)).toBe(false)
   })
 })
