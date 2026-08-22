@@ -509,3 +509,43 @@
       ?path&similar= and nothing else; the URL reproduced 16 tiles in a fresh tab; ✕ Dismiss
       returned to the clean listing URL with no residue; the only console error was the
       dev favicon 404)
+
+## 6. Follow-ups  *(user-requested 2026-08-22, after the live run)*
+
+- [x] 6.1 A similarity view shows the model its neighbours were computed **from**, so the
+      comparison the view exists for can actually be made. The index excludes the query
+      model from its own ranking by design (verified against `mini-classify`'s source
+      while implementing 4.1 — a model scores 1.0 against itself and skews the z), so the
+      anchor is this app's to add. It is the **question**, not part of the answer: a
+      separate field all the way down, folded in at the render layer alone.
+      **Done:** the route resolves it through the same stat path the hit→tile join uses
+      (`modelEntryAt`, extracted from `hitsToEntries` in `server/src/semantic.ts`) and
+      answers `anchor?: DirEntry` beside `entries` — omitted silently when the model no
+      longer stats, since the neighbours are still a true answer without it.
+      `SimilarListing` (`shared/types.ts`), `Landed`/`Result` (`state/reducer.ts`) and the
+      App fetch arm carry it through; R5's wholesale replace covers a landing that has
+      none, so there is no reducer logic. The render prepends it to the grid and to
+      `useThumbnails`' entries (it needs a thumbnail) and **counts it nowhere**:
+      `searchHasNoMatches`, the omitted notice and the narrow affordance all read
+      `result.entries`, so an anchor with no neighbours still says *Nothing in the
+      collection is similar to …* with the model visible above the sentence — which is why
+      the empty sentence no longer replaces the grid but renders beside it. It is exempt
+      from the find filter (the filter narrows the answer; the reference is what the answer
+      is about) and needs no exemption from the kind option, which `byKind` already leaves
+      off a similarity result. `Tile` marks it with a ring, a *Compared against* caption and
+      an accessible-name suffix.
+      **Re-asking on the anchor:** its menu offers *find similar* on the model the view is
+      already about, and what the machinery gives is an **identical re-ask** — the `similar`
+      transition always `ask`s, `sameQuestion` guarding `restore` rather than this — landing
+      on the same view, so the URL is unchanged and no history entry is minted. Pinned as a
+      test rather than special-cased.
+      **Tested and falsified:** two server cases (`server/test/similar.test.ts` — the anchor
+      stat'd and named relative to the collection; deleted mid-request → field omitted,
+      neighbours intact) and four App cases (`client/test/findSimilar.test.tsx` — first and
+      marked; anchor-only still reads as nothing similar and is not counted; the filter
+      narrows the neighbours and never hides the reference; the re-ask). Falsified five
+      ways: counting the anchor among the entries (the empty case fails, and the narrow
+      affordance appears), dropping the filter exemption (the never-hides case fails),
+      rendering it last (the first-and-marked case fails), emitting the field whatever it
+      resolved to (the omitted case fails), and naming it by absolute path (the relative-name
+      assertion fails)

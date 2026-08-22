@@ -1,6 +1,6 @@
 import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
-import { isAbsolute } from 'node:path'
+import { isAbsolute, relative } from 'node:path'
 import { Readable } from 'node:stream'
 import { Hono } from 'hono'
 import type { LightingMode, OrbitAxis, ThumbPutRequest } from '../../shared/types'
@@ -11,6 +11,7 @@ import {
   IndexError,
   hitsToEntries,
   indexStatus,
+  modelEntryAt,
   query as indexQuery,
   scopeWithin,
   similar as indexSimilar,
@@ -235,11 +236,30 @@ export function createApp(cache: ThumbCache = new ThumbCache()): Hono {
     // the tree, stat'd once per returned hit, never the index's description of a
     // model (D3).
     const { entries, poses } = await hitsToEntries(result.results, status.collectionRoot)
+    // The model the neighbours were computed *from*, resolved into a tile of its
+    // own. The index excludes the query model from its own ranking by design (it
+    // scores 1.0 against itself and skews the z), so if the question is to be
+    // visible beside its answer, this app is the only place that can add it.
+    //
+    // Its own field, never prepended into `entries`: the entries are the answer
+    // and the anchor is the question, and a client that counted it would say a
+    // model with no neighbours had one.
+    //
+    // Named the way a hit is — relative to the collection — so the anchor tile
+    // reads like the neighbours beside it rather than as an absolute path.
+    // Omitted silently when it no longer stats: a model can be deleted after it
+    // was embedded, and the neighbours are still a true answer without it.
+    const anchor = await modelEntryAt(model, relative(status.collectionRoot, model))
     // Deliberately without the index's `scope` dict. A similarity view reads
     // none of the meaning residue — `weak`, `capped`, the scope's coverage
     // counts are all facts about a *phrase's* result — and forwarding it would
     // make the client's label read the view as a meaning search (4.7).
-    return c.json({ path: status.collectionRoot, entries, poses })
+    return c.json({
+      path: status.collectionRoot,
+      entries,
+      poses,
+      ...(anchor !== null ? { anchor } : {}),
+    })
   })
 
   app.get('/api/complete', async (c) => {

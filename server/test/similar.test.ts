@@ -3,7 +3,7 @@
 // through. Its own file rather than a branch inside semantic.test.ts, because
 // the fetch stub there answers every POST with one fixture and this route needs
 // `/query` and `/similar` to be told apart.
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -251,6 +251,61 @@ describe('a model’s neighbours', () => {
       string,
       unknown
     >
-    expect(Object.keys(body).sort()).toEqual(['entries', 'path', 'poses'])
+    // `anchor` is the one field added since, and it is not residue: it is this
+    // server's own answer to "what was this compared against", which the index
+    // never says because it excludes the query model from its own ranking.
+    expect(Object.keys(body).sort()).toEqual(['anchor', 'entries', 'path', 'poses'])
+  })
+
+  it('carries the model the neighbours were computed from, stat’d here like any tile', async () => {
+    // The index excludes the query model from its own ranking by design (it
+    // scores 1.0 against itself), so the only place the question can be made
+    // visible beside its answer is here.
+    mkdirSync(join(root, 'Kits'), { recursive: true })
+    writeFileSync(join(root, 'Kits', 'anchor.stl'), stlBytes(3))
+    stubIndex(READY, RESULT)
+    const body = (await (await post({ path: join(root, 'Kits', 'anchor.stl'), k: 16 })).json()) as {
+      entries: { path: string }[]
+      anchor?: { name: string; path: string; kind: string; size: number; mtime: number }
+    }
+    expect(body.anchor?.path).toBe(join(root, 'Kits', 'anchor.stl'))
+    // Named relative to the collection, exactly as a hit is, so the anchor tile
+    // reads like the neighbours beside it rather than as an absolute path.
+    expect(body.anchor?.name).toBe(join('Kits', 'anchor.stl'))
+    expect(body.anchor?.kind).toBe('model')
+    // Its own stat, not the index's word for it — a tile needs mtime and size,
+    // and the index reports neither.
+    expect(body.anchor?.mtime).toBeGreaterThan(0)
+    expect(body.anchor?.size).toBeGreaterThan(0)
+    // Beside the answer, never inside it: an anchor counted among the entries
+    // would say a model with no neighbours had one.
+    expect(body.entries.map((e) => e.path)).toEqual([join(root, 'base.stl')])
+  })
+
+  it('omits the anchor when it no longer resolves, and still answers with the neighbours', async () => {
+    // A model can be deleted after it was embedded. Deleted here between the
+    // path check and the stat — which is the real race, not a contrived one —
+    // by removing it while the index is answering.
+    const ghost = join(root, 'ghost.stl')
+    writeFileSync(ghost, stlBytes(4))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (String(url).endsWith('/status')) {
+          return new Response(JSON.stringify(READY), {
+            headers: { 'content-type': 'application/json' },
+          })
+        }
+        rmSync(ghost, { force: true })
+        return new Response(JSON.stringify(RESULT))
+      }),
+    )
+    const res = await post({ path: ghost })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { entries: unknown[]; anchor?: unknown }
+    // Silently: the neighbours are a true answer without it, and a 404 here
+    // would say "not indexed" about a model that was.
+    expect(body).not.toHaveProperty('anchor')
+    expect(body.entries).toHaveLength(1)
   })
 })

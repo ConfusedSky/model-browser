@@ -164,6 +164,17 @@ export interface SimilarListing {
   entries: DirEntry[]
   /** Orientation per tile path, where the index has one. Advisory (D5). */
   poses: Record<string, IndexPose>
+  /**
+   * The model the neighbours were computed from, so the question can be shown
+   * beside its answer. A field of its own rather than the head of `entries`,
+   * because it is not one of them: the index excludes the query model from its
+   * own ranking by design, and anything counting the tiles — "nothing similar",
+   * the omitted-entries notice — must count the neighbours alone.
+   *
+   * Absent when the model no longer stats: it can be deleted after it was
+   * embedded, and its neighbours are still an answer without it.
+   */
+  anchor?: DirEntry
 }
 
 /** Availability of the semantic index, read from the wire (semantic-search D4). */

@@ -170,6 +170,10 @@ The action SHALL be offered only where it could apply — on a model, within the
 - **WHEN** a similarity request returns no neighbours
 - **THEN** the view says so in terms of the model it was derived from, rather than presenting a grid that reads as an empty folder
 
+#### Scenario: The model compared against is on screen
+- **WHEN** a similarity view renders
+- **THEN** the source model appears first, visibly marked as the subject rather than as one of the results, and is not counted among the neighbours — an anchor with no neighbours still reads as nothing similar
+
 #### Scenario: No index, no action
 - **WHEN** the semantic index is unavailable
 - **THEN** the action is not offered, and every other entry action still works

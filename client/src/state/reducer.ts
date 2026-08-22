@@ -72,6 +72,17 @@ export interface Landed {
   weak?: boolean
   capped?: boolean
   poses?: Record<string, IndexPose>
+  /**
+   * A similarity answer's subject: the model its neighbours were computed from,
+   * which the index excludes from them by design. Beside `entries` rather than
+   * among them, and it stays that way all the way to the render — the grid
+   * shows it first, and everything that *counts* (the empty-result sentence,
+   * the omitted notice) counts `entries` alone.
+   *
+   * No reducer logic of its own: a `landing` replaces the whole result (R5), so
+   * an answer that carries no anchor simply has none.
+   */
+  anchor?: DirEntry
 }
 
 export interface Result extends Landed {
@@ -491,6 +502,7 @@ export function reducer(state: SearchState, action: Action): SearchState {
         weak: action.landed.weak,
         capped: action.landed.capped,
         poses: action.landed.poses,
+        anchor: action.landed.anchor,
       }
       // A stand-in renders without renaming the view: the URL still names the
       // meaning search, the deferral still waits, and the grid shows the

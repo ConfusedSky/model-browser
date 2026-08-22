@@ -360,6 +360,18 @@ export default function App() {
   const truncated = state.result?.truncated === true
   const entries = state.result?.entries ?? NO_ENTRIES
   const poses = state.result?.poses ?? NO_POSES
+  // The model a similarity answer was computed from. It is never counted with
+  // the neighbours — `entries` above is what every count and every "nothing
+  // similar" sentence reads — and it is folded in at the render layer alone.
+  const anchor = state.result?.anchor
+  // The anchor needs a thumbnail like any tile, so it goes to useThumbnails —
+  // memoized because that effect resets the whole thumb map to `loading` on any
+  // `entries` identity change (D2), and a fresh array per render would do it on
+  // every keystroke.
+  const thumbEntries = useMemo(
+    () => (anchor === undefined ? entries : [anchor, ...entries]),
+    [entries, anchor],
+  )
   // The subject a deferral is holding — a phrase or a model, and the banner
   // says a different sentence for each. Read off `view` rather than the answer,
   // like the projection: while a stand-in listing is on screen the *answer* is
@@ -376,7 +388,7 @@ export default function App() {
   const error = state.failure?.message ?? null
 
   const showSkeleton = useDelayedFlag(busy(state), SKELETON_DELAY_MS)
-  const { thumbs, setThumb, setPlaceholder } = useThumbnails(entries, api, lru, queue, poses)
+  const { thumbs, setThumb, setPlaceholder } = useThumbnails(thumbEntries, api, lru, queue, poses)
   placeholderRef.current = setPlaceholder
 
   /**
@@ -456,7 +468,9 @@ export default function App() {
         // no `weak`, no `capped`: the index publishes none of them for
         // neighbours, and a landing that invented them would give the label
         // meaning-query residue to render (4.7).
-        (res) => land({ entries: res.entries, poses: res.poses }),
+        // The anchor rides along beside the entries, never among them: it is the
+        // question, and the neighbours are the answer (D4's addition).
+        (res) => land({ entries: res.entries, poses: res.poses, anchor: res.anchor }),
         (err: unknown) => {
           const notEmbedded = err instanceof HttpError && err.status === 404
           // A 404 means the index *answered* — about this model, not about
@@ -943,6 +957,16 @@ export default function App() {
     () => (needle === '' ? kept : kept.filter((e) => e.name.toLowerCase().includes(needle))),
     [kept, needle],
   )
+  // The anchor is prepended here and nowhere earlier: it is shown, never
+  // counted. It is also **exempt from the find filter** — the filter narrows
+  // the answer, and the reference is what the answer is about, so hiding it
+  // would leave a grid of neighbours with nothing to say what they are near.
+  // The kind option needs no exemption: `byKind` already passes a similarity
+  // result through untouched, since that view reads no kind restriction.
+  const shownEntries = useMemo(
+    () => (anchor === undefined ? filteredListing : [anchor, ...filteredListing]),
+    [anchor, filteredListing],
+  )
   // A kind restriction can empty the grid too, and it is a different sentence:
   // the results are there, this view is not showing them. It is decided first
   // and from `kept`, so the message names the control that actually hid the
@@ -1256,6 +1280,54 @@ export default function App() {
     truncated && !searchHasNoMatches && !kindHidesAll
       ? `Showing ${shownParts.join(' and ')}; some entries were omitted.`
       : ''
+  // The three ways a grid ends up with nothing in it, each with its own
+  // sentence. A value rather than a ternary chain inside the JSX because the
+  // sentence no longer *replaces* the grid unconditionally: a similarity view's
+  // anchor is still drawn above it, so the two are rendered independently.
+  const emptyNotice = searchHasNoMatches ? (
+    // An empty similarity answer is its own sentence, said in terms of the
+    // model it was derived from. It is decided first because every branch below
+    // is about a *phrase*: without it an empty similarity result rendered
+    // `Nothing matched ""` — or, before the subject reached this gate at all,
+    // fell through to Grid's bare "Nothing to show here" as though the folder
+    // were empty.
+    labelModel !== null ? (
+      <p className="mt-16 text-center text-sm text-zinc-600">
+        Nothing in the collection is similar to "{baseName(labelModel)}" — the index holds no
+        neighbours for it.
+      </p>
+    ) : // An empty truncated search never finished: claiming "no match"
+    // would be false — the walk ran out before covering the tree (D5).
+    truncated ? (
+      <p className="mt-16 text-center text-sm text-zinc-600">
+        Nothing matched "{labelQuery}" in the part of the tree the search could cover — it ran out
+        of budget before finishing. Try searching from a deeper folder.
+      </p>
+    ) : scope !== null ? (
+      // Three outcomes, not one empty grid: nothing matched, nothing here is
+      // indexed, or what is here is outside the corpus. Only the second is
+      // fixed by indexing again (4.1).
+      <p className="mt-16 text-center text-sm text-zinc-600">
+        {scope.status === 'unindexed'
+          ? `Nothing here has been indexed yet — meaning search covers ${scope.covers.join(', ')} files outside archives.`
+          : `Nothing matched "${labelQuery}".${
+              scope.status === 'partial'
+                ? ` ${scope.indexed} of ${scope.scanned} models here are indexed.`
+                : ''
+            }`}
+      </p>
+    ) : (
+      <p className="mt-16 text-center text-sm text-zinc-600">Nothing matched "{labelQuery}".</p>
+    )
+  ) : kindHidesAll ? (
+    <p className="mt-16 text-center text-sm text-zinc-600">
+      {counted === 'folders'
+        ? 'No folders matched — the results are models only.'
+        : 'No models matched — the results are folders only.'}
+    </p>
+  ) : filterHidesAll ? (
+    <p className="mt-16 text-center text-sm text-zinc-600">The filter is hiding everything below.</p>
+  ) : null
 
   return (
     <div className="flex h-screen flex-col bg-zinc-950 text-zinc-100">
@@ -1407,56 +1479,13 @@ export default function App() {
                 </p>
               )}
               {noticeBar(resultsLabel, omittedNotice, entries.length > 0)}
-              {searchHasNoMatches ? (
-                // An empty similarity answer is its own sentence, said in terms
-                // of the model it was derived from. It is decided first because
-                // every branch below is about a *phrase*: without it an empty
-                // similarity result rendered `Nothing matched ""` — or, before
-                // the subject reached this gate at all, fell through to Grid's
-                // bare "Nothing to show here" as though the folder were empty.
-                labelModel !== null ? (
-                  <p className="mt-16 text-center text-sm text-zinc-600">
-                    Nothing in the collection is similar to "{baseName(labelModel)}" — the index
-                    holds no neighbours for it.
-                  </p>
-                ) : // An empty truncated search never finished: claiming "no match"
-                // would be false — the walk ran out before covering the tree (D5).
-                truncated ? (
-                  <p className="mt-16 text-center text-sm text-zinc-600">
-                    Nothing matched "{labelQuery}" in the part of the tree the search could cover —
-                    it ran out of budget before finishing. Try searching from a deeper folder.
-                  </p>
-                ) : scope !== null ? (
-                  // Three outcomes, not one empty grid: nothing matched, nothing
-                  // here is indexed, or what is here is outside the corpus. Only
-                  // the second is fixed by indexing again (4.1).
-                  <p className="mt-16 text-center text-sm text-zinc-600">
-                    {scope.status === 'unindexed'
-                      ? `Nothing here has been indexed yet — meaning search covers ${scope.covers.join(', ')} files outside archives.`
-                      : `Nothing matched "${labelQuery}".${
-                          scope.status === 'partial'
-                            ? ` ${scope.indexed} of ${scope.scanned} models here are indexed.`
-                            : ''
-                        }`}
-                  </p>
-                ) : (
-                  <p className="mt-16 text-center text-sm text-zinc-600">
-                    Nothing matched "{labelQuery}".
-                  </p>
-                )
-              ) : kindHidesAll ? (
-                <p className="mt-16 text-center text-sm text-zinc-600">
-                  {counted === 'folders'
-                    ? 'No folders matched — the results are models only.'
-                    : 'No models matched — the results are folders only.'}
-                </p>
-              ) : filterHidesAll ? (
-                <p className="mt-16 text-center text-sm text-zinc-600">
-                  The filter is hiding everything below.
-                </p>
-              ) : (
+              {/* The grid is replaced by a sentence only when there is nothing
+                  left to show. A similarity view's subject is something: it
+                  stays on screen above its own "nothing similar", which is the
+                  one thing that sentence is about. */}
+              {emptyNotice === null || anchor !== undefined ? (
                 <Grid
-                  entries={filteredListing}
+                  entries={shownEntries}
                   thumbs={thumbs}
                   onEnter={enterEntry}
                   onModelPointerDown={onModelPointerDown}
@@ -1464,8 +1493,10 @@ export default function App() {
                   onModelHover={onModelHover}
                   onEntryMenu={onEntryMenu}
                   markedPath={marked}
+                  anchorPath={anchor?.path}
                 />
-              )}
+              ) : null}
+              {emptyNotice}
             </>
           )}
         </main>

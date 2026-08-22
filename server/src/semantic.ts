@@ -286,6 +286,36 @@ export async function similar(path: string, k?: number): Promise<SimilarResult> 
 }
 
 /**
+ * One model path → one tile, from *this* server's stat rather than from
+ * anything the index said about the file (D3): a hit carries neither mtime nor
+ * size, and a tile needs both, since thumbnails are keyed path+mtime.
+ *
+ * Shared by the hit join below and by the similarity route's anchor, which is
+ * the query model itself — the index excludes it from its own ranking, so it
+ * reaches a tile through here rather than through a hit. `null` for anything
+ * that is not a file now: a model can be deleted after it is embedded, and that
+ * is an ordinary outcome rather than an error.
+ *
+ * Containment is the *caller's* to check, and deliberately so: a hit's
+ * `rel_path` is untrusted data from another process, while the anchor has
+ * already been through `scopeWithin`, which compares resolved real paths and is
+ * the stronger test. Re-running the prefix form over it here would reject a
+ * legitimate anchor under a symlinked collection root.
+ */
+export async function modelEntryAt(full: string, name: string): Promise<DirEntry | null> {
+  const s = await stat(full).catch(() => null)
+  if (s === null || !s.isFile()) return null
+  return {
+    name,
+    path: full,
+    kind: 'model' as const,
+    format: modelFormat(full),
+    size: s.size,
+    mtime: s.mtimeMs,
+  }
+}
+
+/**
  * Turn hits into tiles using *this* server's view of the tree, never the
  * index's description of a model (D3).
  *
@@ -314,17 +344,10 @@ export async function hitsToEntries(
       // trusting a mount point this app resolved for itself.
       const full = resolve(collectionRoot, h.rel_path)
       if (full !== collectionRoot && !full.startsWith(collectionRoot + sep)) return null
-      const s = await stat(full).catch(() => null)
-      if (s === null || !s.isFile()) return null
+      const entry = await modelEntryAt(full, h.rel_path)
+      if (entry === null) return null
       if (h.pose !== null) poses[full] = h.pose
-      return {
-        name: h.rel_path,
-        path: full,
-        kind: 'model' as const,
-        format: modelFormat(full),
-        size: s.size,
-        mtime: s.mtimeMs,
-      }
+      return entry
     }),
   )
   return { entries: settled.filter((e) => e !== null), poses }

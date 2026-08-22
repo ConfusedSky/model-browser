@@ -17,6 +17,10 @@ interface Props {
   /** The entry a reveal just located, marked until the highlight fades.
    *  Component-local in App, never a view field (D8). */
   markedPath: string | null
+  /** A similarity view's subject — the model its neighbours were computed from.
+   *  It is drawn first and marked as the reference; App prepends it, so this is
+   *  only which of the rendered tiles is it. */
+  anchorPath?: string
 }
 
 /**
@@ -48,6 +52,7 @@ function Grid({
   onModelHover,
   onEntryMenu,
   markedPath,
+  anchorPath,
 }: Props) {
   if (entries.length === 0) {
     return <p className="mt-16 text-center text-sm text-zinc-600">Nothing to show here.</p>
@@ -67,6 +72,9 @@ function Grid({
           // A boolean per tile, not the path: only the marked tile's props
           // change, so the memo keeps the other 499 from re-rendering.
           marked={entry.path === markedPath}
+          // Per-tile boolean for the same reason `marked` is one: the memo
+          // keeps every other tile out of the re-render.
+          anchor={entry.path === anchorPath}
         />
       ))}
     </div>
@@ -84,6 +92,7 @@ const Tile = memo(function Tile({
   onModelHover,
   onEntryMenu,
   marked,
+  anchor,
 }: {
   entry: DirEntry
   thumb: ThumbState | undefined
@@ -93,6 +102,7 @@ const Tile = memo(function Tile({
   onModelHover: (path: string | null) => void
   onEntryMenu: (entry: DirEntry, el: HTMLElement, at: { x: number; y: number }) => void
   marked: boolean
+  anchor: boolean
 }) {
   const ref = useRef<HTMLButtonElement>(null)
   // Locating is the point of reveal (D3): a grid of identical squares ten
@@ -112,6 +122,11 @@ const Tile = memo(function Tile({
   // fade is the browser's business and App only has to drop the state that
   // applied it.
   const markClass = marked ? ' animate-reveal-mark' : ''
+  // The subject of a similarity view: the model the others were compared
+  // against, drawn as the reference rather than as the best result. A ring the
+  // neighbours do not have, and deliberately a quiet one — anything louder
+  // reads as "this one matched hardest", which is the opposite of what it is.
+  const anchorClass = anchor ? ' border-sky-800 ring-1 ring-sky-800' : ''
   const onMenuKey = (e: React.KeyboardEvent<HTMLButtonElement>): boolean => {
     // Shift+F10 for the platforms that do not send `contextmenu` for the
     // context-menu key itself.
@@ -128,7 +143,7 @@ const Tile = memo(function Tile({
         type="button"
         data-entry-tile={entry.path}
         title={entry.name}
-        className={base + markClass}
+        className={base + markClass + anchorClass}
         onClick={() => onEnter(entry)}
         onContextMenu={(e) => {
           e.preventDefault()
@@ -155,8 +170,11 @@ const Tile = memo(function Tile({
       // The label is shortened to the file name, so the accessible name carries
       // the full one — in flat view that path is the only thing telling two
       // same-named parts apart.
-      aria-label={thumb?.status === 'error' ? `${entry.name} — failed to load` : entry.name}
-      className={`${base} touch-none select-none${markClass}`}
+      aria-label={
+        (thumb?.status === 'error' ? `${entry.name} — failed to load` : entry.name) +
+        (anchor ? ' — the model these are compared against' : '')
+      }
+      className={`${base} touch-none select-none${markClass}${anchorClass}`}
       onPointerDown={(e) => onModelPointerDown(e, entry, e.currentTarget)}
       // The press that raises a menu never orbits: App's `onModelPointerDown`
       // returns on `e.button !== 0` before any overlay is set.
@@ -189,6 +207,13 @@ const Tile = memo(function Tile({
           <span className="size-6 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-400" />
         )}
       </div>
+      {/* Above the name rather than below it: it captions the tile, and it must
+          not become the tile's last line, which is what a label is read from. */}
+      {anchor && (
+        <span className="w-full truncate text-center text-[0.625rem] uppercase tracking-wide text-sky-500">
+          Compared against
+        </span>
+      )}
       {/* Flat-view names carry the relative path (`dir/foo.stl`, `a.zip!/b.stl`) — the
           tile shows just the file name; the path is in the title and aria-label. */}
       <span className="w-full truncate text-center text-xs">{baseName(entry.name)}</span>
