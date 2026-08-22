@@ -29,5 +29,5 @@ None.
 - `server/src/listing.ts` — an in-flight registry keyed by root, so a second request joins the first; `takeStep` gains a cancellation check alongside its budget check (it is already the per-entry chokepoint, so no new plumbing through the recursion).
 - `server/src/app.ts` — the request's own `AbortSignal` (`c.req.raw.signal`) is the source of "nobody is waiting any more"; a shared walk is only abandoned once every joined request has gone.
 - Interacts with `listing-tree-cache`: the two solve the same problem on different axes — that change makes one walk serve many requests *across time*, this one makes it serve many requests *at the same moment*. They compose, and the partial-results rule above exists because they do.
-- No client change: the existing latest-wins guard already discards superseded responses, and a cancelled request is one the client had stopped caring about by definition.
+- No client change needed — and since `search-view-reducer` landed (2026-08-21), the client already aborts superseded listing fetches (`listDir` carries an `AbortSignal` through ApiClient), so `c.req.raw.signal` genuinely fires for the rapid-search case this change is about; before that, a superseded request kept its connection open and the signal never fired.
 - No API shape change.

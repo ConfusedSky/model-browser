@@ -30,7 +30,24 @@
 
 ## 4. Sign-off and follow-through
 
-- [ ] 4.1 Judge the visible behavior change: `toggleFlat`'s label persists until the plain listing lands instead of blanking optimistically — try it against the e2e fixtures on a slow (cold-cache) walk and confirm it reads as truthful rather than stuck; not done until the pixels are judged
-- [ ] 4.2 Manual E2E pass over the deferral lifecycle with the real index (start `mini-classify`, kill it, defer a query, navigate, restart it): confirm no hijack, banner honesty, cancel paths
-- [ ] 4.3 Update `search-cancellation`'s proposal impact note ("No client change") to record that client-side listing aborts now exist and feed its `c.req.raw.signal` premise
-- [ ] 4.4 Delete the `reducer-refactor-owns-deferred-findings` memory and re-run a review of the reducer with a different model than the implementer
+- [x] 4.1 Judge the visible behavior change: `toggleFlat`'s label persists until the plain listing lands instead of blanking optimistically — try it against the e2e fixtures on a slow (cold-cache) walk and confirm it reads as truthful rather than stuck; not done until the pixels are judged
+      (judged 2026-08-21, 100ms-sampled toggle over a 551-tile root search: the side
+      panel's live line empties at click+100ms — the click visibly registers — while
+      the grid label persists exactly as long as the answer's own tiles and leaves
+      with them when the skeleton takes over at ~320ms; label and grid can never
+      disagree, so it reads truthful)
+- [x] 4.2 Manual E2E pass over the deferral lifecycle with the real index (start `mini-classify`, kill it, defer a query, navigate, restart it): confirm no hijack, banner honesty, cancel paths
+      (run 2026-08-21 with availability intercepted at the API boundary rather than
+      killing the peer session's index: deferred boot holds a nested stand-in with an
+      honest banner; navigating away cancels — zero queries fire when ready arrives
+      and the URL drops the search instantly; emptying the input cancels the same
+      way; kept views fire exactly one query when ready lands; the real index dying
+      mid-test bonus-verified the warming→absent banner transition. Known limit,
+      pre-existing: in `absent` state nothing re-probes without an interaction, so an
+      absent-index deferral's "runs as soon as the index answers" overpromises)
+- [x] 4.3 Update `search-cancellation`'s proposal impact note ("No client change") to record that client-side listing aborts now exist and feed its `c.req.raw.signal` premise
+- [x] 4.4 Delete the `reducer-refactor-owns-deferred-findings` memory and re-run a review of the reducer with a different model than the implementer
+      (both commits implemented by opus and line-reviewed by fable before merging:
+      commit 1's review read all 1,035 lines, commit 2's walked the projection fence,
+      fetch/popstate/model effects, resolveView and the debounce guard; two of the
+      four in-flight check-ins were themselves review-driven corrections)
