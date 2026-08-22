@@ -45,6 +45,11 @@
 ## 5. Verification
 
 - [x] 5.1 `bun run typecheck` and `bun run test` pass across workspaces
-- [ ] 5.2 Manual E2E against the running index: change each parameter and see the
+- [x] 5.2 Manual E2E against the running index: change each parameter and see the
       result set change; a tuned URL reproduces in a fresh profile; a `top` above
       the index's cap reports the cap rather than looking complete
+      (run 2026-08-21 over the 3396-model library: pool/raw/top/min each changed
+      the set; top=999 reported the index's 500 cap; a pool+raw+top link
+      reproduced cold in a wiped profile without writing its options to storage —
+      after the `raw`→`score-raw` param rename, since Vite 403s its own reserved
+      `raw` query on any cold load)

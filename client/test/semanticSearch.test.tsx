@@ -561,7 +561,7 @@ describe('meaning search', () => {
     setSearchTuning({ ...TUNING_DEFAULTS, pool: 'mean', top: 5 })
     indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models', covers: ['stl'] })
     semanticSearch.mockResolvedValue(MEANING)
-    await mountAppAtCurrentUrl('/?path=/models&flat=1&q=demon&mode=meaning&raw=1', NESTED)
+    await mountAppAtCurrentUrl('/?path=/models&flat=1&q=demon&mode=meaning&score-raw=1', NESTED)
     await settle()
 
     // The link carries `raw` and omits the rest: omitted means default, never

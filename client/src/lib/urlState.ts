@@ -44,7 +44,7 @@ export function parseUrl(search: string = window.location.search): UrlView {
   const top = Number(p.get('top'))
   const min = Number(p.get('min'))
   const tuning: Partial<Tuning> = {}
-  if (p.get('raw') === '1') tuning.raw = true
+  if (p.get('score-raw') === '1') tuning.raw = true
   if (isPool(pool)) tuning.pool = pool
   if (Number.isFinite(top) && top > 0 && p.has('top')) tuning.top = Math.floor(top)
   if (Number.isFinite(min) && p.has('min')) tuning.minScore = min
@@ -87,7 +87,10 @@ export function serializeView(view: UrlView): string {
   // that reads absence differently, and the same URL asks a different question.
   if (view.q !== undefined && view.q !== '') p.set('mode', view.mode ?? 'name')
   // Omitted at their defaults, so an ordinary meaning link is unchanged (D3).
-  if (view.tuning?.raw === true) p.set('raw', '1')
+  // Not named `raw`: Vite's dev server 403s any URL whose query contains a
+  // `raw`, `url`, or `inline` param (its special import queries, guarded since
+  // CVE-2025-30208), killing deep links before the app loads.
+  if (view.tuning?.raw === true) p.set('score-raw', '1')
   if (view.tuning?.pool !== undefined && view.tuning.pool !== TUNING_DEFAULTS.pool) {
     p.set('pool', view.tuning.pool)
   }
