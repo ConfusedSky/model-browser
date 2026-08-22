@@ -21,6 +21,11 @@ Every URL the client writes into history SHALL be produced by serializing the co
 - **WHEN** a meaning search is committed while the index is not ready, under non-default tuning
 - **THEN** the URL written for the deferred view carries that tuning, and the query runs under it once the index answers
 
+#### Scenario: An option the mode cannot use stays out of the URL
+
+- **WHEN** a search is committed under one mode while the options governing the other mode hold non-default values
+- **THEN** the URL carries only the options its own mode reads — a name search never names tuning, a meaning search never names the kind restriction — matching the panel, which shows each option only in the mode that reads it
+
 #### Scenario: The flat param records the toggle
 
 - **WHEN** the user searches with the flat toggle off, shares the resulting URL, and the recipient clears the query

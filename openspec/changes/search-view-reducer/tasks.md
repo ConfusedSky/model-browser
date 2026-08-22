@@ -56,3 +56,5 @@
 
 - [x] 5.1 Restore across a request-irrelevant difference (kinds, committed-flat, model) patches
       instead of re-fetching (user-reported 2026-08-21)
+- [x] 5.2 The URL carries only the options its mode reads — inapplicable options stay out,
+      matching the panel (user-reported 2026-08-21)

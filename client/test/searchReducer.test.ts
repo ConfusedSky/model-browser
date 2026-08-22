@@ -6,7 +6,7 @@
 // test asks the reducer the question that list got wrong.
 import { describe, expect, it } from 'vitest'
 import type { DirEntry, IndexAvailability, IndexPose, SemanticScope } from '../../shared/types'
-import { TUNING_DEFAULTS } from '../src/lib/searchOptions'
+import { TUNING_DEFAULTS, type SearchMode } from '../src/lib/searchOptions'
 import { serializeView } from '../src/lib/urlState'
 import {
   initialState,
@@ -204,38 +204,58 @@ describe('the reducer, finding by finding', () => {
     expect(pendingRequest(s)).toMatchObject({ kind: 'meaning', text: 'dragon' })
   })
 
-  it('every URL-owning transition names the whole view', () => {
-    const full: View = {
-      ...view({ q: 'dragon', mode: 'meaning', flat: true, kinds: 'models', folderMatching: false }),
-      tuning: { ...TUNING_DEFAULTS, top: 12 },
+  it('every URL-owning transition names the whole view — its own mode’s half of it', () => {
+    // The whole view, held off-default in both halves, so a hand-built literal
+    // that drops a field is caught. The sweep runs per mode because the URL
+    // names only the options its own mode reads: a name search has no tuning to
+    // spell out, and a meaning search cannot restrict by kind (the index
+    // answers with models and nothing else). Sticky options leaking into the
+    // other mode's URL is the user-reported bug this half pins.
+    const tuning = { ...TUNING_DEFAULTS, top: 12, pool: 'max' as const }
+    const OPTIONS: Record<SearchMode, { carries: string[]; omits: string[] }> = {
+      name: {
+        carries: ['q=dragon', 'mode=name', 'kinds=models', 'nofolders=1'],
+        omits: ['top=', 'pool=', 'score-raw', 'min='],
+      },
+      meaning: {
+        carries: ['q=dragon', 'mode=meaning', 'top=12', 'pool=max'],
+        omits: ['kinds=', 'nofolders='],
+      },
     }
-    let s = land(reducer(start({}, READY), { type: 'restore', view: full }), { entries: [] })
-    const carriesEverything = (url: string): void => {
-      for (const param of ['q=dragon', 'mode=meaning', 'kinds=models', 'nofolders=1', 'top=12']) {
-        expect(url).toContain(param)
+    const namesItsView = (mode: SearchMode, url: string): void => {
+      for (const param of OPTIONS[mode].carries) expect(url).toContain(param)
+      for (const param of OPTIONS[mode].omits) expect(url).not.toContain(param)
+    }
+
+    for (const mode of ['name', 'meaning'] as const) {
+      const full: View = {
+        ...view({ q: 'dragon', mode, flat: true, kinds: 'models', folderMatching: false }),
+        tuning,
       }
+      let s = land(reducer(start({}, READY), { type: 'restore', view: full }), { entries: [] })
+
+      // The kind option: a hand-built literal here dropped the tuning.
+      s = reducer(s, { type: 'setKinds', kinds: 'models' })
+      namesItsView(mode, urlOf(s))
+      // The lightbox: its literal dropped mode, kinds and tuning.
+      s = reducer(s, { type: 'modelOpen', path: '/lib/a.stl' })
+      namesItsView(mode, urlOf(s))
+      expect(urlOf(s)).toContain('model=')
+      // The stale-model drop: only that field is rewritten.
+      s = reducer(s, { type: 'modelDrop' })
+      namesItsView(mode, urlOf(s))
+      expect(urlOf(s)).not.toContain('model=')
     }
 
-    // The kind option: a hand-built literal here dropped the tuning.
-    s = reducer(s, { type: 'setKinds', kinds: 'models' })
-    carriesEverything(urlOf(s))
-    // The lightbox: its literal dropped mode, kinds and tuning.
-    s = reducer(s, { type: 'modelOpen', path: '/lib/a.stl' })
-    carriesEverything(urlOf(s))
-    expect(urlOf(s)).toContain('model=')
-    // The stale-model drop: only that field is rewritten.
-    s = reducer(s, { type: 'modelDrop' })
-    carriesEverything(urlOf(s))
-    expect(urlOf(s)).not.toContain('model=')
-
-    // The deferred commit: its literal dropped kinds, folder matching and tuning.
+    // The deferred commit — meaning's alone, since only a meaning query defers:
+    // its literal dropped kinds, folder matching and tuning.
     let d = run(start({ kinds: 'models', folderMatching: false }, WARMING), {
       type: 'setTuning',
-      tuning: { ...TUNING_DEFAULTS, top: 12 },
+      tuning,
       run: false,
     })
     d = search(run(d, { type: 'setMode', mode: 'meaning' }), 'dragon')
-    carriesEverything(urlOf(d))
+    namesItsView('meaning', urlOf(d))
   })
 
   it('the residue dies with its result', () => {

@@ -58,7 +58,9 @@ export function toUrlView(view: View): UrlView {
  * when they name the same URL. Never reference equality — every transition
  * mints a fresh object, so the first fetchless patch would misfire — and never
  * field-wise, which is the hand-maintained list this whole change exists to
- * abolish. `serializeView` already justifies the rule at urlState.ts:106-113.
+ * abolish. `serializeView`'s own doc comment justifies the rule — and holds the
+ * two-dimensional gate (committed query, mode that reads the option) that makes
+ * views differing only in an option neither of them reads the same view.
  */
 export function sameView(a: View, b: View): boolean {
   return serializeView(toUrlView(a)) === serializeView(toUrlView(b))

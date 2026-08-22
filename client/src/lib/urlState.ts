@@ -34,6 +34,15 @@ export interface UrlView {
   model?: string
 }
 
+/**
+ * Deliberately more permissive than `serializeView`: it reads every param it
+ * knows, including ones the serializer would now omit for this view's mode — a
+ * `pool` beside `mode=name`, a `kinds` beside `mode=meaning`. Those come from
+ * links written before the mode gate existed, and from hands. Refusing them
+ * here would turn tolerance into a 404-shaped surprise over a link that names a
+ * perfectly good view; instead the value rides along harmlessly (the mode that
+ * reads it is not in force) and the first commit rewrites the URL without it.
+ */
 export function parseUrl(search: string = window.location.search): UrlView {
   const p = new URLSearchParams(search)
   const raw = p.get('q')
@@ -76,12 +85,21 @@ export function parseUrl(search: string = window.location.search): UrlView {
  * Omit-empty: absent params rather than blank ones; `flat` only when on.
  *
  * The one writer of every history entry (design R3), which is why the gate
- * below lives here rather than at the call sites: **options exist only
- * alongside a committed query.** They describe which entries a view contains,
- * and over a plain listing they select nothing — a `?kinds=folders` on a bare
- * directory names a distinction that view does not make. Enforced here, one
- * projection of the whole view cannot leak an option onto a listing; enforced
- * at four hand-built literals, three of them dropped a field instead.
+ * below lives here rather than at the call sites. The gate has two dimensions,
+ * and an option is written only when it clears both: **a query is committed,
+ * and the mode that query ran under is the one that reads the option.** They
+ * describe which entries a view contains, and over a plain listing they select
+ * nothing — a `?kinds=folders` on a bare directory names a distinction that
+ * view does not make. The same is true across modes: a name search has no
+ * tuning to spell out, and a meaning search cannot restrict by kind, since the
+ * index answers with models and nothing else. The panel already hides each
+ * option outside its mode; the URL now says the same thing, so two views that
+ * differ only in an option neither of them reads serialize alike and stop
+ * minting history entries that go nowhere.
+ *
+ * Enforced here, one projection of the whole view cannot leak an option onto a
+ * listing; enforced at four hand-built literals, three of them dropped a field
+ * instead.
  */
 export function serializeView(view: UrlView): string {
   const p = new URLSearchParams()
@@ -89,11 +107,15 @@ export function serializeView(view: UrlView): string {
   if (view.flat) p.set('flat', '1')
   const searching = view.q !== undefined && view.q !== ''
   if (searching) p.set('q', view.q as string)
+  // Absence means name (see the `mode` write below), so a mode-less committed
+  // view is a name view and takes the name options.
+  const naming = searching && (view.mode ?? 'name') === 'name'
+  const meaning = searching && view.mode === 'meaning'
   // Omitted at their defaults (D4): an ordinary search URL stays byte-identical
   // to what it was before options existed, so making a default explicit never
   // mints a history entry.
-  if (searching && view.folderMatching === false) p.set('nofolders', '1')
-  if (searching && (view.kinds === 'folders' || view.kinds === 'models')) p.set('kinds', view.kinds)
+  if (naming && view.folderMatching === false) p.set('nofolders', '1')
+  if (naming && (view.kinds === 'folders' || view.kinds === 'models')) p.set('kinds', view.kinds)
   // Written whenever a query is committed, including the default. The other
   // options are omitted at their defaults so an ordinary search URL stays what
   // it was — but which *corpus* answered is not a preference among results, it
@@ -105,12 +127,12 @@ export function serializeView(view: UrlView): string {
   // Not named `raw`: Vite's dev server 403s any URL whose query contains a
   // `raw`, `url`, or `inline` param (its special import queries, guarded since
   // CVE-2025-30208), killing deep links before the app loads.
-  if (searching && view.tuning?.raw === true) p.set('score-raw', '1')
-  if (searching && view.tuning?.pool !== undefined && view.tuning.pool !== TUNING_DEFAULTS.pool) {
+  if (meaning && view.tuning?.raw === true) p.set('score-raw', '1')
+  if (meaning && view.tuning?.pool !== undefined && view.tuning.pool !== TUNING_DEFAULTS.pool) {
     p.set('pool', view.tuning.pool)
   }
-  if (searching && view.tuning?.minScore !== undefined) p.set('min', String(view.tuning.minScore))
-  else if (searching && view.tuning?.top !== undefined && view.tuning.top !== TUNING_DEFAULTS.top) {
+  if (meaning && view.tuning?.minScore !== undefined) p.set('min', String(view.tuning.minScore))
+  else if (meaning && view.tuning?.top !== undefined && view.tuning.top !== TUNING_DEFAULTS.top) {
     p.set('top', String(view.tuning.top))
   }
   if (view.model !== undefined && view.model !== '') p.set('model', view.model)

@@ -164,6 +164,56 @@ describe('search options in the URL', () => {
     expect(window.history.length).toBe(len + 1)
   })
 
+  it('an option the mode cannot use stays out of the URL', () => {
+    // The report: sticky options leaked into URLs of modes that cannot read
+    // them — `?q=almenhier&mode=name&pool=max&top=120` (a name search naming a
+    // meaning question) and `?q=almenhier&kinds=models&mode=meaning` (a meaning
+    // search naming a restriction the index cannot express, since it answers
+    // with models and nothing else). The panel hides each control outside its
+    // mode; the URL now agrees.
+    const nameWithTuning: UrlView = {
+      path: '/m',
+      flat: true,
+      q: 'almenhier',
+      mode: 'name',
+      kinds: 'models',
+      tuning: { ...TUNING_DEFAULTS, pool: 'max', top: 120, raw: true, minScore: 0.4 },
+    }
+    const nameUrl = serializeView(nameWithTuning)
+    expect(nameUrl).toBe('?path=%2Fm&flat=1&q=almenhier&kinds=models&mode=name')
+    for (const leak of ['pool', 'top=', 'score-raw', 'min=']) expect(nameUrl).not.toContain(leak)
+
+    const meaningWithKinds: UrlView = {
+      path: '/m',
+      flat: true,
+      q: 'almenhier',
+      mode: 'meaning',
+      kinds: 'models',
+      folderMatching: false,
+      tuning: { ...TUNING_DEFAULTS, pool: 'max' },
+    }
+    const meaningUrl = serializeView(meaningWithKinds)
+    expect(meaningUrl).toBe('?path=%2Fm&flat=1&q=almenhier&mode=meaning&pool=max')
+    for (const leak of ['kinds', 'nofolders']) expect(meaningUrl).not.toContain(leak)
+  })
+
+  it('a view is the same view as its clean counterpart when only the unread options differ', () => {
+    // The knock-on: identical views serialized differently, so `commitUrl`'s
+    // dedupe saw a difference where there is none and Back walked entries that
+    // change nothing on screen.
+    const clean: UrlView = { path: '/m', flat: true, q: 'almenhier', mode: 'name', kinds: 'models' }
+    commitUrl(clean)
+    const len = window.history.length
+    commitUrl({ ...clean, tuning: { ...TUNING_DEFAULTS, pool: 'max', top: 120 } })
+    expect(window.history.length).toBe(len)
+
+    const meaning: UrlView = { path: '/m', flat: true, q: 'almenhier', mode: 'meaning' }
+    commitUrl(meaning)
+    const after = window.history.length
+    commitUrl({ ...meaning, kinds: 'models', folderMatching: false })
+    expect(window.history.length).toBe(after)
+  })
+
   it('absent options are absent, not false', () => {
     const v = parseUrl('?path=/m&flat=1&q=a')
     expect(v.folderMatching).toBeUndefined()
