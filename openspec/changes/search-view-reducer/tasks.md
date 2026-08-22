@@ -51,3 +51,8 @@
       commit 1's review read all 1,035 lines, commit 2's walked the projection fence,
       fetch/popstate/model effects, resolveView and the debounce guard; two of the
       four in-flight check-ins were themselves review-driven corrections)
+
+## 5. Follow-ups
+
+- [x] 5.1 Restore across a request-irrelevant difference (kinds, committed-flat, model) patches
+      instead of re-fetching (user-reported 2026-08-21)

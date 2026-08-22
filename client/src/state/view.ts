@@ -78,6 +78,10 @@ export function sameListing(a: View, b: View): boolean {
  * What a view asks the server for. The request *shape* is derived, never
  * stored (R4): a committed query is always flat-shaped — the API rejects `q`
  * without it — while the toggle keeps its own meaning in `View.flat`.
+ *
+ * This type is the closed list of what the server is told, which is why
+ * `sameQuestion` may enumerate it: unlike a View's options, it cannot grow a
+ * field without this declaration growing with it.
  */
 export type Request =
   | { kind: 'listing'; path: string; flat: boolean; q: string | null; folderMatching: boolean }
@@ -94,6 +98,38 @@ export function requestOf(view: View): Request {
     q: view.q,
     folderMatching: view.folderMatching,
   }
+}
+
+/**
+ * Whether two views ask the same question — equality of `requestOf`, which is
+ * the question the server answers. Distinct from `sameView`, which is the URL
+ * the view names: a view carries options no request sees — `kinds`, `model`,
+ * the `flat` toggle under a committed query, `tuning` under a name search — so
+ * two entries can name different URLs and still be one question. When they
+ * are, the answer already on screen is the answer, and the difference between
+ * them is a patch rather than a re-ask.
+ */
+export function sameQuestion(a: View, b: View): boolean {
+  const x = requestOf(a)
+  const y = requestOf(b)
+  if (x.kind === 'meaning') {
+    return (
+      y.kind === 'meaning' &&
+      x.path === y.path &&
+      x.text === y.text &&
+      x.tuning.raw === y.tuning.raw &&
+      x.tuning.pool === y.tuning.pool &&
+      x.tuning.top === y.tuning.top &&
+      x.tuning.minScore === y.tuning.minScore
+    )
+  }
+  return (
+    y.kind === 'listing' &&
+    x.path === y.path &&
+    x.flat === y.flat &&
+    x.q === y.q &&
+    x.folderMatching === y.folderMatching
+  )
 }
 
 /**

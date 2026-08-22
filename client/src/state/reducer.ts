@@ -30,7 +30,7 @@ import type { DirEntry, IndexAvailability, IndexPose, SemanticScope } from '../.
 import type { SearchKinds, SearchMode, Tuning } from '../lib/searchOptions'
 import {
   corpusOf,
-  sameListing,
+  sameQuestion,
   sameView,
   standInOf,
   type Prefs,
@@ -353,11 +353,24 @@ export function reducer(state: SearchState, action: Action): SearchState {
 
     case 'restore': {
       const v = action.view
-      // A history entry that differs only in which model is open is not a
-      // different listing (R7's two truths) — patch that field and keep the
-      // answer we already have, or the one already on its way.
-      if ((state.result !== null || state.inflight !== null) && sameListing(v, liveView(state))) {
-        return patch(state, { model: v.model })
+      // A history entry that asks the same question is not a different
+      // listing: patch its request-irrelevant fields and keep the answer we
+      // already have, or the one already on its way. Every field below is one
+      // `requestOf` does not read — a difference that mattered would have
+      // changed the request and failed the compare — and patching them is what
+      // keeps the asserted view in lockstep with the URL the browser restored.
+      // `patch` forwards them to `result.forView` too, which is what re-filters
+      // the grid without asking anything. (`path`/`q` stay out by patch's own
+      // rule; under `sameQuestion` they cannot differ in a way the request sees.)
+      if ((state.result !== null || state.inflight !== null) && sameQuestion(v, liveView(state))) {
+        return patch(state, {
+          model: v.model,
+          kinds: v.kinds,
+          flat: v.flat,
+          mode: v.mode,
+          folderMatching: v.folderMatching,
+          tuning: v.tuning,
+        })
       }
       // The input shows the restored query; the filter is not part of the view
       // a URL names, so it is the caller's to clear.

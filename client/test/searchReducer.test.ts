@@ -139,6 +139,53 @@ describe('the reducer, finding by finding', () => {
     expect(s.view.tuning.top).toBe(12)
   })
 
+  it('a restore that asks the same question patches instead of re-asking', () => {
+    // Reported 2026-08-21: the kind control itself asks nothing — it selects
+    // among entries already landed — but Back across a kinds-only difference
+    // re-fetched the whole directory. The compare was over the URL minus the
+    // model; `kinds` is request-irrelevant too, so the two must agree.
+    const entries = [entry('a.stl'), entry('sub', 'dir')]
+    const s = land(search(start(), 'dragon'), { entries })
+    expect(byKind(s).map((e) => e.name)).toEqual(['a.stl', 'sub'])
+
+    const back = reducer(s, { type: 'restore', view: { ...s.view, kinds: 'models' } })
+    expect(pendingRequest(back)).toBeNull()
+    expect(back.lastId).toBe(s.lastId)
+    // And it reaches the answer, so the grid re-filters on the spot.
+    expect(back.view.kinds).toBe('models')
+    expect(byKind(back).map((e) => e.name)).toEqual(['a.stl'])
+    expect(back.result?.entries).toBe(entries)
+  })
+
+  it('the flat toggle is a question only when nothing is committed', () => {
+    // A committed query is flat-shaped whichever way the toggle points (R4),
+    // so the toggle's value is not part of what was asked…
+    const searching = land(search(start({ flat: false }), 'dragon'), { entries: [] })
+    const toggled = reducer(searching, {
+      type: 'restore',
+      view: { ...searching.view, flat: true },
+    })
+    expect(pendingRequest(toggled)).toBeNull()
+    expect(toggled.view.flat).toBe(true)
+    expect(toggled.result?.forView.flat).toBe(true)
+
+    // …while with no query it is the listing's own shape, and must be re-asked.
+    const listing = land(
+      reducer(start({ flat: false }), { type: 'restore', view: view({ flat: false }) }),
+      { entries: [] },
+    )
+    const deepened = reducer(listing, { type: 'restore', view: { ...listing.view, flat: true } })
+    expect(pendingRequest(deepened)).toMatchObject({ kind: 'listing', flat: true, q: null })
+  })
+
+  it('a restore that differs only in the open model still patches', () => {
+    const s = land(search(start(), 'dragon'), { entries: [entry('a.stl')] })
+    const opened = reducer(s, { type: 'restore', view: { ...s.view, model: '/lib/a.stl' } })
+    expect(pendingRequest(opened)).toBeNull()
+    expect(opened.view.model).toBe('/lib/a.stl')
+    expect(stoodIn(opened)).toBe(false)
+  })
+
   it('a stale index is impossible: the corpus decision reads it from state', () => {
     // Nothing is fetched while the probe is out — not even a stand-in: a
     // meaning link's `flat` would walk the whole volume for tiles the meaning
