@@ -124,6 +124,19 @@ succeeds, and the failure path is a brief report that it did not — one sentenc
 behavior, identical on both surfaces because it is built from the entry rather than from
 whatever happens to be rendered.
 
+**Where that report is rendered (task 1.1a, decided at apply).** Nothing in `client/src`
+renders a toast, and inventing one would be a third transient surface beside the two that
+already exist. So the split is: the *sentence* is shared — `COPY_FAILED` in the action
+module, which is what makes "reported the same way from either surface" true — and *where
+it appears* is the invoking surface's own business. The info panel keeps its own line,
+beside the button that already says "copied". The menu's goes to the path bar's transient
+line, as a **component-local override at that one call site in `App`** — deliberately not a
+new reducer failure kind. `state.failure` belongs to a *question*: it carries the `forView`
+it was asked for, and the next answer clears it. A clipboard refusal belongs to no
+question, so routing it there would mean minting a `forView` for something that never had
+one, and would let the next landing silently clear a message about an unrelated act. One
+sentence, two places to put it, and no third surface for anyone to build.
+
 This changes shipped behavior, so it costs a `model-viewer` MODIFY: *Lightbox expanded
 view* currently requires the panel to select the path text on failure. No other active
 change touches that capability, so the modification is free.

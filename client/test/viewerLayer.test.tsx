@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import type * as THREE from 'three'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HttpError, type ApiClient } from '../src/api/client'
+import { COPY_FAILED } from '../src/lib/entryActions'
 import { GestureTracker } from '../src/lib/gesture'
 import type { MeshLru } from '../src/three/lru'
 import ViewerLayer, { type ViewerState } from '../src/viewer/ViewerLayer'
@@ -163,7 +164,13 @@ describe('lightbox gesture binding', () => {
 })
 
 describe('copy-path feedback', () => {
-  it('a failed copy withdraws an earlier "copied" confirmation', async () => {
+  it('a failed copy withdraws an earlier "copied" confirmation and reports the failure', async () => {
+    // The one behavior this affordance's move into the shared command
+    // deliberately changed (entry-actions 1.3, model-viewer MODIFY): the panel
+    // used to select the path text for a manual copy, and now reports the
+    // failure briefly instead. The fallback ranged over the panel's rendered
+    // `<p>`, which a context menu does not have, and defended a non-secure
+    // context this app does not target.
     const writeText = vi
       .fn()
       .mockResolvedValueOnce(undefined)
@@ -176,10 +183,17 @@ describe('copy-path feedback', () => {
 
       await act(async () => copy.click())
       expect(copy.textContent).toBe('copied')
+      // The same implementation the menu invokes, over the same virtual path.
+      expect(writeText).toHaveBeenCalledWith(ENTRY.path)
+      expect(el.querySelector('[role="status"]')).toBeNull()
 
       // Second copy fails inside the first one's confirmation window.
       await act(async () => copy.click())
       expect(copy.textContent).toBe('copy')
+      expect(el.querySelector('[role="status"]')?.textContent).toBe(COPY_FAILED)
+      // And nothing is selected: the retired fallback left a Range over the
+      // path text, which is what a menu could never share.
+      expect(window.getSelection?.()?.toString() ?? '').toBe('')
     } finally {
       Reflect.deleteProperty(navigator, 'clipboard')
     }

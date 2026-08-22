@@ -1,1 +1,25 @@
 @import 'tailwindcss';
+
+/**
+ * The reveal mark (entry-actions D3): the located tile is ringed brightly, holds
+ * for a beat so the eye has somewhere to land in a grid of identical squares,
+ * then fades on its own.
+ *
+ * An animation rather than a transitioned class swap, for two reasons: the fade
+ * is the browser's to time, so nothing in React has to hold a second timer for
+ * it; and it does not compete with the tile's own `transition-colors`, which is
+ * what makes hover feel immediate.
+ */
+@keyframes reveal-mark {
+  0%,
+  55% {
+    box-shadow: 0 0 0 3px var(--color-sky-400, #38bdf8);
+  }
+  100% {
+    box-shadow: 0 0 0 3px transparent;
+  }
+}
+
+@utility animate-reveal-mark {
+  animation: reveal-mark 1.8s ease-out;
+}

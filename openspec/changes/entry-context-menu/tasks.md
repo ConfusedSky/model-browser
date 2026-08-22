@@ -24,90 +24,169 @@
 
 ## 1. The shared action module
 
-- [ ] 1.0 The action module needs the index's poses to resolve an orientation. They live on
+- [x] 1.0 The action module needs the index's poses to resolve an orientation. They live on
       the landed answer now (`state.result.poses`, `reducer.ts:73`), derived in `App.tsx:251`
       and passed to `useThumbnails` and `ViewerLayer`; plumb the same value to the action
       module rather than reading it anywhere new. Note the consequence: `poses` is populated
       only by a meaning landing, so outside a meaning grid every model takes the no-pose
       branch and reset framing gives the default. That is correct — there is no pose to hand
       back — but it means 4b.3a's posed cases are only reachable from a meaning grid, which
-      is where its tests belong
-- [ ] 1.1 An entry-actions module owning one definition per command — open, reveal, copy
+      is where its tests belong.
+      **Done:** `poses` is a field on `ActionHost` (`client/src/lib/entryActions.ts`), fed
+      from App's existing `state.result.poses` derivation — read nowhere new. No Stage-B
+      command reads it; *reset framing* (§4b) is its reader, and typecheck holds the
+      plumbing in place until then
+- [x] 1.1 An entry-actions module owning one definition per command — open, reveal, copy
       path, find similar, re-render thumbnail, reset framing — each taking an entry and the
       app callbacks it needs, with the per-kind availability table from D6 in one place
       rather than at each call site. The two view-changing commands take `dispatch` and
       nothing else (D8): no command builds a URL, calls `pushState`, or touches
-      `window.history`
-- [ ] 1.1a Build the brief-failure affordance the copy command reports through, or adopt one.
+      `window.history`.
+      **Done:** `ENTRY_COMMANDS` in `client/src/lib/entryActions.ts` — one row per command,
+      each carrying its `applies` (D6's table, drawn in the module doc comment) and its
+      `run`. The two thumbnail rows carry `run: null` (Stage C, §4b) and are therefore
+      defined but not rendered. `reveal` goes through `host.navigate`, `findSimilar` through
+      `host.dispatch`; nothing in the module touches `pushState`, `window.history`, or a
+      query string
+- [x] 1.1a Build the brief-failure affordance the copy command reports through, or adopt one.
       Nothing in `client/src` renders a toast today; the two existing surfaces are
       `ViewerLayer`'s inline `copied` state (`ViewerLayer.tsx:85`), which is per-panel, and
       `PathBar`'s `error` prop (`App.tsx:971`, fed from `state.failure?.message`), which is
       the app's one place for transient failure text. Prefer extending the latter to
       inventing a second transient surface — but note it is now reducer-owned, so a
       clipboard failure routed there is either a local override at the `PathBar` call site or
-      a new failure kind; decide at apply and say which, so nobody builds a third
-- [ ] 1.2 `copyPath` becomes a command over the entry: it takes the row and reads
+      a new failure kind; decide at apply and say which, so nobody builds a third.
+      **Decided: a component-local override at the `PathBar` call site.** Not a failure kind
+      — `state.failure` carries a `forView` a clipboard refusal has none of, and the next
+      landing would clear a message about an unrelated act. Not a third surface — App's
+      `actionText` cell feeds `PathBar`'s `error` (failures) and a new `notice` prop (the
+      confirmation): the same one line, two tones. The *sentence* is shared, as `COPY_FAILED`
+      in the action module. Recorded in design.md D2 under "Where that report is rendered"
+- [x] 1.2 `copyPath` becomes a command over the entry: it takes the row and reads
       `entry.path`, the virtual path, unchanged (D2). It does **not** carry
       `selectPathText` (`ViewerLayer.tsx:366-378`) with it — that fallback ranges over
       `pathRef.current`, the panel's rendered `<p>` (`:555`), which a menu does not have,
       and it defends a non-secure context this app does not target. A failed write shows a
-      brief report instead, from whichever surface invoked it
-- [ ] 1.3 The lightbox's copy affordance calls the shared command. `selectPathText`,
+      brief report instead, from whichever surface invoked it.
+      **Done:** `copyEntryPath(entry, feedback)` — the one body, over `entry.path` verbatim
+      (zip notation asserted). The synchronous-throw `try` came along; `selectPathText` did
+      not
+- [x] 1.3 The lightbox's copy affordance calls the shared command. `selectPathText`,
       `pathRef`, and the panel's bespoke try/catch go with it; the `copied` confirmation is
       presentation and stays per surface. Its existing tests need updating for the new
-      failure path — that is the one behavior this move deliberately changes
-- [ ] 1.4 Land the `model-viewer` MODIFY with it: *Lightbox expanded view* currently
+      failure path — that is the one behavior this move deliberately changes.
+      **Done:** `ViewerLayer.copyPath` is now a call to `copyEntryPath` with the panel's own
+      confirm/report; `selectPathText`, `pathRef` and the try/catch are deleted, and the
+      panel gained a `role="status"` line for the report. `viewerLayer.test.tsx`'s copy test
+      is renamed and extended for the new path — the only existing test this stage changes
+- [x] 1.4 Land the `model-viewer` MODIFY with it: *Lightbox expanded view* currently
       requires the panel to select the path text on failure, so the shipped spec is false
       the moment the brief report replaces it. Every other scenario of that requirement is
-      carried forward in the delta
+      carried forward in the delta.
+      **Verified, not rewritten:** `scripts/spec-diff.sh model-viewer entry-context-menu`
+      shows the delta differing from main in exactly the copy-failure sentence and its
+      scenario, with all twelve scenarios carried. It matches what shipped
 
 ## 2. The menu
 
-- [ ] 2.1 A context-menu component: raised at the pointer, kept inside the viewport, closed
-      by choosing an item, Escape, or an outside interaction
-- [ ] 2.2 Wire it to tiles in `Grid.tsx`. `App.tsx:770-772` already returns on
+- [x] 2.1 A context-menu component: raised at the pointer, kept inside the viewport, closed
+      by choosing an item, Escape, or an outside interaction.
+      **Done:** `client/src/components/EntryMenu.tsx`. Position clamped by the exported pure
+      `clampToViewport` — a happy-dom rect is all zeros, so the clamp is unit-tested as a
+      function and its application asserted as a style. Dismissal: choosing, Escape, an
+      outside pointerdown, an outside contextmenu, a wheel
+- [x] 2.2 Wire it to tiles in `Grid.tsx`. `App.tsx:770-772` already returns on
       `e.button !== 0`, so nothing more is needed to keep a secondary press from orbiting —
       assert that in a test rather than trusting it, since it is one early return away from
       regressing. `Grid` and `Tile` are memoized on their handlers (`Grid.tsx:22,45`), so the
       menu handler must be held by identity in `App` like the others or every tile re-renders
-      per keystroke
-- [ ] 2.3 Keyboard access: the platform's context-menu key on a focused tile, arrow keys
+      per keystroke.
+      **Done:** `onEntryMenu` is a `useCallback` in App. The mark reaches `Tile` as a
+      per-tile boolean, so only the marked tile re-renders. (The `Tile` memo is at
+      `Grid.tsx:43`, not `:22,45` — trust the file.) Asserted, not trusted: *opens on a
+      secondary press without orbiting or opening the viewer* fails when the `e.button !== 0`
+      return is deleted
+- [x] 2.3 Keyboard access: the platform's context-menu key on a focused tile, arrow keys
       within the menu, Escape to close, focus returned to the tile. Escape is contended —
       `App.tsx:571` closes the find control on Escape whenever it is open and no viewer is
-      mounted — so the menu has to win while it is raised
-- [ ] 2.4 Raising or dismissing the menu starts and cancels no thumbnail work and does not
+      mounted — so the menu has to win while it is raised.
+      **Done.** `contextmenu` covers the platform key on a focused tile; Shift+F10 is handled
+      beside it; arrows/Home/End move focus within the menu; Escape closes it and focus
+      returns to the tile. **How the find control loses:** App's window listener gains a
+      `menuOpenRef` test beside the `viewerRef` one it already had — the same idiom for the
+      same reason ("the thing on top owns Escape"), and it is a ref rather than event flags
+      so the outcome does not depend on listener order or on where focus is. The menu closes
+      itself from its own window listener. With no menu raised the ref is false and find's
+      Escape is untouched; one test asserts both halves, and it fails when the ref test is
+      removed
+- [x] 2.4 Raising or dismissing the menu starts and cancels no thumbnail work and does not
       suspend the render queue — it is not a viewer. The suspension is keyed off `viewer`
       (`App.tsx:524-527`), which a menu never sets, so this is an assertion to pin rather
-      than a guard to add
-- [ ] 2.5 Find similar reads availability from `state.index` — the reducer's own cell, kept
+      than a guard to add.
+      **Pinned** by spying `RenderQueue.prototype.suspend` across a raise
+      (`entryMenu.test.tsx`)
+- [x] 2.5 Find similar reads availability from `state.index` — the reducer's own cell, kept
       by identity when a poll says nothing new (`reducer.ts:442-445`) — rather than probing
-      the index when a menu opens (D6)
+      the index when a menu opens (D6).
+      **Done:** `commandsFor(entry, { index: state.index })` and nothing else. The test
+      asserts the item is absent for `absent`, `warming` and unprobed, *and* that the
+      `indexAvailability` call count is unchanged across the raise
 
 ## 3. Reveal
 
-- [ ] 3.1 Navigate to the containing folder, deriving it from the entry's vpath — for an
+- [x] 3.1 Navigate to the containing folder, deriving it from the entry's vpath — for an
       archive entry, the directory inside the archive (`foo.zip!/parts`). It is one
       `commit({ type: 'navigate', path, prefs: ownPrefs() })` and nothing else (D8): the
       history push comes from the landing's provenance (`App.tsx:310`), latest-wins and the
-      skeleton come from the ordinary request path, and no URL is assembled anywhere
-- [ ] 3.2 Locate on arrival. The `pendingModel` cell this task used to name is gone — the
+      skeleton come from the ordinary request path, and no URL is assembled anywhere.
+      **Done:** `containingFolder` in `entryActions.ts` — an archive entry lands inside the
+      archive, an entry at the archive's root lands on the archive, and an entry at the fs
+      root bottoms out at `/` rather than `''`. `reveal` calls `host.navigate`, which is
+      App's one `commit({ type: 'navigate', … })`; the push is the landing's (asserted: one
+      history entry)
+- [x] 3.2 Locate on arrival. The `pendingModel` cell this task used to name is gone — the
       deep-linked model is a view field now — so the pattern to follow is the effect at
       `App.tsx:645-660`: hold the payload, act only when `state.result !== null &&
       state.inflight === null && state.failure === null`, honor it if the entry is in
       `state.result.entries`, drop it silently if not. The mark itself is **component-local
       state**, not a view field and not a draft (D8): the reducer never reads a highlight,
-      which is the same rule that kept `findText` local
-- [ ] 3.3 Scroll the entry into view and mark it for a second or two, then fade. Nothing in
+      which is the same rule that kept `findText` local.
+      **Done:** the locate effect sits beside the honor-or-drop effect it patterns on, under
+      the same settled-answer gate. `pendingReveal` and `marked` are `useState` in App — no
+      view field, no draft. Reveal arms the mark **after** calling `navigate`, whose reset
+      would otherwise clear it; swapping those two lines fails the reveal test
+- [x] 3.3 Scroll the entry into view and mark it for a second or two, then fade. Nothing in
       `client/src` calls `scrollIntoView` today, so pick the block/inline behavior
-      deliberately — a tile landing under a sticky header is not located
-- [ ] 3.4 The flat toggle is untouched (D3) — **already true**: `reducer.ts:294` carries
+      deliberately — a tile landing under a sticky header is not located.
+      **Done:** `Tile` scrolls itself on becoming marked, `{ block: 'center', inline:
+      'nearest' }`, instant. `center` deliberately: nothing is sticky today — the header sits
+      *outside* the scrolling `<main>` — but `center` keeps the tile off the top edge, where
+      the notice row sits and where a sticky header would go, and it reads as "here it is"
+      rather than "it is somewhere above". `nearest` inline because the grid never scrolls
+      sideways. Instant because the listing has only just appeared. The fade is a CSS
+      animation (`index.css`, `reveal-mark`, 1.8s) rather than a class swap, so it competes
+      with no `transition-colors` and needs no second JS timer.
+      **Pixels not yet judged** — the ring's colour, width and timing are a visual-tuning
+      call, so this box is code-complete but not sign-off complete
+- [x] 3.4 The flat toggle is untouched (D3) — **already true**: `reducer.ts:294` carries
       `flat: liveView(state).flat` across a `navigate`. This task is now the test, not the
       guard: revealing from flat lists the destination flat, revealing from nested lists it
-      nested
-- [ ] 3.5 The mark is ephemeral — absent from the URL, not restored by Back or reload, and a
+      nested.
+      **Done as a test:** *leaves the flat toggle alone* — reveal from a flat view lands flat
+      and the URL still carries `flat=1`. No code changed
+- [x] 3.5 The mark is ephemeral — absent from the URL, not restored by Back or reload, and a
       no-op when the entry is missing from the listing that arrives. Reset it beside the two
       existing ephemeral resets, `App.tsx:370-371` (navigate) and `:633-634` (popstate), so
-      there is one place a new one gets added
+      there is one place a new one gets added.
+      **Done:** both cells reset inside `navigate` (beside the find-text reset) and in the
+      popstate handler (beside its own), the two places named — so a third ephemeral cell has
+      one obvious home. Absent from the URL by construction. A missing entry drops silently.
+      *marks nothing when history brings the folder back* fails when the popstate reset is
+      removed. (The reload case is asserted too, but it is not falsifiable: a reload remounts
+      App, so it holds structurally — as does "nothing marked" for a missing entry, since a
+      tile that is not rendered cannot carry the class. Both are conformance assertions, and
+      the honor-or-drop check earns its place by not arming a 1.8s timer for a tile that
+      isn't there)
 
 ## 4. Find similar
 

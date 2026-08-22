@@ -8,6 +8,7 @@ import type {
   OrbitAxis,
 } from '../../../shared/types'
 import type { ApiClient } from '../api/client'
+import { copyEntryPath } from '../lib/entryActions'
 import { formatBytes, formatDate } from '../lib/format'
 import { GestureTracker } from '../lib/gesture'
 import type { MeshLru } from '../three/lru'
@@ -83,9 +84,11 @@ export default function ViewerLayer({
   /** Mesh-load failure message — the viewer shows it instead of dismissing. */
   const [loadError, setLoadError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  /** The panel's brief failure report — the surface half of the shared copy
+   *  command's failure path (task 1.2/1.3). */
+  const [copyError, setCopyError] = useState<string | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasHostRef = useRef<HTMLDivElement>(null)
-  const pathRef = useRef<HTMLParagraphElement>(null)
   const openedFromPoseRef = useRef(false)
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   // A pointer-opened viewer mounts mid-press (orbit); a keyboard-opened one
@@ -363,33 +366,31 @@ export default function ViewerLayer({
 
   useEffect(() => () => clearTimeout(copyTimerRef.current), [])
 
-  /** Clipboard-failure fallback: select the path text for a manual copy. */
-  function selectPathText(): void {
-    // An earlier copy's "copied" confirmation must not outlive this failure.
-    clearTimeout(copyTimerRef.current)
-    setCopied(false)
-    const el = pathRef.current
-    if (el === null) return
-    const range = document.createRange()
-    range.selectNodeContents(el)
-    const selection = window.getSelection()
-    selection?.removeAllRanges()
-    selection?.addRange(range)
-  }
-
+  /**
+   * The copy affordance, through the shared command (entry-actions R1) — the
+   * same body the context menu invokes, so the same text lands on the clipboard
+   * and the same sentence reports a write that did not.
+   *
+   * What stays here is presentation: the button that says "copied", and where
+   * the failure sentence is rendered. The panel's old fallback — selecting the
+   * path text for a manual copy — is gone with the move; see `copyEntryPath`.
+   */
   function copyPath(): void {
-    // Outside a secure context (e.g. reached over LAN by IP) navigator.clipboard
-    // is undefined and the call throws synchronously — a bare .catch() misses it.
-    try {
-      if (navigator.clipboard === undefined) throw new Error('clipboard unavailable')
-      navigator.clipboard.writeText(viewer.entry.path).then(() => {
+    copyEntryPath(viewer.entry, {
+      confirm: () => {
+        setCopyError(null)
         setCopied(true)
         clearTimeout(copyTimerRef.current)
         copyTimerRef.current = setTimeout(() => setCopied(false), 1500)
-      }, selectPathText)
-    } catch {
-      selectPathText()
-    }
+      },
+      report: (message) => {
+        // An earlier copy's confirmation must not outlive this failure.
+        clearTimeout(copyTimerRef.current)
+        setCopied(false)
+        setCopyError(message)
+        copyTimerRef.current = setTimeout(() => setCopyError(null), 2500)
+      },
+    })
   }
 
   // Drives renders while an axis-change tween is in flight. The loop ends on
@@ -552,9 +553,12 @@ export default function ViewerLayer({
                 {copied ? 'copied' : 'copy'}
               </button>
             </div>
-            <p ref={pathRef} className="select-text break-all text-xs text-zinc-300">
-              {viewer.entry.path}
-            </p>
+            <p className="select-text break-all text-xs text-zinc-300">{viewer.entry.path}</p>
+            {copyError !== null && (
+              <p role="status" className="text-xs text-red-400">
+                {copyError}
+              </p>
+            )}
           </div>
           <dl className="flex flex-col gap-2 text-xs">
             {viewer.entry.format !== undefined && (

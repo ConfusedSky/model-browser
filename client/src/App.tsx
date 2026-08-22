@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'r
 import type * as THREE from 'three'
 import type { DirEntry, IndexPose, LightingMode } from '../../shared/types'
 import { HttpApiClient } from './api/client'
+import EntryMenu from './components/EntryMenu'
 import FindBar from './components/FindBar'
 import Grid from './components/Grid'
 import SidePanel from './components/SidePanel'
 import PathBar from './components/PathBar'
 import { SKELETON_DELAY_MS, useDelayedFlag } from './hooks/useDelayedFlag'
 import { useThumbnails } from './hooks/useThumbnails'
+import { commandsFor, type ActionHost, type EntryCommand } from './lib/entryActions'
 import { GestureTracker } from './lib/gesture'
 import { createHoverWarmer } from './lib/hover'
 import { fitSquareBox, type Box } from './lib/layout'
@@ -62,6 +64,16 @@ import type { ViewerSession } from './viewer/session'
  * enough that a finished value still feels like it ran on its own.
  */
 const TUNING_DEBOUNCE_MS = 300
+
+/**
+ * How long a revealed entry stays marked. Matches the `reveal-mark` animation
+ * in `index.css`, which does the fading: this is only when the class comes off,
+ * so a second reveal of the same entry replays it.
+ */
+const MARK_MS = 1800
+
+/** How long a command's brief report stays on the path bar's transient line. */
+const ACTION_TEXT_MS = 2500
 
 /**
  * Stable empties for "nothing has landed yet". `useThumbnails` resets every
@@ -219,6 +231,53 @@ export default function App() {
   const viewerRef = useRef<ViewerState | null>(null)
   const findOpenRef = useRef(false)
   findOpenRef.current = findOpen
+
+  /**
+   * The entry menu, and the tile it was raised on. Ephemeral by construction —
+   * no view field, no URL — and **not a viewer**: it never sets `viewer`, which
+   * is what the render-queue suspension keys off (2.4), so raising or
+   * dismissing it starts and cancels no thumbnail work.
+   */
+  const [menu, setMenu] = useState<{
+    entry: DirEntry
+    el: HTMLElement | null
+    x: number
+    y: number
+  } | null>(null)
+  const menuRef = useRef<typeof menu>(null)
+  menuRef.current = menu
+  /** Read by the window-level Escape listener, which subscribes once and would
+   *  otherwise close over the menu as it was at mount. */
+  const menuOpenRef = useRef(false)
+  menuOpenRef.current = menu !== null
+
+  /**
+   * A command's brief report, shown on the path bar's transient line (task
+   * 1.1a). Component-local, and an override at this one call site rather than a
+   * new reducer failure kind: `state.failure` belongs to a *question* — it
+   * carries the view it was asked for and is cleared by the next answer — and a
+   * clipboard refusal belongs to no question. It is also not a third surface:
+   * this is the app's one place for transient text, told what tone to draw.
+   */
+  const [actionText, setActionText] = useState<{ text: string; tone: 'ok' | 'error' } | null>(null)
+  const actionTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(() => () => clearTimeout(actionTimerRef.current), [])
+  const say = useCallback((text: string, tone: 'ok' | 'error'): void => {
+    clearTimeout(actionTimerRef.current)
+    setActionText({ text, tone })
+    actionTimerRef.current = setTimeout(() => setActionText(null), ACTION_TEXT_MS)
+  }, [])
+
+  /**
+   * Reveal's two ephemeral cells (D3/D8): the entry whose containing folder is
+   * being navigated to, and the entry the arrival located. Component-local, like
+   * `findText` and for the same reason — the reducer never reads a highlight —
+   * so neither reaches the URL, history, or a reload.
+   */
+  const [pendingReveal, setPendingReveal] = useState<string | null>(null)
+  const [marked, setMarked] = useState<string | null>(null)
+  const markTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(() => () => clearTimeout(markTimerRef.current), [])
 
   // The tuning re-run waiting to become a query. An effect handle, not state:
   // nothing renders it.
@@ -397,6 +456,13 @@ export default function App() {
       // filter is the caller's to clear because the reducer never reads it.
       setFindText('')
       setFindOpen(false)
+      // The reveal mark is ephemeral in exactly the same sense (3.5), so it is
+      // dropped here — one place a new ephemeral reset gets added, rather than
+      // one per caller. Reveal arms the mark *after* calling this, deliberately:
+      // it belongs to the arrival this navigation causes, not to the view being
+      // left.
+      setPendingReveal(null)
+      setMarked(null)
       commit({ type: 'navigate', path, prefs: ownPrefs() })
     },
     [commit],
@@ -597,7 +663,16 @@ export default function App() {
       // its own input: the user opens it, clicks a tile, and Escape is what
       // they reach for. Not while a viewer is up — the lightbox owns Escape
       // then, and closing a control behind it is not what was asked.
-      if (e.key === 'Escape' && findOpenRef.current && viewerRef.current === null) {
+      // Nor while an entry menu is raised, for the same reason and by the same
+      // test (2.3): the menu is the thing on top, its own window listener closes
+      // it, and this one stands down so one Escape does not dismiss both. With
+      // no menu up the ref is false and find's Escape is untouched.
+      if (
+        e.key === 'Escape' &&
+        findOpenRef.current &&
+        viewerRef.current === null &&
+        !menuOpenRef.current
+      ) {
         closeFind()
         return
       }
@@ -662,6 +737,10 @@ export default function App() {
       // a URL names, so it starts empty here as everywhere else.
       setFindText('')
       setFindOpen(false)
+      // Nor is the reveal mark: going back to a folder an entry was revealed in
+      // lists it with nothing marked (3.5).
+      setPendingReveal(null)
+      setMarked(null)
       dispatch({ type: 'restore', view: resolveView(v) })
     }
     window.addEventListener('popstate', onPop)
@@ -687,6 +766,24 @@ export default function App() {
     if (url.model !== undefined) commitUrl({ ...url, model: undefined }, { replace: true })
     dispatch({ type: 'modelDrop' })
   }, [state.view.model, state.result, state.inflight, state.failure, viewer, openRestoredLightbox, dispatch])
+
+  // Locate on arrival (3.2) — the honor-or-drop pattern the effect above
+  // follows, with a highlight instead of a lightbox: hold the payload, act only
+  // on a settled answer, honor it when the entry is in the listing that landed,
+  // drop it silently when it is not. A revealed entry that has since been moved
+  // or deleted leaves the folder presented normally, with no error and nothing
+  // marked.
+  useEffect(() => {
+    if (pendingReveal === null) return
+    if (state.result === null || state.inflight !== null || state.failure !== null) return
+    setPendingReveal(null)
+    if (!state.result.entries.some((e) => e.path === pendingReveal)) return
+    setMarked(pendingReveal)
+    // The fade is the animation's (index.css); this only decides when the class
+    // comes off, so revealing the same entry twice replays it.
+    clearTimeout(markTimerRef.current)
+    markTimerRef.current = setTimeout(() => setMarked(null), MARK_MS)
+  }, [pendingReveal, state.result, state.inflight, state.failure])
 
   // The lightbox history push hooks the transition INTO 'lightbox' mode, not
   // openLightbox — that function is the keyboard entrance only; the pointer
@@ -835,6 +932,63 @@ export default function App() {
   const onModelHover = useCallback(
     (p: string | null) => (p !== null ? hover.enter(p) : hover.leave()),
     [hover],
+  )
+
+  /**
+   * What the shared commands act through (entry-actions R1). App supplies the
+   * app-shaped halves — the one navigate, the one dispatch, the ephemeral mark,
+   * tile activation, and somewhere to put a sentence — and the module owns what
+   * each command does with them.
+   */
+  const actionHost = useMemo<ActionHost>(
+    () => ({
+      navigate,
+      dispatch,
+      markOnArrival: setPendingReveal,
+      open: (entry, el) => {
+        if (entry.kind !== 'model') {
+          enterEntry(entry)
+          return
+        }
+        // Every surface offering *open* raises it from a tile, so there is
+        // always an element for the lightbox to grow out of.
+        if (el !== null) openLightbox(entry, el)
+      },
+      confirm: () => say('Path copied.', 'ok'),
+      report: (message) => say(message, 'error'),
+      poses,
+    }),
+    [navigate, dispatch, enterEntry, openLightbox, say, poses],
+  )
+
+  const onEntryMenu = useCallback(
+    (entry: DirEntry, el: HTMLElement, at: { x: number; y: number }): void => {
+      setMenu({ entry, el, x: at.x, y: at.y })
+    },
+    [],
+  )
+  /** Dismissal returns focus to the tile the menu was raised on. */
+  const closeMenu = useCallback((): void => {
+    menuRef.current?.el?.focus()
+    setMenu(null)
+  }, [])
+  const onChooseCommand = useCallback(
+    (command: EntryCommand): void => {
+      const raised = menuRef.current
+      // Closed first: choosing is a dismissal, and a command that navigates
+      // would otherwise leave the menu hanging over a listing it no longer
+      // belongs to.
+      closeMenu()
+      if (raised !== null) command.run?.(raised.entry, actionHost, raised.el)
+    },
+    [closeMenu, actionHost],
+  )
+  // D6's table, asked once per raised menu — never a probe of the index when a
+  // menu opens (2.5): `state.index` is the reducer's own cell, kept by identity
+  // when a poll says nothing new.
+  const menuCommands = useMemo(
+    () => (menu === null ? [] : commandsFor(menu.entry, { index: state.index })),
+    [menu, state.index],
   )
 
   function goUp(): void {
@@ -1001,7 +1155,15 @@ export default function App() {
         >
           ↑
         </button>
-        <PathBar path={target} error={error} api={api} onNavigate={navigate} />
+        <PathBar
+          path={target}
+          // A command's failure overrides the view's, and only while it is up:
+          // it is the newer news, and it is about the thing the user just did.
+          error={actionText?.tone === 'error' ? actionText.text : error}
+          notice={actionText?.tone === 'ok' ? actionText.text : null}
+          api={api}
+          onNavigate={navigate}
+        />
         <input
           value={state.drafts.queryText}
           onChange={(e) => handleQueryTextChange(e.target.value)}
@@ -1154,6 +1316,8 @@ export default function App() {
                   onModelPointerDown={onModelPointerDown}
                   onModelOpen={openLightbox}
                   onModelHover={onModelHover}
+                  onEntryMenu={onEntryMenu}
+                  markedPath={marked}
                 />
               )}
             </>
@@ -1211,6 +1375,19 @@ export default function App() {
           ssao
         </button>
       </div>
+      {/* Four items this stage — open, reveal, copy path, find similar. The two
+          thumbnail commands are defined in `entryActions`' table (D6 lives in
+          one place) with no body yet, and a bodiless command is hidden rather
+          than greyed: **Stage C, tasks §4b** builds them. */}
+      {menu !== null && menuCommands.length > 0 && (
+        <EntryMenu
+          x={menu.x}
+          y={menu.y}
+          commands={menuCommands}
+          onChoose={onChooseCommand}
+          onClose={closeMenu}
+        />
+      )}
       {viewer !== null && (
         <ViewerLayer
           viewer={viewer}
