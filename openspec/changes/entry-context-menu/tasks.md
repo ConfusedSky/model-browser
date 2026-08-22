@@ -494,10 +494,18 @@
       add on top.
       **§4.1–4.7 added one**: *entering a similarity view empties the draft, and erasing text
       under one still dismisses* (D9's margin). Falsified against the un-cleared reducer
-- [ ] 5.3 Manual E2E via Playwright MCP on the real library — note tiles respond only to
+- [x] 5.3 Manual E2E via Playwright MCP on the real library — note tiles respond only to
       PointerEvents, so the secondary press needs `button: 'right'`, and clipboard reads
       need permissions granted upfront or the call hangs on a prompt. Reveal a model from a
       deep-search result, confirm Back returns to the results; reveal a zip-resident model
       and confirm it lands inside the archive; find similar from a model, confirm the URL
       names it alone, share it into a second tab, and dismiss back to the listing.
       Requires the index server (`serve_api.py`, port 8077) — not started by `bun run dev`
+      (run 2026-08-22 by the coordinator against the live library + embed-cache2 index:
+      right-click opened the menu without orbiting; a zip-resident dragon revealed INSIDE
+      its archive with the mark present and Back restoring the search; an archive model's
+      menu correctly offered five items (no find-similar) and a plain model's offered six;
+      find similar landed 16 neighbours labeled "from across the collection" under
+      ?path&similar= and nothing else; the URL reproduced 16 tiles in a fresh tab; ✕ Dismiss
+      returned to the clean listing URL with no residue; the only console error was the
+      dev favicon 404)
