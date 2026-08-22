@@ -95,14 +95,19 @@ export class ThumbCache {
     return { status: 'hit', camera: meta.camera, axis, lighting, rig, posed, png: png.toString('base64') }
   }
 
-  async put(path: string, opts: { mtime: number; png?: Buffer; camera?: CameraState; axis?: OrbitAxis; lighting?: LightingMode; rig?: number; posed?: number }): Promise<void> {
+  async put(path: string, opts: { mtime: number; png?: Buffer; camera?: CameraState | null; axis?: OrbitAxis | null; lighting?: LightingMode; rig?: number; posed?: number }): Promise<void> {
     const key = this.key(path)
     const prev = await this.readMeta(key)
     const meta: Meta = {
       path,
       mtime: opts.png !== undefined ? opts.mtime : prev?.mtime,
-      camera: opts.camera ?? prev?.camera,
-      axis: opts.axis ?? prev?.axis,
+      // Three states per field: a value sets it, silence keeps what was there,
+      // `null` discards it. Silence cannot mean discard — every PNG write omits
+      // both — and a written default is not a discard either: it is an
+      // orientation of the user's own, and it suppresses the index that would
+      // otherwise frame the model well (entry-context-menu D7).
+      camera: opts.camera === null ? undefined : (opts.camera ?? prev?.camera),
+      axis: opts.axis === null ? undefined : (opts.axis ?? prev?.axis),
       // Like mtime, lighting and rig describe the pixels: a PUT replacing the
       // PNG without declaring them must not keep old labels on new pixels.
       lighting: opts.png !== undefined ? opts.lighting : (opts.lighting ?? prev?.lighting),

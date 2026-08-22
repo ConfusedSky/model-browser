@@ -67,6 +67,44 @@ describe('ThumbCache maintenance', () => {
     expect((await cache.get(path, 2)).axis).toBe('-x')
   })
 
+  it('gives the camera three states — set, silent, discarded — and the axis the same three', async () => {
+    // Silence has to go on meaning keep (every PNG write omits both), so
+    // discarding needed a word of its own. A written default is not that word:
+    // it is an orientation of the user's, and it suppresses the index that
+    // would otherwise frame the model (entry-context-menu D7).
+    const cache = tempCache()
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const path = join(fx.dir, 'loose.stl')
+    await cache.put(path, { mtime: 1, png: Buffer.from('png'), camera: CAM, axis: '-x' })
+    expect((await cache.get(path, 1)).camera).toEqual(CAM) // set
+    expect((await cache.get(path, 1)).axis).toBe('-x')
+
+    await cache.put(path, { mtime: 1, png: Buffer.from('png2') }) // silent
+    let res = await cache.get(path, 1)
+    expect(res.camera).toEqual(CAM)
+    expect(res.axis).toBe('-x')
+
+    await cache.put(path, { mtime: 1, png: Buffer.from('png3'), camera: null }) // camera discarded
+    res = await cache.get(path, 1)
+    expect(res.camera).toBeUndefined()
+    expect(res.axis).toBe('-x') // …and only the camera: the fields are separate
+
+    await cache.put(path, { mtime: 1, camera: CAM, axis: 'z' })
+    await cache.put(path, { mtime: 1, axis: null }) // axis discarded, on its own
+    res = await cache.get(path, 1)
+    expect(res.axis).toBeUndefined()
+    expect(res.camera).toEqual(CAM)
+
+    // Both at once, which is what reset framing writes when a pose can replace
+    // them: the model reads back as one nobody has ever oriented.
+    await cache.put(path, { mtime: 1, png: Buffer.from('png4'), camera: null, axis: null })
+    res = await cache.get(path, 1)
+    expect(res.camera).toBeUndefined()
+    expect(res.axis).toBeUndefined()
+    expect(res.status).toBe('hit') // the pixels of that write are still served
+  })
+
   it('round-trips the lighting mode and preserves it across partial puts', async () => {
     const cache = tempCache()
     const fx = makeFixtures()

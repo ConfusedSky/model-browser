@@ -165,12 +165,21 @@ describe("the menu's contents", () => {
   it('offers the model set on a model and the container set on a dir or zip', async () => {
     // After the unmount, which resets availability to the default 'absent'.
     await unmountApp()
-    indexAvailability.mockResolvedValue({ state: 'ready' })
+    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models' })
     await mountApp('/models', NESTED)
     mockRoutes()
 
     await secondaryPress(tile('widget.stl'))
-    expect(items()).toEqual(['open', 'reveal', 'copyPath', 'findSimilar'])
+    // D6's table whole: six on a model when the index is answering for the
+    // collection it sits in, three on a container.
+    expect(items()).toEqual([
+      'open',
+      'reveal',
+      'copyPath',
+      'findSimilar',
+      'reRenderThumbnail',
+      'resetFraming',
+    ])
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     })
@@ -190,8 +199,24 @@ describe("the menu's contents", () => {
     // probing is the point: opening a menu makes no call of its own (2.5).
     const before = indexAvailability.mock.calls.length
     await secondaryPress(tile('widget.stl'))
-    expect(items()).toEqual(['open', 'reveal', 'copyPath'])
+    // Every other action still works — the two thumbnail ones are not the
+    // index's, and they stay.
+    expect(items()).toEqual(['open', 'reveal', 'copyPath', 'reRenderThumbnail', 'resetFraming'])
     expect(indexAvailability.mock.calls.length).toBe(before)
+  })
+
+  it('withholds find similar from a model outside the collection the index covers', async () => {
+    // The index is up and answering — for somewhere else. One rule for "inside
+    // the indexed collection", shared with the side panel, so the menu cannot
+    // offer a question the index would refuse on scope.
+    await unmountApp()
+    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/library' })
+    await mountApp('/models', NESTED)
+    mockRoutes()
+
+    await secondaryPress(tile('widget.stl'))
+    expect(items()).not.toContain('findSimilar')
+    expect(items()).toEqual(['open', 'reveal', 'copyPath', 'reRenderThumbnail', 'resetFraming'])
   })
 })
 

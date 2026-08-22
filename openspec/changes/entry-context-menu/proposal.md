@@ -36,7 +36,7 @@ not be written twice.
   else ever built (D9).
 - **Re-render thumbnail** — render this model's tile again under the lighting mode and rig
   version in force now, keeping its camera and axis. The staleness check for those already
-  exists (`useThumbnails.ts:130-131`); what is missing is any way to ask for it on the grid
+  exists (`useThumbnails.ts:139-144`); what is missing is any way to ask for it on the grid
   you are looking at, since the sweep does not re-run when the mode changes (D7).
 - **Reset framing** — *discard* the orientation stored for the model and re-render at
   whatever it then resolves to: the semantic index's pose where there is one for it, the

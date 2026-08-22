@@ -110,8 +110,8 @@ Both actions SHALL be offered on every model, including one whose thumbnail is c
 - **THEN** its thumbnail is rendered at the orientation the model resolves to with none of its own, and opening the model opens it there too
 
 #### Scenario: Giving up an orientation hands the model back to the index
-- **WHEN** the user gives up the orientation of a model the index supplies one for, including one whose axis the user had chosen
-- **THEN** the axis is discarded with the camera and the model is framed by the index's orientation entire, rather than by the default about the axis it used to have
+- **WHEN** the user gives up the orientation of a model — including one whose axis they had chosen — where the view's own answer supplies that model's orientation and the client can express it
+- **THEN** the axis is discarded with the camera and the model is framed by that orientation entire, rather than by the default about the axis it used to have; where the view supplies none, the axis stands, so the command reaches further from a grid that carries orientations than from a plain listing, which carries none
 
 #### Scenario: With nothing to replace it, the axis stays
 - **WHEN** the user gives up the orientation of a model the index supplies none for, whose orbit axis they had chosen

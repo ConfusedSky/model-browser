@@ -30,8 +30,11 @@ export interface ThumbSave {
   path: string
   mtime: number
   png?: Blob
-  camera?: CameraState
-  axis?: OrbitAxis
+  /** Set / keep / discard: a value stores it, absence leaves what is stored,
+   *  `null` gives it up (entry-context-menu D7). */
+  camera?: CameraState | null
+  /** Set / keep / discard, exactly as `camera`. */
+  axis?: OrbitAxis | null
   lighting?: LightingMode
   rig?: number
   posed?: number

@@ -12,8 +12,24 @@
  * bound to a live camera, meaningless without a rendered model — and stay where
  * they are.
  */
-import type { DirEntry, IndexAvailability, IndexPose } from '../../../shared/types'
+import type * as THREE from 'three'
+import type {
+  CameraState,
+  DirEntry,
+  IndexAvailability,
+  IndexPose,
+  OrbitAxis,
+} from '../../../shared/types'
+import type { ApiClient } from '../api/client'
+import type { ThumbState } from '../hooks/useThumbnails'
 import type { Action } from '../state/reducer'
+import { indexCovers } from '../state/selectors'
+import { DEFAULT_CAMERA } from '../three/camera'
+import type { MeshLru } from '../three/lru'
+import { cameraForPose, POSE_VERSION } from '../three/pose'
+import type { RenderQueue } from '../three/queue'
+import { RIG_VERSION, renderThumbnail } from '../three/renderer'
+import { getLightingMode } from '../viewer/lighting'
 
 /** One id per command. The closed list is the menu's budget (D6). */
 export type CommandId =
@@ -69,12 +85,27 @@ export interface ActionHost extends Feedback {
   open: (entry: DirEntry, el: HTMLElement | null) => void
   /**
    * The index's poses, from `state.result.poses` — the landed answer's own
-   * field, plumbed rather than read anywhere new (task 1.0). Populated only by
-   * a meaning landing, so outside a meaning grid every model takes the no-pose
-   * branch. Read by *reset framing* (§4b), which resolves an orientation
-   * against it.
+   * field, plumbed rather than read anywhere new (task 1.0). Populated by a
+   * meaning *or* a similarity landing (both ride `hitsToEntries`), so outside
+   * such a grid every model takes the no-pose branch. Read by both thumbnail
+   * commands, which resolve an orientation against it.
    */
   poses: Record<string, IndexPose>
+  /**
+   * The cache, through the one ApiClient (architecture D1). The thumbnail
+   * commands need both halves: the stored orientation to render from, and
+   * somewhere to put the pixels.
+   */
+  api: Pick<ApiClient, 'getThumb' | 'putThumb'>
+  /** Meshes come from the LRU the grid already loads through, so a re-render
+   *  reuses bytes a thumbnail or an orbit has already paid for. */
+  lru: Pick<MeshLru<THREE.Object3D>, 'acquire'>
+  /** The single shared renderer's queue (architecture D2/D3). */
+  queue: Pick<RenderQueue, 'push' | 'whenResumed'>
+  /** `useThumbnails`' own setter. The map is not a mirror of the server, it is
+   *  what the tile draws and what the lightbox opens at, so a command that
+   *  wrote only to the cache would not take effect until the next load (4b.4). */
+  setThumb: (path: string, state: ThumbState) => void
 }
 
 /** What availability is decided from. `index` is the reducer's own cell — never
@@ -143,15 +174,128 @@ export function containingFolder(path: string): string {
 /**
  * Whether a model could plausibly be a similarity subject.
  *
- * Optimistic by construction (D4): the two conditions knowable client-side —
- * it is a model, and it is not inside an archive, which the index can never
- * embed — plus the index answering at all. Whether *this* model has been
+ * Optimistic by construction (D4): the conditions knowable client-side — it is
+ * a model, and it lies inside the collection the index covers, outside an
+ * archive — plus the index answering at all. Whether *this* model has been
  * embedded is not asked; the menu offers the action and the view explains the
  * failure when it comes. Asking the index about every tile in a 500-tile grid
  * to grey out an item nobody opened is not a trade worth making.
+ *
+ * "Inside the indexed collection" is `indexCovers` and nothing else — the same
+ * predicate the side panel reads, which also answers the archive half (a vpath
+ * is never covered). A second copy of the rule here is how the two would come
+ * to disagree about the same model.
  */
 function similarApplies(entry: DirEntry, ctx: AvailabilityContext): boolean {
-  return entry.kind === 'model' && !entry.path.includes('!/') && ctx.index?.state === 'ready'
+  return entry.kind === 'model' && ctx.index?.state === 'ready' && indexCovers(ctx.index, entry.path)
+}
+
+/** The failure sentence for a thumbnail the app could not draw again. One
+ *  string for both commands and every surface, like `COPY_FAILED`: they differ
+ *  in what they give up, not in how a render that never happened is reported. */
+export const RENDER_FAILED = 'Could not re-render the thumbnail.'
+
+/**
+ * The body behind both thumbnail commands (D7, §4b). They ask two different
+ * questions — *re-render* keeps the model's orientation, *reset framing* gives
+ * it up — and everything after that answer is identical, so they are one
+ * function with one flag rather than two bodies that drift apart.
+ *
+ * Not `async`: a command returns nothing and the work belongs to the render
+ * queue, which is where the job is put.
+ */
+function refreshThumbnail(
+  entry: DirEntry,
+  host: ActionHost,
+  opts: { discardFraming: boolean },
+): void {
+  const { discardFraming } = opts
+  host.queue.push(async () => {
+    try {
+      // Every renderer-touching stage waits out a suspension first: `push`
+      // alone is not enough, because `suspend()` cannot stop a job that has
+      // already started (queue.ts:40-47), and there is exactly one
+      // WebGLRenderer app-wide (architecture D2/D3).
+      await host.queue.whenResumed()
+      // The stored orientation, read from the cache rather than from the
+      // thumbs map: a tile whose lookup or render failed carries no camera at
+      // all, and both commands are offered exactly there (4b.7) — resolving
+      // from a blank would redraw a user's own orbit at the default. Read
+      // after the gate, so a lightbox that persisted a new camera on its way
+      // out is already in it. One lookup holding a render slot is not the 500
+      // the sweep's own limiter exists to keep out of them.
+      const cached = await host.api.getThumb(entry.path, entry.mtime)
+      // A hit mints an object URL; this read wanted the orientation, not the
+      // old pixels.
+      if (cached.pngUrl !== undefined) URL.revokeObjectURL(cached.pngUrl)
+
+      // "Usable" is `cameraForPose`'s answer and nothing else (D7/4b.3a): a
+      // malformed pose — off-axis `up`, non-perpendicular `azimuth_zero` —
+      // returns null, and a pose with no cached front view is deliberately
+      // *not* an exception, since the sweep applies that one too.
+      const pose = cameraForPose(host.poses[entry.path], DEFAULT_CAMERA)
+      let camera: CameraState
+      let axis: OrbitAxis
+      let posed: boolean
+      if (discardFraming) {
+        // What the model resolves to once its own orientation is gone, which
+        // is what an untouched model resolves to: the index's where there is a
+        // usable one, the default otherwise.
+        posed = pose !== null
+        camera = pose?.camera ?? DEFAULT_CAMERA
+        // The axis goes with the camera only when a pose is there to replace
+        // it — half a pose is not a pose. With nothing to replace it the axis
+        // stays and frames the model by default about itself, rather than
+        // laying a Z-up model on its side for a spindle nobody asked for.
+        axis = pose?.axis ?? cached.axis ?? 'y'
+      } else {
+        // Exactly the sweep's resolution (useThumbnails.ts:194-199): the stored
+        // camera/axis, else the pose when *both* are absent, else the default.
+        const fromPose = cached.camera === undefined && cached.axis === undefined ? pose : null
+        posed = fromPose !== null
+        camera = cached.camera ?? fromPose?.camera ?? DEFAULT_CAMERA
+        axis = cached.axis ?? fromPose?.axis ?? 'y'
+      }
+      const dropAxis = discardFraming && pose !== null
+
+      const lighting = getLightingMode() // the mode this render uses
+      const object = await host.lru.acquire(entry.path)
+      await host.queue.whenResumed()
+      const png = await renderThumbnail(object, camera, axis)
+      await host.api.putThumb({
+        path: entry.path,
+        mtime: entry.mtime,
+        png,
+        // Pixels and the labels that say what drew them — never a viewpoint on
+        // re-render: a pose orients the model without becoming its stored
+        // camera (semantic-search), so a re-classification still governs it.
+        //
+        // `null` is the discard the store gained for this (4b.2); `undefined`
+        // still means keep. And the labels are not optional: `cache.ts:108-110`
+        // clears every label a PNG-bearing PUT omits, so an unlabelled write
+        // fails the hit test forever and re-renders the tile on every visit.
+        camera: discardFraming ? null : undefined,
+        axis: dropAxis ? null : undefined,
+        lighting,
+        rig: RIG_VERSION,
+        posed: posed ? POSE_VERSION : undefined,
+      })
+      // The session's own copy, not only the server's: App sources the
+      // lightbox's camera and axis from this map, so a cache-only write would
+      // leave the viewer opening at the orientation just given up (4b.4).
+      host.setThumb(entry.path, {
+        status: 'ready',
+        url: URL.createObjectURL(png),
+        camera: discardFraming ? undefined : cached.camera,
+        axis: dropAxis ? undefined : cached.axis,
+      })
+    } catch {
+      // The tile keeps whatever it was showing — a render that did not happen
+      // is not a reason to degrade a picture that did. Said out loud, though:
+      // this one is a user's press, not a background sweep.
+      host.report(RENDER_FAILED)
+    }
+  })
 }
 
 export interface EntryCommand {
@@ -160,12 +304,10 @@ export interface EntryCommand {
   /** D6's table read for one entry, plus the conditions a table cannot show. */
   readonly applies: (entry: DirEntry, ctx: AvailabilityContext) => boolean
   /**
-   * `null` while the body is not built yet. The two thumbnail commands are
-   * defined here — D6's table is one place, and their availability is part of
-   * it — and implemented by **Stage C (tasks §4b)**, which owns the queue,
-   * `putThumb` and the cache's new *discard*. A null-bodied command is not
-   * rendered: an inapplicable action is absent rather than present and inert,
-   * and so is an unbuilt one.
+   * `null` while the body is not built yet — a null-bodied command is not
+   * rendered, since an inapplicable action is absent rather than present and
+   * inert, and so is an unbuilt one. Every command in the table has a body
+   * now; the field stays because that is the shape a seventh would arrive in.
    */
   readonly run: ((entry: DirEntry, host: ActionHost, el: HTMLElement | null) => void) | null
 }
@@ -234,13 +376,19 @@ export const ENTRY_COMMANDS: readonly EntryCommand[] = [
     // on. Offered whether or not the cached image is current — a failed image
     // is one of the things re-rendering exists to fix.
     applies: (entry) => entry.kind === 'model',
-    run: null, // Stage C — tasks §4b
+    // Keeps the model's orientation and replaces its pixels: the manual
+    // trigger for a mode or rig change the visible grid was never rebuilt for.
+    run: (entry, host) => refreshThumbnail(entry, host, { discardFraming: false }),
   },
   {
     id: 'resetFraming',
     label: 'Reset framing',
     applies: (entry) => entry.kind === 'model',
-    run: null, // Stage C — tasks §4b
+    // *Framing*, not *thumbnail*: the orientation is keyed by path and shared
+    // with the viewer, so giving it up also moves where the lightbox opens
+    // this model (D7). Re-rendering without giving it up would reproduce the
+    // same badly framed picture, which is why this is a second command.
+    run: (entry, host) => refreshThumbnail(entry, host, { discardFraming: true }),
   },
 ]
 

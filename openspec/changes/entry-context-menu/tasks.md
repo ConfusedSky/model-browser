@@ -28,10 +28,11 @@
       the landed answer now (`state.result.poses`, `reducer.ts:73`), derived in `App.tsx:251`
       and passed to `useThumbnails` and `ViewerLayer`; plumb the same value to the action
       module rather than reading it anywhere new. Note the consequence: `poses` is populated
-      only by a meaning landing, so outside a meaning grid every model takes the no-pose
+      by a meaning *or* a similarity landing — similarity hits ride the same `hitsToEntries`
+      and carry poses — so outside a meaning or similarity grid every model takes the no-pose
       branch and reset framing gives the default. That is correct — there is no pose to hand
-      back — but it means 4b.3a's posed cases are only reachable from a meaning grid, which
-      is where its tests belong.
+      back — but it means 4b.3a's posed cases are only reachable from a meaning or similarity
+      grid, which is where its App-level tests belong.
       **Done:** `poses` is a field on `ActionHost` (`client/src/lib/entryActions.ts`), fed
       from App's existing `state.result.poses` derivation — read nowhere new. No Stage-B
       command reads it; *reset framing* (§4b) is its reader, and typecheck holds the
@@ -44,8 +45,9 @@
       `window.history`.
       **Done:** `ENTRY_COMMANDS` in `client/src/lib/entryActions.ts` — one row per command,
       each carrying its `applies` (D6's table, drawn in the module doc comment) and its
-      `run`. The two thumbnail rows carry `run: null` (Stage C, §4b) and are therefore
-      defined but not rendered. `reveal` goes through `host.navigate`, `findSimilar` through
+      `run`. The two thumbnail rows carried `run: null` through Stage B and were therefore
+      defined but not rendered; §4b filled both, so every row has a body and the table renders
+      whole. `reveal` goes through `host.navigate`, `findSimilar` through
       `host.dispatch`; nothing in the module touches `pushState`, `window.history`, or a
       query string
 - [x] 1.1a Build the brief-failure affordance the copy command reports through, or adopt one.
@@ -264,7 +266,13 @@
       **State half landed**: `indexCovers(index, path)` in `state/selectors.ts` — inside the
       collection root, outside an archive, read off `state.index` with no probe. `SidePanel`'s
       own copy of that rule is folded onto it rather than left to drift. The per-kind table
-      that reads it is §2's
+      that reads it is §2's.
+      **Menu half folded on at Stage C**: `similarApplies` had kept its own two-thirds of the
+      rule (a model, not in an archive, index ready) and never asked about the collection, so
+      the menu offered the action on a model the index would have refused on scope. It now
+      calls `indexCovers`, which answers the archive half too — one rule, three readers.
+      `entryActions.test.ts` and `entryMenu.test.tsx` both pin a model outside the collection
+      root offering no find similar
 - [x] 4.5 Two distinct failures: not yet embedded (404 from the index — fixable by running
       the classifier) versus inside an archive (outside the corpus by construction, knowable
       client-side without asking). Different sentences.
@@ -275,7 +283,7 @@
       index's words. The archive case makes no request at all: the fetch arm refuses a `!/`
       subject, which is how a shared or hand-edited link reaches the sentence at all, since
       the menu does not offer the action there. Both sentences tested, both falsified
-- [ ] 4.6 **Build the dismissal; it was never built** (D9). This task said "reuse
+- [x] 4.6 **Build the dismissal; it was never built** (D9). This task said "reuse
       `semantic-search`'s dismiss affordance"; the rebase found there is none — the only exit
       from a committed search is emptying the input (`reducer.ts:350-358`), and `FindBar`'s ✕
       (`FindBar.tsx:70`) dismisses the filter, not the search. That exit is also inert for a
@@ -335,30 +343,53 @@
       models here are indexed") does not render for a similarity view — it is a fact about a
       phrase's scope, and it stays absent for the same reason an inapplicable option does
 
-## 4b. Thumbnail actions  *(the actions land with §1–3; their posed cases need a meaning grid)*
+## 4b. Thumbnail actions  *(the actions land with §1–3; their posed cases need a meaning or similarity grid)*
 
-- [ ] 4b.1 Re-render: resolve the orientation exactly as the sweep does
+- [x] 4b.1 Re-render: resolve the orientation exactly as the sweep does
       (`useThumbnails.ts:194-199` — stored camera/axis, else the pose when *both* are absent,
-      else the default), render through the queue, and `putThumb` **pixels only**. Do not
+      else the default), render through the queue, and `putThumb` **no viewpoint — pixels
+      plus the labels that describe them** (`lighting`, `rig`, and `posed` where a pose drew
+      them). "Pixels only" in the sense of omitting the labels is not a smaller write but a
+      broken one: `server/src/cache.ts:108-110` clears every label a PNG-bearing PUT omits,
+      so the hit test fails for ever after and the tile re-renders on every visit. Do not
       persist a pose: `semantic-search`'s *A pose orients the model without becoming its
       stored camera* forbids it, and the sweep's own comment says the same. Test a posed
       model: after re-render it still has no stored camera or axis, so a re-classification
       still governs it — and it declares `POSE_VERSION`, so the next visit is a hit rather
-      than another re-render (4b.6)
-- [ ] 4b.2 The orientation store gains *discard* (`model-thumbnails` MODIFY), for the axis as
+      than another re-render (4b.6).
+      **Done:** `refreshThumbnail` in `client/src/lib/entryActions.ts`, behind
+      `ENTRY_COMMANDS`' `reRenderThumbnail` row. The resolution is the sweep's, branch for
+      branch. Pinned in `client/test/thumbnailCommands.test.ts` — the stored-orientation
+      case, the posed case, and a **round trip** (`what the next visit makes of the pixels`)
+      that replays the PUT through a fake cache keeping `cache.ts`' own two rules and then
+      mounts `useThumbnails` over it: the tile is served, not re-rendered. Falsified twice,
+      by dropping `posed` and by dropping all three labels — the round trip fails both ways
+- [x] 4b.2 The orientation store gains *discard* (`model-thumbnails` MODIFY), for the axis as
       well as the camera. `server/src/cache.ts:104-105` is `camera: opts.camera ?? prev?.camera`
       / `axis: opts.axis ?? prev?.axis`, so silence means keep and there is no way to clear —
       add an explicit discard to `ThumbPutRequest`/`ThumbCache.put`, keeping silence meaning
       keep. Server test all three states per field: set, silent, discarded.
       The delta's *other* new sentence — that a read reports a missing axis rather than
       substituting +Y — is **already shipped** (`server/src/cache.ts:72-78`); it is in the
-      delta to make main true, not to be implemented again
-- [ ] 4b.3 Reset framing discards rather than writes `DEFAULT_CAMERA`. The distinction is the
+      delta to make main true, not to be implemented again.
+      **Done:** the wire word is `null` — `camera?: CameraState | null` / `axis?:
+      OrbitAxis | null` on `ThumbPutRequest` (`shared/types.ts`) and `ThumbSave`
+      (`client/src/api/client.ts`), read by `ThumbCache.put` as
+      `opts.camera === null ? undefined : (opts.camera ?? prev?.camera)`. No new route and no
+      new verb: JSON drops `undefined` and keeps `null`, so absence goes on meaning keep by
+      itself. `app.ts`' axis validator had to learn that a null axis is a discard rather than
+      a bad axis. Three states per field in `server/test/cache.test.ts`, plus the wire in
+      `server/test/api.test.ts`; falsified by restoring the old merge (both fail)
+- [x] 4b.3 Reset framing discards rather than writes `DEFAULT_CAMERA`. The distinction is the
       task, not a nicety: a stored default makes `cached.camera !== undefined`, which at
       `useThumbnails.ts:194-196` permanently disqualifies the model from the pose path — the
       fix for a badly framed thumbnail would guarantee one. Test that a posed model, after
-      reset framing, renders at the pose and not at the default
-- [ ] 4b.3a Reset framing discards the **axis too when a usable pose exists** for that model,
+      reset framing, renders at the pose and not at the default.
+      **Done:** the same `refreshThumbnail`, with `discardFraming` — one body, since the two
+      commands differ in that answer alone and in nothing after it. Two cases in
+      `thumbnailCommands.test.ts`: the posed model renders at the pose, and `never writes a
+      default in place of the discarded camera` pins the distinction directly
+- [x] 4b.3a Reset framing discards the **axis too when a usable pose exists** for that model,
       so the pose applies entire (D7). Gate on `cameraForPose(...) !== null`, not on the raw
       presence of a pose: a malformed one (off-axis `up`, non-perpendicular `azimuth_zero` —
       `pose.ts:85-92`) returns null, and trading a real axis for `'y'` there would be worse
@@ -369,17 +400,37 @@
       an untouched one gets. A second opinion about what counts as usable is the drift
       `lighting-refreshes-thumbnails` D1 warns about.
       With no usable pose, discard the camera alone. Test all three: posed + stored axis →
-      both discarded and the pose applies; malformed pose → axis kept; no pose → axis kept
-- [ ] 4b.4 Reset framing also updates the in-memory thumb state, not just the server:
+      both discarded and the pose applies; malformed pose → axis kept; no pose → axis kept.
+      **Done:** `const dropAxis = discardFraming && pose !== null`, where `pose` is
+      `cameraForPose(host.poses[entry.path], DEFAULT_CAMERA)` and nothing else — no
+      `front === null` exception, which `treats a pose with no cached front view as usable`
+      pins as a test in its own right. The gate reads **the view's** poses, so the command's
+      reach follows the grid's provenance: a plain listing knows no poses and the axis
+      stands, which is *the user's own choice wins* working rather than failing. The
+      entry-actions scenario *Giving up an orientation hands the model back to the index* was
+      rewritten under its title to say so. All three cases in `thumbnailCommands.test.ts`;
+      falsified by widening the gate to `discardFraming` (the axis-kept case fails)
+- [x] 4b.4 Reset framing also updates the in-memory thumb state, not just the server:
       `App.tsx:1184-1185` sources the lightbox's camera and axis from
       `thumbs.get(viewer.entry.path)`, so a server-only write leaves the viewer opening at the
       old camera for the rest of the session. `setThumb` (`useThumbnails.ts:83-89`) is the
-      handle. Test the viewer within one session, not only after a reload
-- [ ] 4b.5 Re-render never touches `axis`. Test with a non-`y` spindle stored: it survives
+      handle. Test the viewer within one session, not only after a reload.
+      **Done:** both commands end in one `host.setThumb` carrying the new pixels and the
+      orientation as it now stands — `camera: undefined` after a discard, `cached.camera`
+      after a re-render. Tested within one session in
+      `client/test/thumbnailActions.test.tsx`, which mocks `ViewerLayer` to read the `camera`
+      and `axis` App hands it: open → reset framing → open again, no reload. Falsified by
+      deleting the `setThumb` call (that case fails, with five unit cases beside it)
+- [x] 4b.5 Re-render never touches `axis`. Test with a non-`y` spindle stored: it survives
       re-render whether or not a pose exists, and the render is drawn about it. Reset framing
       is the only path that moves the axis, and only under 4b.3a's gate — a discard that left
-      a Z-up model laid on its side with nothing to replace the axis is the failure D7 refuses
-- [ ] 4b.6 Both `await queue.whenResumed()` before touching the renderer, as the sweep does
+      a Z-up model laid on its side with nothing to replace the axis is the failure D7 refuses.
+      **Done:** re-render's PUT sends `axis: undefined` unconditionally — silence, which the
+      store reads as keep. `never moves the axis, whether or not a pose exists` runs both
+      ways round: with a `-z` spindle stored the render is drawn about `-z`, the PUT carries
+      no axis, and the pose is withheld entire (so no `posed` label either), since a stored
+      axis alone is enough to withhold it
+- [x] 4b.6 Both `await queue.whenResumed()` before touching the renderer, as the sweep does
       at `useThumbnails.ts:177,181` — `queue.push` alone is not enough, since
       `queue.ts:39-47` documents that `suspend()` cannot stop a job that has started, and
       this is the single shared `WebGLRenderer` (architecture D2/D3). Neither bumps
@@ -390,21 +441,46 @@
       and renders the tile again. It self-heals — that sweep writes the label back
       (`useThumbnails.ts:208`) — so the cost is one wasted render rather than a loop, and only
       where poses exist at all. Declare it anyway: a thumbnail that lies about which recipe
-      drew it is the thing `posed` was added to stop
-- [ ] 4b.7 Offered on every model tile including one whose thumbnail is missing or errored
+      drew it is the thing `posed` was added to stop.
+      **Done:** two gates, either side of `lru.acquire`, exactly as the sweep places them. No
+      `RIG_VERSION` bump was needed or made — both consume the current recipe. `POSE_VERSION`
+      is declared wherever a pose drew the pixels, on both commands. The first test written
+      for this passed with **both gates deleted** — `push` never starts a job while the queue
+      is suspended, so it was testing the queue's pump, not the gate. Rewritten as the case
+      that actually needs it: the job starts, a viewer takes the renderer while the mesh is
+      loading, and the render must wait. It fails with the gates removed
+- [x] 4b.7 Offered on every model tile including one whose thumbnail is missing or errored
       (`useThumbnails.ts:230,238` → `Grid.tsx:97-98`) — a failed image is a case re-render
-      exists for. Absent on dir and zip tiles (D6): container tiles are glyphs, not renders
+      exists for. Absent on dir and zip tiles (D6): container tiles are glyphs, not renders.
+      **Done:** `applies: (entry) => entry.kind === 'model'` on both rows — never a function
+      of the tile's state, which is what makes the errored case free. Tested through App with
+      a cache that rejects (`thumbnailActions.test.tsx`): the tile has no image and the menu
+      offers both. Containers offer three items, asserted there and in `entryMenu.test.tsx`.
+      The read they resolve from is the **cache**, not `thumbs.get(path)`, for this exact
+      reason: an errored tile carries no camera, and resolving from it would redraw a user's
+      own orbit at the default
 
 ## 5. Verification
 
-- [ ] 5.1 `bun run typecheck` and `bun run test` pass across workspaces
-- [ ] 5.2 Component tests: the menu opens on secondary click without orbiting; each item
+- [x] 5.1 `bun run typecheck` and `bun run test` pass across workspaces.
+      **Green at Stage C:** client 357 tests / 38 files, server 123 / 5, typecheck clean in
+      both workspaces, `openspec validate entry-context-menu` clean, and the archive dry run
+      applies on a fresh copy
+- [x] 5.2 Component tests: the menu opens on secondary click without orbiting; each item
       appears only for the kinds D6 lists; copy path works from both surfaces with one
       implementation; reveal navigates, marks, pushes history, and leaves the flat toggle
       alone; the mark does not survive a reload; re-render re-renders under the current
       settings from the stored camera, and reset framing discards the stored orientation,
-      renders at what the model then resolves to, and moves where the viewer opens it
-- [ ] 5.2a Reducer unit tests for the subject, beside the existing ten-findings cases: a
+      renders at what the model then resolves to, and moves where the viewer opens it.
+      **Landed across three files.** `entryMenu.test.tsx` carries the menu, the per-kind
+      lists (now six items on a model the index covers) and reveal; `viewerLayer.test.tsx`
+      the second copy surface. The two thumbnail lines are Stage C's:
+      `thumbnailCommands.test.ts` for what each command renders from and writes back — the
+      three discard cases, the axis rules, the resume gate, the label round trip — and
+      `thumbnailActions.test.tsx` for the halves that need the whole app: a failed tile still
+      offers them, a similarity grid's poses reach them, and reset framing moves where the
+      lightbox opens the model *within the session*
+- [x] 5.2a Reducer unit tests for the subject, beside the existing ten-findings cases: a
       similarity view and a query view replace each other rather than coexisting; a similarity
       deep link waits, stands in nested, and fires once the index is ready, under the
       deferral's own provenance so a restored one replaces rather than pushes; `clearSubject`

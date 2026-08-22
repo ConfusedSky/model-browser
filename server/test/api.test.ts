@@ -261,4 +261,29 @@ describe('thumbnail cache API', () => {
     })
     expect(put.status).toBe(400)
   })
+
+  it('carries a discard over the wire — null clears, and is not a bad axis', async () => {
+    // The route is where `null` could most easily be lost: JSON drops
+    // `undefined` and the axis validator would 400 a null it did not expect,
+    // which would make reset framing fail as a client bug at the last hop.
+    const other = join(fx.dir, 'discarded.stl')
+    const stored = await app.request('/api/thumb', {
+      method: 'PUT',
+      headers: { ...LOOPBACK, 'content-type': 'application/json' },
+      body: JSON.stringify({ path: other, mtime: 111, png, camera, axis: '-z' }),
+    })
+    expect(stored.status).toBe(200)
+    const discard = await app.request('/api/thumb', {
+      method: 'PUT',
+      headers: { ...LOOPBACK, 'content-type': 'application/json' },
+      body: JSON.stringify({ path: other, mtime: 111, png, camera: null, axis: null, rig: 9 }),
+    })
+    expect(discard.status).toBe(200)
+    const res = await get(`/api/thumb?path=${encodeURIComponent(other)}&mtime=111`)
+    const body = (await res.json()) as ThumbGetResponse
+    expect(body.status).toBe('hit')
+    expect(body.camera).toBeUndefined()
+    expect(body.axis).toBeUndefined()
+    expect(body.rig).toBe(9) // the pixels' own labels still land
+  })
 })

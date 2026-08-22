@@ -30,7 +30,10 @@ const dir = (path: string): DirEntry => ({
 })
 const zip = (path: string): DirEntry => ({ ...dir(path), kind: 'zip' })
 
-const READY: IndexAvailability = { state: 'ready' }
+// Answering, and saying which collection it covers — the second half matters:
+// find similar is offered inside that collection, by the same `indexCovers` the
+// side panel reads.
+const READY: IndexAvailability = { state: 'ready', collectionRoot: '/m' }
 const ids = (entry: DirEntry, index: IndexAvailability | null): string[] =>
   commandsFor(entry, { index }).map((c) => c.id)
 
@@ -79,23 +82,38 @@ describe("D6's per-kind table", () => {
 
   it('withholds find similar from a model inside an archive', () => {
     // Outside the corpus by construction, and knowable client-side from the
-    // path — no round trip to learn it.
+    // path — no round trip to learn it. `indexCovers` answers this half too,
+    // which is why the rule is not spelled out a second time here.
     expect(ids(model('/m/kit.zip!/lid.stl'), READY)).not.toContain('findSimilar')
   })
 
-  it('defines the two thumbnail commands as model-only, and renders neither yet', () => {
-    // Stage C (§4b) builds their bodies. Until then the table is the single
-    // place their availability lives, and a bodiless command is hidden.
-    const table = ENTRY_COMMANDS.filter((c) => c.run === null).map((c) => c.id)
-    expect(table).toEqual(['reRenderThumbnail', 'resetFraming'])
-    for (const c of ENTRY_COMMANDS) {
-      if (c.run !== null) continue
-      expect(c.applies(model('/m/a.stl'), { index: READY })).toBe(true)
-      expect(c.applies(dir('/m/d'), { index: READY })).toBe(false)
-      expect(c.applies(zip('/m/z.zip'), { index: READY })).toBe(false)
+  it('withholds find similar from a model outside the collection the index covers', () => {
+    // "Inside the indexed collection" is one rule, and the side panel already
+    // owns it: a second copy here is how the menu and the panel would come to
+    // disagree about the same model.
+    expect(ids(model('/elsewhere/a.stl'), READY)).not.toContain('findSimilar')
+    expect(ids(model('/m/a.stl'), { state: 'ready' })).not.toContain('findSimilar') // no root, no claim
+  })
+
+  it('offers both thumbnail commands on a model and on nothing else', () => {
+    // Model-only for a structural reason: container tiles are drawn as glyphs,
+    // not renders, so there is no thumbnail to act on. Every command in the
+    // table has a body now, so none is hidden for want of one.
+    expect(ENTRY_COMMANDS.filter((c) => c.run === null)).toEqual([])
+    for (const id of ['reRenderThumbnail', 'resetFraming']) {
+      expect(ids(model('/m/a.stl'), READY)).toContain(id)
+      expect(ids(dir('/m/d'), READY)).not.toContain(id)
+      expect(ids(zip('/m/z.zip'), READY)).not.toContain(id)
     }
-    expect(ids(model('/m/a.stl'), READY)).not.toContain('reRenderThumbnail')
-    expect(ids(model('/m/a.stl'), READY)).not.toContain('resetFraming')
+    // Offered on a model the index cannot serve, too — they are not the
+    // index's actions, and a failed image is a case re-render exists for.
+    expect(ids(model('/m/a.stl'), null)).toEqual([
+      'open',
+      'reveal',
+      'copyPath',
+      'reRenderThumbnail',
+      'resetFraming',
+    ])
   })
 })
 

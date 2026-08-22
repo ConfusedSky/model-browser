@@ -1034,8 +1034,16 @@ export default function App() {
       confirm: () => say('Path copied.', 'ok'),
       report: (message) => say(message, 'error'),
       poses,
+      // The thumbnail half: the one cache client, the mesh LRU the grid loads
+      // through, the one render queue, and `useThumbnails`' own setter. Handed
+      // over rather than reimplemented — App has no business resolving an
+      // orientation, and the module has no business constructing any of these.
+      api,
+      lru,
+      queue,
+      setThumb,
     }),
-    [navigate, dispatch, enterEntry, openLightbox, say, poses],
+    [navigate, dispatch, enterEntry, openLightbox, say, poses, api, lru, queue, setThumb],
   )
 
   const onEntryMenu = useCallback(
@@ -1513,10 +1521,9 @@ export default function App() {
           ssao
         </button>
       </div>
-      {/* Four items this stage — open, reveal, copy path, find similar. The two
-          thumbnail commands are defined in `entryActions`' table (D6 lives in
-          one place) with no body yet, and a bodiless command is hidden rather
-          than greyed: **Stage C, tasks §4b** builds them. */}
+      {/* D6's table, whole: three items on a container, five on a model, and a
+          sixth when the index is answering for the collection it sits in. Which
+          ones an entry offers lives in `entryActions`, never here. */}
       {menu !== null && menuCommands.length > 0 && (
         <EntryMenu
           x={menu.x}

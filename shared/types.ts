@@ -78,8 +78,19 @@ export interface ThumbPutRequest {
   mtime: number
   /** base64 PNG. */
   png?: string
-  camera?: CameraState
-  axis?: OrbitAxis
+  /**
+   * Three states, not two: a value **sets** the camera, absence **keeps**
+   * whatever was stored, and `null` **discards** it. Silence has to go on
+   * meaning keep — every PNG write omits it — so giving an orientation up
+   * needed a word of its own rather than a written default, which is an
+   * orientation of the user's and suppresses any index that would supply one
+   * (entry-context-menu D7).
+   */
+  camera?: CameraState | null
+  /** Set / keep / discard, exactly as `camera` — the axis is discarded with it
+   *  when a source can supply both, since angles measured about one axis do not
+   *  describe a view about another. */
+  axis?: OrbitAxis | null
   lighting?: LightingMode
   rig?: number
   /** Pose recipe version the PNG was rendered under; absent when unposed. */

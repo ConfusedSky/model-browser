@@ -261,7 +261,9 @@ export function createApp(cache: ThumbCache = new ThumbCache()): Hono {
     if (typeof body.path !== 'string' || typeof body.mtime !== 'number') {
       return c.json({ error: 'path and mtime are required' }, 400)
     }
-    if (body.axis !== undefined && !ORBIT_AXES.includes(body.axis)) {
+    // `null` is the discard, not a bad axis: absence keeps, a value sets, null
+    // clears (entry-context-menu D7). Only a value is worth validating.
+    if (body.axis !== undefined && body.axis !== null && !ORBIT_AXES.includes(body.axis)) {
       return c.json({ error: `invalid axis: ${String(body.axis)}` }, 400)
     }
     if (body.lighting !== undefined && !LIGHTING_MODES.includes(body.lighting)) {
