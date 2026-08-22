@@ -130,9 +130,13 @@ Both actions SHALL be offered on every model, including one whose thumbnail is c
 - **THEN** neither action is listed
 
 ### Requirement: Find models similar to this one
-Where a semantic index is available, the client SHALL offer an action on a model that requests its nearest neighbours from that index and presents them as a set of results in place of the listing, ordered by similarity, with the model itself excluded. Neighbours SHALL be drawn from the whole indexed collection rather than from the folder the model is browsed in, since a model's nearest neighbours are a question about the collection and the folder's own answer is already on screen. The result SHALL be a view like any other: named in the URL by the model the neighbours were derived from, participating in history, and reproducing for anyone who opens that URL. It SHALL be left through the same explicit dismissal that other result sets offer, since there is no typed text to clear.
+Where a semantic index is available, the client SHALL offer an action on a model that requests its nearest neighbours from that index and presents them as a set of results in place of the listing, ordered by similarity, with the model itself excluded. Neighbours SHALL be drawn from the whole indexed collection rather than from the folder the model is browsed in, since a model's nearest neighbours are a question about the collection and the folder's own answer is already on screen.
 
-The action SHALL be offered only where it could apply — on a model, within the collection the index covers, and outside an archive — and SHALL distinguish a model the index has not yet embedded from one it can never embed, since only the first is fixed by indexing again. Where the index is unavailable the action SHALL be absent, and opening a URL naming such a view SHALL present the location's ordinary listing with an explanation rather than an empty grid.
+The result SHALL be a view like any other: it is what the view is *about*, in the same sense a committed query is, and SHALL be named in the URL by the model the neighbours were derived from, participate in history, and reproduce for anyone who opens that URL. A view SHALL be about at most one thing — asking for neighbours SHALL leave any committed query behind, and committing a query SHALL leave a similarity view behind — and the URL SHALL name only what the view's subject reads, so a similarity URL names the source model and carries no query text, search mode, kind restriction, or tuning.
+
+A similarity view SHALL be leaveable. Since it holds no typed text to clear, the client SHALL offer an explicit dismissal with the results — **one** control, shown wherever the view is about something, whether that is a committed query or a model — so that leaving a similarity view and leaving a search are the same act rather than two that resemble each other, and emptying the search input SHALL do what that control does rather than carry its own copy of the rule. Dismissing SHALL return the location's ordinary listing.
+
+The action SHALL be offered only where it could apply — on a model, within the collection the index covers, and outside an archive — and SHALL distinguish a model the index has not yet embedded from one it can never embed, since only the first is fixed by indexing again. Where the index is unavailable the action SHALL be absent. A similarity view SHALL wait for an index that is not ready exactly as a deferred meaning search does: nothing is fetched while the index has not yet answered whether it can serve at all, the location's ordinary nested listing stands in once it has, the view keeps its name meanwhile and the UI says what it is waiting for — naming the model rather than offering to search names, since a similarity view has no phrase to search names with — and the wait is cancelled completely, banner and URL included, when the user navigates away, commits a query, or dismisses the view.
 
 #### Scenario: More like this one
 - **WHEN** the user asks for models similar to one on screen
@@ -151,8 +155,20 @@ The action SHALL be offered only where it could apply — on a model, within the
 - **THEN** the first is explained as not yet indexed and the second as outside what the index covers
 
 #### Scenario: Leaving a similarity view
-- **WHEN** similarity results are on screen
-- **THEN** the same dismissal that leaves any other result set returns to the ordinary listing
+- **WHEN** similarity results are on screen and the user activates the dismissal offered with them
+- **THEN** the ordinary listing for the location returns — by the same control, and the same rule beneath it, that leaves a committed search
+
+#### Scenario: A view is about one thing at a time
+- **WHEN** the user asks for neighbours while a search is committed, and later commits a search while similarity results are on screen
+- **THEN** each replaces the other as what the view is about, and the URL never names both
+
+#### Scenario: A similarity view waits for a warming index
+- **WHEN** a URL naming similarity results is opened while the index is still starting up
+- **THEN** nothing is fetched until the index says whether it can serve, the location's nested listing then stands in, the view goes on naming the model it is about, and the wait is explained by naming that model
+
+#### Scenario: Nothing similar enough to show
+- **WHEN** a similarity request returns no neighbours
+- **THEN** the view says so in terms of the model it was derived from, rather than presenting a grid that reads as an empty folder
 
 #### Scenario: No index, no action
 - **WHEN** the semantic index is unavailable

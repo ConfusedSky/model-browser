@@ -1,10 +1,18 @@
 # model-thumbnails Delta
 
-> No other active change modifies this requirement (`lighting-refreshes-thumbnails` modifies
-> *Lighting-mode-aware thumbnails*, `thumbnail-sweep-priority` modifies *Client-side
-> thumbnail rendering*), so there is no collision. All five scenarios this requirement
-> already carries are preserved: a MODIFIED requirement replaces prose *and* scenarios at
-> archive.
+> Re-verified against main at `baa7010`. No other active change modifies this requirement
+> (`lighting-refreshes-thumbnails` modifies *Lighting-mode-aware thumbnails*,
+> `thumbnail-sweep-priority` modifies *Client-side thumbnail rendering*), so there is no
+> archive collision — though all three edit `useThumbnails.ts` and two edit the cache, which
+> tasks.md declares as file-level ordering. All five scenarios this requirement already
+> carries are preserved: a MODIFIED requirement replaces prose *and* scenarios at archive.
+>
+> Two halves, and only one is work. **Discarding** is new: `server/src/cache.ts:104-105`
+> merges with `opts.camera ?? prev?.camera`, so silence means keep and nothing can clear.
+> **Reporting a missing axis rather than substituting +Y** already ships
+> (`server/src/cache.ts:72-78`, comment and all — it landed with `semantic-search`, whose
+> archived change carried no `model-thumbnails` delta, so main's text was left saying the old
+> thing). It is carried here to make main true, not to be implemented twice.
 
 ## MODIFIED Requirements
 

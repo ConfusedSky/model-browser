@@ -1,5 +1,10 @@
 # model-viewer Delta
 
+> Re-verified against main at `baa7010`: this block carries main's prose and all twelve of
+> its scenarios, with the copy-failure one rewritten in place (a scenario a change
+> invalidates is rewritten under its own title — RENAMED/REMOVED exist for requirements, not
+> scenarios).
+>
 > No other active change touches this capability. The copy affordance moves into the shared
 > action module (`entry-actions`), and its failure path changes with the move: the selection
 > fallback existed for non-secure contexts, which this app does not target — it is served
