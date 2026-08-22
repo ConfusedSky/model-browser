@@ -138,6 +138,23 @@ export interface SemanticListing {
   capped: boolean
 }
 
+/**
+ * A model's nearest neighbours (entry-context-menu D4). Deliberately not a
+ * `SemanticListing` with fields left blank: everything a meaning answer carries
+ * beyond the tiles describes a *phrase's* result — the scope a query was judged
+ * within, whether it stood out, whether a bound bit — and none of it is a fact
+ * about a model's neighbours. The index reports no `weak` here at all (measured:
+ * model-to-model cosines run 0.85–0.99 where text-query cosines run ~0.1), and
+ * order carries strength, so there is nothing to say per tile either.
+ */
+export interface SimilarListing {
+  /** The collection the neighbours were drawn from — the whole of it (D4). */
+  path: string
+  entries: DirEntry[]
+  /** Orientation per tile path, where the index has one. Advisory (D5). */
+  poses: Record<string, IndexPose>
+}
+
 /** Availability of the semantic index, read from the wire (semantic-search D4). */
 export type IndexState = 'ready' | 'warming' | 'wedged' | 'volume-gone' | 'absent'
 

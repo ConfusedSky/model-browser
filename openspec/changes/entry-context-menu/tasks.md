@@ -217,31 +217,64 @@
       `similar` (which the serializer cannot write — only a hand-edited link), resolves the
       similarity view and lets the stray `q` ride until the first commit rewrites it, which is
       the leniency `urlState.ts:37-45` already documents. `optionsOf` is untouched
-- [ ] 4.1 `ApiClient` gains the similar call, beside the semantic query (D1: no raw fetch in
+- [x] 4.1 `ApiClient` gains the similar call, beside the semantic query (D1: no raw fetch in
       components); the server proxies it and joins hits to listing data through the same path
       `semantic-search` built. It is driven by the fetch effect off `pendingRequest`
       (`App.tsx:297-363`) like every other request, tagged with the asking event and the
-      question as asked, and aborted when superseded
-- [ ] 4.1a Send no scope: neighbours come from the whole indexed collection (D4). The index's
+      question as asked, and aborted when superseded.
+      **Landed**: `similar()` in `server/src/semantic.ts` (sharing `askIndex`, one copy of the
+      error contract, with `query`), `POST /api/semantic/similar` in `server/src/app.ts`,
+      `ApiClient.similar` + `HttpApiClient.similar`, and the real arm replacing the abort-only
+      stub in `App.tsx`. `server/test/similar.test.ts` pins the join and the four failure
+      lanes; `client/test/findSimilar.test.tsx` pins the call arguments (model, `SIMILAR_K`,
+      an `AbortSignal`) and that a superseded question is really aborted
+- [x] 4.1a Send no scope: neighbours come from the whole indexed collection (D4). The index's
       `scope` is optional and defaults to the collection, so this is stating a default rather
       than passing a value — and it differs from meaning search, which is rooted at the
       browsed directory. A reviewer seeing two sibling result views scoped differently should
-      find the reason written down
-- [ ] 4.2 Choose `k` deliberately rather than inheriting either default: the index's is 10,
+      find the reason written down.
+      **Landed**: the reason is in `similar()`'s doc comment and in the route's, and the
+      absence is a test rather than an assumption — *sends no scope: neighbours are
+      collection-wide*, falsified by sending the model's folder as a scope
+- [x] 4.2 Choose `k` deliberately rather than inheriting either default: the index's is 10,
       this app's text-query bound is 60. Neighbours degrade faster than text matches. It is a
       module constant, not a view field and not a URL param (D4) — nothing on screen sets it.
-      Leave the index's `pool` at the server default for the same reason
-- [ ] 4.3 The view goes in the URL and into history through the one writer and nothing else:
+      Leave the index's `pool` at the server default for the same reason.
+      **`k` landed with 4.0** (`SIMILAR_K = 16`, `state/view.ts`). `pool` is closed here: the
+      server sends `path` and `k` only, stated in design D4 and pinned by the same test
+- [x] 4.3 The view goes in the URL and into history through the one writer and nothing else:
       the `similar` transition asserts its subject, leaves a `urlIntent`, and the projection
       at `App.tsx:278-287` serializes the whole view (D8). No hand-built literal — abolishing
       those is why the projection exists. Land the `url-navigation` MODIFY with it; it carries
       main's current text plus this change's scenarios, and corrects one stale sentence about
-      the mode (flagged in the delta's header)
-- [ ] 4.4 Availability is optimistic (D4): offered on models inside the indexed collection
-      and outside archives, with no per-tile round trip to the index
-- [ ] 4.5 Two distinct failures: not yet embedded (404 from the index — fixable by running
+      the mode (flagged in the delta's header).
+      **Verified end to end, from both ends.** The dispatch→ask→land→serialize half is
+      `searchReducer.test.ts`'s *a similarity URL names the model, the place and the toggle*
+      (dispatched subject, non-default options, `serializeView` over the landed view). The App
+      half is `findSimilar.test.tsx`'s *names the model, the place and the toggle in the URL*:
+      a link in, the options non-default in storage and named nowhere, and then the one write
+      a similarity view can actually make from inside the app — the dismissal — rewriting the
+      whole URL, similarity params and never-read options leaving together, one history entry.
+      No literal is built anywhere. Note the shape of what is *not* provable at DOM level yet:
+      entering a similarity view from within the app needs the menu (§2), and every other
+      landing serializes to what the address bar already says, so `commitUrl` declines the
+      write. That is the documented leniency, not a gap
+- [x] 4.4 Availability is optimistic (D4): offered on models inside the indexed collection
+      and outside archives, with no per-tile round trip to the index.
+      **State half landed**: `indexCovers(index, path)` in `state/selectors.ts` — inside the
+      collection root, outside an archive, read off `state.index` with no probe. `SidePanel`'s
+      own copy of that rule is folded onto it rather than left to drift. The per-kind table
+      that reads it is §2's
+- [x] 4.5 Two distinct failures: not yet embedded (404 from the index — fixable by running
       the classifier) versus inside an archive (outside the corpus by construction, knowable
-      client-side without asking). Different sentences
+      client-side without asking). Different sentences.
+      **Landed**: the 400/502/503 mapping in `app.ts` gains one clause — an upstream 404
+      passes through as a 404, since it is a statement about the *requested resource* and the
+      only upstream status the UI owns a sentence for (approved at check-in; the index's other
+      4xx, its 422s, still map to 400). The client dispatches on the status, never on the
+      index's words. The archive case makes no request at all: the fetch arm refuses a `!/`
+      subject, which is how a shared or hand-edited link reaches the sentence at all, since
+      the menu does not offer the action there. Both sentences tested, both falsified
 - [ ] 4.6 **Build the dismissal; it was never built** (D9). This task said "reuse
       `semantic-search`'s dismiss affordance"; the rebase found there is none — the only exit
       from a committed search is emptying the input (`reducer.ts:350-358`), and `FindBar`'s ✕
@@ -253,28 +286,54 @@
       That is what makes the delta's "the same dismissal" literally one control.
       **State half landed with 4.0**: the `clearSubject` action and the private `leaveSubject`
       the `queryText` empty path now delegates to, with both-kinds and end-the-deferral cases
-      in `searchReducer.test.ts`. What remains is the visible control
-- [ ] 4.6a A deferred similarity view gets a banner. `App.tsx:252` derives the banner's text
+      in `searchReducer.test.ts`. What remains is the visible control.
+      **UI half landed**: one `✕ Dismiss` in `noticeBar`, beside the label, gated on the
+      **live** subject rather than the answered one — which is what lets ONE control serve a
+      landed result *and* a deferral, whose stand-in answer is about the folder and would
+      report nothing committed. A second copy in the banner is the two-that-resemble-each-other
+      D9 refuses. Tested over both kinds of subject in one case, and falsified by re-gating it
+      on the answered subject (the deferred case then loses its way out).
+      **Revised here, reversing a Stage A sub-ruling**: the `similar` transition now clears
+      `drafts.queryText` as `navigate` does. Left alone, stale text under a similarity view
+      is a trap — erasing it is the natural gesture for a stale box, and erasing it runs the
+      shared leave-subject rule and destroys the view. Recorded in design D9's margin; one
+      reducer case, falsified
+- [x] 4.6a A deferred similarity view gets a banner. `App.tsx:252` derives the banner's text
       from `state.view.q`, which is `null` for a similarity subject, so today's code would
       defer silently — the one state whose whole purpose is to explain itself. It names the
       model, and it offers only the dismiss: "search names instead" (`App.tsx:1070-1076`,
-      `deferredToName`) needs a phrase, and there is none
-- [ ] 4.6b `labelInputs` (`selectors.ts:106-121`) learns the subject. It reads `forView.q`
+      `deferredToName`) needs a phrase, and there is none.
+      **Landed**: the banner branches on `state.view.subject` rather than on a phrase — "This
+      view is the models similar to “hero.stl”, and the index is …" — and the name-corpus
+      offer is rendered only for a query. Its only offer is the dismiss, which is 4.6's one
+      control in the line directly below. Both halves tested (the offer absent for a model,
+      still present for a phrase)
+- [x] 4.6b `labelInputs` (`selectors.ts:106-121`) learns the subject. It reads `forView.q`
       today, so a similarity result renders a blank label **and** leaves
       `searchHasNoMatches` (`App.tsx:749`) false — which gates every "nothing matched"
       sentence, so an empty similarity result falls through to `Grid`'s bare "Nothing to show
       here." Test the empty case, not only the populated one.
       **Selector half landed with 4.0**: `labelInputs` and `controls` return the `subject`
       rather than a query string, and `searchHasNoMatches` gates on it — so an empty
-      similarity result now reaches the "nothing matched" branch. What remains is the App
-      copy for that branch and for the results label, which still render a *phrase* and are
-      therefore blank for a similarity subject (`labelQuery`, `App.tsx`) — pinned for this
-      task rather than guessed at here
-- [ ] 4.7 No per-result score or z on the tile (`semantic-search` D10): order carries
+      similarity result now reaches the "nothing matched" branch.
+      **Copy half landed**: a populated view labels itself *Models similar to "hero.stl", from
+      across the collection.*; an empty one says *Nothing in the collection is similar to
+      "hero.stl" — the index holds no neighbours for it*, decided ahead of every branch below
+      it, all of which are about a phrase. Falsified by removing that branch: the empty view
+      then renders `Nothing matched ""`, which is the 4.6b failure exactly. Both name the
+      model by base name — the full vpath is in the URL, which is where an identity belongs
+- [x] 4.7 No per-result score or z on the tile (`semantic-search` D10): order carries
       strength. Similarity cosines run 0.85–0.99 against text queries' ~0.1, and the index
       reports no `weak` flag here for that reason — `labelInputs`' `weak`/`capped` terms are
       meaning-query residue and stay absent from a similarity label rather than reading as
-      `false`
+      `false`.
+      **Landed**: the similarity label repeats neither clause, and the residue never reaches
+      the client to be rendered — the server's answer is `{path, entries, poses}` and nothing
+      else, so the index's `scope` dict cannot make `labelInputs.meaning` true. Tested on both
+      sides (the response's key set; no `0.xx` anywhere on screen, none of the meaning
+      clauses). **Visible consequence, deliberate:** the side panel's coverage line ("N of M
+      models here are indexed") does not render for a similarity view — it is a fact about a
+      phrase's scope, and it stays absent for the same reason an inapplicable option does
 
 ## 4b. Thumbnail actions  *(the actions land with §1–3; their posed cases need a meaning grid)*
 
@@ -356,7 +415,9 @@
       phrase-options-do-not-re-ask rule, the URL that names nothing it cannot read, the
       absent name-corpus offer, and 4.6b's empty-result gate. Six of them were falsified
       against broken code before being trusted. Box stays open only for whatever §4.1–4.6b
-      add on top
+      add on top.
+      **§4.1–4.7 added one**: *entering a similarity view empties the draft, and erasing text
+      under one still dismisses* (D9's margin). Falsified against the un-cleared reducer
 - [ ] 5.3 Manual E2E via Playwright MCP on the real library — note tiles respond only to
       PointerEvents, so the secondary press needs `button: 'right'`, and clipboard reads
       need permissions granted upfront or the call hangs on a prompt. Reveal a model from a

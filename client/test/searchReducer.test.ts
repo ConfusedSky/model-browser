@@ -580,6 +580,27 @@ describe('the view has a subject', () => {
     expect(s.view.subject).toEqual({ kind: 'none' })
   })
 
+  it('entering a similarity view empties the draft, and erasing text under one still dismisses', () => {
+    // The draft goes with the subject, as it does on a `navigate`. Text left in
+    // the input under a similarity view relates to nothing on screen, and
+    // erasing it — the natural gesture for a stale box — runs the shared
+    // leave-subject rule and destroys the view. Cleared on entry, the input
+    // says what is true.
+    let s = land(search(start({}, READY), 'dragon'), { entries: [entry('a.stl')] })
+    expect(s.drafts.queryText).toBe('dragon')
+
+    s = land(reducer(s, { type: 'similar', model: '/lib/a.stl' }), { entries: [entry('b.stl')] })
+    expect(s.drafts.queryText).toBe('')
+    expect(s.view.subject).toEqual(like('/lib/a.stl'))
+
+    // …and the delegation keeps a user-visible instance: typing then erasing
+    // under a similarity view leaves it by the one rule, exactly as before.
+    s = run(s, { type: 'queryText', text: 'typed' }, { type: 'queryText', text: '' })
+    expect(pendingRequest(s)).toMatchObject({ kind: 'listing', path: '/lib', q: null })
+    s = land(s, { entries: [] })
+    expect(s.view.subject).toEqual({ kind: 'none' })
+  })
+
   it('two similarity views of one model at different anchors are two questions', () => {
     const here = view({ subject: like('/lib/a.stl') })
     const there: View = { ...here, path: '/lib/sub' }

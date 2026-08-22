@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import type * as THREE from 'three'
 import type { DirEntry, IndexPose, LightingMode } from '../../shared/types'
-import { HttpApiClient } from './api/client'
+import { HttpApiClient, HttpError } from './api/client'
 import EntryMenu from './components/EntryMenu'
 import FindBar from './components/FindBar'
 import Grid from './components/Grid'
@@ -47,7 +47,7 @@ import {
   noticeKinds,
   pendingRequest,
 } from './state/selectors'
-import { sameListing, toUrlView, type Prefs, type View } from './state/view'
+import { sameListing, toUrlView, type Prefs, type Subject, type View } from './state/view'
 import { MeshLru } from './three/lru'
 import { disposeModel, embedded3mfThumbnail, formatOf, geometryBytes, parseModel } from './three/models'
 import { POSE_VERSION } from './three/pose'
@@ -82,6 +82,41 @@ const ACTION_TEXT_MS = 2500
  */
 const NO_ENTRIES: DirEntry[] = []
 const NO_POSES: Record<string, IndexPose> = {}
+/** "Nothing is deferred", as a subject, so the banner branches on one union
+ *  rather than on a null *and* a kind. */
+const NO_SUBJECT: Subject = { kind: 'none' }
+
+/**
+ * A model named for a person rather than for the path bar. A similarity view's
+ * subject is a vpath — `/run/media/…/Kits/Baal/hero.stl` — and the results
+ * label is a single truncating line, so spelling the whole thing there pushes
+ * out the part that says what the view is. The full path is still in the URL,
+ * which is where an identity belongs.
+ */
+function baseName(path: string): string {
+  return path.slice(path.lastIndexOf('/') + 1)
+}
+
+/**
+ * The two ways a model can fail to be a similarity subject, and they are two
+ * sentences because only one of them is fixable (D4/4.5).
+ *
+ * *Not yet embedded* is a 404 from the index: it walked the collection and this
+ * model was not in the cache. Running the classifier over it fixes that, so the
+ * sentence says so.
+ *
+ * *Inside an archive* is knowable here without asking anything —
+ * `classify_stls.py` walks real `.stl` files on disk and archives are unpacked
+ * before classification, so a `zip!/` vpath is never a key on either side. The
+ * menu does not offer the action there (D6), but a shared or hand-edited
+ * `?similar=…!/…` link reaches the fetch layer, and it must not spend a request
+ * to be told something the path already says — nor borrow the other sentence,
+ * which would promise that indexing again would help.
+ */
+const NOT_EMBEDDED =
+  'This model has not been indexed yet, so the index knows no neighbours for it — run the classifier over it and try again.'
+const OUTSIDE_CORPUS =
+  'Models inside an archive are outside what the index covers, so it can find nothing similar to this one.'
 
 /**
  * The options a view runs under.
@@ -315,19 +350,29 @@ export default function App() {
   const label = labelInputs(state)
   // The committed *phrase*, where a phrase is what is being rendered — the
   // side panel's "Results for …", the label, the "nothing matched" sentences.
-  // A similarity subject has none, and Stage 4.6b is what teaches those places
-  // to say what it does have.
+  // A similarity subject has none, and names a model instead: the two are read
+  // separately rather than flattened to one string, because every place below
+  // has a different sentence for each and a blank is not one of them.
   const liveQuery = live.subject.kind === 'query' ? live.subject.text : null
   const labelQuery = label.subject.kind === 'query' ? label.subject.text : null
+  const labelModel = label.subject.kind === 'similar' ? label.subject.model : null
   const scope = state.result?.scope ?? null
   const truncated = state.result?.truncated === true
   const entries = state.result?.entries ?? NO_ENTRIES
   const poses = state.result?.poses ?? NO_POSES
-  // The banner's phrase. A deferred *similarity* view has none, so it shows no
-  // banner at all today — the known gap task 4.6a closes by naming the model
-  // instead; nothing here invents that sentence.
-  const deferred =
-    state.phase !== 'idle' && state.view.subject.kind === 'query' ? state.view.subject.text : null
+  // The subject a deferral is holding — a phrase or a model, and the banner
+  // says a different sentence for each. Read off `view` rather than the answer,
+  // like the projection: while a stand-in listing is on screen the *answer* is
+  // about the folder, and the banner's whole job is to explain the question
+  // that answer is not about.
+  const deferredSubject = state.phase !== 'idle' ? state.view.subject : NO_SUBJECT
+  // Whether there is anything to dismiss, asked of the question the app stands
+  // behind rather than the one it has answered (selectors' third case). That is
+  // what makes ONE control serve both a landed result and a deferral, whose
+  // stand-in answer is about the folder and would report nothing committed —
+  // and a second copy in the banner is exactly the two-that-resemble-each-other
+  // D9 exists to refuse.
+  const dismissable = live.subject.kind !== 'none'
   const error = state.failure?.message ?? null
 
   const showSkeleton = useDelayedFlag(busy(state), SKELETON_DELAY_MS)
@@ -398,12 +443,44 @@ export default function App() {
       })
     }
     if (request.kind === 'similar') {
-      // Not wired yet: task 4.1 gives `ApiClient` the similar call and lands it
-      // here beside the meaning query. Unreachable meanwhile — nothing
-      // dispatches `similar` until the menu that asks for it exists — and if it
-      // were reached before then it would leave `inflight` set with no answer
-      // coming, which is why this names the task rather than trusting anyone to
-      // remember.
+      // Knowable without asking, so it is not asked: an archive-resident model
+      // has no embedding and never will. This fails the question rather than
+      // spending a round trip that would come back 404 and be reported as the
+      // fixable kind.
+      if (request.model.includes('!/')) {
+        dispatch({ type: 'failure', id, forView, message: OUTSIDE_CORPUS })
+        return () => controller.abort()
+      }
+      void api.similar(request.model, request.k, controller.signal).then(
+        // Similarity order is the index's; the client sorts nothing. No scope,
+        // no `weak`, no `capped`: the index publishes none of them for
+        // neighbours, and a landing that invented them would give the label
+        // meaning-query residue to render (4.7).
+        (res) => land({ entries: res.entries, poses: res.poses }),
+        (err: unknown) => {
+          const notEmbedded = err instanceof HttpError && err.status === 404
+          // A 404 means the index *answered* — about this model, not about
+          // itself. Re-probing availability over it would flash the "index is
+          // not there" affordance across a perfectly healthy index, so the
+          // re-probe is kept for the failures that really are availability's.
+          if (!controller.signal.aborted && !notEmbedded) {
+            void api.indexAvailability({ fresh: true }).then(
+              (availability) => dispatch({ type: 'index', availability }),
+              () => {},
+            )
+          }
+          // The status is the contract (`ApiClient.similar`), so the sentence is
+          // chosen from it rather than from the index's own words, which name a
+          // cache the user has never heard of.
+          if (notEmbedded) {
+            if (!controller.signal.aborted) {
+              dispatch({ type: 'failure', id, forView, message: NOT_EMBEDDED })
+            }
+            return
+          }
+          fail(err)
+        },
+      )
       return () => controller.abort()
     }
     if (request.kind === 'meaning') {
@@ -1102,11 +1179,40 @@ export default function App() {
           </button>
         )}
         <p className="min-w-0 truncate text-zinc-400">{labelText}</p>
+        {/* The way out of a committed view, and the ONLY one on screen (D9).
+            Beside the label because that is where the view says what it is
+            about, so what it is about and how to stop being about it sit
+            together. It dispatches the one transition emptying the input
+            delegates to — the same act, not a second implementation of it —
+            and it is rendered for a model exactly as for a phrase, which is
+            the whole reason a similarity view is leaveable at all: there is no
+            text in the input for it to empty. */}
+        {dismissable && (
+          <button
+            type="button"
+            onClick={() => commit({ type: 'clearSubject' })}
+            title="Show this folder's own contents again"
+            className="shrink-0 rounded px-1.5 text-zinc-500 hover:text-zinc-200"
+          >
+            ✕ Dismiss
+          </button>
+        )}
       </div>
       <p className="shrink-0 text-amber-400">{caveat}</p>
     </div>
   )
 
+  // A similarity view says what it is about too, and says it in terms of the
+  // model rather than of a phrase it does not have — the blank this used to
+  // render was the label failing to describe a view that is perfectly
+  // describable. The `weak`/`capped` clauses are deliberately NOT repeated
+  // here: they are meaning-query residue, the index publishes neither for
+  // neighbours, and rendering them off `false` would tell the reader something
+  // was measured and came out negative (4.7). Order carries strength (D10).
+  const similarLabel =
+    labelModel !== null && !searchHasNoMatches
+      ? `Models similar to "${baseName(labelModel)}", from across the collection.`
+      : ''
   const resultsLabel =
     labelQuery !== null && !searchHasNoMatches
       ? `${label.meaning ? 'Meaning matches' : 'Search results'} for "${labelQuery}".${
@@ -1118,7 +1224,7 @@ export default function App() {
           // index's own ceiling, met by a bound the user set (D2).
           label.capped ? ' The index returned fewer than asked for — its cap.' : ''
         }`
-      : ''
+      : similarLabel
   // Counted over `kept`, not the whole listing: the kind option is part of the
   // view's identity — in the URL, in history, shareable — so a notice that
   // counted entries the option is hiding would describe a view nobody is
@@ -1250,9 +1356,22 @@ export default function App() {
                   onClose={closeFind}
                 />
               )}
-              {deferred !== null && (
+              {deferredSubject.kind !== 'none' && (
                 <p className="px-4 pt-1 text-xs text-amber-400">
-                  This view is a meaning search for &ldquo;{deferred}&rdquo;, and the index is{' '}
+                  {/* The banner names the subject it is waiting on, and for a
+                      similarity view that is a model rather than a phrase.
+                      Deriving this from a query string showed no banner at all
+                      for a deferred similarity link — the one state whose whole
+                      purpose is to explain itself, explaining nothing. */}
+                  {deferredSubject.kind === 'query' ? (
+                    <>This view is a meaning search for &ldquo;{deferredSubject.text}&rdquo;</>
+                  ) : (
+                    <>
+                      This view is the models similar to &ldquo;
+                      {baseName(deferredSubject.model)}&rdquo;
+                    </>
+                  )}
+                  , and the index is{' '}
                   {state.index?.state === 'warming' ? 'still starting up' : 'not answering'}. Showing
                   this folder meanwhile —{' '}
                   {/* Only the warming state is polled (the availability effect
@@ -1262,18 +1381,37 @@ export default function App() {
                   {state.index?.state === 'warming'
                     ? 'it runs as soon as the index answers.'
                     : 'it runs if the index comes back, and searching again will look for it.'}{' '}
-                  <button
-                    type="button"
-                    onClick={() => runDeferredByName()}
-                    className="underline hover:text-amber-300"
-                  >
-                    Search names instead
-                  </button>
+                  {/* Offered only for a phrase: substituting the name corpus
+                      needs something to type at it, and a model is not text
+                      (4.6a). A deferred similarity view's only offer is the
+                      dismiss, which is the one control in the line below — a
+                      second copy of it here would be the two-that-resemble-
+                      each-other D9 refuses. */}
+                  {deferredSubject.kind === 'query' && (
+                    <button
+                      type="button"
+                      onClick={() => runDeferredByName()}
+                      className="underline hover:text-amber-300"
+                    >
+                      Search names instead
+                    </button>
+                  )}
                 </p>
               )}
               {noticeBar(resultsLabel, omittedNotice, entries.length > 0)}
               {searchHasNoMatches ? (
-                // An empty truncated search never finished: claiming "no match"
+                // An empty similarity answer is its own sentence, said in terms
+                // of the model it was derived from. It is decided first because
+                // every branch below is about a *phrase*: without it an empty
+                // similarity result rendered `Nothing matched ""` — or, before
+                // the subject reached this gate at all, fell through to Grid's
+                // bare "Nothing to show here" as though the folder were empty.
+                labelModel !== null ? (
+                  <p className="mt-16 text-center text-sm text-zinc-600">
+                    Nothing in the collection is similar to "{baseName(labelModel)}" — the index
+                    holds no neighbours for it.
+                  </p>
+                ) : // An empty truncated search never finished: claiming "no match"
                 // would be false — the walk ran out before covering the tree (D5).
                 truncated ? (
                   <p className="mt-16 text-center text-sm text-zinc-600">

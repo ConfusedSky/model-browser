@@ -4,6 +4,7 @@ import type {
   IndexAvailability,
   SemanticListing,
   SemanticTuning,
+  SimilarListing,
   LightingMode,
   OrbitAxis,
   ThumbGetResponse,
@@ -70,6 +71,20 @@ export interface ApiClient {
     tuning?: SemanticTuning,
     signal?: AbortSignal,
   ): Promise<SemanticListing>
+  /**
+   * A model's nearest neighbours, drawn from the whole indexed collection — no
+   * scope is sent, which is the index's own default stated rather than passed
+   * (entry-context-menu D4).
+   *
+   * Throws `HttpError(404)` when the index has never embedded this model. That
+   * status is the contract, not the message: it is the one failure with a
+   * sentence of its own ("not indexed yet"), and the caller reads the code
+   * rather than sniffing the index's words.
+   *
+   * `signal` aborts it, like its two siblings: a superseded question must stop
+   * rather than merely be ignored on arrival.
+   */
+  similar(model: string, k: number, signal?: AbortSignal): Promise<SimilarListing>
   getThumb(path: string, mtime: number): Promise<ThumbResult>
   putThumb(save: ThumbSave): Promise<void>
 }
@@ -147,6 +162,16 @@ export class HttpApiClient implements ApiClient {
       signal,
     })
     return jsonOrThrow<SemanticListing>(res)
+  }
+
+  async similar(model: string, k: number, signal?: AbortSignal): Promise<SimilarListing> {
+    const res = await this.fetchFn('/api/semantic/similar', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: model, k }),
+      signal,
+    })
+    return jsonOrThrow<SimilarListing>(res)
   }
 
   async complete(prefix: string): Promise<string[]> {

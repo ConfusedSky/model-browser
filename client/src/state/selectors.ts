@@ -11,7 +11,7 @@
  * stands behind, in flight or asserted (`liveView`), which is why the path bar
  * shows a directory the moment it is requested.
  */
-import type { DirEntry } from '../../../shared/types'
+import type { DirEntry, IndexAvailability } from '../../../shared/types'
 import type { SearchKinds, SearchMode, Tuning } from '../lib/searchOptions'
 import { liveView, type SearchState } from './reducer'
 import { requestOf, type Request, type Subject, type View } from './view'
@@ -104,6 +104,31 @@ export function byKind(state: SearchState): DirEntry[] {
 export function noticeKinds(state: SearchState): SearchKinds {
   const v = state.result?.forView
   return v !== undefined && v.subject.kind === 'query' && v.mode === 'name' ? v.kinds : 'both'
+}
+
+/**
+ * Whether the index could plausibly answer about `path` — it is inside the
+ * collection the index covers, and it is not inside an archive.
+ *
+ * The state half of the per-kind availability table (D6): the menu asks this
+ * rather than deriving the rule beside the side panel's copy of it, and neither
+ * probes the index per tile. Optimism is the design (D4/4.4): asking about every
+ * tile in a 500-tile grid to grey out an item nobody has opened is not a trade
+ * worth making, so the affordance is offered wherever it *could* work and the
+ * failure is explained when it comes.
+ *
+ * A prefix check is the right approximation: the server still compares resolved
+ * real paths — the library lives on removable media and a remount moves the
+ * mount point without changing the tree — so a disagreement costs the affordance
+ * rather than producing a wrong answer.
+ *
+ * Availability itself is `index.state`, which callers gate on separately: this
+ * answers "is this path in range", not "is the index up".
+ */
+export function indexCovers(index: IndexAvailability | null, path: string): boolean {
+  const root = index?.collectionRoot
+  if (root === undefined || path.includes('!/')) return false
+  return path === root || path.startsWith(`${root}/`)
 }
 
 /**

@@ -281,7 +281,25 @@ rather than re-argued.
 side panel's controls are meaning-query controls — so a URL field for it would name a
 distinction no view makes. If it ever becomes user-settable it becomes a view field then and
 the gate carries it like tuning. The index's `pool` parameter is left at the server's own
-default for the same reason.
+default for the same reason: `similar()` sends `path` and `k` and nothing else, so the value
+in force is whatever `serve_api.py --pool` was started with — the same pooling a meaning query
+gets when the panel leaves it alone. Stating it is the whole of task 4.2; there is no code for
+it beyond the absence.
+
+*Verified against the index's source while implementing 4.1* (`docs/api/surface.md`
+§`POST /similar` and `src/api.py:404-441`, read with the service down). Every claim in this
+section holds. Two facts the surface doc states less prominently, recorded so the next reader
+inherits them rather than rediscovering them:
+
+- **The 404 is not the only refusal.** `/similar` also answers **422** for a virtual (`!/`)
+  path and for a `path` naming more than one model. Both are refusals to fix rather than
+  "this model is not embedded", which is why the server maps 404 alone through as a 404 and
+  leaves every other 4xx on 400 — reading a 422 as the fixable kind would tell the user to run
+  the classifier over a path it can never hold.
+- **An empty answer is an answer.** A scope containing only the query model returns
+  `{results: []}` rather than an error, because a model is excluded from its own ranking (it
+  scores 1.0 and skews the z). So "no neighbours" is an ordinary landing, which is what
+  4.6b's empty-result sentence is for.
 
 *The value is 16* (`SIMILAR_K`, `state/view.ts`, landed with the subject). Chosen rather
 than inherited from either end: the index's own default is 10 and this app's text-query
@@ -368,6 +386,19 @@ built here:
 
 This is scope the change always had; the rebase only discovered that the thing it planned to
 reuse was never built.
+
+*Revised while implementing 4.1–4.6, and it reverses a sub-ruling taken at Stage A.* Stage A
+decided the `similar` transition should leave `drafts.queryText` alone, on the grounds that
+the draft is the user's text and no transition should throw it away unasked. That is wrong
+here, and the reason is this section's own rule. Text left in the input under a similarity
+view relates to nothing on screen — it was typed at a search the view is no longer about —
+and erasing it is the natural gesture for a stale box. But erasing it runs `leaveSubject`,
+because the empty-input path delegates there. So the tidying gesture silently destroys the
+view, and the delegation that makes "one dismissal" true is what makes the trap possible.
+`similar` therefore clears the draft on entry, exactly as `navigate` does: the input then says
+what is true — nothing textual is committed — and typing-then-erasing still dismisses by the
+one rule, so the delegation keeps a user-visible instance rather than becoming unreachable
+machinery. One line in the reducer, one case in the unit suite.
 
 ### D5: No OS integration
 

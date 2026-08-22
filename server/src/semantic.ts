@@ -194,30 +194,21 @@ export const TOP = 60
 /** What shapes a query beyond the phrase and the scope — the wire shape. */
 export type Tuning = SemanticTuning
 
-export async function query(
-  text: string,
-  scope: string | null,
-  tuning: Tuning = {},
-): Promise<QueryResult> {
+/**
+ * POST one of the index's scoring routes, with the error contract both of them
+ * share. One copy, because the caller's status mapping keys off `upstreamStatus`
+ * (`app.ts`) and two routes classifying the same upstream status differently is
+ * exactly the drift that mapping exists to prevent.
+ */
+async function askIndex(route: string, body: unknown): Promise<unknown> {
   const base = baseUrl()
   if (base === null) throw new IndexError('absent', 'semantic index is not configured')
   let res: Response
   try {
-    res = await fetch(`${base}/query`, {
+    res = await fetch(`${base}${route}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        text,
-        path: scope ?? undefined,
-        // A floor and a count are alternatives: the index ignores `top` when
-        // `min_score` is set, so sending both would state a relationship that
-        // does not exist (D1).
-        ...(tuning.minScore !== undefined
-          ? { min_score: tuning.minScore }
-          : { top: tuning.top ?? TOP }),
-        ...(tuning.raw === true ? { raw: true } : {}),
-        ...(tuning.pool !== undefined ? { pool: tuning.pool } : {}),
-      }),
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(QUERY_TIMEOUT_MS),
     })
   } catch {
@@ -230,14 +221,68 @@ export async function query(
     throw new IndexError('warming', 'the semantic index is still loading')
   }
   if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { detail?: unknown } | null
-    const detail = typeof body?.detail === 'string' ? body.detail : `index error ${res.status}`
+    const detail = (await res.json().catch(() => null)) as { detail?: unknown } | null
+    const message =
+      typeof detail?.detail === 'string' ? detail.detail : `index error ${res.status}`
     // The index answered, so it is up: this is a refused request, not an
     // unavailable service. Its status travels with the error so the caller can
     // report it as what it is rather than as availability.
-    throw new IndexError('ready', detail, res.status)
+    throw new IndexError('ready', message, res.status)
   }
-  return (await res.json()) as QueryResult
+  return res.json()
+}
+
+export async function query(
+  text: string,
+  scope: string | null,
+  tuning: Tuning = {},
+): Promise<QueryResult> {
+  return (await askIndex('/query', {
+    text,
+    path: scope ?? undefined,
+    // A floor and a count are alternatives: the index ignores `top` when
+    // `min_score` is set, so sending both would state a relationship that
+    // does not exist (D1).
+    ...(tuning.minScore !== undefined
+      ? { min_score: tuning.minScore }
+      : { top: tuning.top ?? TOP }),
+    ...(tuning.raw === true ? { raw: true } : {}),
+    ...(tuning.pool !== undefined ? { pool: tuning.pool } : {}),
+  })) as QueryResult
+}
+
+/** What `/similar` answers with. No `weak` and no `truncated`: the index
+ *  publishes neither for neighbours, and inventing them here would hand the UI
+ *  a flag that can only ever read `false` (D4/4.7). */
+export interface SimilarResult {
+  results: Hit[]
+}
+
+/**
+ * A model's nearest neighbours, drawn from the whole indexed collection.
+ *
+ * **No `scope` is sent, deliberately** (D4/4.1a). The index's `scope` is
+ * optional and defaults to the collection, so this states that default rather
+ * than passing a value — and it is where this differs from meaning search, which
+ * *is* rooted at the browsed directory. A phrase is a question about a place
+ * ("dragons in this kit"); "more like this one" is not, and scoped to the
+ * model's own folder it would mostly return that kit's other parts, which is the
+ * one answer the user already has on screen.
+ *
+ * `pool` is likewise left at the server's own default, for the reason `k` is not
+ * a URL param: nothing on screen sets it, so sending a value would state a
+ * choice no view makes.
+ *
+ * A 404 travels back as an `IndexError` carrying that status: the index has
+ * never embedded this model, which is a fact about the model rather than about
+ * availability, and the only upstream status the UI owns a distinct sentence
+ * for.
+ */
+export async function similar(path: string, k?: number): Promise<SimilarResult> {
+  return (await askIndex('/similar', {
+    path,
+    ...(k !== undefined ? { k } : {}),
+  })) as SimilarResult
 }
 
 /**

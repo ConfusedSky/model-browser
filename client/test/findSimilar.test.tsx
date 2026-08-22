@@ -1,0 +1,296 @@
+// @vitest-environment happy-dom
+//
+// A similarity view through App: what it asks for, what it says it is, the one
+// way out of it, and the two ways it can fail.
+//
+// Every case here enters through a link rather than through a menu, and that is
+// not a shortcut: the menu that dispatches `similar` is a separate stage, while
+// the view itself is reachable, shareable and reloadable by URL by design (D4).
+// The dispatch → ask → land → URL chain is pinned from the reducer end in
+// searchReducer.test.ts; what these pin is the half that lives in App.
+import { act } from 'react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { DirListing } from '../../shared/types'
+import {
+  click,
+  container,
+  dir,
+  indexAvailability,
+  labels,
+  listDir,
+  model,
+  mountAppAtCurrentUrl,
+  pathInput,
+  pressEnter,
+  searchInput,
+  settle,
+  similar,
+  tiles,
+  type,
+  unmountApp,
+} from './appHarness'
+import {
+  setSearchKinds,
+  setSearchMode,
+  setSearchTuning,
+  TUNING_DEFAULTS,
+} from '../src/lib/searchOptions'
+import { SIMILAR_K } from '../src/state/view'
+
+vi.mock('../src/api/client', async () => (await import('./appHarness')).apiClientModule())
+vi.mock('../src/three/renderer', async (importOriginal) =>
+  (await import('./appHarness')).rendererModule(importOriginal),
+)
+
+const NESTED: DirListing = { path: '/models', entries: [dir('Alpha'), model('widget.stl')] }
+const HERO = '/models/Kits/Baal/hero.stl'
+const LINK = `/?path=/models&similar=${encodeURIComponent(HERO)}`
+
+const NEIGHBOURS = {
+  path: '/models',
+  entries: [model('Kits/Baal/base.stl'), model('Kits/Other/wing.stl')],
+  poses: {},
+}
+
+const READY = { state: 'ready', collectionRoot: '/models', covers: ['stl'] }
+
+/** The one dismiss control, wherever the view is about something (D9). */
+function dismissButton(): HTMLButtonElement | undefined {
+  return Array.from(container.querySelectorAll<HTMLButtonElement>('main button')).find((b) =>
+    b.textContent?.includes('Dismiss'),
+  )
+}
+function nameButton(): HTMLButtonElement | undefined {
+  return Array.from(container.querySelectorAll<HTMLButtonElement>('main button')).find((b) =>
+    b.textContent?.includes('Search names instead'),
+  )
+}
+/** An HttpError as `ApiClient` throws it — the status is the contract. */
+async function httpError(status: number, message: string): Promise<Error> {
+  const { HttpError } = (await import('../src/api/client')) as unknown as {
+    HttpError: new (status: number, message: string) => Error
+  }
+  return new HttpError(status, message)
+}
+
+beforeEach(() => {
+  localStorage.clear()
+  setSearchMode('name')
+  setSearchKinds('both')
+  setSearchTuning({ ...TUNING_DEFAULTS })
+})
+afterEach(() => unmountApp())
+
+describe('a similarity view', () => {
+  it('asks the index for the model’s neighbours and presents them in place of the listing', async () => {
+    indexAvailability.mockResolvedValue(READY)
+    similar.mockResolvedValue(NEIGHBOURS)
+    await mountAppAtCurrentUrl(LINK, NESTED)
+    await settle()
+
+    // The model, the module constant, and the abort handle — the third asserted
+    // rather than ignored, so a superseded question can be stopped rather than
+    // merely dropped on arrival.
+    expect(similar).toHaveBeenCalledWith(HERO, SIMILAR_K, expect.any(AbortSignal))
+    // No listing was walked for its sake: the neighbours ARE the grid.
+    expect(listDir).not.toHaveBeenCalled()
+    expect(labels()).toEqual(['base.stl', 'wing.stl'])
+    expect(container.textContent).toContain('Models similar to "hero.stl"')
+  })
+
+  it('shows no score, no z, and none of the meaning query’s residue', async () => {
+    // 4.7 / D10: order carries strength. The index publishes no `weak` for
+    // neighbours at all, so a label rendering `weak: false` would report a
+    // measurement that was never taken.
+    indexAvailability.mockResolvedValue(READY)
+    similar.mockResolvedValue(NEIGHBOURS)
+    await mountAppAtCurrentUrl(LINK, NESTED)
+    await settle()
+
+    expect(container.textContent).not.toMatch(/0\.\d\d/)
+    expect(container.textContent).not.toContain('Nothing stood out')
+    expect(container.textContent).not.toContain('returned fewer than asked for')
+    expect(container.textContent).not.toContain('Meaning matches')
+    for (const tile of tiles()) expect(tile.textContent).not.toMatch(/\d\.\d/)
+  })
+
+  it('names the model, the place and the toggle in the URL — and, when it advances, drops what it never read', async () => {
+    // The link end of "a similarity URL carries nothing it does not read": the
+    // reader's own options are non-default here and the view names none of
+    // them, because none of them selects anything within it. The write half is
+    // the dismissal below — the one writer serializes the WHOLE view, so the
+    // similarity params leave together with the options that were never in it.
+    setSearchMode('meaning')
+    setSearchKinds('folders')
+    setSearchTuning({ ...TUNING_DEFAULTS, pool: 'max', top: 5 })
+    indexAvailability.mockResolvedValue(READY)
+    similar.mockResolvedValue(NEIGHBOURS)
+    await mountAppAtCurrentUrl(`${LINK}&flat=1`, NESTED)
+    await settle()
+
+    // Still the link's own text: `commitUrl` declines a write the address bar
+    // makes redundant, and the reader's options were never in it to be dropped.
+    expect(location.search).toContain('similar=')
+    expect(location.search).toContain('path=/models')
+    expect(location.search).toContain('flat=1')
+    for (const param of ['q=', 'mode=', 'kinds=', 'nofolders=', 'top=', 'pool=', 'min=']) {
+      expect(location.search).not.toContain(param)
+    }
+
+    listDir.mockResolvedValue({ path: '/models', entries: [dir('Alpha')] })
+    const before = history.length
+    await click(dismissButton()!)
+    await settle()
+
+    expect(location.search).not.toContain('similar=')
+    for (const param of ['q=', 'mode=', 'kinds=', 'top=', 'pool=']) {
+      expect(location.search).not.toContain(param)
+    }
+    // The toggle is the user's and survives the view it was set on (R4).
+    expect(location.search).toContain('flat=1')
+    // One entry, so Back returns to the neighbours rather than half-way.
+    expect(history.length).toBe(before + 1)
+  })
+
+  it('is left by the same one control that leaves a search', async () => {
+    // D9's whole point: ONE control, rendered wherever the view is about
+    // something, dispatching the one transition emptying the input delegates
+    // to. Two controls that resemble each other is the thing it refuses.
+    indexAvailability.mockResolvedValue(READY)
+    similar.mockResolvedValue(NEIGHBOURS)
+    await mountAppAtCurrentUrl(LINK, NESTED)
+    await settle()
+    expect(dismissButton()).toBeDefined()
+
+    listDir.mockResolvedValue({ path: '/models', entries: [dir('Alpha')] })
+    await click(dismissButton()!)
+    await settle()
+    expect(labels()).toEqual(['Alpha'])
+    // Gone, because there is nothing left to dismiss.
+    expect(dismissButton()).toBeUndefined()
+
+    // The same control, over a committed query — the model case is not a
+    // second affordance beside a text one.
+    listDir.mockResolvedValue({ path: '/models', entries: [model('widget.stl')] })
+    await type(searchInput(), 'widget')
+    await pressEnter(searchInput())
+    await settle()
+    expect(dismissButton()).toBeDefined()
+    expect(location.search).toContain('q=widget')
+
+    listDir.mockResolvedValue({ path: '/models', entries: [dir('Alpha')] })
+    await click(dismissButton()!)
+    await settle()
+    expect(location.search).not.toContain('q=')
+    expect(dismissButton()).toBeUndefined()
+  })
+
+  it('an empty answer says what it is, in terms of the model it came from', async () => {
+    // 4.6b. Two failures at once before the subject reached these places: a
+    // blank label, and an empty result falling through to Grid's bare "Nothing
+    // to show here" as though the folder were the empty thing.
+    indexAvailability.mockResolvedValue(READY)
+    similar.mockResolvedValue({ ...NEIGHBOURS, entries: [] })
+    await mountAppAtCurrentUrl(LINK, NESTED)
+    await settle()
+
+    expect(container.textContent).toContain('Nothing in the collection is similar to "hero.stl"')
+    expect(container.textContent).not.toContain('Nothing to show here')
+    // Not the phrase sentence with an empty phrase in it, either.
+    expect(container.textContent).not.toContain('Nothing matched ""')
+    // And still leaveable — an empty view is the one that most needs a way out.
+    expect(dismissButton()).toBeDefined()
+  })
+
+  it('a deferred similarity view names the model, and its only offer is the dismiss', async () => {
+    // 4.6a. Deriving the banner from a query string showed no banner at all
+    // here — the one state whose whole purpose is to explain itself. And
+    // "search names instead" needs a phrase: there is none, so it is absent
+    // rather than running an empty search.
+    indexAvailability.mockResolvedValue({ state: 'warming', elapsed: 4 })
+    await mountAppAtCurrentUrl(LINK, NESTED)
+    await settle()
+
+    expect(similar).not.toHaveBeenCalled()
+    expect(container.textContent).toContain('models similar to')
+    expect(container.textContent).toContain('hero.stl')
+    expect(container.textContent).toContain('still starting up')
+    expect(nameButton()).toBeUndefined()
+    // The one control serves the banner too: the view is still about the model
+    // even though the grid on screen is the folder standing in for it.
+    expect(dismissButton()).toBeDefined()
+    // The link keeps naming what it named while it waits.
+    expect(location.search).toContain('similar=')
+  })
+
+  it('a deferred query still gets its name-corpus offer', async () => {
+    // The other half of the same branch: absent for a model is a decision, not
+    // the offer having been deleted.
+    indexAvailability.mockResolvedValue({ state: 'warming', elapsed: 4 })
+    await mountAppAtCurrentUrl('/?path=/models&flat=1&q=demon&mode=meaning', NESTED)
+    await settle()
+    expect(nameButton()).toBeDefined()
+  })
+
+  it('a model the index has not embedded is explained as not indexed yet — without a re-probe', async () => {
+    indexAvailability.mockResolvedValue(READY)
+    similar.mockRejectedValue(await httpError(404, '/models/Kits/Baal/hero.stl is not in the cache'))
+    await mountAppAtCurrentUrl(LINK, NESTED)
+    await settle()
+
+    expect(container.textContent).toContain('has not been indexed yet')
+    expect(container.textContent).toContain('run the classifier')
+    // The index's own words name a cache the user has never heard of, so the
+    // sentence is chosen from the status instead.
+    expect(container.textContent).not.toContain('not in the cache')
+    // A 404 means the index ANSWERED. Re-probing over it would flash the
+    // "index is not there" affordance across a perfectly healthy index. The
+    // forced re-read is the only caller passing `fresh` — the ordinary
+    // availability effect, which runs at mount, passes nothing — so this is
+    // asked of the argument rather than of the call count.
+    expect(indexAvailability).toHaveBeenCalled()
+    expect(indexAvailability).not.toHaveBeenCalledWith({ fresh: true })
+  })
+
+  it('a model inside an archive is a different sentence, and costs no request', async () => {
+    // Knowable from the path: the classifier walks real files on disk, and
+    // archives are unpacked before it runs, so a `zip!/` vpath is never a key
+    // on either side. Borrowing the other sentence would promise that indexing
+    // again would help.
+    indexAvailability.mockResolvedValue(READY)
+    const inZip = '/models/Kits/kit.zip!/parts/lid.stl'
+    await mountAppAtCurrentUrl(`/?path=/models&similar=${encodeURIComponent(inZip)}`, NESTED)
+    await settle()
+
+    expect(similar).not.toHaveBeenCalled()
+    expect(container.textContent).toContain('inside an archive are outside what the index covers')
+    expect(container.textContent).not.toContain('has not been indexed yet')
+  })
+
+  it('a superseded similarity question is stopped, not merely ignored', async () => {
+    indexAvailability.mockResolvedValue(READY)
+    let signal: AbortSignal | undefined
+    similar.mockImplementation(
+      (_m: string, _k: number, s: AbortSignal) =>
+        new Promise(() => {
+          signal = s
+        }),
+    )
+    await mountAppAtCurrentUrl(LINK, NESTED)
+    await settle()
+    expect(signal?.aborted).toBe(false)
+
+    // Away, the way a user leaves a view they are tired of waiting for.
+    listDir.mockResolvedValue({ path: '/models/Alpha', entries: [dir('Beta')] })
+    await act(async () => {
+      pathInput().focus()
+    })
+    await type(pathInput(), '/models/Alpha')
+    await pressEnter(pathInput())
+    await settle()
+
+    expect(signal?.aborted).toBe(true)
+    expect(labels()).toEqual(['Beta'])
+    expect(location.search).not.toContain('similar=')
+  })
+})

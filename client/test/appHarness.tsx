@@ -29,6 +29,10 @@ export const indexAvailability = vi.fn().mockResolvedValue({ state: 'absent' })
 // the camera and axis a pose produced, not just that pixels appeared.
 export const renderThumbnail = vi.fn(() => Promise.resolve(new Blob()))
 export const semanticSearch = vi.fn()
+// A model's neighbours. Shared like `semanticSearch`, and left unconfigured by
+// default so a test that does not opt in fails loudly rather than silently
+// resolving `undefined`.
+export const similar = vi.fn()
 
 /** A minimal valid binary STL (one facet) — enough for parseModel to build a real mesh. */
 export function tinyStl(): ArrayBuffer {
@@ -44,7 +48,18 @@ export function tinyStl(): ArrayBuffer {
 // module is the seam — there is no prop to inject a fake through.
 export function apiClientModule(): Record<string, unknown> {
   return {
-    HttpError: class extends Error {},
+    // Carries `status`, because it is the contract for at least one failure: a
+    // 404 from the similar call means "this model is not embedded", and the app
+    // chooses its sentence from the code rather than from the index's words. A
+    // statusless stub would let that dispatch pass by accident.
+    HttpError: class extends Error {
+      constructor(
+        readonly status: number,
+        message: string,
+      ) {
+        super(message)
+      }
+    },
     HttpApiClient: class {
       listDir = listDir
       complete = vi.fn().mockResolvedValue([])
@@ -53,6 +68,7 @@ export function apiClientModule(): Record<string, unknown> {
       putThumb = putThumb
       indexAvailability = indexAvailability
       semanticSearch = semanticSearch
+      similar = similar
     },
   }
 }
@@ -203,6 +219,7 @@ export async function unmountApp(): Promise<void> {
   // mount, so a test has to be able to configure it *before* mounting.
   indexAvailability.mockResolvedValue({ state: 'absent' })
   semanticSearch.mockReset()
+  similar.mockReset()
   renderThumbnail.mockClear()
   await act(async () => {
     root?.unmount()

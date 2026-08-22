@@ -348,7 +348,18 @@ export function reducer(state: SearchState, action: Action): SearchState {
         subject: { kind: 'similar', model: action.model },
         model: null,
       }
-      return askCommitted(state, view, 'user')
+      // The draft goes with it, as it does on a `navigate`. Text left in the
+      // input under a similarity view is a trap: it relates to nothing on
+      // screen, and erasing it — the natural gesture for a stale box — runs the
+      // shared leave-subject rule and destroys the view. Cleared here, the input
+      // says what is true (nothing textual is committed), and typing then
+      // erasing still dismisses by that one rule, so the delegation keeps a
+      // user-visible instance rather than becoming unreachable.
+      return askCommitted(
+        { ...state, drafts: { ...state.drafts, queryText: '' } },
+        view,
+        'user',
+      )
     }
 
     case 'clearSubject':
