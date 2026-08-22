@@ -30,9 +30,17 @@ export function dest(state: SearchState): string {
  * counts — that is the window where the availability probe has not answered
  * and *nothing at all* has been requested — while a deferral standing behind a
  * placeholder does not: the grid is showing something true.
+ *
+ * A failed stand-in ends the debt too, and that is not a nicety: nothing is in
+ * flight, so nothing was going to clear it, and the skeleton this drives
+ * replaces the grid — the error, the banner and the way out all sat behind a
+ * spinner that would never stop.
  */
 export function busy(state: SearchState): boolean {
-  return state.inflight !== null || (state.phase === 'deferred' && state.result === null)
+  return (
+    state.inflight !== null ||
+    (state.phase !== 'idle' && state.result === null && state.failure === null)
+  )
 }
 
 /** The values the search controls display: the question in flight if there is
@@ -65,24 +73,33 @@ export function pendingRequest(
   return f === null ? null : { ...requestOf(f.view), id: f.id, forView: f.asked }
 }
 
-/** The landed entries the kind option leaves. It restricts search results
- *  only — a plain listing is left alone — and it reads the *answered* view, so
- *  flipping it mid-flight cannot filter a grid by a rule its results never ran
- *  under. */
+/**
+ * The landed entries the kind option leaves. It restricts *name* search results
+ * only, which is the same two-dimensional gate `serializeView` applies — a
+ * committed query, under the mode that reads the option — and it has to be the
+ * same one, or the URL and the grid disagree about whether the option is even
+ * in force. It was not: the option is sticky and the panel hides its control
+ * outside name mode, so a `folders` left over from a name search rode into a
+ * meaning view and emptied the grid ("No folders matched") over an option with
+ * no control to undo it and, once the URL stopped naming it, nothing on screen
+ * to explain it. Reads the *answered* view, so flipping it mid-flight cannot
+ * filter a grid by a rule its results never ran under.
+ */
 export function byKind(state: SearchState): DirEntry[] {
   const r = state.result
   if (r === null) return []
-  const { q, kinds } = r.forView
-  if (q === null || kinds === 'both') return r.entries
+  const { q, kinds, mode } = r.forView
+  if (q === null || mode !== 'name' || kinds === 'both') return r.entries
   return r.entries.filter((e) => (kinds === 'folders' ? e.kind !== 'model' : e.kind === 'model'))
 }
 
-/** Which kinds the omitted-entries notice counts by — 'both' over a plain
- *  listing, where the option selects nothing and counting by it produced a
- *  sentence with no parts. */
+/** Which kinds the omitted-entries notice counts by — 'both' wherever the
+ *  option selects nothing (a plain listing, or a meaning search: `byKind`'s
+ *  gate, which is `serializeView`'s), where counting by it produced a sentence
+ *  with no parts. */
 export function noticeKinds(state: SearchState): SearchKinds {
   const v = state.result?.forView
-  return v !== undefined && v.q !== null ? v.kinds : 'both'
+  return v !== undefined && v.q !== null && v.mode === 'name' ? v.kinds : 'both'
 }
 
 /** Everything the results label is built from, all of it from the answer. */

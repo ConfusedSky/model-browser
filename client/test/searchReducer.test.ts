@@ -72,7 +72,7 @@ describe('the reducer, finding by finding', () => {
   it('a navigation cancels a deferred meaning query', () => {
     let s = run(start({}, WARMING), { type: 'setMode', mode: 'meaning' })
     s = land(search(s, 'dragon'), { entries: [entry('a.stl')] })
-    expect(s.phase).toBe('deferred')
+    expect(s.phase).toEqual({ deferred: 'user' })
 
     s = land(reducer(s, { type: 'navigate', path: '/other', prefs: PREFS }))
     expect(s.phase).toBe('idle')
@@ -193,7 +193,7 @@ describe('the reducer, finding by finding', () => {
     let s = run(start({}, null), { type: 'setMode', mode: 'meaning' })
     s = search(s, 'dragon')
     expect(pendingRequest(s)).toBeNull()
-    expect(s.phase).toBe('deferred')
+    expect(s.phase).toEqual({ deferred: 'user' })
     expect(busy(s)).toBe(true)
 
     // The probe's answer decides, and it is state — there is no closure left
@@ -303,7 +303,7 @@ describe('the reducer, finding by finding', () => {
 
     s = reducer(s, { type: 'setMode', mode: 'meaning' })
     // The view names the meaning search and the banner explains the wait…
-    expect(s.phase).toBe('deferred')
+    expect(s.phase).toEqual({ deferred: 'user' })
     expect(s.view).toMatchObject({ q: 'dragon', mode: 'meaning' })
     // …rather than a name search running in its place.
     expect(pendingRequest(s)).toMatchObject({ kind: 'listing', q: null, flat: false })
@@ -350,6 +350,106 @@ describe('the reducer, finding by finding', () => {
     expect(s.inflight?.view).toMatchObject({ ...own, path: '/other', q: null })
     s = land(s, { entries: [] })
     expect(s.view).toMatchObject({ ...own, path: '/other', q: null })
+  })
+  it('a deferral fires under the provenance that made it', () => {
+    // A restored deferral resumes a restoration: the entry the link already
+    // sits on is the one the answer belongs to, so the fire must replace it.
+    // Hardcoding 'user' here pushed a second entry over a deep link whose URL
+    // was not already byte-identical to what the serializer writes — every
+    // link written before an option's gate existed, for one — turning a wait
+    // for the index into a Back that goes nowhere.
+    let s = run(start({}, WARMING), {
+      type: 'restore',
+      view: view({ q: 'dragon', mode: 'meaning' }),
+    })
+    expect(s.phase).toEqual({ deferred: 'restore' })
+    s = reducer(s, { type: 'index', availability: READY })
+    expect(s.inflight).toMatchObject({ source: 'restore' })
+
+    // …and a deferral the user typed still pushes.
+    let u = run(start({}, WARMING), { type: 'setMode', mode: 'meaning' })
+    u = search(u, 'dragon')
+    expect(u.phase).toEqual({ deferred: 'user' })
+    u = reducer(u, { type: 'index', availability: READY })
+    expect(u.inflight).toMatchObject({ source: 'user' })
+  })
+
+  it('a stand-in that fails stops the app owing an answer', () => {
+    // Nothing is in flight afterwards, so nothing was going to clear the debt:
+    // `busy` drives the skeleton, and the skeleton replaces the grid — the
+    // error, the banner and the "search names instead" way out all sat behind
+    // a spinner that would never stop.
+    let s = run(start({}, WARMING), { type: 'setMode', mode: 'meaning' })
+    s = search(s, 'dragon')
+    const f = s.inflight
+    if (f === null) throw new Error('the stand-in should be in flight')
+    s = reducer(s, { type: 'failure', id: f.id, forView: f.asked, message: 'boom' })
+
+    expect(s.inflight).toBeNull()
+    expect(s.phase).toEqual({ deferred: 'user' })
+    expect(s.failure?.message).toBe('boom')
+    expect(busy(s)).toBe(false)
+  })
+
+  it('a fresh deferral does not inherit the last question\'s failure', () => {
+    // Otherwise `busy` reads a stale message as this deferral's own answer and
+    // the wait renders as a finished, failed one.
+    let s = start({}, WARMING)
+    s = reducer(s, { type: 'navigate', path: '/gone', prefs: PREFS })
+    const f = s.inflight
+    if (f === null) throw new Error('the listing should be in flight')
+    s = reducer(s, { type: 'failure', id: f.id, forView: f.asked, message: 'boom' })
+    expect(s.failure).not.toBeNull()
+
+    s = run(s, { type: 'setMode', mode: 'meaning' })
+    s = search(s, 'dragon')
+    expect(s.failure).toBeNull()
+    expect(busy(s)).toBe(true)
+  })
+  it('a Back onto the answer on screen drops the error that was not about it', () => {
+    // The failure belonged to the question the user left. Backing onto a view
+    // whose answer is already up patches rather than re-asks, so nothing was
+    // going to land and clear it: the grid showed /lib while the path bar went
+    // on reporting the folder that failed, for the rest of the session.
+    let s = land(reducer(start(), { type: 'restore', view: view() }), {
+      entries: [entry('a.stl')],
+    })
+    const here = s.view
+    s = reducer(s, { type: 'navigate', path: '/gone', prefs: PREFS })
+    const f = s.inflight
+    if (f === null) throw new Error('the listing should be in flight')
+    s = reducer(s, { type: 'failure', id: f.id, forView: f.asked, message: 'boom' })
+    expect(s.failure?.message).toBe('boom')
+
+    s = reducer(s, { type: 'restore', view: { ...here, model: '/lib/a.stl' } })
+    expect(s.failure).toBeNull()
+    // …and it really was the patch branch: nothing was re-asked.
+    expect(s.inflight).toBeNull()
+    expect(s.view.model).toBe('/lib/a.stl')
+  })
+
+  it('the kind option restricts only the mode whose URL names it', () => {
+    // `serializeView` gates each option on its mode (7a440aa); the filter has
+    // to use the same gate or the two disagree about whether the option is in
+    // force. It did: `kinds` is sticky and the panel hides its control outside
+    // name mode, so a 'folders' left over from a name search rode into a
+    // meaning view and emptied the grid — over an option with no control to
+    // undo it and, once the URL stopped naming it, nothing on screen to explain
+    // it.
+    const v = view({ q: 'dragon', mode: 'meaning', kinds: 'folders' })
+    let s = land(run(start({}, READY), { type: 'restore', view: v }), {
+      entries: [entry('a.stl'), entry('b.stl')],
+    })
+    expect(urlOf(s)).not.toContain('kinds')
+    expect(byKind(s)).toHaveLength(2)
+
+    // Under the mode that does name it, it restricts as it always did.
+    const named = view({ q: 'dragon', mode: 'name', kinds: 'folders' })
+    let n = land(run(start({}, READY), { type: 'restore', view: named }), {
+      entries: [entry('a.stl'), entry('sets', 'dir')],
+    })
+    expect(urlOf(n)).toContain('kinds=folders')
+    expect(byKind(n).map((e) => e.name)).toEqual(['sets'])
   })
 })
 

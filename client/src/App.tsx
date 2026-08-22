@@ -174,10 +174,14 @@ export default function App() {
    * keystroke.
    */
   const urlIntent = useRef<{ replace?: boolean; state?: unknown } | null>(null)
-  /** The last view the projection wrote, as it wrote it. The URL can run ahead
-   *  of the view — the browser rewinds it on Back while the restoration is
-   *  still in flight — so "has anything been asserted since" is asked of what
-   *  we projected, never of what the address bar currently says. */
+  /** The view as of the last time the projection looked — updated on every
+   *  state change, written or not. The URL can run ahead of the view (the
+   *  browser rewinds it on Back while the restoration is still in flight), so
+   *  "did this dispatch advance the view" is asked of what the view was, never
+   *  of what the address bar currently says. Tracking only the writes made this
+   *  go stale the other way: a Back that *patched* the view, or a bridge-4 URL
+   *  rewrite, moved the URL without a projection, and re-asserting the last
+   *  view we happened to have written then read as a no-op. */
   const projectedRef = useRef<string | null>(null)
   const commit = useCallback(
     (action: Action, opts: { replace?: boolean; state?: unknown } = {}): void => {
@@ -245,7 +249,7 @@ export default function App() {
   const truncated = state.result?.truncated === true
   const entries = state.result?.entries ?? NO_ENTRIES
   const poses = state.result?.poses ?? NO_POSES
-  const deferred = state.phase === 'deferred' ? state.view.q : null
+  const deferred = state.phase !== 'idle' ? state.view.q : null
   const error = state.failure?.message ?? null
 
   const showSkeleton = useDelayedFlag(busy(state), SKELETON_DELAY_MS)
@@ -261,17 +265,24 @@ export default function App() {
    * teardown is asynchronous (PERSIST_HOLD_MS, ViewerLayer.tsx) and the view
    * disagrees with what is mounted for its whole duration (R7). And that
    * dispatch must have actually asserted something: most controls *ask* rather
-   * than assert, and writing the unadvanced view then is not a no-op after a
+   * than assert, and pushing the unadvanced view then is not a no-op after a
    * Back — the browser has already rewound the URL, so it would push the view
    * the user just left back on top of history.
+   *
+   * A `replace` is exempt from the second condition, and only a `replace`. The
+   * boot seed asserts nothing — the view was resolved before any dispatch — yet
+   * it is exactly the write that has to land, and `commitUrl` already declines
+   * a replace the address bar makes redundant. It is the *push* of an
+   * unadvanced view that mints the entry nobody asked for.
    */
   useEffect(() => {
     const intent = urlIntent.current
-    if (intent === null) return
     urlIntent.current = null
     const url = serializeView(toUrlView(state.view))
-    if (url === projectedRef.current) return
+    const advanced = url !== projectedRef.current
     projectedRef.current = url
+    if (intent === null) return
+    if (!advanced && intent.replace !== true) return
     commitUrl(toUrlView(state.view), intent)
   }, [state])
 
@@ -390,7 +401,7 @@ export default function App() {
    * this is the asking. Being a user action, it may rename the view.
    */
   function runDeferredByName(): void {
-    if (state.phase !== 'deferred') return
+    if (state.phase === 'idle') return
     commit({ type: 'deferredToName' })
   }
 
@@ -719,6 +730,11 @@ export default function App() {
   // pair because an empty grid has to name the one that emptied it, and the
   // kind restriction runs first: if it left nothing, the filter never had a
   // chance to hide anything.
+  // Narrower than the selector's argument on purpose: `byKind` reads the
+  // landed answer and nothing else, and re-running it on every state change
+  // would mint a fresh array — which `filteredListing` and then the grid
+  // compare on, re-rendering every tile for an availability tick.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const kept = useMemo(() => byKind(state), [state.result])
   const filteredListing = useMemo(
     () => (needle === '' ? kept : kept.filter((e) => e.name.toLowerCase().includes(needle))),
@@ -1043,7 +1059,14 @@ export default function App() {
                 <p className="px-4 pt-1 text-xs text-amber-400">
                   This view is a meaning search for &ldquo;{deferred}&rdquo;, and the index is{' '}
                   {state.index?.state === 'warming' ? 'still starting up' : 'not answering'}. Showing
-                  this folder meanwhile — it runs as soon as the index answers.{' '}
+                  this folder meanwhile —{' '}
+                  {/* Only the warming state is polled (the availability effect
+                      re-reads on a path change and every 2s while warming), so
+                      promising an absent index will be noticed the moment it
+                      returns would be a promise nothing keeps. */}
+                  {state.index?.state === 'warming'
+                    ? 'it runs as soon as the index answers.'
+                    : 'it runs if the index comes back, and searching again will look for it.'}{' '}
                   <button
                     type="button"
                     onClick={() => runDeferredByName()}

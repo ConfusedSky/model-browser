@@ -157,6 +157,29 @@ describe('lightbox history', () => {
     back.mockRestore()
   })
 
+  it('re-opening the same model after closing it pushes its entry again', async () => {
+    // The close moves the URL off the model without a projection (bridge 4 and
+    // the browser's own rewind), so the projection's record of the last view
+    // has to follow it. Tracking only what the projection *wrote* left the
+    // second open reading as a re-commit of a view already named: the lightbox
+    // opened with no `model` in the URL and no entry behind it, so Back left
+    // the app instead of closing it and a reload lost the model.
+    await openByPointer()
+    expect(search()).toContain('model=')
+
+    window.history.replaceState(null, '', '/?path=%2Fmodels')
+    await pop()
+    await wait(200)
+    expect(dialog()).toBeNull()
+    expect(search()).not.toContain('model=')
+
+    const len = window.history.length
+    await openByPointer()
+    expect(dialog()).not.toBeNull()
+    expect(search()).toContain('model=%2Fmodels%2Fwidget.stl')
+    expect(window.history.length).toBe(len + 1)
+  })
+
   it('the backdrop closes like every other affordance', async () => {
     await openByPointer()
     const back = vi.spyOn(window.history, 'back').mockImplementation(() => {

@@ -58,3 +58,33 @@
       instead of re-fetching (user-reported 2026-08-21)
 - [x] 5.2 The URL carries only the options its mode reads — inapplicable options stay out,
       matching the panel (user-reported 2026-08-21)
+- [x] 5.2a …and so does the *filter*: 5.2 put the two-dimensional gate in `serializeView` but
+      not in `byKind`/`noticeKinds`, so a sticky `kinds=folders` carried from a name search still
+      emptied a meaning grid ("No folders matched") — over a control the panel hides in that mode
+      and, once the URL stopped naming it, with nothing on screen to explain it. Same gate, same
+      three places; pinned by "the kind option restricts only the mode whose URL names it"
+- [x] 5.3 `listDir`'s `AbortSignal` reaches `fetch`. 3.2 landed the parameter through ApiClient
+      but the call site dropped it, so no listing was ever cancelled on the wire and 4.3's note
+      on `search-cancellation` was false when written; that note is now true. Pinned by
+      `apiClient.test.ts`'s "listDir hands its signal to fetch"
+- [x] 5.4 The projection's fence compares against the view at the previous state change, not
+      against the last view it wrote (design R3, corrected). The written-view reading went stale
+      whenever the URL moved without a projection — a patching Back, or a bridge-4 rewrite — so
+      re-asserting that view wrote nothing: re-opening a closed model left no `model` param and no
+      history entry (Back then left the app), and a kind re-pressed after a Back across it filtered
+      the grid without the URL. Regression tests in `urlLightbox` and `searchOptionsUi`, each
+      confirmed to fail with the old fence restored (and the lightbox one to pass at a0e69cd, so
+      it is a regression the change introduced, not a gap it inherited)
+- [x] 5.5 A deferral carries its own provenance (`phase: 'idle' | { deferred: Source }`), so a
+      restored one replaces rather than pushes when the index answers (design R2). Reachable on any
+      deep link the serializer would not write byte-identically — since the mode gate (7a440aa),
+      every pre-gate link
+- [x] 5.5a A Back onto the answer already on screen clears the failure that was not about it.
+      5.1 widened the patch branch from one field to six, so this went from rare to ordinary:
+      land /a, follow a link that fails, Back — the grid is right while the path bar goes on
+      reporting the folder that failed, and nothing was going to land and clear it. Only that
+      branch clears it; `patch` must not, or a lightbox open would wipe a live error report
+- [x] 5.6 A failed stand-in no longer wedges the skeleton: `busy` reads `failure`, and `defer`
+      clears it so a fresh deferral cannot inherit one (design R6). Also deleted the unreachable
+      `cancelDeferred` action, narrowed the `kept` memo's deps comment, and stopped the deferred
+      banner promising an *absent* index would be noticed — only `warming` is polled

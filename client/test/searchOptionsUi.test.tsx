@@ -113,6 +113,35 @@ describe('search options', () => {
     expect(location.search).toContain('kinds=models')
   })
 
+  it('re-pressing a kind after a Back across it names it in the URL again', async () => {
+    // The Back patches the view without asking anything, so nothing projects
+    // and the URL moves out from under the projection. Its record of the last
+    // view has to follow, or pressing the control again reads as a re-commit
+    // of a view already named: the grid re-filters and the URL silently does
+    // not, leaving a view that cannot be shared or restored.
+    await type(searchInput(), 'sandy')
+    await pressEnter(searchInput())
+    await settle()
+    // The entry the Back returns to — captured, not spelled out, so the two
+    // URLs differ in the kind and nothing else. Any other difference would
+    // advance the view on its own and hide the bug.
+    const beforeKind = location.search
+    await click(kindButton('models'))
+    await settle()
+    expect(location.search).toContain('kinds=models')
+
+    await act(async () => {
+      history.replaceState(null, '', `/${beforeKind}`)
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+    await settle()
+    expect(location.search).not.toContain('kinds=models')
+
+    await click(kindButton('models'))
+    await settle()
+    expect(location.search).toContain('kinds=models')
+  })
+
   it('a link governs its view without rewriting stored preferences', async () => {
     await unmountApp()
     localStorage.setItem('model-browser:search-folder-matching', 'on')

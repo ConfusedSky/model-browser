@@ -24,6 +24,7 @@ describe('HttpApiClient contract', () => {
     await api.listDir('/my models/kit.zip!/parts')
     expect(fetchFn).toHaveBeenCalledWith(
       `/api/dir?path=${encodeURIComponent('/my models/kit.zip!/parts')}`,
+      { signal: undefined },
     )
   })
 
@@ -31,10 +32,14 @@ describe('HttpApiClient contract', () => {
     const fetchFn = vi.fn((_url: string) => Promise.resolve(jsonResponse({ path: '', entries: [] })))
     const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
     await api.listDir('/models', { flat: true })
-    expect(fetchFn).toHaveBeenCalledWith(`/api/dir?path=${encodeURIComponent('/models')}&flat=true`)
+    expect(fetchFn).toHaveBeenCalledWith(`/api/dir?path=${encodeURIComponent('/models')}&flat=true`, {
+      signal: undefined,
+    })
     await api.listDir('/models', { flat: false })
     await api.listDir('/models')
-    expect(fetchFn).toHaveBeenCalledWith(`/api/dir?path=${encodeURIComponent('/models')}`)
+    expect(fetchFn).toHaveBeenCalledWith(`/api/dir?path=${encodeURIComponent('/models')}`, {
+      signal: undefined,
+    })
     expect(fetchFn.mock.calls.filter(([url]) => url.includes('flat'))).toHaveLength(1)
   })
 
@@ -44,10 +49,27 @@ describe('HttpApiClient contract', () => {
     await api.listDir('/models', { flat: true, q: 'nuts & bolts' })
     expect(fetchFn).toHaveBeenCalledWith(
       `/api/dir?path=${encodeURIComponent('/models')}&flat=true&q=${encodeURIComponent('nuts & bolts')}`,
+      { signal: undefined },
     )
     fetchFn.mockClear()
     await api.listDir('/models', { flat: true, q: '   ' })
-    expect(fetchFn).toHaveBeenCalledWith(`/api/dir?path=${encodeURIComponent('/models')}&flat=true`)
+    expect(fetchFn).toHaveBeenCalledWith(`/api/dir?path=${encodeURIComponent('/models')}&flat=true`, {
+      signal: undefined,
+    })
+  })
+
+  it('listDir hands its signal to fetch — a superseded walk is cancellable', async () => {
+    // The client half of search-cancellation's premise: without the signal
+    // reaching fetch, the connection stays open and the server's
+    // `c.req.raw.signal` never fires, however promptly the client stops
+    // caring about the answer.
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ path: '', entries: [] }))
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
+    const controller = new AbortController()
+    await api.listDir('/models', { flat: true }, controller.signal)
+    expect(fetchFn).toHaveBeenCalledWith(expect.stringContaining('/api/dir?path='), {
+      signal: controller.signal,
+    })
   })
 
   it('throws HttpError with the server message on failure', async () => {

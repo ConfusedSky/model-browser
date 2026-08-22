@@ -85,10 +85,20 @@ export interface Failure {
   message: string
 }
 
+/**
+ * `idle`, or a meaning query held for an index that cannot answer yet — holding
+ * its own provenance, because that is the only place left to keep it. Every
+ * other question carries its source on `inflight`, but a deferral in the `wait`
+ * window has asked for nothing at all, and when the index finally answers, the
+ * fire is that original asking resumed: a restored one must replace the entry
+ * the link already sits on, not push a second one over it (R2).
+ */
+export type Phase = 'idle' | { deferred: Source }
+
 export interface SearchState {
   view: View
   inflight: Inflight | null
-  phase: 'idle' | 'deferred'
+  phase: Phase
   result: Result | null
   failure: Failure | null
   index: IndexAvailability | null
@@ -112,8 +122,6 @@ export type Action =
   | { type: 'setFolderMatching'; on: boolean }
   /** Typing in the search input. Emptying it is how a committed search is left. */
   | { type: 'queryText'; text: string }
-  /** Give up on a deferred query without asking anything else. */
-  | { type: 'cancelDeferred' }
   /** The deferred banner's offer: run the held phrase against the name corpus. */
   | { type: 'deferredToName' }
   /** A history entry or a link. The caller resolves the URL into a whole View. */
@@ -202,7 +210,7 @@ function patch(state: SearchState, fields: Partial<View>): SearchState {
  * dead deferral behind to fire later.
  */
 function endDeferral(state: SearchState): SearchState {
-  if (state.phase !== 'deferred') return state
+  if (state.phase === 'idle') return state
   return { ...state, phase: 'idle', view: { ...state.view, q: null } }
 }
 
@@ -210,7 +218,16 @@ function endDeferral(state: SearchState): SearchState {
  *  question cannot fail), with the placeholder listing asked for at once —
  *  unless the probe has not answered at all, when nothing is asked. */
 function defer(state: SearchState, view: View, source: Source, probed: boolean): SearchState {
-  const held: SearchState = { ...state, phase: 'deferred', view, inflight: null }
+  // The failure goes with the question that earned it: a deferral is a fresh
+  // question, and leaving the old message standing would make `busy` read a
+  // stale error as this deferral's own answer.
+  const held: SearchState = {
+    ...state,
+    phase: { deferred: source },
+    view,
+    inflight: null,
+    failure: null,
+  }
   return probed ? ask(held, standInOf(view), source, true) : held
 }
 
@@ -340,14 +357,11 @@ export function reducer(state: SearchState, action: Action): SearchState {
       return ask(endDeferral(typed), { ...base, q: null, model: null }, 'user')
     }
 
-    case 'cancelDeferred':
-      return endDeferral(state)
-
     case 'deferredToName': {
       // Offered rather than done for the user: substituting the corpus is only
       // honest when it was asked for, and the banner's button is the asking.
       const q = state.view.q
-      if (state.phase !== 'deferred' || q === null) return state
+      if (state.phase === 'idle' || q === null) return state
       return ask(endDeferral(state), { ...state.view, q, mode: 'name', model: null }, 'user')
     }
 
@@ -363,14 +377,24 @@ export function reducer(state: SearchState, action: Action): SearchState {
       // the grid without asking anything. (`path`/`q` stay out by patch's own
       // rule; under `sameQuestion` they cannot differ in a way the request sees.)
       if ((state.result !== null || state.inflight !== null) && sameQuestion(v, liveView(state))) {
-        return patch(state, {
-          model: v.model,
-          kinds: v.kinds,
-          flat: v.flat,
-          mode: v.mode,
-          folderMatching: v.folderMatching,
-          tuning: v.tuning,
-        })
+        return {
+          ...patch(state, {
+            model: v.model,
+            kinds: v.kinds,
+            flat: v.flat,
+            mode: v.mode,
+            folderMatching: v.folderMatching,
+            tuning: v.tuning,
+          }),
+          // The failure belonged to some other question — this branch runs only
+          // when the answer already on screen, or already on its way, is this
+          // view's own. Leaving it standing left a dead message in the path bar
+          // for the rest of the session: land /a, follow a link that fails, come
+          // back, and the grid is right while the error still accuses it. Only
+          // this branch clears it; `patch` must not, or a lightbox open would
+          // wipe the report of the failure it was opened in spite of.
+          failure: null,
+        }
       }
       // The input shows the restored query; the filter is not part of the view
       // a URL names, so it is the caller's to clear.
@@ -419,18 +443,19 @@ export function reducer(state: SearchState, action: Action): SearchState {
       const known = sameAvailability(state.index, action.availability)
         ? state
         : { ...state, index: action.availability }
-      if (known.phase !== 'deferred' || known.view.q === null) return known
+      if (known.phase === 'idle' || known.view.q === null) return known
+      const source = known.phase.deferred
       if (action.availability.state === 'ready') {
         // The link finally doing what it named. It runs for the view that
         // deferred it and only that one — every other path out of the phase
-        // cancels it, so there is no stale deferral left to fire.
-        return ask({ ...known, phase: 'idle' }, known.view, 'user')
+        // cancels it, so there is no stale deferral left to fire. Under the
+        // deferral's own provenance: this is the asking event resumed, so a
+        // restored one still replaces rather than pushing.
+        return ask({ ...known, phase: 'idle' }, known.view, source)
       }
       // Cannot answer yet: stand in with the location's own contents, once.
-      // (Provenance is 'user' because a deferral holds none: the URL already
-      // names this view, so the projection writes nothing either way.)
       if (known.inflight !== null || stoodIn(known)) return known
-      return ask(known, standInOf(known.view), 'user', true)
+      return ask(known, standInOf(known.view), source, true)
     }
 
     case 'modelOpen':

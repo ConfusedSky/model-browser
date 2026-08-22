@@ -121,7 +121,10 @@ export class HttpApiClient implements ApiClient {
     // Sent only when off: the server's default is the shipped predicate, so an
     // ordinary request is byte-identical to what it was before the option.
     const folders = opts?.folderMatching === false ? '&folders=false' : ''
-    const res = await this.fetchFn(`/api/dir?path=${encodeURIComponent(path)}${flat}${q}${folders}`)
+    const res = await this.fetchFn(
+      `/api/dir?path=${encodeURIComponent(path)}${flat}${q}${folders}`,
+      { signal },
+    )
     return jsonOrThrow<DirListing>(res)
   }
 
