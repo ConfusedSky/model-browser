@@ -1,6 +1,19 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { OrbitAxis } from '../../../shared/types'
-import { ORBIT_AXIS_CHOICES, type EntryCommand } from '../lib/entryActions'
+import {
+  AXIS_CAPTION_CLASS,
+  AXIS_DIVIDER_CLASS,
+  AXIS_GROUP_CLASS,
+  AXIS_LETTERS,
+  FLIP_TITLE,
+  axisLetter,
+  axisPillClass,
+  axisWithLetter,
+  flipPillClass,
+  isAxisNegated,
+  negatedAxis,
+  type EntryCommand,
+} from '../lib/entryActions'
 
 /**
  * A context menu raised on a grid tile.
@@ -22,18 +35,22 @@ interface Props {
    * tile, or the **lightbox**, which shows the live picker instead. App decides
    * that with `orbitAxisApplies`; this component only draws it.
    *
-   * An **inline radio group**, not a submenu, and the reason is this component's
-   * keyboard model: focus here is one index over the menu's buttons, so six more
-   * buttons cost one changed count and nothing else, while a submenu would need
-   * its own open state, its own clamp, focus handed across it and a second level
-   * of Escape — new machinery for a menu of at most twelve short items.
+   * An **inline group**, not a submenu, and the reason is this component's
+   * keyboard model: focus here is one index over the menu's buttons, so a few
+   * more buttons cost one changed count and nothing else, while a submenu would
+   * need its own open state, its own clamp, focus handed across it and a second
+   * level of Escape — new machinery for a menu of at most ten short items.
    *
-   * Drawn at the **top**, as a compact pill row rather than six full-width rows
-   * *(user feedback 2026-08-22, 6.8)*: six rows of a twelve-row menu were the
-   * axis, which read as the menu's subject rather than as one property of the
-   * model. A row of pills is also the vocabulary the user already learned from
-   * the lightbox's own picker (`ViewerLayer.tsx`, the `left-3 top-3` row), so
-   * `−Z` is recognised rather than translated.
+   * Drawn at the **top**, as a compact pill row rather than full-width rows
+   * *(user feedback 2026-08-22, 6.8)*: rows of a twelve-row menu were the axis,
+   * which read as the menu's subject rather than as one property of the model.
+   *
+   * And drawn as **`axis  X Y Z | flip`** — the lightbox picker's own four
+   * buttons *(second look at 6.8, same feedback thread)*, not six pills spelling
+   * the spindles out. The picker taught the user that a spindle is a letter and
+   * a sign, and its rules come with the shape: a letter keeps the sign in force
+   * (`−Z` then `X` is `−X`), `flip` negates. `entryActions` holds both the rules
+   * and the class strings so the two surfaces cannot drift apart.
    */
   axis?: { current: OrbitAxis; onChoose: (axis: OrbitAxis) => void } | null
   onChoose: (command: EntryCommand) => void
@@ -57,6 +74,13 @@ const EDGE = 6
  */
 export const MENU_ITEM_CLASS =
   'block w-full px-3 py-1.5 text-left hover:bg-zinc-800 focus:bg-zinc-800 focus:outline-none'
+
+/**
+ * The axis pills carry their own focus mark, which the picker in the lightbox
+ * has no need of: there, focus is wherever the pointer left it, while here the
+ * arrow keys move it and it has to be visible doing so.
+ */
+const FOCUS_RING = 'focus:outline-none focus:ring-1 focus:ring-sky-500'
 
 /**
  * Keep the whole menu on screen (R2's "all of its items are visible"). Pure and
@@ -87,10 +111,13 @@ export default function EntryMenu({ x, y, commands, axis = null, onChoose, onClo
 
   // Every focusable button, **axis pills first**, in DOM order — which is what
   // `focused` indexes and what the focus effect below reads back out of the DOM.
-  const axisCount = axis === null ? 0 : ORBIT_AXIS_CHOICES.length
+  // Four of them when the group is offered: three letters and `flip`.
+  const axisCount = axis === null ? 0 : AXIS_LETTERS.length + 1
   const count = axisCount + commands.length
+  // Entering the group lands on the **letter** in force — the analogue of the
+  // old land-on-the-marked-spindle rule now that the sign is a fourth button.
   const currentAxisRow =
-    axis === null ? 0 : Math.max(0, ORBIT_AXIS_CHOICES.findIndex((c) => c.axis === axis.current))
+    axis === null ? 0 : Math.max(0, AXIS_LETTERS.indexOf(axisLetter(axis.current)))
 
   // The menu opens on its first *command*, not on the pill row above it: the
   // commands are what the menu is for, and the group is one property of the
@@ -100,11 +127,10 @@ export default function EntryMenu({ x, y, commands, axis = null, onChoose, onClo
 
   /**
    * One step of arrow navigation, with the group's one rule: **entering it lands
-   * on the spindle already in force**, rather than on the first of six. The
-   * group is a choice among six and a choice starts from what is currently
-   * true — the same reason the picker in the lightbox opens showing the live
-   * axis pressed. Every one of the six is still reached by stepping on from
-   * there, in either direction.
+   * on the letter already in force**, rather than on `X`. A choice starts from
+   * what is currently true — the same reason the picker in the lightbox opens
+   * showing the live axis filled. The other letters and `flip` are still reached
+   * by stepping on from there, in either direction.
    *
    * The group being above the commands rather than below them moves which
    * crossing this rule catches — Up off the first command, and the wrap off the
@@ -190,38 +216,50 @@ export default function EntryMenu({ x, y, commands, axis = null, onChoose, onClo
       }}
     >
       {axis !== null && (
-        // The spindle this model is stored about — a radio group, since exactly
-        // one of the six is true of it and picking one is picking, not toggling.
-        // The "axis" caption is a <span>, so it stays out of the button index
-        // `focused` walks, exactly as the old heading did.
+        // The spindle this model is stored about, as the lightbox picker states
+        // it: three letters and a sign. The "axis" caption is a <span>, so it
+        // stays out of the button index `focused` walks, exactly as the old
+        // heading did.
         //
-        // Drawn as the lightbox picker's own pill row (6.8): the marked spindle
-        // is the *filled* pill there and it is the filled pill here, so the mark
-        // is one visual idea across the two surfaces rather than a tick on one
-        // and a fill on the other. `aria-checked` carries it either way.
-        <div
-          role="group"
-          aria-label="Orbit axis"
-          className="mb-1 flex items-center gap-0.5 border-b border-zinc-700 px-2 pb-1.5 text-xs"
-        >
-          <span className="pr-1 text-zinc-500">axis</span>
-          {ORBIT_AXIS_CHOICES.map((c) => (
-            <button
-              key={c.axis}
-              type="button"
-              role="menuitemradio"
-              aria-checked={c.axis === axis.current}
-              data-axis={c.axis}
-              onClick={() => axis.onChoose(c.axis)}
-              className={`rounded-full px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-sky-500 ${
-                c.axis === axis.current
-                  ? 'bg-sky-700 text-white'
-                  : 'text-zinc-400 hover:text-zinc-200'
-              }`}
-            >
-              {c.label}
-            </button>
-          ))}
+        // Roles are split rather than uniform, because the two halves are two
+        // different questions: the letters are a choice among three
+        // (`menuitemradio`, exactly one checked), and `flip` is a state that is
+        // on or off (`menuitemcheckbox`). The split costs the keyboard model
+        // nothing — `step` counts buttons and never reads a role — so there was
+        // no reason to flatten a real distinction to save it.
+        <div role="group" aria-label="Orbit axis" className={`mx-2 mb-1 ${AXIS_GROUP_CLASS}`}>
+          <span className={AXIS_CAPTION_CLASS}>axis</span>
+          {AXIS_LETTERS.map((letter) => {
+            const active = axisLetter(axis.current) === letter
+            return (
+              <button
+                key={letter}
+                type="button"
+                role="menuitemradio"
+                aria-checked={active}
+                data-axis={letter}
+                // The sign in force rides along: picking `X` under `−Z` means
+                // `−X`. Re-picking the active letter therefore reproduces the
+                // spindle in force, which `setOrbitAxis` already declines.
+                onClick={() => axis.onChoose(axisWithLetter(axis.current, letter))}
+                className={`${axisPillClass(active)} ${FOCUS_RING}`}
+              >
+                {letter.toUpperCase()}
+              </button>
+            )
+          })}
+          <span className={AXIS_DIVIDER_CLASS} />
+          <button
+            type="button"
+            role="menuitemcheckbox"
+            aria-checked={isAxisNegated(axis.current)}
+            data-axis="flip"
+            title={FLIP_TITLE}
+            onClick={() => axis.onChoose(negatedAxis(axis.current))}
+            className={`${flipPillClass(isAxisNegated(axis.current))} ${FOCUS_RING}`}
+          >
+            flip
+          </button>
         </div>
       )}
       {commands.map((c) => (

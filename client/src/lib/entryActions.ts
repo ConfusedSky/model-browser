@@ -18,8 +18,9 @@
  * Rotating a live view to a new spindle is a control; *which spindle this model
  * is stored about* is a fact about the model, and setting it is one-shot,
  * completes on its own and leaves no mode behind — a command by D1's own test.
- * So a model **tile's** menu offers the six axes (`ORBIT_AXIS_CHOICES`,
- * `setOrbitAxis`) and the picker goes on being the control for a view that is
+ * So a model **tile's** menu offers the axis as the picker offers it — three
+ * letters and a `flip` (`AXIS_LETTERS`, `axisWithLetter`, `negatedAxis`,
+ * `setOrbitAxis`) — and the picker goes on being the control for a view that is
  * open. The two never appear together: the lightbox withholds the group
  * (`'orbitAxis'` in the exclusion lists below), and the orbit overlay — which
  * carries no picker — offers it as the tile does (6.8). Recorded in design.md
@@ -55,8 +56,8 @@ export type CommandId =
 
 /**
  * What a surface can withhold: every command, plus the menu's orbit-axis group
- * (6.7), which is not a command — it is six of them wearing one heading, and it
- * has no row in the table below.
+ * (6.7), which is not a command — it is the six spindles reachable through four
+ * buttons, wearing one heading, and it has no row in the table below.
  *
  * It is in *this* union rather than in `CommandId` so that "one id per command"
  * stays true, and in the union at all so that the per-surface filter has one
@@ -426,21 +427,66 @@ export function resetFramingLive(
   view?.reframe(framing.camera, framing.axis, framing.posed)
 }
 
-/**
- * The six spindles, in the lightbox picker's own order and vocabulary
- * (`ViewerLayer.tsx:637-673`): the three letters it lists, then those three
- * negated, which is exactly what its *flip* toggle produces. Reusing its words
- * is the point — someone who has flipped a spindle in the viewer should
- * recognise `−Z` in the menu rather than translate it.
+/*
+ * ── The axis picker's vocabulary ─────────────────────────────────────────────
+ *
+ * **The lightbox picker is the source of truth** (`ViewerLayer.tsx`, the
+ * `left-3 top-3` row): three letter pills that preserve the sign in force, a
+ * divider, and a `flip` pill that negates. The menu's group is the same four
+ * buttons *(user feedback 2026-08-22, second look at 6.8)* — six pills spelled
+ * the six spindles out where the user had already learned to read them as
+ * `letter × sign`, so the two surfaces disagreed about what an axis control is.
+ *
+ * Both the rules and the class strings live **here** rather than in either
+ * component, for the reason `MENU_ITEM_CLASS` lives in `EntryMenu`: one copy,
+ * imported, rather than two that drift. Not in `ViewerLayer` (which owns the
+ * look) because `ViewerLayer` already imports `EntryMenu`, so an export the
+ * other way would close a module cycle; this module is what both already
+ * import, and it already owns the axis vocabulary.
  */
-export const ORBIT_AXIS_CHOICES: readonly { readonly axis: OrbitAxis; readonly label: string }[] = [
-  { axis: 'x', label: 'X' },
-  { axis: 'y', label: 'Y' },
-  { axis: 'z', label: 'Z' },
-  { axis: '-x', label: '−X' },
-  { axis: '-y', label: '−Y' },
-  { axis: '-z', label: '−Z' },
-]
+
+/** The three letters the picker lists; a spindle is one of these, signed. */
+export const AXIS_LETTERS = ['x', 'y', 'z'] as const
+export type AxisLetter = (typeof AXIS_LETTERS)[number]
+
+/** Whether this spindle is a negated one — the state `flip` shows pressed. */
+export function isAxisNegated(axis: OrbitAxis): boolean {
+  return axis.startsWith('-')
+}
+
+/** The letter of this spindle, which is the pill marked for it. */
+export function axisLetter(axis: OrbitAxis): AxisLetter {
+  return (isAxisNegated(axis) ? axis.slice(1) : axis) as AxisLetter
+}
+
+/**
+ * The spindle a letter pill chooses: that letter **at the sign already in
+ * force**. `−Z` + `X` is `−X`, not `X` — the picker's rule, because the sign is
+ * the flip pill's to say and a letter press is not a press of it.
+ */
+export function axisWithLetter(current: OrbitAxis, letter: AxisLetter): OrbitAxis {
+  return (isAxisNegated(current) ? `-${letter}` : letter) as OrbitAxis
+}
+
+/** The spindle the flip pill chooses: the current one, negated. Never a no-op. */
+export function negatedAxis(current: OrbitAxis): OrbitAxis {
+  return (isAxisNegated(current) ? current.slice(1) : `-${current}`) as OrbitAxis
+}
+
+/** The row the four pills sit in — positioning stays with the caller. */
+export const AXIS_GROUP_CLASS = 'flex items-center gap-1 rounded-full bg-zinc-800/80 p-1 text-xs'
+/** The `axis` caption: a `<span>`, so it stays out of any button index. */
+export const AXIS_CAPTION_CLASS = 'px-1.5 text-zinc-500'
+/** The hairline between the letters and `flip`. */
+export const AXIS_DIVIDER_CLASS = 'h-4 w-px bg-zinc-700'
+/** A letter pill; the spindle in force is the *filled* one. */
+export const axisPillClass = (active: boolean): string =>
+  `rounded-full px-2.5 py-1 ${active ? 'bg-sky-700 text-white' : 'text-zinc-400 hover:text-zinc-200'}`
+/** The `flip` pill — amber rather than sky, since it is a state and not a pick. */
+export const flipPillClass = (active: boolean): string =>
+  `rounded-full px-2.5 py-1 ${active ? 'bg-amber-700 text-white' : 'text-zinc-400 hover:text-zinc-200'}`
+/** What `flip` says it does, on both surfaces. */
+export const FLIP_TITLE = 'Negate the spindle axis (+axis ↔ −axis)'
 
 /** The spindle a model with none stored is framed about — the `'y'` the sweep
  *  (`useThumbnails.ts:223`) and the viewer already fall back to, named here so

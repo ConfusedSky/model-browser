@@ -782,10 +782,11 @@ until the next open, and it was the user who named that spindle rather than a co
 guessing at one on their behalf. That leaves "the menu cannot show it", which was already
 retired.
 
-So a **model tile's** menu offers the six axes (`ORBIT_AXIS_CHOICES`, `setOrbitAxis`), in
-the picker's own order and vocabulary — `X Y Z` then `−X −Y −Z`, which is what its *flip*
-toggle produces — with the model's current one marked, read from the thumbs map and
-defaulting to `y` where nothing is stored. The **lightbox withholds the group**
+So a **model tile's** menu offers the axis as the picker offers it — `axis  X  Y  Z | flip`
+(`AXIS_LETTERS`, `axisWithLetter`, `negatedAxis`, `setOrbitAxis`) — with the model's current
+spindle stated the picker's way, its letter marked and `flip` pressed when it is negated,
+read from the thumbs map and defaulting to `y` where nothing is stored. The **lightbox
+withholds the group**
 (`'orbitAxis'` in `LIGHTBOX_MENU_EXCLUDES` and `LIGHTBOX_PANEL_EXCLUDES`): the picker is
 right there, live, and a menu duplicate would race the closing persist. The orbit overlay
 offers it, exactly as the tile under it does — it carries no picker of its own (6.8).
@@ -800,6 +801,24 @@ one index over the menu's buttons, the group is still entered at the spindle in 
 moving it above the commands only moves which crossings that rule catches (Up off the first
 command, and the wrap off the last). The menu opens on its first *command*, which is what
 the menu is for.
+
+And the row is the picker's **four** buttons rather than six pills *(second look at 6.8,
+same feedback thread, from a screenshot of the picker)*: `axis  X  Y  Z | flip` — three
+letter pills, a divider, and a flip pill that is amber when the spindle is negated. Six
+pills had borrowed the picker's *look* while contradicting what it taught, which is that a
+spindle is a letter and a sign; so the behaviour is mirrored with the shape. A letter keeps
+the sign in force (`−Z` then `X` is `−X` — the sign is `flip`'s to say, and pressing a
+letter is not pressing it), `flip` negates. One command still runs underneath: every press
+is a `setOrbitAxis(entry, host, chosen, current)`, whose no-op guard now catches the active
+letter, while `flip` names a spindle the model is not about either way and is never a no-op.
+The rules and the four class strings live in `entryActions` — the module both surfaces
+already import, and the only home that does not close a cycle, since `ViewerLayer`, where
+the look belongs, already imports `EntryMenu` — and `ViewerLayer`'s picker draws from them,
+so there is one copy rather than a copy and a transcription. The keyboard rule survives in
+its own shape: the group is four focusables walked letter-letter-letter-flip, and entering
+it lands on the **letter** in force. Roles are split, since the halves ask different
+questions — the letters are `menuitemradio`, `flip` is `menuitemcheckbox` — which the
+button-counting `step` never notices.
 
 **A pick writes the axis and discards the camera**, in one PUT (`axis: <picked>`,
 `camera: null`). This is D7's own rule read the other way round: angles measured about one

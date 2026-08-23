@@ -10,7 +10,18 @@ import type {
 import type { ApiClient } from '../api/client'
 import { MENU_ITEM_CLASS } from '../components/EntryMenu'
 import {
+  AXIS_CAPTION_CLASS,
+  AXIS_DIVIDER_CLASS,
+  AXIS_GROUP_CLASS,
+  AXIS_LETTERS,
+  FLIP_TITLE,
+  axisLetter,
+  axisPillClass,
+  axisWithLetter,
   copyEntryPath,
+  flipPillClass,
+  isAxisNegated,
+  negatedAxis,
   type CommandId,
   type EntryCommand,
   type LiveFramingView,
@@ -95,8 +106,6 @@ interface Props {
    */
   onCommand: (id: CommandId, live: LiveFramingView | null) => void
 }
-
-const AXIS_LETTERS = ['x', 'y', 'z'] as const
 
 /** Longest the orbit overlay holds its dismissal waiting for the refreshed thumbnail. */
 export const PERSIST_HOLD_MS = 1500
@@ -630,45 +639,33 @@ export default function ViewerLayer({
               spinner
             ))}
           {session !== null && (
-            <div
-              className="absolute left-3 top-3 flex items-center gap-1 rounded-full bg-zinc-800/80 p-1 text-xs"
-              aria-label="Orbit axis"
-            >
-              <span className="px-1.5 text-zinc-500">axis</span>
+            // This row is the axis control's source of truth; the tile menu's
+            // group draws the same four buttons from the same strings and
+            // rules, which live in `entryActions` so neither copy can drift
+            // (second look at 6.8).
+            <div className={`absolute left-3 top-3 ${AXIS_GROUP_CLASS}`} aria-label="Orbit axis">
+              <span className={AXIS_CAPTION_CLASS}>axis</span>
               {AXIS_LETTERS.map((letter) => {
-                const flipped = sessionAxis.startsWith('-')
-                const active = sessionAxis === letter || sessionAxis === `-${letter}`
+                const active = axisLetter(sessionAxis) === letter
                 return (
                   <button
                     key={letter}
                     type="button"
                     aria-pressed={active}
-                    onClick={() => changeAxis(flipped ? (`-${letter}` as OrbitAxis) : letter)}
-                    className={`rounded-full px-2.5 py-1 ${
-                      active ? 'bg-sky-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
-                    }`}
+                    onClick={() => changeAxis(axisWithLetter(sessionAxis, letter))}
+                    className={axisPillClass(active)}
                   >
                     {letter.toUpperCase()}
                   </button>
                 )
               })}
-              <span className="h-4 w-px bg-zinc-700" />
+              <span className={AXIS_DIVIDER_CLASS} />
               <button
                 type="button"
-                aria-pressed={sessionAxis.startsWith('-')}
-                title="Negate the spindle axis (+axis ↔ −axis)"
-                onClick={() =>
-                  changeAxis(
-                    sessionAxis.startsWith('-')
-                      ? (sessionAxis.slice(1) as OrbitAxis)
-                      : (`-${sessionAxis}` as OrbitAxis),
-                  )
-                }
-                className={`rounded-full px-2.5 py-1 ${
-                  sessionAxis.startsWith('-')
-                    ? 'bg-amber-700 text-white'
-                    : 'text-zinc-400 hover:text-zinc-200'
-                }`}
+                aria-pressed={isAxisNegated(sessionAxis)}
+                title={FLIP_TITLE}
+                onClick={() => changeAxis(negatedAxis(sessionAxis))}
+                className={flipPillClass(isAxisNegated(sessionAxis))}
               >
                 flip
               </button>

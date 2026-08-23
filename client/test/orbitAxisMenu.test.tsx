@@ -30,6 +30,7 @@ import {
   tiles,
   unmountApp,
 } from './appHarness'
+import { AXIS_DIVIDER_CLASS, axisPillClass, flipPillClass } from '../src/lib/entryActions'
 import { DEFAULT_CAMERA } from '../src/three/camera'
 import { POSE_VERSION } from '../src/three/pose'
 import { RIG_VERSION } from '../src/three/renderer'
@@ -109,13 +110,18 @@ const items = (): string[] =>
   Array.from(menu()?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []).map(
     (b) => b.dataset.command ?? '',
   )
+/** The three letter pills. `flip` is a checkbox, and is asked for by name. */
 const axes = (): HTMLButtonElement[] =>
   Array.from(menu()?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]') ?? [])
 const axisLabels = (): string[] => axes().map((b) => b.dataset.axis ?? '')
 const markedAxis = (): string | undefined =>
   axes().find((b) => b.getAttribute('aria-checked') === 'true')?.dataset.axis
-const axisItem = (a: OrbitAxis): HTMLButtonElement =>
-  menu()!.querySelector<HTMLButtonElement>(`[role="menuitemradio"][data-axis="${a}"]`)!
+const axisItem = (letter: 'x' | 'y' | 'z'): HTMLButtonElement =>
+  menu()!.querySelector<HTMLButtonElement>(`[role="menuitemradio"][data-axis="${letter}"]`)!
+const flip = (): HTMLButtonElement | null =>
+  menu()?.querySelector<HTMLButtonElement>('[role="menuitemcheckbox"][data-axis="flip"]') ?? null
+/** Whether `flip` reads as pressed — the group's whole account of the sign. */
+const flipped = (): boolean => flip()?.getAttribute('aria-checked') === 'true'
 const tile = (name: string): HTMLButtonElement =>
   tiles().find((t) => (t.getAttribute('title') ?? '') === name)!
 const arrow = (key: 'ArrowDown' | 'ArrowUp'): Promise<void> =>
@@ -157,15 +163,18 @@ afterEach(async () => {
 })
 
 describe('the group is offered on model tiles and nowhere else', () => {
-  it('lists the six spindles in the picker’s order, marking the one the model is stored about', async () => {
+  it('states the spindle the picker’s way — the letter in force marked, the sign on flip', async () => {
     stored('-x')
     await mountApp('/models', NESTED)
     await settle()
 
     await secondaryPress(tile('widget.stl'))
-    expect(axisLabels()).toEqual(['x', 'y', 'z', '-x', '-y', '-z'])
-    expect(markedAxis()).toBe('-x')
-    // Exactly one of six is true of the model, so exactly one is marked.
+    expect(axisLabels()).toEqual(['x', 'y', 'z'])
+    // '-x' is one spindle said as two things, exactly as the lightbox says it:
+    // the letter is marked and the sign is `flip` pressed.
+    expect(markedAxis()).toBe('x')
+    expect(flipped()).toBe(true)
+    // Exactly one of the three letters is true of the model.
     expect(axes().filter((b) => b.getAttribute('aria-checked') === 'true')).toHaveLength(1)
   })
 
@@ -178,33 +187,41 @@ describe('the group is offered on model tiles and nowhere else', () => {
 
     await secondaryPress(tile('widget.stl'))
     expect(markedAxis()).toBe('y')
+    expect(flipped()).toBe(false) // 'y' is not a negated spindle
   })
 
-  it('draws the six as a pill row above the commands, not as rows beneath them', async () => {
-    // User feedback 2026-08-22 (6.8): six full-width rows at the bottom read as
-    // the menu's subject rather than as one property of the model. The group is
-    // now the compact pill row the lightbox's own picker uses, at the top.
+  it('draws the picker’s four buttons above the commands, not six pills', async () => {
+    // User feedback 2026-08-22, second look at 6.8: the row is the *lightbox
+    // picker's* row — `axis X Y Z | flip` — not six pills spelling out what the
+    // picker states as a letter and a sign.
     stored('-x')
     await mountApp('/models', NESTED)
     await settle()
 
     await secondaryPress(tile('widget.stl'))
-    // DOM order, which is also the order the arrow keys walk: the six pills
-    // first, then every command.
+    // DOM order, which is also the order the arrow keys walk: three letters,
+    // `flip`, then every command.
     const roles = Array.from(menu()!.querySelectorAll<HTMLElement>('button')).map((b) =>
       b.getAttribute('role'),
     )
-    expect(roles.slice(0, 6)).toEqual(Array(6).fill('menuitemradio'))
-    expect(roles.slice(6)).toEqual(Array(roles.length - 6).fill('menuitem'))
-    expect(roles.length).toBeGreaterThan(6) // there are commands under it
+    expect(roles.slice(0, 4)).toEqual([
+      'menuitemradio',
+      'menuitemradio',
+      'menuitemradio',
+      'menuitemcheckbox',
+    ])
+    expect(roles.slice(4)).toEqual(Array(roles.length - 4).fill('menuitem'))
+    expect(roles.length).toBeGreaterThan(4) // there are commands under it
+    // The divider is between them, and is not a button.
+    expect(menu()!.querySelector(`.${AXIS_DIVIDER_CLASS.split(' ').join('.')}`)).not.toBeNull()
 
-    // The pill vocabulary, not a menu row: the marked spindle is *filled*, the
-    // way the lightbox's picker fills the axis in force, and a pill is not
-    // full-width.
-    expect(axisItem('-x').className).toContain('bg-sky-700')
-    expect(axisItem('-x').className).toContain('rounded-full')
-    expect(axisItem('z').className).not.toContain('bg-sky-700')
-    expect(axisItem('-x').className).not.toContain('w-full')
+    // Not merely "pill-shaped": the *same strings* the lightbox row draws with,
+    // which is what makes the two surfaces one control rather than two that
+    // resemble each other. `entryActions` is where that copy lives.
+    expect(axisItem('x').className).toContain(axisPillClass(true))
+    expect(axisItem('z').className).toContain(axisPillClass(false))
+    expect(flip()!.className).toContain(flipPillClass(true)) // amber, being negated
+    expect(axisItem('x').className).not.toContain('w-full')
   })
 
   it('is absent on a directory and on an archive, which are glyphs with no spindle', async () => {
@@ -214,16 +231,21 @@ describe('the group is offered on model tiles and nowhere else', () => {
     await secondaryPress(tile('Alpha'))
     expect(items()).toEqual(['open', 'reveal', 'copyPath'])
     expect(axes()).toHaveLength(0)
+    expect(flip()).toBeNull()
     await escape()
 
     await secondaryPress(tile('kit.zip'))
     expect(axes()).toHaveLength(0)
+    expect(flip()).toBeNull()
   })
 })
 
 describe('reaching the group from the keyboard', () => {
-  it('lands on the spindle in force, steps through the rest, and gives Escape the whole menu', async () => {
-    stored('-x')
+  // '-z' throughout, and not '-x': the letter in force is then the *last* of
+  // the three, so "lands on the letter in force" cannot pass by landing on the
+  // first button of the group and calling it that.
+  it('lands on the letter in force, walks the letters and flip, and gives Escape the whole menu', async () => {
+    stored('-z')
     await mountApp('/models', NESTED)
     await settle()
 
@@ -236,53 +258,63 @@ describe('reaching the group from the keyboard', () => {
     expect(document.activeElement).toBe(menu()!.querySelector('[role="menuitem"]'))
 
     // Down through the commands and off the end into the group — which is
-    // entered at the spindle already in force rather than at the first of six.
+    // entered at the **letter** in force rather than at `X`. That is the old
+    // land-on-the-spindle-in-force rule, said in the shape the group now has.
     for (let i = 0; i < commands; i++) await arrow('ArrowDown')
-    expect((document.activeElement as HTMLElement).dataset.axis).toBe('-x')
+    expect((document.activeElement as HTMLElement).dataset.axis).toBe('z')
 
+    // Letter, letter, letter, flip — four focusables in the order they are drawn.
     await arrow('ArrowDown')
-    expect((document.activeElement as HTMLElement).dataset.axis).toBe('-y')
-    await arrow('ArrowUp')
+    expect(document.activeElement).toBe(flip())
     await arrow('ArrowUp')
     expect((document.activeElement as HTMLElement).dataset.axis).toBe('z')
+    await arrow('ArrowUp')
+    expect((document.activeElement as HTMLElement).dataset.axis).toBe('y')
+    await arrow('ArrowUp')
+    expect((document.activeElement as HTMLElement).dataset.axis).toBe('x')
 
     // One press dismisses one thing, and that thing is the menu entire.
     await escape()
     expect(menu()).toBeNull()
   })
 
-  it('enters the group from above too, at the same spindle', async () => {
+  it('enters the group from above too, at the same letter', async () => {
     // The crossing 6.8 created: the group sits above the commands, so one press
     // Up off the first command walks into it — and it lands where entering the
-    // group always lands, not on the pill that happens to be nearest.
-    stored('-x')
+    // group always lands, not on the button that happens to be nearest, which
+    // since the second look is `flip`.
+    stored('-z')
     await mountApp('/models', NESTED)
     await settle()
 
     await secondaryPress(tile('widget.stl'))
     expect(document.activeElement).toBe(menu()!.querySelector('[role="menuitem"]'))
     await arrow('ArrowUp')
-    expect((document.activeElement as HTMLElement).dataset.axis).toBe('-x')
-    // And stepping on from there still reaches the rest, in either direction.
-    await arrow('ArrowUp')
     expect((document.activeElement as HTMLElement).dataset.axis).toBe('z')
+    expect(document.activeElement).not.toBe(flip())
+    // And stepping on from there still reaches the rest.
+    await arrow('ArrowDown')
+    expect(document.activeElement).toBe(flip())
   })
 
-  it('chooses the focused spindle, by the same body the pointer reaches', async () => {
-    stored('-x')
+  it('chooses the focused letter at the sign in force, by the same body the pointer reaches', async () => {
+    stored('-z')
     await mountApp('/models', NESTED)
     await settle()
     renderThumbnail.mockClear()
     putThumb.mockClear()
 
     await secondaryPress(tile('widget.stl'))
-    for (let i = 0; i < items().length; i++) await arrow('ArrowDown')
-    await arrow('ArrowDown') // '-y', one on from the marked '-x'
+    await arrow('ArrowUp') // into the group, at 'z'
+    await arrow('ArrowUp')
+    await arrow('ArrowUp') // 'x'
     await click(document.activeElement as HTMLElement)
     await settle()
 
     expect(menu()).toBeNull()
-    expect(lastPut()!.axis).toBe('-y')
+    // '-x' and not 'x': the keyboard reaches the same letter press the pointer
+    // does, sign preservation included.
+    expect(lastPut()!.axis).toBe('-x')
   })
 })
 
@@ -299,7 +331,7 @@ describe('picking a spindle', () => {
     await settle()
 
     // The default about the new spindle: the stored camera's angles were
-    // measured about '-x' and describe nothing about 'z'.
+    // measured about '-x' and describe nothing about '-z'.
     // The harness's stub is declared argument-less; the call is (object, camera, axis).
     const [, camera, axis] = renderThumbnail.mock.calls.at(-1)! as unknown as [
       unknown,
@@ -307,10 +339,10 @@ describe('picking a spindle', () => {
       OrbitAxis,
     ]
     expect(camera).toEqual(DEFAULT_CAMERA)
-    expect(axis).toBe('z')
+    expect(axis).toBe('-z')
 
     const put = lastPut()!
-    expect(put.axis).toBe('z')
+    expect(put.axis).toBe('-z')
     expect(put.camera).toBeNull() // discarded, never a written default
     expect(put.lighting).toBe(getLightingMode())
     expect(put.rig).toBe(RIG_VERSION)
@@ -339,8 +371,51 @@ describe('picking a spindle', () => {
     await click(menu()!.querySelector<HTMLButtonElement>('[data-command="open"]')!)
     await settle()
     // A model has one stored orientation, not one per surface.
-    expect(opened.axis).toBe('z')
+    expect(opened.axis).toBe('-z')
     expect(opened.camera).toBeUndefined()
+  })
+
+  it('keeps the sign in force when a letter is picked: −Z then X is −X', async () => {
+    // The lightbox picker's rule, and the reason the group is four buttons and
+    // not six: the sign belongs to `flip`, and pressing a letter is not
+    // pressing it.
+    stored('-z')
+    await mountApp('/models', NESTED)
+    await settle()
+    putThumb.mockClear()
+
+    await secondaryPress(tile('widget.stl'))
+    expect(markedAxis()).toBe('z')
+    expect(flipped()).toBe(true)
+    await click(axisItem('x'))
+    await settle()
+
+    expect(lastPut()!.axis).toBe('-x')
+  })
+
+  it('negates on flip, and flip is never a no-op in either direction', async () => {
+    // The one button that always writes: it names a spindle the model is not
+    // about, whichever way it is pressed. (Pressing it twice is two real
+    // changes, not a round trip that never happened.)
+    stored('-x')
+    await mountApp('/models', NESTED)
+    await settle()
+    putThumb.mockClear()
+
+    await secondaryPress(tile('widget.stl'))
+    await click(flip()!)
+    await settle()
+    expect(lastPut()!.axis).toBe('x') // negated: the sign came off
+
+    // And from a positive spindle, the other way. The menu now reads the axis
+    // it just wrote, so this is the second press of the same button.
+    putThumb.mockClear()
+    await secondaryPress(tile('widget.stl'))
+    expect(markedAxis()).toBe('x')
+    expect(flipped()).toBe(false)
+    await click(flip()!)
+    await settle()
+    expect(lastPut()!.axis).toBe('-x')
   })
 
   it('ignores an index orientation for the model — the user has said which way up it stands', async () => {
@@ -377,7 +452,8 @@ describe('picking a spindle', () => {
     // menu marks the default, not the pose's spindle: the pose is advisory and
     // the model has no axis of its own.
     expect(markedAxis()).toBe('y')
-    await click(axisItem('-y'))
+    expect(flipped()).toBe(false)
+    await click(flip()!) // 'y' negated
     await settle()
 
     const [, , axis] = renderThumbnail.mock.calls.at(-1)! as unknown as [
@@ -395,7 +471,10 @@ describe('picking a spindle', () => {
     expect(put.posed).toBeUndefined()
   })
 
-  it('does nothing when the spindle picked is the one already marked', async () => {
+  it('does nothing when the letter picked is the one already marked', async () => {
+    // The no-op the four-button shape leaves: pressing the active letter names
+    // that letter at the sign already in force, which is the spindle already in
+    // force. `setOrbitAxis` declines it — no PUT, no render, no queue slot.
     stored('-x')
     await mountApp('/models', NESTED)
     await settle()
@@ -403,8 +482,9 @@ describe('picking a spindle', () => {
     putThumb.mockClear()
 
     await secondaryPress(tile('widget.stl'))
-    expect(markedAxis()).toBe('-x')
-    await click(axisItem('-x'))
+    expect(markedAxis()).toBe('x')
+    expect(flipped()).toBe(true)
+    await click(axisItem('x')) // '-x' again, not 'x'
     await settle()
 
     expect(menu()).toBeNull() // still a dismissal

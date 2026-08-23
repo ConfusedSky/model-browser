@@ -54,6 +54,9 @@ const axes = (): string[] =>
   Array.from(menu()?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') ?? []).map(
     (b) => b.dataset.axis ?? '',
   )
+/** The group's fourth button — present exactly when the letters are. */
+const flip = (): HTMLElement | null =>
+  menu()?.querySelector<HTMLElement>('[role="menuitemcheckbox"][data-axis="flip"]') ?? null
 const dialog = (): HTMLElement | null => document.querySelector<HTMLElement>('[role="dialog"]')
 /** Every item a model tile offers when the index is answering — the whole of
  *  D6's table, which is also what the orbit overlay offers since 6.8. */
@@ -65,7 +68,9 @@ const WHOLE_TABLE = [
   'reRenderThumbnail',
   'resetFraming',
 ]
-const SIX_AXES = ['x', 'y', 'z', '-x', '-y', '-z']
+/** The axis group as the lightbox picker states it: three letters and a flip. */
+const AXIS_LETTERS = ['x', 'y', 'z']
+const GROUP_ROLES = ['menuitemradio', 'menuitemradio', 'menuitemradio', 'menuitemcheckbox']
 /** The orbit overlay: the fixed layer over the pressed tile. */
 const overlay = (): HTMLElement | null => container.querySelector<HTMLElement>('.z-30.cursor-grab')
 const modelTile = (): HTMLElement =>
@@ -172,7 +177,8 @@ describe('the menu on a viewer surface', () => {
 
     await secondaryPress(overlay()!)
     expect(items()).toEqual(WHOLE_TABLE)
-    expect(axes()).toEqual(SIX_AXES)
+    expect(axes()).toEqual(AXIS_LETTERS)
+    expect(flip()).not.toBeNull()
   })
 
   it('a secondary press on the lightbox raises the same three', async () => {
@@ -199,11 +205,11 @@ describe('the menu on a viewer surface', () => {
       )
 
     // The tile first, while nothing is open: this is not a rule about the
-    // entry, so the same model has to offer all six here — as a pill row at the
-    // top of the menu (6.8).
+    // entry, so the same model has to offer the group here — as the picker's
+    // own `axis X Y Z | flip` row at the top of the menu (6.8, second look).
     await secondaryPress(modelTile())
-    expect(axes()).toEqual(SIX_AXES)
-    expect(roles().slice(0, 6)).toEqual(Array(6).fill('menuitemradio'))
+    expect(axes()).toEqual(AXIS_LETTERS)
+    expect(roles().slice(0, 4)).toEqual(GROUP_ROLES)
     await escape()
 
     // The overlay carries no picker of its own — the live one belongs to the
@@ -211,8 +217,8 @@ describe('the menu on a viewer surface', () => {
     // unreachable for as long as the overlay lingered over its tile.
     await startOrbit()
     await secondaryPress(overlay()!)
-    expect(axes()).toEqual(SIX_AXES)
-    expect(roles().slice(0, 6)).toEqual(Array(6).fill('menuitemradio'))
+    expect(axes()).toEqual(AXIS_LETTERS)
+    expect(roles().slice(0, 4)).toEqual(GROUP_ROLES)
     await escape()
 
     // The same gesture's release promotes the overlay to the lightbox — a
@@ -225,8 +231,10 @@ describe('the menu on a viewer surface', () => {
     await wait(150)
     expect(dialog()).not.toBeNull()
     await secondaryPress(dialog()!)
-    // Here, and only here, the picker is a few pixels away.
+    // Here, and only here, the picker is a few pixels away — the row this
+    // menu's group is a copy of.
     expect(axes()).toHaveLength(0)
+    expect(flip()).toBeNull()
   })
 
   it('gives Escape to the menu first and to the lightbox second', async () => {

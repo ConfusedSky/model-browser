@@ -911,3 +911,35 @@
       the two viewer surfaces as one thing. `model-viewer`'s *Lightbox expanded view* gains
       the row's position and look in its prose and one scenario (*The panel describes before
       it offers*). No requirement renamed or removed
+      **Addendum 2026-08-22 (second look at (a), same feedback thread, with a screenshot of
+      the lightbox picker):** a pill row was the right idea drawn from the wrong row. The
+      group is now the picker's own **four** buttons — `axis  X  Y  Z | flip` — not six pills
+      spelling out what the picker states as a letter and a sign, and it mirrors the picker's
+      *behaviour* too: a letter keeps the sign in force (`−Z` then `X` is `−X`, since the sign
+      is `flip`'s to say), `flip` negates. `ORBIT_AXIS_CHOICES` is gone with the six, replaced
+      by `AXIS_LETTERS`, `axisLetter`, `axisWithLetter`, `negatedAxis` and the row's four
+      class strings, all in `entryActions` — which both surfaces already import, and which is
+      the only home that does not close a cycle (`ViewerLayer`, where the look belongs, is
+      already an importer of `EntryMenu`). `ViewerLayer`'s picker now draws from them, so the
+      copy is one. Semantics are unchanged: every press is still one `setOrbitAxis`, and its
+      no-op guard now catches **the active letter** (that letter at the sign in force is the
+      spindle in force); `flip` names a spindle the model is not about either way, so it is
+      never a no-op. Keyboard: the group is four focusables walked letter-letter-letter-flip,
+      and entering it lands on the **letter** in force — the old rule in the new shape.
+      Roles are split rather than uniform, because the halves ask different questions: the
+      letters are `menuitemradio` (`aria-checked` on the letter), `flip` is
+      `menuitemcheckbox` (`aria-checked` when the spindle is negated). It costs the keyboard
+      model nothing — `step` counts buttons and never reads a role.
+      **Tested:** `orbitAxisMenu` and `viewerMenu` moved to the four-button shape (letters,
+      roles, the divider, the *shared* class strings asserted against `axisPillClass` /
+      `flipPillClass` rather than against a transcription), plus two added cases — sign
+      preservation (`−Z` then `X` is `−X`) and flip negating in both directions, neither a
+      no-op — and the existing no-op case re-aimed at the active letter.
+      **Falsified three ways:** dropping sign preservation from `axisWithLetter` (five fail,
+      the `−Z→X` case among them), dropping `setOrbitAxis`'s guard (only the no-op case
+      fails), and pinning group entry to `X` (the three keyboard cases fail — which they did
+      *not* while those cases used `−x`, whose letter is the first of the three; they were
+      rewritten on `−z` for exactly that reason)
+      **Delta:** none. `entry-actions` asks for the axis "as a choice among the axes the
+      client can express, naming them as the expanded view's own control names them" and
+      "marked as the live control marks it" — which is what this makes literally true
