@@ -549,3 +549,85 @@
       rendering it last (the first-and-marked case fails), emitting the field whatever it
       resolved to (the omitted case fails), and naming it by absolute path (the relative-name
       assertion fails)
+- [x] 6.2 The similarity view's parameters become tweakable — how many neighbours, and how
+      the index pools a model's several views. D4 predicted this exactly ("if it ever becomes
+      user-settable it becomes a view field then and the gate carries it like tuning"), so the
+      shape is that prediction kept rather than a new argument.
+      **Done, on the subject rather than beside it:** `Subject`'s similar arm is
+      `{ model, k, pool? }` (`state/view.ts`) — a sibling `View` field would re-mint the reset
+      list the union abolishes, which is the union's own argument applied a second time.
+      `SIMILAR_K` becomes the *default*; the `similar` transition and `resolveView` build the
+      subject with it. `requestOf` reads both off the subject, `sameQuestion`'s similar arm
+      compares both (it already compared the constant `k`, which is why that arm needed only
+      `pool` added), and `serializeView` writes `k` off its default and `pool` when set, under
+      the similar gate. `pool` is **one** URL param with two possible readers and never both in
+      force: `parseUrl` reports it into `tuning.pool` and into its own slot, `resolveView`
+      assigns by subject, and the two gates are mutually exclusive — recorded in design D4,
+      because borrowing `tuning.pool` for the similarity reading would have made `UrlView.tuning`
+      mean something it is not.
+      **One new reducer transition, `similarTuning`**: rebuild the subject, go through
+      `askCommitted` (so a re-parameterisation while the index warms defers exactly as a fresh
+      find-similar would), and no-op off a similarity view. **No record-only phase** — there is
+      nothing for the reducer to hold, so the debounce lives in `SidePanel` as a `countText`
+      draft with a timer beside it, the `topText`/`scoreText` pattern.
+      **Panel block** rendered only under a live similarity subject (the applicability idiom
+      that hides the name options under meaning): the count spinner (bounds 1..1000, the
+      server's own) and the mean/max/softmax trio, which runs immediately since a click is a
+      finished value. Its trio is labelled *Pool neighbour views by*, apart from the meaning
+      tuning's identical one — the mode is sticky, so both can be on screen at once and two
+      controls sharing an accessible name are one control to anything reading names. None of
+      the three renders pressed until one is pressed: absence means the index's own pooling,
+      which is not any of them.
+      **Not sticky, deliberately, and recorded in design D4:** these belong to one
+      neighbourhood, not to a profile; the URL carries them and the next find-similar starts
+      from the defaults.
+      **Server half:** `pool` joins `k` in the `/similar` body pass-through, validated the same
+      way (only the three the index names, 400 otherwise) and forwarded only when present, so
+      absence still leaves whatever `serve_api.py --pool` was started with.
+      **Tested:** `searchReducer.test.ts` (the re-ask, the off-similar no-op, the whole-set
+      rule, `sameQuestion` over both parameters with a Back across each, and the URL off/at
+      defaults), `urlState.test.ts` (round-trip, elision, a refused `k` reading as absence, and
+      the one-param-two-readers shape), `similarTuning.test.tsx` (the block's applicability,
+      the debounce collapsing a typed count to one question, the immediate pooling click, a
+      link's parameters, and a field mid-edit not being a value), `server/test/similar.test.ts`
+      (forwarded only when named; validated). **Falsified four ways:** dropping `k`/`pool` from
+      `sameQuestion` (the Back-re-asks case fails), deleting the two URL writes (four cases
+      across three files fail), removing the transition's applicability guard (the no-op case
+      fails), and calling `onSimilarTuning` without the timer (the one-question case fails).
+      The `similar()` call signature gained `pool` positionally, so `findSimilar.test.tsx`'s
+      three call-argument assertions moved with it — the only existing case this touched
+- [x] 6.3 Dismissing a similarity view returns to the view it came from. The live run's gap:
+      the exit built at 4.6 always re-asks the location's listing, which is right for a link
+      and wrong for a view raised over a search result that cost ~32s to produce — D3's own
+      argument for reveal pushing a history entry, arriving at the exit instead of the
+      entrance.
+      **Done as provenance, not as a second exit.** An in-app find-similar stamps its entry
+      through the projection's existing `state` channel — `SIMILAR_ENTRY` + `isSimilarEntry()`
+      beside the lightbox pair (`lib/urlState.ts`), set in the fetch effect's `land()` when
+      `request.kind === 'similar' && requestSource === 'user'`. One App-level `leaveSubject`
+      holds the branch: marked entry → `history.back()`, otherwise the existing reducer path
+      (`clearSubject` from the ✕, the `queryText` commit from the empty-input branch) exactly as
+      before. Two call sites, zero copies — D9's requirement is *one rule*, not *one
+      destination*. Query-subject dismissal is untouched, and not as a special case: a query
+      landing never marks its entry, so the branch is never taken there. Chained find-similars
+      unwind one hop per press, with no code for the chain.
+      **Marker survival, verified rather than assumed** (the check-in trigger): a restore
+      landing's intent is `{ replace: true }` with no `state`, which would write `null` over an
+      entry's marker *if it wrote at all*. It does not — a Back onto a marked entry has already
+      had its URL rewound by the browser, so the landing's serialization matches the address bar
+      and `commitUrl` declines the whole write. The dedupe **is** the preservation, and the only
+      restore landings that do advance the URL are ones whose entry never matched the resolved
+      view, which carry no marker and must not gain one. Recorded in design D9 and pinned twice
+      — a unit case over `commitUrl` directly (`urlState.test.ts`) and an App case that Backs
+      onto an in-app similarity view and dismisses again.
+      **No interaction with the anchor or locate machinery:** `history.back()` produces a
+      popstate, which already resets both ephemeral reveal cells, and the anchor is part of the
+      result the restore landing replaces wholesale (R5).
+      **Tested** in `similarReturn.test.tsx` — returns to the search whole (URL, label, entries
+      and the input's text), a cold link still clears to the listing, the erase gesture returns
+      the same way, a chain unwinds one hop per press, the marker survives a Back, and a query
+      view's dismissal is unchanged. `history.back()` is spied and played by hand throughout
+      (the harness stubs `URL`, so happy-dom's own `back()` throws — `urlLightbox`'s pattern).
+      **Falsified three ways:** dropping the marker stamp, hard-coding the branch to false, and
+      un-delegating the empty-input exit — the first two fail four cases each, the third fails
+      the erase case alone, which is exactly the delegation it removed

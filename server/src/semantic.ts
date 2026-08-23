@@ -269,19 +269,27 @@ export interface SimilarResult {
  * model's own folder it would mostly return that kit's other parts, which is the
  * one answer the user already has on screen.
  *
- * `pool` is likewise left at the server's own default, for the reason `k` is not
- * a URL param: nothing on screen sets it, so sending a value would state a
- * choice no view makes.
+ * `k` and `pool` are the caller's, forwarded only when it names them. Both are
+ * settable on screen now (the side panel's similarity block) and both ride the
+ * view's URL; where the caller names neither, the index's own defaults apply and
+ * this sends no field for them — absence meaning the default at every layer,
+ * which is what keeps "the pooling in force is whatever `serve_api.py --pool`
+ * was started with" true for a view that made no choice.
  *
  * A 404 travels back as an `IndexError` carrying that status: the index has
  * never embedded this model, which is a fact about the model rather than about
  * availability, and the only upstream status the UI owns a distinct sentence
  * for.
  */
-export async function similar(path: string, k?: number): Promise<SimilarResult> {
+export async function similar(
+  path: string,
+  k?: number,
+  pool?: Tuning['pool'],
+): Promise<SimilarResult> {
   return (await askIndex('/similar', {
     path,
     ...(k !== undefined ? { k } : {}),
+    ...(pool !== undefined ? { pool } : {}),
   })) as SimilarResult
 }
 

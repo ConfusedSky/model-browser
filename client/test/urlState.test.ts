@@ -5,9 +5,11 @@ import { requestOf, type View } from '../src/state/view'
 import {
   commitUrl,
   isLightboxEntry,
+  isSimilarEntry,
   LIGHTBOX_ENTRY,
   parseUrl,
   serializeView,
+  SIMILAR_ENTRY,
   type UrlView,
 } from '../src/lib/urlState'
 
@@ -97,6 +99,34 @@ describe('url state', () => {
     expect(window.history.state).toEqual({ lightbox: true })
   })
 
+  it('marks the entries an in-app find-similar mints, and the two markers do not read each other', () => {
+    // 6.3. Same channel as the lightbox's, same reason: the browser keeps state
+    // per entry, so a forward-restored similarity view is still known to have
+    // its origin behind it, which an in-memory flag could not say.
+    commitUrl({ path: '/a', flat: false, similar: '/a/m.stl' }, { state: SIMILAR_ENTRY })
+    expect(isSimilarEntry()).toBe(true)
+    expect(isLightboxEntry()).toBe(false)
+
+    // A link's entry is the browser's, not one we minted — nothing behind it,
+    // so nothing to go back to.
+    commitUrl({ path: '/a', flat: false, similar: '/a/other.stl' })
+    expect(isSimilarEntry()).toBe(false)
+
+    commitUrl({ path: '/a', flat: false, model: '/a/m.stl' }, { state: LIGHTBOX_ENTRY })
+    expect(isSimilarEntry()).toBe(false)
+  })
+
+  it('a redundant write leaves the entry’s marker alone — it is not a write at all', () => {
+    // What the restore path rests on (6.3): a Back onto a marked similarity
+    // entry re-asks and lands, and that landing's replace must not scrub the
+    // marker. It cannot, because the browser has already rewound the URL, so
+    // the serialization matches and `commitUrl` declines — the dedupe is the
+    // preservation.
+    commitUrl({ path: '/a', flat: false, similar: '/a/m.stl' }, { state: SIMILAR_ENTRY })
+    commitUrl({ path: '/a', flat: false, similar: '/a/m.stl' }, { replace: true })
+    expect(isSimilarEntry()).toBe(true)
+  })
+
   it('pushes only on difference: a re-commit of the same view stacks nothing', () => {
     const before = window.history.length
     commitUrl({ path: '/a', flat: false })
@@ -155,6 +185,46 @@ describe('search options in the URL', () => {
       tuning: { ...TUNING_DEFAULTS, top: 12 },
     }
     expect(serializeView(similar)).toBe('?path=%2Fa&flat=1&similar=%2Fa%2Fm.stl')
+  })
+
+  it('a similarity view round-trips the two parameters it does read, and omits them at their defaults', () => {
+    // 6.2. The gate did not loosen — it grew two options this subject genuinely
+    // reads, on the same rule as the rest: they select which entries the view
+    // contains, and something on screen sets them.
+    const tuned: UrlView = { path: '/a', flat: false, similar: '/a/m.stl', k: 40, pool: 'max' }
+    expect(serializeView(tuned)).toBe('?path=%2Fa&similar=%2Fa%2Fm.stl&k=40&pool=max')
+    expect(roundTrip(tuned)).toMatchObject({ similar: '/a/m.stl', k: 40, pool: 'max' })
+
+    // Absent is the default at both ends: `toUrlView` elides `SIMILAR_K` (it
+    // owns the constant; this module cannot import it back), and an absent pool
+    // is the index's own rather than any of the three values.
+    const plain: UrlView = { path: '/a', flat: false, similar: '/a/m.stl' }
+    expect(serializeView(plain)).toBe('?path=%2Fa&similar=%2Fa%2Fm.stl')
+    expect(roundTrip(plain).k).toBeUndefined()
+    expect(roundTrip(plain).pool).toBeUndefined()
+
+    // A `k` the index would refuse reads as absence, not as an error over a
+    // link that names a perfectly good view.
+    for (const bad of ['k=0', 'k=1001', 'k=4.5', 'k=lots', 'k=']) {
+      expect(parseUrl(`?path=%2Fa&similar=%2Fa%2Fm.stl&${bad}`).k).toBeUndefined()
+    }
+
+    // One `pool` param, two readers, and never both: the subject decides. A
+    // similarity view writes its own; a meaning view writes its tuning's.
+    const meaningPool: UrlView = {
+      path: '/a',
+      flat: false,
+      q: 'gear',
+      mode: 'meaning',
+      tuning: { ...TUNING_DEFAULTS, pool: 'mean' },
+    }
+    expect(serializeView({ ...tuned, ...meaningPool })).toBe(
+      '?path=%2Fa&similar=%2Fa%2Fm.stl&k=40&pool=max',
+    )
+    expect(serializeView(meaningPool)).toContain('pool=mean')
+    // …and a `k` beside a phrase is written by neither, because no phrase reads
+    // one.
+    expect(serializeView({ ...meaningPool, k: 40 })).not.toContain('k=')
   })
 
   it('a hand-edited link carrying both q and similar parses as both; similar is what wins', () => {

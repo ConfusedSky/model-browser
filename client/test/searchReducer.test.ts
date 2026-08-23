@@ -6,7 +6,7 @@
 // test asks the reducer the question that list got wrong.
 import { describe, expect, it } from 'vitest'
 import type { DirEntry, IndexAvailability, IndexPose, SemanticScope } from '../../shared/types'
-import { TUNING_DEFAULTS, type SearchMode } from '../src/lib/searchOptions'
+import { TUNING_DEFAULTS, type SearchMode, type Tuning } from '../src/lib/searchOptions'
 import { serializeView } from '../src/lib/urlState'
 import {
   initialState,
@@ -31,7 +31,15 @@ const WARMING: IndexAvailability = { state: 'warming', elapsed: 3 }
 /** The two committed subjects, spelled once so a view literal reads as what it
  *  is about rather than as a union member. */
 const asks = (text: string): Subject => ({ kind: 'query', text })
-const like = (model: string): Subject => ({ kind: 'similar', model })
+/** A similarity subject at its default parameters unless the case is about
+ *  them — `k` and `pool` ride the subject now (6.2), so every literal would
+ *  otherwise have to spell out a count it does not care about. */
+const like = (model: string, over: { k?: number; pool?: Tuning['pool'] } = {}): Subject => ({
+  kind: 'similar',
+  model,
+  k: over.k ?? SIMILAR_K,
+  pool: over.pool,
+})
 
 const view = (over: Partial<View> = {}): View => ({
   path: '/lib',
@@ -708,6 +716,100 @@ describe('the view has a subject', () => {
       entries: [],
     })
     expect(labelInputs(listing).subject.kind).toBe('none')
+  })
+
+  it('similarTuning re-asks the view with the new parameters, and is a no-op off one', () => {
+    // 6.2. The parameters live on the subject, so changing one is a new
+    // question about the same model — routed through the one corpus decision
+    // like every other re-ask, not patched into the answer on screen.
+    let s = land(
+      reducer(start({}, READY), { type: 'restore', view: view({ subject: like('/lib/a.stl') }) }),
+      { entries: [entry('b.stl')] },
+    )
+    expect(pendingRequest(s)).toBeNull()
+
+    s = reducer(s, { type: 'similarTuning', k: 40, pool: 'max' })
+    expect(pendingRequest(s)).toMatchObject({
+      kind: 'similar',
+      path: '/lib',
+      model: '/lib/a.stl',
+      k: 40,
+      pool: 'max',
+    })
+    s = land(s, { entries: [entry('b.stl'), entry('c.stl')] })
+    expect(s.view.subject).toEqual(like('/lib/a.stl', { k: 40, pool: 'max' }))
+
+    // The whole set, never a delta: an omitted pool asserts "leave it to the
+    // index" rather than keeping whatever was there.
+    s = land(reducer(s, { type: 'similarTuning', k: 40 }), { entries: [] })
+    expect(s.view.subject).toEqual(like('/lib/a.stl', { k: 40 }))
+
+    // Off a similarity view there is nothing to re-parameterise, and the
+    // control is not on screen. Asserting one anyway would put a `k` in the URL
+    // of a view that reads none.
+    const searched = land(search(start({}, READY), 'dragon'), { entries: [] })
+    expect(reducer(searched, { type: 'similarTuning', k: 40 })).toBe(searched)
+    const listing = land(reducer(start({}, READY), { type: 'restore', view: view() }), {
+      entries: [],
+    })
+    expect(reducer(listing, { type: 'similarTuning', k: 40 })).toBe(listing)
+  })
+
+  it('a different parameter is a different question: Back across one re-asks', () => {
+    // The reason `k` and `pool` are compared in `sameQuestion`. Left out, a
+    // Back across a parameter change takes `restore`'s patch branch: the answer
+    // on screen kept, while the URL — and the panel's spinner — claim a count
+    // the index was never asked for.
+    const at16 = view({ subject: like('/lib/a.stl') })
+    let s = land(reducer(start({}, READY), { type: 'restore', view: at16 }), {
+      entries: [entry('b.stl')],
+    })
+
+    const at40: View = { ...at16, subject: like('/lib/a.stl', { k: 40 }) }
+    s = reducer(s, { type: 'restore', view: at40 })
+    expect(pendingRequest(s)).toMatchObject({ kind: 'similar', k: 40 })
+    s = land(s, { entries: [] })
+
+    // Pooling alone is a different question too — same model, same count.
+    const pooled: View = { ...at40, subject: like('/lib/a.stl', { k: 40, pool: 'mean' }) }
+    s = reducer(s, { type: 'restore', view: pooled })
+    expect(pendingRequest(s)).toMatchObject({ kind: 'similar', k: 40, pool: 'mean' })
+    s = land(s, { entries: [] })
+
+    // …and a Back that really is the same question still patches, so this did
+    // not widen `sameQuestion` into re-asking everything.
+    const same = reducer(s, { type: 'restore', view: { ...s.view, model: '/lib/a.stl' } })
+    expect(pendingRequest(same)).toBeNull()
+    expect(same.view.model).toBe('/lib/a.stl')
+  })
+
+  it('the URL carries the two parameters a similarity subject reads, and only off their defaults', () => {
+    const plain = land(
+      reducer(start({}, READY), { type: 'restore', view: view({ subject: like('/lib/a.stl') }) }),
+      { entries: [] },
+    )
+    // `SIMILAR_K` with no pooling is what an untouched view asks for, so the
+    // URL is byte-identical to what a similarity link was before they became
+    // settable — making a default explicit never mints a history entry.
+    expect(urlOf(plain)).toBe('?path=%2Flib&similar=%2Flib%2Fa.stl')
+
+    const tuned = land(
+      reducer(start({}, READY), {
+        type: 'restore',
+        view: view({ subject: like('/lib/a.stl', { k: 40, pool: 'max' }), kinds: 'models' }),
+      }),
+      { entries: [] },
+    )
+    expect(urlOf(tuned)).toContain('k=40')
+    expect(urlOf(tuned)).toContain('pool=max')
+    // Still none of the phrase options — the gate did not loosen, it grew two
+    // options this subject genuinely reads.
+    for (const param of ['q=', 'mode=', 'kinds=', 'nofolders=', 'top=', 'min=']) {
+      expect(urlOf(tuned)).not.toContain(param)
+    }
+    // And they are the view's identity: two similarity views of one model at
+    // different counts are two views, so Back between them goes somewhere.
+    expect(urlOf(tuned)).not.toBe(urlOf(plain))
   })
 
   it('a deferred similarity view has no phrase to offer the name corpus', () => {

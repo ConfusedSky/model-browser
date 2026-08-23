@@ -132,9 +132,15 @@ Both actions SHALL be offered on every model, including one whose thumbnail is c
 ### Requirement: Find models similar to this one
 Where a semantic index is available, the client SHALL offer an action on a model that requests its nearest neighbours from that index and presents them as a set of results in place of the listing, ordered by similarity, with the model itself excluded. Neighbours SHALL be drawn from the whole indexed collection rather than from the folder the model is browsed in, since a model's nearest neighbours are a question about the collection and the folder's own answer is already on screen.
 
-The result SHALL be a view like any other: it is what the view is *about*, in the same sense a committed query is, and SHALL be named in the URL by the model the neighbours were derived from, participate in history, and reproduce for anyone who opens that URL. A view SHALL be about at most one thing — asking for neighbours SHALL leave any committed query behind, and committing a query SHALL leave a similarity view behind — and the URL SHALL name only what the view's subject reads, so a similarity URL names the source model and carries no query text, search mode, kind restriction, or tuning.
+The result SHALL be a view like any other: it is what the view is *about*, in the same sense a committed query is, and SHALL be named in the URL by the model the neighbours were derived from, participate in history, and reproduce for anyone who opens that URL. A view SHALL be about at most one thing — asking for neighbours SHALL leave any committed query behind, and committing a query SHALL leave a similarity view behind — and the URL SHALL name only what the view's subject reads: the source model, and the parameters below, but no query text, search mode, or kind restriction, since none of those selects anything within it.
 
-A similarity view SHALL be leaveable. Since it holds no typed text to clear, the client SHALL offer an explicit dismissal with the results — **one** control, shown wherever the view is about something, whether that is a committed query or a model — so that leaving a similarity view and leaving a search are the same act rather than two that resemble each other, and emptying the search input SHALL do what that control does rather than carry its own copy of the rule. Dismissing SHALL return the location's ordinary listing.
+The parameters the neighbours were computed under SHALL be adjustable while the results are on screen — how many neighbours to return, and how the index reduces a model's several views to one score — offered with the results as the search options are, and only where they can apply, since a view that is not about a model has no neighbours to shape. Changing one SHALL ask the question again rather than reshape the answer already there, because a different parameter is a different question: the view it produces SHALL be a distinct view, named distinctly in the URL, so that going back across a change returns to the neighbours that were actually shown.
+
+These parameters SHALL belong to the view rather than to the profile: they SHALL travel in the URL so a neighbourhood worth showing someone reproduces for them, and SHALL NOT be remembered as a preference for the next model, whose neighbourhood a count chosen for this one says nothing about. Each SHALL have a default that the URL states by omitting it, so a view that adjusted nothing is named exactly as it was before they could be adjusted; where the default belongs to the index rather than to this client, omission SHALL leave the index's own in force rather than this client naming a value on its behalf.
+
+A similarity view SHALL be leaveable. Since it holds no typed text to clear, the client SHALL offer an explicit dismissal with the results — **one** control, shown wherever the view is about something, whether that is a committed query or a model — so that leaving a similarity view and leaving a search are the same act rather than two that resemble each other, and emptying the search input SHALL do what that control does rather than carry its own copy of the rule.
+
+Where the dismissal leads SHALL follow from where the view was entered. A similarity view raised from within the app SHALL return to the view it was raised from, entire — the search that was on screen, with its own results, or the listing — since that view is what the user was looking at and it may have cost minutes to produce, and an exit that discarded it is one people learn not to press. A similarity view opened from a link, with none of this app's history behind it, SHALL return the location's ordinary listing instead. This SHALL be one rule with one branch inside it rather than two dismissals, and dismissing a committed query SHALL be unchanged by it.
 
 The action SHALL be offered only where it could apply — on a model, within the collection the index covers, and outside an archive — and SHALL distinguish a model the index has not yet embedded from one it can never embed, since only the first is fixed by indexing again. Where the index is unavailable the action SHALL be absent. A similarity view SHALL wait for an index that is not ready exactly as a deferred meaning search does: nothing is fetched while the index has not yet answered whether it can serve at all, the location's ordinary nested listing stands in once it has, the view keeps its name meanwhile and the UI says what it is waiting for — naming the model rather than offering to search names, since a similarity view has no phrase to search names with — and the wait is cancelled completely, banner and URL included, when the user navigates away, commits a query, or dismisses the view.
 
@@ -155,8 +161,20 @@ The action SHALL be offered only where it could apply — on a model, within the
 - **THEN** the first is explained as not yet indexed and the second as outside what the index covers
 
 #### Scenario: Leaving a similarity view
-- **WHEN** similarity results are on screen and the user activates the dismissal offered with them
-- **THEN** the ordinary listing for the location returns — by the same control, and the same rule beneath it, that leaves a committed search
+- **WHEN** similarity results raised from within the app are on screen and the user activates the dismissal offered with them — or empties the search input, which is the same act
+- **THEN** the view they were raised from returns entire, with its own results, rather than the location's listing being asked for again; and a similarity view opened from a link, with nothing of this app's behind it, returns the location's ordinary listing — by the same control, and the same rule beneath it, that leaves a committed search
+
+#### Scenario: Asking for more neighbours, or fewer
+- **WHEN** the user changes how many neighbours a similarity view shows, or how the index scores a model's several views
+- **THEN** the neighbours are computed again under the new parameter and the URL names it, so the view can be shared and returned to as it was — and going back reaches the neighbours shown before the change rather than the same ones relabelled
+
+#### Scenario: The parameters belong to the view, not to the profile
+- **WHEN** the user adjusts a similarity view's parameters, leaves it, and asks for another model's neighbours
+- **THEN** the new view starts from the defaults, and its URL names neither parameter, since a count chosen for one model's neighbourhood says nothing about another's
+
+#### Scenario: The parameters are offered only where they apply
+- **WHEN** the view is a listing or a committed search rather than a set of neighbours
+- **THEN** the neighbour parameters are not offered, since there are no neighbours to shape
 
 #### Scenario: A view is about one thing at a time
 - **WHEN** the user asks for neighbours while a search is committed, and later commits a search while similarity results are on screen

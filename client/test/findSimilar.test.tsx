@@ -117,10 +117,12 @@ describe('a similarity view', () => {
     await mountAppAtCurrentUrl(LINK, NESTED)
     await settle()
 
-    // The model, the module constant, and the abort handle — the third asserted
-    // rather than ignored, so a superseded question can be stopped rather than
-    // merely dropped on arrival.
-    expect(similar).toHaveBeenCalledWith(HERO, SIMILAR_K, expect.any(AbortSignal))
+    // The model, the default count, no pooling of its own, and the abort handle
+    // — the last asserted rather than ignored, so a superseded question can be
+    // stopped rather than merely dropped on arrival. `undefined` for the pool
+    // is the whole of 4.2's rule surviving the parameters becoming settable: a
+    // view that made no choice sends none, and the index's own applies.
+    expect(similar).toHaveBeenCalledWith(HERO, SIMILAR_K, undefined, expect.any(AbortSignal))
     // No listing was walked for its sake: the neighbours ARE the grid.
     expect(listDir).not.toHaveBeenCalled()
     expect(labels()).toEqual(['base.stl', 'wing.stl'])
@@ -288,7 +290,7 @@ describe('a similarity view', () => {
     await settle()
 
     expect(similar).toHaveBeenCalledTimes(2)
-    expect(similar).toHaveBeenLastCalledWith(HERO, SIMILAR_K, expect.any(AbortSignal))
+    expect(similar).toHaveBeenLastCalledWith(HERO, SIMILAR_K, undefined, expect.any(AbortSignal))
     expect(location.search).toContain(`similar=${encodeURIComponent(HERO)}`)
     expect(history.length).toBe(before)
     expect(labels()).toEqual(['hero.stl', 'base.stl', 'wing.stl'])
@@ -386,7 +388,7 @@ describe('a similarity view', () => {
     indexAvailability.mockResolvedValue(READY)
     let signal: AbortSignal | undefined
     similar.mockImplementation(
-      (_m: string, _k: number, s: AbortSignal) =>
+      (_m: string, _k: number, _pool: unknown, s: AbortSignal) =>
         new Promise(() => {
           signal = s
         }),

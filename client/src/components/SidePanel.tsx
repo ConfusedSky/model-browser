@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { IndexAvailability, SemanticScope } from '../../../shared/types'
 import type { SearchKinds, SearchMode, Tuning } from '../lib/searchOptions'
-import { TUNING_DEFAULTS } from '../lib/searchOptions'
+import { POOLS, TUNING_DEFAULTS } from '../lib/searchOptions'
 import { stored } from '../lib/stored'
 import { indexCovers } from '../state/selectors'
 
@@ -10,6 +10,19 @@ const COLLAPSE_KEY = 'model-browser:chat-collapsed'
 const TAB_KEY = 'model-browser:panel-tab'
 
 type Tab = 'chat' | 'search'
+
+/**
+ * How long a typed neighbour count waits before it becomes a question. The
+ * search tuning's own debounce (`TUNING_DEBOUNCE_MS`, App) to the millisecond,
+ * and deliberately so: two number fields in one panel that settled at different
+ * speeds would read as one of them being broken.
+ */
+const SIMILAR_DEBOUNCE_MS = 300
+
+/** What the index will accept, so the field refuses what the server would 400
+ *  rather than spending a round trip to be told (`app.ts`'s `k` validator). */
+const K_MIN = 1
+const K_MAX = 1000
 
 const collapseStore = stored(
   COLLAPSE_KEY,
@@ -38,6 +51,7 @@ const tabStore = stored<Tab>(
  */
 export default function SidePanel({
   query,
+  similar,
   path,
   folderMatching,
   kinds,
@@ -49,8 +63,16 @@ export default function SidePanel({
   onKinds,
   onMode,
   onTuning,
+  onSimilarTuning,
 }: {
   query: string | null
+  /**
+   * The live view's similarity subject, or null when it is about anything else.
+   * The block below is rendered from it by the same applicability idiom that
+   * hides the name options under meaning: an option that cannot apply is
+   * absent, not inert.
+   */
+  similar: { model: string; k: number; pool?: Tuning['pool'] } | null
   /** The directory in view — meaning search only covers part of the filesystem. */
   path: string
   folderMatching: boolean
@@ -66,6 +88,13 @@ export default function SidePanel({
   onMode: (mode: SearchMode) => void
   /** `defer` asks the caller to wait out a typing run before re-querying. */
   onTuning: (tuning: Tuning, opts?: { defer?: boolean }) => void
+  /**
+   * Re-ask the similarity view with these parameters. The whole set, never a
+   * delta — `pool` omitted is "leave it to the index", which is a value to
+   * assert rather than a field to forget. Called only with a finished count:
+   * the debounce is this component's, below.
+   */
+  onSimilarTuning: (k: number, pool?: Tuning['pool']) => void
 }) {
   const [collapsed, setCollapsed] = useState(() => collapseStore.read())
   const [tab, setTab] = useState<Tab>(() => tabStore.read())
@@ -81,6 +110,22 @@ export default function SidePanel({
    */
   const [topText, setTopText] = useState<string | null>(null)
   const [scoreText, setScoreText] = useState<string | null>(null)
+  /**
+   * The neighbour count while it is being typed in — the same draft the two
+   * fields above keep, for the same reason: a field mid-edit is not a value,
+   * and `Number('')` is 0, which is not a request for no neighbours.
+   */
+  const [countText, setCountText] = useState<string | null>(null)
+  /**
+   * …and the wait before a typed count becomes a question. This is the one
+   * debounce that lives in a control rather than in App: the meaning tuning's
+   * has a record-only reducer phase to pair with (a recorded value the URL must
+   * not mint an entry for), and a similarity parameter has none — it either
+   * re-asks or it has not happened yet. So there is nothing for the reducer to
+   * hold, and the holding belongs where the keystrokes are.
+   */
+  const countTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(() => () => clearTimeout(countTimerRef.current), [])
 
   function toggle(): void {
     const next = !collapsed
@@ -160,6 +205,93 @@ export default function SidePanel({
                   </p>
                 )}
               </div>
+              {/* What a similarity view is about, and the two parameters it
+                  reads. Rendered only under one — the same rule that keeps the
+                  name options off a meaning search, and the mode toggle off a
+                  machine with no index: an option that cannot apply is absent,
+                  not present and inert.
+
+                  Nothing here is sticky. The four search options are stored per
+                  profile because they describe how *you* search; these describe
+                  one neighbourhood, and a count that suited one model's says
+                  nothing about another's. The URL carries them, so a view worth
+                  keeping is kept by keeping its link, and the next find-similar
+                  starts from the defaults. */}
+              {similar !== null && (
+                <div className="space-y-2 border-t border-zinc-800 pt-3">
+                  <p className="text-zinc-500">Neighbours</p>
+                  <p className="break-all text-zinc-300">
+                    Similar to &ldquo;{similar.model.slice(similar.model.lastIndexOf('/') + 1)}
+                    &rdquo;
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <label className="text-zinc-500" htmlFor="similar-count">
+                      How many
+                    </label>
+                    <input
+                      id="similar-count"
+                      type="number"
+                      min={K_MIN}
+                      max={K_MAX}
+                      aria-label="Number of neighbours"
+                      value={countText ?? String(similar.k)}
+                      onChange={(e) => {
+                        const text = e.target.value
+                        setCountText(text)
+                        const n = Number(text)
+                        // Held, not clamped — a field cleared on its way to
+                        // "40" is not a request for one neighbour, and one on
+                        // its way past 1000 is not a request for the whole
+                        // collection.
+                        if (text.trim() === '' || !Number.isFinite(n)) return
+                        const k = Math.round(n)
+                        if (k < K_MIN || k > K_MAX) return
+                        clearTimeout(countTimerRef.current)
+                        countTimerRef.current = setTimeout(
+                          () => onSimilarTuning(k, similar.pool),
+                          SIMILAR_DEBOUNCE_MS,
+                        )
+                      }}
+                      onBlur={() => setCountText(null)}
+                      className="w-16 rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-zinc-100"
+                    />
+                  </div>
+                  {/* Pooling is a click, so it runs at once: waiting on a
+                      finished value only makes sense where the value arrives a
+                      character at a time. */}
+                  {/* Named apart from the meaning tuning's identical trio: the
+                      mode is sticky, so a profile whose next search is a
+                      meaning one has both on screen under a similarity view,
+                      and two controls sharing an accessible name is one control
+                      as far as anything reading names is concerned. */}
+                  <div className="flex gap-1" role="group" aria-label="Pool neighbour views by">
+                    {POOLS.map((p) => (
+                      <button
+                        key={p}
+                        type="button"
+                        aria-pressed={similar.pool === p}
+                        onClick={() => {
+                          // Whatever the count field was holding is superseded
+                          // by this question, which carries the count in force.
+                          clearTimeout(countTimerRef.current)
+                          setCountText(null)
+                          onSimilarTuning(similar.k, p)
+                        }}
+                        className={`flex-1 rounded-lg border px-2 py-1.5 ${similar.pool === p ? 'border-zinc-500 text-zinc-100' : 'border-zinc-800 text-zinc-500'}`}
+                      >
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                  {/* None pressed is a state, not a gap: absence means the
+                      index's own pooling, which is not any of the three — so
+                      saying which one it is would be a guess about another
+                      process's configuration. */}
+                  {similar.pool === undefined && (
+                    <p className="text-zinc-600">Pooled however the index is configured to.</p>
+                  )}
+                </div>
+              )}
               {showMode && (
                 <div className="flex gap-1" role="group" aria-label="Search by">
                   {(['name', 'meaning'] as const).map((m) => (

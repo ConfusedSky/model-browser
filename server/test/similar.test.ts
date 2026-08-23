@@ -158,9 +158,29 @@ describe('a model’s neighbours', () => {
     expect(body).not.toHaveProperty('scope')
     expect(body.path).toBe(join(root, 'hero.stl'))
     expect(body.k).toBe(16)
-    // `pool` is left at the server's own default for the same reason `k` is not
-    // a URL param: nothing on screen sets it (4.2).
+    // No pool named, no pool sent: 4.2's rule survives the parameter becoming
+    // settable (6.2) — a view that made no choice leaves the index's own in
+    // force, and absence is what says so at every layer.
     expect(body).not.toHaveProperty('pool')
+  })
+
+  it('forwards the pooling only when the caller names one, and only the three the index knows', async () => {
+    // 6.2. The same shape as `k`: validated, never defaulted. Substituting one
+    // here would mint a second default for a choice this server has no opinion
+    // about, and forwarding an unknown value would make the index guess.
+    stubIndex(READY, RESULT)
+    await post({ path: join(root, 'hero.stl'), k: 16, pool: 'max' })
+    expect(sentBody().pool).toBe('max')
+
+    for (const pool of ['softmax', 'mean']) {
+      stubIndex(READY, RESULT)
+      await post({ path: join(root, 'hero.stl'), pool })
+      expect(sentBody().pool).toBe(pool)
+    }
+
+    stubIndex(READY, RESULT)
+    expect((await post({ path: join(root, 'hero.stl'), pool: 'sideways' })).status).toBe(400)
+    expect((await post({ path: join(root, 'hero.stl'), pool: 3 })).status).toBe(400)
   })
 
   it('leaves k to the index when the caller names none, rather than minting a second default', async () => {

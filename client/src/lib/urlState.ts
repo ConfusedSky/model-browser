@@ -31,6 +31,22 @@ export interface UrlView {
    * `toUrlView` never emits both, and `serializeView` never writes both.
    */
   similar?: string
+  /**
+   * How many neighbours a similarity view asked for, carried only when it is
+   * not the default. The default lives with the subject (`SIMILAR_K`,
+   * `state/view.ts`) and is elided by `toUrlView`, because this module cannot
+   * import it back without a cycle — so this field is already
+   * "non-default or absent" by the time the serializer sees it.
+   */
+  k?: number
+  /**
+   * How a *similarity* view pools the subject's per-view scores. One `pool`
+   * param in the URL, two possible readers: a meaning view reads it as tuning
+   * (`tuning.pool`), a similarity view as its own. `parseUrl` reports it both
+   * ways — reporting is its whole job — and the subject decides which reading
+   * is in force, so the two can never both be written.
+   */
+  pool?: Tuning['pool']
   /** Folder matching, default on — carried only when off. */
   folderMatching?: boolean
   /** Which kinds the results present, default 'both'. */
@@ -71,6 +87,13 @@ export function parseUrl(search: string = window.location.search): UrlView {
   const pool = p.get('pool')
   const top = Number(p.get('top'))
   const min = Number(p.get('min'))
+  // Read leniently, like every other param here: a `k` that is not a whole
+  // number the index would accept reads as absence, which resolves to the
+  // default rather than to an error over a link that names a perfectly good
+  // view. The bounds are the server's own (`app.ts`, 1..1000).
+  const rawK = Number(p.get('k'))
+  const k =
+    p.has('k') && Number.isInteger(rawK) && rawK >= 1 && rawK <= 1000 ? rawK : undefined
   const tuning: Partial<Tuning> = {}
   if (p.get('score-raw') === '1') tuning.raw = true
   if (isPool(pool)) tuning.pool = pool
@@ -88,6 +111,11 @@ export function parseUrl(search: string = window.location.search): UrlView {
     flat: p.has('flat'),
     q,
     similar,
+    k,
+    // The same `pool` param the tuning report below carries, reported a second
+    // way for the subject that reads it as its own rather than as tuning. The
+    // parser reports; `resolveView` assigns, by subject.
+    pool: isPool(pool) ? pool : undefined,
     // Defaults are absent from the URL, so their absence is what selects them
     // — and an unrecognised `kinds` reads as the default rather than as an
     // error, since a hand-edited link should degrade to the ordinary view. An
@@ -112,10 +140,12 @@ export function parseUrl(search: string = window.location.search): UrlView {
  * that view does not make. Under a committed query the subject reads a phrase,
  * so the reading mode decides the rest: a name search has no tuning to spell
  * out, and a meaning search cannot restrict by kind, since the index answers
- * with models and nothing else. Under a `similar` subject none of them are
- * read at all (D4) — the source model is the whole of what the view contains,
- * and there is no phrase to tune or restrict — so the URL names the model, the
- * location and the flat toggle and stops.
+ * with models and nothing else. Under a `similar` subject none of the *phrase*
+ * options are read (D4) — there is no phrase to tune or restrict — so the URL
+ * names the model, the location, the flat toggle, and the two parameters that
+ * subject does read: how many neighbours it asked for and how the index pooled
+ * them. Those are in the URL by the same rule that keeps the others out: they
+ * select which entries the view contains, and something on screen sets them.
  *
  * The panel already hides each option outside its mode; the URL says the same
  * thing, so two views that differ only in an option neither of them reads
@@ -136,6 +166,12 @@ export function serializeView(view: UrlView): string {
   // option gate below is false, since none of them is read by that subject.
   const similar = view.similar !== undefined && view.similar !== ''
   if (similar) p.set('similar', view.similar as string)
+  // The two options a similarity subject *does* read. `k` arrives already
+  // elided at its default (`toUrlView`, which owns `SIMILAR_K`), so this writes
+  // whatever it is handed; `pool` has no default to elide — absent means the
+  // index's own, which is a different thing from any of the three values.
+  if (similar && view.k !== undefined) p.set('k', String(view.k))
+  if (similar && view.pool !== undefined) p.set('pool', view.pool)
   const searching = !similar && view.q !== undefined && view.q !== ''
   if (searching) p.set('q', view.q as string)
   // Absence means name (see the `mode` write below), so a mode-less committed
@@ -212,4 +248,29 @@ export const LIGHTBOX_ENTRY = { lightbox: true }
 
 export function isLightboxEntry(): boolean {
   return (window.history.state as { lightbox?: boolean } | null)?.lightbox === true
+}
+
+/**
+ * Stamped into the entry an **in-app** find-similar mints, and read back when
+ * the view is dismissed: an entry we pushed has the view it was raised from
+ * behind it, so `history.back()` restores that view whole — a query search with
+ * its options, or a listing — rather than re-asking the location's listing and
+ * throwing the previous answer away.
+ *
+ * The same channel and the same reasoning as `LIGHTBOX_ENTRY`: the browser
+ * keeps state per entry, so this survives reload and forward/back, where an
+ * in-memory flag would not — a forward-restored similarity view would then
+ * dismiss down the deep-link path.
+ *
+ * A *restored* or deep-linked similarity landing must never gain it: there is
+ * nothing of this app's behind such an entry, and back would leave the app. It
+ * cannot: the landing that would stamp it is a `user` landing only, and a
+ * restore landing onto an entry that already carries the marker writes nothing
+ * at all — the browser has already rewound the URL, so `commitUrl` finds its
+ * serialization redundant and declines, marker included.
+ */
+export const SIMILAR_ENTRY = { similar: true }
+
+export function isSimilarEntry(): boolean {
+  return (window.history.state as { similar?: boolean } | null)?.similar === true
 }

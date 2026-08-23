@@ -277,14 +277,56 @@ only in options neither of them reads serialize alike, so they are one view unde
 and mint no history entries that go nowhere. That is the mode gate's own property, inherited
 rather than re-argued.
 
-`k` is a module constant: not a view field, not a URL param. Nothing on screen sets it — the
-side panel's controls are meaning-query controls — so a URL field for it would name a
-distinction no view makes. If it ever becomes user-settable it becomes a view field then and
-the gate carries it like tuning. The index's `pool` parameter is left at the server's own
-default for the same reason: `similar()` sends `path` and `k` and nothing else, so the value
-in force is whatever `serve_api.py --pool` was started with — the same pooling a meaning query
-gets when the panel leaves it alone. Stating it is the whole of task 4.2; there is no code for
-it beyond the absence.
+~~`k` is a module constant: not a view field, not a URL param.~~ **It became user-settable
+(task 6.2), and this paragraph's own prediction is what happened.** What it said was: "Nothing
+on screen sets it — the side panel's controls are meaning-query controls — so a URL field for
+it would name a distinction no view makes. **If it ever becomes user-settable it becomes a view
+field then and the gate carries it like tuning.**" The side panel now has a similarity block,
+so `k` is a field and the gate carries it. The prediction is recorded as kept rather than
+deleted, because the *reason* it gave is the reason the new shape is right: a URL param earns
+its place by naming a distinction some view actually makes, and the day something on screen
+makes that distinction is the day it earns it. Nothing about the gate loosened.
+
+The same paragraph left the index's `pool` at the server's own default on the same grounds, and
+the same thing happened to it — with one difference worth keeping. `k` has a default *this app*
+chose (`SIMILAR_K`, below), so its absence from a URL means 16. `pool`'s default belongs to the
+index — whatever `serve_api.py --pool` was started with — so its absence means **that**, and
+this app must not name a value on the index's behalf to represent it. Hence: `pool` is written
+only when set, sent only when set, and the panel's trio renders with none of the three pressed
+until somebody presses one. Task 4.2's "there is no code for it beyond the absence" is now
+"the absence is the code": one `undefined` carried from the subject through `requestOf`, the
+`ApiClient` call, the route, and `similar()`, each layer dropping the field rather than
+substituting for it.
+
+**Where they live: on the subject, not beside it.** `Subject`'s `similar` arm carries
+`{ model, k, pool? }` rather than `View` gaining sibling fields. A sibling would re-mint exactly
+the reset list the union abolishes — every transition that leaves a similarity view would have
+to remember to clear it — and would make "a query subject with neighbour parameters" a
+representable state with no meaning. This is the union's own argument, applied a second time;
+that it applies again is the evidence it was the right shape.
+
+**They are not sticky, and that is deliberate.** The four search options are stored per profile
+because they describe how *you* search. These describe one neighbourhood: a count that suited
+this model's says nothing about another's, and a stored one would silently shape every later
+find-similar from a decision made about an unrelated model. So the URL carries them — a
+neighbourhood worth showing someone reproduces for them — and the next find-similar starts from
+the defaults. A view worth keeping is kept by keeping its link, which is the same answer this
+app gives for every other view.
+
+**The re-ask is a re-ask, not a patch.** `sameQuestion`'s similar arm compares `k` and `pool`
+alongside `path` and `model`, which is what the `Request` type's "closed list of what
+*identifies* the question" was written to make true the day these became variables. Left out,
+a Back across a parameter change takes `restore`'s patch branch: the old answer kept on screen
+while the URL, and the panel's own spinner, claim a count the index was never asked for.
+
+**No record-only phase.** `setTuning` has one — a value the reducer records without running,
+so a typed number does not mint a history entry per keystroke — and the similarity parameters
+deliberately do not. There is nothing for the reducer to hold: a parameter here either re-asks
+or has not happened yet. So the debounce lives in the control that types the digits
+(`SidePanel`'s `countText` draft, the `topText`/`scoreText` pattern with a timer beside it),
+and the transition always asks. It goes through `askCommitted`, so a re-parameterisation while
+the index is warming defers exactly as a fresh find-similar would rather than firing at an
+index that cannot answer.
 
 *Verified against the index's source while implementing 4.1* (`docs/api/surface.md`
 §`POST /similar` and `src/api.py:404-441`, read with the service down). Every claim in this
@@ -301,18 +343,33 @@ inherits them rather than rediscovering them:
   scores 1.0 and skews the z). So "no neighbours" is an ordinary landing, which is what
   4.6b's empty-result sentence is for.
 
-*The value is 16* (`SIMILAR_K`, `state/view.ts`, landed with the subject). Chosen rather
+*The default is 16* (`SIMILAR_K`, `state/view.ts`, landed with the subject; the *default* rather
+than *the value* since 6.2). Chosen rather
 than inherited from either end: the index's own default is 10 and this app's text-query
 bound is 60. Above the index's, because a grid of ten leaves most of a row empty at the
 `minmax(11rem,1fr)` track width; well under the text bound, because neighbour quality falls
 off faster than text-match quality does — a phrase's 40th hit can still be the one you meant,
-while a model's 40th neighbour is noise. It is compared in `sameQuestion`'s similar arm even
-though it is constant, so the "closed list of what identifies the question" stays literally
-true the day it becomes a variable.
+while a model's 40th neighbour is noise. It was compared in `sameQuestion`'s similar arm while
+it was still constant, so that the "closed list of what identifies the question" would stay
+literally true the day it became a variable. *That day is 6.2, and the arm needed no change
+beyond adding `pool` beside it* — which is the payoff for having compared a constant.
 
 `parseUrl` keeps its deliberate leniency (`urlState.ts:37-45`): a hand-edited URL carrying
 both `q` and `similar` resolves as the similarity view — the parameter naming a subject is
-the more specific one — and the stray `q` rides along harmlessly, read by nothing.
+the more specific one — and the stray `q` rides along harmlessly, read by nothing. `k` reads
+by the same rule: a value the index would refuse (non-integer, `< 1`, `> 1000` — the server's
+own bounds) reads as *absence*, which resolves to `SIMILAR_K`, rather than as an error over a
+link that names a perfectly good view.
+
+One shape worth stating, because it looks like duplication and is not: `pool` is **one** URL
+param with **two** possible readers — a meaning view's tuning, and a similarity view's own —
+and they can never both be in force, because the subject decides which reading applies and a
+view has one subject. So `parseUrl` reports it twice (into `tuning.pool` and into `UrlView.pool`),
+`resolveView` assigns whichever the subject reads, and `serializeView` writes it from whichever
+gate is open. The parser reports; the resolver assigns. Giving the similarity reading its own
+slot rather than borrowing `tuning.pool` keeps `UrlView.tuning` honestly meaning *the view's
+tuning* — under a similarity subject it is not that, and a `pool` smuggled through it would be
+a lie in the type that exists to be the one honest report of a URL.
 
 *Corrected while implementing this:* that comment claimed the stray is scrubbed by "the
 first commit", and it is not. `commitUrl` declines a write whose serialization already
@@ -386,6 +443,46 @@ built here:
 
 This is scope the change always had; the rebase only discovered that the thing it planned to
 reuse was never built.
+
+*Extended at 6.3, and the one-rule requirement is what shapes the extension.* The exit above
+always returns the location's listing, which is right for a link and wrong for the case the
+live run exposed: a similarity view raised **from inside the app** replaced a view the user
+was looking at — often a search result that cost ~32s on a cold spinning volume — and
+dismissing threw it away and re-walked the folder instead. That is D3's own argument for
+reveal pushing a history entry ("an action that discards it irreversibly would be one people
+learn not to press"), arriving at the exit rather than at the entrance.
+
+So the dismissal branches on **provenance**, and the branch is inside the one function:
+
+```
+leaveSubject(otherwise):  isSimilarEntry() ? history.back() : commit(otherwise)
+```
+
+Two call sites — the ✕ passes `clearSubject`, the empty-input path passes its `queryText` —
+and zero copies. D9's requirement is *one rule*, not *one destination*: two implementations
+that both branched would be the two-that-resemble-each-other it refuses, while one function
+with a branch is one rule that knows two things. Query-subject dismissal is untouched, which
+is not a special case but a consequence: a query landing never marks its entry, so the branch
+is never taken there.
+
+**How the provenance is known.** Through the projection's existing `state` channel, exactly as
+`LIGHTBOX_ENTRY` (R7 bridge 1): the fetch effect's `land()` stamps `SIMILAR_ENTRY` when
+`request.kind === 'similar' && requestSource === 'user'`. The browser keeps state per entry, so
+it survives reload and forward/back — an in-memory flag would not, and a forward-restored
+similarity view would then dismiss down the deep-link path, which is the bug the lightbox
+marker was introduced to avoid. Chained find-similars need no special case: each in-app landing
+marks its own entry, so each press unwinds one hop.
+
+**Why a restore landing cannot gain or lose the marker, verified rather than assumed.** Gaining
+is closed by the `user` gate. *Losing* is the one that needed checking, because the restore
+intent is `{ replace: true }` with no `state`, and `commitUrl` would write `null` over an
+entry's state if it wrote at all. It does not: a Back onto a marked similarity entry has already
+had its URL rewound by the browser, so the landing's serialization matches the address bar and
+`commitUrl` declines the write entirely — marker included. The dedupe *is* the preservation.
+The only restore landings that do advance the URL are ones whose entry never matched the
+resolved view (a hand-edited link with a stray param), which carry no marker to preserve and
+must not gain one. Pinned twice: as a unit case over `commitUrl` directly, and as an App case
+that Backs onto an in-app similarity view and dismisses again.
 
 *Revised while implementing 4.1–4.6, and it reverses a sub-ruling taken at Stage A.* Stage A
 decided the `similar` transition should leave `drafts.queryText` alone, on the grounds that

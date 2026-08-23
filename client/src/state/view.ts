@@ -22,11 +22,29 @@ import { serializeView, type UrlView } from '../lib/urlState'
  *
  * Distinct from `View.mode`, which is the corpus a typed *phrase* goes to: the
  * subject says what the view is about, the mode says how a phrase is read.
+ *
+ * The similar arm carries its own parameters rather than sitting beside a
+ * sibling `View` field for them (D4, revised): a second slot re-mints exactly
+ * the reset list the union abolishes — every transition that leaves a
+ * similarity view would have to remember to clear it, and "a query subject with
+ * neighbour parameters" would be representable and mean nothing. They travel
+ * with the subject that reads them, so leaving the subject leaves them.
  */
 export type Subject =
   | { kind: 'none' }
   | { kind: 'query'; text: string }
-  | { kind: 'similar'; model: string }
+  | {
+      kind: 'similar'
+      model: string
+      /** How many neighbours to ask for. `SIMILAR_K` where nothing set it. */
+      k: number
+      /**
+       * How the index pools a model's per-view scores. Absent means the
+       * server's own default, which is never sent (4.2's rule): a value here is
+       * a choice somebody made on screen, and absence is the absence of one.
+       */
+      pool?: Tuning['pool']
+    }
 
 export interface View {
   path: string
@@ -64,6 +82,16 @@ export function toUrlView(view: View): UrlView {
     flat: view.flat,
     q: view.subject.kind === 'query' ? view.subject.text : undefined,
     similar: view.subject.kind === 'similar' ? view.subject.model : undefined,
+    // The similarity parameters, and the default elided here rather than in
+    // `serializeView` — this module owns `SIMILAR_K`, and `urlState` cannot
+    // import it back without a cycle. Absence means the default at both ends:
+    // `resolveView` reads an absent `k` as `SIMILAR_K`, so a link that names no
+    // count and one that names 16 are the same view under `sameView`.
+    k:
+      view.subject.kind === 'similar' && view.subject.k !== SIMILAR_K
+        ? view.subject.k
+        : undefined,
+    pool: view.subject.kind === 'similar' ? view.subject.pool : undefined,
     folderMatching: view.folderMatching,
     kinds: view.kinds,
     mode: view.mode,
@@ -96,11 +124,16 @@ export function sameListing(a: View, b: View): boolean {
 }
 
 /**
- * How many neighbours a similarity view asks the index for. A module constant,
- * not a view field and not a URL param (D4): nothing on screen sets it, so a
- * URL field would name a distinction no view makes. If it ever becomes
- * user-settable it becomes a view field then, and the URL gate carries it the
- * way it carries tuning.
+ * How many neighbours a similarity view asks the index for **when nothing has
+ * said otherwise** — the default, not the value.
+ *
+ * D4 said this was a module constant "not a view field and not a URL param,
+ * because nothing on screen sets it — if it ever becomes user-settable it
+ * becomes a view field then, and the URL gate carries it the way it carries
+ * tuning." Something on screen sets it now (the side panel's similarity block),
+ * so that is exactly what happened: `k` is a field of the `similar` subject and
+ * a URL param, and the gate carries it. This constant is what an unset one
+ * resolves to, and what `toUrlView` elides.
  *
  * Chosen rather than inherited from either end. The index's own default is 10
  * and this app's text-query bound is 60: above the index's, because a grid of
@@ -131,12 +164,27 @@ export const SIMILAR_K = 16
 export type Request =
   | { kind: 'listing'; path: string; flat: boolean; q: string | null; folderMatching: boolean }
   | { kind: 'meaning'; path: string; text: string; tuning: Tuning }
-  | { kind: 'similar'; path: string; model: string; k: number }
+  | {
+      kind: 'similar'
+      path: string
+      model: string
+      k: number
+      /** Sent only when the subject names one; absent leaves the index's own. */
+      pool?: Tuning['pool']
+    }
 
 export function requestOf(view: View): Request {
   const subject = view.subject
   if (subject.kind === 'similar') {
-    return { kind: 'similar', path: view.path, model: subject.model, k: SIMILAR_K }
+    // The parameters come off the subject, not off a constant: they are part of
+    // what the question *is*, which is why `sameQuestion` compares them below.
+    return {
+      kind: 'similar',
+      path: view.path,
+      model: subject.model,
+      k: subject.k,
+      pool: subject.pool,
+    }
   }
   if (subject.kind === 'query' && view.mode === 'meaning') {
     return { kind: 'meaning', path: view.path, text: subject.text, tuning: view.tuning }
@@ -166,7 +214,18 @@ export function sameQuestion(a: View, b: View): boolean {
     // `path` is compared here and nowhere else: `sameQuestion` is not widened
     // to compare it generally, because for every other request kind it is
     // already inside the compare below.
-    return y.kind === 'similar' && x.path === y.path && x.model === y.model && x.k === y.k
+    //
+    // `k` and `pool` are compared for the reason the whole type exists: a
+    // different parameter is a different question. Leaving either out would let
+    // a Back across a parameter change take `restore`'s patch branch — the
+    // answer on screen kept, the URL saying a count nobody asked the index for.
+    return (
+      y.kind === 'similar' &&
+      x.path === y.path &&
+      x.model === y.model &&
+      x.k === y.k &&
+      x.pool === y.pool
+    )
   }
   if (x.kind === 'meaning') {
     return (

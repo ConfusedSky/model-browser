@@ -84,10 +84,22 @@ export interface ApiClient {
    * sentence of its own ("not indexed yet"), and the caller reads the code
    * rather than sniffing the index's words.
    *
+   * `k` is how many neighbours to ask for and `pool` how the index reduces a
+   * model's per-view scores to one — both the similarity view's own, set in the
+   * side panel and carried in its URL. `pool` is positional and often
+   * `undefined`, which is not the same as any of its three values: it means
+   * leave the index's own default in force, so the field is dropped from the
+   * body rather than sent empty.
+   *
    * `signal` aborts it, like its two siblings: a superseded question must stop
    * rather than merely be ignored on arrival.
    */
-  similar(model: string, k: number, signal?: AbortSignal): Promise<SimilarListing>
+  similar(
+    model: string,
+    k: number,
+    pool?: SemanticTuning['pool'],
+    signal?: AbortSignal,
+  ): Promise<SimilarListing>
   getThumb(path: string, mtime: number): Promise<ThumbResult>
   putThumb(save: ThumbSave): Promise<void>
 }
@@ -167,11 +179,19 @@ export class HttpApiClient implements ApiClient {
     return jsonOrThrow<SemanticListing>(res)
   }
 
-  async similar(model: string, k: number, signal?: AbortSignal): Promise<SimilarListing> {
+  async similar(
+    model: string,
+    k: number,
+    pool?: SemanticTuning['pool'],
+    signal?: AbortSignal,
+  ): Promise<SimilarListing> {
     const res = await this.fetchFn('/api/semantic/similar', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ path: model, k }),
+      // `JSON.stringify` drops an `undefined` field, so an unset pool sends no
+      // `pool` at all and the index's own applies — absence meaning the default
+      // at every layer, the way `folderMatching` and the tuning already do.
+      body: JSON.stringify({ path: model, k, pool }),
       signal,
     })
     return jsonOrThrow<SimilarListing>(res)

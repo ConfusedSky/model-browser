@@ -31,9 +31,11 @@ import {
 import {
   commitUrl,
   isLightboxEntry,
+  isSimilarEntry,
   LIGHTBOX_ENTRY,
   parseUrl,
   serializeView,
+  SIMILAR_ENTRY,
   type UrlView,
 } from './lib/urlState'
 import { initialState, reducer, type Action, type Landed } from './state/reducer'
@@ -47,7 +49,7 @@ import {
   noticeKinds,
   pendingRequest,
 } from './state/selectors'
-import { sameListing, toUrlView, type Prefs, type Subject, type View } from './state/view'
+import { sameListing, SIMILAR_K, toUrlView, type Prefs, type Subject, type View } from './state/view'
 import { MeshLru } from './three/lru'
 import { disposeModel, embedded3mfThumbnail, formatOf, geometryBytes, parseModel } from './three/models'
 import { POSE_VERSION } from './three/pose'
@@ -173,7 +175,11 @@ function resolveView(url: UrlView): View {
     // by nothing.
     subject:
       url.similar !== undefined
-        ? { kind: 'similar', model: url.similar }
+        ? // The parser reports every param it recognises; the *resolver* is
+          // where a subject claims the ones it reads. `k` absent is the
+          // default, the same absence `toUrlView` writes; `pool` absent is the
+          // index's own, which is not any of the three named values.
+          { kind: 'similar', model: url.similar, k: url.k ?? SIMILAR_K, pool: url.pool }
         : url.q !== undefined
           ? { kind: 'query', text: url.q }
           : { kind: 'none' },
@@ -354,6 +360,11 @@ export default function App() {
   // separately rather than flattened to one string, because every place below
   // has a different sentence for each and a blank is not one of them.
   const liveQuery = live.subject.kind === 'query' ? live.subject.text : null
+  // The similarity view's own parameters, for the panel block that sets them.
+  // Read off the LIVE subject, like every other control (selectors' third
+  // case): a spinner that showed the answered view's count would snap back
+  // between the press and the answer.
+  const liveSimilar = live.subject.kind === 'similar' ? live.subject : null
   const labelQuery = label.subject.kind === 'query' ? label.subject.text : null
   const labelModel = label.subject.kind === 'similar' ? label.subject.model : null
   const scope = state.result?.scope ?? null
@@ -442,7 +453,22 @@ export default function App() {
       // The view is real now — record it (url-navigation D1/D2). A restoration
       // replaces (back must not mint forward-erasing entries); a user
       // navigation pushes.
-      urlIntent.current = { replace: requestSource === 'restore' }
+      //
+      // A similarity view the user asked for *from inside the app* marks the
+      // entry it pushes, through the projection's existing `state` channel —
+      // the `LIGHTBOX_ENTRY` pattern, for the same reason (D9): the mark says
+      // this entry has the view it was raised from behind it, so dismissing can
+      // go back to that view rather than re-asking the folder's listing.
+      // Restored and deep-linked landings must not gain it and cannot: this is
+      // gated on `user`, and a restore onto an entry that already carries the
+      // marker writes nothing at all, since the browser has already rewound the
+      // URL and `commitUrl` declines the redundant write, marker included.
+      urlIntent.current = {
+        replace: requestSource === 'restore',
+        ...(request.kind === 'similar' && requestSource === 'user'
+          ? { state: SIMILAR_ENTRY }
+          : {}),
+      }
       dispatch({ type: 'landing', id, forView, landed })
     }
     const fail = (err: unknown): void => {
@@ -463,7 +489,11 @@ export default function App() {
         dispatch({ type: 'failure', id, forView, message: OUTSIDE_CORPUS })
         return () => controller.abort()
       }
-      void api.similar(request.model, request.k, controller.signal).then(
+      // `pool` is passed through as the subject holds it — `undefined` where
+      // nothing set one, which the client drops from the body so the index's
+      // own default applies (4.2's rule, now that something on screen can set
+      // it).
+      void api.similar(request.model, request.k, request.pool, controller.signal).then(
         // Similarity order is the index's; the client sorts nothing. No scope,
         // no `weak`, no `capped`: the index publishes none of them for
         // neighbours, and a landing that invented them would give the label
@@ -568,14 +598,50 @@ export default function App() {
     commit({ type: 'toggleFlat' })
   }
 
+  /**
+   * Leave the committed subject — **the** dismissal, whichever affordance asked
+   * for it (D9). One function with the branch inside it; two call sites, zero
+   * copies.
+   *
+   * The branch is provenance, and it is the whole of what this adds: a
+   * similarity view entered from inside the app sits on an entry we pushed and
+   * marked, so going back restores the view it was raised from *whole* — a
+   * query search with its options, a listing with its place — rather than
+   * re-asking the location's listing and throwing that answer away. On a cold
+   * link there is nothing of this app's behind the entry, so back would leave
+   * the app; the reducer path clears to the listing instead.
+   *
+   * Chained find-similars unwind one hop per press, because each in-app landing
+   * marked its own entry. And a query view is untouched by all of this: its
+   * entry is never marked, so `otherwise` is what runs — exactly as before.
+   */
+  const leaveSubject = useCallback(
+    (otherwise: Action): void => {
+      if (isSimilarEntry()) {
+        // popstate does the rest: the restoration is one dispatch of the
+        // previous URL resolved whole, which is the machinery that already
+        // exists for Back (url-navigation D2).
+        window.history.back()
+        return
+      }
+      commit(otherwise)
+    },
+    [commit],
+  )
+
   function handleQueryTextChange(value: string): void {
     // Emptying the input while a subject is committed is how it is left: it
     // drops the subject, cancels any deferral, and re-issues the ordinary
     // listing (file-search's "Clearing a committed query" rule, now one rule
     // for both kinds of subject — D9). That cancel asserts the view at
     // dispatch, so it owns the URL; ordinary typing owns nothing.
+    //
+    // Through the one dismissal, so erasing stale text under an in-app
+    // similarity view returns where the ✕ returns. Left as its own commit, the
+    // tidying gesture and the control would be two exits again — which is the
+    // resemblance D9 refuses, in the one place D9 already had to argue about.
     if (value.trim() === '' && live.subject.kind !== 'none') {
-      commit({ type: 'queryText', text: value })
+      leaveSubject({ type: 'queryText', text: value })
       return
     }
     dispatch({ type: 'queryText', text: value })
@@ -675,6 +741,31 @@ export default function App() {
     tuningForRef.current = null
     clearTimeout(tuningTimerRef.current)
   }, [state])
+
+  /**
+   * The similarity view's parameters — how many neighbours, and how the index
+   * pools a model's views. Both re-ask, for the reason the mode and folder
+   * matching re-ask a committed query: trying a parameter is the point, and a
+   * setting that only applied to the *next* find-similar would make trying it a
+   * two-step.
+   *
+   * No debounce here and no record-only phase, unlike `setTuning`: the count is
+   * typed digit by digit, so the panel holds the draft and only calls this with
+   * a finished value. `commit` rather than `dispatch` because a deferred
+   * re-parameterisation asserts its view at dispatch and owes the URL that
+   * assertion; a landed one is written by its landing, as every ask is.
+   *
+   * Nothing is written to storage. These are not sticky preferences: they
+   * belong to the view they were set on, they travel in its URL, and the next
+   * find-similar starts from the defaults again — deliberately, since a count
+   * that was right for one model's neighbourhood says nothing about another's.
+   */
+  const setSimilarTuning = useCallback(
+    (k: number, pool?: Tuning['pool']): void => {
+      commit({ type: 'similarTuning', k, pool })
+    },
+    [commit],
+  )
 
   /** The kind option only selects among entries already returned — no request,
    *  but the URL names the view and this changed which entries it shows. */
@@ -1218,12 +1309,20 @@ export default function App() {
             delegates to — the same act, not a second implementation of it —
             and it is rendered for a model exactly as for a phrase, which is
             the whole reason a similarity view is leaveable at all: there is no
-            text in the input for it to empty. */}
+            text in the input for it to empty.
+
+            Where it goes is `leaveSubject`'s to decide, not this button's: an
+            in-app similarity view returns to the view it came from, everything
+            else clears to the listing as before (D9's provenance branch). */}
         {dismissable && (
           <button
             type="button"
-            onClick={() => commit({ type: 'clearSubject' })}
-            title="Show this folder's own contents again"
+            onClick={() => leaveSubject({ type: 'clearSubject' })}
+            // One sentence for both destinations, because the button cannot
+            // honestly promise either: where it lands is the entry's
+            // provenance, and reading `history.state` during a render would
+            // read it one render stale.
+            title="Stop showing this and go back to browsing"
             className="shrink-0 rounded px-1.5 text-zinc-500 hover:text-zinc-200"
           >
             ✕ Dismiss
@@ -1502,6 +1601,8 @@ export default function App() {
         </main>
         <SidePanel
           query={liveQuery}
+          similar={liveSimilar}
+          onSimilarTuning={setSimilarTuning}
           path={target}
           folderMatching={live.folderMatching}
           kinds={live.kinds}

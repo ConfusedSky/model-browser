@@ -33,6 +33,7 @@ import {
   corpusOf,
   sameQuestion,
   sameView,
+  SIMILAR_K,
   standInOf,
   type Prefs,
   type View,
@@ -138,6 +139,18 @@ export type Action =
    *  user is standing in. The corpus decides what that means, exactly as it does
    *  for a phrase — including deferring it while the index warms (D4). */
   | { type: 'similar'; model: string }
+  /**
+   * Re-shape the similarity view on screen: how many neighbours, and how the
+   * index pools a model's per-view scores. The whole parameter set, never a
+   * delta — an omitted `pool` is the index's own default, which is a value the
+   * action can assert rather than a field it forgot.
+   *
+   * No record-only phase, unlike `setTuning`: a parameter here is one number
+   * and one three-way choice, and the debounce that keeps a typed number from
+   * becoming four questions lives in the control that types it. So this
+   * transition always asks — there is nothing to record.
+   */
+  | { type: 'similarTuning'; k: number; pool?: Tuning['pool'] }
   /** Leave whatever subject is committed — a phrase or a model — and re-ask the
    *  location's ordinary listing (D9). One transition for both kinds, which is
    *  what makes "the same dismissal" one implementation rather than two that
@@ -354,9 +367,12 @@ export function reducer(state: SearchState, action: Action): SearchState {
       // similarity views of one model apart (`requestOf`). Routed through the
       // one corpus decision, so it defers and waits exactly as meaning does,
       // and the deferral holds its own provenance.
+      // The parameters start at their defaults: `SIMILAR_K` neighbours, and no
+      // pool at all — absence being the index's own, which is what an
+      // untouched view asks for.
       const view: View = {
         ...liveView(state),
-        subject: { kind: 'similar', model: action.model },
+        subject: { kind: 'similar', model: action.model, k: SIMILAR_K },
         model: null,
       }
       // The draft goes with it, as it does on a `navigate`. Text left in the
@@ -371,6 +387,25 @@ export function reducer(state: SearchState, action: Action): SearchState {
         view,
         'user',
       )
+    }
+
+    case 'similarTuning': {
+      const base = liveView(state)
+      // Only a similarity view has these to change. Under any other subject
+      // the control is not on screen, and asserting a parameter set onto a
+      // subject that reads none would put a `k` in the URL of a view that
+      // cannot use it — the mode's own mistake, in a different slot.
+      if (base.subject.kind !== 'similar') return state
+      // A different parameter is a different question, so this re-asks by the
+      // one corpus decision — deferring while the index warms exactly as a
+      // fresh find-similar would, rather than firing at an index that cannot
+      // answer.
+      const view: View = {
+        ...base,
+        subject: { ...base.subject, k: action.k, pool: action.pool },
+        model: null,
+      }
+      return askCommitted(state, view, 'user')
     }
 
     case 'clearSubject':

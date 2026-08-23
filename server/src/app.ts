@@ -202,7 +202,9 @@ export function createApp(cache: ThumbCache = new ThumbCache()): Hono {
    * meaning exactly one thing.
    */
   app.post('/api/semantic/similar', async (c) => {
-    const body = (await c.req.json().catch(() => null)) as { path?: string; k?: number } | null
+    const body = (await c.req.json().catch(() => null)) as
+      | { path?: string; k?: number; pool?: string }
+      | null
     const path = body?.path
     if (typeof path !== 'string' || path.trim() === '') {
       return c.json({ error: 'path is required' }, 400)
@@ -214,6 +216,14 @@ export function createApp(cache: ThumbCache = new ThumbCache()): Hono {
     if (k !== undefined && (!Number.isInteger(k) || k < 1 || k > 1000)) {
       return c.json({ error: `invalid k: ${String(k)}` }, 400)
     }
+    // The same rule for the pooling, which is settable on screen now. Absent
+    // still leaves the index's own — the value in force is whatever
+    // `serve_api.py --pool` was started with — and only the three the index
+    // names are forwarded, so a hand-made request cannot make it guess.
+    const pool = body?.pool
+    if (pool !== undefined && pool !== 'mean' && pool !== 'max' && pool !== 'softmax') {
+      return c.json({ error: `invalid pool: ${String(pool)}` }, 400)
+    }
     const status = await indexStatus()
     if (status.state !== 'ready' || status.collectionRoot === undefined) {
       return c.json({ error: 'index unavailable', state: status.state, detail: status.detail }, 503)
@@ -224,7 +234,7 @@ export function createApp(cache: ThumbCache = new ThumbCache()): Hono {
     }
     let result
     try {
-      result = await indexSimilar(model, k)
+      result = await indexSimilar(model, k, pool)
     } catch (err) {
       if (err instanceof IndexError) {
         const { body: reply, status: code } = indexErrorReply(err)
