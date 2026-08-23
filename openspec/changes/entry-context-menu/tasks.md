@@ -609,8 +609,23 @@
       (`clearSubject` from the ✕, the `queryText` commit from the empty-input branch) exactly as
       before. Two call sites, zero copies — D9's requirement is *one rule*, not *one
       destination*. Query-subject dismissal is untouched, and not as a special case: a query
-      landing never marks its entry, so the branch is never taken there. Chained find-similars
-      unwind one hop per press, with no code for the chain.
+      landing never marks its entry, so the branch is never taken there.
+      **Revised after live verification 2026-08-22:** one hop was wrong. Tuning a view twice
+      (`k`, then the pool) and pressing ✕ landed on the intermediate k-tuned entry — three
+      presses to leave. Each re-tune *must* push its own marked entry (a different parameter is
+      a different question, and Back must reach the neighbours actually shown), so an excursion
+      is a run of marked entries and the exit has to know how long it is. `SIMILAR_ENTRY` is now
+      a factory stamping `{ similar: true, depth: n }`, `land()` computes `n` as
+      `similarDepth() + 1` off the entry still current at stamp time, and the branch is
+      `history.go(-similarDepth())`. Dismiss leaves the whole excursion in one press — tuning
+      steps and chains alike; Back is untouched and still walks the steps. This **revises the
+      landed "chained find-similars unwind one hop per press" behavior** and the test that
+      pinned it, which now pins the new rule (chain two, dismiss once, land on the origin).
+      The entry-actions dismissal scenario needed no wording change: it says the view they were
+      raised from returns entire — "the search that was on screen, with its own results, or the
+      listing" — which names a non-similarity destination and so describes the new behavior more
+      exactly than the old. Recorded in design D9 ("How far back, revised after live
+      verification").
       **Marker survival, verified rather than assumed** (the check-in trigger): a restore
       landing's intent is `{ replace: true }` with no `state`, which would write `null` over an
       entry's marker *if it wrote at all*. It does not — a Back onto a marked entry has already
@@ -618,16 +633,25 @@
       and `commitUrl` declines the whole write. The dedupe **is** the preservation, and the only
       restore landings that do advance the URL are ones whose entry never matched the resolved
       view, which carry no marker and must not gain one. Recorded in design D9 and pinned twice
-      — a unit case over `commitUrl` directly (`urlState.test.ts`) and an App case that Backs
-      onto an in-app similarity view and dismisses again.
-      **No interaction with the anchor or locate machinery:** `history.back()` produces a
+      — a unit case over `commitUrl` directly (`urlState.test.ts`, now asserting the depth
+      survives too) and an App case that Backs onto a *tuned* in-app similarity view and
+      dismisses again, since `similarDepth()` reads the entry the browser restored.
+      **No interaction with the anchor or locate machinery:** `history.go(-n)` produces a
       popstate, which already resets both ephemeral reveal cells, and the anchor is part of the
       result the restore landing replaces wholesale (R5).
       **Tested** in `similarReturn.test.tsx` — returns to the search whole (URL, label, entries
-      and the input's text), a cold link still clears to the listing, the erase gesture returns
-      the same way, a chain unwinds one hop per press, the marker survives a Back, and a query
-      view's dismissal is unchanged. `history.back()` is spied and played by hand throughout
-      (the harness stubs `URL`, so happy-dom's own `back()` throws — `urlLightbox`'s pattern).
-      **Falsified three ways:** dropping the marker stamp, hard-coding the branch to false, and
-      un-delegating the empty-input exit — the first two fail four cases each, the third fails
-      the erase case alone, which is exactly the delegation it removed
+      and the input's text), a view tuned twice leaves in one press past both steps, a chain of
+      two leaves in one press to the origin, a cold link still clears to the listing, the erase
+      gesture returns the same way, the marker and depth survive a Back, and a query view's
+      dismissal is unchanged. The history is faked and played by hand throughout (the harness
+      stubs `URL`, so happy-dom's own `back()` throws — `urlLightbox`'s pattern), and the fake's
+      back stack is built by spying on the app's own `pushState` rather than by the test
+      declaring it: the depth under test is a count of entries the app minted, so a hand-fed
+      stack could agree with a wrong count.
+      **Falsified five ways:** dropping the marker stamp, hard-coding the branch to false, and
+      un-delegating the empty-input exit (the original three — the first two fail four cases
+      each, the third fails the erase case alone, which is exactly the delegation it removed);
+      then for the depth, hard-coding the stamp to `SIMILAR_ENTRY(1)` and reverting the exit to
+      `go(-1)` — each fails the tune-twice, chain, and Backed-onto cases and leaves the
+      single-similar, cold-link, erase and query cases passing, which is the split that says
+      they are testing the depth and not the branch

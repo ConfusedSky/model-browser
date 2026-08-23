@@ -10,6 +10,7 @@ import {
   parseUrl,
   serializeView,
   SIMILAR_ENTRY,
+  similarDepth,
   type UrlView,
 } from '../src/lib/urlState'
 
@@ -103,17 +104,20 @@ describe('url state', () => {
     // 6.3. Same channel as the lightbox's, same reason: the browser keeps state
     // per entry, so a forward-restored similarity view is still known to have
     // its origin behind it, which an in-memory flag could not say.
-    commitUrl({ path: '/a', flat: false, similar: '/a/m.stl' }, { state: SIMILAR_ENTRY })
+    commitUrl({ path: '/a', flat: false, similar: '/a/m.stl' }, { state: SIMILAR_ENTRY(1) })
     expect(isSimilarEntry()).toBe(true)
+    expect(similarDepth()).toBe(1)
     expect(isLightboxEntry()).toBe(false)
 
     // A link's entry is the browser's, not one we minted — nothing behind it,
     // so nothing to go back to.
     commitUrl({ path: '/a', flat: false, similar: '/a/other.stl' })
     expect(isSimilarEntry()).toBe(false)
+    expect(similarDepth()).toBe(0)
 
     commitUrl({ path: '/a', flat: false, model: '/a/m.stl' }, { state: LIGHTBOX_ENTRY })
     expect(isSimilarEntry()).toBe(false)
+    expect(similarDepth()).toBe(0)
   })
 
   it('a redundant write leaves the entry’s marker alone — it is not a write at all', () => {
@@ -122,9 +126,12 @@ describe('url state', () => {
     // marker. It cannot, because the browser has already rewound the URL, so
     // the serialization matches and `commitUrl` declines — the dedupe is the
     // preservation.
-    commitUrl({ path: '/a', flat: false, similar: '/a/m.stl' }, { state: SIMILAR_ENTRY })
+    commitUrl({ path: '/a', flat: false, similar: '/a/m.stl' }, { state: SIMILAR_ENTRY(2) })
     commitUrl({ path: '/a', flat: false, similar: '/a/m.stl' }, { replace: true })
     expect(isSimilarEntry()).toBe(true)
+    // The depth is preserved by the same non-write, and it has to be: it is
+    // what the dismissal after a Back goes back by.
+    expect(similarDepth()).toBe(2)
   })
 
   it('pushes only on difference: a re-commit of the same view stacks nothing', () => {

@@ -455,7 +455,7 @@ learn not to press"), arriving at the exit rather than at the entrance.
 So the dismissal branches on **provenance**, and the branch is inside the one function:
 
 ```
-leaveSubject(otherwise):  isSimilarEntry() ? history.back() : commit(otherwise)
+leaveSubject(otherwise):  isSimilarEntry() ? history.go(-similarDepth()) : commit(otherwise)
 ```
 
 Two call sites — the ✕ passes `clearSubject`, the empty-input path passes its `queryText` —
@@ -470,19 +470,41 @@ is never taken there.
 `request.kind === 'similar' && requestSource === 'user'`. The browser keeps state per entry, so
 it survives reload and forward/back — an in-memory flag would not, and a forward-restored
 similarity view would then dismiss down the deep-link path, which is the bug the lightbox
-marker was introduced to avoid. Chained find-similars need no special case: each in-app landing
-marks its own entry, so each press unwinds one hop.
+marker was introduced to avoid.
+
+**How far back, revised after live verification 2026-08-22.** One hop was wrong, and the run
+that found it is the same shape as the one that motivated the branch: tune a view twice — `k`,
+then the pool — and press ✕, and it took three presses to leave, the first two landing on
+intermediate parameter sets the user had already moved on from. The cause is not a bug in the
+tuning: each re-tune *must* push its own marked entry, because a different parameter is a
+different question and Back must reach the neighbours actually shown (R4's own rule). So a
+similarity excursion is a **run** of marked entries, not one, and "the view it was raised from"
+is the entry before the run — not the entry before the top of it.
+
+The marker therefore carries a **depth**: `SIMILAR_ENTRY` becomes a factory stamping
+`{ similar: true, depth: n }`, `land()` computes `n` as `similarDepth() + 1` read from the entry
+still current at stamp time, and the exit is `history.go(-similarDepth())`. A landing from a
+non-similarity entry stamps 1; a re-tune and a chained find-similar each stamp one deeper, so
+chained find-similars still need no special case — they were the case that already worked by
+accident, and the depth is what makes tuning work by the same rule rather than by a second one.
+Dismiss exits the whole excursion in one press; Back is untouched and still walks the steps
+individually, which is the division the two gestures should have had all along: Back retraces
+questions, Dismiss leaves the subject. This revises the landed "each press unwinds one hop"
+behavior and the test that pinned it. `similarDepth()` reads the *current* entry, which the
+browser restores, so a Dismiss from an entry reached by Back goes back by that entry's own depth
+and is right for free.
 
 **Why a restore landing cannot gain or lose the marker, verified rather than assumed.** Gaining
 is closed by the `user` gate. *Losing* is the one that needed checking, because the restore
 intent is `{ replace: true }` with no `state`, and `commitUrl` would write `null` over an
 entry's state if it wrote at all. It does not: a Back onto a marked similarity entry has already
 had its URL rewound by the browser, so the landing's serialization matches the address bar and
-`commitUrl` declines the write entirely — marker included. The dedupe *is* the preservation.
-The only restore landings that do advance the URL are ones whose entry never matched the
-resolved view (a hand-edited link with a stray param), which carry no marker to preserve and
-must not gain one. Pinned twice: as a unit case over `commitUrl` directly, and as an App case
-that Backs onto an in-app similarity view and dismisses again.
+`commitUrl` declines the write entirely — marker and depth included. The dedupe *is* the
+preservation. The only restore landings that do advance the URL are ones whose entry never
+matched the resolved view (a hand-edited link with a stray param), which carry no marker to
+preserve and must not gain one. Pinned twice: as a unit case over `commitUrl` directly, and as
+an App case that Backs onto a *tuned* in-app similarity view and dismisses again — the depth
+has to survive the restore for that press to leave the excursion rather than a step of it.
 
 *Revised while implementing 4.1–4.6, and it reverses a sub-ruling taken at Stage A.* Stage A
 decided the `similar` transition should leave `drafts.queryText` alone, on the grounds that

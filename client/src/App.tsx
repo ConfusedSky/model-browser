@@ -36,6 +36,7 @@ import {
   parseUrl,
   serializeView,
   SIMILAR_ENTRY,
+  similarDepth,
   type UrlView,
 } from './lib/urlState'
 import { initialState, reducer, type Action, type Landed } from './state/reducer'
@@ -463,10 +464,16 @@ export default function App() {
       // gated on `user`, and a restore onto an entry that already carries the
       // marker writes nothing at all, since the browser has already rewound the
       // URL and `commitUrl` declines the redundant write, marker included.
+      //
+      // The depth counts from the entry being pushed *from*, read here because
+      // here is where that entry is still current: one deeper than whatever the
+      // current entry is, so a re-tune and a chained find-similar both stack,
+      // and a landing from anywhere else starts at 1. The dismissal goes back
+      // that many hops, leaving the excursion whole rather than one step of it.
       urlIntent.current = {
         replace: requestSource === 'restore',
         ...(request.kind === 'similar' && requestSource === 'user'
-          ? { state: SIMILAR_ENTRY }
+          ? { state: SIMILAR_ENTRY(similarDepth() + 1) }
           : {}),
       }
       dispatch({ type: 'landing', id, forView, landed })
@@ -611,9 +618,16 @@ export default function App() {
    * link there is nothing of this app's behind the entry, so back would leave
    * the app; the reducer path clears to the listing instead.
    *
-   * Chained find-similars unwind one hop per press, because each in-app landing
-   * marked its own entry. And a query view is untouched by all of this: its
-   * entry is never marked, so `otherwise` is what runs — exactly as before.
+   * How far back is the marker's depth, not one hop. Every in-app similar
+   * landing pushes a marked entry — tuning `k` or the pool is a different
+   * question, and Back must reach the neighbours actually shown — so an
+   * excursion is a *run* of marked entries. Going back one landed on the
+   * intermediate tuning step, which is not a view the user asked to return to;
+   * going back the depth leaves the whole excursion in one press, tuning steps
+   * and chains alike. Back still walks the steps individually.
+   *
+   * And a query view is untouched by all of this: its entry is never marked, so
+   * `otherwise` is what runs — exactly as before.
    */
   const leaveSubject = useCallback(
     (otherwise: Action): void => {
@@ -621,7 +635,7 @@ export default function App() {
         // popstate does the rest: the restoration is one dispatch of the
         // previous URL resolved whole, which is the machinery that already
         // exists for Back (url-navigation D2).
-        window.history.back()
+        window.history.go(-similarDepth())
         return
       }
       commit(otherwise)

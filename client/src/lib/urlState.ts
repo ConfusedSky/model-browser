@@ -268,9 +268,29 @@ export function isLightboxEntry(): boolean {
  * restore landing onto an entry that already carries the marker writes nothing
  * at all — the browser has already rewound the URL, so `commitUrl` finds its
  * serialization redundant and declines, marker included.
+ *
+ * The marker carries a **depth**: how many entries deep into one similarity
+ * excursion this one sits. Every in-app similar landing pushes its own entry —
+ * a re-tune is a different question and Back must reach the neighbours actually
+ * shown — so an excursion is a run of marked entries, not one, and a dismissal
+ * that went back a single hop landed on an intermediate tuning step the user
+ * never asked to return to. The depth is what lets the exit be one press: the
+ * stamp reads the current entry's depth and adds one, so tuning steps and
+ * chained find-similars alike stack, and dismissing goes back the whole run.
+ * A landing from a non-similarity entry stamps 1.
  */
-export const SIMILAR_ENTRY = { similar: true }
+export const SIMILAR_ENTRY = (depth: number): { similar: true; depth: number } => ({
+  similar: true,
+  depth,
+})
 
 export function isSimilarEntry(): boolean {
   return (window.history.state as { similar?: boolean } | null)?.similar === true
+}
+
+/** How deep into a similarity excursion the current entry is; 0 when it carries
+ *  no marker — a listing, a query view, or a cold-loaded similarity link. */
+export function similarDepth(): number {
+  const depth = (window.history.state as { depth?: number } | null)?.depth
+  return typeof depth === 'number' && depth > 0 ? depth : 0
 }
