@@ -49,6 +49,11 @@ function makeProps(mode: 'orbit' | 'lightbox') {
     onLoadError: vi.fn(),
     onEntryMenu: vi.fn(),
     menuOpen: { current: false },
+    // These cases are about a model that never loaded; the panel's action row
+    // is App's list, and an empty one leaves the copy affordance they assert on
+    // exactly where it was.
+    panelCommands: [],
+    onCommand: vi.fn(),
   }
 }
 

@@ -727,3 +727,56 @@
       fails). That last one caught a weak assertion first: `putThumb` having been *called* is
       no evidence, because the background sweep calls it too — the case now looks for a PUT
       carrying a **camera**, which only the close path writes
+- [x] 6.6 The entry actions become visible affordances in the lightbox's **info panel**, not
+      only something a right-click reaches. **User-requested 2026-08-22:** a menu nobody
+      opens is a feature nobody has.
+      **Done:** the panel gains an action row beside the copy affordance it already had —
+      *Reveal in app*, *Find similar* (under the same availability rule the menu reads,
+      `indexCovers` + the index answering), *Reset framing*. One bridge prop,
+      `onCommand(id, live)`: App holds the `ActionHost` and looks the body up
+      (`runCommand`), `ViewerLayer` holds no host and no copy of any command. The row's
+      contents are `commandsFor(entry, ctx, LIGHTBOX_PANEL_EXCLUDES)`, asked by App exactly
+      as the menu's are.
+      **The panel's exclusion list is not the menu's, deliberately.**
+      `VIEWER_SURFACE_EXCLUDES` is untouched — the menu still withholds *reset framing* on
+      a viewer surface — and `LIGHTBOX_PANEL_EXCLUDES` withholds *open*, *copy path* (the
+      panel already has it, beside the path it copies) and *re-render thumbnail*. Re-render
+      is out of **both**: the closing persist already snapshots the live view under the
+      lighting and rig in force now, so it **is** the re-render and an item for it would ask
+      for what closing the view does anyway. Recorded in design D6's margin and in a comment
+      where the two lists are defined.
+      **Reset framing here has live semantics, which is the whole reason the surface may
+      offer it.** `resetFramingLive` (entryActions) does the store half — a **png-less** PUT
+      with `camera: null`, and `axis: null` exactly when a usable pose replaces it, plus the
+      in-memory `discardThumbFraming` so re-opening does not resume the orientation just
+      given up — and the live half: `ViewerSession.reframe(camera, axis)` moves the open view
+      to what the model now resolves to (`framingAfterDiscard`, the one reading of D7's rule,
+      shared with the queued command) **and clears `manipulated`**, while `ViewerLayer` sets
+      `openedFromPoseRef` to whether that orientation came from the index and raises a new
+      `framingDiscardedRef`. The close then persists pixels and **no camera** — without that
+      it would write the discard straight back, the race that keeps this command off the
+      menu. `reframe` reuses the axis picker's tween (`tweenTo`, extracted from `setAxis`), so
+      a reset that changes the spindle is as legible as a spindle change made by hand.
+      **One label came apart from its condition:** `persist` used to emit `posed` whenever it
+      declined the camera, which was the same thing until now. A reset with no usable pose
+      declines the camera while showing the *default*, so the close passes `posed` explicitly
+      — labelling those pixels posed would tell the grid a pose it never applied is in force.
+      **Tested** in `client/test/viewerPanelActions.test.tsx` — the row's contents and the
+      find-similar gate; reveal navigating, marking and leaving through the persisting close
+      (a PUT carrying a **camera**, 6.5's lesson); find similar landing the similarity view
+      the same way; reset framing discarding (`camera: null`, axis untouched with no pose, no
+      png), the open view re-framed (read off what the closing persist snapshotted — the only
+      render in that case), the close writing pixels with no camera and no pose label, and an
+      **orbit made before the reset** discarded with it; plus `resetFramingLive` directly for
+      the posed case (camera and axis handed back together), the no-pose case, and a write
+      that did not land reporting `RESET_FAILED`.
+      **Falsified six ways:** dropping `reframe`'s `manipulated = false` (only the
+      orbit-then-reset case fails — the resurrection), dropping `framingDiscardedRef` from the
+      close's condition (both reset cases fail), writing `camera: undefined` instead of the
+      discard (four fail), dropping the live re-frame (four fail), deriving `posed` from the
+      camera decision again (only the pose-label assertion fails), and adding *reset framing*
+      to the panel's exclusion list (four fail). Two existing cases moved with named regions:
+      the two ViewerLayer prop builders gained the new props, and `orbitHandoff`'s posed-close
+      case now reads `{ camera: false, posed: true }` — the same write, said explicitly
+      **Delta:** `model-viewer`'s *Lightbox expanded view* gains the row in its prose and one
+      scenario (*Acting on the model from the info panel*); no requirement renamed or removed

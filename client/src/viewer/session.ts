@@ -149,12 +149,6 @@ export class ViewerSession {
   }
 
   /**
-   * Switch the spindle. The rest state jumps straight to the new spindle's
-   * default view (so persistence never waits on the animation) while the live
-   * pose tweens there — an eased rotation that carries the new axis to
-   * screen-up. Called mid-tween it retargets from the current pose.
-   */
-  /**
    * Whether the user has moved this view. An index-supplied orientation is a
    * default, not a decision: a session opened at one and closed untouched must
    * leave no camera behind, or the index's opinion becomes the user's stored
@@ -168,16 +162,53 @@ export class ViewerSession {
     return this.manipulated
   }
 
+  /**
+   * Switch the spindle. The rest state jumps straight to the new spindle's
+   * default view (so persistence never waits on the animation) while the live
+   * pose tweens there — an eased rotation that carries the new axis to
+   * screen-up. Called mid-tween it retargets from the current pose.
+   */
   setAxis(axis: OrbitAxis): void {
     this.manipulated = true
     if (axis === this._axis) return
+    this.tweenTo(DEFAULT_CAMERA, axis)
+  }
+
+  /**
+   * Re-frame this live view to `state` about `axis` — the lightbox panel's
+   * *reset framing* (entry-context-menu D7's margin), which is why it also
+   * gives up the session's claim on the orientation.
+   *
+   * The claim is the point. `everManipulated` is what the closing persist reads
+   * to decide whether this view records a decision worth storing, and the
+   * orientation being installed here is precisely *not* the user's — it is what
+   * the model resolves to now that theirs has been discarded. Left standing, an
+   * orbit made before the reset would have the close write that orbit back over
+   * the discard, which is the race that keeps this command off the right-click
+   * menu (`VIEWER_SURFACE_EXCLUDES`).
+   *
+   * The move is the axis picker's own tween, not a snap: a reset can change the
+   * spindle, and a spindle change made without the animated rotation that
+   * carries the new axis to screen-up is the illegible outcome D7 rejects.
+   */
+  reframe(state: CameraState, axis: OrbitAxis): void {
+    this.tweenTo(state, axis)
+    this.manipulated = false
+  }
+
+  /**
+   * The shared body of every programmatic move: retarget from the pose of now,
+   * adopt the spindle, and ease the live camera to `state` while the rest state
+   * jumps there at once (so persistence never waits on the animation).
+   */
+  private tweenTo(state: CameraState, axis: OrbitAxis): void {
     this.advance()
     this._axis = axis
     this.frame = frameFor(axis)
     // The floor snaps while the camera tweens: an eased floor would read as
     // the model's resting face interpolating, which means nothing (D3).
     placeFloor(this.floor, this.bounds, axis)
-    this.state = { ...DEFAULT_CAMERA }
+    this.state = { ...state }
     const toTarget = stateTarget(this.state, this.bounds)
     const toOffset = statePosition(this.state, this.bounds, axis).sub(toTarget)
     const fromLen = this.offset.length()

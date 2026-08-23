@@ -106,6 +106,9 @@ export interface ActionHost extends Feedback {
    *  what the tile draws and what the lightbox opens at, so a command that
    *  wrote only to the cache would not take effect until the next load (4b.4). */
   setThumb: (path: string, state: ThumbState) => void
+  /** The same map's framing-only discard, for the one command that gives an
+   *  orientation up without drawing anything (`resetFramingLive`). */
+  discardThumbFraming: (path: string, dropAxis: boolean) => void
 }
 
 /** What availability is decided from. `index` is the reducer's own cell — never
@@ -196,6 +199,36 @@ function similarApplies(entry: DirEntry, ctx: AvailabilityContext): boolean {
 export const RENDER_FAILED = 'Could not re-render the thumbnail.'
 
 /**
+ * What a model resolves to once its own stored orientation is given up — the
+ * one reading of D7's rule, for every surface that gives one up.
+ *
+ * A discarded orientation resolves the way an untouched model resolves, as far
+ * as the view can know it: the index's pose where the view's landed answer
+ * carries a usable one, the default otherwise. "Usable" is `cameraForPose`'s
+ * answer and nothing else — a malformed pose (off-axis `up`, a non-perpendicular
+ * `azimuth_zero`) is not usable, and a pose with no cached front view
+ * deliberately *is*, since the thumbnail sweep applies that one too.
+ *
+ * `posed` carries both halves of what a caller does with the answer: it is the
+ * label these pixels get, and it is exactly when the stored **axis** goes as
+ * well. Half a pose is not a pose (`useThumbnails` offers one only when neither
+ * a camera nor an axis is stored), and with no pose to replace it the axis
+ * stays — framing the model by default about its own spindle rather than laying
+ * a Z-up model on its side for a spindle nobody asked for.
+ */
+export function framingAfterDiscard(
+  pose: IndexPose | undefined,
+  keptAxis: OrbitAxis,
+): { camera: CameraState; axis: OrbitAxis; posed: boolean } {
+  const resolved = cameraForPose(pose, DEFAULT_CAMERA)
+  return {
+    camera: resolved?.camera ?? DEFAULT_CAMERA,
+    axis: resolved?.axis ?? keptAxis,
+    posed: resolved !== null,
+  }
+}
+
+/**
  * The body behind both thumbnail commands (D7, §4b). They ask two different
  * questions — *re-render* keeps the model's orientation, *reset framing* gives
  * it up — and everything after that answer is identical, so they are one
@@ -229,25 +262,21 @@ function refreshThumbnail(
       // old pixels.
       if (cached.pngUrl !== undefined) URL.revokeObjectURL(cached.pngUrl)
 
-      // "Usable" is `cameraForPose`'s answer and nothing else (D7/4b.3a): a
-      // malformed pose — off-axis `up`, non-perpendicular `azimuth_zero` —
-      // returns null, and a pose with no cached front view is deliberately
-      // *not* an exception, since the sweep applies that one too.
+      // The index's orientation for this model, for the re-render branch — the
+      // discard branch reads it through `framingAfterDiscard`, which is where
+      // "usable" is decided (D7/4b.3a).
       const pose = cameraForPose(host.poses[entry.path], DEFAULT_CAMERA)
       let camera: CameraState
       let axis: OrbitAxis
       let posed: boolean
       if (discardFraming) {
-        // What the model resolves to once its own orientation is gone, which
-        // is what an untouched model resolves to: the index's where there is a
-        // usable one, the default otherwise.
-        posed = pose !== null
-        camera = pose?.camera ?? DEFAULT_CAMERA
-        // The axis goes with the camera only when a pose is there to replace
-        // it — half a pose is not a pose. With nothing to replace it the axis
-        // stays and frames the model by default about itself, rather than
-        // laying a Z-up model on its side for a spindle nobody asked for.
-        axis = pose?.axis ?? cached.axis ?? 'y'
+        // What the model resolves to once its own orientation is gone —
+        // resolved by the shared rule, which the lightbox panel's live reset
+        // reads too, so the two surfaces cannot disagree about the same model.
+        ;({ camera, axis, posed } = framingAfterDiscard(
+          host.poses[entry.path],
+          cached.axis ?? 'y',
+        ))
       } else {
         // Exactly the sweep's resolution (useThumbnails.ts:194-199): the stored
         // camera/axis, else the pose when *both* are absent, else the default.
@@ -256,7 +285,9 @@ function refreshThumbnail(
         camera = cached.camera ?? fromPose?.camera ?? DEFAULT_CAMERA
         axis = cached.axis ?? fromPose?.axis ?? 'y'
       }
-      const dropAxis = discardFraming && pose !== null
+      // `posed` says a usable pose replaced the orientation, which is exactly
+      // when the stored axis goes with it.
+      const dropAxis = discardFraming && posed
 
       const lighting = getLightingMode() // the mode this render uses
       const object = await host.lru.acquire(entry.path)
@@ -296,6 +327,78 @@ function refreshThumbnail(
       host.report(RENDER_FAILED)
     }
   })
+}
+
+/** The failure sentence for a discard the store did not accept. */
+export const RESET_FAILED = 'Could not reset the framing.'
+
+/**
+ * The open view a live *reset framing* re-frames — the lightbox's session,
+ * described by the two things this command needs of it and nothing else.
+ */
+export interface LiveFramingView {
+  /** The spindle the view is on: what the model keeps when there is no usable
+   *  pose to replace it. */
+  readonly axis: OrbitAxis
+  /**
+   * Move the live view to `camera` about `axis`, giving up the session's claim
+   * on the orientation so the closing persist does not write it back. `posed`
+   * says the orientation came from the index, which is what the close labels
+   * its pixels with.
+   */
+  reframe: (camera: CameraState, axis: OrbitAxis, posed: boolean) => void
+}
+
+/**
+ * *Reset framing* pressed on the surface that is **showing** the model — the
+ * lightbox's info panel (D6's margin, follow-up 6.6).
+ *
+ * The right-click menu withholds this command on a viewer surface and this
+ * function is why the panel may still offer it: it is a different body, not the
+ * same one on a second surface. `refreshThumbnail` would queue a render behind
+ * the suspension the viewer itself holds, sit there until the lightbox closed,
+ * and then lose a coin-flip against the closing persist. Here the two halves
+ * are done where they can actually happen:
+ *
+ * - **the store half**, now: discard the stored camera, and the axis with it
+ *   exactly when a usable pose replaces it. A png-less PUT, deliberately —
+ *   `cache.put` keeps the mtime and every label a PNG-less write omits, so the
+ *   tile keeps the pixels it has until something redraws them.
+ * - **the live half**, now: re-frame the open session to what the model
+ *   resolves to, which is also what redraws those pixels — the lightbox's
+ *   closing persist snapshots the live view, so the panel needs no *re-render*
+ *   item of its own.
+ *
+ * With no session (the panel is up while the mesh loads, or after it failed)
+ * there is nothing to re-frame and the store half still runs: the discard is
+ * about what is stored, not about what is on screen.
+ */
+export function resetFramingLive(
+  entry: DirEntry,
+  host: ActionHost,
+  view: LiveFramingView | null,
+): void {
+  // The kept axis only ever describes a live view; with no session there is
+  // none to keep, and the resolved axis this produces goes unread.
+  const framing = framingAfterDiscard(host.poses[entry.path], view?.axis ?? 'y')
+  void host.api
+    .putThumb({
+      path: entry.path,
+      mtime: entry.mtime,
+      // `null` is the discard the store gained for this (4b.2); `undefined`
+      // still means keep. No png and no labels: the labels describe pixels,
+      // and this write does not touch them.
+      camera: null,
+      axis: framing.posed ? null : undefined,
+    })
+    .then(
+      // The tile's own copy, not only the server's: App opens the lightbox at
+      // what this map holds, so a cache-only discard would re-open the model
+      // at the orientation just given up (4b.4).
+      () => host.discardThumbFraming(entry.path, framing.posed),
+      () => host.report(RESET_FAILED),
+    )
+  view?.reframe(framing.camera, framing.axis, framing.posed)
 }
 
 export interface EntryCommand {
@@ -415,6 +518,48 @@ export const VIEWER_SURFACE_EXCLUDES: readonly CommandId[] = [
   'reRenderThumbnail',
   'resetFraming',
 ]
+
+/**
+ * What the lightbox's **info panel** withholds — the other set of affordances on
+ * the same surface (follow-up 6.6), and deliberately not the same list.
+ *
+ * The asymmetry is the point, and it is about the body rather than the surface:
+ *
+ * - *Reset framing* is excluded from the menu above and offered here, because
+ *   the panel's press runs `resetFramingLive` — a discard that re-frames the
+ *   open session and clears its claim on the orientation, so the closing
+ *   persist cannot resurrect what was just given up. That is the whole reason
+ *   the command is allowed on this surface: the menu's body cannot do it, this
+ *   one can, and only this path carries the live semantics.
+ * - *Re-render thumbnail* stays out of both. The closing persist already
+ *   snapshots the live view under the lighting and rig in force now — it **is**
+ *   the re-render — so an item for it would be a button asking for what closing
+ *   the lightbox does anyway, and it would ask for it through the body that
+ *   cannot run here.
+ * - *Open* is out for the menu's reason: the model is already open.
+ * - *Copy path* is out because the panel already has it, beside the path it
+ *   copies, with its own "copied" confirmation. Two affordances for one command
+ *   within one panel is a duplicate, not an accelerator.
+ */
+export const LIGHTBOX_PANEL_EXCLUDES: readonly CommandId[] = [
+  'open',
+  'copyPath',
+  'reRenderThumbnail',
+]
+
+/**
+ * Run a command by id — the shape a surface that renders its own affordances
+ * needs, as opposed to the menu's, which is handed the table rows themselves.
+ * An unbuilt or unknown id does nothing, exactly as a null body does.
+ */
+export function runCommand(
+  id: CommandId,
+  entry: DirEntry,
+  host: ActionHost,
+  el: HTMLElement | null = null,
+): void {
+  ENTRY_COMMANDS.find((c) => c.id === id)?.run?.(entry, host, el)
+}
 
 /**
  * The commands this entry offers, in menu order: applicable by D6's table,

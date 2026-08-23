@@ -596,6 +596,32 @@ the `VIEWER_SURFACE_EXCLUDES` list — rather than a seventh column in the table
 table stays the one answer to "what does this *entry* offer"; a row that also had to know
 where it was being rendered is how the two would come to disagree about the same model.
 
+**The lightbox's info panel is a third surface, and its list is deliberately not the
+menu's.** *(Added 2026-08-22, follow-up 6.6: the actions were reachable only by right-click,
+which is not an affordance.)* The panel offers *reveal in app*, *find similar* (under the
+same availability rule) and *reset framing*, and the asymmetry with the list above is about
+the **body**, not the surface:
+
+- *Reset framing* is withheld from the menu and offered here because the panel's press runs
+  a different body. `resetFramingLive` does the store half now — a png-less PUT discarding
+  the camera, and the axis with it exactly when a usable pose replaces it — and the live
+  half now: it re-frames the open session to what the model resolves to (`cameraForPose`,
+  else the default about the spindle it keeps) and clears the session's claim on the
+  orientation, so the closing persist writes pixels and no camera. Without that last step
+  the close resurrects what the user just discarded, which is precisely why the queued
+  body cannot be offered from here.
+- **Re-render thumbnail stays out of both**, and not for the queue's reason alone: the
+  lightbox's closing persist already snapshots the live view under the lighting mode and
+  `RIG_VERSION` in force now — it **is** the re-render, arriving on the way out. An item
+  for it would be a button asking for what closing the view does anyway.
+- *Open* is out for the menu's reason, and *copy path* because the panel already carries it
+  beside the path it copies, with its own confirmation. Two affordances for one command in
+  one panel is a duplicate, not an accelerator.
+
+`VIEWER_SURFACE_EXCLUDES` is therefore unchanged, and `LIGHTBOX_PANEL_EXCLUDES` sits beside
+it with the asymmetry recorded where both are defined. Same mechanism as above — a
+per-surface filter at the call site, never a column in the table.
+
 **Escape while that menu is up.** The menu is the thing on top and owns Escape, so the
 lightbox's own handler stands down for exactly as long as it is raised, and the next press
 closes the lightbox as before. This is 2.3's idiom reaching a second contender: a ref read

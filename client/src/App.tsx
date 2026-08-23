@@ -11,9 +11,14 @@ import { SKELETON_DELAY_MS, useDelayedFlag } from './hooks/useDelayedFlag'
 import { useThumbnails } from './hooks/useThumbnails'
 import {
   commandsFor,
+  LIGHTBOX_PANEL_EXCLUDES,
+  resetFramingLive,
+  runCommand,
   VIEWER_SURFACE_EXCLUDES,
   type ActionHost,
+  type CommandId,
   type EntryCommand,
+  type LiveFramingView,
 } from './lib/entryActions'
 import { GestureTracker } from './lib/gesture'
 import { createHoverWarmer } from './lib/hover'
@@ -410,7 +415,13 @@ export default function App() {
   const error = state.failure?.message ?? null
 
   const showSkeleton = useDelayedFlag(busy(state), SKELETON_DELAY_MS)
-  const { thumbs, setThumb, setPlaceholder } = useThumbnails(thumbEntries, api, lru, queue, poses)
+  const { thumbs, setThumb, setPlaceholder, discardThumbFraming } = useThumbnails(
+    thumbEntries,
+    api,
+    lru,
+    queue,
+    poses,
+  )
   placeholderRef.current = setPlaceholder
 
   /**
@@ -1181,8 +1192,21 @@ export default function App() {
       lru,
       queue,
       setThumb,
+      discardThumbFraming,
     }),
-    [navigate, dispatch, enterEntry, openLightbox, say, poses, api, lru, queue, setThumb],
+    [
+      navigate,
+      dispatch,
+      enterEntry,
+      openLightbox,
+      say,
+      poses,
+      api,
+      lru,
+      queue,
+      setThumb,
+      discardThumbFraming,
+    ],
   )
 
   const onEntryMenu = useCallback(
@@ -1230,6 +1254,42 @@ export default function App() {
     [menu, state.index],
   )
 
+  /**
+   * The same table again, for the lightbox panel's own affordances (6.6) — a
+   * third surface asking the one question, with its own exclusion list. Not the
+   * menu's list: *reset framing* is withheld from the menu and offered here,
+   * because only the panel's press carries the live-session semantics that make
+   * it honest (`LIGHTBOX_PANEL_EXCLUDES` says why).
+   */
+  const panelCommands = useMemo(
+    () =>
+      viewer === null
+        ? []
+        : commandsFor(viewer.entry, { index: state.index }, LIGHTBOX_PANEL_EXCLUDES),
+    [viewer, state.index],
+  )
+  /**
+   * A panel affordance pressed: the shared body, through the one host — the
+   * panel holds no command of its own, exactly as the menu does not.
+   *
+   * *Reset framing* is the one that takes the live view with it. Its body is a
+   * different one from the menu's (`resetFramingLive` rather than the queued
+   * render), which is the whole reason this surface may offer a command the
+   * menu withholds.
+   */
+  const onViewerCommand = useCallback(
+    (id: CommandId, live: LiveFramingView | null): void => {
+      const entry = viewerRef.current?.entry
+      if (entry === undefined) return
+      if (id === 'resetFraming') {
+        resetFramingLive(entry, actionHost, live)
+        return
+      }
+      runCommand(id, entry, actionHost)
+    },
+    [actionHost],
+  )
+
   function goUp(): void {
     // Ascend from `dest`, not the committed path (D3): pressing ↑ twice during
     // a slow listing must reach the grandparent, not re-request the same parent.
@@ -1248,7 +1308,7 @@ export default function App() {
   }
 
   const persist = useCallback(
-    async (session: ViewerSession, opts: { camera?: boolean } = {}) => {
+    async (session: ViewerSession, opts: { camera?: boolean; posed?: boolean } = {}) => {
       const entry = viewer?.entry
       if (entry === undefined) return
       try {
@@ -1284,11 +1344,16 @@ export default function App() {
             lighting,
             rig: RIG_VERSION,
             // The pose is an input to these pixels the cache key does not
-            // carry, exactly like `rig`. Declining the camera is what says the
-            // view was the index's and the user never touched it, so the same
+            // carry, exactly like `rig`. Declining the camera usually says the
+            // view was the index's and the user never touched it, so that same
             // condition labels the picture: unlabelled, the grid would read
             // these posed pixels as stale and render them a second time.
-            posed: opts.camera === false ? POSE_VERSION : undefined,
+            //
+            // Usually, not always — a framing reset that found no usable pose
+            // also declines the camera while showing the default (D7's margin),
+            // and labelling *that* would claim a pose these pixels never had.
+            // The caller says so when the two come apart.
+            posed: (opts.posed ?? opts.camera === false) ? POSE_VERSION : undefined,
           }),
         ])
         setThumb(entry.path, {
@@ -1724,6 +1789,8 @@ export default function App() {
           onLoadError={() => setThumb(viewer.entry.path, { status: 'error' })}
           onEntryMenu={onViewerEntryMenu}
           menuOpen={menuOpenRef}
+          panelCommands={panelCommands}
+          onCommand={onViewerCommand}
         />
       )}
     </div>

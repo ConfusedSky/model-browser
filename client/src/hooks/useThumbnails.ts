@@ -88,6 +88,30 @@ export function useThumbnails(
     })
   }, [])
 
+  /**
+   * Give up the framing a tile is carrying without touching its pixels — the
+   * in-memory half of *reset framing* pressed from the open lightbox
+   * (entry-context-menu D7's margin).
+   *
+   * `setThumb` cannot express this: it replaces the whole entry, and the
+   * caller has no URL to put back. Nor should it mint one — the lightbox's
+   * closing persist redraws this tile from the re-framed view, so a render
+   * here would be a second one nobody asked for.
+   *
+   * A path with nothing in the map is left alone: there is nothing to discard,
+   * and inventing a `ready` entry with no image would blank the tile.
+   */
+  const discardThumbFraming = useCallback((path: string, dropAxis: boolean) => {
+    setThumbs((prev) => {
+      const cur = prev.get(path)
+      if (cur === undefined) return prev
+      if (cur.camera === undefined && (!dropAxis || cur.axis === undefined)) return prev
+      const next = new Map(prev)
+      next.set(path, { ...cur, camera: undefined, axis: dropAxis ? undefined : cur.axis })
+      return next
+    })
+  }, [])
+
   /** Placeholder hook for the LRU loader (embedded 3MF previews). */
   const setPlaceholder = useCallback((path: string, url: string) => {
     setThumbs((prev) => {
@@ -246,5 +270,5 @@ export function useThumbnails(
     }
   }, [entries, api, lru, queue, setThumb])
 
-  return { thumbs, setThumb, setPlaceholder }
+  return { thumbs, setThumb, setPlaceholder, discardThumbFraming }
 }

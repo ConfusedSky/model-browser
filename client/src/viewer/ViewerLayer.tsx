@@ -8,7 +8,12 @@ import type {
   OrbitAxis,
 } from '../../../shared/types'
 import type { ApiClient } from '../api/client'
-import { copyEntryPath } from '../lib/entryActions'
+import {
+  copyEntryPath,
+  type CommandId,
+  type EntryCommand,
+  type LiveFramingView,
+} from '../lib/entryActions'
 import { formatBytes, formatDate } from '../lib/format'
 import { GestureTracker } from '../lib/gesture'
 import type { MeshLru } from '../three/lru'
@@ -49,7 +54,10 @@ interface Props {
   /** Increments when App wants the persisting close to run (url-navigation D3). */
   closeSignal: number
   onDismiss: () => void
-  onPersist: (session: ViewerSession, opts?: { camera?: boolean }) => Promise<void>
+  onPersist: (
+    session: ViewerSession,
+    opts?: { camera?: boolean; posed?: boolean },
+  ) => Promise<void>
   onLoadError: (message: string) => void
   /**
    * Raise the shared entry menu on this viewer's own entry, at the pointer.
@@ -72,6 +80,19 @@ interface Props {
    * out of the menu it just raised.
    */
   menuOpen: { readonly current: boolean }
+  /**
+   * The entry actions this panel offers, decided by `entryActions` for this
+   * entry and this surface (`LIGHTBOX_PANEL_EXCLUDES`) and asked by App — never
+   * re-decided here, exactly as the menu never re-decides its own items.
+   */
+  panelCommands: readonly EntryCommand[]
+  /**
+   * Run one of them. The bodies are the shared ones and App holds the host, so
+   * this component carries no copy of any command — only the live view a reset
+   * needs to re-frame, which is the one thing App cannot reach: the session is
+   * private to this component.
+   */
+  onCommand: (id: CommandId, live: LiveFramingView | null) => void
 }
 
 const AXIS_LETTERS = ['x', 'y', 'z'] as const
@@ -101,6 +122,8 @@ export default function ViewerLayer({
   onLoadError,
   onEntryMenu,
   menuOpen,
+  panelCommands,
+  onCommand,
 }: Props) {
   const [session, setSession] = useState<ViewerSession | null>(null)
   const [sessionAxis, setSessionAxis] = useState<OrbitAxis>('y')
@@ -112,7 +135,23 @@ export default function ViewerLayer({
   const [copyError, setCopyError] = useState<string | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasHostRef = useRef<HTMLDivElement>(null)
+  /**
+   * Whether the orientation on screen is the index's rather than the user's —
+   * set when the session opens at a pose, and re-decided by a framing reset,
+   * which installs exactly such an orientation (or the default). Read on close
+   * to decide what may be written and how the pixels are labelled.
+   */
   const openedFromPoseRef = useRef(false)
+  /**
+   * Whether a *reset framing* in this session discarded the model's stored
+   * orientation. Separate from the ref above because the two disagree in the
+   * case that matters: a reset with no usable pose leaves the view at the
+   * default, which came from no index and must still never be written back —
+   * writing it would store an orientation the user did not choose, and D7's
+   * whole point is that a stored default is worse than nothing (it disqualifies
+   * the model from ever being posed).
+   */
+  const framingDiscardedRef = useRef(false)
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   // A pointer-opened viewer mounts mid-press (orbit); a keyboard-opened one
   // mounts directly in lightbox mode with no pointer down.
@@ -170,6 +209,9 @@ export default function ViewerLayer({
     // Whether this session opened at an orientation the index suggested rather
     // than one the user stored — read on close, to decide what may be written.
     openedFromPoseRef.current = false
+    // A new session has discarded nothing yet — a held dismissal can keep this
+    // component mounted across entries.
+    framingDiscardedRef.current = false
     const savedPromise: Promise<{ camera?: CameraState; axis: OrbitAxis }> =
       camera !== undefined
         ? Promise.resolve({ camera, axis: axis ?? 'y' })
@@ -374,7 +416,20 @@ export default function ViewerLayer({
       // wins" would then keep it forever, outliving the re-classification that
       // would have corrected it (semantic-search D5). So the pixels go either
       // way; the camera goes only when it records a decision.
-      await onPersist(s, { camera: s.everManipulated || !openedFromPoseRef.current })
+      //
+      // A framing reset is the second view that records none, and the strictest
+      // one: the user pressed a button to give the stored orientation up, so a
+      // close that wrote *any* camera back — the discarded one, or the default
+      // it resolved to — would undo the press. Orbiting after the reset is a
+      // new decision and does get written, which is why `everManipulated` still
+      // leads (`reframe` cleared it, so only a later drag can set it again).
+      const unowned = openedFromPoseRef.current || framingDiscardedRef.current
+      const decided = s.everManipulated || !unowned
+      // The pose label describes the pixels, so it follows what is on screen
+      // and not what may be written: a reset that found no usable pose leaves
+      // the view at the default, and labelling those pixels posed would tell
+      // the grid a pose it has never applied is already in force.
+      await onPersist(s, { camera: decided, posed: openedFromPoseRef.current && !s.everManipulated })
     }
     onDismiss()
   }
@@ -438,6 +493,35 @@ export default function ViewerLayer({
         copyTimerRef.current = setTimeout(() => setCopyError(null), 2500)
       },
     })
+  }
+
+  /**
+   * A panel affordance pressed: the shared command, through App's host.
+   *
+   * What travels with it is the live view — this component's session, which is
+   * private to it and is the thing a framing reset has to move. Handed over for
+   * every command, not just that one: the surface reports what it has, and
+   * which commands care is `entryActions`' business.
+   */
+  function runPanelCommand(id: CommandId): void {
+    const s = sessionRef.current
+    const live: LiveFramingView | null =
+      s === null
+        ? null
+        : {
+            axis: s.axis,
+            reframe: (nextCamera, nextAxis, posed) => {
+              s.reframe(nextCamera, nextAxis)
+              setSessionAxis(nextAxis)
+              runTweenLoop()
+              // The view on screen is now the index's orientation or the
+              // default — either way not the user's, and the close must not
+              // write it back over the discard just made.
+              openedFromPoseRef.current = posed
+              framingDiscardedRef.current = true
+            },
+          }
+    onCommand(id, live)
   }
 
   // Drives renders while an axis-change tween is in flight. The loop ends on
@@ -612,6 +696,27 @@ export default function ViewerLayer({
               </p>
             )}
           </div>
+          {/* The entry actions as affordances rather than only behind a
+              secondary press (6.6) — the same commands the menu raises, beside
+              the copy affordance that was already one of them. Named for the
+              model, not "Entry actions": the menu can be raised over this very
+              panel, and two things sharing an accessible name are one thing to
+              anything reading names. */}
+          {panelCommands.length > 0 && (
+            <div className="flex flex-wrap gap-1.5" aria-label="Model actions" role="group">
+              {panelCommands.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  data-command={c.id}
+                  onClick={() => runPanelCommand(c.id)}
+                  className="rounded-full bg-zinc-800 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-700"
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          )}
           <dl className="flex flex-col gap-2 text-xs">
             {viewer.entry.format !== undefined && (
               <div className="flex justify-between gap-2">

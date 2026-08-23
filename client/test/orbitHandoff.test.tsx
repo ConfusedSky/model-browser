@@ -70,6 +70,10 @@ function makeProps() {
       onEntryMenu: vi.fn(),
       // No menu in these cases, so the lightbox owns Escape throughout.
       menuOpen: { current: false },
+      // No panel affordances either: these cases are the gesture and the
+      // persist, and App is what decides that row's contents.
+      panelCommands: [],
+      onCommand: vi.fn(),
     },
   }
 }
@@ -250,8 +254,14 @@ describe('an index pose is advisory', () => {
     await act(async () => {})
 
     expect(posed.onPersist).toHaveBeenCalled()
+    // The label travels with the decision now rather than being derived from
+    // it: declining the camera and labelling the pixels posed came apart when
+    // a framing reset gained the power to decline one without the other (6.6),
+    // so this close says both. Same write as before — the pose's pixels,
+    // labelled, and no camera.
     expect((posed.onPersist as ReturnType<typeof vi.fn>).mock.calls[0]![1]).toEqual({
       camera: false,
+      posed: true,
     })
   })
 })
