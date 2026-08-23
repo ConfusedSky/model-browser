@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import type * as THREE from 'three'
-import type { DirEntry, IndexPose, LightingMode } from '../../shared/types'
+import type { DirEntry, IndexPose, LightingMode, OrbitAxis } from '../../shared/types'
 import { HttpApiClient, HttpError } from './api/client'
 import EntryMenu from './components/EntryMenu'
 import FindBar from './components/FindBar'
@@ -11,9 +11,12 @@ import { SKELETON_DELAY_MS, useDelayedFlag } from './hooks/useDelayedFlag'
 import { useThumbnails } from './hooks/useThumbnails'
 import {
   commandsFor,
+  DEFAULT_ORBIT_AXIS,
   LIGHTBOX_PANEL_EXCLUDES,
+  orbitAxisApplies,
   resetFramingLive,
   runCommand,
+  setOrbitAxis,
   VIEWER_SURFACE_EXCLUDES,
   type ActionHost,
   type CommandId,
@@ -1239,6 +1242,38 @@ export default function App() {
     },
     [closeMenu, actionHost],
   )
+  /**
+   * The menu's orbit-axis group (6.7): the spindle this model is stored about,
+   * or `null` where the group is not offered — a container, or either viewer
+   * surface, which carries the live picker instead.
+   *
+   * Read from the thumbs map, which is what the tile drew and what the lightbox
+   * would open at; a model that has never been given one is marked at the
+   * default rather than at nothing, because that is the spindle it is framed
+   * about.
+   */
+  const menuAxis = useMemo<OrbitAxis | null>(() => {
+    if (
+      menu === null ||
+      !orbitAxisApplies(menu.entry, menu.surface === 'viewer' ? VIEWER_SURFACE_EXCLUDES : [])
+    ) {
+      return null
+    }
+    return thumbs.get(menu.entry.path)?.axis ?? DEFAULT_ORBIT_AXIS
+  }, [menu, thumbs])
+  /** An axis chosen from the menu: the shared body, through the one host. The
+   *  spindle already in force goes with it — re-choosing it is a no-op, and that
+   *  rule belongs to the command rather than to this surface. */
+  const onChooseAxis = useCallback(
+    (axis: OrbitAxis): void => {
+      const raised = menuRef.current
+      closeMenu()
+      if (raised !== null && menuAxis !== null) {
+        setOrbitAxis(raised.entry, actionHost, axis, menuAxis)
+      }
+    },
+    [closeMenu, actionHost, menuAxis],
+  )
   // D6's table, asked once per raised menu — never a probe of the index when a
   // menu opens (2.5): `state.index` is the reducer's own cell, kept by identity
   // when a poll says nothing new.
@@ -1759,13 +1794,15 @@ export default function App() {
       </div>
       {/* D6's table, whole: three items on a container, five on a model, and a
           sixth when the index is answering for the collection it sits in — less
-          whatever the raising surface withholds. Which ones an entry offers,
-          and which a surface declines, both live in `entryActions`, never here. */}
+          whatever the raising surface withholds, plus the orbit-axis group on a
+          model tile. Which ones an entry offers, and which a surface declines,
+          both live in `entryActions`, never here. */}
       {menu !== null && menuCommands.length > 0 && (
         <EntryMenu
           x={menu.x}
           y={menu.y}
           commands={menuCommands}
+          axis={menuAxis === null ? null : { current: menuAxis, onChoose: onChooseAxis }}
           onChoose={onChooseCommand}
           onClose={closeMenu}
         />

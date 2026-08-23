@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { EntryCommand } from '../lib/entryActions'
+import type { OrbitAxis } from '../../../shared/types'
+import { ORBIT_AXIS_CHOICES, type EntryCommand } from '../lib/entryActions'
 
 /**
  * A context menu raised on a grid tile.
@@ -16,6 +17,18 @@ interface Props {
   x: number
   y: number
   commands: EntryCommand[]
+  /**
+   * The orbit-axis group (6.7), or `null` where it is not offered — a container
+   * tile, or either viewer surface, which shows the live picker instead. App
+   * decides that with `orbitAxisApplies`; this component only draws it.
+   *
+   * An **inline radio group**, not a submenu, and the reason is this component's
+   * keyboard model: focus here is one index over the menu's buttons, so six more
+   * buttons cost one changed count and nothing else, while a submenu would need
+   * its own open state, its own clamp, focus handed across it and a second level
+   * of Escape — new machinery for a menu of at most twelve short items.
+   */
+  axis?: { current: OrbitAxis; onChoose: (axis: OrbitAxis) => void } | null
   onChoose: (command: EntryCommand) => void
   onClose: () => void
 }
@@ -46,10 +59,31 @@ export function clampToViewport(
   }
 }
 
-export default function EntryMenu({ x, y, commands, onChoose, onClose }: Props) {
+export default function EntryMenu({ x, y, commands, axis = null, onChoose, onClose }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ left: x, top: y })
   const [focused, setFocused] = useState(0)
+
+  // Every focusable row, commands first, in DOM order — which is what `focused`
+  // indexes and what the focus effect below reads back out of the DOM.
+  const axisCount = axis === null ? 0 : ORBIT_AXIS_CHOICES.length
+  const count = commands.length + axisCount
+  const currentAxisRow =
+    axis === null ? 0 : commands.length + ORBIT_AXIS_CHOICES.findIndex((c) => c.axis === axis.current)
+
+  /**
+   * One step of arrow navigation, with the group's one rule: **entering it lands
+   * on the spindle already in force**, rather than on the first of six. The
+   * group is a choice among six and a choice starts from what is currently
+   * true — the same reason the picker in the lightbox opens showing the live
+   * axis pressed. Every one of the six is still reached by stepping on from
+   * there, in either direction.
+   */
+  function step(from: number, delta: number): number {
+    const next = (from + delta + count) % count
+    if (from < commands.length && next >= commands.length) return currentAxisRow
+    return next
+  }
 
   // Measure once mounted, then clamp: the height depends on how many commands
   // this entry offers, which is the whole reason it cannot be computed upfront.
@@ -58,7 +92,7 @@ export default function EntryMenu({ x, y, commands, onChoose, onClose }: Props) 
     if (el === null) return
     const r = el.getBoundingClientRect()
     setPos(clampToViewport(x, y, r.width, r.height, window.innerWidth, window.innerHeight))
-  }, [x, y, commands.length])
+  }, [x, y, commands.length, axisCount])
 
   // Focus follows the arrow keys, so the menu owns the keyboard the moment it
   // is raised — which is also what makes its Escape the one that fires.
@@ -105,16 +139,16 @@ export default function EntryMenu({ x, y, commands, onChoose, onClose }: Props) 
       onKeyDown={(e) => {
         if (e.key === 'ArrowDown') {
           e.preventDefault()
-          setFocused((i) => (i + 1) % commands.length)
+          setFocused((i) => step(i, 1))
         } else if (e.key === 'ArrowUp') {
           e.preventDefault()
-          setFocused((i) => (i - 1 + commands.length) % commands.length)
+          setFocused((i) => step(i, -1))
         } else if (e.key === 'Home') {
           e.preventDefault()
           setFocused(0)
         } else if (e.key === 'End') {
           e.preventDefault()
-          setFocused(commands.length - 1)
+          setFocused(count - 1)
         }
       }}
     >
@@ -133,6 +167,31 @@ export default function EntryMenu({ x, y, commands, onChoose, onClose }: Props) 
           {c.label}
         </button>
       ))}
+      {axis !== null && (
+        // The spindle this model is stored about — a radio group, since exactly
+        // one of the six is true of it and picking one is picking, not toggling.
+        // The heading is a <p>, so it stays out of the button index `focused`
+        // walks.
+        <div role="group" aria-label="Orbit axis" className="mt-1 border-t border-zinc-700 pt-1">
+          <p className="px-3 py-1 text-[11px] uppercase tracking-wide text-zinc-500">Orbit axis</p>
+          {ORBIT_AXIS_CHOICES.map((c) => (
+            <button
+              key={c.axis}
+              type="button"
+              role="menuitemradio"
+              aria-checked={c.axis === axis.current}
+              data-axis={c.axis}
+              onClick={() => axis.onChoose(c.axis)}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-zinc-800 focus:bg-zinc-800 focus:outline-none"
+            >
+              <span className="w-3 text-sky-400" aria-hidden="true">
+                {c.axis === axis.current ? '✓' : ''}
+              </span>
+              {c.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

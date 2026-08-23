@@ -1,14 +1,15 @@
 // @vitest-environment happy-dom
 //
-// The two thumbnail commands (§4b), asked directly through the command table:
-// what orientation each one renders from, what it writes back, and what it
-// leaves alone. The wiring — which tiles offer them, and the lightbox seeing
-// the result — is entryMenu.test.tsx's job.
+// The thumbnail actions (§4b, and the axis group at 6.7), asked directly: what
+// orientation each one renders from, what it writes back, and what it leaves
+// alone. The wiring — which tiles offer them, and the lightbox seeing the
+// result — is entryMenu.test.tsx's and orbitAxisMenu.test.tsx's job.
 //
-// Everything here goes through `ENTRY_COMMANDS` rather than an exported body,
+// The two commands go through `ENTRY_COMMANDS` rather than an exported body,
 // because "the menu shows it" and "this is what it does" have to be the same
 // object: a command whose body drifted from its table entry would pass a test
-// written against the body alone.
+// written against the body alone. The axis group has no table row — it is six
+// picks under one heading, and `setOrbitAxis` is the body the menu calls.
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -17,7 +18,12 @@ import type { CameraState, DirEntry, IndexPose, LightingMode, OrbitAxis } from '
 import type { ApiClient, ThumbSave } from '../src/api/client'
 import { useThumbnails } from '../src/hooks/useThumbnails'
 import type { MeshLru } from '../src/three/lru'
-import { ENTRY_COMMANDS, RENDER_FAILED, type ActionHost } from '../src/lib/entryActions'
+import {
+  ENTRY_COMMANDS,
+  RENDER_FAILED,
+  setOrbitAxis,
+  type ActionHost,
+} from '../src/lib/entryActions'
 import { DEFAULT_CAMERA } from '../src/three/camera'
 import { cameraForPose, POSE_VERSION } from '../src/three/pose'
 import { RenderQueue } from '../src/three/queue'
@@ -248,6 +254,98 @@ describe('reset framing', () => {
   })
 })
 
+describe('set orbit axis', () => {
+  it('writes the picked spindle, discards the camera with it, and draws the default about the new one', async () => {
+    // A pose exists and is deliberately ignored: choosing an axis is the user
+    // saying which way up this model stands, which is exactly the claim a pose
+    // would otherwise make for them.
+    const h = harness({ status: 'hit', camera: CAM, axis: '-x' }, { [HERO.path]: POSE })
+    setOrbitAxis(HERO, h.host, 'z', '-x')
+    await flush()
+
+    // Nothing was read: neither half of the stored orientation survives the
+    // write, so there is nothing to resolve from.
+    expect(h.getThumb).not.toHaveBeenCalled()
+    // The default about the new spindle — which is what an ordinary visit
+    // resolves to for a model with an axis and no camera.
+    expect(renderThumbnail).toHaveBeenCalledWith(MESH, DEFAULT_CAMERA, 'z')
+
+    const put = h.putThumb.mock.calls[0]![0] as Record<string, unknown>
+    expect(put.path).toBe(HERO.path)
+    expect(put.mtime).toBe(HERO.mtime)
+    expect(put.png).toBeInstanceOf(Blob)
+    expect(put.axis).toBe('z')
+    // `null` discards. `undefined` would keep a camera whose angles were
+    // measured about '-x' and mean something else about 'z'.
+    expect(put.camera).toBeNull()
+    // The labels that describe these pixels — and no `posed`: a stored axis
+    // takes the model out of pose framing altogether, which is what choosing
+    // an axis means.
+    expect(put.lighting).toBe(getLightingMode())
+    expect(put.rig).toBe(RIG_VERSION)
+    expect(put.posed).toBeUndefined()
+    // The session's own copy, so the lightbox opens about the new spindle now.
+    expect(h.setThumb).toHaveBeenCalledWith(HERO.path, {
+      status: 'ready',
+      url: expect.any(String),
+      camera: undefined,
+      axis: 'z',
+    })
+  })
+
+  it('does nothing at all when the spindle picked is the one already in force', async () => {
+    // Including the model that has never been given one, which is framed about
+    // the default and is marked there: a menu that re-does what is already true
+    // spends a render to produce the picture already on screen.
+    for (const [current, picked] of [
+      ['-x', '-x'],
+      ['y', 'y'],
+    ] as const) {
+      const h = harness({ status: 'hit', camera: CAM, axis: current })
+      renderThumbnail.mockClear()
+      setOrbitAxis(HERO, h.host, picked, current)
+      await flush()
+      expect(renderThumbnail).not.toHaveBeenCalled()
+      expect(h.putThumb).not.toHaveBeenCalled()
+      expect(h.setThumb).not.toHaveBeenCalled()
+      expect(h.acquire).not.toHaveBeenCalled() // not even a mesh load
+    }
+  })
+
+  it('does not touch the renderer when a viewer takes it mid-job, and finishes when it gives it back', async () => {
+    // The gate `queue.push` alone does not provide, for the same reason as the
+    // other two: `suspend()` cannot stop a job that has already started.
+    const h = harness({ status: 'hit', camera: CAM, axis: '-x' })
+    let deliverMesh: () => void = () => {}
+    h.acquire.mockReturnValue(new Promise<THREE.Object3D>((r) => (deliverMesh = () => r(MESH))))
+
+    setOrbitAxis(HERO, h.host, 'z', '-x')
+    await flush()
+    expect(h.acquire).toHaveBeenCalled()
+
+    h.queue.suspend() // a viewer opens while the mesh is still loading
+    deliverMesh()
+    await flush()
+    expect(renderThumbnail).not.toHaveBeenCalled()
+    expect(h.putThumb).not.toHaveBeenCalled()
+
+    h.queue.resume()
+    await flush()
+    expect(renderThumbnail).toHaveBeenCalledTimes(1)
+    expect(h.putThumb).toHaveBeenCalledTimes(1)
+  })
+
+  it('says so when the render fails, and leaves the tile showing what it had', async () => {
+    const h = harness({ status: 'hit', camera: CAM, axis: '-x' })
+    h.acquire.mockRejectedValue(new Error('mesh is not a mesh'))
+    setOrbitAxis(HERO, h.host, 'z', '-x')
+    await flush()
+    expect(h.report).toHaveBeenCalledWith(RENDER_FAILED)
+    expect(h.putThumb).not.toHaveBeenCalled()
+    expect(h.setThumb).not.toHaveBeenCalled()
+  })
+})
+
 describe('both commands', () => {
   it('do not touch the renderer when a viewer takes it mid-job, and finish when it gives it back', async () => {
     // The case `queue.push` alone does not cover, and the reason both commands
@@ -402,6 +500,50 @@ describe('what the next visit makes of the pixels', () => {
     })
 
     expect(renderThumbnail).toHaveBeenCalledTimes(1) // served from the cache
+    await act(async () => root.unmount())
+    el.remove()
+  })
+
+  it('an axis pick is a hit on the next visit, drawn about the spindle chosen', async () => {
+    // The same eternal-re-render trap from the other side (6.7). This write
+    // declares lighting and rig and deliberately no `posed`; drop the labels and
+    // the cache clears them, the sweep's hit test fails and this tile re-renders
+    // on every visit for ever. The pose is present throughout and must not
+    // reassert itself: a stored axis withholds it.
+    ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+    const api = fakeCache()
+    const poses = { [HERO.path]: POSE }
+    const queue = new RenderQueue(2)
+    const lru = { acquire: () => Promise.resolve(MESH) } as unknown as MeshLru<THREE.Object3D>
+    const setThumb = vi.fn()
+    const host = { report: vi.fn(), poses, api, lru, queue, setThumb } as unknown as ActionHost
+
+    setOrbitAxis(HERO, host, '-z', 'y')
+    await flush()
+    expect(renderThumbnail).toHaveBeenCalledTimes(1)
+    expect(renderThumbnail).toHaveBeenCalledWith(MESH, DEFAULT_CAMERA, '-z')
+
+    // Now the grid arrives at this model the ordinary way.
+    const el = document.createElement('div')
+    document.body.appendChild(el)
+    const root = createRoot(el)
+    const entries = [HERO]
+    const states: (Record<string, unknown> | undefined)[] = []
+    const Probe = (): null => {
+      const { thumbs } = useThumbnails(entries, api as ApiClient, lru, queue, poses)
+      states.push(thumbs.get(HERO.path) as Record<string, unknown> | undefined)
+      return null
+    }
+    await act(async () => root.render(createElement(Probe)))
+    await flush()
+    await act(async () => {
+      await flush()
+    })
+
+    expect(renderThumbnail).toHaveBeenCalledTimes(1) // served, not redrawn
+    // And served *about the chosen spindle*, with no camera and no pose: the
+    // orientation the next visit reads back is the one the pick wrote.
+    expect(states.at(-1)).toMatchObject({ status: 'ready', camera: undefined, axis: '-z' })
     await act(async () => root.unmount())
     el.remove()
   })

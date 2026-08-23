@@ -23,7 +23,7 @@ Which actions an entry offers SHALL follow from what the entry is, and an action
 
 #### Scenario: Live-view controls stay with the live view
 - **WHEN** the user raises the context menu on a model tile
-- **THEN** controls that change how a displayed model is drawn are not offered there, since the menu cannot show their effect
+- **THEN** controls bound to a displayed model — those that change how it is being shown and animate the result as they do it — are not offered there, since there is no such display to operate on; a one-shot choice that redraws the tile in place is not one of them
 
 #### Scenario: Inapplicable actions are absent
 - **WHEN** the user raises the context menu on an entry that is not a model
@@ -31,6 +31,8 @@ Which actions an entry offers SHALL follow from what the entry is, and an action
 
 ### Requirement: A context menu on grid tiles
 The client SHALL raise a context menu on any surface presenting a listing entry — a grid tile, and the live view of a model while it is being orbited or shown expanded — in response to the platform's secondary-click gesture, positioned at the pointer and kept within the viewport, with the platform's own menu suppressed. It SHALL be dismissible by choosing an action, by pressing Escape, and by interacting outside it, and SHALL be reachable and operable from the keyboard. Raising or dismissing the menu SHALL NOT disturb what it was raised over: no orbit begins, no expanded view opens, no open view closes, and no thumbnail work is started or cancelled. A surface SHALL offer only the actions it can perform there, and while the menu is raised it SHALL own Escape, so that one press dismisses one thing.
+
+A menu raised on a model's **tile** SHALL additionally offer that model's orbit axis as a choice among the axes the client can express, naming them as the expanded view's own control names them and marking the one the model is framed about. The surfaces showing a model live SHALL NOT offer that choice, each already carrying a live control for it. The choice SHALL be reachable and operable from the keyboard with the rest of the menu, entered at the axis in force.
 
 #### Scenario: Secondary click opens the menu without orbiting
 - **WHEN** the user secondary-clicks a model tile
@@ -51,6 +53,10 @@ The client SHALL raise a context menu on any surface presenting a listing entry 
 #### Scenario: Dismissal leaves nothing behind
 - **WHEN** the user opens the menu and dismisses it with Escape or by clicking elsewhere
 - **THEN** the menu closes and the grid is exactly as it was
+
+#### Scenario: Choosing an axis from the tile
+- **WHEN** the user chooses an orbit axis from a model tile's menu
+- **THEN** the model is stored about that axis, the viewpoint stored for it is given up rather than kept — angles measured about one axis do not describe a view about another — and its thumbnail is drawn again about the axis chosen, framed by default about it; the pixels are not recorded as an orientation source's, since a model whose axis its owner has chosen is no longer framed by a source; and choosing the axis the model is already about does nothing at all, neither storing nor drawing
 
 #### Scenario: The menu stays on screen
 - **WHEN** the menu is raised on a tile at the edge of the window

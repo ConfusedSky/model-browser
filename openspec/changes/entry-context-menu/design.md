@@ -62,6 +62,12 @@ the choice means. A menu item mutating the same persisted value is the same writ
 the thing that made it legible. D7 applies this to the two thumbnail commands, which are on
 the command side of it.
 
+*Revised 2026-08-22 (6.7): the spindle turned out to sit on **both** sides of this line.*
+Rotating a live view is a control and stays in the lightbox; *which spindle a model is
+stored about* is a fact about the model, and setting it from its tile is one-shot and leaves
+no mode behind. The tile menu offers the six axes, both viewer surfaces withhold them, and
+the picker is untouched. D7 carries the whole argument.
+
 ### D8: A command that changes the view dispatches; nothing builds a URL
 
 *(Numbered last so D2–D7's references stay stable; placed here because D3 and D4 both rest
@@ -559,7 +565,14 @@ Copy path            Copy path       Copy path
 Find similar         —               —
 Re-render thumbnail  —               —
 Reset framing        —               —
+Orbit axis ×6        —               —
 ```
+
+The last row is the axis group (follow-up 6.7, and D7's revision below): six spindles under
+one heading on a **model tile**, the model's own marked. It is model-only for the thumbnail
+items' structural reason — a container tile is a glyph with no spindle — and it is a group
+rather than a seventh command, with no row in `ENTRY_COMMANDS`: `orbitAxisApplies` answers
+for it, under the same per-kind rule and the same per-surface filter.
 
 Find similar is model-only because the index embeds models — and it carries a second
 condition the table cannot show: the index is a separate service that may not be running,
@@ -590,6 +603,10 @@ for reasons about the **surface**, not the entry:
   closing persist races them, writing the orbited camera straight back over the discard
   *reset framing* was pressed for. Offering an item that quietly loses a coin-flip against
   the gesture that dismisses it is worse than not offering it.
+- The **orbit-axis group** goes for a third reason, its own (6.7): a viewer surface already
+  carries the live picker, which sets the same thing and shows the spindle rotating as it
+  does it. A menu duplicate over it would be a second affordance for one choice — and the
+  worse of the two, since its write would then race the same closing persist.
 
 That is a **per-surface filter at the call site** — `commandsFor`'s third argument, from
 the `VIEWER_SURFACE_EXCLUDES` list — rather than a seventh column in the table above. The
@@ -711,17 +728,50 @@ re-renders in place at the new orientation, so the result is visible, and the us
 the stored orientation to be given up rather than for a particular spindle to be set.
 Re-render still never touches the axis.
 
-**The axis is not a third item**, by D1. The orbit-axis picker is a control: it is bound to
-a live view and shows the spindle rotating to screen-up as it changes. A menu item that
-reset a persisted spindle is a spindle change made outside the view that shows what a
-spindle change means — and on a Z-up model it would lay the model on its side, which is the
-outcome the picker's animated rotation exists to make legible. (The earlier form of this
-argument said a menu item would show *nothing* of the result. These two items falsify that:
-the tile re-renders in place, and the axis does change tile pixels, since `stageModel`
-(`renderer.ts:309`) and `applyState` (`camera.ts:81-85`) both take it. The command/control
-line and the Z-up outcome carry the decision; "nothing shows it" no longer does.)
-It stays in the lightbox, which already has the picker and its flip toggle. The index
-supplies the axis anyway wherever it has a pose.
+**The axis is not a third item**, by D1 — *revised 2026-08-22 (follow-up 6.7): it is a
+group of six, on model tiles.* The argument that stood here said the orbit-axis picker is a
+control, bound to a live view and showing the spindle rotating to screen-up as it changes,
+so a menu item setting a persisted spindle would be a spindle change made outside the view
+that shows what one means — and on a Z-up model it would lay the model on its side, the
+outcome the animated rotation exists to make legible. (An earlier form had said a menu item
+would show *nothing* of the result; the two thumbnail items falsified that, since the tile
+re-renders in place and the axis does change tile pixels — `stageModel` (`renderer.ts:309`)
+and `applyState` (`camera.ts:81-85`) both take it.)
+
+**What was wrong with it: it read one sentence as two claims.** Rotating a live view to a
+new spindle is a control, and stays one. *Which spindle this model is stored about* is a
+fact about the model, and setting it is one-shot, completes on its own and leaves no mode
+behind — a command by D1's own test, exactly as *reset framing* is one, which already moves
+the axis (above). The Z-up worry does not survive the answer either: the tile re-renders
+about the chosen spindle, so the model laid on its side is *on screen* rather than hidden
+until the next open, and it was the user who named that spindle rather than a command
+guessing at one on their behalf. That leaves "the menu cannot show it", which was already
+retired.
+
+So a **model tile's** menu offers the six axes (`ORBIT_AXIS_CHOICES`, `setOrbitAxis`), in
+the picker's own order and vocabulary — `X Y Z` then `−X −Y −Z`, which is what its *flip*
+toggle produces — with the model's current one marked, read from the thumbs map and
+defaulting to `y` where nothing is stored. Both **viewer surfaces withhold the group**
+(`'orbitAxis'` in `VIEWER_SURFACE_EXCLUDES` and `LIGHTBOX_PANEL_EXCLUDES`): the picker is
+right there, live, and a menu duplicate would race the closing persist.
+
+**A pick writes the axis and discards the camera**, in one PUT (`axis: <picked>`,
+`camera: null`). This is D7's own rule read the other way round: angles measured about one
+axis do not describe a view about another — the reason `cameraForPose` derives camera and
+axis together and the azimuth offset comes out of `frameFor(axis)` — so a camera recorded
+about the old spindle is not a worse view about the new one, it is a meaningless one. The
+thumbnail is then redrawn at the default about the new spindle, which is what an ordinary
+visit resolves to for a model with an axis and no camera (`useThumbnails.ts:222-223`), so
+the tile and the next sweep agree. `lighting` and `rig` ride along, since `cache.ts:108-110`
+clears every label a PNG-bearing PUT omits and an unlabelled write re-renders this tile for
+ever; **`posed` deliberately does not**. The pose path needs both a missing camera and a
+missing axis, so a stored axis takes the model out of pose framing for good — which is what
+choosing an axis *means*: the user has said which way up this model stands, and an index
+that disagrees no longer reframes it. Picking the spindle already in force does nothing at
+all: no PUT, no render, not even a mesh load.
+
+The picker itself stays in the lightbox, with its flip toggle and its tween. The index
+still supplies the axis wherever it has a pose and the user has chosen none.
 
 *Refreshing the visible grid on a mode change is a separate change, and it is now an active
 one:* `lighting-refreshes-thumbnails` makes the mode an input to the sweep. Note this was

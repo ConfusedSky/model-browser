@@ -780,3 +780,56 @@
       case now reads `{ camera: false, posed: true }` — the same write, said explicitly
       **Delta:** `model-viewer`'s *Lightbox expanded view* gains the row in its prose and one
       scenario (*Acting on the model from the info panel*); no requirement renamed or removed
+- [x] 6.7 A model's **orbit axis** is settable from its tile — the six spindles in the menu,
+      the model's own marked, without opening it. **User-requested 2026-08-22:** the only way
+      to lay a model right was to open it, use the picker, and let the close persist.
+      **This revises D1/D7's "the axis is not a third item".** That rule read one sentence as
+      two claims: rotating a *live view* to a new spindle is a control and stays in the
+      lightbox, but *which spindle this model is stored about* is a fact about the model, and
+      setting it is one-shot and leaves no mode behind — a command by D1's own test, as
+      *reset framing* already is, which moves the axis too. The revision is recorded in
+      design.md D7 under the heading that carried the old rule, in D1's margin, and in the
+      module doc of `entryActions.ts`, which carried the same sentence.
+      **Done:** `ORBIT_AXIS_CHOICES` (the picker's own order and vocabulary — `X Y Z` then
+      `−X −Y −Z`, which is what its *flip* produces), `orbitAxisApplies` and `setOrbitAxis`
+      in `client/src/lib/entryActions.ts`. A pick writes `axis` and **discards the camera**
+      in one PUT (`camera: null`): angles measured about one axis do not describe a view
+      about another — D7's own rule read the other way round — so a camera recorded about the
+      old spindle is meaningless about the new one. The thumbnail is redrawn at the default
+      about the new spindle, which is what an ordinary visit resolves to for a model with an
+      axis and no camera, through the same two `whenResumed` gates the other two use.
+      `lighting` and `rig` ride along and **`posed` deliberately does not**: the pose path
+      needs both a missing camera and a missing axis, so a stored axis takes the model out of
+      pose framing for good — that is what choosing an axis means. `setThumb` carries it into
+      the session, so the lightbox opens about the new spindle without a reload. Picking the
+      spindle already in force does nothing: no PUT, no render, not even a mesh load.
+      **A group, not a seventh command:** no row in `ENTRY_COMMANDS`, so D6's budget is
+      unspent; the id lives in a new `MenuItemId = CommandId | 'orbitAxis'` so the
+      per-surface filter keeps one vocabulary. Both viewer surfaces withhold it —
+      `VIEWER_SURFACE_EXCLUDES` because the surface carries the live picker and a menu
+      duplicate would race the closing persist, `LIGHTBOX_PANEL_EXCLUDES` for the *copy path*
+      reason (the picker is a few pixels away); the asymmetry comment where the two lists are
+      defined says which is which.
+      **Inline radio group, not a submenu**, and the reason is `EntryMenu`'s keyboard model:
+      focus there is one index over the menu's buttons, so six more buttons cost one changed
+      count, where a submenu needs its own open state, its own clamp, focus handed across it
+      and a second level of Escape. One rule was added — **entering the group lands on the
+      spindle in force** rather than on the first of six, since a choice starts from what is
+      already true; every one of the six is still reached by stepping on from there, and
+      Escape still closes the whole menu.
+      **Tested** in `client/test/orbitAxisMenu.test.tsx` (the group on model tiles and not on
+      containers, the marked spindle including the default on a model that has none, the
+      keyboard reach and the keyboard pick, the PUT and the redraw, the lightbox opening
+      about it in-session, a similarity grid's pose ignored and unlabelled, and the no-op),
+      `thumbnailCommands.test.ts` (the body directly, the no-op, the resume gate, the failure
+      sentence, and a **round trip** through the fake cache: an axis pick is a hit on the next
+      visit, drawn about the spindle chosen), and one case in `viewerMenu.test.tsx` for the
+      group's absence on both viewer surfaces beside the rest of that filter.
+      **Falsified five ways:** dropping `camera: null` (three cases fail — the discard),
+      dropping the no-op guard (two fail, one per level), dropping `lighting`/`rig` (three,
+      including the round trip, which re-renders for ever), dropping `'orbitAxis'` from
+      `VIEWER_SURFACE_EXCLUDES` (the viewer-surface case fails), and dropping the
+      group-entry rule from `step` (both keyboard cases fail, and the existing command-only
+      keyboard case goes on passing — which is the split that says it tests the group)
+      **Delta:** `entry-actions`' *A context menu on grid tiles* gains one scenario,
+      *Choosing an axis from the tile*; no requirement renamed or removed

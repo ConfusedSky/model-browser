@@ -8,9 +8,21 @@
  * failure sentence itself, is one thing.
  *
  * These are **commands** (design D1): one-shot, stateless, identical wherever
- * invoked. The lightbox's orbit-axis picker and spindle flip are controls —
- * bound to a live camera, meaningless without a rendered model — and stay where
- * they are.
+ * invoked. The lightbox's spindle flip and the picker's animated rotation are
+ * controls — bound to a live camera, meaningless without a rendered model — and
+ * stay where they are.
+ *
+ * **Revised 2026-08-22 (follow-up 6.7).** This doc used to say "the lightbox's
+ * orbit-axis picker and spindle flip are controls", and read that as putting
+ * the axis itself out of a menu's reach. That was two claims in one coat.
+ * Rotating a live view to a new spindle is a control; *which spindle this model
+ * is stored about* is a fact about the model, and setting it is one-shot,
+ * completes on its own and leaves no mode behind — a command by D1's own test.
+ * So a model **tile's** menu offers the six axes (`ORBIT_AXIS_CHOICES`,
+ * `setOrbitAxis`) and the picker goes on being the control for a view that is
+ * open. The two never appear together: both viewer surfaces withhold the group
+ * (`'orbitAxis'` in the exclusion lists below). Recorded in design.md D7, under
+ * the heading that carried the old rule.
  */
 import type * as THREE from 'three'
 import type {
@@ -39,6 +51,18 @@ export type CommandId =
   | 'findSimilar'
   | 'reRenderThumbnail'
   | 'resetFraming'
+
+/**
+ * What a surface can withhold: every command, plus the menu's orbit-axis group
+ * (6.7), which is not a command — it is six of them wearing one heading, and it
+ * has no row in the table below.
+ *
+ * It is in *this* union rather than in `CommandId` so that "one id per command"
+ * stays true, and in the union at all so that the per-surface filter has one
+ * vocabulary: `VIEWER_SURFACE_EXCLUDES` says what a viewer surface does not
+ * offer, in one list, whether or not the thing it names has a body.
+ */
+export type MenuItemId = CommandId | 'orbitAxis'
 
 /**
  * The per-surface half of a host: brief feedback, rendered however the surface
@@ -401,6 +425,121 @@ export function resetFramingLive(
   view?.reframe(framing.camera, framing.axis, framing.posed)
 }
 
+/**
+ * The six spindles, in the lightbox picker's own order and vocabulary
+ * (`ViewerLayer.tsx:637-673`): the three letters it lists, then those three
+ * negated, which is exactly what its *flip* toggle produces. Reusing its words
+ * is the point — someone who has flipped a spindle in the viewer should
+ * recognise `−Z` in the menu rather than translate it.
+ */
+export const ORBIT_AXIS_CHOICES: readonly { readonly axis: OrbitAxis; readonly label: string }[] = [
+  { axis: 'x', label: 'X' },
+  { axis: 'y', label: 'Y' },
+  { axis: 'z', label: 'Z' },
+  { axis: '-x', label: '−X' },
+  { axis: '-y', label: '−Y' },
+  { axis: '-z', label: '−Z' },
+]
+
+/** The spindle a model with none stored is framed about — the `'y'` the sweep
+ *  (`useThumbnails.ts:223`) and the viewer already fall back to, named here so
+ *  the menu can mark a model that has never been given one. */
+export const DEFAULT_ORBIT_AXIS: OrbitAxis = 'y'
+
+/**
+ * Whether the menu raised on this entry, on this surface, offers the axis group.
+ *
+ * Model-only for the thumbnail commands' structural reason: a container tile is
+ * a glyph, not a render, and has no spindle to be framed about. Withheld on
+ * both viewer surfaces by the same per-surface filter the commands use — see
+ * `VIEWER_SURFACE_EXCLUDES`.
+ */
+export function orbitAxisApplies(entry: DirEntry, exclude: readonly MenuItemId[] = []): boolean {
+  return entry.kind === 'model' && !exclude.includes('orbitAxis')
+}
+
+/**
+ * Set the spindle a model is stored about, from its tile (6.7).
+ *
+ * Three things happen, and the middle one is the design:
+ *
+ * - **the axis is written**, so the tile, the next sweep and the lightbox all
+ *   frame this model about it;
+ * - **the stored camera is discarded** — `camera: null`, the store's own word
+ *   for it (4b.2), never a written default (that is 4b.3's whole argument).
+ *   Angles measured about one axis do not describe a view about another: it is
+ *   why `cameraForPose` derives camera and axis together, and why the azimuth
+ *   offset comes out of `frameFor(axis)`. A camera recorded about the old
+ *   spindle is not a worse view of the model about the new one, it is a
+ *   meaningless one, so it goes and the model is framed by default about the
+ *   axis just chosen;
+ * - **the thumbnail is redrawn about it**, through the same queue-gated body the
+ *   other thumbnail commands use (4b.6), so the answer appears on the tile
+ *   rather than only inside the next lightbox.
+ *
+ * Nothing is read from the cache first, unlike the two commands above: neither
+ * half of the stored orientation survives this write, so there is nothing to
+ * resolve from and no reason to hold a render slot for a lookup.
+ *
+ * **No `posed` label, and that is not an omission.** The pose path requires
+ * *both* a missing camera and a missing axis (`useThumbnails.ts:218-220`), so a
+ * stored axis takes this model out of pose framing for good. That is what
+ * choosing an axis *means*: the user has said which way up this model stands,
+ * and an index that disagrees no longer reframes it. `lighting` and `rig` do
+ * ride along — `cache.ts:108-110` clears every label a PNG-bearing PUT omits,
+ * so an unlabelled write fails the next visit's hit test and re-renders this
+ * tile on every visit, for ever.
+ *
+ * **Picking the axis already in force does nothing** — no PUT, no render, no
+ * queue slot. A menu that re-does what is already true spends a render to
+ * produce the picture already on screen.
+ */
+export function setOrbitAxis(
+  entry: DirEntry,
+  host: ActionHost,
+  axis: OrbitAxis,
+  current: OrbitAxis,
+): void {
+  if (axis === current) return
+  host.queue.push(async () => {
+    try {
+      // The suspension gate, twice, exactly where the other two put it: `push`
+      // alone cannot stop a job that has already started (queue.ts:40-47), and
+      // there is one WebGLRenderer app-wide (architecture D2/D3).
+      await host.queue.whenResumed()
+      const lighting = getLightingMode() // the mode this render uses
+      const object = await host.lru.acquire(entry.path)
+      await host.queue.whenResumed()
+      // The default about the new spindle — which is what an ordinary visit
+      // resolves to for a model that has an axis and no camera
+      // (`useThumbnails.ts:222-223`), so the tile and the next sweep agree.
+      // `renderThumbnail` also hands the axis to the rig, so axis-mode lighting
+      // follows the new spindle rather than the old one.
+      const png = await renderThumbnail(object, DEFAULT_CAMERA, axis)
+      await host.api.putThumb({
+        path: entry.path,
+        mtime: entry.mtime,
+        png,
+        camera: null,
+        axis,
+        lighting,
+        rig: RIG_VERSION,
+      })
+      // The session's own copy, not only the server's: App opens the lightbox at
+      // what this map holds, so a cache-only write would open the model about
+      // the spindle just replaced (4b.4).
+      host.setThumb(entry.path, {
+        status: 'ready',
+        url: URL.createObjectURL(png),
+        camera: undefined,
+        axis,
+      })
+    } catch {
+      host.report(RENDER_FAILED)
+    }
+  })
+}
+
 export interface EntryCommand {
   readonly id: CommandId
   readonly label: string
@@ -428,7 +567,12 @@ export interface EntryCommand {
  * Find similar         —               —
  * Re-render thumbnail  —               —
  * Reset framing        —               —
+ * Orbit axis ×6        —               —
  * ```
+ *
+ * The last row is the group, not a command, and has no entry in the table below
+ * — `orbitAxisApplies` answers for it, under the same model-only rule and the
+ * same per-surface filter (6.7).
  *
  * Find similar carries a second condition the table cannot show: the index is a
  * separate service that may not be running, and the action is absent when it is
@@ -510,13 +654,21 @@ export const ENTRY_COMMANDS: readonly EntryCommand[] = [
  * `queue.whenResumed()` and the viewer holds the suspension (architecture
  * D2/D3), so they would sit until it closed — and the closing persist then
  * races them, writing the orbited camera straight back over the discard *reset
- * framing* was pressed for. What is left is the three that do not care which
- * surface asked.
+ * framing* was pressed for.
+ *
+ * The **orbit-axis group** goes for a third reason, its own (6.7): this surface
+ * already carries the live picker, which does the same thing and shows the
+ * spindle rotating as it does it. A menu duplicate over it would be a second
+ * affordance for one choice — and the worse of the two, since its write would
+ * then race the closing persist that snapshots the live view.
+ *
+ * What is left is the three that do not care which surface asked.
  */
-export const VIEWER_SURFACE_EXCLUDES: readonly CommandId[] = [
+export const VIEWER_SURFACE_EXCLUDES: readonly MenuItemId[] = [
   'open',
   'reRenderThumbnail',
   'resetFraming',
+  'orbitAxis',
 ]
 
 /**
@@ -540,11 +692,18 @@ export const VIEWER_SURFACE_EXCLUDES: readonly CommandId[] = [
  * - *Copy path* is out because the panel already has it, beside the path it
  *   copies, with its own "copied" confirmation. Two affordances for one command
  *   within one panel is a duplicate, not an accelerator.
+ * - The **orbit-axis group** is out for the copy-path reason rather than the
+ *   menu's (6.7): this very surface shows the live picker a few pixels away.
+ *   The panel renders commands and never a group, so the entry is a statement
+ *   of the rule rather than a filter that does work — which is why it is stated:
+ *   the two lists are read side by side, and a silence here would read as an
+ *   oversight.
  */
-export const LIGHTBOX_PANEL_EXCLUDES: readonly CommandId[] = [
+export const LIGHTBOX_PANEL_EXCLUDES: readonly MenuItemId[] = [
   'open',
   'copyPath',
   'reRenderThumbnail',
+  'orbitAxis',
 ]
 
 /**
@@ -570,7 +729,7 @@ export function runCommand(
 export function commandsFor(
   entry: DirEntry,
   ctx: AvailabilityContext,
-  exclude: readonly CommandId[] = [],
+  exclude: readonly MenuItemId[] = [],
 ): EntryCommand[] {
   return ENTRY_COMMANDS.filter(
     (c) => c.run !== null && !exclude.includes(c.id) && c.applies(entry, ctx),

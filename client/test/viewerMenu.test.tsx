@@ -154,6 +154,36 @@ describe('the menu on a viewer surface', () => {
     ])
   })
 
+  // 6.7's half of the same filter: the group the tile menu offers, withheld on
+  // both surfaces that already carry the live picker.
+  it('withholds the orbit-axis group on both viewer surfaces, and offers it on the tile', async () => {
+    const axes = (): HTMLElement[] =>
+      Array.from(menu()?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') ?? [])
+
+    // The tile first, while nothing is open: this is not a rule about the
+    // entry, so the same model has to offer all six here.
+    await secondaryPress(modelTile())
+    expect(axes().map((b) => b.dataset.axis)).toEqual(['x', 'y', 'z', '-x', '-y', '-z'])
+    await escape()
+
+    await startOrbit()
+    await secondaryPress(overlay()!)
+    expect(axes()).toHaveLength(0)
+    await escape()
+
+    // The same gesture's release promotes the overlay to the lightbox — a
+    // pointer-opened one, which is why this test never closes it (that path
+    // goes through `history.back`, which the harness's stubbed URL cannot
+    // survive).
+    await act(async () => {
+      window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: 50, clientY: 50 }))
+    })
+    await wait(150)
+    expect(dialog()).not.toBeNull()
+    await secondaryPress(dialog()!)
+    expect(axes()).toHaveLength(0)
+  })
+
   it('gives Escape to the menu first and to the lightbox second', async () => {
     // Deep-linked rather than pointer-opened: this one closes without
     // history.back, which the harness's stubbed URL cannot survive.
