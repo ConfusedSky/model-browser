@@ -19,14 +19,21 @@ interface Props {
   commands: EntryCommand[]
   /**
    * The orbit-axis group (6.7), or `null` where it is not offered — a container
-   * tile, or either viewer surface, which shows the live picker instead. App
-   * decides that with `orbitAxisApplies`; this component only draws it.
+   * tile, or the **lightbox**, which shows the live picker instead. App decides
+   * that with `orbitAxisApplies`; this component only draws it.
    *
    * An **inline radio group**, not a submenu, and the reason is this component's
    * keyboard model: focus here is one index over the menu's buttons, so six more
    * buttons cost one changed count and nothing else, while a submenu would need
    * its own open state, its own clamp, focus handed across it and a second level
    * of Escape — new machinery for a menu of at most twelve short items.
+   *
+   * Drawn at the **top**, as a compact pill row rather than six full-width rows
+   * *(user feedback 2026-08-22, 6.8)*: six rows of a twelve-row menu were the
+   * axis, which read as the menu's subject rather than as one property of the
+   * model. A row of pills is also the vocabulary the user already learned from
+   * the lightbox's own picker (`ViewerLayer.tsx`, the `left-3 top-3` row), so
+   * `−Z` is recognised rather than translated.
    */
   axis?: { current: OrbitAxis; onChoose: (axis: OrbitAxis) => void } | null
   onChoose: (command: EntryCommand) => void
@@ -35,6 +42,21 @@ interface Props {
 
 /** Margin between the menu and the window edge. */
 const EDGE = 6
+
+/**
+ * One menu item's look: a full-width, square-cornered row that fills on hover
+ * and on focus.
+ *
+ * Exported because the lightbox's info panel draws its action row with it
+ * *(user feedback 2026-08-22, 6.8: the panel's pills should be the menu's
+ * items)*. **This module is the source of truth** — the panel imports the
+ * string rather than carrying a second copy that would drift from it. A shared
+ * string and not a shared component: the two surfaces differ in what they hand
+ * their `onClick`, and wrapping a `className` in a component to share it buys
+ * an indirection and nothing else.
+ */
+export const MENU_ITEM_CLASS =
+  'block w-full px-3 py-1.5 text-left hover:bg-zinc-800 focus:bg-zinc-800 focus:outline-none'
 
 /**
  * Keep the whole menu on screen (R2's "all of its items are visible"). Pure and
@@ -62,14 +84,19 @@ export function clampToViewport(
 export default function EntryMenu({ x, y, commands, axis = null, onChoose, onClose }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ left: x, top: y })
-  const [focused, setFocused] = useState(0)
 
-  // Every focusable row, commands first, in DOM order — which is what `focused`
-  // indexes and what the focus effect below reads back out of the DOM.
+  // Every focusable button, **axis pills first**, in DOM order — which is what
+  // `focused` indexes and what the focus effect below reads back out of the DOM.
   const axisCount = axis === null ? 0 : ORBIT_AXIS_CHOICES.length
-  const count = commands.length + axisCount
+  const count = axisCount + commands.length
   const currentAxisRow =
-    axis === null ? 0 : commands.length + ORBIT_AXIS_CHOICES.findIndex((c) => c.axis === axis.current)
+    axis === null ? 0 : Math.max(0, ORBIT_AXIS_CHOICES.findIndex((c) => c.axis === axis.current))
+
+  // The menu opens on its first *command*, not on the pill row above it: the
+  // commands are what the menu is for, and the group is one property of the
+  // model shown alongside them. `axisCount` is that index, and 0 when there is
+  // no group.
+  const [focused, setFocused] = useState(axisCount)
 
   /**
    * One step of arrow navigation, with the group's one rule: **entering it lands
@@ -78,18 +105,28 @@ export default function EntryMenu({ x, y, commands, axis = null, onChoose, onClo
    * true — the same reason the picker in the lightbox opens showing the live
    * axis pressed. Every one of the six is still reached by stepping on from
    * there, in either direction.
+   *
+   * The group being above the commands rather than below them moves which
+   * crossing this rule catches — Up off the first command, and the wrap off the
+   * last — and changes nothing else.
    */
   function step(from: number, delta: number): number {
     const next = (from + delta + count) % count
-    if (from < commands.length && next >= commands.length) return currentAxisRow
+    if (from >= axisCount && next < axisCount) return currentAxisRow
     return next
   }
 
   // Measure once mounted, then clamp: the height depends on how many commands
   // this entry offers, which is the whole reason it cannot be computed upfront.
+  //
+  // Focus is re-seeded here too, against the item set just measured: `focused`
+  // is a DOM index, and a menu re-raised on a different entry can offer fewer
+  // buttons than the last one did — leaving the index past the end, pointing at
+  // no button at all.
   useLayoutEffect(() => {
     const el = ref.current
     if (el === null) return
+    setFocused(axisCount)
     const r = el.getBoundingClientRect()
     setPos(clampToViewport(x, y, r.width, r.height, window.innerWidth, window.innerHeight))
   }, [x, y, commands.length, axisCount])
@@ -152,6 +189,41 @@ export default function EntryMenu({ x, y, commands, axis = null, onChoose, onClo
         }
       }}
     >
+      {axis !== null && (
+        // The spindle this model is stored about — a radio group, since exactly
+        // one of the six is true of it and picking one is picking, not toggling.
+        // The "axis" caption is a <span>, so it stays out of the button index
+        // `focused` walks, exactly as the old heading did.
+        //
+        // Drawn as the lightbox picker's own pill row (6.8): the marked spindle
+        // is the *filled* pill there and it is the filled pill here, so the mark
+        // is one visual idea across the two surfaces rather than a tick on one
+        // and a fill on the other. `aria-checked` carries it either way.
+        <div
+          role="group"
+          aria-label="Orbit axis"
+          className="mb-1 flex items-center gap-0.5 border-b border-zinc-700 px-2 pb-1.5 text-xs"
+        >
+          <span className="pr-1 text-zinc-500">axis</span>
+          {ORBIT_AXIS_CHOICES.map((c) => (
+            <button
+              key={c.axis}
+              type="button"
+              role="menuitemradio"
+              aria-checked={c.axis === axis.current}
+              data-axis={c.axis}
+              onClick={() => axis.onChoose(c.axis)}
+              className={`rounded-full px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-sky-500 ${
+                c.axis === axis.current
+                  ? 'bg-sky-700 text-white'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+      )}
       {commands.map((c) => (
         <button
           key={c.id}
@@ -162,36 +234,11 @@ export default function EntryMenu({ x, y, commands, axis = null, onChoose, onClo
           // the menu on anything outside it, and a press that both chose an
           // item and dismissed the menu would race itself.
           onClick={() => onChoose(c)}
-          className="block w-full px-3 py-1.5 text-left hover:bg-zinc-800 focus:bg-zinc-800 focus:outline-none"
+          className={MENU_ITEM_CLASS}
         >
           {c.label}
         </button>
       ))}
-      {axis !== null && (
-        // The spindle this model is stored about — a radio group, since exactly
-        // one of the six is true of it and picking one is picking, not toggling.
-        // The heading is a <p>, so it stays out of the button index `focused`
-        // walks.
-        <div role="group" aria-label="Orbit axis" className="mt-1 border-t border-zinc-700 pt-1">
-          <p className="px-3 py-1 text-[11px] uppercase tracking-wide text-zinc-500">Orbit axis</p>
-          {ORBIT_AXIS_CHOICES.map((c) => (
-            <button
-              key={c.axis}
-              type="button"
-              role="menuitemradio"
-              aria-checked={c.axis === axis.current}
-              data-axis={c.axis}
-              onClick={() => axis.onChoose(c.axis)}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-zinc-800 focus:bg-zinc-800 focus:outline-none"
-            >
-              <span className="w-3 text-sky-400" aria-hidden="true">
-                {c.axis === axis.current ? '✓' : ''}
-              </span>
-              {c.label}
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   )
 }

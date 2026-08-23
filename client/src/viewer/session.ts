@@ -185,7 +185,7 @@ export class ViewerSession {
    * the model resolves to now that theirs has been discarded. Left standing, an
    * orbit made before the reset would have the close write that orbit back over
    * the discard, which is the race that keeps this command off the right-click
-   * menu (`VIEWER_SURFACE_EXCLUDES`).
+   * menu (`LIGHTBOX_MENU_EXCLUDES`).
    *
    * The move is the axis picker's own tween, not a snap: a reset can change the
    * spindle, and a spindle change made without the animated rotation that

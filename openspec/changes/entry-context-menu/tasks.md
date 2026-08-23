@@ -833,3 +833,81 @@
       keyboard case goes on passing — which is the split that says it tests the group)
       **Delta:** `entry-actions`' *A context menu on grid tiles* gains one scenario,
       *Choosing an axis from the tile*; no requirement renamed or removed
+- [x] 6.8 Four things the user asked for after the 6.5–6.7 run, three of them about how the
+      affordances *look* and one a bug the screenshot diagnosed. **User feedback
+      2026-08-22.**
+      **(a) The axis group is a pill row at the top of the menu**, not six full-width rows
+      at the bottom. Six of a twelve-row menu spent on the axis read as the menu's subject
+      rather than as one property of the model, and pills are the vocabulary the lightbox's
+      own picker already taught — down to the mark, which is now the *filled* pill on both
+      surfaces rather than a tick on one and a fill on the other (`aria-checked` carries it
+      either way, so nothing an assistive reader sees changed). The keyboard model is
+      untouched: `focused` is still one index over the menu's buttons, the group is still
+      entered at the spindle in force, Escape still closes the whole menu. Moving the group
+      above the commands only moves which crossings that rule catches — Up off the first
+      command, and the wrap off the last — so `step`'s condition is mirrored
+      (`from >= axisCount && next < axisCount`) and nothing else in it changes. The menu
+      opens on its first *command*, which is what a menu is for, and the layout effect that
+      already measures the menu re-seeds `focused` against the item set it just measured, so
+      a DOM index can no longer outlive the buttons it counted.
+      **(b) + (c) The panel's action row moves below the metadata and becomes menu items.**
+      The panel describes the model first — format, size, modified — and offers what can be
+      done to it after. The buttons are the same commands the menu raises, so they are the
+      menu's own rows: `MENU_ITEM_CLASS`, exported from `EntryMenu`, which is the **one
+      style source** — the panel imports the string rather than carrying a copy that would
+      drift. A string and not a component: the two surfaces differ in what they hand their
+      `onClick`, and wrapping a `className` to share it buys an indirection and nothing
+      else. **Copy path is untouched**, still the pill on the path line it belongs to.
+      **(d) The orbit surface serves the full tile menu; only the lightbox filters.**
+      *The bug, from a screenshot:* right-clicking a tile a second after orbiting it showed
+      the three-item viewer menu, because the overlay lingers over that tile invisibly
+      through the persist hold and the filter was keyed on "a viewer is mounted". Every
+      reason on that list is about a view the user **opened** — it holds the renderer for as
+      long as they leave it open, it carries the live picker a few pixels away, it ends in a
+      close that persists what is on screen. A transient overlay is none of those; it draws
+      no picker at all (the `left-3 top-3` row is in the lightbox branch only) and is gone
+      within `PERSIST_HOLD_MS`. So `VIEWER_SURFACE_EXCLUDES` is renamed
+      **`LIGHTBOX_MENU_EXCLUDES`** and applies to the lightbox alone; App's menu state tells
+      the two viewer surfaces apart (`surface: 'tile' | 'orbit' | 'lightbox'`, the mode read
+      from `viewerRef` — App's own fact, so `ViewerLayer` reports no copy of it) and hands
+      the orbit surface the whole table **and** `menuAxis`, read from the thumbs map exactly
+      as a tile's is. The two exclusion lists now both name the lightbox, which is the shape
+      to read them in — one surface, two affordance sets — and the asymmetry comment says so.
+      **Ordering against the overlay's own closing PUT, checked rather than assumed**, since
+      the restored items are the ones that write. The `whenResumed()` gate that made them
+      dishonest under a lightbox is what *sequences* them here: `dismissAfterPersist` awaits
+      the settle→persist chain before `onDismiss`, the queue resumes only when the overlay
+      unmounts, so a queued body reads (`getThumb`) the orientation that persist just wrote
+      and acts on it rather than racing it. The axis group reads nothing and writes after the
+      same gate; its mark is the thumbs map's axis, which a drag never moves (a drag persists
+      a camera, never a spindle). *Open* is the promote path by another name — a newer
+      `viewer` replaces the held dismissal's, which `dismissAfterPersist` already stands down
+      for (D4). The one gap is `PERSIST_HOLD_MS` itself: a persist slower than 1.5s unmounts
+      the overlay and resumes the queue while it is still in flight. That window is not new
+      and not this filter's — the background sweep's queued renders resume into it
+      identically — and the cost is a command pressed again on an overlay that is by then
+      gone. No reducer or state change was needed for any of the four.
+      **Tested**, with three existing cases adjusted for the semantics that changed and four
+      added. Adjusted: `viewerMenu`'s orbit case now expects the **whole table** (was the
+      three), its axis case now expects the six on the tile *and* the overlay and none on
+      the lightbox (was none on both), and `orbitAxisMenu`'s keyboard case names the first
+      `[role="menuitem"]` rather than the menu's first `button`, which is now a pill.
+      Added: the pill row's DOM position and pill look (`orbitAxisMenu`), Up off the first
+      command entering the group at the spindle in force — the crossing the move created
+      (`orbitAxisMenu`), the screenshot case itself, a right-click *during* the persist hold
+      after a drag release, expecting all six items and all six axes (`viewerMenu`), and the
+      panel row's DOM order against the metadata plus its `MENU_ITEM_CLASS` buttons and the
+      untouched copy pill (`viewerPanelActions`).
+      **Falsified four ways:** restoring the orbit filter (all three orbit-surface cases
+      fail, the lightbox's three keep passing — which is the split that says the filter is
+      now the lightbox's), moving the group back below the commands (five fail across both
+      menu suites; the command-only keyboard cases keep passing), moving the panel row back
+      above the metadata (only the order case fails), and dropping the group-entry rule from
+      `step` (only the three keyboard cases fail)
+      **Delta:** `entry-actions`' *A context menu on grid tiles* gains the transient-surface
+      rule and the presentation rule in its prose, one scenario (*A momentary overlay is the
+      tile it covers*), and two rewritten in place — *The menu reaches the model being
+      viewed* and *Actions a surface cannot perform are absent from it*, which both named
+      the two viewer surfaces as one thing. `model-viewer`'s *Lightbox expanded view* gains
+      the row's position and look in its prose and one scenario (*The panel describes before
+      it offers*). No requirement renamed or removed

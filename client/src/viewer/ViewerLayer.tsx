@@ -8,6 +8,7 @@ import type {
   OrbitAxis,
 } from '../../../shared/types'
 import type { ApiClient } from '../api/client'
+import { MENU_ITEM_CLASS } from '../components/EntryMenu'
 import {
   copyEntryPath,
   type CommandId,
@@ -696,27 +697,6 @@ export default function ViewerLayer({
               </p>
             )}
           </div>
-          {/* The entry actions as affordances rather than only behind a
-              secondary press (6.6) — the same commands the menu raises, beside
-              the copy affordance that was already one of them. Named for the
-              model, not "Entry actions": the menu can be raised over this very
-              panel, and two things sharing an accessible name are one thing to
-              anything reading names. */}
-          {panelCommands.length > 0 && (
-            <div className="flex flex-wrap gap-1.5" aria-label="Model actions" role="group">
-              {panelCommands.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  data-command={c.id}
-                  onClick={() => runPanelCommand(c.id)}
-                  className="rounded-full bg-zinc-800 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-700"
-                >
-                  {c.label}
-                </button>
-              ))}
-            </div>
-          )}
           <dl className="flex flex-col gap-2 text-xs">
             {viewer.entry.format !== undefined && (
               <div className="flex justify-between gap-2">
@@ -735,6 +715,40 @@ export default function ViewerLayer({
               <dd className="text-right text-zinc-300">{formatDate(viewer.entry.mtime)}</dd>
             </div>
           </dl>
+          {/* The entry actions as affordances rather than only behind a
+              secondary press (6.6) — the same commands the menu raises, beside
+              the copy affordance that was already one of them. Named for the
+              model, not "Entry actions": the menu can be raised over this very
+              panel, and two things sharing an accessible name are one thing to
+              anything reading names.
+
+              **Last in the panel, and drawn as menu items** *(user feedback
+              2026-08-22, 6.8)*: what the panel is is a description of the model,
+              so the facts about it come first and the things one can do to it
+              come after — and these are the same commands the menu offers, so
+              they are the menu's rows rather than a second look for one thing.
+              `MENU_ITEM_CLASS` is imported from `EntryMenu`, which owns that
+              look. The copy affordance stays a pill up beside the path it
+              copies: it is part of that line, not one of these. */}
+          {panelCommands.length > 0 && (
+            <div
+              className="-mx-1 flex flex-col overflow-hidden rounded-lg border border-zinc-700 text-sm text-zinc-200"
+              aria-label="Model actions"
+              role="group"
+            >
+              {panelCommands.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  data-command={c.id}
+                  onClick={() => runPanelCommand(c.id)}
+                  className={MENU_ITEM_CLASS}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <button
           type="button"

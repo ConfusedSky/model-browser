@@ -15,6 +15,7 @@
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DirEntry, DirListing, IndexPose } from '../../shared/types'
+import { MENU_ITEM_CLASS } from '../src/components/EntryMenu'
 import {
   RESET_FAILED,
   resetFramingLive,
@@ -123,6 +124,30 @@ describe('the info panel offers the entry actions', () => {
     // duplicated: the panel already has it, beside the path it copies.
     expect(actions()).toEqual(['reveal', 'findSimilar', 'resetFraming'])
     expect(document.querySelector('button[aria-label="Copy path"]')).not.toBeNull()
+  })
+
+  it('puts the row after the metadata, drawn as the context menu’s own items', async () => {
+    // User feedback 2026-08-22 (6.8), both halves at once. **Order:** the panel
+    // describes the model — format, size, modified — and then offers what can
+    // be done to it; the row used to sit above all of that. **Look:** these are
+    // the same commands the menu raises, so they are the menu's rows rather
+    // than a second style for one thing.
+    await openLightbox('Alpha/found.stl')
+    const meta = document.querySelector('dl')!
+    const row = actionRow()!
+    // 4 is DOCUMENT_POSITION_FOLLOWING: the row comes after the metadata.
+    expect(meta.compareDocumentPosition(row) & 4).toBe(4)
+    // Both are in the panel, so this is an order and not two disjoint columns.
+    expect(row.parentElement).toBe(meta.parentElement)
+
+    // One style source, imported rather than copied — `EntryMenu` owns it.
+    expect(action('reveal').className).toBe(MENU_ITEM_CLASS)
+    expect(action('resetFraming').className).toBe(MENU_ITEM_CLASS)
+    // And the copy affordance is exactly as it was: the pill on the path line,
+    // which is part of that line rather than one of these.
+    const copy = document.querySelector<HTMLButtonElement>('button[aria-label="Copy path"]')!
+    expect(copy.className).toContain('rounded-full')
+    expect(copy.className).not.toBe(MENU_ITEM_CLASS)
   })
 
   it('withholds find similar when the index is not answering', async () => {

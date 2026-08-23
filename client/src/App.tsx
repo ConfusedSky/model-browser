@@ -12,16 +12,17 @@ import { useThumbnails } from './hooks/useThumbnails'
 import {
   commandsFor,
   DEFAULT_ORBIT_AXIS,
+  LIGHTBOX_MENU_EXCLUDES,
   LIGHTBOX_PANEL_EXCLUDES,
   orbitAxisApplies,
   resetFramingLive,
   runCommand,
   setOrbitAxis,
-  VIEWER_SURFACE_EXCLUDES,
   type ActionHost,
   type CommandId,
   type EntryCommand,
   type LiveFramingView,
+  type MenuItemId,
 } from './lib/entryActions'
 import { GestureTracker } from './lib/gesture'
 import { createHoverWarmer } from './lib/hover'
@@ -101,6 +102,23 @@ const NO_POSES: Record<string, IndexPose> = {}
 /** "Nothing is deferred", as a subject, so the banner branches on one union
  *  rather than on a null *and* a kind. */
 const NO_SUBJECT: Subject = { kind: 'none' }
+
+/** Nothing withheld. One module-level list rather than a fresh `[]` per raised
+ *  menu, and a name for what an empty exclusion list means. */
+const NO_EXCLUDES: readonly MenuItemId[] = []
+
+/**
+ * What the surface the menu was raised on withholds (D6's margin, 6.8).
+ *
+ * **The lightbox is the only surface that withholds anything.** A tile offers
+ * the whole table, and so does the orbit overlay — which is a transient layer
+ * over a tile rather than a view the user opened, so as far as the menu is
+ * concerned it *is* that tile. `LIGHTBOX_MENU_EXCLUDES` carries the reasoning
+ * for every id on the list, and why none of it reaches the overlay.
+ */
+function menuExcludes(surface: 'tile' | 'orbit' | 'lightbox'): readonly MenuItemId[] {
+  return surface === 'lightbox' ? LIGHTBOX_MENU_EXCLUDES : NO_EXCLUDES
+}
 
 /**
  * A model named for a person rather than for the path bar. A similarity view's
@@ -296,13 +314,18 @@ export default function App() {
    * `surface` is not derivable from `viewer`: an orbit overlay covers one tile
    * and leaves the rest of the grid right-clickable, so "a viewer is mounted"
    * and "this menu was raised on it" are different facts.
+   *
+   * The two viewer surfaces are told apart (6.8) because only one of them
+   * filters: `'lightbox'` is a view the user opened and holds, `'orbit'` is an
+   * overlay that lingers over a tile for a moment and offers what that tile
+   * offers. See `LIGHTBOX_MENU_EXCLUDES`.
    */
   const [menu, setMenu] = useState<{
     entry: DirEntry
     el: HTMLElement | null
     x: number
     y: number
-    surface: 'tile' | 'viewer'
+    surface: 'tile' | 'orbit' | 'lightbox'
   } | null>(null)
   const menuRef = useRef<typeof menu>(null)
   menuRef.current = menu
@@ -1218,11 +1241,20 @@ export default function App() {
     },
     [],
   )
-  /** The same menu, raised on the live view of the model instead of its tile —
-   *  which is a different *surface*, not a different menu (D6's margin). */
+  /**
+   * The same menu, raised on the live view of the model instead of its tile —
+   * which is a different *surface*, not a different menu (D6's margin).
+   *
+   * Which viewer surface comes from `viewerRef` rather than from the caller:
+   * the mode is this component's own fact, and `ViewerLayer` reporting it back
+   * would be a second copy of something App already holds. Read from the ref so
+   * this callback stays stable — it is a prop on the layer that would otherwise
+   * change on every mode flip.
+   */
   const onViewerEntryMenu = useCallback(
     (entry: DirEntry, el: HTMLElement | null, at: { x: number; y: number }): void => {
-      setMenu({ entry, el, x: at.x, y: at.y, surface: 'viewer' })
+      const surface = viewerRef.current?.mode === 'lightbox' ? 'lightbox' : 'orbit'
+      setMenu({ entry, el, x: at.x, y: at.y, surface })
     },
     [],
   )
@@ -1244,21 +1276,18 @@ export default function App() {
   )
   /**
    * The menu's orbit-axis group (6.7): the spindle this model is stored about,
-   * or `null` where the group is not offered — a container, or either viewer
-   * surface, which carries the live picker instead.
+   * or `null` where the group is not offered — a container, or the lightbox,
+   * which carries the live picker instead. The orbit overlay carries no picker
+   * and gets the group, exactly as the tile under it does (6.8).
    *
    * Read from the thumbs map, which is what the tile drew and what the lightbox
    * would open at; a model that has never been given one is marked at the
    * default rather than at nothing, because that is the spindle it is framed
-   * about.
+   * about. An orbit drag moves the camera and never the axis, so an overlay's
+   * pending persist cannot make this mark wrong while it is in flight.
    */
   const menuAxis = useMemo<OrbitAxis | null>(() => {
-    if (
-      menu === null ||
-      !orbitAxisApplies(menu.entry, menu.surface === 'viewer' ? VIEWER_SURFACE_EXCLUDES : [])
-    ) {
-      return null
-    }
+    if (menu === null || !orbitAxisApplies(menu.entry, menuExcludes(menu.surface))) return null
     return thumbs.get(menu.entry.path)?.axis ?? DEFAULT_ORBIT_AXIS
   }, [menu, thumbs])
   /** An axis chosen from the menu: the shared body, through the one host. The
@@ -1281,11 +1310,7 @@ export default function App() {
     () =>
       menu === null
         ? []
-        : commandsFor(
-            menu.entry,
-            { index: state.index },
-            menu.surface === 'viewer' ? VIEWER_SURFACE_EXCLUDES : [],
-          ),
+        : commandsFor(menu.entry, { index: state.index }, menuExcludes(menu.surface)),
     [menu, state.index],
   )
 

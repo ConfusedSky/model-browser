@@ -20,9 +20,10 @@
  * completes on its own and leaves no mode behind — a command by D1's own test.
  * So a model **tile's** menu offers the six axes (`ORBIT_AXIS_CHOICES`,
  * `setOrbitAxis`) and the picker goes on being the control for a view that is
- * open. The two never appear together: both viewer surfaces withhold the group
- * (`'orbitAxis'` in the exclusion lists below). Recorded in design.md D7, under
- * the heading that carried the old rule.
+ * open. The two never appear together: the lightbox withholds the group
+ * (`'orbitAxis'` in the exclusion lists below), and the orbit overlay — which
+ * carries no picker — offers it as the tile does (6.8). Recorded in design.md
+ * D7, under the heading that carried the old rule.
  */
 import type * as THREE from 'three'
 import type {
@@ -59,8 +60,8 @@ export type CommandId =
  *
  * It is in *this* union rather than in `CommandId` so that "one id per command"
  * stays true, and in the union at all so that the per-surface filter has one
- * vocabulary: `VIEWER_SURFACE_EXCLUDES` says what a viewer surface does not
- * offer, in one list, whether or not the thing it names has a body.
+ * vocabulary: `LIGHTBOX_MENU_EXCLUDES` says what the lightbox does not offer,
+ * in one list, whether or not the thing it names has a body.
  */
 export type MenuItemId = CommandId | 'orbitAxis'
 
@@ -450,9 +451,10 @@ export const DEFAULT_ORBIT_AXIS: OrbitAxis = 'y'
  * Whether the menu raised on this entry, on this surface, offers the axis group.
  *
  * Model-only for the thumbnail commands' structural reason: a container tile is
- * a glyph, not a render, and has no spindle to be framed about. Withheld on
- * both viewer surfaces by the same per-surface filter the commands use — see
- * `VIEWER_SURFACE_EXCLUDES`.
+ * a glyph, not a render, and has no spindle to be framed about. Withheld on the
+ * lightbox by the same per-surface filter the commands use — see
+ * `LIGHTBOX_MENU_EXCLUDES`; the orbit overlay offers it, exactly as the tile
+ * beneath it does (6.8).
  */
 export function orbitAxisApplies(entry: DirEntry, exclude: readonly MenuItemId[] = []): boolean {
   return entry.kind === 'model' && !exclude.includes('orbitAxis')
@@ -640,8 +642,7 @@ export const ENTRY_COMMANDS: readonly EntryCommand[] = [
 ]
 
 /**
- * What a menu raised on a viewer surface — the orbit overlay, the lightbox —
- * withholds (D6's margin).
+ * What a menu raised on the **lightbox** withholds (D6's margin).
  *
  * The table above is per-*kind* and stays one table. This is the other axis,
  * per-*surface*, and it is a filter at the call site rather than a seventh
@@ -650,11 +651,11 @@ export const ENTRY_COMMANDS: readonly EntryCommand[] = [
  *
  * *Open* goes because the model is already open — the command would re-open the
  * thing the menu was raised on. The two thumbnail commands go because from an
- * open viewer they cannot honestly run: their renders wait on
- * `queue.whenResumed()` and the viewer holds the suspension (architecture
- * D2/D3), so they would sit until it closed — and the closing persist then
- * races them, writing the orbited camera straight back over the discard *reset
- * framing* was pressed for.
+ * open lightbox they cannot honestly run: their renders wait on
+ * `queue.whenResumed()` and the view holds the suspension (architecture
+ * D2/D3), so they would sit for as long as the user leaves it open, and the
+ * closing persist then races them — writing the orbited camera straight back
+ * over the discard *reset framing* was pressed for.
  *
  * The **orbit-axis group** goes for a third reason, its own (6.7): this surface
  * already carries the live picker, which does the same thing and shows the
@@ -663,8 +664,23 @@ export const ENTRY_COMMANDS: readonly EntryCommand[] = [
  * then race the closing persist that snapshots the live view.
  *
  * What is left is the three that do not care which surface asked.
+ *
+ * **The orbit overlay is not on this list, and was until 2026-08-22 (6.8, a
+ * user-reported screenshot).** Every reason above is about a view the user has
+ * *opened*: it holds the renderer indefinitely, it carries the live picker, and
+ * it ends in a close that persists what is on screen. A transient overlay over
+ * a tile is none of those. It carries no picker at all, it is gone within
+ * `PERSIST_HOLD_MS` of the release, and the `whenResumed()` gate that made the
+ * thumbnail commands dishonest under a lightbox is exactly what *sequences*
+ * them here — the queue resumes when the overlay unmounts, which is after its
+ * persist has been awaited, so the command reads the orientation that persist
+ * just wrote and then acts on it. So a lingering overlay over a tile **is** the
+ * tile as far as the menu is concerned, and the orbit surface gets the full
+ * menu, group included. The bug this fixes: right-clicking a tile within a
+ * second of an orbit showed the three-item lightbox menu, because the invisible
+ * overlay caught the press and this filter applied to it.
  */
-export const VIEWER_SURFACE_EXCLUDES: readonly MenuItemId[] = [
+export const LIGHTBOX_MENU_EXCLUDES: readonly MenuItemId[] = [
   'open',
   'reRenderThumbnail',
   'resetFraming',
@@ -673,7 +689,12 @@ export const VIEWER_SURFACE_EXCLUDES: readonly MenuItemId[] = [
 
 /**
  * What the lightbox's **info panel** withholds — the other set of affordances on
- * the same surface (follow-up 6.6), and deliberately not the same list.
+ * the same surface (follow-up 6.6), and deliberately not the same list as the
+ * menu raised on that surface.
+ *
+ * Both lists name the lightbox and only the lightbox, which is the shape to
+ * read them in: one surface, two affordance sets. The orbit overlay filters
+ * nothing (6.8, above) and has no panel at all.
  *
  * The asymmetry is the point, and it is about the body rather than the surface:
  *

@@ -32,7 +32,9 @@ Which actions an entry offers SHALL follow from what the entry is, and an action
 ### Requirement: A context menu on grid tiles
 The client SHALL raise a context menu on any surface presenting a listing entry — a grid tile, and the live view of a model while it is being orbited or shown expanded — in response to the platform's secondary-click gesture, positioned at the pointer and kept within the viewport, with the platform's own menu suppressed. It SHALL be dismissible by choosing an action, by pressing Escape, and by interacting outside it, and SHALL be reachable and operable from the keyboard. Raising or dismissing the menu SHALL NOT disturb what it was raised over: no orbit begins, no expanded view opens, no open view closes, and no thumbnail work is started or cancelled. A surface SHALL offer only the actions it can perform there, and while the menu is raised it SHALL own Escape, so that one press dismisses one thing.
 
-A menu raised on a model's **tile** SHALL additionally offer that model's orbit axis as a choice among the axes the client can express, naming them as the expanded view's own control names them and marking the one the model is framed about. The surfaces showing a model live SHALL NOT offer that choice, each already carrying a live control for it. The choice SHALL be reachable and operable from the keyboard with the rest of the menu, entered at the axis in force.
+A surface withholds an action only where it could not honestly perform it, and a surface that merely covers an entry momentarily on the way to somewhere else SHALL offer whatever that entry offers: what withholds is a view the user has opened and holds, not a transient overlay.
+
+A menu raised on a model's **tile** SHALL additionally offer that model's orbit axis as a choice among the axes the client can express, naming them as the expanded view's own control names them and marking the one the model is framed about. The expanded view SHALL NOT offer that choice, already carrying a live control for it. The choice SHALL be presented compactly and before the actions rather than as a list of its own beneath them, since it is one property of the model among the things that can be done to it — and it SHALL be marked as the live control marks it, so that one spindle-in-force reads the same way on either surface. The choice SHALL be reachable and operable from the keyboard with the rest of the menu, entered at the axis in force.
 
 #### Scenario: Secondary click opens the menu without orbiting
 - **WHEN** the user secondary-clicks a model tile
@@ -40,11 +42,15 @@ A menu raised on a model's **tile** SHALL additionally offer that model's orbit 
 
 #### Scenario: The menu reaches the model being viewed
 - **WHEN** the user secondary-clicks a model that is being orbited, or one open in the expanded view
-- **THEN** the menu opens over it, offering the actions that do not depend on the surface, and the platform's own menu does not appear
+- **THEN** the menu opens over it and the platform's own menu does not appear — offering, on the expanded view, the actions that do not depend on the surface, and on the momentary overlay everything the tile beneath it offers
 
 #### Scenario: Actions a surface cannot perform are absent from it
-- **WHEN** the user raises the menu on the live view of a model
-- **THEN** opening it is not offered, since it is already open, and neither are the actions that redraw its thumbnail, which cannot be drawn while that view holds the renderer and would be overwritten by the view's own closing save
+- **WHEN** the user raises the menu on a model open in the expanded view
+- **THEN** opening it is not offered, since it is already open, and neither are the actions that redraw its thumbnail, which cannot be drawn for as long as that view holds the renderer and would be overwritten by the view's own closing save
+
+#### Scenario: A momentary overlay is the tile it covers
+- **WHEN** the user orbits a model, releases, and secondary-clicks it again while the overlay is still settling over its tile
+- **THEN** the whole of the tile's menu is offered, orbit axis included, since nothing about that overlay makes any of it dishonest — it holds the renderer only until it goes, it carries no live control of its own, and each action takes effect after the settling save rather than racing it
 
 #### Scenario: Escape closes the menu before the view
 - **WHEN** the user raises the menu over the expanded view and presses Escape

@@ -180,6 +180,33 @@ describe('the group is offered on model tiles and nowhere else', () => {
     expect(markedAxis()).toBe('y')
   })
 
+  it('draws the six as a pill row above the commands, not as rows beneath them', async () => {
+    // User feedback 2026-08-22 (6.8): six full-width rows at the bottom read as
+    // the menu's subject rather than as one property of the model. The group is
+    // now the compact pill row the lightbox's own picker uses, at the top.
+    stored('-x')
+    await mountApp('/models', NESTED)
+    await settle()
+
+    await secondaryPress(tile('widget.stl'))
+    // DOM order, which is also the order the arrow keys walk: the six pills
+    // first, then every command.
+    const roles = Array.from(menu()!.querySelectorAll<HTMLElement>('button')).map((b) =>
+      b.getAttribute('role'),
+    )
+    expect(roles.slice(0, 6)).toEqual(Array(6).fill('menuitemradio'))
+    expect(roles.slice(6)).toEqual(Array(roles.length - 6).fill('menuitem'))
+    expect(roles.length).toBeGreaterThan(6) // there are commands under it
+
+    // The pill vocabulary, not a menu row: the marked spindle is *filled*, the
+    // way the lightbox's picker fills the axis in force, and a pill is not
+    // full-width.
+    expect(axisItem('-x').className).toContain('bg-sky-700')
+    expect(axisItem('-x').className).toContain('rounded-full')
+    expect(axisItem('z').className).not.toContain('bg-sky-700')
+    expect(axisItem('-x').className).not.toContain('w-full')
+  })
+
   it('is absent on a directory and on an archive, which are glyphs with no spindle', async () => {
     await mountApp('/models', NESTED)
     await settle()
@@ -203,10 +230,13 @@ describe('reaching the group from the keyboard', () => {
     await secondaryPress(tile('widget.stl'))
     const commands = items().length
     expect(commands).toBeGreaterThan(0)
-    expect(document.activeElement).toBe(menu()!.querySelector('button'))
+    // The menu opens on its first *command*, which is what a menu is for. Since
+    // 6.8 that is no longer the menu's first button — the pill row is above it —
+    // so this names the role rather than taking the first `button` it finds.
+    expect(document.activeElement).toBe(menu()!.querySelector('[role="menuitem"]'))
 
-    // Down through the commands, then into the group — which is entered at the
-    // spindle already in force rather than at the first of six.
+    // Down through the commands and off the end into the group — which is
+    // entered at the spindle already in force rather than at the first of six.
     for (let i = 0; i < commands; i++) await arrow('ArrowDown')
     expect((document.activeElement as HTMLElement).dataset.axis).toBe('-x')
 
@@ -219,6 +249,23 @@ describe('reaching the group from the keyboard', () => {
     // One press dismisses one thing, and that thing is the menu entire.
     await escape()
     expect(menu()).toBeNull()
+  })
+
+  it('enters the group from above too, at the same spindle', async () => {
+    // The crossing 6.8 created: the group sits above the commands, so one press
+    // Up off the first command walks into it — and it lands where entering the
+    // group always lands, not on the pill that happens to be nearest.
+    stored('-x')
+    await mountApp('/models', NESTED)
+    await settle()
+
+    await secondaryPress(tile('widget.stl'))
+    expect(document.activeElement).toBe(menu()!.querySelector('[role="menuitem"]'))
+    await arrow('ArrowUp')
+    expect((document.activeElement as HTMLElement).dataset.axis).toBe('-x')
+    // And stepping on from there still reaches the rest, in either direction.
+    await arrow('ArrowUp')
+    expect((document.activeElement as HTMLElement).dataset.axis).toBe('z')
   })
 
   it('chooses the focused spindle, by the same body the pointer reaches', async () => {

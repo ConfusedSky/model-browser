@@ -588,30 +588,62 @@ drawn as glyphs, not renders, so there is no thumbnail to act on.
 
 Everything else applies to every kind, which is what keeps the menu predictable.
 
-**The viewer surfaces get a shorter menu — and the table did not change.** *(Added
-2026-08-22, with the fix for a user-reported right-click that reached nothing: both
-overlays swallowed `contextmenu` before the tile beneath could see it, and the orbit
-overlay keeps sitting over that tile invisibly through the persist hold after a release.)*
-A menu raised on the orbit overlay or the lightbox offers three items — *reveal*, *copy
-path*, *find similar* — the ones that do not care which surface asked. Three are withheld,
-for reasons about the **surface**, not the entry:
+**The lightbox gets a shorter menu — and the table did not change.** *(Added 2026-08-22,
+with the fix for a user-reported right-click that reached nothing: both overlays swallowed
+`contextmenu` before the tile beneath could see it, and the orbit overlay keeps sitting
+over that tile invisibly through the persist hold after a release. Narrowed from "either
+viewer surface" to the lightbox on the same day — see the margin below.)* A menu raised on
+the lightbox offers three items — *reveal*, *copy path*, *find similar* — the ones that do
+not care which surface asked. Three are withheld, for reasons about the **surface**, not
+the entry:
 
 - *Open* would re-open the model that is already open.
-- *Re-render thumbnail* and *reset framing* cannot honestly run from an open viewer. Both
-  wait on `queue.whenResumed()` before touching the renderer (4b.6) and the viewer holds
-  that suspension (architecture D2/D3), so they would sit until it closed — and then the
-  closing persist races them, writing the orbited camera straight back over the discard
-  *reset framing* was pressed for. Offering an item that quietly loses a coin-flip against
-  the gesture that dismisses it is worse than not offering it.
-- The **orbit-axis group** goes for a third reason, its own (6.7): a viewer surface already
+- *Re-render thumbnail* and *reset framing* cannot honestly run from an open lightbox. Both
+  wait on `queue.whenResumed()` before touching the renderer (4b.6) and the view holds
+  that suspension (architecture D2/D3), so they would sit for as long as the user leaves it
+  open — and then the closing persist races them, writing the orbited camera straight back
+  over the discard *reset framing* was pressed for. Offering an item that quietly loses a
+  coin-flip against the gesture that dismisses it is worse than not offering it.
+- The **orbit-axis group** goes for a third reason, its own (6.7): the lightbox already
   carries the live picker, which sets the same thing and shows the spindle rotating as it
   does it. A menu duplicate over it would be a second affordance for one choice — and the
   worse of the two, since its write would then race the same closing persist.
 
 That is a **per-surface filter at the call site** — `commandsFor`'s third argument, from
-the `VIEWER_SURFACE_EXCLUDES` list — rather than a seventh column in the table above. The
+the `LIGHTBOX_MENU_EXCLUDES` list — rather than a seventh column in the table above. The
 table stays the one answer to "what does this *entry* offer"; a row that also had to know
 where it was being rendered is how the two would come to disagree about the same model.
+
+**The orbit overlay is not one of the surfaces that filters, and the reason is that it is
+not a view the user opened.** *(Added 2026-08-22, follow-up 6.8, from a user's screenshot:
+right-clicking a tile a second after orbiting it produced the three-item menu, because the
+overlay lingers over that tile invisibly through the persist hold and this filter was
+keyed on "a viewer is mounted".)* Read the three reasons above and every one of them is
+about an **open** view: it holds the renderer for as long as the user leaves it open, it
+carries the live picker a few pixels away, and it ends in a close that persists what is on
+screen. A transient overlay over a tile is none of those. It carries no picker at all (the
+`left-3 top-3` row is drawn in the lightbox branch only), and it is gone within
+`PERSIST_HOLD_MS` of the release. So the overlay gets the **whole tile menu**, group
+included: as far as the menu is concerned, a lingering overlay over a tile *is* that tile.
+
+The one thing worth stating rather than assuming is the **ordering against the overlay's
+own closing PUT**, since the three items just restored are the ones that write. The
+`whenResumed()` gate that made them dishonest under a lightbox is what *sequences* them
+here. `dismissAfterPersist` awaits the settle→persist chain before `onDismiss`, the queue
+resumes when the overlay unmounts, and only then does the queued body run — so it reads
+(`getThumb`) the orientation the persist has just written and acts on that, rather than
+racing it. The axis group needs no read at all and writes `axis` + `camera: null` after the
+same gate; the mark it shows is the thumbs map's axis, which an orbit drag never moves
+(a drag persists a camera, never a spindle), so a persist in flight cannot make the mark
+wrong. *Open* is the promote path by another name — a newer `viewer` replaces the held
+dismissal's, which `dismissAfterPersist` already stands down for (D4's "a held dismissal
+yields to any newer interaction").
+
+The one gap: `dismissAfterPersist` races the chain against `PERSIST_HOLD_MS`, so a persist
+slower than 1.5s unmounts the overlay and resumes the queue while it is still in flight,
+and the two writes then interleave. That window is not new and is not this filter's —
+the background sweep's own queued renders resume into it identically — and the cost is a
+command that has to be pressed again, on an overlay that is by then gone.
 
 **The lightbox's info panel is a third surface, and its list is deliberately not the
 menu's.** *(Added 2026-08-22, follow-up 6.6: the actions were reachable only by right-click,
@@ -635,9 +667,11 @@ the **body**, not the surface:
   beside the path it copies, with its own confirmation. Two affordances for one command in
   one panel is a duplicate, not an accelerator.
 
-`VIEWER_SURFACE_EXCLUDES` is therefore unchanged, and `LIGHTBOX_PANEL_EXCLUDES` sits beside
-it with the asymmetry recorded where both are defined. Same mechanism as above — a
-per-surface filter at the call site, never a column in the table.
+`LIGHTBOX_MENU_EXCLUDES` is therefore unchanged by 6.6, and `LIGHTBOX_PANEL_EXCLUDES` sits
+beside it with the asymmetry recorded where both are defined. Same mechanism as above — a
+per-surface filter at the call site, never a column in the table. Both lists name the
+lightbox and only the lightbox, which is the shape to read them in: **one surface, two
+affordance sets.** The orbit overlay filters nothing and has no panel at all.
 
 **Escape while that menu is up.** The menu is the thing on top and owns Escape, so the
 lightbox's own handler stands down for exactly as long as it is raised, and the next press
@@ -751,9 +785,21 @@ retired.
 So a **model tile's** menu offers the six axes (`ORBIT_AXIS_CHOICES`, `setOrbitAxis`), in
 the picker's own order and vocabulary — `X Y Z` then `−X −Y −Z`, which is what its *flip*
 toggle produces — with the model's current one marked, read from the thumbs map and
-defaulting to `y` where nothing is stored. Both **viewer surfaces withhold the group**
-(`'orbitAxis'` in `VIEWER_SURFACE_EXCLUDES` and `LIGHTBOX_PANEL_EXCLUDES`): the picker is
-right there, live, and a menu duplicate would race the closing persist.
+defaulting to `y` where nothing is stored. The **lightbox withholds the group**
+(`'orbitAxis'` in `LIGHTBOX_MENU_EXCLUDES` and `LIGHTBOX_PANEL_EXCLUDES`): the picker is
+right there, live, and a menu duplicate would race the closing persist. The orbit overlay
+offers it, exactly as the tile under it does — it carries no picker of its own (6.8).
+
+It is drawn as a **compact pill row at the top of the menu**, not six full-width rows at
+the bottom *(user feedback 2026-08-22, 6.8)*. Six of a twelve-row menu spent on the axis
+read as the menu's subject rather than as one property of the model; and pills are the
+vocabulary the lightbox's picker already taught, down to the mark — the spindle in force is
+the *filled* pill on both surfaces rather than a tick on one and a fill on the other, with
+`aria-checked` carrying it either way. The keyboard model is unchanged: `focused` is still
+one index over the menu's buttons, the group is still entered at the spindle in force, and
+moving it above the commands only moves which crossings that rule catches (Up off the first
+command, and the wrap off the last). The menu opens on its first *command*, which is what
+the menu is for.
 
 **A pick writes the axis and discards the camera**, in one PUT (`axis: <picked>`,
 `camera: null`). This is D7's own rule read the other way round: angles measured about one
