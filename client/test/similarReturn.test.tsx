@@ -110,14 +110,16 @@ const poolButton = (name: string): HTMLButtonElement =>
   ).find((b) => b.textContent === name)!
 
 /** The panel starts collapsed for a fresh profile; open it and select its
- *  search tab, which is where every option in this app lives. */
+ *  Similar tab, which is where the neighbour parameters live (6.4). It is
+ *  offered only under a similarity view, which is the only state these
+ *  callers open it from. */
 async function openPanel(): Promise<void> {
   const expand = container.querySelector<HTMLButtonElement>(
     'aside button[aria-label="Expand side panel"]',
   )
   if (expand !== null) await click(expand)
   const tab = Array.from(container.querySelectorAll<HTMLButtonElement>('aside [role="tab"]')).find(
-    (b) => b.textContent?.startsWith('search'),
+    (b) => b.textContent?.startsWith('similar'),
   )
   if (tab !== undefined) await click(tab)
 }

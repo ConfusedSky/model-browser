@@ -313,6 +313,23 @@ neighbourhood worth showing someone reproduces for them — and the next find-si
 the defaults. A view worth keeping is kept by keeping its link, which is the same answer this
 app gives for every other view.
 
+*Where they render, revised 2026-08-22 (user-requested).* They were a "Neighbours" block inside
+the search tab; they are now the whole of a **Similar** tab of their own. The search tab keeps no
+similarity content — its four options answer "how do I search", and a neighbour count answers
+something else, so sharing a pane made one tab mean two things. The tab is the heading, so the
+block dropped the one it carried. Three lifecycle rules, because a tab that depends on a subject
+is not the same object as a tab that is always there: it is **listed only while there is a
+similarity view** (the applicability idiom the options inside it already follow, one level up —
+absent, never greyed); **arriving at a similarity view selects it only from the search tab**,
+never from chat, because the tab in force is the only evidence of what the user was doing with
+this panel and a half-typed message must not lose its pane to a menu item clicked out in the
+grid; and **leaving the view falls back to the search tab**, since a tab about to stop existing
+cannot stay selected. The **store never records it** — `StoredTab` is `Exclude<Tab, 'similar'>`,
+so writing it does not compile — because a profile restored onto a Similar tab with no similarity
+view would open on a tab that is not there. Old profiles need no migration: the parse already
+reads anything that is not `search` as `chat`. Presentation only; no reducer, URL, or server
+surface moved.
+
 **The re-ask is a re-ask, not a patch.** `sameQuestion`'s similar arm compares `k` and `pool`
 alongside `path` and `model`, which is what the `Request` type's "closed list of what
 *identifies* the question" was written to make true the day these became variables. Left out,

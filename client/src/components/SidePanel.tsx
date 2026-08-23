@@ -9,7 +9,16 @@ import { indexCovers } from '../state/selectors'
 const COLLAPSE_KEY = 'model-browser:chat-collapsed'
 const TAB_KEY = 'model-browser:panel-tab'
 
-type Tab = 'chat' | 'search'
+type Tab = 'chat' | 'search' | 'similar'
+
+/**
+ * The tabs that may be *recorded*. Similar is not one of them: it exists only
+ * while a similarity view does, so a profile restored onto it with no such view
+ * would open on a tab that is not there. Excluding it from the store's type is
+ * what makes that a rule rather than a habit — `tabStore.write('similar')` does
+ * not compile.
+ */
+type StoredTab = Exclude<Tab, 'similar'>
 
 /**
  * How long a typed neighbour count waits before it becomes a question. The
@@ -29,16 +38,19 @@ const collapseStore = stored(
   (raw) => raw === '1',
   (v) => (v ? '1' : '0'),
 )
-const tabStore = stored<Tab>(
+/** Anything that is not `search` reads as `chat` — which is already how a
+ *  profile that somehow holds `similar` degrades, so old profiles need nothing. */
+const tabStore = stored<StoredTab>(
   TAB_KEY,
   (raw) => (raw === 'search' ? 'search' : 'chat'),
   (v) => v,
 )
 
 /**
- * The right-edge panel: a tab host for the placeholder chat and the search
- * tab. No backend behavior of its own — the chat echoes locally, and the
- * search tab's controls cause only the requests those controls already imply.
+ * The right-edge panel: a tab host for the placeholder chat, the search tab,
+ * and — only while there is a similarity view to be about — the Similar tab.
+ * No backend behavior of its own — the chat echoes locally, and the option
+ * tabs' controls cause only the requests those controls already imply.
  *
  * The panel **mirrors** the committed search; it does not own it. The search
  * input stays in the bar and the results label over the grid, because search
@@ -46,8 +58,9 @@ const tabStore = stored<Tab>(
  * it closed must never have to open a drawer to search, or lose the ability to
  * tell what the grid is (search-options D5).
  *
- * Collapse state and the selected tab persist per profile. Neither belongs in
- * the URL — neither changes which entries a view contains.
+ * Collapse state and the selected tab persist per profile — except the Similar
+ * tab, which is never recorded (`StoredTab`). Neither belongs in the URL —
+ * neither changes which entries a view contains.
  */
 export default function SidePanel({
   query,
@@ -68,9 +81,10 @@ export default function SidePanel({
   query: string | null
   /**
    * The live view's similarity subject, or null when it is about anything else.
-   * The block below is rendered from it by the same applicability idiom that
+   * The Similar tab is offered from it by the same applicability idiom that
    * hides the name options under meaning: an option that cannot apply is
-   * absent, not inert.
+   * absent, not inert. A tab is that rule applied one level up — an absent tab
+   * rather than an absent block.
    */
   similar: { model: string; k: number; pool?: Tuning['pool'] } | null
   /** The directory in view — meaning search only covers part of the filesystem. */
@@ -135,8 +149,35 @@ export default function SidePanel({
 
   function selectTab(next: Tab): void {
     setTab(next)
-    tabStore.write(next)
+    // Selecting Similar is a move within one view, not a preference about how
+    // this profile opens — see `StoredTab`.
+    if (next !== 'similar') tabStore.write(next)
   }
+
+  /**
+   * The Similar tab follows the view it is about, in the two directions a view
+   * changes under it.
+   *
+   * Arriving: the panel switches to it only from the search tab. Find-similar
+   * is raised from a grid, so the tab the user was on is the only evidence of
+   * what they were doing with this panel — search says "I am looking at how
+   * this view is shaped", and the similarity parameters are the answer to that
+   * question under the new view. Chat says something else entirely, and a
+   * half-typed message losing its tab because a menu item was clicked
+   * elsewhere is the panel taking a decision that was not offered to it.
+   *
+   * Leaving: a tab that is about to stop existing cannot stay selected, so it
+   * falls back to search — the neighbouring options tab, and where a dismissal
+   * lands the user anyway.
+   *
+   * Neither writes the store: a tab the app selected is not a tab the user
+   * chose, and the one being selected here is the one that is never recorded.
+   */
+  const hasSimilar = similar !== null
+  useEffect(() => {
+    if (hasSimilar) setTab((t) => (t === 'search' ? 'similar' : t))
+    else setTab((t) => (t === 'similar' ? 'search' : t))
+  }, [hasSimilar])
 
   // Answers "why are my results strange?" without opening the panel (D5).
   const nonDefault = !folderMatching || kinds !== 'both'
@@ -163,6 +204,9 @@ export default function SidePanel({
   // machines will never run it. It is worth reporting to someone whose mode
   // says meaning, who is otherwise looking at a panel that explains nothing.
   const showIndexState = !meaningRunnable && (mode === 'meaning' || index.state !== 'absent')
+  // A tab with nothing to be about is absent, not greyed — the same rule the
+  // options inside these tabs follow.
+  const tabs: Tab[] = hasSimilar ? ['chat', 'search', 'similar'] : ['chat', 'search']
 
   return (
     <aside
@@ -179,7 +223,7 @@ export default function SidePanel({
       {!collapsed && (
         <>
           <div className="flex border-b border-zinc-800 text-xs" role="tablist">
-            {(['chat', 'search'] as const).map((t) => (
+            {tabs.map((t) => (
               <button
                 key={t}
                 type="button"
@@ -205,93 +249,6 @@ export default function SidePanel({
                   </p>
                 )}
               </div>
-              {/* What a similarity view is about, and the two parameters it
-                  reads. Rendered only under one — the same rule that keeps the
-                  name options off a meaning search, and the mode toggle off a
-                  machine with no index: an option that cannot apply is absent,
-                  not present and inert.
-
-                  Nothing here is sticky. The four search options are stored per
-                  profile because they describe how *you* search; these describe
-                  one neighbourhood, and a count that suited one model's says
-                  nothing about another's. The URL carries them, so a view worth
-                  keeping is kept by keeping its link, and the next find-similar
-                  starts from the defaults. */}
-              {similar !== null && (
-                <div className="space-y-2 border-t border-zinc-800 pt-3">
-                  <p className="text-zinc-500">Neighbours</p>
-                  <p className="break-all text-zinc-300">
-                    Similar to &ldquo;{similar.model.slice(similar.model.lastIndexOf('/') + 1)}
-                    &rdquo;
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <label className="text-zinc-500" htmlFor="similar-count">
-                      How many
-                    </label>
-                    <input
-                      id="similar-count"
-                      type="number"
-                      min={K_MIN}
-                      max={K_MAX}
-                      aria-label="Number of neighbours"
-                      value={countText ?? String(similar.k)}
-                      onChange={(e) => {
-                        const text = e.target.value
-                        setCountText(text)
-                        const n = Number(text)
-                        // Held, not clamped — a field cleared on its way to
-                        // "40" is not a request for one neighbour, and one on
-                        // its way past 1000 is not a request for the whole
-                        // collection.
-                        if (text.trim() === '' || !Number.isFinite(n)) return
-                        const k = Math.round(n)
-                        if (k < K_MIN || k > K_MAX) return
-                        clearTimeout(countTimerRef.current)
-                        countTimerRef.current = setTimeout(
-                          () => onSimilarTuning(k, similar.pool),
-                          SIMILAR_DEBOUNCE_MS,
-                        )
-                      }}
-                      onBlur={() => setCountText(null)}
-                      className="w-16 rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-zinc-100"
-                    />
-                  </div>
-                  {/* Pooling is a click, so it runs at once: waiting on a
-                      finished value only makes sense where the value arrives a
-                      character at a time. */}
-                  {/* Named apart from the meaning tuning's identical trio: the
-                      mode is sticky, so a profile whose next search is a
-                      meaning one has both on screen under a similarity view,
-                      and two controls sharing an accessible name is one control
-                      as far as anything reading names is concerned. */}
-                  <div className="flex gap-1" role="group" aria-label="Pool neighbour views by">
-                    {POOLS.map((p) => (
-                      <button
-                        key={p}
-                        type="button"
-                        aria-pressed={similar.pool === p}
-                        onClick={() => {
-                          // Whatever the count field was holding is superseded
-                          // by this question, which carries the count in force.
-                          clearTimeout(countTimerRef.current)
-                          setCountText(null)
-                          onSimilarTuning(similar.k, p)
-                        }}
-                        className={`flex-1 rounded-lg border px-2 py-1.5 ${similar.pool === p ? 'border-zinc-500 text-zinc-100' : 'border-zinc-800 text-zinc-500'}`}
-                      >
-                        {p}
-                      </button>
-                    ))}
-                  </div>
-                  {/* None pressed is a state, not a gap: absence means the
-                      index's own pooling, which is not any of the three — so
-                      saying which one it is would be a guess about another
-                      process's configuration. */}
-                  {similar.pool === undefined && (
-                    <p className="text-zinc-600">Pooled however the index is configured to.</p>
-                  )}
-                </div>
-              )}
               {showMode && (
                 <div className="flex gap-1" role="group" aria-label="Search by">
                   {(['name', 'meaning'] as const).map((m) => (
@@ -473,6 +430,90 @@ export default function SidePanel({
                   ))}
                   </div>
                 </div>
+              )}
+            </div>
+          ) : /* `similar !== null` is not only narrowing: a dismissal renders
+                 once before the effect above moves off this tab, and that
+                 render has no subject left to describe. */
+          tab === 'similar' && similar !== null ? (
+            <div className="flex-1 space-y-2 overflow-auto p-3 text-xs">
+              {/* What a similarity view is about, and the two parameters it
+                  reads. The tab is the heading, so this block carries none of
+                  its own.
+
+                  Nothing here is sticky. The four search options are stored per
+                  profile because they describe how *you* search; these describe
+                  one neighbourhood, and a count that suited one model's says
+                  nothing about another's. The URL carries them, so a view worth
+                  keeping is kept by keeping its link, and the next find-similar
+                  starts from the defaults. */}
+              <p className="break-all text-zinc-300">
+                Similar to &ldquo;{similar.model.slice(similar.model.lastIndexOf('/') + 1)}&rdquo;
+              </p>
+              <div className="flex items-center gap-2">
+                <label className="text-zinc-500" htmlFor="similar-count">
+                  How many
+                </label>
+                <input
+                  id="similar-count"
+                  type="number"
+                  min={K_MIN}
+                  max={K_MAX}
+                  aria-label="Number of neighbours"
+                  value={countText ?? String(similar.k)}
+                  onChange={(e) => {
+                    const text = e.target.value
+                    setCountText(text)
+                    const n = Number(text)
+                    // Held, not clamped — a field cleared on its way to "40" is
+                    // not a request for one neighbour, and one on its way past
+                    // 1000 is not a request for the whole collection.
+                    if (text.trim() === '' || !Number.isFinite(n)) return
+                    const k = Math.round(n)
+                    if (k < K_MIN || k > K_MAX) return
+                    clearTimeout(countTimerRef.current)
+                    countTimerRef.current = setTimeout(
+                      () => onSimilarTuning(k, similar.pool),
+                      SIMILAR_DEBOUNCE_MS,
+                    )
+                  }}
+                  onBlur={() => setCountText(null)}
+                  className="w-16 rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-zinc-100"
+                />
+              </div>
+              {/* Pooling is a click, so it runs at once: waiting on a finished
+                  value only makes sense where the value arrives a character at
+                  a time. */}
+              {/* Named apart from the meaning tuning's identical trio: the mode
+                  is sticky, so a profile whose next search is a meaning one has
+                  both reachable under a similarity view, and two controls
+                  sharing an accessible name is one control as far as anything
+                  reading names is concerned. */}
+              <div className="flex gap-1" role="group" aria-label="Pool neighbour views by">
+                {POOLS.map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    aria-pressed={similar.pool === p}
+                    onClick={() => {
+                      // Whatever the count field was holding is superseded by
+                      // this question, which carries the count in force.
+                      clearTimeout(countTimerRef.current)
+                      setCountText(null)
+                      onSimilarTuning(similar.k, p)
+                    }}
+                    className={`flex-1 rounded-lg border px-2 py-1.5 ${similar.pool === p ? 'border-zinc-500 text-zinc-100' : 'border-zinc-800 text-zinc-500'}`}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+              {/* None pressed is a state, not a gap: absence means the index's
+                  own pooling, which is not any of the three — so saying which
+                  one it is would be a guess about another process's
+                  configuration. */}
+              {similar.pool === undefined && (
+                <p className="text-zinc-600">Pooled however the index is configured to.</p>
               )}
             </div>
           ) : (

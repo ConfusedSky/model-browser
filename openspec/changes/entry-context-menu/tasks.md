@@ -655,3 +655,31 @@
       `go(-1)` — each fails the tune-twice, chain, and Backed-onto cases and leaves the
       single-similar, cold-link, erase and query cases passing, which is the split that says
       they are testing the depth and not the branch
+- [x] 6.4 The similarity parameters get a side-panel tab of their own, **Similar**, instead of
+      a "Neighbours" block inside the search tab. The search tab's four options answer "how do
+      I search"; a neighbour count answers something else, and one pane holding both made the
+      tab mean two things.
+      **Done as presentation only** — no reducer, `urlState`, or server surface moved.
+      `SidePanel`'s `Tab` gains `'similar'`; the tab is listed only while `similar !== null`
+      (absent, never greyed — the applicability idiom the options inside these tabs already
+      follow, one level up), and its content is the old block minus the heading the tab now is.
+      **Three lifecycle rules:** arriving at a similarity view selects it *only* from the search
+      tab — never from chat, since the tab in force is the only evidence of what the user was
+      doing with this panel; leaving the view falls the selection back to search; and the tab
+      **store never records it**, enforced by `StoredTab = Exclude<Tab, 'similar'>` so that
+      `tabStore.write('similar')` does not compile. Old profiles need no migration — the store's
+      parse already reads anything that is not `search` as `chat`, which is verified rather than
+      assumed. Recorded in design D4's margin.
+      **Tested** in `similarTuning.test.tsx`: the five parameter cases now reach the spinner and
+      the trio through the Similar tab (which is the semantics — the search tab no longer holds
+      them), and a new `the Similar tab itself` block pins the tab absent on a plain listing and
+      on a query view, present under a similarity view, selected on arrival from search and *not*
+      from chat, fallen back to search on dismissal, and never written to `localStorage`. The
+      arrival cases enter through the context menu, the gesture the rule is about, rather than by
+      link. `similarReturn.test.tsx`'s `openPanel` moved to the Similar tab with the controls —
+      the only other file that touches them.
+      **Falsified four ways:** writing the store unconditionally (only the storage case fails,
+      and it needs an explicit cast to compile at all), dropping the arrival guard (only the
+      chat-not-stolen case fails), dropping the leaving rule (only the dismissal case fails), and
+      listing the tab unconditionally (the absence and dismissal cases fail) — four rules, four
+      disjoint failures

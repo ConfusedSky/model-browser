@@ -18,6 +18,7 @@ import {
   labels,
   listDir,
   model,
+  mountApp,
   mountAppAtCurrentUrl,
   pressEnter,
   searchInput,
@@ -49,6 +50,10 @@ const NEIGHBOURS = {
   poses: {},
 }
 const READY = { state: 'ready', collectionRoot: '/models', covers: ['stl'] }
+/** The panel's own storage key, written out rather than imported: renaming it
+ *  would drop every profile's state, and a test that renamed with it would say
+ *  nothing about that. */
+const TAB_KEY = 'model-browser:panel-tab'
 
 /** The neighbour-count field, absent unless the view is about a model. */
 function countInput(): HTMLInputElement | null {
@@ -63,17 +68,65 @@ function poolButtons(): HTMLButtonElement[] {
 function poolButton(name: string): HTMLButtonElement {
   return poolButtons().find((b) => b.textContent === name)!
 }
-/** The panel starts collapsed for a fresh profile; open it and select its
- *  search tab, which is where every option in this app lives. */
-async function openPanel(): Promise<void> {
+/** The panel's tabs, by their labels — the Similar one is present only while
+ *  there is a similarity view for it to be about (6.4). */
+function tabButtons(): HTMLButtonElement[] {
+  return Array.from(container.querySelectorAll<HTMLButtonElement>('aside [role="tab"]'))
+}
+function tabNames(): string[] {
+  // The dot the search tab wears under non-default options is part of its text.
+  return tabButtons().map((b) => b.textContent!.replace('•', '').trim())
+}
+function tabButton(name: string): HTMLButtonElement | undefined {
+  const i = tabNames().indexOf(name)
+  return i === -1 ? undefined : tabButtons()[i]
+}
+function selectedTab(): string | undefined {
+  return tabNames()[tabButtons().findIndex((b) => b.getAttribute('aria-selected') === 'true')]
+}
+/** The panel starts collapsed for a fresh profile. */
+async function expandPanel(): Promise<void> {
   const expand = container.querySelector<HTMLButtonElement>(
     'aside button[aria-label="Expand side panel"]',
   )
   if (expand !== null) await click(expand)
-  const tab = Array.from(container.querySelectorAll<HTMLButtonElement>('aside [role="tab"]')).find(
-    (b) => b.textContent?.startsWith('search'),
-  )
+}
+/** Open the panel and stand on the Similar tab, which is where the similarity
+ *  parameters live (6.4) — the search tab keeps none of them. Selecting it by
+ *  hand rather than leaning on the auto-select: these cases are about the
+ *  parameters, and the tab lifecycle has its own cases below. */
+async function openSimilarTab(): Promise<void> {
+  await expandPanel()
+  const tab = tabButton('similar')
   if (tab !== undefined) await click(tab)
+}
+
+/** The in-app way into a similarity view — a secondary press on a tile, then
+ *  the menu item — which is the gesture the arrival rule is about. (The tuning
+ *  cases above enter by link instead: what they are about is what happens once
+ *  the view is on screen.) */
+async function findSimilarOn(label: string): Promise<void> {
+  const tile = Array.from(container.querySelectorAll<HTMLElement>('main .grid button')).find(
+    (b) => b.lastElementChild?.textContent === label,
+  )!
+  const at = { bubbles: true, clientX: 9, clientY: 9 }
+  await act(async () => {
+    tile.dispatchEvent(new PointerEvent('pointerdown', { ...at, button: 2, buttons: 2 }))
+    tile.dispatchEvent(new MouseEvent('contextmenu', { ...at, cancelable: true }))
+  })
+  await settle()
+  const item = document.querySelector<HTMLButtonElement>(
+    '[role="menu"] [data-command="findSimilar"]',
+  )!
+  await click(item)
+  await settle()
+}
+
+/** The ✕ over the grid — the way out of a similarity view. */
+function dismissButton(): HTMLButtonElement | undefined {
+  return Array.from(container.querySelectorAll<HTMLButtonElement>('main button')).find((b) =>
+    b.textContent?.includes('Dismiss'),
+  )
 }
 
 beforeEach(() => {
@@ -85,14 +138,15 @@ beforeEach(() => {
 afterEach(() => unmountApp())
 
 describe('the similarity view’s parameters', () => {
-  it('the block is offered under a similarity view and nowhere else', async () => {
-    // The applicability idiom the panel already uses for the name options: an
-    // option that cannot apply is absent, not present and inert.
+  it('the Similar tab holds them, under a similarity view and nowhere else', async () => {
+    // The applicability idiom the panel already uses for the name options, one
+    // level up (6.4): an option that cannot apply is absent, not present and
+    // inert — and so is the tab that would hold it.
     indexAvailability.mockResolvedValue(READY)
     similar.mockResolvedValue(NEIGHBOURS)
     await mountAppAtCurrentUrl(LINK, NESTED)
     await settle()
-    await openPanel()
+    await openSimilarTab()
 
     expect(countInput()).not.toBeNull()
     expect(countInput()!.value).toBe(String(SIMILAR_K))
@@ -103,10 +157,12 @@ describe('the similarity view’s parameters', () => {
     expect(container.textContent).toContain('Pooled however the index is configured to')
     // Named by base name, like the results label: the full vpath is in the URL,
     // which is where an identity belongs.
-    expect(container.textContent).toContain('Neighbours')
     expect(container.textContent).toContain('Similar to “hero.stl”')
+    // The tab is the heading, so the block carries none of its own — a
+    // "Neighbours" line here would be the title said twice.
+    expect(container.textContent).not.toContain('Neighbours')
 
-    // Leave the view and the block goes with it — the parameters belong to the
+    // Leave the view and the tab goes with it — the parameters belong to the
     // subject that reads them, not to the profile.
     listDir.mockResolvedValue({ path: '/models', entries: [model('widget.stl')] })
     await type(searchInput(), 'widget')
@@ -124,7 +180,7 @@ describe('the similarity view’s parameters', () => {
     similar.mockResolvedValue(NEIGHBOURS)
     await mountAppAtCurrentUrl(LINK, NESTED)
     await settle()
-    await openPanel()
+    await openSimilarTab()
     expect(similar).toHaveBeenCalledTimes(1)
 
     await type(countInput()!, '4')
@@ -148,7 +204,7 @@ describe('the similarity view’s parameters', () => {
     similar.mockResolvedValue(NEIGHBOURS)
     await mountAppAtCurrentUrl(`${LINK}&k=40`, NESTED)
     await settle()
-    await openPanel()
+    await openSimilarTab()
     expect(similar).toHaveBeenLastCalledWith(HERO, 40, undefined, expect.any(AbortSignal))
     // No pool in, no pool out: 4.2's rule survives the parameter becoming
     // settable — a view that made no choice sends none.
@@ -167,7 +223,7 @@ describe('the similarity view’s parameters', () => {
     similar.mockResolvedValue(NEIGHBOURS)
     await mountAppAtCurrentUrl(`${LINK}&k=40&pool=mean`, NESTED)
     await settle()
-    await openPanel()
+    await openSimilarTab()
 
     expect(similar).toHaveBeenCalledWith(HERO, 40, 'mean', expect.any(AbortSignal))
     expect(countInput()!.value).toBe('40')
@@ -190,7 +246,7 @@ describe('the similarity view’s parameters', () => {
     similar.mockResolvedValue(NEIGHBOURS)
     await mountAppAtCurrentUrl(LINK, NESTED)
     await settle()
-    await openPanel()
+    await openSimilarTab()
 
     await type(countInput()!, '')
     await wait(400)
@@ -203,5 +259,108 @@ describe('the similarity view’s parameters', () => {
       countInput()!.dispatchEvent(new FocusEvent('focusout', { bubbles: true })),
     )
     expect(countInput()!.value).toBe(String(SIMILAR_K))
+  })
+})
+
+describe('the Similar tab itself (6.4)', () => {
+  it('is absent on a plain listing and on a query view', async () => {
+    // A tab with nothing to be about is absent, not greyed — the rule the four
+    // search options already follow, applied to the tab that would hold these.
+    indexAvailability.mockResolvedValue(READY)
+    await mountApp('/models', NESTED)
+    await settle()
+    await expandPanel()
+    expect(tabNames()).toEqual(['chat', 'search'])
+
+    listDir.mockResolvedValue({ path: '/models', entries: [model('widget.stl')] })
+    await type(searchInput(), 'widget')
+    await pressEnter(searchInput())
+    await settle()
+    expect(tabNames()).toEqual(['chat', 'search'])
+  })
+
+  it('appears under a similarity view', async () => {
+    indexAvailability.mockResolvedValue(READY)
+    similar.mockResolvedValue(NEIGHBOURS)
+    await mountAppAtCurrentUrl(LINK, NESTED)
+    await settle()
+    await expandPanel()
+    expect(tabNames()).toEqual(['chat', 'search', 'similar'])
+  })
+
+  it('is selected on arrival from the search tab, and never from chat', async () => {
+    // The panel follows the view from search, because search is the user saying
+    // "I am looking at how this view is shaped" and the neighbour parameters
+    // are that question's answer under the new view. Chat is a different
+    // activity, and a half-typed message must not lose its tab because a menu
+    // item was clicked out in the grid.
+    indexAvailability.mockResolvedValue(READY)
+    similar.mockResolvedValue(NEIGHBOURS)
+    await mountApp('/models', NESTED)
+    await settle()
+    await expandPanel()
+    await click(tabButton('search')!)
+    await findSimilarOn('widget.stl')
+    expect(selectedTab()).toBe('similar')
+    expect(countInput()).not.toBeNull()
+
+    // Same gesture from chat: the tab is offered, and nothing is taken.
+    await unmountApp()
+    localStorage.clear()
+    indexAvailability.mockResolvedValue(READY)
+    similar.mockResolvedValue(NEIGHBOURS)
+    await mountApp('/models', NESTED)
+    await settle()
+    await expandPanel()
+    await click(tabButton('chat')!)
+    await findSimilarOn('widget.stl')
+    expect(selectedTab()).toBe('chat')
+    expect(tabNames()).toContain('similar')
+    expect(countInput()).toBeNull()
+  })
+
+  it('falls back to search when the view it is about is dismissed', async () => {
+    // A tab that is about to stop existing cannot stay selected. Search is
+    // where it lands: the neighbouring options tab, and where the dismissal
+    // leaves the user anyway.
+    indexAvailability.mockResolvedValue(READY)
+    similar.mockResolvedValue(NEIGHBOURS)
+    await mountAppAtCurrentUrl(LINK, NESTED)
+    await settle()
+    await openSimilarTab()
+    expect(selectedTab()).toBe('similar')
+
+    listDir.mockResolvedValue({ path: '/models', entries: [dir('Alpha')] })
+    await click(dismissButton()!)
+    await settle()
+    expect(tabNames()).toEqual(['chat', 'search'])
+    expect(selectedTab()).toBe('search')
+  })
+
+  it('is never what the profile records', async () => {
+    // It is subject-dependent, and a profile restored onto it with no
+    // similarity view would open on a tab that is not there. The store's parse
+    // degrades an unknown value to chat, so old profiles need nothing — but
+    // nothing must write one either.
+    indexAvailability.mockResolvedValue(READY)
+    similar.mockResolvedValue(NEIGHBOURS)
+    await mountAppAtCurrentUrl(LINK, NESTED)
+    await settle()
+    await expandPanel()
+    await click(tabButton('search')!)
+    expect(localStorage.getItem(TAB_KEY)).toBe('search')
+
+    // Selected by hand…
+    await click(tabButton('similar')!)
+    expect(selectedTab()).toBe('similar')
+    expect(localStorage.getItem(TAB_KEY)).toBe('search')
+
+    // …and selected by the arrival rule, which does not write either.
+    listDir.mockResolvedValue(NESTED)
+    await click(dismissButton()!)
+    await settle()
+    await findSimilarOn('widget.stl')
+    expect(selectedTab()).toBe('similar')
+    expect(localStorage.getItem(TAB_KEY)).toBe('search')
   })
 })
