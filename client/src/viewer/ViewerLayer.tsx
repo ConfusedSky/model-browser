@@ -51,6 +51,27 @@ interface Props {
   onDismiss: () => void
   onPersist: (session: ViewerSession, opts?: { camera?: boolean }) => Promise<void>
   onLoadError: (message: string) => void
+  /**
+   * Raise the shared entry menu on this viewer's own entry, at the pointer.
+   *
+   * Both modes report it, because both swallow `contextmenu`: the orbit overlay
+   * sits over the very tile whose handler would otherwise see the press — and
+   * keeps sitting there, invisibly, through the persist hold after a release
+   * (PERSIST_HOLD_MS) — so without this a secondary press on a model being
+   * viewed reaches nothing at all. `el` is this viewer's own container, which
+   * is where dismissal returns focus; in lightbox mode that is the dialog, so
+   * the focus trap gets its focus back.
+   */
+  onEntryMenu: (entry: DirEntry, el: HTMLElement | null, at: { x: number; y: number }) => void
+  /**
+   * Whether that menu is currently raised, read live.
+   *
+   * A ref rather than a value: the outcome must not depend on which window
+   * listener runs first, and a changing prop would re-run the focus-trap effect
+   * below — which focuses the dialog on every run and would pull focus straight
+   * out of the menu it just raised.
+   */
+  menuOpen: { readonly current: boolean }
 }
 
 const AXIS_LETTERS = ['x', 'y', 'z'] as const
@@ -78,6 +99,8 @@ export default function ViewerLayer({
   onDismiss,
   onPersist,
   onLoadError,
+  onEntryMenu,
+  menuOpen,
 }: Props) {
   const [session, setSession] = useState<ViewerSession | null>(null)
   const [sessionAxis, setSessionAxis] = useState<OrbitAxis>('y')
@@ -306,7 +329,15 @@ export default function ViewerLayer({
     if (viewer.mode !== 'lightbox') return
     containerRef.current?.focus()
     function onKey(e: KeyboardEvent): void {
-      if (e.key === 'Escape') onCloseIntent()
+      // The entry menu can now be raised over this view, and while it is up it
+      // is the thing on top: its own window listener closes it and this one
+      // stands down, so one press dismisses one thing. The next press finds the
+      // ref false and closes the lightbox as before. Same idiom, same reason as
+      // App's find control standing down for a menu.
+      if (e.key === 'Escape') {
+        if (menuOpen.current) return
+        onCloseIntent()
+      }
       if (e.key === 'Tab') {
         // Real trap: cycle focus through the dialog and its controls.
         e.preventDefault()
@@ -360,8 +391,24 @@ export default function ViewerLayer({
   }, [closeSignal])
 
   function startGesture(e: React.PointerEvent): void {
+    // Primary button only, exactly as the tile's own handler decides
+    // (App.onModelPointerDown): orbit is a left-drag, and a secondary press is
+    // the menu's. Without this the release after a right-click would find a
+    // gesture in progress and promote the overlay to the lightbox behind the
+    // menu it just raised.
+    if (e.button !== 0) return
     pointer.current = { down: true, lastX: e.clientX, lastY: e.clientY }
     tracker.start(e.clientX, e.clientY)
+  }
+
+  /**
+   * The secondary press on either viewer surface: the app's own entry menu,
+   * never the browser's. Nothing collides — there is no right-button gesture
+   * here to preserve.
+   */
+  function raiseEntryMenu(e: React.MouseEvent): void {
+    e.preventDefault()
+    onEntryMenu(viewer.entry, containerRef.current, { x: e.clientX, y: e.clientY })
   }
 
   useEffect(() => () => clearTimeout(copyTimerRef.current), [])
@@ -430,6 +477,7 @@ export default function ViewerLayer({
         className="fixed z-30 cursor-grab touch-none rounded-lg bg-zinc-900 ring-1 ring-sky-700/50 active:cursor-grabbing"
         style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
         onPointerDown={startGesture}
+        onContextMenu={raiseEntryMenu}
         onPointerLeave={() => {
           if (!pointer.current.down) void dismissAfterPersist()
         }}
@@ -453,8 +501,12 @@ export default function ViewerLayer({
   return (
     <div
       className="fixed inset-0 z-40 flex items-center justify-center bg-black/70"
+      onContextMenu={raiseEntryMenu}
       onPointerDown={(e) => {
-        if (e.target === e.currentTarget) onCloseIntent()
+        // Primary button only, for the same reason `startGesture` checks it: a
+        // secondary press on the backdrop raises the menu, and closing the view
+        // out from under the menu it just raised is not what was asked.
+        if (e.button === 0 && e.target === e.currentTarget) onCloseIntent()
       }}
     >
       <div

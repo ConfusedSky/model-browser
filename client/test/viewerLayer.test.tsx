@@ -47,6 +47,8 @@ function makeProps(mode: 'orbit' | 'lightbox') {
     onDismiss: vi.fn(),
     onPersist: vi.fn().mockResolvedValue(undefined),
     onLoadError: vi.fn(),
+    onEntryMenu: vi.fn(),
+    menuOpen: { current: false },
   }
 }
 

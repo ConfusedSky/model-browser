@@ -3,7 +3,7 @@
 ## ADDED Requirements
 
 ### Requirement: Entry actions are defined once and offered on every surface that hosts them
-The client SHALL define each action available on a listing entry once, and every surface offering that action SHALL invoke that definition rather than reimplementing it. The surfaces are a context menu raised on a grid tile and the expanded viewer's information panel. An action SHALL behave identically whichever surface invoked it.
+The client SHALL define each action available on a listing entry once, and every surface offering that action SHALL invoke that definition rather than reimplementing it. The surfaces are a context menu — raised on a grid tile, or on the live view of a model — and the expanded viewer's information panel. An action SHALL behave identically whichever surface invoked it.
 
 Shared actions are one-shot commands: each completes on its own and leaves no mode behind. Most need no rendered model at all and SHALL NOT load one; the exceptions are the actions whose whole purpose is to produce a rendering, which SHALL obtain the model the same way the listing does rather than by opening the expanded viewer. Controls that operate on a live view — those that change how the model is currently displayed and show the result as they do it — SHALL remain with that view rather than being offered as menu items.
 
@@ -30,11 +30,23 @@ Which actions an entry offers SHALL follow from what the entry is, and an action
 - **THEN** actions that only apply to models are not listed, rather than listed and disabled
 
 ### Requirement: A context menu on grid tiles
-The client SHALL raise a context menu on a grid tile in response to the platform's secondary-click gesture, positioned at the pointer and kept within the viewport. It SHALL be dismissible by choosing an action, by pressing Escape, and by interacting outside it, and SHALL be reachable and operable from the keyboard. Raising or dismissing the menu SHALL NOT disturb the tile beneath it: no orbit begins, no expanded view opens, and no thumbnail work is started or cancelled.
+The client SHALL raise a context menu on any surface presenting a listing entry — a grid tile, and the live view of a model while it is being orbited or shown expanded — in response to the platform's secondary-click gesture, positioned at the pointer and kept within the viewport, with the platform's own menu suppressed. It SHALL be dismissible by choosing an action, by pressing Escape, and by interacting outside it, and SHALL be reachable and operable from the keyboard. Raising or dismissing the menu SHALL NOT disturb what it was raised over: no orbit begins, no expanded view opens, no open view closes, and no thumbnail work is started or cancelled. A surface SHALL offer only the actions it can perform there, and while the menu is raised it SHALL own Escape, so that one press dismisses one thing.
 
 #### Scenario: Secondary click opens the menu without orbiting
 - **WHEN** the user secondary-clicks a model tile
 - **THEN** the menu opens and the model does not begin to orbit, nor does the expanded view open
+
+#### Scenario: The menu reaches the model being viewed
+- **WHEN** the user secondary-clicks a model that is being orbited, or one open in the expanded view
+- **THEN** the menu opens over it, offering the actions that do not depend on the surface, and the platform's own menu does not appear
+
+#### Scenario: Actions a surface cannot perform are absent from it
+- **WHEN** the user raises the menu on the live view of a model
+- **THEN** opening it is not offered, since it is already open, and neither are the actions that redraw its thumbnail, which cannot be drawn while that view holds the renderer and would be overwritten by the view's own closing save
+
+#### Scenario: Escape closes the menu before the view
+- **WHEN** the user raises the menu over the expanded view and presses Escape
+- **THEN** the menu closes and the expanded view stays open, and a second press closes the view
 
 #### Scenario: Dismissal leaves nothing behind
 - **WHEN** the user opens the menu and dismisses it with Escape or by clicking elsewhere

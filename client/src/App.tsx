@@ -9,7 +9,12 @@ import SidePanel from './components/SidePanel'
 import PathBar from './components/PathBar'
 import { SKELETON_DELAY_MS, useDelayedFlag } from './hooks/useDelayedFlag'
 import { useThumbnails } from './hooks/useThumbnails'
-import { commandsFor, type ActionHost, type EntryCommand } from './lib/entryActions'
+import {
+  commandsFor,
+  VIEWER_SURFACE_EXCLUDES,
+  type ActionHost,
+  type EntryCommand,
+} from './lib/entryActions'
 import { GestureTracker } from './lib/gesture'
 import { createHoverWarmer } from './lib/hover'
 import { fitSquareBox, type Box } from './lib/layout'
@@ -275,16 +280,21 @@ export default function App() {
   findOpenRef.current = findOpen
 
   /**
-   * The entry menu, and the tile it was raised on. Ephemeral by construction —
-   * no view field, no URL — and **not a viewer**: it never sets `viewer`, which
-   * is what the render-queue suspension keys off (2.4), so raising or
-   * dismissing it starts and cancels no thumbnail work.
+   * The entry menu, what it was raised on, and which surface raised it.
+   * Ephemeral by construction — no view field, no URL — and **not a viewer**:
+   * it never sets `viewer`, which is what the render-queue suspension keys off
+   * (2.4), so raising or dismissing it starts and cancels no thumbnail work.
+   *
+   * `surface` is not derivable from `viewer`: an orbit overlay covers one tile
+   * and leaves the rest of the grid right-clickable, so "a viewer is mounted"
+   * and "this menu was raised on it" are different facts.
    */
   const [menu, setMenu] = useState<{
     entry: DirEntry
     el: HTMLElement | null
     x: number
     y: number
+    surface: 'tile' | 'viewer'
   } | null>(null)
   const menuRef = useRef<typeof menu>(null)
   menuRef.current = menu
@@ -1176,8 +1186,16 @@ export default function App() {
   )
 
   const onEntryMenu = useCallback(
-    (entry: DirEntry, el: HTMLElement, at: { x: number; y: number }): void => {
-      setMenu({ entry, el, x: at.x, y: at.y })
+    (entry: DirEntry, el: HTMLElement | null, at: { x: number; y: number }): void => {
+      setMenu({ entry, el, x: at.x, y: at.y, surface: 'tile' })
+    },
+    [],
+  )
+  /** The same menu, raised on the live view of the model instead of its tile —
+   *  which is a different *surface*, not a different menu (D6's margin). */
+  const onViewerEntryMenu = useCallback(
+    (entry: DirEntry, el: HTMLElement | null, at: { x: number; y: number }): void => {
+      setMenu({ entry, el, x: at.x, y: at.y, surface: 'viewer' })
     },
     [],
   )
@@ -1201,7 +1219,14 @@ export default function App() {
   // menu opens (2.5): `state.index` is the reducer's own cell, kept by identity
   // when a poll says nothing new.
   const menuCommands = useMemo(
-    () => (menu === null ? [] : commandsFor(menu.entry, { index: state.index })),
+    () =>
+      menu === null
+        ? []
+        : commandsFor(
+            menu.entry,
+            { index: state.index },
+            menu.surface === 'viewer' ? VIEWER_SURFACE_EXCLUDES : [],
+          ),
     [menu, state.index],
   )
 
@@ -1668,8 +1693,9 @@ export default function App() {
         </button>
       </div>
       {/* D6's table, whole: three items on a container, five on a model, and a
-          sixth when the index is answering for the collection it sits in. Which
-          ones an entry offers lives in `entryActions`, never here. */}
+          sixth when the index is answering for the collection it sits in — less
+          whatever the raising surface withholds. Which ones an entry offers,
+          and which a surface declines, both live in `entryActions`, never here. */}
       {menu !== null && menuCommands.length > 0 && (
         <EntryMenu
           x={menu.x}
@@ -1696,6 +1722,8 @@ export default function App() {
           onDismiss={closeViewer}
           onPersist={persist}
           onLoadError={() => setThumb(viewer.entry.path, { status: 'error' })}
+          onEntryMenu={onViewerEntryMenu}
+          menuOpen={menuOpenRef}
         />
       )}
     </div>

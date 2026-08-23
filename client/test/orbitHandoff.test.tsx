@@ -67,6 +67,9 @@ function makeProps() {
       onDismiss: vi.fn(),
       onPersist: vi.fn(() => persistGate),
       onLoadError: vi.fn(),
+      onEntryMenu: vi.fn(),
+      // No menu in these cases, so the lightbox owns Escape throughout.
+      menuOpen: { current: false },
     },
   }
 }

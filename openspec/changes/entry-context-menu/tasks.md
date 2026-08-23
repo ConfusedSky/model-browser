@@ -683,3 +683,47 @@
       chat-not-stolen case fails), dropping the leaving rule (only the dismissal case fails), and
       listing the tab unconditionally (the absence and dismissal cases fail) — four rules, four
       disjoint failures
+- [x] 6.5 Right-clicking a model that is being viewed brings up its menu. **User-reported
+      2026-08-22:** it did nothing at all. The `ViewerLayer` overlay handles no `contextmenu`
+      in either mode, so it swallowed the press before the tile's own handler could see it —
+      including through the ~1.5s persist hold after an orbit release, when the overlay
+      lingers invisibly over the tile the user is aiming at.
+      **Done:** both overlay roots gain one `onContextMenu` that prevents the default and
+      reports `(entry, container, pointer)` up through a new `onEntryMenu` prop. App raises
+      the SAME `EntryMenu` it raises for tiles, at the pointer, for `viewer.entry` — one
+      menu, a second surface.
+      **The viewer set is three items**, by a per-surface filter at the call site
+      (`commandsFor`'s third argument, from `VIEWER_SURFACE_EXCLUDES`) rather than a seventh
+      column: D6's availability table stays the one answer to what an *entry* offers.
+      *Open* goes (the model is already open); the two thumbnail commands go (their renders
+      wait on the suspension this very viewer holds, and the closing persist would then race
+      them — reset framing's discard undone by the close writing the orbited camera back).
+      Reasoning recorded in design.md D6's margin.
+      **Escape:** the lightbox's own handler stands down while the menu is raised, through
+      the `menuOpenRef` App already holds for the find control — passed in as a ref, not a
+      value, so the outcome cannot depend on listener order and a changing prop cannot re-run
+      the focus-trap effect and pull focus out of the menu. The next press closes the
+      lightbox as before.
+      **Two guards came with it**, both the tile handler's own `e.button !== 0` idiom
+      reaching the viewer: `startGesture` ignores a secondary press (without it the release
+      after a right-click promoted the overlay to the lightbox behind the menu it had just
+      raised), and the lightbox backdrop closes on the primary button only (without it a
+      right-click on the backdrop closed the view out from under its own menu). Both are what
+      "raising the menu disturbs nothing beneath it" means on these surfaces.
+      **Delta wording:** *A context menu on grid tiles* named the tile as the only surface,
+      so its prose is extended to "any surface presenting a listing entry" under the same
+      requirement title, with three scenarios added (the viewer surfaces, the actions a
+      surface withholds, Escape closing menu-then-view); R1's surface list gained the same
+      clause. No requirement renamed, none removed.
+      **Tested** in `client/test/viewerMenu.test.tsx` — the orbit overlay and the lightbox
+      each raise exactly the three, the native menu is suppressed (`dispatchEvent` reports
+      the event as cancelled), Escape closes menu-then-lightbox in two presses, find-similar
+      from the lightbox lands the similarity view and closes it *through the persisting
+      path*, and a tile still offers all six. **Falsified five ways:** dropping the Escape
+      yield (the two-press case fails), dropping the surface filter (both three-item cases
+      fail), dropping the orbit overlay's `onContextMenu` (the orbit case fails — the bug
+      itself), dropping `preventDefault` (both suppression assertions fail), and replacing
+      the close signal's `closeLightbox()` with a bare `onDismiss()` (the find-similar case
+      fails). That last one caught a weak assertion first: `putThumb` having been *called* is
+      no evidence, because the background sweep calls it too — the case now looks for a PUT
+      carrying a **camera**, which only the close path writes

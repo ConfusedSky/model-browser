@@ -392,8 +392,42 @@ export const ENTRY_COMMANDS: readonly EntryCommand[] = [
   },
 ]
 
-/** The commands this entry offers, in menu order: applicable by D6's table and
- *  built. */
-export function commandsFor(entry: DirEntry, ctx: AvailabilityContext): EntryCommand[] {
-  return ENTRY_COMMANDS.filter((c) => c.run !== null && c.applies(entry, ctx))
+/**
+ * What a menu raised on a viewer surface — the orbit overlay, the lightbox —
+ * withholds (D6's margin).
+ *
+ * The table above is per-*kind* and stays one table. This is the other axis,
+ * per-*surface*, and it is a filter at the call site rather than a seventh
+ * column: a row that also had to know where it was being rendered is how the
+ * two would come to disagree about the same model.
+ *
+ * *Open* goes because the model is already open — the command would re-open the
+ * thing the menu was raised on. The two thumbnail commands go because from an
+ * open viewer they cannot honestly run: their renders wait on
+ * `queue.whenResumed()` and the viewer holds the suspension (architecture
+ * D2/D3), so they would sit until it closed — and the closing persist then
+ * races them, writing the orbited camera straight back over the discard *reset
+ * framing* was pressed for. What is left is the three that do not care which
+ * surface asked.
+ */
+export const VIEWER_SURFACE_EXCLUDES: readonly CommandId[] = [
+  'open',
+  'reRenderThumbnail',
+  'resetFraming',
+]
+
+/**
+ * The commands this entry offers, in menu order: applicable by D6's table,
+ * built, and not withheld by the surface that asked. `exclude` is how a surface
+ * declines a command it cannot honestly perform; the table never learns who is
+ * asking.
+ */
+export function commandsFor(
+  entry: DirEntry,
+  ctx: AvailabilityContext,
+  exclude: readonly CommandId[] = [],
+): EntryCommand[] {
+  return ENTRY_COMMANDS.filter(
+    (c) => c.run !== null && !exclude.includes(c.id) && c.applies(entry, ctx),
+  )
 }

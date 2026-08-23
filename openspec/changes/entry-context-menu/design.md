@@ -575,6 +575,34 @@ drawn as glyphs, not renders, so there is no thumbnail to act on.
 
 Everything else applies to every kind, which is what keeps the menu predictable.
 
+**The viewer surfaces get a shorter menu — and the table did not change.** *(Added
+2026-08-22, with the fix for a user-reported right-click that reached nothing: both
+overlays swallowed `contextmenu` before the tile beneath could see it, and the orbit
+overlay keeps sitting over that tile invisibly through the persist hold after a release.)*
+A menu raised on the orbit overlay or the lightbox offers three items — *reveal*, *copy
+path*, *find similar* — the ones that do not care which surface asked. Three are withheld,
+for reasons about the **surface**, not the entry:
+
+- *Open* would re-open the model that is already open.
+- *Re-render thumbnail* and *reset framing* cannot honestly run from an open viewer. Both
+  wait on `queue.whenResumed()` before touching the renderer (4b.6) and the viewer holds
+  that suspension (architecture D2/D3), so they would sit until it closed — and then the
+  closing persist races them, writing the orbited camera straight back over the discard
+  *reset framing* was pressed for. Offering an item that quietly loses a coin-flip against
+  the gesture that dismisses it is worse than not offering it.
+
+That is a **per-surface filter at the call site** — `commandsFor`'s third argument, from
+the `VIEWER_SURFACE_EXCLUDES` list — rather than a seventh column in the table above. The
+table stays the one answer to "what does this *entry* offer"; a row that also had to know
+where it was being rendered is how the two would come to disagree about the same model.
+
+**Escape while that menu is up.** The menu is the thing on top and owns Escape, so the
+lightbox's own handler stands down for exactly as long as it is raised, and the next press
+closes the lightbox as before. This is 2.3's idiom reaching a second contender: a ref read
+live (`menuOpenRef`, already held for the find control), not `stopPropagation` and not
+listener order — the ref is still true for the whole of the dispatch that closes the menu,
+so the outcome does not depend on which window listener ran first.
+
 Rejected: "search in this folder" (reveal followed by a search, with less control than
 doing both), and resetting the orbit axis — see D7.
 
