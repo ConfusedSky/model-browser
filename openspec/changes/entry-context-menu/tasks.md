@@ -780,8 +780,9 @@
       case now reads `{ camera: false, posed: true }` — the same write, said explicitly
       **Delta:** `model-viewer`'s *Lightbox expanded view* gains the row in its prose and one
       scenario (*Acting on the model from the info panel*); no requirement renamed or removed
-- [x] 6.7 A model's **orbit axis** is settable from its tile — the six spindles in the menu,
-      the model's own marked, without opening it. **User-requested 2026-08-22:** the only way
+- [x] 6.7 A model's **orbit axis** is settable from its tile — the picker's letters-and-flip
+      group in the menu (four buttons since 6.8's second look), the model's own marked,
+      without opening it. **User-requested 2026-08-22:** the only way
       to lay a model right was to open it, use the picker, and let the close persist.
       **This revises D1/D7's "the axis is not a third item".** That rule read one sentence as
       two claims: rotating a *live view* to a new spindle is a control and stays in the

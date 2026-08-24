@@ -1,6 +1,9 @@
 # Design — entry-context-menu
 
-Line citations are against `baa7010` (post `search-view-reducer`). This change was first
+Line citations in sections 1–5 and D1–D9's original text are against `baa7010` (post
+`search-view-reducer`); the follow-up (6.x) passages added after implementation cite the
+tree as of their own landing — where the two disagree inside one decision, that is why.
+This change was first
 written against the pre-reducer App and has been rebased onto the state layer: every
 citation below was re-checked against that commit, and the ones that named `useState` cells
 or refs the reducer deleted are gone rather than renumbered.
@@ -76,7 +79,10 @@ on it.)*
 Two of the six commands move the view — reveal navigates, find similar replaces the grid
 with a result set. Under the reducer both are **dispatched actions and nothing else**. A
 command never calls `pushState`, never assembles a query string, never touches
-`window.history`. The rule is R3's: one effect (`App.tsx:278-287`) serializes `state.view`
+`window.history`. That sentence is the *commands'*, not the whole app's: the one exit that
+does walk history — the dismissal's `history.go(-similarDepth())` (follow-up 6.3, D9's
+depth rule) — is App's own `leaveSubject`, not a command, and goes backward through entries
+the projection wrote rather than minting any. The rule is R3's: one effect (`App.tsx:278-287`) serializes `state.view`
 through `serializeView` and commits it, fenced by a `urlIntent` the dispatching site leaves
 behind and by an advancement test against what the view was at the previous state change.
 Four hand-built view literals are what that fence exists to abolish; a menu adding a fifth
@@ -559,17 +565,18 @@ folder on disk, and it works when the browser is not on the machine holding the 
 ```
 model tile           dir tile        zip tile
 ──────────           ────────        ────────
+axis X Y Z | flip    —               —
 Open                 Open            Open
 Reveal in app        Reveal in app   Reveal in app
 Copy path            Copy path       Copy path
 Find similar         —               —
 Re-render thumbnail  —               —
 Reset framing        —               —
-Orbit axis ×6        —               —
 ```
 
-The last row is the axis group (follow-up 6.7, and D7's revision below): six spindles under
-one heading on a **model tile**, the model's own marked. It is model-only for the thumbnail
+The first row is the axis group (follow-up 6.7, reshaped by 6.8's second look, and D7's
+revision below): the picker's four buttons — three letter pills and a flip — above the
+commands on a **model tile**, the letter in force marked. It is model-only for the thumbnail
 items' structural reason — a container tile is a glyph with no spindle — and it is a group
 rather than a seventh command, with no row in `ENTRY_COMMANDS`: `orbitAxisApplies` answers
 for it, under the same per-kind rule and the same per-surface filter.
@@ -762,8 +769,9 @@ re-renders in place at the new orientation, so the result is visible, and the us
 the stored orientation to be given up rather than for a particular spindle to be set.
 Re-render still never touches the axis.
 
-**The axis is not a third item**, by D1 — *revised 2026-08-22 (follow-up 6.7): it is a
-group of six, on model tiles.* The argument that stood here said the orbit-axis picker is a
+**The axis is not a third item**, by D1 — *revised 2026-08-22 (follow-up 6.7, reshaped by
+6.8's second look): it is the picker's four buttons — letters and a flip — at the top of the
+menu, on model tiles.* The argument that stood here said the orbit-axis picker is a
 control, bound to a live view and showing the spindle rotating to screen-up as it changes,
 so a menu item setting a persisted spindle would be a spindle change made outside the view
 that shows what one means — and on a Z-up model it would lay the model on its side, the
