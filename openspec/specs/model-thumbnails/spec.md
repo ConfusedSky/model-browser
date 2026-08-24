@@ -38,7 +38,7 @@ The server SHALL persist rendered thumbnails keyed by `path + mtime` in a cache 
 - **THEN** the cached thumbnail is treated as stale and the client re-renders and re-uploads it
 
 ### Requirement: Camera state stored alongside thumbnails
-The server SHALL store each model's camera (orientation) state and its orbit axis together alongside its thumbnail, keyed by path only, so both survive file modification, sessions, and different browsers. Thumbnail renders SHALL use the stored camera state when present, otherwise the spindle's default fit-to-bounds three-quarter view. Camera state SHALL be stored bounds-relative — azimuth, elevation, and distance as a multiple of the bounding-sphere radius, with the target relative to the bounding box — and spindle-relative: azimuth/elevation are measured in the model's spindle frame, never in world coordinates, so orientation round-trips exactly for every axis. A missing axis SHALL read as +Y, under which the spindle-relative representation equals the historical world-Y one (no migration).
+The server SHALL store each model's camera (orientation) state and its orbit axis together alongside its thumbnail, keyed by path only, so both survive file modification, sessions, and different browsers. Thumbnail renders SHALL use the stored camera state when present, otherwise the spindle's default fit-to-bounds three-quarter view. The client SHALL be able to **discard** a model's stored orientation — its camera, its axis, or both — distinctly from writing a value over it: a request that does not mention one of them SHALL leave it as it was, while one that discards it SHALL leave the model with none. A model with no stored orientation SHALL be rendered the way a model that never had one is rendered — which, where an orientation source such as a semantic index supplies one for it, means that orientation rather than the default. Where such a source supplies an axis and angles as one orientation, a stored axis SHALL be enough to withhold it, since angles measured about one axis do not describe a view about another. Writing the default view as a stored value SHALL NOT be treated as equivalent to discarding, since a stored default is an orientation of the user's own and suppresses any such source. Camera state SHALL be stored bounds-relative — azimuth, elevation, and distance as a multiple of the bounding-sphere radius, with the target relative to the bounding box — and spindle-relative: azimuth/elevation are measured in the model's spindle frame, never in world coordinates, so orientation round-trips exactly for every axis. A missing axis SHALL be *rendered* as +Y, under which the spindle-relative representation equals the historical world-Y one (no migration) — but a read SHALL report its absence rather than substituting +Y, since whether the user has chosen an orientation is what tells a caller that the model is free to be oriented by something else. Defaulting belongs to the caller that draws; the response distinguishes none-stored from stored-as-+Y.
 
 #### Scenario: Orientation survives re-export
 - **WHEN** a model file is overwritten (new mtime) after the user saved an orientation
@@ -59,6 +59,22 @@ The server SHALL store each model's camera (orientation) state and its orbit axi
 #### Scenario: Pre-existing entries read as +Y
 - **WHEN** a cache entry written before axis support is served
 - **THEN** it behaves as axis +Y with its camera state interpreted unchanged
+
+#### Scenario: Discarding an orientation is not writing one
+- **WHEN** a model's stored camera is discarded and its thumbnail is rendered again
+- **THEN** it is rendered as a model with no orientation of its own — at an orientation supplied for it by an index where one exists, and at the spindle's default otherwise — rather than at a stored default that would suppress that source
+
+#### Scenario: Silence still preserves
+- **WHEN** a request stores a thumbnail without mentioning the camera or the axis
+- **THEN** both are unchanged, as they are today
+
+#### Scenario: Discarding both hands the model to the source
+- **WHEN** a model's stored camera and axis are both discarded and an index supplies an orientation for it
+- **THEN** it is rendered at that orientation — its axis as well as its angles — rather than at the default about its former axis
+
+#### Scenario: Absence is reported, not defaulted away
+- **WHEN** a model with a stored thumbnail but no stored axis is read
+- **THEN** the response reports no axis rather than +Y, while anything drawing it still draws it about +Y absent another source
 
 ### Requirement: Bounded, self-maintaining cache
 The thumbnail cache SHALL NOT grow without bound. Superseded thumbnails (an older mtime for the same path) SHALL be deleted, entries whose source path no longer exists SHALL be swept — for a virtual path, existence SHALL be tested against the containing zip rather than the entry — and when total cache size exceeds a configurable cap (default 2GB) least-recently-read thumbnails SHALL be evicted. Camera state and the orbit axis SHALL survive size-cap eviction of their thumbnail (they are tiny and cannot be regenerated), but the existence sweep SHALL remove the entire entry — camera state and axis included — when the source path no longer exists. Entries SHALL be stored under a hash of the path rather than the path itself, since paths contain `/`, `!`, and spaces and may exceed filename length limits.
