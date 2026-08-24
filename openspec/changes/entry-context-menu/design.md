@@ -3,10 +3,9 @@
 Line citations in sections 1–5 and D1–D9's original text are against `baa7010` (post
 `search-view-reducer`); the follow-up (6.x) passages added after implementation cite the
 tree as of their own landing — where the two disagree inside one decision, that is why.
-This change was first
-written against the pre-reducer App and has been rebased onto the state layer: every
-citation below was re-checked against that commit, and the ones that named `useState` cells
-or refs the reducer deleted are gone rather than renumbered.
+This change was first written against the pre-reducer App and has been rebased onto the
+state layer: every citation below was re-checked against that commit, and the ones that
+named `useState` cells or refs the reducer deleted are gone rather than renumbered.
 
 ## Context
 
@@ -82,9 +81,10 @@ command never calls `pushState`, never assembles a query string, never touches
 `window.history`. That sentence is the *commands'*, not the whole app's: the one exit that
 does walk history — the dismissal's `history.go(-similarDepth())` (follow-up 6.3, D9's
 depth rule) — is App's own `leaveSubject`, not a command, and goes backward through entries
-the projection wrote rather than minting any. The rule is R3's: one effect (`App.tsx:278-287`) serializes `state.view`
-through `serializeView` and commits it, fenced by a `urlIntent` the dispatching site leaves
-behind and by an advancement test against what the view was at the previous state change.
+the projection wrote rather than minting any. The rule is R3's: one effect
+(`App.tsx:278-287`) serializes `state.view` through `serializeView` and commits it, fenced
+by a `urlIntent` the dispatching site leaves behind and by an advancement test against what
+the view was at the previous state change.
 Four hand-built view literals are what that fence exists to abolish; a menu adding a fifth
 would re-open exactly the class of bug — a URL naming a view minus whichever fields the
 author forgot — that the reducer change was written to close.
