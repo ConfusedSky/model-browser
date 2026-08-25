@@ -265,6 +265,28 @@ next contradiction is recognizable):
 - *`createApp` grows one optional trailing `launcher` param* defaulting to the real
   factory — additive, no existing call site changes; config is read eagerly at
   construction ("read at startup").
+- *The report lives in component-local App state, not the reducer* — the reducer
+  holds what the search machine reads (the `index` cell feeds the corpus decision);
+  nothing in it reads the apps report, so it sits with `actionText`-class ephemeral
+  cells. Fetched once per session in a sibling effect beside the index fetch, deps
+  `[api]` only; the refetch lives in the `openWith` command body (both outcome
+  branches) via a `host.refreshApps()` capability, so the rule stays where the
+  rationale lives.
+- *Menu keyboard rule for the second group*: entering the open-in group from outside
+  lands on its first pill (the default app); consequently ArrowUp from that pill
+  enters the axis group and lands on the letter in force, exactly as the existing
+  crossing rule already promises. Initial focus moves to `pillCount` (still the
+  first command).
+- *"Open with…" appends last in `ENTRY_COMMANDS`* — 4.3's naming/ordering pass owns
+  its final position; adjacent "Open / Open with…" is the exact confusion 4.3 flags.
+- *The row dedupes by id, never by name*: default first, then associated minus the
+  default's id (defensive even though the server also excludes it — a configured
+  override might not); name collisions still render as two pills (L1).
+- *App pills are `role="menuitem"` with `data-app-id` and NO `data-command`* — ARIA
+  honesty over test-helper convenience; the existing `items()` helper keeps seeing
+  only commands, and a new test asserts exactly that.
+- *Client mime derivation is `model/${entry.format}`* — the entry's `format` is the
+  server's own `modelFormat` result, so no second table exists on either side.
 
 ## Risks / Trade-offs
 
