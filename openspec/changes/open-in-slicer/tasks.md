@@ -113,12 +113,13 @@
       Workshop with F3D honestly gone, since it was only ever the default pin and
       never an association. no-chooser absence remains unit-test-covered only, by
       choice — unconfiguring the live machine would mutate real config)*
-- [ ] 4.3 Tune the pill row visually and settle the naming — the menu will hold
-      "Open", "Reveal in app", "open in <X>", and "Open with…", four flavors of
-      open/app — then freeze: not done when the code lands, done when the pixels are
-      judged. The naming pass also owns `LAUNCH_FAILED`'s wording, which currently
-      says "that application" even for a chooser failure where none was chosen
-      (review finding, 2026-08-24)
+- [ ] 4.3 Tune the pill row visually and settle the naming — **decided by the user
+      2026-08-25 on the live app**: (a) `open` becomes kind-aware — "Open lightbox" /
+      "Open folder" / "Open archive"; (b) the lightbox's information panel carries the
+      launch actions after all (pill row + "Open with…"), reversing this change's own
+      panel exclusion. Both implemented in 4.6. Still open: judging the pill row's
+      pixels once the panel row exists, and `LAUNCH_FAILED`'s wording, which says
+      "that application" even for a chooser failure where none was chosen
 - [ ] 4.4 Dry-run the archive per project convention
 - [ ] 4.5 Give `ZipTempStore` an optional root (and `createApp` an optional store or
       root, the way it already takes `cache` and `launcher`) so tests can point it at
@@ -132,3 +133,8 @@
       holds one of those paths as a *string* (no fd, `lsof` proves nothing), and an
       early rm makes its next zip launch fail on `renameSync` into a missing dir.
       systemd-tmpfiles reclaims them in 10 days regardless
+- [ ] 4.6 Implement 4.3's two decisions: kind-aware `open` labels resolved in
+      `commandsFor`; drop `openIn`/`openWith` from `LIGHTBOX_PANEL_EXCLUDES` and give
+      the panel the pill row above its action strip. Inverts the panel-withholds
+      assertions in `viewerPanelActions.test.tsx` (semantics-is-the-point, not
+      mechanical) and updates the entry-actions delta, already rewritten to match

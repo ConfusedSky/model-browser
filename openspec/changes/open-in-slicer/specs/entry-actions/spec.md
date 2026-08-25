@@ -4,7 +4,7 @@
 
 ### Requirement: A model entry offers its associated applications as open-in choices
 The client SHALL offer, on every context-menu surface that hosts a model entry's
-actions — the expanded viewer's information panel deliberately excluded — the
+actions — its menus and the expanded viewer's information panel alike — the
 applications the platform associates with the entry's model type, presented as an
 inline group of choices — the default application first — rather than as a submenu,
 matching the menu's existing inline-group treatment of the orbit axis. What the group
@@ -33,6 +33,13 @@ application did afterwards.
 - **THEN** the entry's file opens in that application, no mesh is fetched for the
   action's sake, and no expanded view opens
 
+#### Scenario: The expanded viewer offers the launch actions beside the model
+- **WHEN** the user opens a model in the expanded viewer and reads its information
+  panel
+- **THEN** the panel offers that model's open-in choices and, where a chooser is
+  configured, the chooser action — the same choices its menu offers, since the
+  viewer is where the decision to send a model onward is made
+
 #### Scenario: The group is absent where it does not apply
 - **WHEN** the user raises the menu on a directory or zip-container entry, or on a
   model entry whose type the client cannot map to any application
@@ -48,9 +55,9 @@ The client SHALL offer on model entries an "Open with…" action that invokes th
 platform's configured application chooser with the entry's file — the machine's own
 chooser, not a list of the client's making — so that opening in an application not
 associated with the type, and anything else that chooser can do, happens in the one
-chooser the user maintains. The action lives on the context-menu surfaces, not the
-expanded viewer's information panel, and SHALL be offered exactly when a chooser is
-configured, and absent otherwise — absent rather than present and inert — with the
+chooser the user maintains. The action lives on every surface that hosts the entry's
+actions, the expanded viewer's information panel included, and SHALL be offered
+exactly when a chooser is configured, and absent otherwise — absent rather than present and inert — with the
 open-in group still covering the associated applications. Whether a chooser is
 configured is known from the same session-held report the open-in group reads, not
 probed when a menu opens. Invoking the action is a

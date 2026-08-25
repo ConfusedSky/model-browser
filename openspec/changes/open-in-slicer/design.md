@@ -232,15 +232,29 @@ land-on-the-letter rule, `focused` seeded at `axisCount`); a second, variable-le
 group generalizes all of it — explicit tasks, not incidental work. Layout: the open-in
 row sits below the axis row, both above the command list; the menu still opens focused
 on the first command. Surface placement is chosen through the existing excludes
-vocabulary: `MenuItemId` gains `openIn` and `openWith`, both offered on the three menu
-surfaces (tile, orbit, lightbox menu — a one-shot launch is honest everywhere) and
-both excluded from the lightbox info panel (`LIGHTBOX_PANEL_EXCLUDES`,
-entryActions.ts:769) — panel scope is deliberate, not accidental. Failure reporting
+vocabulary: `MenuItemId` gains `openIn` and `openWith`, offered on **every** surface
+that hosts the entry's actions — the three menus (tile, orbit, lightbox menu) and the
+lightbox's information panel. The panel was excluded when this was written, on the
+reasoning that it describes the model rather than listing things to do to it; **the
+user reversed that on seeing it** (2026-08-25, judging 4.3), and the reversal is the
+better read: the expanded viewer is exactly where someone decides a model is the one
+to print, and the panel is the surface they look at while deciding — the menu having
+carried the actions all along made them merely undiscoverable, not present. The panel
+therefore grows the pill row above its action strip and takes `openWith` as a strip
+row. Note this returns the entry-actions requirement to the broad "every surface"
+wording it had before round three narrowed it to menus to match the code — the code
+was the thing that was wrong. Failure reporting
 uses a shared constant beside `COPY_FAILED` (entryActions.ts:148) so "reported the
-same way" is structural. Naming needs the 4.2 pass: the menu already carries "Open"
-(the lightbox) and "Reveal in app" (this app), and "open in <X>" plus "Open with…"
-makes four flavors of open/app in one short menu — the labels are a tuning decision,
-judged with the pixels.
+same way" is structural.
+
+*Naming, settled by the user 2026-08-25 (4.3):* four flavors of open/app in one short
+menu was indeed too many, and the fix is that `open` stops being labelled for what it
+is and starts being labelled for **what it does to this entry** — "Open lightbox" on a
+model, "Open folder" on a directory, "Open archive" on a zip. One command, three
+labels, because one label was only ever accurate for one third of the entries it
+appears on ("Open" on a folder browses in; no lightbox is involved). The label is
+resolved per entry where the per-entry list is already built (`commandsFor`), so the
+surfaces keep rendering a plain string and no consumer learns about entry kinds.
 
 **Apply-time adjudications** (coordinator rulings on worker check-ins, recorded so the
 next contradiction is recognizable):
