@@ -11,9 +11,12 @@
 > tests, typecheck clean, independently re-run by the reviewing session. Live
 > verification: `/api/apps` on this machine returns F3D · LycheeSlicer · Photon
 > Workshop with `chooser:true`; the menu renders that row with zero `/api/apps`
-> requests fired on raise (fetch instrumented); a Lychee pill launch
-> warm-forwarded; a zip-entry Photon launch extracted to the vpath-hashed temp
-> file and opened (user-confirmed).
+> requests fired on raise; a Lychee pill launch warm-forwarded; a zip-entry
+> Photon launch extracted to the vpath-hashed temp file and opened
+> (user-confirmed). Correction on the record: the first no-probe measurement
+> (a `window.fetch` wrapper) was blind — `HttpApiClient` captures its fetch at
+> construction — and was redone 2026-08-25 at the network level (Playwright
+> request events): 3 raises, 0 requests, genuinely proven.
 
 ## 1. Server: platform operations (L2, L6)
 
@@ -99,15 +102,17 @@
 - [x] 4.1 Author the machine's `launch.json` with the chooser entry (the dotfiles
       `open-with` script) — the config that makes Open with… exist; without it 4.2's
       chooser steps cannot run
-- [ ] 4.2 E2E against the live dev instance: pill row shows the current registry
+- [x] 4.2 E2E against the live dev instance: pill row shows the current registry
       (default first — f3d as of writing); Open with… → pick Lychee with its
       set-default (Ctrl+Enter) → re-raise the menu and confirm the row now leads with
       Lychee (the registry loop end to end); open a zip entry; confirm the
       no-association and no-chooser-configured absences
-      *(2026-08-24: all run and green except the chooser-loop step — the chooser is
-      invoked and pending the user's pick; the completion-refetch counter is
-      instrumented in the live page awaiting it. no-chooser absence covered by unit
-      tests only — unconfiguring the live machine would mutate real config)*
+      *(closed 2026-08-25: the user Ctrl+Entered Lychee in the invoked rofi —
+      `xdg-mime query default model/stl` flipped to `lycheeslicer.desktop`, the
+      completion refetch fired, and the next raised menu led LycheeSlicer · Photon
+      Workshop with F3D honestly gone, since it was only ever the default pin and
+      never an association. no-chooser absence remains unit-test-covered only, by
+      choice — unconfiguring the live machine would mutate real config)*
 - [ ] 4.3 Tune the pill row visually and settle the naming — the menu will hold
       "Open", "Reveal in app", "open in <X>", and "Open with…", four flavors of
       open/app — then freeze: not done when the code lands, done when the pixels are
