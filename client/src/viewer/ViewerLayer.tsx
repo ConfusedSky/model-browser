@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type * as THREE from 'three'
 import type {
+  AppRef,
   CameraState,
   DirEntry,
   IndexPose,
@@ -15,6 +16,10 @@ import {
   AXIS_GROUP_CLASS,
   AXIS_LETTERS,
   FLIP_TITLE,
+  OPEN_IN_CAPTION,
+  OPEN_IN_CAPTION_CLASS,
+  OPEN_IN_GROUP_CLASS,
+  OPEN_IN_PILL_CLASS,
   axisLetter,
   axisPillClass,
   axisWithLetter,
@@ -99,6 +104,19 @@ interface Props {
    */
   panelCommands: readonly EntryCommand[]
   /**
+   * The panel's open-in row (open-in-slicer L10, reversed 2026-08-25): the
+   * applications the platform associates with this model's type, default
+   * first, or `null` where the row is not offered — a type with no
+   * applications, or a report that has not landed. App decides that with
+   * `openInApps`, exactly as it decides `panelCommands`; this component only
+   * draws it.
+   *
+   * `null` and not an empty array, the menu's own rule: a caption with no
+   * pills under it is an affordance that does nothing, and what does not
+   * apply is absent rather than present and inert.
+   */
+  openIn?: { apps: AppRef[]; onChoose: (appId: string) => void } | null
+  /**
    * Run one of them. The bodies are the shared ones and App holds the host, so
    * this component carries no copy of any command — only the live view a reset
    * needs to re-frame, which is the one thing App cannot reach: the session is
@@ -133,6 +151,7 @@ export default function ViewerLayer({
   onEntryMenu,
   menuOpen,
   panelCommands,
+  openIn = null,
   onCommand,
 }: Props) {
   const [session, setSession] = useState<ViewerSession | null>(null)
@@ -727,6 +746,30 @@ export default function ViewerLayer({
               `MENU_ITEM_CLASS` is imported from `EntryMenu`, which owns that
               look. The copy affordance stays a pill up beside the path it
               copies: it is part of that line, not one of these. */}
+          {openIn !== null && (
+            // The launch actions beside the model (L10, the 2026-08-25
+            // reversal): the pill row the menu draws, from the same exported
+            // strings, so the two surfaces cannot drift — above the action
+            // strip it extends, since *Open with…* arrives there as a strip
+            // row. Not a menu, so the pills are plain buttons in a labelled
+            // group, named the way the strip beside them is; they carry
+            // `data-app-id` and no `data-command`, exactly as the menu's do.
+            <div role="group" aria-label="Open in" className={OPEN_IN_GROUP_CLASS}>
+              <span className={OPEN_IN_CAPTION_CLASS}>{OPEN_IN_CAPTION}</span>
+              {openIn.apps.map((app) => (
+                <button
+                  key={app.id}
+                  type="button"
+                  data-app-id={app.id}
+                  title={app.name}
+                  onClick={() => openIn.onChoose(app.id)}
+                  className={OPEN_IN_PILL_CLASS}
+                >
+                  {app.name}
+                </button>
+              ))}
+            </div>
+          )}
           {panelCommands.length > 0 && (
             <div
               className="-mx-1 flex flex-col overflow-hidden rounded-lg border border-zinc-700 text-sm text-zinc-200"

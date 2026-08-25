@@ -761,6 +761,14 @@ export function openEntryWith(entry: DirEntry, host: ActionHost): void {
 export interface EntryCommand {
   readonly id: CommandId
   readonly label: string
+  /**
+   * A label that depends on the entry, resolved by `commandsFor` — so the
+   * commands a surface receives already carry the right `label` as a plain
+   * string, and no surface learns about entry kinds (L10's naming decision:
+   * one command, labelled for what it does to *this* entry). Absent on every
+   * command whose label is one string for every entry.
+   */
+  readonly labelFor?: (entry: DirEntry) => string
   /** D6's table read for one entry, plus the conditions a table cannot show. */
   readonly applies: (entry: DirEntry, ctx: AvailabilityContext) => boolean
   /**
@@ -779,7 +787,7 @@ export interface EntryCommand {
  * ```
  * model tile           dir tile        zip tile
  * ──────────           ────────        ────────
- * Open                 Open            Open
+ * Open lightbox        Open folder     Open archive
  * Reveal in app        Reveal in app   Reveal in app
  * Copy path            Copy path       Copy path
  * Find similar         —               —
@@ -806,6 +814,14 @@ export const ENTRY_COMMANDS: readonly EntryCommand[] = [
   {
     id: 'open',
     label: 'Open',
+    // Labelled for what it does to *this* entry, not for what it is (the 4.3
+    // naming decision, 2026-08-25): "Open" was only ever accurate on a model —
+    // a directory or archive is browsed into, no lightbox involved — and beside
+    // `open in <X>` and *Open with…* an unqualified "Open" was one flavor too
+    // many. The table's `label` is the fallback spelling; every surface renders
+    // what `commandsFor` resolved.
+    labelFor: (entry) =>
+      entry.kind === 'model' ? 'Open lightbox' : entry.kind === 'dir' ? 'Open folder' : 'Open archive',
     applies: () => true,
     run: (entry, host, el) => host.open(entry, el),
   },
@@ -866,10 +882,11 @@ export const ENTRY_COMMANDS: readonly EntryCommand[] = [
     // being absent (not yet landed, or its read failed) reads as no chooser,
     // which is the same absence a machine without one has.
     applies: (entry, ctx) => entry.kind === 'model' && ctx.apps?.chooser === true,
-    // Last in the table, which puts it under the pill row it extends. Where it
-    // finally sits, and what it is finally called, belong to the naming pass
-    // (4.3): this menu now carries *Open*, *Reveal in app*, `open in <X>` and
-    // this — four flavors of open in one short menu, judged with the pixels.
+    // Last in the table, which puts it under the pill row it extends. The
+    // naming pass (4.3) kept it here and resolved the four-flavors-of-open
+    // crowd the other way: `open` is now labelled for what it does to the
+    // entry ("Open lightbox" on a model), so this row and the pill row are
+    // the only application-facing opens left in the menu.
     run: (entry, host) => openEntryWith(entry, host),
   },
 ]
@@ -952,25 +969,24 @@ export const LIGHTBOX_MENU_EXCLUDES: readonly MenuItemId[] = [
  *   of the rule rather than a filter that does work — which is why it is stated:
  *   the two lists are read side by side, and a silence here would read as an
  *   oversight.
- * - The **open-in group** and ***Open with…*** are out together, and this is
- *   the one exclusion list they appear on (open-in-slicer L10). A one-shot
- *   launch is honest on every *menu* surface — a tile, the orbit overlay, and
- *   the lightbox's own menu — because it opens another application and changes
- *   nothing here: no render is queued, no suspension is waited on, no closing
- *   persist can race it. The panel is a different question from the menu on the
- *   same surface: it is the open view's own strip of affordances, describing
- *   the model being looked at, and a row of other applications' names in it
- *   would read as things to do to *this* view. The panel is also where the
- *   fewest affordances earn their place, which is why *copy path* is out of it
- *   while the menu keeps it.
+ * - The **open-in group** and ***Open with…*** are *not* on this list, and were
+ *   until 2026-08-25 — the reversal is the user's, judging 4.3 on the live app
+ *   (L10). The exclusion's reasoning was that the panel describes the model
+ *   rather than listing things to do to it; the better read is that the
+ *   expanded viewer is exactly where someone decides a model is the one to
+ *   print, and the panel is the surface they look at while deciding — the menu
+ *   having carried the actions all along made them merely undiscoverable, not
+ *   present. A one-shot launch was always honest here: it opens another
+ *   application and changes nothing in this view — no render queued, no
+ *   suspension waited on, nothing for the closing persist to race. So the panel
+ *   carries the pill row above its action strip, and *Open with…* joins the
+ *   strip through this list's silence about it.
  */
 export const LIGHTBOX_PANEL_EXCLUDES: readonly MenuItemId[] = [
   'open',
   'copyPath',
   'reRenderThumbnail',
   'orbitAxis',
-  'openIn',
-  'openWith',
 ]
 
 /**
@@ -1000,5 +1016,5 @@ export function commandsFor(
 ): EntryCommand[] {
   return ENTRY_COMMANDS.filter(
     (c) => c.run !== null && !exclude.includes(c.id) && c.applies(entry, ctx),
-  )
+  ).map((c) => (c.labelFor === undefined ? c : { ...c, label: c.labelFor(entry) }))
 }

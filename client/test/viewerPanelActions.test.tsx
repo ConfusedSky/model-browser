@@ -14,9 +14,11 @@
 // the posed case, which needs a landed answer carrying a pose.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DirEntry, DirListing, IndexPose } from '../../shared/types'
+import type { AppsReport, DirEntry, DirListing, IndexPose } from '../../shared/types'
 import { MENU_ITEM_CLASS } from '../src/components/EntryMenu'
 import {
+  LAUNCH_FAILED,
+  OPEN_IN_PILL_CLASS,
   RESET_FAILED,
   resetFramingLive,
   type ActionHost,
@@ -37,6 +39,7 @@ import {
   model,
   mountApp,
   mountAppAtCurrentUrl,
+  openApp,
   putThumb,
   renderThumbnail,
   settle,
@@ -61,9 +64,30 @@ const NEIGHBOURS = { path: '/models', entries: [model('near.stl')], poses: {} }
  *  that ends up at the default can only have been re-framed. */
 const STORED = { az: 1.25, el: -0.4, distR: 4.5, target: [0, 0, 0] as [number, number, number] }
 
+/**
+ * The registry as the machine reports it (the openInApps fixture's shape): a
+ * viewer-led row, so default-first cannot pass by accident of order.
+ */
+const F3D = { id: 'f3d.desktop', name: 'F3D' }
+const LYCHEE = { id: 'lycheeslicer.desktop', name: 'LycheeSlicer' }
+const PHOTON = { id: 'photon-workshop.desktop', name: 'Photon Workshop' }
+const REPORT: AppsReport = {
+  chooser: true,
+  types: { 'model/stl': { default: F3D, associated: [LYCHEE, PHOTON] } },
+}
+
 const dialog = (): HTMLElement | null => document.querySelector<HTMLElement>('[role="dialog"]')
 const actionRow = (): HTMLElement | null =>
   document.querySelector<HTMLElement>('[aria-label="Model actions"]')
+/** The panel's open-in row — scoped to the dialog, so a raised menu's row
+ *  (same accessible name) can never answer for it. */
+const openInRow = (): HTMLElement | null =>
+  dialog()?.querySelector<HTMLElement>('[aria-label="Open in"]') ?? null
+const panelPills = (): HTMLButtonElement[] =>
+  Array.from(openInRow()?.querySelectorAll<HTMLButtonElement>('[data-app-id]') ?? [])
+/** The path bar's transient line, where every entry action reports a failure. */
+const pathError = (): string | null =>
+  container.querySelector('header p.text-red-400')?.textContent ?? null
 const actions = (): string[] =>
   Array.from(actionRow()?.querySelectorAll<HTMLButtonElement>('button') ?? []).map(
     (b) => b.dataset.command ?? '',
@@ -151,15 +175,15 @@ describe('the info panel offers the entry actions', () => {
     expect(copy.className).not.toBe(MENU_ITEM_CLASS)
   })
 
-  it('withholds the launch actions, which the same surface’s menu still offers', async () => {
-    // Panel scope, deliberately (open-in-slicer L10): a one-shot launch is
-    // honest on every *menu* surface, this one included — it opens another
-    // application and races nothing here. The panel is the other question: it
-    // is the open view's own strip, describing the model being looked at, and
-    // a row of other applications' names in it would read as things to do to
-    // this view. So the exclusion is the panel's alone, and this pins that it
-    // is a *scope* and not an absence — the menu raised on the very same
-    // lightbox offers both.
+  it('offers the launch actions, exactly as the same surface’s menu does', async () => {
+    // INVERTED 2026-08-25, and the semantics are the point: this test used to
+    // pin that the panel *withholds* the launch actions (the L10 exclusion as
+    // first written), and the user reversed that decision judging 4.3 on the
+    // live app — the expanded viewer is exactly where someone decides a model
+    // is the one to print, and the panel is the surface they read while
+    // deciding. So what was pinned as a scope is now pinned as an offer: the
+    // pill row above the strip, *Open with…* in it, on the panel and the menu
+    // alike.
     await unmountApp()
     apps.mockResolvedValue({
       chooser: true,
@@ -175,10 +199,24 @@ describe('the info panel offers the entry actions', () => {
     listDir.mockResolvedValue(NESTED)
 
     await openLightbox('Alpha/found.stl')
-    expect(actions()).toEqual(['reveal', 'findSimilar', 'resetFraming'])
-    expect(actionRow()!.querySelectorAll('[data-app-id]')).toHaveLength(0)
+    // The strip gains *Open with…* and nothing else — `open` stays excluded
+    // (the model is already open), so the kind-aware label never shows here.
+    expect(actions()).toEqual(['reveal', 'findSimilar', 'resetFraming', 'openWith'])
+    // The pill row, above the strip: ids and names, default first, wearing the
+    // exported pill class so the panel's row and the menu's cannot drift.
+    expect(panelPills().map((b) => b.dataset.appId)).toEqual([
+      'f3d.desktop',
+      'lycheeslicer.desktop',
+    ])
+    expect(panelPills().map((b) => b.textContent)).toEqual(['F3D', 'LycheeSlicer'])
+    expect(panelPills()[0]!.className).toContain(OPEN_IN_PILL_CLASS)
+    expect(openInRow()!.compareDocumentPosition(actionRow()!) & 4).toBe(4)
+    // The panel is not a menu: its pills are plain buttons in a labelled
+    // group, with `data-app-id` and no `data-command`, exactly as the menu's.
+    expect(openInRow()!.querySelector('[role="menuitem"]')).toBeNull()
+    expect(panelPills().every((p) => p.dataset.command === undefined)).toBe(true)
 
-    // The menu on that same lightbox, which withholds a different set.
+    // The menu on that same lightbox offers the same choices.
     await act(async () => {
       dialog()!.dispatchEvent(
         new PointerEvent('pointerdown', {
@@ -210,6 +248,71 @@ describe('the info panel offers the entry actions', () => {
 
     await openLightbox('Alpha/found.stl')
     expect(actions()).toEqual(['reveal', 'resetFraming'])
+  })
+})
+
+describe('the panel’s launch actions (the 4.3 reversal, open-in-slicer L10)', () => {
+  /** Remount with a registry report, so the session's one reading carries it. */
+  async function remountWithApps(report: AppsReport): Promise<void> {
+    await unmountApp()
+    apps.mockResolvedValue(report)
+    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models' })
+    await mountApp('/models', NESTED)
+    listDir.mockResolvedValue(NESTED)
+  }
+
+  it('renders the pill row for a model whose type has applications, default first', async () => {
+    await remountWithApps(REPORT)
+    await openLightbox('Alpha/found.stl')
+
+    // Ids launch and names render — and the order is the assertion: the
+    // default leads, the associations follow in the registry's order.
+    expect(panelPills().map((b) => b.dataset.appId)).toEqual([F3D.id, LYCHEE.id, PHOTON.id])
+    expect(panelPills().map((b) => b.textContent)).toEqual(['F3D', 'LycheeSlicer', 'Photon Workshop'])
+  })
+
+  it('renders no row when the type maps to no applications, keeping Open with…', async () => {
+    // Absent rather than present and inert — a caption with no pills is an
+    // affordance that does nothing. *Open with…* does not go with it: it
+    // follows the chooser flag alone, exactly as the spec pairs them.
+    await remountWithApps({ chooser: true, types: {} })
+    await openLightbox('Alpha/found.stl')
+
+    expect(openInRow()).toBeNull()
+    expect(actions()).toContain('openWith')
+  })
+
+  it('withholds Open with… when no chooser is configured, keeping the pill row', async () => {
+    await remountWithApps({ ...REPORT, chooser: false })
+    await openLightbox('Alpha/found.stl')
+
+    expect(actions()).toEqual(['reveal', 'findSimilar', 'resetFraming'])
+    expect(panelPills().map((b) => b.dataset.appId)).toEqual([F3D.id, LYCHEE.id, PHOTON.id])
+  })
+
+  it('launches once with the entry path and the chosen id, and the view stays', async () => {
+    await remountWithApps(REPORT)
+    await openLightbox('Alpha/found.stl')
+
+    await click(panelPills()[1]!) // LycheeSlicer
+    await settle()
+
+    expect(openApp).toHaveBeenCalledTimes(1)
+    expect(openApp).toHaveBeenCalledWith(FOUND, LYCHEE.id)
+    // One-shot: the launch opens another application, never touches this view.
+    expect(dialog()).not.toBeNull()
+    expect(pathError()).toBeNull()
+  })
+
+  it('reports a failed launch with the one shared sentence', async () => {
+    await remountWithApps(REPORT)
+    await openLightbox('Alpha/found.stl')
+
+    openApp.mockRejectedValueOnce(new Error('gtk-launch exited 1'))
+    await click(panelPills()[0]!)
+    await settle()
+
+    expect(pathError()).toBe(LAUNCH_FAILED)
   })
 })
 

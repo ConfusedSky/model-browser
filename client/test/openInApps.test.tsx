@@ -412,6 +412,27 @@ describe('when the registry is read', () => {
   })
 })
 
+describe('the open command is labelled for the entry', () => {
+  it('says Open lightbox on a model, Open folder on a directory, Open archive on a zip', async () => {
+    // The 4.3 naming decision, read off the rendered menu: the label the user
+    // sees is the resolved one, per kind — not the table's fallback string.
+    apps.mockResolvedValue(REPORT)
+    await mountApp('/models', NESTED)
+    await settle()
+    const openRow = (): HTMLButtonElement =>
+      menu()!.querySelector<HTMLButtonElement>('[data-command="open"]')!
+
+    await secondaryPress(tile('widget.stl'))
+    expect(openRow().textContent).toBe('Open lightbox')
+    await escape()
+    await secondaryPress(tile('Alpha'))
+    expect(openRow().textContent).toBe('Open folder')
+    await escape()
+    await secondaryPress(tile('kit.zip'))
+    expect(openRow().textContent).toBe('Open archive')
+  })
+})
+
 describe('the keyboard, across two pill groups', () => {
   // '-z' stored throughout, so the axis group's landing rule cannot pass by
   // landing on the group's first button and calling it the letter in force.

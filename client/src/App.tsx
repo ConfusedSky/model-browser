@@ -1353,8 +1353,9 @@ export default function App() {
    * The menu's open-in group (L3): the applications the platform associates
    * with this model's type, default first, or `null` where the row is not
    * offered — a container, a type with no applications, a report that has not
-   * landed, or a surface that withholds it (the lightbox's *panel* does; its
-   * menu does not).
+   * landed, or a surface that withholds it (none of the three menu surfaces
+   * does; since the 4.3 reversal the lightbox's panel offers it too, through
+   * `panelOpenIn` below).
    *
    * `null` rather than `[]` for an empty answer: a caption with no pills under
    * it is an affordance that does nothing, and this menu's rule is absence.
@@ -1400,6 +1401,30 @@ export default function App() {
         ? []
         : commandsFor(viewer.entry, { index: state.index, apps }, LIGHTBOX_PANEL_EXCLUDES),
     [viewer, state.index, apps],
+  )
+  /**
+   * The panel's open-in row (L10, reversed 2026-08-25): the same question the
+   * menu asks, through the same body, under the panel's own exclusion list —
+   * which no longer withholds it. `null` rather than `[]` for an empty answer,
+   * the menu's rule: a caption with no pills under it is an affordance that
+   * does nothing. Read from `apps`, which is state — opening the lightbox
+   * fires no registry request.
+   */
+  const panelOpenIn = useMemo(() => {
+    if (viewer === null) return null
+    const list = openInApps(viewer.entry, { index: state.index, apps }, LIGHTBOX_PANEL_EXCLUDES)
+    return list.length === 0 ? null : list
+  }, [viewer, state.index, apps])
+  /** A panel pill pressed: the shared launch body through the one host — a
+   *  launch and nothing else, exactly as the menu's press (the entry read from
+   *  `viewerRef` the way `onViewerCommand` reads it, so the callback is stable). */
+  const onPanelChooseApp = useCallback(
+    (appId: string): void => {
+      const entry = viewerRef.current?.entry
+      if (entry === undefined) return
+      openEntryIn(entry, actionHost, appId)
+    },
+    [actionHost],
   )
   /**
    * A panel affordance pressed: the shared body, through the one host — the
@@ -1926,6 +1951,7 @@ export default function App() {
           onEntryMenu={onViewerEntryMenu}
           menuOpen={menuOpenRef}
           panelCommands={panelCommands}
+          openIn={panelOpenIn === null ? null : { apps: panelOpenIn, onChoose: onPanelChooseApp }}
           onCommand={onViewerCommand}
         />
       )}

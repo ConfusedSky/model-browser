@@ -118,6 +118,26 @@ describe("D6's per-kind table", () => {
       'resetFraming',
     ])
   })
+
+  it('labels open for what it does to this entry, resolved by commandsFor', () => {
+    // The 4.3 naming decision (2026-08-25): "Open" was only ever accurate on a
+    // model — a directory or archive is browsed into, no lightbox involved.
+    // One command, three labels, and the resolution happens where the
+    // per-entry list is built: consumers keep rendering a plain `label`
+    // string and never learn about entry kinds.
+    const label = (entry: DirEntry): string =>
+      commandsFor(entry, { index: READY, apps: null }).find((c) => c.id === 'open')!.label
+    expect(label(model('/m/a.stl'))).toBe('Open lightbox')
+    expect(label(dir('/m/d'))).toBe('Open folder')
+    expect(label(zip('/m/z.zip'))).toBe('Open archive')
+    // Every other command's label is one string for every entry.
+    for (const entry of [model('/m/a.stl'), dir('/m/d'), zip('/m/z.zip')]) {
+      for (const c of commandsFor(entry, { index: READY, apps: null })) {
+        if (c.id === 'open') continue
+        expect(c.label).toBe(ENTRY_COMMANDS.find((t) => t.id === c.id)!.label)
+      }
+    }
+  })
 })
 
 describe('copyEntryPath', () => {
