@@ -1,11 +1,12 @@
 import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
-import { isAbsolute, relative } from 'node:path'
+import { isAbsolute, relative, resolve as resolvePath } from 'node:path'
 import { Readable } from 'node:stream'
 import { Hono } from 'hono'
 import type { LightingMode, OrbitAxis, ThumbPutRequest } from '../../shared/types'
 import { ThumbCache } from './cache'
 import { guard } from './guard'
+import { LaunchError, type Launcher, ZipTempStore, createLauncher } from './launch'
 import { ListingError, complete, listDir, listFlat } from './listing'
 import {
   IndexError,
@@ -58,8 +59,14 @@ function indexErrorReply(err: IndexError): {
   return { body: { error: err.message }, status: bad ? 400 : 502 }
 }
 
-export function createApp(cache: ThumbCache = new ThumbCache()): Hono {
+export function createApp(
+  cache: ThumbCache = new ThumbCache(),
+  launcher: Launcher = createLauncher(),
+): Hono {
   const app = new Hono()
+  // Per server run, per app: nothing in it is deleted while the server runs,
+  // since a launched application may still be reading (app-launch L7).
+  const zipTemp = new ZipTempStore()
 
   app.use('/api/*', guard)
 
@@ -104,6 +111,109 @@ export function createApp(cache: ThumbCache = new ThumbCache()): Hono {
     if (s === null || !s.isFile()) return c.json({ error: `no such file: ${fsPath}` }, 404)
     const stream = Readable.toWeb(createReadStream(fsPath)) as ReadableStream
     return c.body(stream, 200, { ...headers, 'content-length': String(s.size) })
+  })
+
+  /**
+   * The one path pipeline both launch endpoints share: validated exactly as
+   * `/api/file` validates (absolute, `parseVPath`, nested zips rejected,
+   * existence), zip entries temp-extracted, and the result **always absolute**
+   * — a relative path breaks applications that resolve it against a running
+   * instance's working directory (app-launch L5/L7).
+   */
+  type Resolved =
+    | { ok: true; file: string }
+    | { ok: false; body: { error: string }; status: 400 | 404 }
+
+  async function resolveEntryFile(path: string): Promise<Resolved> {
+    const { fsPath, entry } = parseVPath(path)
+    if (!isAbsolute(fsPath)) return { ok: false, body: { error: 'path must be absolute' }, status: 400 }
+    if (entry !== undefined && /\.zip$/i.test(entry)) {
+      return { ok: false, body: { error: 'nested zips are unsupported' }, status: 400 }
+    }
+    const s = await stat(fsPath).catch(() => null)
+    if (s === null || !s.isFile()) {
+      return { ok: false, body: { error: `no such file: ${fsPath}` }, status: 404 }
+    }
+    if (entry !== undefined) {
+      return { ok: true, file: await zipTemp.fileFor(path, fsPath, entry) }
+    }
+    return { ok: true, file: resolvePath(fsPath) }
+  }
+
+  /**
+   * What the platform registry says about the model types this app handles.
+   *
+   * No path parameter and no path validation: the report is about the machine,
+   * not an entry. Read fresh every request — the chooser can rewrite the
+   * registry mid-session, so a memoized answer would go stale exactly when it
+   * mattered (L5).
+   */
+  app.get('/api/apps', async (c) => c.json(await launcher.report()))
+
+  /**
+   * Launch an application with an entry's file. The client sends an
+   * application id, never a command.
+   *
+   * A failed launch is a 502, on `indexErrorReply`'s reasoning: the command ran
+   * and the thing downstream failed, which is a bad gateway rather than a fault
+   * of this server's own code. Success means the launch command succeeded and
+   * nothing more — `wine start` exits 0 once it hands off, so a Wine app that
+   * then fails to open the file reads as success here, and pretending otherwise
+   * would be false precision (L8).
+   */
+  app.post('/api/open', async (c) => {
+    const body = (await c.req.json().catch(() => null)) as
+      | { path?: unknown; appId?: unknown }
+      | null
+    const path = body?.path
+    if (typeof path !== 'string' || path.trim() === '') {
+      return c.json({ error: 'path is required' }, 400)
+    }
+    const appId = body?.appId
+    if (typeof appId !== 'string' || appId.trim() === '') {
+      return c.json({ error: 'appId is required' }, 400)
+    }
+    const target = await resolveEntryFile(path)
+    if (!target.ok) return c.json(target.body, target.status)
+    try {
+      await launcher.launch(appId, target.file)
+    } catch (err) {
+      if (err instanceof LaunchError) return c.json({ error: err.message }, 502)
+      throw err
+    }
+    return c.json({ ok: true })
+  })
+
+  /**
+   * Hand an entry's file to the machine's own configured chooser.
+   *
+   * Unconfigured is **unavailable, not a failed launch** — a state the UI
+   * renders by withholding the action, which is `/api/semantic`'s reasoning for
+   * its own 503 rather than a 500. Nothing is spawned on that path.
+   *
+   * The request completes when the chooser command does, however long the human
+   * takes (L9). No timeout and no abort are wired here — `SpawnOptions` has no
+   * `signal` to wire — because a dismissed chooser and a killed one must never
+   * read the same.
+   */
+  app.post('/api/open-with', async (c) => {
+    const body = (await c.req.json().catch(() => null)) as { path?: unknown } | null
+    const path = body?.path
+    if (typeof path !== 'string' || path.trim() === '') {
+      return c.json({ error: 'path is required' }, 400)
+    }
+    if (!launcher.chooserConfigured) {
+      return c.json({ error: 'no chooser is configured', unavailable: true }, 503)
+    }
+    const target = await resolveEntryFile(path)
+    if (!target.ok) return c.json(target.body, target.status)
+    try {
+      await launcher.chooser(target.file)
+    } catch (err) {
+      if (err instanceof LaunchError) return c.json({ error: err.message }, 502)
+      throw err
+    }
+    return c.json({ ok: true })
   })
 
   /**
