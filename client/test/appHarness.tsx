@@ -29,6 +29,15 @@ export const indexAvailability = vi.fn().mockResolvedValue({ state: 'absent' })
 // the camera and axis a pose produced, not just that pixels appeared.
 export const renderThumbnail = vi.fn(() => Promise.resolve(new Blob()))
 export const semanticSearch = vi.fn()
+// The platform's launch registry. The default is the state a machine with no
+// slicers and no configured chooser is in — no applications, no chooser — so a
+// test opts *into* the row and the item existing, and every test written before
+// this feature sees the menu it was written against.
+export const apps = vi.fn().mockResolvedValue({ chooser: false, types: {} })
+// Named `openApp` rather than `open`: `open` is a global in a DOM environment,
+// and the shadowing reads as a mistake at every call site.
+export const openApp = vi.fn().mockResolvedValue(undefined)
+export const openWith = vi.fn().mockResolvedValue(undefined)
 // A model's neighbours. Shared like `semanticSearch`, and left unconfigured by
 // default so a test that does not opt in fails loudly rather than silently
 // resolving `undefined`.
@@ -69,6 +78,9 @@ export function apiClientModule(): Record<string, unknown> {
       indexAvailability = indexAvailability
       semanticSearch = semanticSearch
       similar = similar
+      apps = apps
+      open = openApp
+      openWith = openWith
     },
   }
 }
@@ -185,6 +197,12 @@ async function mount(initial: DirListing): Promise<void> {
   listDir.mockResolvedValue(initial)
   getThumb.mockClear()
   putThumb.mockClear()
+  // Cleared before the render, so the count a test reads afterwards is the
+  // session's own one reading of the registry and nothing left over — which is
+  // exactly the count "raising a menu fires no fetch" is measured against.
+  apps.mockClear()
+  openApp.mockClear()
+  openWith.mockClear()
   // The persist chain decodes its PNG via createImageBitmap, which happy-dom
   // lacks — a resolving stub lets the close path run through to putThumb.
   vi.stubGlobal('createImageBitmap', () => Promise.resolve({ close() {} }))
@@ -218,6 +236,12 @@ export async function unmountApp(): Promise<void> {
   // Reset on teardown, not on mount: the index's availability is read during
   // mount, so a test has to be able to configure it *before* mounting.
   indexAvailability.mockResolvedValue({ state: 'absent' })
+  // Same rule as the index's, and for the same reason: the report is read
+  // during mount, so a test configures it *before* mounting and the default is
+  // restored on the way out.
+  apps.mockResolvedValue({ chooser: false, types: {} })
+  openApp.mockResolvedValue(undefined)
+  openWith.mockResolvedValue(undefined)
   semanticSearch.mockReset()
   similar.mockReset()
   renderThumbnail.mockClear()

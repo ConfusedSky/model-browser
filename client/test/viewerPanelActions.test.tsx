@@ -27,6 +27,7 @@ import { cameraForPose } from '../src/three/pose'
 import { RIG_VERSION } from '../src/three/renderer'
 import { getLightingMode } from '../src/viewer/lighting'
 import {
+  apps,
   click,
   container,
   dir,
@@ -148,6 +149,56 @@ describe('the info panel offers the entry actions', () => {
     const copy = document.querySelector<HTMLButtonElement>('button[aria-label="Copy path"]')!
     expect(copy.className).toContain('rounded-full')
     expect(copy.className).not.toBe(MENU_ITEM_CLASS)
+  })
+
+  it('withholds the launch actions, which the same surface’s menu still offers', async () => {
+    // Panel scope, deliberately (open-in-slicer L10): a one-shot launch is
+    // honest on every *menu* surface, this one included — it opens another
+    // application and races nothing here. The panel is the other question: it
+    // is the open view's own strip, describing the model being looked at, and
+    // a row of other applications' names in it would read as things to do to
+    // this view. So the exclusion is the panel's alone, and this pins that it
+    // is a *scope* and not an absence — the menu raised on the very same
+    // lightbox offers both.
+    await unmountApp()
+    apps.mockResolvedValue({
+      chooser: true,
+      types: {
+        'model/stl': {
+          default: { id: 'f3d.desktop', name: 'F3D' },
+          associated: [{ id: 'lycheeslicer.desktop', name: 'LycheeSlicer' }],
+        },
+      },
+    })
+    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models' })
+    await mountApp('/models', NESTED)
+    listDir.mockResolvedValue(NESTED)
+
+    await openLightbox('Alpha/found.stl')
+    expect(actions()).toEqual(['reveal', 'findSimilar', 'resetFraming'])
+    expect(actionRow()!.querySelectorAll('[data-app-id]')).toHaveLength(0)
+
+    // The menu on that same lightbox, which withholds a different set.
+    await act(async () => {
+      dialog()!.dispatchEvent(
+        new PointerEvent('pointerdown', {
+          bubbles: true,
+          button: 2,
+          buttons: 2,
+          clientX: 30,
+          clientY: 30,
+        }),
+      )
+      dialog()!.dispatchEvent(
+        new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 30, clientY: 30 }),
+      )
+    })
+    const raised = document.querySelector<HTMLElement>('[role="menu"]')!
+    expect(Array.from(raised.querySelectorAll('[data-app-id]')).map((b) => b.textContent)).toEqual([
+      'F3D',
+      'LycheeSlicer',
+    ])
+    expect(raised.querySelector('[data-command="openWith"]')).not.toBeNull()
   })
 
   it('withholds find similar when the index is not answering', async () => {

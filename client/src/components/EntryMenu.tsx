@@ -1,11 +1,15 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { OrbitAxis } from '../../../shared/types'
+import type { AppRef, OrbitAxis } from '../../../shared/types'
 import {
   AXIS_CAPTION_CLASS,
   AXIS_DIVIDER_CLASS,
   AXIS_GROUP_CLASS,
   AXIS_LETTERS,
   FLIP_TITLE,
+  OPEN_IN_CAPTION,
+  OPEN_IN_CAPTION_CLASS,
+  OPEN_IN_GROUP_CLASS,
+  OPEN_IN_PILL_CLASS,
   axisLetter,
   axisPillClass,
   axisWithLetter,
@@ -53,6 +57,23 @@ interface Props {
    * and the class strings so the two surfaces cannot drift apart.
    */
   axis?: { current: OrbitAxis; onChoose: (axis: OrbitAxis) => void } | null
+  /**
+   * The applications this model's type is associated with (open-in-slicer L3),
+   * default first, or `null` where the row is not offered — a container tile, a
+   * type the platform maps to nothing, or a surface that withholds the group.
+   * App decides that with `openInApps`; this component only draws it.
+   *
+   * `null` and not an empty array, and the distinction is the design's: a row
+   * with a caption and no pills is an affordance that does nothing, and this
+   * menu's rule is that what does not apply is *absent* rather than present and
+   * inert.
+   *
+   * A second inline group, for the first one's reason and drawn to match it —
+   * see the note on `axis`. What it costs the keyboard model is one more count
+   * and one more crossing rule, which is the whole argument for pills over a
+   * submenu holding for a group whose length the registry decides.
+   */
+  openIn?: { apps: AppRef[]; onChoose: (appId: string) => void } | null
   onChoose: (command: EntryCommand) => void
   onClose: () => void
 }
@@ -105,40 +126,65 @@ export function clampToViewport(
   }
 }
 
-export default function EntryMenu({ x, y, commands, axis = null, onChoose, onClose }: Props) {
+export default function EntryMenu({
+  x,
+  y,
+  commands,
+  axis = null,
+  openIn = null,
+  onChoose,
+  onClose,
+}: Props) {
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ left: x, top: y })
 
-  // Every focusable button, **axis pills first**, in DOM order — which is what
+  // Every focusable button, **pill rows first**, in DOM order — which is what
   // `focused` indexes and what the focus effect below reads back out of the DOM.
-  // Four of them when the group is offered: three letters and `flip`.
+  // The axis row is four when offered: three letters and `flip`. The open-in row
+  // is as long as the registry says, which is the generalization this arithmetic
+  // grew for (open-in-slicer L10): one group was a constant, two — the second of
+  // no fixed length — is a boundary between them.
   const axisCount = axis === null ? 0 : AXIS_LETTERS.length + 1
-  const count = axisCount + commands.length
-  // Entering the group lands on the **letter** in force — the analogue of the
-  // old land-on-the-marked-spindle rule now that the sign is a fourth button.
+  const openInCount = openIn === null ? 0 : openIn.apps.length
+  /** Where the pills end and the commands begin — the menu's one index seam. */
+  const pillCount = axisCount + openInCount
+  const count = pillCount + commands.length
+  // Entering the axis group lands on the **letter** in force — the analogue of
+  // the old land-on-the-marked-spindle rule now that the sign is a fourth
+  // button.
   const currentAxisRow =
     axis === null ? 0 : Math.max(0, AXIS_LETTERS.indexOf(axisLetter(axis.current)))
 
-  // The menu opens on its first *command*, not on the pill row above it: the
-  // commands are what the menu is for, and the group is one property of the
-  // model shown alongside them. `axisCount` is that index, and 0 when there is
-  // no group.
-  const [focused, setFocused] = useState(axisCount)
+  // The menu opens on its first *command*, not on the pill rows above it: the
+  // commands are what the menu is for, and the groups are properties of the
+  // model shown alongside them. `pillCount` is that index, and 0 when neither
+  // group is offered.
+  const [focused, setFocused] = useState(pillCount)
 
   /**
-   * One step of arrow navigation, with the group's one rule: **entering it lands
-   * on the letter already in force**, rather than on `X`. A choice starts from
-   * what is currently true — the same reason the picker in the lightbox opens
-   * showing the live axis filled. The other letters and `flip` are still reached
-   * by stepping on from there, in either direction.
+   * One step of arrow navigation, with a landing rule per group. Both say the
+   * same thing — **a group is entered where a choice sensibly starts** — and
+   * they differ only in where that is:
    *
-   * The group being above the commands rather than below them moves which
-   * crossing this rule catches — Up off the first command, and the wrap off the
-   * last — and changes nothing else.
+   * - the axis group is entered at the letter already in force, because a
+   *   choice starts from what is currently true (the picker in the lightbox
+   *   opens showing the live axis filled);
+   * - the open-in group is entered at its **first** pill, which is the default
+   *   application, because that is what "currently true" means for a type whose
+   *   applications are ordered by the registry's own preference.
+   *
+   * Within a group the arrows step one button at a time in either direction —
+   * the rules catch crossings only, which is why each tests where the step came
+   * *from* as well as where it lands. Both groups sitting above the commands
+   * decides which crossings those are: Up off the first command, and the wrap
+   * off the last.
    */
   function step(from: number, delta: number): number {
     const next = (from + delta + count) % count
     if (from >= axisCount && next < axisCount) return currentAxisRow
+    if ((from < axisCount || from >= pillCount) && next >= axisCount && next < pillCount) {
+      return axisCount
+    }
     return next
   }
 
@@ -152,10 +198,10 @@ export default function EntryMenu({ x, y, commands, axis = null, onChoose, onClo
   useLayoutEffect(() => {
     const el = ref.current
     if (el === null) return
-    setFocused(axisCount)
+    setFocused(pillCount)
     const r = el.getBoundingClientRect()
     setPos(clampToViewport(x, y, r.width, r.height, window.innerWidth, window.innerHeight))
-  }, [x, y, commands.length, axisCount])
+  }, [x, y, commands.length, axisCount, openInCount, pillCount])
 
   // Focus follows the arrow keys, so the menu owns the keyboard the moment it
   // is raised — which is also what makes its Escape the one that fires.
@@ -260,6 +306,32 @@ export default function EntryMenu({ x, y, commands, axis = null, onChoose, onClo
           >
             flip
           </button>
+        </div>
+      )}
+      {openIn !== null && (
+        // The applications the platform associates with this model's type,
+        // default first — below the axis row and above the commands (L10).
+        //
+        // `menuitem` and not `menuitemradio`: choosing one launches it, it does
+        // not mark the model as being that thing. The pills carry no
+        // `data-command` for the same honesty — they are not commands from the
+        // table, and a surface reading the menu's command rows must not find
+        // them there.
+        <div role="group" aria-label="Open in" className={`mx-2 mb-1 ${OPEN_IN_GROUP_CLASS}`}>
+          <span className={OPEN_IN_CAPTION_CLASS}>{OPEN_IN_CAPTION}</span>
+          {openIn.apps.map((app) => (
+            <button
+              key={app.id}
+              type="button"
+              role="menuitem"
+              data-app-id={app.id}
+              title={app.name}
+              onClick={() => openIn.onChoose(app.id)}
+              className={`${OPEN_IN_PILL_CLASS} ${FOCUS_RING}`}
+            >
+              {app.name}
+            </button>
+          ))}
         </div>
       )}
       {commands.map((c) => (

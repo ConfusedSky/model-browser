@@ -21,6 +21,12 @@ vi.mock('../src/api/client', () => ({
     // client/test/CLAUDE.md's note about spreading the real module.
     indexAvailability = vi.fn().mockResolvedValue({ state: 'absent' })
     semanticSearch = vi.fn()
+    // The session's one registry reading, which App does on mount: a machine
+    // with nothing associated and no chooser, so nothing about the persist
+    // path changes here.
+    apps = vi.fn().mockResolvedValue({ chooser: false, types: {} })
+    open = vi.fn()
+    openWith = vi.fn()
   },
 }))
 // Spread the real module and override only what needs WebGL. RIG_VERSION comes

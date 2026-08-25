@@ -28,6 +28,8 @@
  */
 import type * as THREE from 'three'
 import type {
+  AppRef,
+  AppsReport,
   CameraState,
   DirEntry,
   IndexAvailability,
@@ -53,18 +55,24 @@ export type CommandId =
   | 'findSimilar'
   | 'reRenderThumbnail'
   | 'resetFraming'
+  | 'openWith'
 
 /**
- * What a surface can withhold: every command, plus the menu's orbit-axis group
- * (6.7), which is not a command — it is the six spindles reachable through four
- * buttons, wearing one heading, and it has no row in the table below.
+ * What a surface can withhold: every command, plus the menu's two inline
+ * *groups* — the orbit-axis group (6.7) and the open-in group (open-in-slicer
+ * L3) — neither of which is a command. Each is several buttons wearing one
+ * heading, and neither has a row in the table below.
  *
- * It is in *this* union rather than in `CommandId` so that "one id per command"
- * stays true, and in the union at all so that the per-surface filter has one
- * vocabulary: `LIGHTBOX_MENU_EXCLUDES` says what the lightbox does not offer,
- * in one list, whether or not the thing it names has a body.
+ * They are in *this* union rather than in `CommandId` so that "one id per
+ * command" stays true, and in the union at all so that the per-surface filter
+ * has one vocabulary: `LIGHTBOX_MENU_EXCLUDES` says what the lightbox does not
+ * offer, in one list, whether or not the thing it names has a body.
+ *
+ * `openWith` is not here for the same reason: it *is* a command — one label,
+ * one body, one row — so it arrives through `CommandId` and needs no second
+ * spelling (open-in-slicer 3.5).
  */
-export type MenuItemId = CommandId | 'orbitAxis'
+export type MenuItemId = CommandId | 'orbitAxis' | 'openIn'
 
 /**
  * The per-surface half of a host: brief feedback, rendered however the surface
@@ -105,9 +113,15 @@ export interface ActionHost extends Feedback {
    * this very command is setting.
    */
   markOnArrival: (path: string) => void
-  /** Activate the entry exactly as its tile does — a container is browsed into,
-   *  a model is presented in the expanded viewer. `el` anchors the lightbox's
-   *  opening rect; surfaces without one pass null. */
+  /**
+   * Activate the entry exactly as its tile does — a container is browsed into,
+   * a model is presented in the expanded viewer. `el` anchors the lightbox's
+   * opening rect; surfaces without one pass null.
+   *
+   * Not to be confused with `api.open` below, which is a different verb on a
+   * different object: this one opens the entry *in this app*, that one opens
+   * the file in another application and never touches the view.
+   */
   open: (entry: DirEntry, el: HTMLElement | null) => void
   /**
    * The index's poses, from `state.result.poses` — the landed answer's own
@@ -118,11 +132,22 @@ export interface ActionHost extends Feedback {
    */
   poses: Record<string, IndexPose>
   /**
-   * The cache, through the one ApiClient (architecture D1). The thumbnail
-   * commands need both halves: the stored orientation to render from, and
-   * somewhere to put the pixels.
+   * The one ApiClient (architecture D1), narrowed to what these bodies ask of
+   * it. The thumbnail commands need both cache halves — the stored orientation
+   * to render from, and somewhere to put the pixels; the launch actions need
+   * the two handoffs, which return nothing and change nothing in this app.
    */
-  api: Pick<ApiClient, 'getThumb' | 'putThumb'>
+  api: Pick<ApiClient, 'getThumb' | 'putThumb' | 'open' | 'openWith'>
+  /**
+   * Read the platform registry again, into the session's held report — App's
+   * own setter, handed over the way `setThumb` is.
+   *
+   * Called by the *Open with…* body when the chooser's command completes,
+   * because that is exactly when the registry may have changed under us: the
+   * chooser's own set-default is the designed way to lead the pill row with a
+   * slicer (L4), and the next menu raised has to show what the user just did.
+   */
+  refreshApps: () => void
   /** Meshes come from the LRU the grid already loads through, so a re-render
    *  reuses bytes a thumbnail or an orbit has already paid for. */
   lru: Pick<MeshLru<THREE.Object3D>, 'acquire'>
@@ -137,15 +162,44 @@ export interface ActionHost extends Feedback {
   discardThumbFraming: (path: string, dropAxis: boolean) => void
 }
 
-/** What availability is decided from. `index` is the reducer's own cell — never
- *  a probe issued when a menu opens (D6/2.5). */
+/**
+ * What availability is decided from. Both cells are **state the app already
+ * holds** — never a probe issued when a menu opens (D6/2.5).
+ *
+ * `index` is the reducer's own cell. `apps` is the session's one reading of the
+ * platform registry (open-in-slicer L5): fetched once, refetched when an
+ * open-with completes, and `null` until the first answer lands or when it
+ * failed — which reads as "no applications", so the group and *Open with…* are
+ * absent rather than present and inert.
+ *
+ * A probe here would not merely be slow: the menu's command list is measured,
+ * clamped and focus-seeded from `commands.length` on mount
+ * (`EntryMenu.tsx`), so a late-arriving item would visibly re-position the menu
+ * and jump focus out from under the keyboard.
+ */
 export interface AvailabilityContext {
   index: IndexAvailability | null
+  apps: AppsReport | null
 }
 
 /** The failure sentence for a clipboard write that did not land. One string, so
  *  the menu and the info panel report the same thing (R1). */
 export const COPY_FAILED = 'Could not copy the path — the clipboard refused.'
+
+/**
+ * The failure sentence for a launch that did not happen — one string for both
+ * ways of asking for one (a pill from the open-in group, *Open with…*) and for
+ * every surface that offers them, exactly as `COPY_FAILED` is one string for
+ * the menu and the info panel (open-in-slicer L10).
+ *
+ * One sentence and no status branching, deliberately: the client cannot tell a
+ * missing launcher from a nonzero exit from a chooser that is not configured
+ * after all, and it does not need to — the action is withheld when no chooser
+ * is configured, so the only way that reply arrives is a report gone stale
+ * under the menu. What the user can act on is that the application did not
+ * open.
+ */
+export const LAUNCH_FAILED = 'Could not open the file in that application.'
 
 /**
  * Copy an entry's virtual path. **The** copy implementation — the menu reaches
@@ -588,6 +642,122 @@ export function setOrbitAxis(
   })
 }
 
+/*
+ * ── The open-in group's vocabulary ───────────────────────────────────────────
+ *
+ * The applications the platform associates with a model's type, offered as an
+ * **inline pill row** rather than a submenu — the axis group's precedent and
+ * the axis group's reason (`EntryMenu.tsx`'s note: focus here is one flat index
+ * over buttons, and a submenu would want open state, a clamp, focus handoff and
+ * a second Escape level for a row of two-to-four names).
+ *
+ * The rules and the class strings live **here** for the reason the axis row's
+ * do: one copy, imported, rather than two rows that drift into two different
+ * controls. The strings *are* the axis row's, aliased rather than re-typed —
+ * the two rows are one shape, and the 4.3 tuning pass has one place to change
+ * it (open-in-slicer L3, 4.3).
+ */
+
+/** The row the pills sit in — the axis row's shape, since it is the same row. */
+export const OPEN_IN_GROUP_CLASS = AXIS_GROUP_CLASS
+/** The `open in` caption: a `<span>`, so it stays out of any button index. */
+export const OPEN_IN_CAPTION_CLASS = AXIS_CAPTION_CLASS
+/**
+ * An application pill. One class for every pill, including the default's: which
+ * application leads is said by **order**, which is what the spec pins ("the
+ * default application first"). Marking it as well would state one fact twice,
+ * and a filled pill in the axis row means "this is what the model is", which is
+ * not what a launchable application is.
+ */
+export const OPEN_IN_PILL_CLASS = axisPillClass(false)
+/** What the caption says the row is for. */
+export const OPEN_IN_CAPTION = 'open in'
+
+/**
+ * The mime for an entry's model format — the client's half of L6's rule that
+ * the format detector *is* the mime table.
+ *
+ * `entry.format` is `modelFormat`'s own answer, arrived over the wire, and the
+ * three model mimes are that answer with one prefix (`stl` → `model/stl`). A
+ * literal map here would be a second table to drift; a template cannot drift.
+ * A non-model, or a model entry the server sent no format for, has no mime and
+ * therefore no applications — absence, not an inert row.
+ */
+function entryMime(entry: DirEntry): string | null {
+  if (entry.kind !== 'model' || entry.format === undefined) return null
+  return `model/${entry.format}`
+}
+
+/**
+ * The applications this entry's menu offers, in the order the row draws them:
+ * the default first, then the associated ones (spec R1).
+ *
+ * Empty is the answer for everything the group does not apply to — a container
+ * entry, a surface that withholds the group, a type the report knows nothing
+ * about, a report that has not landed or failed to. The caller renders no row
+ * for an empty answer rather than an empty one, which is the same
+ * absent-rather-than-inert rule the commands follow.
+ *
+ * **Deduplicated by id, never by name.** The default is its own source and need
+ * not appear among the associations (L1), but nothing in the report's shape
+ * forbids it — a configured associations override answers for itself — and the
+ * same application twice is a duplicate rather than a choice. Two *different*
+ * applications that happen to share a `Name=` do render as two pills, verbatim
+ * per L1: they are two entries, and the row says what the registry says.
+ */
+export function openInApps(
+  entry: DirEntry,
+  ctx: AvailabilityContext,
+  exclude: readonly MenuItemId[] = [],
+): AppRef[] {
+  if (exclude.includes('openIn')) return []
+  const mime = entryMime(entry)
+  const type = mime === null ? undefined : ctx.apps?.types[mime]
+  if (type === undefined) return []
+  const lead = type.default
+  if (lead === null) return type.associated
+  return [lead, ...type.associated.filter((a) => a.id !== lead.id)]
+}
+
+/**
+ * Open an entry's file in one named application — the body behind a pill press.
+ *
+ * A **one-shot** action in D1's full sense: it opens no viewer, loads no mesh,
+ * touches neither the thumbs map nor the render queue, and leaves no mode
+ * behind. Nothing is awaited on the app's side either — the request resolves
+ * when the platform's launch command succeeded (L8), and success is silent,
+ * because the evidence a user wants is the other application's window.
+ *
+ * Failure is the one sentence, through the host's own report — the same path a
+ * clipboard refusal takes, which is what "reported the way other entry actions
+ * report theirs" means structurally.
+ */
+export function openEntryIn(entry: DirEntry, host: ActionHost, appId: string): void {
+  void host.api.open(entry.path, appId).then(undefined, () => host.report(LAUNCH_FAILED))
+}
+
+/**
+ * Hand an entry's file to the platform's own chooser — *Open with…*'s body,
+ * exported beside the pill's for symmetry and tested as one.
+ *
+ * The refetch is the half that is not obvious, and it runs on **both**
+ * outcomes. The chooser is where a user sets a default (L4), and the registry
+ * it rewrites is what the next menu reads from the session's held report — so
+ * the report has to be re-read when the chooser is done with it. A failed
+ * command gets the same treatment because "failed" here can mean a second rofi
+ * refusing to start *after* the first one already set a default (L9): the
+ * client cannot tell, and re-reading is cheap while a stale row is a lie.
+ */
+export function openEntryWith(entry: DirEntry, host: ActionHost): void {
+  void host.api.openWith(entry.path).then(
+    () => host.refreshApps(),
+    () => {
+      host.report(LAUNCH_FAILED)
+      host.refreshApps()
+    },
+  )
+}
+
 export interface EntryCommand {
   readonly id: CommandId
   readonly label: string
@@ -615,19 +785,22 @@ export interface EntryCommand {
  * Find similar         —               —
  * Re-render thumbnail  —               —
  * Reset framing        —               —
+ * Open with…           —               —
  * Orbit axis ×6        —               —
+ * open in <app> …      —               —
  * ```
  *
- * The last row is the group, not a command, and has no entry in the table below
- * — `orbitAxisApplies` answers for it, under the same model-only rule and the
- * same per-surface filter (6.7).
+ * The last two rows are the groups, not commands, and have no entry in the
+ * table below — `orbitAxisApplies` and `openInApps` answer for them, under the
+ * same model-only rule and the same per-surface filter (6.7, L3).
  *
- * Find similar carries a second condition the table cannot show: the index is a
- * separate service that may not be running, and the action is absent when it is
- * unavailable. So the honest reading is three items on a container, five on a
- * model, and a sixth on a model when the index is answering — a model tile
- * without *find similar* is the degradation `semantic-search` designs for,
- * arriving here.
+ * Two rows carry a second condition the table cannot show, and both are the
+ * same shape: a facility outside this app may not be there. *Find similar* is
+ * absent when the index is not answering — the degradation `semantic-search`
+ * designs for, arriving here. *Open with…* is absent when the machine has no
+ * chooser configured (L4), which is every machine until someone configures one:
+ * the pill row still covers the associated applications, and an item that
+ * cannot hand off to anything is not offered inert.
  */
 export const ENTRY_COMMANDS: readonly EntryCommand[] = [
   {
@@ -684,6 +857,20 @@ export const ENTRY_COMMANDS: readonly EntryCommand[] = [
     // this model (D7). Re-rendering without giving it up would reproduce the
     // same badly framed picture, which is why this is a second command.
     run: (entry, host) => refreshThumbnail(entry, host, { discardFraming: true }),
+  },
+  {
+    id: 'openWith',
+    label: 'Open with…',
+    // Model-only, and offered *exactly* when the session's report says a
+    // chooser is configured — read from state, never probed (L5). The report
+    // being absent (not yet landed, or its read failed) reads as no chooser,
+    // which is the same absence a machine without one has.
+    applies: (entry, ctx) => entry.kind === 'model' && ctx.apps?.chooser === true,
+    // Last in the table, which puts it under the pill row it extends. Where it
+    // finally sits, and what it is finally called, belong to the naming pass
+    // (4.3): this menu now carries *Open*, *Reveal in app*, `open in <X>` and
+    // this — four flavors of open in one short menu, judged with the pixels.
+    run: (entry, host) => openEntryWith(entry, host),
   },
 ]
 
@@ -765,12 +952,25 @@ export const LIGHTBOX_MENU_EXCLUDES: readonly MenuItemId[] = [
  *   of the rule rather than a filter that does work — which is why it is stated:
  *   the two lists are read side by side, and a silence here would read as an
  *   oversight.
+ * - The **open-in group** and ***Open with…*** are out together, and this is
+ *   the one exclusion list they appear on (open-in-slicer L10). A one-shot
+ *   launch is honest on every *menu* surface — a tile, the orbit overlay, and
+ *   the lightbox's own menu — because it opens another application and changes
+ *   nothing here: no render is queued, no suspension is waited on, no closing
+ *   persist can race it. The panel is a different question from the menu on the
+ *   same surface: it is the open view's own strip of affordances, describing
+ *   the model being looked at, and a row of other applications' names in it
+ *   would read as things to do to *this* view. The panel is also where the
+ *   fewest affordances earn their place, which is why *copy path* is out of it
+ *   while the menu keeps it.
  */
 export const LIGHTBOX_PANEL_EXCLUDES: readonly MenuItemId[] = [
   'open',
   'copyPath',
   'reRenderThumbnail',
   'orbitAxis',
+  'openIn',
+  'openWith',
 ]
 
 /**

@@ -1,4 +1,5 @@
 import type {
+  AppsReport,
   CameraState,
   DirListing,
   IndexAvailability,
@@ -102,6 +103,29 @@ export interface ApiClient {
   ): Promise<SimilarListing>
   getThumb(path: string, mtime: number): Promise<ThumbResult>
   putThumb(save: ThumbSave): Promise<void>
+  /**
+   * What the platform registry reports for the model types this app handles,
+   * plus whether a chooser is configured — the whole report in one answer,
+   * taking no path (open-in-slicer L5).
+   *
+   * Fetched **once per session** by App and read from state when a menu opens;
+   * refetched when an open-with completes, since the chooser may have rewritten
+   * the registry. Never called from a menu-open path (D6/2.5).
+   */
+  apps(): Promise<AppsReport>
+  /** Open `path` in the application `appId` names — a one-shot launch, resolving
+   *  when the platform's launch command succeeded (L8). */
+  open(path: string, appId: string): Promise<void>
+  /**
+   * Hand `path` to the platform's configured chooser (L4).
+   *
+   * **No timeout and no `AbortSignal`**, unlike every other call here that takes
+   * one: this request spans a human decision at the chooser and is unbounded by
+   * construction (L9). Completion is when the registry may have changed, which
+   * is what the refetch keys on, and an abort would also have to mean "kill the
+   * chooser", which a dismissal and a kill must not both read as.
+   */
+  openWith(path: string): Promise<void>
 }
 
 export class HttpError extends Error {
@@ -119,6 +143,14 @@ async function jsonOrThrow<T>(res: Response): Promise<T> {
     throw new HttpError(res.status, body?.error ?? res.statusText)
   }
   return res.json() as Promise<T>
+}
+
+/** `jsonOrThrow`'s half for a call whose success carries nothing the caller
+ *  reads: the same `HttpError`, no body parsed on the way past. */
+async function okOrThrow(res: Response): Promise<void> {
+  if (res.ok) return
+  const body = (await res.json().catch(() => null)) as { error?: string } | null
+  throw new HttpError(res.status, body?.error ?? res.statusText)
 }
 
 function base64ToBlobUrl(b64: string): string {
@@ -225,6 +257,32 @@ export class HttpApiClient implements ApiClient {
       posed: body.posed,
       pngUrl: body.png !== undefined ? base64ToBlobUrl(body.png) : undefined,
     }
+  }
+
+  async apps(): Promise<AppsReport> {
+    const res = await this.fetchFn('/api/apps')
+    return jsonOrThrow<AppsReport>(res)
+  }
+
+  async open(path: string, appId: string): Promise<void> {
+    const res = await this.fetchFn('/api/open', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path, appId }),
+    })
+    await okOrThrow(res)
+  }
+
+  async openWith(path: string): Promise<void> {
+    // No `signal`, deliberately, and no timeout wrapped around it: the chooser
+    // blocks in its own UI until the user picks or dismisses (L9). The reply is
+    // the completion this client waits for.
+    const res = await this.fetchFn('/api/open-with', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path }),
+    })
+    await okOrThrow(res)
   }
 
   async putThumb(save: ThumbSave): Promise<void> {

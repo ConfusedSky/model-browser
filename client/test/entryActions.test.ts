@@ -34,8 +34,11 @@ const zip = (path: string): DirEntry => ({ ...dir(path), kind: 'zip' })
 // find similar is offered inside that collection, by the same `indexCovers` the
 // side panel reads.
 const READY: IndexAvailability = { state: 'ready', collectionRoot: '/m' }
+// `apps: null` is a machine whose registry has not answered — no chooser, so no
+// *Open with…*, which is what every case in this file is about. The launch
+// actions' own cases are in openInApps.test.tsx, where a report exists.
 const ids = (entry: DirEntry, index: IndexAvailability | null): string[] =>
-  commandsFor(entry, { index }).map((c) => c.id)
+  commandsFor(entry, { index, apps: null }).map((c) => c.id)
 
 describe('containingFolder', () => {
   it('is the parent directory of an ordinary path', () => {

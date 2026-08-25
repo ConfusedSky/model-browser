@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import type * as THREE from 'three'
-import type { DirEntry, IndexPose, LightingMode, OrbitAxis } from '../../shared/types'
+import type { AppsReport, DirEntry, IndexPose, LightingMode, OrbitAxis } from '../../shared/types'
 import { HttpApiClient, HttpError } from './api/client'
 import EntryMenu from './components/EntryMenu'
 import FindBar from './components/FindBar'
@@ -14,6 +14,8 @@ import {
   DEFAULT_ORBIT_AXIS,
   LIGHTBOX_MENU_EXCLUDES,
   LIGHTBOX_PANEL_EXCLUDES,
+  openEntryIn,
+  openInApps,
   orbitAxisApplies,
   resetFramingLive,
   runCommand,
@@ -342,6 +344,19 @@ export default function App() {
    * clipboard refusal belongs to no question. It is also not a third surface:
    * this is the app's one place for transient text, told what tone to draw.
    */
+  /**
+   * The platform's applications for the model types this app handles, and
+   * whether a chooser is configured — one reading per session (open-in-slicer
+   * L5), held here so the menu's open-in group and *Open with…* are decided
+   * from state and never from a probe fired when a menu opens (D6/2.5).
+   *
+   * Component-local, like `actionText` and `findText` and for their reason: the
+   * reducer holds what the *search machine* reads, and nothing in it reads a
+   * launcher registry. `null` until the first answer lands, and again if the
+   * read fails — which the actions read as "no applications, no chooser", so
+   * they are absent rather than present and inert.
+   */
+  const [apps, setApps] = useState<AppsReport | null>(null)
   const [actionText, setActionText] = useState<{ text: string; tone: 'ok' | 'error' } | null>(null)
   const actionTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => () => clearTimeout(actionTimerRef.current), [])
@@ -896,6 +911,33 @@ export default function App() {
     }
   }, [api, dispatch, state.view.path])
 
+  /**
+   * Read the platform registry into the session's held report — the whole of
+   * the app's I/O for the launch actions, in one place.
+   *
+   * A failed read is `null` and not a retained stale answer: the report decides
+   * whether actions are *offered*, and offering a launch into an application
+   * the registry no longer reports is worse than offering none.
+   */
+  const refreshApps = useCallback((): void => {
+    void api.apps().then(
+      (report) => setApps(report),
+      () => setApps(null),
+    )
+  }, [api])
+
+  // Once per session, and that is the whole schedule (L5) — the deliberate
+  // difference from the index reading above, which re-reads on every landing
+  // because a service that starts late must become usable without a reload.
+  // The registry has one other moment when it can change under us, and it is
+  // not a landing: a chooser the user just used. *Open with…*'s own body asks
+  // for the re-read then (`refreshApps` on the host), so this effect stays a
+  // mount effect rather than growing a dependency that would re-read on every
+  // navigation for nothing.
+  useEffect(() => {
+    refreshApps()
+  }, [refreshApps])
+
   // Ctrl-F / Cmd-F takes the browser's find, deliberately: the app's own is the
   // better one on this content — it matches the full relative path a tile is
   // only labeled by, it knows when it has hidden everything, and it does not
@@ -1219,6 +1261,9 @@ export default function App() {
       queue,
       setThumb,
       discardThumbFraming,
+      // The launch half: App holds the session's report, so App is who can read
+      // it again. The *when* belongs to the command — see `openEntryWith`.
+      refreshApps,
     }),
     [
       navigate,
@@ -1232,6 +1277,7 @@ export default function App() {
       queue,
       setThumb,
       discardThumbFraming,
+      refreshApps,
     ],
   )
 
@@ -1303,15 +1349,42 @@ export default function App() {
     },
     [closeMenu, actionHost, menuAxis],
   )
-  // D6's table, asked once per raised menu — never a probe of the index when a
-  // menu opens (2.5): `state.index` is the reducer's own cell, kept by identity
-  // when a poll says nothing new.
+  /**
+   * The menu's open-in group (L3): the applications the platform associates
+   * with this model's type, default first, or `null` where the row is not
+   * offered — a container, a type with no applications, a report that has not
+   * landed, or a surface that withholds it (the lightbox's *panel* does; its
+   * menu does not).
+   *
+   * `null` rather than `[]` for an empty answer: a caption with no pills under
+   * it is an affordance that does nothing, and this menu's rule is absence.
+   *
+   * Read from `apps`, which is state — raising this menu fires no request.
+   */
+  const menuOpenIn = useMemo(() => {
+    if (menu === null) return null
+    const list = openInApps(menu.entry, { index: state.index, apps }, menuExcludes(menu.surface))
+    return list.length === 0 ? null : list
+  }, [menu, state.index, apps])
+  /** A pill pressed: the shared body, through the one host — a launch and
+   *  nothing else, so unlike an axis pick there is no current value to hand it. */
+  const onChooseApp = useCallback(
+    (appId: string): void => {
+      const raised = menuRef.current
+      closeMenu()
+      if (raised !== null) openEntryIn(raised.entry, actionHost, appId)
+    },
+    [closeMenu, actionHost],
+  )
+  // D6's table, asked once per raised menu — never a probe when a menu opens
+  // (2.5), for either cell it reads: `state.index` is the reducer's own, and
+  // `apps` is the session's one reading of the registry (L5).
   const menuCommands = useMemo(
     () =>
       menu === null
         ? []
-        : commandsFor(menu.entry, { index: state.index }, menuExcludes(menu.surface)),
-    [menu, state.index],
+        : commandsFor(menu.entry, { index: state.index, apps }, menuExcludes(menu.surface)),
+    [menu, state.index, apps],
   )
 
   /**
@@ -1325,8 +1398,8 @@ export default function App() {
     () =>
       viewer === null
         ? []
-        : commandsFor(viewer.entry, { index: state.index }, LIGHTBOX_PANEL_EXCLUDES),
-    [viewer, state.index],
+        : commandsFor(viewer.entry, { index: state.index, apps }, LIGHTBOX_PANEL_EXCLUDES),
+    [viewer, state.index, apps],
   )
   /**
    * A panel affordance pressed: the shared body, through the one host — the
@@ -1828,6 +1901,7 @@ export default function App() {
           y={menu.y}
           commands={menuCommands}
           axis={menuAxis === null ? null : { current: menuAxis, onChoose: onChooseAxis }}
+          openIn={menuOpenIn === null ? null : { apps: menuOpenIn, onChoose: onChooseApp }}
           onChoose={onChooseCommand}
           onClose={closeMenu}
         />
