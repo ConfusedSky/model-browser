@@ -24,11 +24,16 @@ Spike evidence (2026-08-24, this machine — Arch, Hyprland/Wayland, Chrome):
   launch — accepted behavior, outside our control.
 - **Broken launchers are fixed at the desktop-entry layer**: Wine's visible Photon entry
   had no `%f`; a ten-line user-authored `photon-workshop.desktop` (in the user's
-  dotfiles) fixed launching. Its `MimeType=model/stl;` did **not** make it discoverable
-  through the cache-backed registry: the entry lives in a symlinked `dot_applications`
-  subdirectory that `update-desktop-database` does not index, so `mimeinfo.cache` (and
-  therefore `gio mime`) never lists it — verified 2026-08-24. Direct desktop-entry
-  reading sees it; the stale cache does not. This shapes the association builtin (L2).
+  dotfiles) fixed launching. Its `MimeType=model/stl;` was at first **not** visible
+  through the cache-backed registry — and the first-recorded explanation ("the cache
+  does not index symlinked subdirectories") proved wrong on re-test: rebuilt
+  explicitly, the cache indexes them fine. The true failure mode is **silent
+  staleness**: `mimeinfo.cache` is a build artifact, and nothing reruns
+  `update-desktop-database` for hand-placed entries, so a new `MimeType=` declaration
+  stays invisible indefinitely (verified both ways, 2026-08-24). Direct desktop-entry
+  reading is immune to that. This shapes the association builtin (L2). The user's
+  dotfiles installer now links entries singly and rebuilds the cache itself, but the
+  server cannot assume every machine does.
 - **Relative paths break single-instance forwards** (resolved against the running
   instance's cwd) — the server must always hand launchers absolute paths.
 
@@ -60,12 +65,15 @@ rejected: an app-owned slicer list with a settings UI and a config API — more 
 a second registry to keep in sync, and a "config that executes commands" trust
 question. The registry's state is whatever the user made it, recorded honestly: on the
 development machine as of 2026-08-24, `model/stl` defaults to `f3d.desktop` (a viewer,
-not a slicer), the associations are Wine shims plus f3d, and LycheeSlicer's own entry
-declares no model MimeType (`/usr/share/applications/lycheeslicer.desktop`) — so as
-shipped, no slicer leads the pill row until the user pins one. That is not a corner
-case; it is the launch experience, and the designed path out of it is the chooser loop
-(L4): Open with… → pick the slicer → its set-default re-orders the row. The 4.1 E2E
-exercises exactly that loop.
+not a slicer) and the associations are LycheeSlicer (via a user-level override entry
+in dotfiles that adds the model MimeTypes the stock
+`/usr/share/applications/lycheeslicer.desktop` omits), Photon Workshop
+(`photon-workshop.desktop`), a Wine shim, and f3d — so the pill row shows both
+slicers, led by the viewer, until the user pins a slicer as default. Both slicer
+associations exist because the user authored entries — the escape hatch working as
+designed, and also proof a fresh machine starts with less. The designed path to a
+slicer-led row is the chooser loop (L4): Open with… → pick the slicer → its
+set-default re-orders the row. The 4.2 E2E exercises exactly that loop.
 
 **L2 — Four platform operations, each configurable as an argv template.** Operations:
 `default(mime)`, `associations(mime)`, `launch(appId, file)`, `chooser(file)`.
@@ -76,8 +84,8 @@ with curly quotes and ids only (verified), unfit for a stable parse — instead 
 whose `MimeType=` declares the mime, found by reading the `applications/` dirs of
 `$XDG_DATA_HOME`/`$XDG_DATA_DIRS` directly (subdirectories included, ids formed
 `/`→`-` and resolved back `-`→`/`) — direct reading rather than `mimeinfo.cache`
-because the cache misses subdirectory entries (the `photon-workshop.desktop` finding,
-Context). The traversal MUST `stat()` through symlinks with a depth/cycle guard: the
+because the cache is silently stale for hand-placed entries: nothing reruns
+`update-desktop-database` for them (the `photon-workshop.desktop` finding, Context). The traversal MUST `stat()` through symlinks with a depth/cycle guard: the
 motivating entry's own directory (`dot_applications` → the dotfiles repo) is a
 symlink, for which `dirent.isDirectory()` is false (verified) — a naive
 `withFileTypes` descent skips exactly the entry this approach exists to find. The same reader resolves any id to its localized `Name=`, which is the

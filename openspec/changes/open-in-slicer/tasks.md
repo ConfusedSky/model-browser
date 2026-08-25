@@ -14,7 +14,7 @@
       traversal stats through symlinks with a depth/cycle guard —
       `dirent.isDirectory()` is false for the symlinked `dot_applications`,
       `-`→`/` id resolution, NoDisplay/Hidden filtered) — not `gio mime` (localized
-      prose) and not `mimeinfo.cache` (misses subdir entries); `launch` via
+      prose) and not `mimeinfo.cache` (silently stale for hand-placed entries); `launch` via
       `gtk-launch {appId} {file}` with `execFile`; `chooser` config-only (unavailable
       until configured)
 - [ ] 1.2 Config loading: `~/.config/model-browser/launch.json` (path via

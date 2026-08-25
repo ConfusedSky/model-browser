@@ -15,7 +15,7 @@ contracts and placeholder rules: `openspec/changes/open-in-slicer/design.md` (L2
 | Operation | Linux (builtin, verified) | Windows (sketch) | macOS (sketch) |
 |---|---|---|---|
 | `default(mime)` | `xdg-mime query default <mime>` (machine-readable; `gio mime` rejected — localized prose) | file-extension registry (`HKCU\...\FileExts`, `assoc`/`ftype`) | LaunchServices; no stock CLI — third-party `duti` or a tiny helper |
-| `associations(mime)` | desktop-entry reader: mimeapps ids ∪ `MimeType=` declarations, read direct (mimeinfo.cache misses symlinked subdirs; stat through symlinks) | `OpenWithList`/`OpenWithProgids` registry keys | LaunchServices (`LSCopyApplicationURLsForContentType`) via helper |
+| `associations(mime)` | desktop-entry reader: mimeapps ids ∪ `MimeType=` declarations, read direct (mimeinfo.cache is silently stale for hand-placed entries; stat through symlinks) | `OpenWithList`/`OpenWithProgids` registry keys | LaunchServices (`LSCopyApplicationURLsForContentType`) via helper |
 | `launch(appId, file)` | `gtk-launch <id> <file>` | `cmd /c start` or direct exe path; ShellExecute under Electron | `open -a <App> <file>` — the easy one |
 | `chooser(file)` | user-configured only (e.g. a rofi script); no builtin | `rundll32 shell32.dll,OpenAs_RunDLL <file>` — the native Open-With dialog | no stock chooser; likely stays unconfigured (feature absent by design) |
 
