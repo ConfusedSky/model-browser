@@ -70,6 +70,17 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
 - Scene teardown (renderThumbnail's finally, ViewerSession.close) disposes every
   DirectionalLight — shadow maps are VRAM; the model is LRU-owned and never disposed there
 
+## OS-specific surface
+
+- docs/platform-surface.md catalogs everything OS-specific: the per-OS operations
+  (launch/default/associations/chooser), latent POSIX assumptions (paths, XDG dirs,
+  session env), and the deferred Electron drag-out. Only Linux is implemented;
+  Windows/macOS columns are unverified sketches.
+- A change that adds OS-specific behavior — spawning, file-type registries, per-OS
+  paths/dirs, display-server dependencies — adds or updates its row there as part of
+  the change (e.g. a new launch operation adds a table row; a new `~/.config` file
+  extends the user-dirs bullet)
+
 ## Testing
 
 - Suite-specific conventions live with the tests: client/test/CLAUDE.md, server/test/CLAUDE.md
