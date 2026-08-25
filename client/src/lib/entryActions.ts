@@ -658,10 +658,25 @@ export function setOrbitAxis(
  * it (open-in-slicer L3, 4.3).
  */
 
-/** The row the pills sit in — the axis row's shape, since it is the same row. */
-export const OPEN_IN_GROUP_CLASS = AXIS_GROUP_CLASS
-/** The `open in` caption: a `<span>`, so it stays out of any button index. */
-export const OPEN_IN_CAPTION_CLASS = AXIS_CAPTION_CLASS
+/**
+ * The row the pills sit in. **Not** the axis row's class, and this is the one
+ * place the two rows are allowed to differ: the axis row is five tiny children
+ * of fixed width and always fits on one line, while this row holds application
+ * names the registry chooses the length of — "Photon Workshop" beside
+ * "LycheeSlicer" overruns a 288px panel column on its own. So it wraps, which
+ * is what makes the pills stack when the surface is narrow *(user feedback,
+ * 2026-08-25, 4.3)*, and a wrapped `rounded-full` reads as a blob rather than a
+ * pill, hence the softer radius.
+ */
+export const OPEN_IN_GROUP_CLASS =
+  'flex flex-wrap items-center gap-1 rounded-2xl bg-zinc-800/80 p-1 text-xs'
+/**
+ * The `open in` caption: a `<span>`, so it stays out of any button index — and
+ * `whitespace-nowrap`, because two words in a squeezed flex row break as "open"
+ * over "in", which reads as two captions (observed 2026-08-25; `axis` is one
+ * word and never showed it).
+ */
+export const OPEN_IN_CAPTION_CLASS = `${AXIS_CAPTION_CLASS} whitespace-nowrap`
 /**
  * An application pill. One class for every pill, including the default's: which
  * application leads is said by **order**, which is what the spec pins ("the
@@ -669,7 +684,7 @@ export const OPEN_IN_CAPTION_CLASS = AXIS_CAPTION_CLASS
  * and a filled pill in the axis row means "this is what the model is", which is
  * not what a launchable application is.
  */
-export const OPEN_IN_PILL_CLASS = axisPillClass(false)
+export const OPEN_IN_PILL_CLASS = `${axisPillClass(false)} max-w-full truncate`
 /** What the caption says the row is for. */
 export const OPEN_IN_CAPTION = 'open in'
 
