@@ -194,3 +194,27 @@ export interface IndexAvailability {
 export interface ApiError {
   error: string
 }
+
+/** One launchable application, as the platform registry names it. */
+export interface AppRef {
+  /** Desktop-file id (with its `.desktop` suffix), e.g. `lycheeslicer.desktop`. */
+  id: string
+  /** Human-readable name from the entry itself — ids never render (app-launch L2). */
+  name: string
+}
+
+/** A model type's registry entry: the default is its own source and need not
+ *  appear among the associations (app-launch spec). */
+export interface TypeApps {
+  default: AppRef | null
+  associated: AppRef[]
+}
+
+/** `GET /api/apps` — fetched once per session, refetched after an open-with
+ *  completes; never probed when a menu opens (open-in-slicer L5). */
+export interface AppsReport {
+  /** Whether a chooser command is configured server-side — gates "Open with…". */
+  chooser: boolean
+  /** Keyed by mime, only the model types the app handles (open-in-slicer L6). */
+  types: Record<string, TypeApps>
+}
