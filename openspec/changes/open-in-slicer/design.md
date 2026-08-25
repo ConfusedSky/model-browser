@@ -238,6 +238,34 @@ same way" is structural. Naming needs the 4.2 pass: the menu already carries "Op
 makes four flavors of open/app in one short menu — the labels are a tuning decision,
 judged with the pixels.
 
+**Apply-time adjudications** (coordinator rulings on worker check-ins, recorded so the
+next contradiction is recognizable):
+
+- *mimeapps semantics*: first decision per id wins scanning locations in precedence
+  order; within one file, Removed beats Added (the user's explicit removal is the
+  safer read). Association ordering: mimeapps-added ids in precedence/file order,
+  then MimeType-declaring entries not already present, sorted by name.
+- *Dashed-id resolution*: candidates are CUMULATIVE left-to-right dash→`/`
+  substitutions (first dash; first+second; …) after the literal try — single-swap
+  candidates cannot reach `wine/Programs/AnycubicPhotonWorkshop/…`, which needs three
+  simultaneous replacements. Scanned entries resolve via the scan's own id map first.
+- *Wire shapes beyond shared/types*: `POST /api/open` and `/api/open-with` succeed
+  with `200 {ok:true}` (the PUT /api/thumb precedent); validation failures mirror
+  `/api/file` (400/404, same wording); a launch command that fails is **502** (the
+  indexErrorReply precedent — a downstream process failing, not our bug); chooser
+  unconfigured is **503 `{error, unavailable:true}`** (the semantic-status precedent:
+  availability the UI renders, not an error). The client treats any non-ok launch
+  reply as the one shared failure message; it never needs to distinguish 503, since
+  the action is hidden when unconfigured and a 503 can only arrive on a stale-report
+  race.
+- *Client-abort coverage*: asserted structurally (chooser spawn options carry
+  `detached:true` and no signal; the handler never reads `c.req.raw.signal`) rather
+  than via a real listening server — `app.request()` has no connection to abort, and
+  a socket-level test buys flake, not confidence.
+- *`createApp` grows one optional trailing `launcher` param* defaulting to the real
+  factory — additive, no existing call site changes; config is read eagerly at
+  construction ("read at startup").
+
 ## Risks / Trade-offs
 
 - [OS registry coupling] App behavior depends on machine state outside the repo →
