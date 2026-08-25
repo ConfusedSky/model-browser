@@ -187,19 +187,28 @@ export interface AvailabilityContext {
 export const COPY_FAILED = 'Could not copy the path — the clipboard refused.'
 
 /**
- * The failure sentence for a launch that did not happen — one string for both
- * ways of asking for one (a pill from the open-in group, *Open with…*) and for
- * every surface that offers them, exactly as `COPY_FAILED` is one string for
- * the menu and the info panel (open-in-slicer L10).
+ * The failure sentence for a launch into a **named** application — the pill the
+ * user pressed — on every surface that offers one, exactly as `COPY_FAILED` is
+ * one string for the menu and the info panel (open-in-slicer L10).
  *
- * One sentence and no status branching, deliberately: the client cannot tell a
- * missing launcher from a nonzero exit from a chooser that is not configured
- * after all, and it does not need to — the action is withheld when no chooser
- * is configured, so the only way that reply arrives is a report gone stale
- * under the menu. What the user can act on is that the application did not
- * open.
+ * No status branching behind it, deliberately: the client cannot tell a missing
+ * launcher from a nonzero exit and does not need to. What the user can act on
+ * is that the application did not open.
  */
 export const LAUNCH_FAILED = 'Could not open the file in that application.'
+
+/**
+ * The failure sentence for *Open with…*, which is a different failure from the
+ * one above and now says so *(user feedback 2026-08-25, 4.3)*: no application
+ * was ever chosen, so "that application" named something the user had not
+ * picked. What failed is the chooser — it did not start, or the machine turned
+ * out to have none configured after the report was read.
+ *
+ * Two sentences rather than one, and this does not reopen the no-branching
+ * rule: the split is by **which action the user invoked**, which the client
+ * knows for certain, not by a status code, which it still never reads.
+ */
+export const CHOOSER_FAILED = 'Could not open the chooser to pick an application.'
 
 /**
  * Copy an entry's virtual path. **The** copy implementation — the menu reaches
@@ -776,7 +785,7 @@ export function openEntryWith(entry: DirEntry, host: ActionHost): void {
   void host.api.openWith(entry.path).then(
     () => host.refreshApps(),
     () => {
-      host.report(LAUNCH_FAILED)
+      host.report(CHOOSER_FAILED)
       host.refreshApps()
     },
   )

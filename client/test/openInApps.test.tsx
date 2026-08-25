@@ -31,7 +31,7 @@ import {
   tiles,
   unmountApp,
 } from './appHarness'
-import { LAUNCH_FAILED, OPEN_IN_PILL_CLASS } from '../src/lib/entryActions'
+import { CHOOSER_FAILED, LAUNCH_FAILED, OPEN_IN_PILL_CLASS } from '../src/lib/entryActions'
 
 vi.mock('../src/api/client', async () => (await import('./appHarness')).apiClientModule())
 vi.mock('../src/three/renderer', async (importOriginal) =>
@@ -335,7 +335,7 @@ describe('what a launch does, and what it does not', () => {
     expect(pathError()).toBe(LAUNCH_FAILED)
   })
 
-  it('reports a failed chooser command the same way', async () => {
+  it('reports a failed chooser as its own failure, naming no application', async () => {
     apps.mockResolvedValue(REPORT)
     await mountApp('/models', NESTED)
     await settle()
@@ -346,7 +346,10 @@ describe('what a launch does, and what it does not', () => {
     await settle()
 
     expect(openWith).toHaveBeenCalledWith('/models/widget.stl')
-    expect(pathError()).toBe(LAUNCH_FAILED)
+    // Not the pill's sentence: nothing was chosen, so "that application" would
+    // name something the user never picked (4.3).
+    expect(pathError()).toBe(CHOOSER_FAILED)
+    expect(pathError()).not.toBe(LAUNCH_FAILED)
   })
 })
 

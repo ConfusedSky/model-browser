@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppsReport, DirEntry, DirListing, IndexPose } from '../../shared/types'
 import { MENU_ITEM_CLASS } from '../src/components/EntryMenu'
 import {
+  CHOOSER_FAILED,
   LAUNCH_FAILED,
   OPEN_IN_PILL_CLASS,
   RESET_FAILED,
@@ -40,6 +41,7 @@ import {
   mountApp,
   mountAppAtCurrentUrl,
   openApp,
+  openWith,
   putThumb,
   renderThumbnail,
   settle,
@@ -304,7 +306,7 @@ describe('the panel’s launch actions (the 4.3 reversal, open-in-slicer L10)', 
     expect(pathError()).toBeNull()
   })
 
-  it('reports a failed launch with the one shared sentence', async () => {
+  it('reports a failed launch with the sentence for a named application', async () => {
     await remountWithApps(REPORT)
     await openLightbox('Alpha/found.stl')
 
@@ -313,6 +315,20 @@ describe('the panel’s launch actions (the 4.3 reversal, open-in-slicer L10)', 
     await settle()
 
     expect(pathError()).toBe(LAUNCH_FAILED)
+  })
+
+  it('reports a failed chooser with its own sentence, which names no application', async () => {
+    await remountWithApps(REPORT)
+    await openLightbox('Alpha/found.stl')
+
+    openWith.mockRejectedValueOnce(new Error('rofi is already running'))
+    await click(actionRow()!.querySelector<HTMLButtonElement>('[data-command="openWith"]')!)
+    await settle()
+
+    // The panel reaches the same bodies the menu does, so it inherits the split
+    // too: nothing was chosen here, and the sentence must not say otherwise.
+    expect(pathError()).toBe(CHOOSER_FAILED)
+    expect(pathError()).not.toBe(LAUNCH_FAILED)
   })
 })
 
