@@ -12,6 +12,12 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   — it answers `/status` at once with `ready:false` and 503s queries for ~16s
   while SigLIP loads, so a connection refusal means not started, not warming
 - `bun run test` / `bun run typecheck` - vitest + tsc across workspaces
+- Launch config (open-in-slicer): `~/.config/model-browser/launch.json`, path
+  overridable via `MODEL_BROWSER_LAUNCH_CONFIG` — argv-array templates for the four
+  platform operations; the chooser op has no builtin, so "Open with…" is absent until
+  configured (this machine: chooser → the dotfiles rofi `open-with` script). Read once
+  at server start — restart after editing. `/api/open` launches GUI apps, so the
+  server needs the user session env (a terminal-started `bun run dev` has it)
 - `scripts/spec-diff.sh [change | capability change [requirement]]` - diff delta specs
   vs main specs (no args = all active changes; prints `new spec <path>` for new capabilities)
 - `openspec validate <name>` takes the change name positionally (`--change` works on
