@@ -34,7 +34,8 @@ Spike evidence (2026-08-24, this machine — Arch, Hyprland/Wayland, Chrome):
 **Goals:**
 
 - One-click "open in <slicer>" from the entry menu, default first, for model entries.
-- "Open with…" for one-off opens in any installed application.
+- "Open with…" delegating to the OS's own configured chooser for opens in any
+  installed application.
 - The OS registry (defaults, associations, desktop entries) is the source of truth —
   no app-owned slicer list, no settings UI.
 - Platform operations behind configurable command templates so other distributions and,
@@ -58,18 +59,18 @@ installed slicer whose desktop entry declares no model MimeType (LycheeSlicer's
 declares none) is not associated until pinned once or given an entry — the
 `photon-workshop.desktop` precedent shows the fix is ten lines in user space.
 
-**L2 — Four platform operations, each overridable by an argv template.** Operations:
-`default(mime)`, `associations(mime)`, `listApps()`, `launch(appId, file)`. Built-in
+**L2 — Four platform operations, each configurable as an argv template.** Operations:
+`default(mime)`, `associations(mime)`, `launch(appId, file)`, `chooser(file)`. Built-in
 implementations: `gio mime {mime}` parsed for default/associations;
-`gtk-launch {appId} {file}` for launch; `listApps` is a built-in scan of
-`$XDG_DATA_HOME`/`$XDG_DATA_DIRS` `applications/` dirs (subdirectories included,
-desktop-file ids formed with `/`→`-`, `NoDisplay`/`Hidden` filtered, user dirs winning
-dedup) — there is no stock CLI that lists all applications. Server config may override
-any operation with an **argv array** template using `{mime}`, `{appId}`, `{file}`
-placeholders, substituted per-element and spawned via `execFile` — never a shell string,
-so no quoting/injection surface. Overrides must produce the documented line-oriented
-output (`appId<TAB>name` per line; first line of `default` is the default's id).
-Config lives at `~/.config/model-browser/launch.json` (path overridable via
+`gtk-launch {appId} {file}` via `execFile` for launch. `chooser` has **no builtin** —
+no stock freedesktop CLI pops an application chooser — so it exists only when
+configured, and the feature depending on it is absent otherwise (L4). Server config may
+supply or override any operation with an **argv array** template using `{mime}`,
+`{appId}`, `{file}` placeholders, substituted per-element and spawned via `execFile` —
+never a shell string, so no quoting/injection surface. Overrides of the query
+operations must produce the documented line-oriented output (`appId<TAB>name` per
+line; first line of `default` is the default's id). Config lives at
+`~/.config/model-browser/launch.json` (path overridable via
 `MODEL_BROWSER_LAUNCH_CONFIG`), read at startup, absent file = builtins. Templates are
 authored by the machine's user in a local file; they are trusted config, and nothing
 network-supplied ever reaches them.
@@ -81,22 +82,32 @@ group renders as `open in  <Default> <Other> …` alongside the axis group, appl
 to model entries, and participates in the flat keyboard index. Revisit a real submenu
 only if the associated-app list outgrows a pill row in practice.
 
-**L4 — "Open with…" is an in-app chooser fed by `listApps`.** A menu command (a normal
-`EntryCommand`) opening a modal list — name + filter input, keyboard operable,
-Escape-dismissable following the menu's own conventions — of every installed
-application, launching the pick once, remembering nothing. Alternative rejected:
-invoking an OS chooser (rofi et al.) — machine-specific and unavailable to the
-server's trust model. Deliberately absent: a "set as default" action in the chooser;
-defaults are OS-level (L1), and the chooser must not silently diverge the OS registry
-from what the user's own tools maintain.
+**L4 — "Open with…" delegates to the OS's configured chooser, absent when none.** A
+menu command (a normal `EntryCommand`) that asks the server to invoke the `chooser`
+operation (L2) with the entry's file — behind the same validation, zip extraction, and
+absolutization pipeline as launch. The chooser is whatever the user configured (here:
+the dotfiles rofi `open-with` script — icons, filtering, and its Ctrl+Enter
+set-default), so the app reuses the machine's one chooser instead of maintaining a
+parallel one, and anything the chooser does to the OS registry — setting a default
+included — is the OS layer acting on itself, legitimately re-ordering the pill row for
+the next menu. With no chooser configured the action is **absent rather than present
+and inert**, per entry-actions' own philosophy; the pill row still covers the
+associated applications. Alternatives rejected: an in-app modal fed by an
+installed-applications scan (an earlier draft of this design) — it rebuilt an OS
+surface inside the app in direct tension with L1, required the hairiest builtin (an
+XDG desktop-entry scanner), and had to forbid set-default to avoid diverging the
+registry; and keeping that modal as a fallback for unconfigured machines — all of the
+code on the least-exercised path.
 
 **L5 — Server endpoints.** `GET /api/apps?path=<vpath>` resolves the entry's mime (L6)
-and returns `{mime, default, associated, all}` (each app as `{id, name}`);
-`POST /api/open` takes `{path, appId}`, validates the path exactly as `/api/file` does
-(absolute, `parseVPath`, existence), resolves zip entries per L7, absolutizes, and runs
-the launch operation. The client never sends commands, only `{path, appId}`; unknown
-`appId`s are passed to the launcher, whose failure is reported (L8). All client I/O via
-`ApiClient` (global D1).
+and returns `{mime, default, associated, chooser}` — each app as `{id, name}`, and
+`chooser` a boolean saying whether the chooser operation is configured, which is what
+the client keys the Open with… action's presence on. `POST /api/open` takes
+`{path, appId}`; `POST /api/open-with` takes `{path}` and runs the chooser operation
+(reporting unavailable when unconfigured). Both validate the path exactly as
+`/api/file` does (absolute, `parseVPath`, existence), resolve zip entries per L7, and
+absolutize. The client never sends commands; unknown `appId`s are passed to the
+launcher, whose failure is reported (L8). All client I/O via `ApiClient` (global D1).
 
 **L6 — Mime resolution is a fixed extension table in the server.** `.stl → model/stl`,
 `.3mf → model/3mf`, `.obj → model/obj` — the formats the app already parses. No
@@ -115,7 +126,9 @@ omission.
 success; nonzero/spawn error → the menu reports failure the way other entry actions
 report theirs. Honest limitation, recorded: `wine start` exits 0 once it hands off, so
 a Wine app that then fails to open the file reads as success — the server cannot see
-deeper, and pretending otherwise would be false precision. The server also requires the
+deeper, and pretending otherwise would be false precision. The chooser operation reads
+the same way: its command completing is success, and a chooser the user dismissed
+without picking is a success in which nothing happened — not an error to report. The server also requires the
 user session environment (DISPLAY/WAYLAND_DISPLAY, PATH) to launch GUI apps — true for
 a dev server started from a terminal; noted as an operational constraint, not
 bootstrapped.

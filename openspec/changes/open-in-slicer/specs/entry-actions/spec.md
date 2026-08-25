@@ -39,30 +39,34 @@ application did afterwards.
 - **THEN** the failure is reported the way other entry actions report theirs, and
   nothing else changes
 
-### Requirement: Open with… opens a model entry in any installed application
-The client SHALL offer on model entries an "Open with…" action that presents a chooser
-listing every installed application — not only those associated with the entry's type —
-with a text filter to narrow the list, operable from the keyboard, and dismissable with
-Escape without disturbing what it was raised over. Choosing an application SHALL open
-the entry's file in it once: the choice SHALL NOT be remembered, and SHALL NOT change
-the platform's default or associations for the type — defaults are configured at the
-platform level, not from this chooser.
+### Requirement: Open with… hands a model entry to the platform's configured chooser
+The client SHALL offer on model entries an "Open with…" action that invokes the
+platform's configured application chooser with the entry's file — the machine's own
+chooser, not a list of the client's making — so that opening in an application not
+associated with the type, and anything else that chooser can do, happens in the one
+chooser the user maintains. The action SHALL be offered exactly when a chooser is
+configured, and absent otherwise — absent rather than present and inert — with the
+open-in group still covering the associated applications. Invoking the action is a
+one-shot handoff: what the chooser then does, including changing the platform's
+default or associations for the type, is platform behavior, and a menu raised
+afterwards SHALL reflect the registry as it then stands. A chooser command that fails
+SHALL be reported the way other entry actions report theirs; a chooser the user
+dismissed without choosing is not a failure.
 
-#### Scenario: A one-off open changes no defaults
-- **WHEN** the user opens a model via Open with… in an application that is not the
-  type's default
-- **THEN** the file opens in that application, and the open-in group on a later menu
-  is unchanged — same default, same associations
+#### Scenario: Open with… hands off to the platform chooser
+- **WHEN** a chooser is configured and the user invokes Open with… on a model entry
+- **THEN** the platform chooser is invoked with the entry's file, and no chooser
+  surface of the client's own appears
 
-#### Scenario: The filter narrows the list
-- **WHEN** the user types in the chooser's filter
-- **THEN** the list shows only applications whose names match, and the keyboard can
-  select among what remains
+#### Scenario: Absent when no chooser is configured
+- **WHEN** no chooser is configured and the user raises the menu on a model entry
+- **THEN** Open with… is not offered, and the open-in group is unaffected
 
-#### Scenario: Escape dismisses only the chooser
-- **WHEN** the user presses Escape with the chooser open
-- **THEN** the chooser closes and the surface it was raised from is undisturbed
+#### Scenario: A default set in the chooser reaches the next menu
+- **WHEN** the user, inside the platform chooser, sets a different default for the
+  entry's type, and later raises the menu on an entry of that type
+- **THEN** the open-in group leads with the new default
 
-#### Scenario: A failed launch is reported from the chooser
-- **WHEN** the chosen application's launch command fails
+#### Scenario: A failed chooser command is reported
+- **WHEN** the chooser command fails to run
 - **THEN** the failure is reported the way other entry actions report theirs
