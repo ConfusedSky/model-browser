@@ -241,9 +241,16 @@ better read: the expanded viewer is exactly where someone decides a model is the
 to print, and the panel is the surface they look at while deciding — the menu having
 carried the actions all along made them merely undiscoverable, not present. The panel
 therefore grows the pill row above its action strip and takes `openWith` as a strip
-row. Note this returns the entry-actions requirement to the broad "every surface"
-wording it had before round three narrowed it to menus to match the code — the code
-was the thing that was wrong. Failure reporting
+row. The entry-actions requirement returns to the broad "every surface" wording it
+carried at `ff6027e`; the "context-menu surface" qualifier was added at `241d548`,
+in the *first* review fold, as a planning decision — the reviewer's finding offered
+"narrow the spec sentence to the menu, or add panel work to tasks" and this design
+chose to narrow. No code existed then (`cac097a`, the first line of it, came five
+commits later), so the code did not drive the spec: the spec decided the exclusion
+and the code implemented it faithfully. What is being reversed here is therefore
+this design's own call, not a drift between the two. *(This paragraph previously
+said "round three narrowed it to match the code"; both halves were false, caught in
+review 2026-08-25 and corrected against `git log --follow`.)* Failure reporting
 uses a shared constant beside `COPY_FAILED` (entryActions.ts:148) so "reported the
 same way" is structural.
 

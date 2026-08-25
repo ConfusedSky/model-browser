@@ -3,8 +3,8 @@
 ## ADDED Requirements
 
 ### Requirement: A model entry offers its associated applications as open-in choices
-The client SHALL offer, on every context-menu surface that hosts a model entry's
-actions — its menus and the expanded viewer's information panel alike — the
+The client SHALL offer, on every surface that hosts a model entry's actions — its
+menus and the expanded viewer's information panel alike — the
 applications the platform associates with the entry's model type, presented as an
 inline group of choices — the default application first — rather than as a submenu,
 matching the menu's existing inline-group treatment of the orbit axis. What the group
