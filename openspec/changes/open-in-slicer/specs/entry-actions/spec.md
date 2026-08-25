@@ -3,13 +3,17 @@
 ## ADDED Requirements
 
 ### Requirement: A model entry offers its associated applications as open-in choices
-The client SHALL offer, on every surface that hosts a model entry's actions, the
+The client SHALL offer, on every context-menu surface that hosts a model entry's
+actions — the expanded viewer's information panel deliberately excluded — the
 applications the platform associates with the entry's model type, presented as an
 inline group of choices — the default application first — rather than as a submenu,
-matching the menu's existing inline-group treatment of the orbit axis. Choosing an
-application SHALL open the entry's file in that application as a one-shot action: it
-completes on its own, loads no model, opens no viewer, and leaves no mode behind.
-The group SHALL be reachable and operable from the keyboard with the rest of the menu.
+matching the menu's existing inline-group treatment of the orbit axis. What the group
+offers SHALL come from a session-held report, refreshed when the platform chooser
+completes — never a probe issued when a menu opens — so the menu's contents are known
+the moment it is raised. Choosing an application SHALL open the entry's file in that
+application as a one-shot action: it completes on its own, loads no model, opens no
+viewer, and leaves no mode behind. The group SHALL be reachable and operable from the
+keyboard with the rest of the menu.
 
 The group follows from what the entry is: it SHALL be absent on entries that are not
 models, and absent when the entry's type maps to no applications — absent rather than
@@ -44,9 +48,12 @@ The client SHALL offer on model entries an "Open with…" action that invokes th
 platform's configured application chooser with the entry's file — the machine's own
 chooser, not a list of the client's making — so that opening in an application not
 associated with the type, and anything else that chooser can do, happens in the one
-chooser the user maintains. The action SHALL be offered exactly when a chooser is
+chooser the user maintains. The action lives on the context-menu surfaces, not the
+expanded viewer's information panel, and SHALL be offered exactly when a chooser is
 configured, and absent otherwise — absent rather than present and inert — with the
-open-in group still covering the associated applications. Invoking the action is a
+open-in group still covering the associated applications. Whether a chooser is
+configured is known from the same session-held report the open-in group reads, not
+probed when a menu opens. Invoking the action is a
 one-shot handoff: what the chooser then does, including changing the platform's
 default or associations for the type, is platform behavior, and a menu raised
 afterwards SHALL reflect the registry as it then stands. A chooser command that fails

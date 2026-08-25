@@ -2,49 +2,52 @@
 
 ## ADDED Requirements
 
-### Requirement: The server reports the applications for a model entry's type
-The server SHALL expose an endpoint that, given a listing entry's path (virtual zip
-paths included), resolves the entry's model type and returns the platform's default
-application for it and the further associated applications — each application as an
-identifier plus a human-readable name, with the default distinguished — together with
-whether a chooser is configured, so the client can offer or withhold its
-chooser-dependent action. The type SHALL be resolved from the entry's file extension
-against a fixed table of the model formats the application handles — never by content
-sniffing, which misreads binary STL and cannot see inside archives. A path whose
-extension is outside the table SHALL yield empty default and associations; the
-chooser-configured indication does not depend on the type. The path SHALL be validated
-as the file endpoint validates its paths.
+### Requirement: The server reports the applications for the model types it handles
+The server SHALL expose an endpoint, taking no entry path, that reports for each model
+type the application handles: the platform's default application and the further
+associated applications — each as an identifier plus a human-readable name resolved
+from the platform's application entries, with the default distinguished — together
+with whether a chooser is configured, so the client can offer or withhold its
+chooser-dependent action. Associations SHALL include applications whose entries
+declare the type even when the platform's cached index has missed them, by reading the
+entries rather than trusting the cache. The endpoint SHALL reflect the registry as it
+stands at the time of the request — no memoization across requests — since the
+chooser can rewrite the registry mid-session. Model types SHALL be derived from the
+same format detection the listing already uses to decide what a model is, so the two
+cannot drift; types outside that set are not reported.
 
-#### Scenario: An STL entry's applications, default first
-- **WHEN** the client requests applications for an entry ending in `.stl` on a platform
-  whose registry has a default and further associations for `model/stl`
-- **THEN** the response identifies the default application and the associated
-  applications, the default is distinguishable, and the response says whether a
-  chooser is configured
+#### Scenario: Types report default first, with names
+- **WHEN** the client requests the applications report on a platform whose registry
+  has a default and further associations for `model/stl`
+- **THEN** the response maps `model/stl` to its default application and associated
+  applications, each carrying a human-readable name, the default distinguishable, and
+  says whether a chooser is configured
 
-#### Scenario: A zip entry resolves by its inner name
-- **WHEN** the client requests applications for `archive.zip!/part.stl`
-- **THEN** the type resolves from `part.stl`'s extension, exactly as for a plain file
+#### Scenario: An entry the cached index missed still associates
+- **WHEN** an application's entry declares a model type but the platform's cached
+  index does not list it for that type
+- **THEN** the report includes that application among the type's associations
 
-#### Scenario: An unmapped extension yields no associations
-- **WHEN** the client requests applications for an entry whose extension is not in the
-  format table
-- **THEN** the response carries no default and no associations, and still says whether
-  a chooser is configured
+#### Scenario: A registry change is visible on the next request
+- **WHEN** the platform default for a type changes after the server has answered once,
+  and the client requests the report again
+- **THEN** the new default is reported
 
 ### Requirement: The server launches an application with an entry's file
 The server SHALL expose an endpoint accepting an entry path and an application
 identifier — never a command — that launches the identified application with the
 entry's file. The path SHALL be validated as the file endpoint validates its paths,
-and the launcher SHALL always receive an absolute path, since a relative path breaks
-applications that resolve it against another working directory (single-instance
-forwards). A zip virtual path SHALL first be extracted to a temporary file — one
-stable name per entry within a per-server-run temporary directory, overwritten on each
-launch and not deleted while the server runs, since the launched application may still
-be reading it. The endpoint SHALL report success exactly when the platform's launch
-command succeeded, and SHALL report a failed or unspawnable launch command as an
-error with its reason; it makes no claim about the launched application's behavior
-past a successful handoff.
+nested-zip entries rejected as the file endpoint rejects them, and the launcher SHALL
+always receive an absolute path, since a relative path breaks applications that
+resolve it against another working directory (single-instance forwards). A zip virtual
+path SHALL first be extracted to a temporary file — named from the full virtual path,
+keeping the entry's extension, within a per-server-run temporary directory — so that
+same-named entries in different archives never share a file; the file is overwritten
+on a repeat launch of the same virtual path and not deleted while the server runs,
+since the launched application may still be reading it. The endpoint SHALL report
+success exactly when the platform's launch command succeeded, and SHALL report a
+failed or unspawnable launch command as an error with its reason; it makes no claim
+about the launched application's behavior past a successful handoff.
 
 #### Scenario: A plain file launches with an absolute path
 - **WHEN** the client requests a launch for a valid model file and an installed
@@ -52,14 +55,18 @@ past a successful handoff.
 - **THEN** the launch command runs with the file's absolute path and the endpoint
   reports success
 
-#### Scenario: A zip entry is extracted, then launched
-- **WHEN** the client requests a launch for `archive.zip!/part.stl`
-- **THEN** the entry's bytes are extracted to the run's temporary directory and the
-  launch command receives that file's absolute path
+#### Scenario: Same-named entries in different archives get distinct files
+- **WHEN** launches are requested for `a.zip!/part.stl` and then `b.zip!/part.stl`
+- **THEN** each is extracted to its own temporary file, and the second launch does not
+  overwrite what the first application may still be reading
 
 #### Scenario: A missing file is an error, not a launch
 - **WHEN** the client requests a launch for a path that does not exist
 - **THEN** no launch command runs and the endpoint reports the error
+
+#### Scenario: A nested zip is rejected
+- **WHEN** the client requests a launch for a zip entry that is itself a zip
+- **THEN** no launch command runs and the endpoint rejects it as the file endpoint does
 
 #### Scenario: A failing launch command is reported
 - **WHEN** the launch command exits nonzero or cannot be spawned
@@ -69,19 +76,24 @@ past a successful handoff.
 The server SHALL perform its four platform operations — the default application for a
 type, the associations for a type, launching an application with a file, and invoking
 the chooser with a file — through configurable command templates from a local server
-configuration file, with built-in implementations backed by the freedesktop machinery
-for all but the chooser, which has no portable builtin and SHALL be treated as
-unavailable until configured. A template SHALL be an argv array with `{mime}`,
-`{appId}`, and `{file}` placeholders substituted per element and executed without a
-shell, so that no value — file names included — is ever interpreted by one; an
-override of a query operation SHALL follow the same documented line-oriented output
-contract the built-ins satisfy. With no configuration file present the built-ins SHALL
-serve unchanged. Configuration is read from the local machine only; nothing received
-over the network SHALL reach a template except as a substituted placeholder value.
+configuration file, with built-in implementations for all but the chooser, which has
+no portable builtin and SHALL be treated as unavailable until configured. The built-in
+default query SHALL use the platform's machine-readable default lookup; the built-in
+association query and all display names SHALL come from reading the platform's
+application entries directly — including entries in subdirectories the cached index
+misses — never from parsing localized human-oriented command output. A template SHALL
+be an argv array with `{mime}`, `{appId}`, and `{file}` placeholders substituted per
+element and executed without a shell, so that no value — file names included — is
+ever interpreted by one; an override of a query operation SHALL produce the documented
+line-oriented output, names included. With no configuration file present the built-ins
+SHALL serve unchanged. Configuration is read from the local machine only; nothing
+received over the network SHALL reach a template except as a substituted placeholder
+value.
 
 #### Scenario: No configuration, built-in behavior
 - **WHEN** the server starts with no launch configuration file
-- **THEN** all four operations run their built-in freedesktop implementations
+- **THEN** the query and launch operations run their built-ins and the chooser is
+  unavailable
 
 #### Scenario: An overridden operation runs the configured argv
 - **WHEN** the configuration overrides the launch operation with an argv template and
@@ -96,12 +108,16 @@ over the network SHALL reach a template except as a substituted placeholder valu
 ### Requirement: The server invokes the configured chooser with an entry's file
 The server SHALL expose an endpoint accepting an entry path — nothing else — that
 invokes the configured chooser operation with the entry's file, behind the same path
-validation, zip temp-extraction, and absolutization the launch endpoint applies. With
-no chooser configured the endpoint SHALL report the operation unavailable without
-running anything. The chooser command completing SHALL read as success — what the
-chooser did, a dismissal without a choice included, is not the server's to judge — and
-a chooser command that fails or cannot be spawned SHALL be reported as an error with
-its reason.
+validation, nested-zip rejection, zip temp-extraction, and absolutization the launch
+endpoint applies. With no chooser configured the endpoint SHALL report the operation
+unavailable without running anything. The chooser spans a human decision: the request
+SHALL complete when the chooser command does, however long that takes, and the
+chooser's lifetime SHALL NOT be tied to the requesting connection — a client that
+disconnects or aborts SHALL NOT terminate the chooser, so a dismissed chooser and a
+killed one can never read the same. The chooser command completing SHALL read as
+success — what the chooser did, a dismissal without a choice included, is not the
+server's to judge — and a chooser command that fails or cannot be spawned SHALL be
+reported as an error with its reason.
 
 #### Scenario: A configured chooser receives the absolute path
 - **WHEN** a chooser is configured and the client requests it for a valid model file
@@ -111,6 +127,10 @@ its reason.
 #### Scenario: Unconfigured is unavailable, not an error launch
 - **WHEN** no chooser is configured and the client requests it
 - **THEN** nothing is spawned and the endpoint reports the operation unavailable
+
+#### Scenario: A dropped request does not kill the chooser
+- **WHEN** the requesting connection aborts while the chooser is still open
+- **THEN** the chooser stays up and the user's eventual pick still launches
 
 #### Scenario: A zip entry reaches the chooser as a real file
 - **WHEN** a chooser is configured and the client requests it for `archive.zip!/part.stl`

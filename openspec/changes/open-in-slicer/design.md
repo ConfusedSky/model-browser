@@ -24,8 +24,11 @@ Spike evidence (2026-08-24, this machine — Arch, Hyprland/Wayland, Chrome):
   launch — accepted behavior, outside our control.
 - **Broken launchers are fixed at the desktop-entry layer**: Wine's visible Photon entry
   had no `%f`; a ten-line user-authored `photon-workshop.desktop` (in the user's
-  dotfiles) fixed it and, via its `MimeType=model/stl;`, made Photon discoverable as an
-  STL handler. This is the configuration escape hatch the design leans on.
+  dotfiles) fixed launching. Its `MimeType=model/stl;` did **not** make it discoverable
+  through the cache-backed registry: the entry lives in a symlinked `dot_applications`
+  subdirectory that `update-desktop-database` does not index, so `mimeinfo.cache` (and
+  therefore `gio mime`) never lists it — verified 2026-08-24. Direct desktop-entry
+  reading sees it; the stale cache does not. This shapes the association builtin (L2).
 - **Relative paths break single-instance forwards** (resolved against the running
   instance's cwd) — the server must always hand launchers absolute paths.
 
@@ -49,31 +52,47 @@ Spike evidence (2026-08-24, this machine — Arch, Hyprland/Wayland, Chrome):
 
 ## Decisions
 
-**L1 — Registry is freedesktop, not app config.** The menu lists what
-`gio mime <type>` reports: the default application first, then registered/recommended
-associations. Users configure by OS-level pinning (`xdg-mime default`) or by authoring
-desktop entries; the app stores nothing. Alternative rejected: an app-owned slicer list
-with a settings UI and a config API — more surface, a second registry to keep in sync,
-and a "config that executes commands" trust question. Known gap, accepted: a freshly
-installed slicer whose desktop entry declares no model MimeType (LycheeSlicer's
-declares none) is not associated until pinned once or given an entry — the
-`photon-workshop.desktop` precedent shows the fix is ten lines in user space.
+**L1 — Registry is freedesktop, not app config.** The menu lists what the platform
+registry reports: the default application first, then the associated applications.
+Users configure by OS-level pinning (`xdg-mime default`, the chooser's own
+set-default) or by authoring desktop entries; the app stores nothing. Alternative
+rejected: an app-owned slicer list with a settings UI and a config API — more surface,
+a second registry to keep in sync, and a "config that executes commands" trust
+question. The registry's state is whatever the user made it, recorded honestly: on the
+development machine as of 2026-08-24, `model/stl` defaults to `f3d.desktop` (a viewer,
+not a slicer), the associations are Wine shims plus f3d, and LycheeSlicer's own entry
+declares no model MimeType (`/usr/share/applications/lycheeslicer.desktop`) — so as
+shipped, no slicer leads the pill row until the user pins one. That is not a corner
+case; it is the launch experience, and the designed path out of it is the chooser loop
+(L4): Open with… → pick the slicer → its set-default re-orders the row. The 4.1 E2E
+exercises exactly that loop.
 
 **L2 — Four platform operations, each configurable as an argv template.** Operations:
-`default(mime)`, `associations(mime)`, `launch(appId, file)`, `chooser(file)`. Built-in
-implementations: `gio mime {mime}` parsed for default/associations;
-`gtk-launch {appId} {file}` via `execFile` for launch. `chooser` has **no builtin** —
-no stock freedesktop CLI pops an application chooser — so it exists only when
-configured, and the feature depending on it is absent otherwise (L4). Server config may
-supply or override any operation with an **argv array** template using `{mime}`,
-`{appId}`, `{file}` placeholders, substituted per-element and spawned via `execFile` —
-never a shell string, so no quoting/injection surface. Overrides of the query
-operations must produce the documented line-oriented output (`appId<TAB>name` per
-line; first line of `default` is the default's id). Config lives at
-`~/.config/model-browser/launch.json` (path overridable via
-`MODEL_BROWSER_LAUNCH_CONFIG`), read at startup, absent file = builtins. Templates are
-authored by the machine's user in a local file; they are trusted config, and nothing
-network-supplied ever reaches them.
+`default(mime)`, `associations(mime)`, `launch(appId, file)`, `chooser(file)`.
+Built-ins: `default` runs `xdg-mime query default {mime}` — one machine-readable line.
+`associations` does **not** shell out to `gio mime`: its output is localized prose
+with curly quotes and ids only (verified), unfit for a stable parse — instead a
+**targeted desktop-entry reader** unions the ids in `mimeapps.list` with the entries
+whose `MimeType=` declares the mime, found by reading the `applications/` dirs of
+`$XDG_DATA_HOME`/`$XDG_DATA_DIRS` directly (subdirectories included, ids formed
+`/`→`-` and resolved back `-`→`/`) — direct reading rather than `mimeinfo.cache`
+because the cache misses subdirectory entries (the `photon-workshop.desktop` finding,
+Context). The same reader resolves any id to its localized `Name=`, which is the
+**only source of display names** anywhere in the design. This is not the deleted
+installed-applications scan: it resolves given ids and matches three mimes; it never
+enumerates for enumeration's sake. `launch` runs `gtk-launch {appId} {file}` via
+`execFile`. `chooser` has **no builtin** — no stock freedesktop CLI pops an
+application chooser — so it exists only when configured, and the feature depending on
+it is absent otherwise (L4). Server config may supply or override any operation with
+an **argv array** template using `{mime}`, `{appId}`, `{file}` placeholders,
+substituted per-element and spawned via `execFile` — never a shell string, so no
+quoting/injection surface. Overrides of the query operations must produce the
+documented line-oriented output (`appId<TAB>name` per line; first line of `default`
+is the default's id — names the override's own job, since ids alone would render as
+`wine-extension-stl`). Config lives at `~/.config/model-browser/launch.json` (path
+overridable via `MODEL_BROWSER_LAUNCH_CONFIG`), read at startup, absent file =
+builtins. Templates are authored by the machine's user in a local file; they are
+trusted config, and nothing network-supplied ever reaches them.
 
 **L3 — Menu shape: inline pill group, not a submenu.** Follows the axis-pill precedent
 and rationale recorded at EntryMenu.tsx:38 verbatim — a submenu would add open state, a
@@ -99,28 +118,44 @@ XDG desktop-entry scanner), and had to forbid set-default to avoid diverging the
 registry; and keeping that modal as a fallback for unconfigured machines — all of the
 code on the least-exercised path.
 
-**L5 — Server endpoints.** `GET /api/apps?path=<vpath>` resolves the entry's mime (L6)
-and returns `{mime, default, associated, chooser}` — each app as `{id, name}`, and
-`chooser` a boolean saying whether the chooser operation is configured, which is what
-the client keys the Open with… action's presence on. `POST /api/open` takes
+**L5 — Server endpoints, and no probe on menu open.** `GET /api/apps` takes **no
+path**: it returns `{chooser, types}` — `chooser` the configured-or-not boolean (a
+per-server-config constant with no business on a per-entry request), `types` a map
+from each handled mime (L6) to `{default, associated}` with apps as `{id, name}`. The
+client fetches it **once per session** and reads the cache when a menu opens — never a
+probe issued when a menu opens, which is a recorded rule (`AvailabilityContext`,
+entryActions.ts:139, D6/2.5), and also what keeps the menu's command list synchronous:
+EntryMenu measures, clamps, and seeds focus from `commands.length` on mount
+(EntryMenu.tsx:107–160), so late-arriving commands would visibly re-position the menu
+and jump focus. The cache is refetched each time an open-with completes, since the
+chooser may have rewritten the registry (L9). The endpoint reads the registry fresh on
+each request — no server-side memoization across requests. `POST /api/open` takes
 `{path, appId}`; `POST /api/open-with` takes `{path}` and runs the chooser operation
 (reporting unavailable when unconfigured). Both validate the path exactly as
-`/api/file` does (absolute, `parseVPath`, existence), resolve zip entries per L7, and
-absolutize. The client never sends commands; unknown `appId`s are passed to the
-launcher, whose failure is reported (L8). All client I/O via `ApiClient` (global D1).
+`/api/file` does (absolute, `parseVPath`, existence), reject nested-zip entries as
+`/api/file` does (app.ts:100), resolve zip entries per L7, and absolutize. The client
+never sends commands; unknown `appId`s are passed to the launcher, whose failure is
+reported (L8). All client I/O via `ApiClient` (global D1).
 
-**L6 — Mime resolution is a fixed extension table in the server.** `.stl → model/stl`,
-`.3mf → model/3mf`, `.obj → model/obj` — the formats the app already parses. No
-platform call: content sniffing is exactly what the spike showed to be wrong for binary
-STL, and zip entries have no file to sniff until extracted. Entries outside the table
-offer no open-in actions.
+**L6 — Mime resolution maps the existing format detector, not a second table.**
+`modelFormat` (server/src/listing.ts:17) already decides what a model is
+(`/\.(stl|3mf|obj)$/i`) and is what makes an entry `kind === 'model'`; the mime is a
+mapping of its result (`stl → model/stl`, `3mf → model/3mf`, `obj → model/obj`), so
+the two can never drift. No platform call: content sniffing is exactly what the spike
+showed to be wrong for binary STL, and zip entries have no file to sniff until
+extracted. Because model-kind and mime share one detector, "unmapped extension" is
+unreachable from the UI (non-models get no open-in actions at all); it exists only for
+hand-typed API paths.
 
 **L7 — Zip entries are temp-extracted per launch.** `foo.zip!/entry` is extracted with
-`extractEntry` into a per-server-run `mkdtemp` directory under the entry's basename,
-overwritten on each launch, and never deleted while the server runs (the launched app
-may still be reading it); the OS reclaims the temp dir. Alternative rejected: excluding
-zip entries — the library leans on zips (D6), and exclusion would make the menu lie by
-omission.
+`extractEntry` into a per-server-run `mkdtemp` directory under a name keyed on the
+**full virtual path** (sanitized/hashed), not the entry's basename — `a.zip!/part.stl`
+and `b.zip!/part.stl` must not share a temp file, or the second launch overwrites
+bytes the first app may still be reading, the exact hazard this decision exists to
+avoid. The file keeps the entry's extension (launched apps key on it), is overwritten
+on each launch of the same virtual path, and is never deleted while the server runs;
+the OS reclaims the temp dir. Alternative rejected: excluding zip entries — the
+library leans on zips (D6), and exclusion would make the menu lie by omission.
 
 **L8 — Launch success means the launch command succeeded.** `execFile` exit 0 →
 success; nonzero/spawn error → the menu reports failure the way other entry actions
@@ -128,10 +163,39 @@ report theirs. Honest limitation, recorded: `wine start` exits 0 once it hands o
 a Wine app that then fails to open the file reads as success — the server cannot see
 deeper, and pretending otherwise would be false precision. The chooser operation reads
 the same way: its command completing is success, and a chooser the user dismissed
-without picking is a success in which nothing happened — not an error to report. The server also requires the
-user session environment (DISPLAY/WAYLAND_DISPLAY, PATH) to launch GUI apps — true for
-a dev server started from a terminal; noted as an operational constraint, not
-bootstrapped.
+without picking is a success in which nothing happened — not an error to report. The
+server also requires the user session environment (DISPLAY/WAYLAND_DISPLAY, PATH) to
+launch GUI apps — true for a dev server started from a terminal; noted as an
+operational constraint, not bootstrapped.
+
+**L9 — The chooser request spans a human decision.** The chooser command blocks in its
+UI until the user picks or dismisses — seconds to minutes, unbounded — and
+`POST /api/open-with` completes when the command does, because completion is when the
+registry may have changed (L5's refetch keys on it). Consequences, decided: the client
+issues that call with no timeout and wires no abort; a dropped or aborted request MUST
+NOT kill the spawned chooser (a dismissed chooser and a killed chooser must not read
+the same), so the child is spawned detached from the request's lifetime — which also
+keeps a `bun --hot` reload from orphan-killing a chooser mid-decision. A second
+Open with… while one is up is not prevented client-side; rofi refuses a second
+instance itself, which surfaces as the command failing and is reported like any
+failure (L8).
+
+**L10 — Menu integration is a generalization, not a drop-in.** EntryMenu's keyboard
+arithmetic is written for exactly one fixed-size pill group (EntryMenu.tsx:107–146:
+`axisCount = AXIS_LETTERS.length + 1`, `count = axisCount + commands.length`, the
+land-on-the-letter rule, `focused` seeded at `axisCount`); a second, variable-length
+group generalizes all of it — explicit tasks, not incidental work. Layout: the open-in
+row sits below the axis row, both above the command list; the menu still opens focused
+on the first command. Surface placement is chosen through the existing excludes
+vocabulary: `MenuItemId` gains `openIn` and `openWith`, both offered on the three menu
+surfaces (tile, orbit, lightbox menu — a one-shot launch is honest everywhere) and
+both excluded from the lightbox info panel (`LIGHTBOX_PANEL_EXCLUDES`,
+entryActions.ts:769) — panel scope is deliberate, not accidental. Failure reporting
+uses a shared constant beside `COPY_FAILED` (entryActions.ts:145) so "reported the
+same way" is structural. Naming needs the 4.2 pass: the menu already carries "Open"
+(the lightbox) and "Reveal in app" (this app), and "open in <X>" plus "Open with…"
+makes four flavors of open/app in one short menu — the labels are a tuning decision,
+judged with the pixels.
 
 ## Risks / Trade-offs
 

@@ -25,5 +25,5 @@ The point of browsing a print library is to print something, and today the app d
 
 - **Server**: new `/api` endpoints for application listing and launch (`server/src/app.ts`), path validation shared with `/api/file` (`vpath.ts`, `guard.ts`); zip virtual paths need temp extraction before launch (decided in design). The server process must carry the user session environment to launch GUI applications.
 - **Client**: `EntryMenu.tsx` gains the pill group and the Open with… action via `entryActions` — no chooser UI of its own; all I/O through `ApiClient` (D1).
-- **Specs**: `entry-actions` delta (ADDED), new `app-launch` spec. No collisions: none of the four in-flight changes touch these files.
+- **Specs**: `entry-actions` delta (ADDED), new `app-launch` spec. No spec-level collisions with the four in-flight changes — but `search-cancellation` also edits `server/src/app.ts`, where this change adds routes; tasks.md carries the hard-ordering note.
 - **Out of scope**: drag-out (deferred follow-up, Electron), touch interactions, non-Linux launch implementations (the template seam is the deliverable; only freedesktop templates ship).
