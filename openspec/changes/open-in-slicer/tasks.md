@@ -129,7 +129,12 @@
       `whitespace-nowrap` caption that no longer breaks as "open"/"in", and the menu
       gained a viewport-relative max-width so it wraps instead of growing past a
       narrow window. Measured at 907×743: pills stack one per line,
-      `scrollWidth === clientWidth`, no scrollbar)*
+      `scrollWidth === clientWidth`, no scrollbar. Second round `df0e389`: in the
+      panel the caption now takes its own full line, so every pill starts beneath
+      it — one application beside the caption with the rest below read as ragged.
+      The menu keeps its inline caption, where the row has width to spare and sits
+      under an inline axis row; this is the second deliberate divergence between
+      the two surfaces' classes)*
 - [ ] 4.7 The lightbox does not adapt to narrow windows — pre-existing, surfaced
       while judging 4.3: the model area is `shrink-0` at `min(80vh,80vw)`, so at a
       640px viewport it takes 512px and the information panel is crushed from its
