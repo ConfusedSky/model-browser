@@ -678,6 +678,15 @@ export const OPEN_IN_GROUP_CLASS =
  */
 export const OPEN_IN_CAPTION_CLASS = `${AXIS_CAPTION_CLASS} whitespace-nowrap`
 /**
+ * The caption on a surface narrow enough that the row wraps in practice — the
+ * lightbox's panel. `w-full` takes the whole line of a wrapping flex row, so
+ * every pill starts on the next one *(user feedback 2026-08-25)*: one
+ * application beside the caption and the rest beneath it reads as ragged, where
+ * a caption over its list reads as a heading. The menu keeps the inline caption,
+ * where the row has the width to stay on one line beside the axis row above it.
+ */
+export const OPEN_IN_PANEL_CAPTION_CLASS = `${OPEN_IN_CAPTION_CLASS} w-full`
+/**
  * An application pill. One class for every pill, including the default's: which
  * application leads is said by **order**, which is what the spec pins ("the
  * default application first"). Marking it as well would state one fact twice,

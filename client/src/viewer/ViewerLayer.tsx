@@ -17,7 +17,7 @@ import {
   AXIS_LETTERS,
   FLIP_TITLE,
   OPEN_IN_CAPTION,
-  OPEN_IN_CAPTION_CLASS,
+  OPEN_IN_PANEL_CAPTION_CLASS,
   OPEN_IN_GROUP_CLASS,
   OPEN_IN_PILL_CLASS,
   axisLetter,
@@ -755,7 +755,7 @@ export default function ViewerLayer({
             // group, named the way the strip beside them is; they carry
             // `data-app-id` and no `data-command`, exactly as the menu's do.
             <div role="group" aria-label="Open in" className={OPEN_IN_GROUP_CLASS}>
-              <span className={OPEN_IN_CAPTION_CLASS}>{OPEN_IN_CAPTION}</span>
+              <span className={OPEN_IN_PANEL_CAPTION_CLASS}>{OPEN_IN_CAPTION}</span>
               {openIn.apps.map((app) => (
                 <button
                   key={app.id}
