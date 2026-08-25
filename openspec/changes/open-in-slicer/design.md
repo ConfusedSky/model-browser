@@ -65,13 +65,18 @@ rejected: an app-owned slicer list with a settings UI and a config API — more 
 a second registry to keep in sync, and a "config that executes commands" trust
 question. The registry's state is whatever the user made it, recorded honestly: on the
 development machine as of 2026-08-24, `model/stl` defaults to `f3d.desktop` (a viewer,
-not a slicer) and the associations are LycheeSlicer (via a user-level override entry
-in dotfiles that adds the model MimeTypes the stock
-`/usr/share/applications/lycheeslicer.desktop` omits), Photon Workshop
-(`photon-workshop.desktop`), a Wine shim, and f3d — so the pill row shows both
-slicers, led by the viewer, until the user pins a slicer as default. Both slicer
-associations exist because the user authored entries — the escape hatch working as
-designed, and also proof a fresh machine starts with less. The designed path to a
+not a slicer) and the associations after the NoDisplay filter are LycheeSlicer (via a
+user-level override entry in dotfiles that adds the model MimeTypes the stock
+`/usr/share/applications/lycheeslicer.desktop` omits) and Photon Workshop
+(`photon-workshop.desktop`) — the raw registry also lists a Wine shim
+(`Name=0FileVersion`) and f3d's NoDisplay plugin, which the filter removes (L2). The
+row therefore reads `F3D · LycheeSlicer · Photon Workshop`: both slicers present, led
+by the viewer, until the user pins a slicer as default. Note `f3d.desktop` itself
+declares no `MimeType=` at all (verified) — it leads purely as the mimeapps default,
+so default and associations are genuinely different sources and the default need not
+appear among the associations. Both slicer associations exist because the user
+authored entries — the escape hatch working as designed, and also proof a fresh
+machine starts with less. The designed path to a
 slicer-led row is the chooser loop (L4): Open with… → pick the slicer → its
 set-default re-orders the row. The 4.2 E2E exercises exactly that loop.
 
@@ -80,16 +85,32 @@ set-default re-orders the row. The 4.2 E2E exercises exactly that loop.
 Built-ins: `default` runs `xdg-mime query default {mime}` — one machine-readable line.
 `associations` does **not** shell out to `gio mime`: its output is localized prose
 with curly quotes and ids only (verified), unfit for a stable parse — instead a
-**targeted desktop-entry reader** unions the ids in `mimeapps.list` with the entries
-whose `MimeType=` declares the mime, found by reading the `applications/` dirs of
-`$XDG_DATA_HOME`/`$XDG_DATA_DIRS` directly (subdirectories included, ids formed
-`/`→`-` and resolved back `-`→`/`) — direct reading rather than `mimeinfo.cache`
-because the cache is silently stale for hand-placed entries: nothing reruns
-`update-desktop-database` for them (the `photon-workshop.desktop` finding, Context). The traversal MUST `stat()` through symlinks with a depth/cycle guard: the
-motivating entry's own directory (`dot_applications` → the dotfiles repo) is a
-symlink, for which `dirent.isDirectory()` is false (verified) — a naive
-`withFileTypes` descent skips exactly the entry this approach exists to find. The same reader resolves any id to its localized `Name=`, which is the
-**only source of display names** anywhere in the design. This is not the deleted
+**targeted desktop-entry reader** combines `mimeapps.list` with the entries whose
+`MimeType=` declares the mime. The mimeapps read honors its sections, not a flat
+union: `[Default Applications]` and `[Added Associations]` associate,
+`[Removed Associations]` **excludes** — an app the user explicitly removed must not
+get a pill — reading the standard locations in precedence order
+(`$XDG_CONFIG_HOME/mimeapps.list` first, then per-data-dir
+`applications/mimeapps.list`), with the env-var **defaults applied**: on this machine
+`XDG_DATA_HOME` is unset and `~/.local/share` is absent from `XDG_DATA_DIRS`
+(verified), so reading the variables literally misses the one directory holding every
+entry that matters — the reader uses `${XDG_DATA_HOME:-~/.local/share}` plus the
+`XDG_DATA_DIRS` default `/usr/local/share:/usr/share`. Entry scanning reads the
+`applications/` dirs directly rather than `mimeinfo.cache`, because the cache is
+silently stale for hand-placed entries: nothing reruns `update-desktop-database` for
+them (the `photon-workshop.desktop` finding, Context). Subdirectories are descended
+because the desktop-entry spec scans them and real entries live there — Wine's
+`wine/Programs/…/AnycubicPhotonWorkshop.desktop` on this machine — with ids formed
+`/`→`-` and resolved back `-`→`/`. The traversal MUST `stat()` through symlinks —
+**files and directories both** — with a depth/cycle guard: every dotfiles-deployed
+entry is now a top-level file symlink for which `dirent.isFile()` is false (verified:
+`lycheeslicer.desktop`, `photon-workshop.desktop`), so a naive `withFileTypes` filter
+skips exactly the entries the feature exists for. `NoDisplay`/`Hidden` entries are
+filtered from associations, and the filter is load-bearing, not cosmetic: for
+`model/stl` it removes `wine-extension-stl.desktop` (`Name=0FileVersion`) and
+`f3d-plugin-native.desktop`, whose `Name=F3D` would otherwise duplicate the default's
+pill. The same reader resolves any id to its localized `Name=`, which is the **only
+source of display names** anywhere in the design. This is not the deleted
 installed-applications scan: it resolves given ids and matches three mimes; it never
 enumerates for enumeration's sake. `launch` runs `gtk-launch {appId} {file}` via
 `execFile`. `chooser` has **no builtin** — no stock freedesktop CLI pops an
@@ -99,8 +120,9 @@ an **argv array** template using `{mime}`, `{appId}`, `{file}` placeholders,
 substituted per-element and spawned via `execFile` — never a shell string, so no
 quoting/injection surface. Overrides of the query operations must produce the
 documented line-oriented output (`appId<TAB>name` per line; first line of `default`
-is the default's id — names the override's own job, since ids alone would render as
-`wine-extension-stl`). Config lives at `~/.config/model-browser/launch.json` (path
+is the default's id — names the override's own job, since ids alone would render a
+pill as `lycheeslicer.desktop` instead of `LycheeSlicer`). Config lives at
+`~/.config/model-browser/launch.json` (path
 overridable via `MODEL_BROWSER_LAUNCH_CONFIG`), read at startup, absent file =
 builtins. Templates are authored by the machine's user in a local file; they are
 trusted config, and nothing network-supplied ever reaches them.
@@ -135,7 +157,7 @@ per-server-config constant with no business on a per-entry request), `types` a m
 from each handled mime (L6) to `{default, associated}` with apps as `{id, name}`. The
 client fetches it **once per session** and reads the cache when a menu opens — never a
 probe issued when a menu opens, which is a recorded rule (`AvailabilityContext`,
-entryActions.ts:139, D6/2.5), and also what keeps the menu's command list synchronous:
+entryActions.ts:142, D6/2.5), and also what keeps the menu's command list synchronous:
 EntryMenu measures, clamps, and seeds focus from `commands.length` on mount
 (EntryMenu.tsx:107–160), so late-arriving commands would visibly re-position the menu
 and jump focus. The cache is refetched each time an open-with completes, since the
@@ -163,9 +185,11 @@ hand-typed API paths.
 **full virtual path** (sanitized/hashed), not the entry's basename — `a.zip!/part.stl`
 and `b.zip!/part.stl` must not share a temp file, or the second launch overwrites
 bytes the first app may still be reading, the exact hazard this decision exists to
-avoid. The file keeps the entry's extension (launched apps key on it), is overwritten
-on each launch of the same virtual path, and is never deleted while the server runs;
-the OS reclaims the temp dir. Alternative rejected: excluding zip entries — the
+avoid. The file keeps the entry's extension (launched apps key on it). A repeat
+launch of the same virtual path MUST NOT truncate in place — that would gut the very
+in-flight reader the no-delete rule protects — it extracts to a staging name and
+`rename()`s over the target, so a still-reading application keeps the inode it
+opened; nothing is deleted while the server runs, and the OS reclaims the temp dir. Alternative rejected: excluding zip entries — the
 library leans on zips (D6), and exclusion would make the menu lie by omission.
 
 **L8 — Launch success means the launch command succeeded.** `execFile` exit 0 →
@@ -202,7 +226,7 @@ vocabulary: `MenuItemId` gains `openIn` and `openWith`, both offered on the thre
 surfaces (tile, orbit, lightbox menu — a one-shot launch is honest everywhere) and
 both excluded from the lightbox info panel (`LIGHTBOX_PANEL_EXCLUDES`,
 entryActions.ts:769) — panel scope is deliberate, not accidental. Failure reporting
-uses a shared constant beside `COPY_FAILED` (entryActions.ts:145) so "reported the
+uses a shared constant beside `COPY_FAILED` (entryActions.ts:148) so "reported the
 same way" is structural. Naming needs the 4.2 pass: the menu already carries "Open"
 (the lightbox) and "Reveal in app" (this app), and "open in <X>" plus "Open with…"
 makes four flavors of open/app in one short menu — the labels are a tuning decision,
@@ -219,7 +243,8 @@ judged with the pixels.
 - [Session env absent] A server launched outside the session can list apps but launches
   fail or land on the wrong display → surfaced in the launch error path; documented.
 - [Temp extraction growth] Repeated zip launches accumulate files in one run →
-  bounded by overwrite-per-entry naming; OS cleans the dir.
+  bounded by stable per-vpath naming (staging files renamed over targets); OS cleans
+  the dir.
 - [Node compatibility] All of this must run on Node unchanged (global D1): spawning via
   `node:child_process`, temp via `node:fs`/`node:os` — no Bun-only APIs outside
   `server/src/index.ts`.

@@ -10,7 +10,9 @@ from the platform's application entries, with the default distinguished — toge
 with whether a chooser is configured, so the client can offer or withhold its
 chooser-dependent action. Associations SHALL include applications whose entries
 declare the type even when the platform's cached index has missed them, by reading the
-entries rather than trusting the cache. The endpoint SHALL reflect the registry as it
+entries rather than trusting the cache; SHALL exclude entries the platform marks
+not-for-display and applications the user's configuration explicitly removed from the
+type; and the default is its own source — it need not appear among the associations. The endpoint SHALL reflect the registry as it
 stands at the time of the request — no memoization across requests — since the
 chooser can rewrite the registry mid-session. Model types SHALL be derived from the
 same format detection the listing already uses to decide what a model is, so the two
@@ -42,9 +44,11 @@ always receive an absolute path, since a relative path breaks applications that
 resolve it against another working directory (single-instance forwards). A zip virtual
 path SHALL first be extracted to a temporary file — named from the full virtual path,
 keeping the entry's extension, within a per-server-run temporary directory — so that
-same-named entries in different archives never share a file; the file is overwritten
-on a repeat launch of the same virtual path and not deleted while the server runs,
-since the launched application may still be reading it. The endpoint SHALL report
+same-named entries in different archives never share a file. A repeat launch of the
+same virtual path SHALL replace that file by writing aside and renaming over it —
+never truncating in place — so an application still reading keeps the content it
+opened; nothing is deleted while the server runs, since the launched application may
+still be reading it. The endpoint SHALL report
 success exactly when the platform's launch command succeeded, and SHALL report a
 failed or unspawnable launch command as an error with its reason; it makes no claim
 about the launched application's behavior past a successful handoff.
@@ -59,6 +63,12 @@ about the launched application's behavior past a successful handoff.
 - **WHEN** launches are requested for `a.zip!/part.stl` and then `b.zip!/part.stl`
 - **THEN** each is extracted to its own temporary file, and the second launch does not
   overwrite what the first application may still be reading
+
+#### Scenario: Relaunching a zip entry does not truncate an in-flight reader
+- **WHEN** a zip entry is launched again while an application from the first launch
+  may still be reading its temporary file
+- **THEN** the new bytes arrive by rename over the name, and the earlier reader keeps
+  the content it opened
 
 #### Scenario: A missing file is an error, not a launch
 - **WHEN** the client requests a launch for a path that does not exist
