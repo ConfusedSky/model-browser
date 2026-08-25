@@ -252,7 +252,12 @@ this design's own call, not a drift between the two. *(This paragraph previously
 said "round three narrowed it to match the code"; both halves were false, caught in
 review 2026-08-25 and corrected against `git log --follow`.)* Failure reporting
 uses a shared constant beside `COPY_FAILED` (entryActions.ts:148) so "reported the
-same way" is structural.
+same way" is structural — **two** constants since 2026-08-25 (`878a854`):
+`LAUNCH_FAILED` for a pill, whose application the user named, and
+`CHOOSER_FAILED` for *Open with…*, where none was chosen and "that application"
+named something the user never picked. This does not reopen L5's no-status-
+branching rule: the split is by which action was invoked, which the client knows
+for certain, not by a reply code, which it still never reads.
 
 *Naming, settled by the user 2026-08-25 (4.3):* four flavors of open/app in one short
 menu was indeed too many, and the fix is that `open` stops being labelled for what it

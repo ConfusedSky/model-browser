@@ -118,8 +118,11 @@
       "Open folder" / "Open archive"; (b) the lightbox's information panel carries the
       launch actions after all (pill row + "Open with…"), reversing this change's own
       panel exclusion. Both implemented in 4.6. Still open: judging the pill row's
-      pixels once the panel row exists, and `LAUNCH_FAILED`'s wording, which says
-      "that application" even for a chooser failure where none was chosen.
+      pixels once the panel row exists. *(Wording settled `878a854`: split into
+      `LAUNCH_FAILED` for a named application and `CHOOSER_FAILED` — "Could not
+      open the chooser to pick an application." — for Open with…, falsified by
+      reverting the split and watching both surfaces' tests fail with
+      `expected "…chooser to pick an…" received "…file in that…"`.)*
       *(First pixel round done `0e0dedb`: the row inherited the axis row's
       non-wrapping `flex`, built for five tiny fixed children, so application names
       of the registry's choosing overran the panel column and it grew a horizontal
