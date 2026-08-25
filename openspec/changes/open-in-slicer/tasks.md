@@ -119,7 +119,25 @@
       launch actions after all (pill row + "Open with…"), reversing this change's own
       panel exclusion. Both implemented in 4.6. Still open: judging the pill row's
       pixels once the panel row exists, and `LAUNCH_FAILED`'s wording, which says
-      "that application" even for a chooser failure where none was chosen
+      "that application" even for a chooser failure where none was chosen.
+      *(First pixel round done `0e0dedb`: the row inherited the axis row's
+      non-wrapping `flex`, built for five tiny fixed children, so application names
+      of the registry's choosing overran the panel column and it grew a horizontal
+      scrollbar — `overflow-y-auto` forces `overflow-x` to `auto`. The open-in row
+      now has its own class that wraps, with a softer radius since a wrapped
+      `rounded-full` reads as a blob, pills that truncate rather than overrun, a
+      `whitespace-nowrap` caption that no longer breaks as "open"/"in", and the menu
+      gained a viewport-relative max-width so it wraps instead of growing past a
+      narrow window. Measured at 907×743: pills stack one per line,
+      `scrollWidth === clientWidth`, no scrollbar)*
+- [ ] 4.7 The lightbox does not adapt to narrow windows — pre-existing, surfaced
+      while judging 4.3: the model area is `shrink-0` at `min(80vh,80vw)`, so at a
+      640px viewport it takes 512px and the information panel is crushed from its
+      `w-72` to 94px, narrow enough that the path text alone overflows it (measured
+      2026-08-25; neither the pill row at 62px nor the action strip at 70px exceeds
+      the column, so this is not the launch actions' doing). Not fixed here: it
+      predates this change and touching the viewer's layout belongs to a change that
+      owns the lightbox requirements
 - [ ] 4.4 Dry-run the archive per project convention
 - [ ] 4.5 Give `ZipTempStore` an optional root (and `createApp` an optional store or
       root, the way it already takes `cache` and `launcher`) so tests can point it at
