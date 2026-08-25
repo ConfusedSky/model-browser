@@ -133,8 +133,18 @@
       holds one of those paths as a *string* (no fd, `lsof` proves nothing), and an
       early rm makes its next zip launch fail on `renameSync` into a missing dir.
       systemd-tmpfiles reclaims them in 10 days regardless
-- [ ] 4.6 Implement 4.3's two decisions: kind-aware `open` labels resolved in
+- [x] 4.6 Implement 4.3's two decisions: kind-aware `open` labels resolved in
       `commandsFor`; drop `openIn`/`openWith` from `LIGHTBOX_PANEL_EXCLUDES` and give
       the panel the pill row above its action strip. Inverts the panel-withholds
       assertions in `viewerPanelActions.test.tsx` (semantics-is-the-point, not
       mechanical) and updates the entry-actions delta, already rewritten to match
+      *(landed `ec447bf` 2026-08-25. The implementing worker died mid-verification
+      on an account spend limit; its uncommitted work was salvaged as a patch,
+      and the coordinator ran the falsification independently — arguably stronger
+      than author-run, since the falsifier has no stake in the tests passing.
+      Falsified: restoring `openIn`/`openWith` to `LIGHTBOX_PANEL_EXCLUDES` fails
+      all six panel tests; flattening `labelFor` to a fixed "Open" fails both label
+      tests with `expected 'Open' to be 'Open lightbox'`. Merged main: 447 client +
+      173 server tests, typecheck clean. Live: model menu reads "Open lightbox",
+      zip menu "Open archive", and the lightbox panel carries `open in LycheeSlicer
+      Photon Workshop` above a strip ending in "Open with…")*
