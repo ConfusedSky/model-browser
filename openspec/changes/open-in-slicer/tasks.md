@@ -115,9 +115,15 @@
       says "that application" even for a chooser failure where none was chosen
       (review finding, 2026-08-24)
 - [ ] 4.4 Dry-run the archive per project convention
-- [ ] 4.5 Point the server tests' `ZipTempStore`s at test-scoped temp dirs — the
-      suite currently litters the real tmpdir with `model-browser-open-*` dirs on
-      every run (dozens observed after the apply, including a `.zip` artifact from a
-      falsification run). Inject a base dir; do not delete the live litter
-      indiscriminately, since a running server's dir may still be read by launched
-      apps (L7)
+- [ ] 4.5 Give `ZipTempStore` an optional root (and `createApp` an optional store or
+      root, the way it already takes `cache` and `launcher`) so tests can point it at
+      their own swept dirs. Scoped 2026-08-24 (reviewer-verified): 45
+      `model-browser-open-*` dirs / 7.1M in the real tmpdir; every *other* test
+      mkdtemp is cleaned by its afterAll — the leak is structural, `createApp` builds
+      its store internally with `join(tmpdir(), …)` hardcoded, so a test that calls
+      `createApp` never gets a handle to clean. The two dirs carrying a `.zip` are
+      falsification residue; the nested-zip guard is present and rejecting at HEAD.
+      Sweeping the litter: only after the dev server restarts — the running store
+      holds one of those paths as a *string* (no fd, `lsof` proves nothing), and an
+      early rm makes its next zip launch fail on `renameSync` into a missing dir.
+      systemd-tmpfiles reclaims them in 10 days regardless
