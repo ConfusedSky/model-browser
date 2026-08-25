@@ -99,9 +99,15 @@ entry that matters — the reader uses `${XDG_DATA_HOME:-~/.local/share}` plus t
 `applications/` dirs directly rather than `mimeinfo.cache`, because the cache is
 silently stale for hand-placed entries: nothing reruns `update-desktop-database` for
 them (the `photon-workshop.desktop` finding, Context). Subdirectories are descended
-because the desktop-entry spec scans them and real entries live there — Wine's
-`wine/Programs/…/AnycubicPhotonWorkshop.desktop` on this machine — with ids formed
-`/`→`-` and resolved back `-`→`/`. The traversal MUST `stat()` through symlinks —
+as deliberate spec conformance — the desktop-entry spec scans them — with ids formed
+`/`→`-` and resolved back `-`→`/`. The live example, Wine's
+`wine/Programs/AnycubicPhotonWorkshop/AnycubicPhotonWorkshop.desktop`, proves
+subdirectoried entries exist but changes nothing the pill row reports today (it
+declares no `MimeType=`); it does set the depth bar — three levels down, so the
+guard's limit must comfortably exceed that — and if such an entry ever declared a
+model type, its name would collide with the user's presentable entry the way the
+duplicate-`F3D` plugin does, which the NoDisplay filter would not catch: a
+name-collision among displayable entries is possible and simply renders as two pills. The traversal MUST `stat()` through symlinks —
 **files and directories both** — with a depth/cycle guard: every dotfiles-deployed
 entry is now a top-level file symlink for which `dirent.isFile()` is false (verified:
 `lycheeslicer.desktop`, `photon-workshop.desktop`), so a naive `withFileTypes` filter

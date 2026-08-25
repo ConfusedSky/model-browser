@@ -90,8 +90,8 @@ configuration file, with built-in implementations for all but the chooser, which
 no portable builtin and SHALL be treated as unavailable until configured. The built-in
 default query SHALL use the platform's machine-readable default lookup; the built-in
 association query and all display names SHALL come from reading the platform's
-application entries directly — including entries in subdirectories the cached index
-misses — never from parsing localized human-oriented command output. A template SHALL
+application entries directly — including entries in subdirectories — never from
+parsing localized human-oriented command output. A template SHALL
 be an argv array with `{mime}`, `{appId}`, and `{file}` placeholders substituted per
 element and executed without a shell, so that no value — file names included — is
 ever interpreted by one; an override of a query operation SHALL produce the documented
