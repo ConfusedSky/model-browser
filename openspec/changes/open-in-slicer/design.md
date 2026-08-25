@@ -77,7 +77,10 @@ whose `MimeType=` declares the mime, found by reading the `applications/` dirs o
 `$XDG_DATA_HOME`/`$XDG_DATA_DIRS` directly (subdirectories included, ids formed
 `/`→`-` and resolved back `-`→`/`) — direct reading rather than `mimeinfo.cache`
 because the cache misses subdirectory entries (the `photon-workshop.desktop` finding,
-Context). The same reader resolves any id to its localized `Name=`, which is the
+Context). The traversal MUST `stat()` through symlinks with a depth/cycle guard: the
+motivating entry's own directory (`dot_applications` → the dotfiles repo) is a
+symlink, for which `dirent.isDirectory()` is false (verified) — a naive
+`withFileTypes` descent skips exactly the entry this approach exists to find. The same reader resolves any id to its localized `Name=`, which is the
 **only source of display names** anywhere in the design. This is not the deleted
 installed-applications scan: it resolves given ids and matches three mimes; it never
 enumerates for enumeration's sake. `launch` runs `gtk-launch {appId} {file}` via

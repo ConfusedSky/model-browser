@@ -11,6 +11,8 @@
       names via the targeted desktop-entry reader — union of `mimeapps.list` ids and
       entries whose `MimeType=` declares the mime, read directly from
       `$XDG_DATA_HOME`/`$XDG_DATA_DIRS` `applications/` dirs (subdirs included,
+      traversal stats through symlinks with a depth/cycle guard —
+      `dirent.isDirectory()` is false for the symlinked `dot_applications`,
       `-`→`/` id resolution, NoDisplay/Hidden filtered) — not `gio mime` (localized
       prose) and not `mimeinfo.cache` (misses subdir entries); `launch` via
       `gtk-launch {appId} {file}` with `execFile`; `chooser` config-only (unavailable
@@ -22,7 +24,8 @@
       extension table to drift
 - [ ] 1.4 Server tests: template substitution stays per-element (metacharacter file
       name arrives as one argv entry), builtin selected when config absent, override
-      selected when present, reader resolves subdirectory ids and finds a
+      selected when present, reader resolves subdirectory ids, traverses a
+      **symlinked** subdirectory (the dot_applications shape) and finds a
       MimeType-declaring entry missing from `mimeinfo.cache`, names resolve from
       `Name=`
 
