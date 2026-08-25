@@ -115,7 +115,11 @@ skips exactly the entries the feature exists for. `NoDisplay`/`Hidden` entries a
 filtered from associations, and the filter is load-bearing, not cosmetic: for
 `model/stl` it removes `wine-extension-stl.desktop` (`Name=0FileVersion`) and
 `f3d-plugin-native.desktop`, whose `Name=F3D` would otherwise duplicate the default's
-pill. The same reader resolves any id to its localized `Name=`, which is the **only
+pill. The same reader resolves any id to its plain `Name=` — the first unlocalized
+occurrence; `Name[locale]` variants are deliberately ignored, so a non-English
+desktop sees the C-locale name here while other surfaces translate (accepted:
+locale plumbing is not this change's work, and the plain name is never wrong, only
+untranslated) — which is the **only
 source of display names** anywhere in the design. This is not the deleted
 installed-applications scan: it resolves given ids and matches three mimes; it never
 enumerates for enumeration's sake. `launch` runs `gtk-launch {appId} {file}` via
@@ -287,6 +291,14 @@ next contradiction is recognizable):
   only commands, and a new test asserts exactly that.
 - *Client mime derivation is `model/${entry.format}`* — the entry's `format` is the
   server's own `modelFormat` result, so no second table exists on either side.
+- *The default is exempt from the NoDisplay and Removed filters, deliberately*
+  (post-review ruling — the behavior existed before anyone chose it, which is what
+  this line fixes): the default is the registry's statement of what double-click
+  does, and a row that hides or filters the user's own pin silently disagrees with
+  the OS about the user's own configuration. Pinning a NoDisplay entry as default
+  therefore puts its (possibly garbage) name at the head of the row — self-inflicted,
+  visible, and honest, which beats divergence. The filters apply to associations,
+  exactly as the spec's sentence scopes them.
 
 ## Risks / Trade-offs
 
