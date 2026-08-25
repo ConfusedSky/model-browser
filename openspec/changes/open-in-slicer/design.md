@@ -3,11 +3,10 @@
 ## Context
 
 The entry menu system landed with `entry-context-menu`: commands are defined once in
-`client/src/lib/entryActions.ts` (`ENTRY_COMMANDS`, `EntryCommand` at entryActions.ts:591)
-and drawn by `EntryMenu.tsx`, which documents (EntryMenu.tsx:38) why the menu has **no
+`client/src/lib/entryActions.ts` (`ENTRY_COMMANDS`, `EntryCommand`)
+and drawn by `EntryMenu.tsx`, whose note on the `axis` prop says why the menu has **no
 submenu machinery** — focus is one flat index over buttons, and the axis choice is an
-inline pill group for exactly that reason. The server exposes `/api/file`
-(server/src/app.ts:86) with virtual-path parsing (`parseVPath`, server/src/vpath.ts) and
+inline pill group for exactly that reason. The server exposes `/api/file` with virtual-path parsing (`parseVPath`, server/src/vpath.ts) and
 zip extraction (`extractEntry`, server/src/zip.ts); the guard checks Origin on `/api/*`.
 
 Spike evidence (2026-08-24, this machine — Arch, Hyprland/Wayland, Chrome):
@@ -138,7 +137,7 @@ builtins. Templates are authored by the machine's user in a local file; they are
 trusted config, and nothing network-supplied ever reaches them.
 
 **L3 — Menu shape: inline pill group, not a submenu.** Follows the axis-pill precedent
-and rationale recorded at EntryMenu.tsx:38 verbatim — a submenu would add open state, a
+and the rationale recorded on `EntryMenu`'s `axis` prop verbatim — a submenu would add open state, a
 clamp, focus handoff, and a second Escape level for a row of two-to-four names. The
 group renders as `open in  <Default> <Other> …` alongside the axis group, applies only
 to model entries, and participates in the flat keyboard index. Revisit a real submenu
@@ -166,22 +165,20 @@ path**: it returns `{chooser, types}` — `chooser` the configured-or-not boolea
 per-server-config constant with no business on a per-entry request), `types` a map
 from each handled mime (L6) to `{default, associated}` with apps as `{id, name}`. The
 client fetches it **once per session** and reads the cache when a menu opens — never a
-probe issued when a menu opens, which is a recorded rule (`AvailabilityContext`,
-entryActions.ts:142, D6/2.5), and also what keeps the menu's command list synchronous:
-EntryMenu measures, clamps, and seeds focus from `commands.length` on mount
-(EntryMenu.tsx:107–160), so late-arriving commands would visibly re-position the menu
+probe issued when a menu opens, which is a recorded rule (`AvailabilityContext`, D6/2.5), and also what keeps the menu's command list synchronous:
+EntryMenu measures, clamps, and seeds focus from `commands.length` on mount, so late-arriving commands would visibly re-position the menu
 and jump focus. The cache is refetched each time an open-with completes, since the
 chooser may have rewritten the registry (L9). The endpoint reads the registry fresh on
 each request — no server-side memoization across requests. `POST /api/open` takes
 `{path, appId}`; `POST /api/open-with` takes `{path}` and runs the chooser operation
 (reporting unavailable when unconfigured). Both validate the path exactly as
 `/api/file` does (absolute, `parseVPath`, existence), reject nested-zip entries as
-`/api/file` does (app.ts:100), resolve zip entries per L7, and absolutize. The client
+`/api/file` does, resolve zip entries per L7, and absolutize. The client
 never sends commands; unknown `appId`s are passed to the launcher, whose failure is
 reported (L8). All client I/O via `ApiClient` (global D1).
 
 **L6 — Mime resolution maps the existing format detector, not a second table.**
-`modelFormat` (server/src/listing.ts:17) already decides what a model is
+`modelFormat` (server/src/listing.ts) already decides what a model is
 (`/\.(stl|3mf|obj)$/i`) and is what makes an entry `kind === 'model'`; the mime is a
 mapping of its result (`stl → model/stl`, `3mf → model/3mf`, `obj → model/obj`), so
 the two can never drift. No platform call: content sniffing is exactly what the spike
@@ -226,8 +223,7 @@ instance itself, which surfaces as the command failing and is reported like any
 failure (L8).
 
 **L10 — Menu integration is a generalization, not a drop-in.** EntryMenu's keyboard
-arithmetic is written for exactly one fixed-size pill group (EntryMenu.tsx:107–146:
-`axisCount = AXIS_LETTERS.length + 1`, `count = axisCount + commands.length`, the
+arithmetic is written for exactly one fixed-size pill group (`axisCount = AXIS_LETTERS.length + 1`, `count = axisCount + commands.length`, the
 land-on-the-letter rule, `focused` seeded at `axisCount`); a second, variable-length
 group generalizes all of it — explicit tasks, not incidental work. Layout: the open-in
 row sits below the axis row, both above the command list; the menu still opens focused
@@ -251,7 +247,7 @@ and the code implemented it faithfully. What is being reversed here is therefore
 this design's own call, not a drift between the two. *(This paragraph previously
 said "round three narrowed it to match the code"; both halves were false, caught in
 review 2026-08-25 and corrected against `git log --follow`.)* Failure reporting
-uses a shared constant beside `COPY_FAILED` (entryActions.ts:148) so "reported the
+uses a shared constant beside `COPY_FAILED` so "reported the
 same way" is structural — **two** constants since 2026-08-25 (`878a854`):
 `LAUNCH_FAILED` for a pill, whose application the user named, and
 `CHOOSER_FAILED` for *Open with…*, where none was chosen and "that application"
@@ -285,7 +281,8 @@ next contradiction is recognizable):
   indexErrorReply precedent — a downstream process failing, not our bug); chooser
   unconfigured is **503 `{error, unavailable:true}`** (the semantic-status precedent:
   availability the UI renders, not an error). The client treats any non-ok launch
-  reply as the one shared failure message; it never needs to distinguish 503, since
+  reply as that action's failure sentence (one for a named application, one for the
+  chooser — split later, at 878a854); it never needs to distinguish 503, since
   the action is hidden when unconfigured and a 503 can only arrive on a stale-report
   race.
 - *Client-abort coverage*: asserted structurally (chooser spawn options carry
@@ -325,6 +322,12 @@ next contradiction is recognizable):
   therefore puts its (possibly garbage) name at the head of the row — self-inflicted,
   visible, and honest, which beats divergence. The filters apply to associations,
   exactly as the spec's sentence scopes them.
+
+*Citation convention (adopted 2026-08-25):* this document and `tasks.md` cite code by
+**symbol name, never by line**. Every one of the sixteen `file:line` citations they
+carried had gone stale by the time the change was implemented — the implementation
+pushed all nine cited symbols down, `COPY_FAILED` twice in two weeks — and a line
+number adds nothing a `grep` for the name does not, while being the half that rots.
 
 ## Risks / Trade-offs
 

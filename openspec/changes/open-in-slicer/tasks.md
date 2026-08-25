@@ -39,7 +39,7 @@
 - [x] 1.2 Config loading: `~/.config/model-browser/launch.json` (path via
       `MODEL_BROWSER_LAUNCH_CONFIG`), argv-array overrides with per-element placeholder
       substitution, absent file → builtins
-- [x] 1.3 Mime mapping from `modelFormat` (server/src/listing.ts:17) — no second
+- [x] 1.3 Mime mapping from `modelFormat` (server/src/listing.ts) — no second
       extension table to drift
 - [x] 1.4 Server tests: template substitution stays per-element (metacharacter file
       name arrives as one argv entry), builtin selected when config absent, override
@@ -54,8 +54,7 @@
 - [x] 2.1 `GET /api/apps` (no path parameter, no path validation) — fresh read per
       request, returns `{chooser, types}`: `chooser` the configured boolean, `types`
       mapping each handled mime to `{default, associated}` with `{id, name}` records
-- [x] 2.2 `POST /api/open` `{path, appId}` — validate as `/api/file` (nested zips
-      rejected, app.ts:100), absolutize, temp-extract zip entries (per-run `mkdtemp`,
+- [x] 2.2 `POST /api/open` `{path, appId}` — validate as `/api/file` (nested zips rejected), absolutize, temp-extract zip entries (per-run `mkdtemp`,
       name keyed on the full virtual path with the entry's extension, repeat
       launches extract to a staging name and `rename()` over the target — never
       truncate in place — never delete mid-run), run launch op, exit 0 → success,
@@ -76,21 +75,22 @@
 - [x] 3.1 ApiClient: `apps()` fetched once per session and cached; `open(path, appId)`;
       `openWith(path)` issued with no timeout and no abort wiring, and completing it
       refetches `apps()` (the chooser may have rewritten the registry)
-- [x] 3.2 Generalize EntryMenu's keyboard arithmetic (EntryMenu.tsx:107–146) from one
+- [x] 3.2 Generalize EntryMenu's keyboard arithmetic from one
       fixed-size pill group to two groups, one variable-length: index math, the
       land-on-current rule, initial focus still the first command, re-seed deps —
       open-in row below the axis row, both above the commands
 - [x] 3.3 Open-in pill group in `entryActions.ts` + `EntryMenu.tsx`: model entries
       only, default first, absent when no associations, data from the session cache
       (no probe on menu open — D6/2.5), one-shot launch, failure reported via a shared
-      constant beside `COPY_FAILED` (entryActions.ts:145)
+      constant beside `COPY_FAILED` (`LAUNCH_FAILED`)
 - [x] 3.4 "Open with…" `EntryCommand`: offered exactly when the cached report says a
       chooser is configured (absent otherwise), one-shot handoff to
-      `POST /api/open-with`, no client chooser UI, failure via the shared constant
+      `POST /api/open-with`, no client chooser UI, failure via `CHOOSER_FAILED` — its
+      own sentence since 878a854, because no application was chosen
 - [x] 3.5 `MenuItemId` gains `openIn` (the group id, joining the union the way
-      `orbitAxis` does — entryActions.ts:60–67); `openWith` arrives via `CommandId`
+      `orbitAxis` does — see its comment in entryActions.ts); `openWith` arrives via `CommandId`
       automatically. Both offered on tile/orbit/lightbox-menu surfaces and excluded
-      in `LIGHTBOX_PANEL_EXCLUDES` (entryActions.ts:769) — panel scope deliberate
+      in `LIGHTBOX_PANEL_EXCLUDES` — panel scope deliberate
 - [x] 3.6 Client tests: group presence/absence per entry kind and association state,
       default-first ordering, Open with… present/absent on the chooser flag, no fetch
       fired by raising a menu, refetch after open-with completes, keyboard traversal
