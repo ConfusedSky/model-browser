@@ -1,11 +1,27 @@
-import { closeSync, mkdtempSync, openSync, readFileSync, readSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  closeSync,
+  mkdtempSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  readSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { zipSync } from 'fflate'
 import { afterAll, describe, expect, it } from 'vitest'
 import { createApp } from '../src/app'
 import { ThumbCache } from '../src/cache'
-import { type ExecFn, type LaunchConfig, type SpawnOptions, type SpawnResult, createLauncher } from '../src/launch'
+import {
+  type ExecFn,
+  type LaunchConfig,
+  type SpawnOptions,
+  type SpawnResult,
+  createLauncher,
+  ZipTempStore,
+} from '../src/launch'
 import { LOOPBACK, stlBytes } from './helpers'
 
 const dir = mkdtempSync(join(tmpdir(), 'mb-open-'))
@@ -37,7 +53,10 @@ interface Call {
 /**
  * A whole app wired to a recording exec: the endpoints run the real launcher,
  * the real path pipeline, and the real temp store — only the spawn is faked.
- * The config is always injected, never read from the machine.
+ * The config is always injected, never read from the machine. The zip temp
+ * store's root defaults to this file's own swept `dir`, never the bare system
+ * tmpdir (4.5) — a test wanting to check the injected-root plumbing itself
+ * passes its own store.
  */
 function harness(
   config: LaunchConfig = {},
@@ -46,6 +65,7 @@ function harness(
     stdout: '',
     stderr: '',
   }),
+  zipTemp: ZipTempStore = new ZipTempStore(dir),
 ): { calls: Call[]; app: ReturnType<typeof createApp> } {
   const calls: Call[] = []
   const exec: ExecFn = async (file, args, opts) => {
@@ -53,7 +73,7 @@ function harness(
     return reply(file, args)
   }
   const env: NodeJS.ProcessEnv = { HOME: join(dir, 'no-such-home'), XDG_DATA_DIRS: join(dir, 'no-such-share') }
-  const app = createApp(new ThumbCache(cacheDir), createLauncher({ env, exec, config }))
+  const app = createApp(new ThumbCache(cacheDir), createLauncher({ env, exec, config }), zipTemp)
   return { calls, app }
 }
 
@@ -228,6 +248,23 @@ describe('POST /api/open', () => {
     expect(res.status).toBe(502)
     expect(((await res.json()) as { error: string }).error).toMatch(/ENOENT/)
   })
+
+  it('extracts a zip-entry launch into the injected root, never the bare system tmpdir (4.5)', async () => {
+    // Snapshotted rather than asserted empty: the real tmpdir can carry
+    // `model-browser-open-*` dirs from unrelated runs, and that is not this
+    // test's business — only whether *this* launch added one is.
+    const before = new Set(readdirSync(tmpdir()).filter((n) => n.startsWith('model-browser-open-')))
+    const root = mkdtempSync(join(dir, 'regression-root-'))
+    const { calls, app } = harness({}, undefined, new ZipTempStore(root))
+    await post(app, '/api/open', { path: `${join(dir, 'a.zip')}!/part.stl`, appId: 'x.desktop' })
+    const file = calls[0]?.args[1] as string
+    // Positive assertion: the extracted file resolves under the store's own
+    // injected root, not wherever the OS tmpdir happens to be.
+    expect(file.startsWith(root + sep)).toBe(true)
+    expect(readFileSync(file).equals(aPart)).toBe(true)
+    const after = readdirSync(tmpdir()).filter((n) => n.startsWith('model-browser-open-'))
+    expect(after.filter((n) => !before.has(n))).toEqual([])
+  })
 })
 
 describe('POST /api/open-with', () => {
@@ -283,6 +320,7 @@ describe('POST /api/open-with', () => {
     const app = createApp(
       new ThumbCache(cacheDir),
       createLauncher({ env, exec, config: { chooser: ['open-with', '{file}'] } }),
+      new ZipTempStore(dir),
     )
     const controller = new AbortController()
     const pending = app.request('/api/open-with', {

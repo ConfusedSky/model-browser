@@ -488,13 +488,19 @@ let stagingCounter = 0
  * path**, never the basename: `a.zip!/part.stl` and `b.zip!/part.stl` must not
  * share a file, or the second launch overwrites bytes the first app may still
  * be reading — the exact hazard this exists to avoid (L7).
+ *
+ * `root` is the directory its per-run `mkdtemp` is created inside — defaults
+ * to the OS tmpdir, unchanged from before this parameter existed. Tests pass
+ * their own swept root so `createApp` never litters the real tmpdir (4.5).
  */
 export class ZipTempStore {
   private dir: string | undefined
 
+  constructor(private readonly root: string = tmpdir()) {}
+
   /** Created lazily: a server that never opens a zip entry makes no temp dir. */
   private ensureDir(): string {
-    return (this.dir ??= mkdtempSync(join(tmpdir(), 'model-browser-open-')))
+    return (this.dir ??= mkdtempSync(join(this.root, 'model-browser-open-')))
   }
 
   async fileFor(vpath: string, zipPath: string, entry: string): Promise<string> {

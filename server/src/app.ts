@@ -62,11 +62,13 @@ function indexErrorReply(err: IndexError): {
 export function createApp(
   cache: ThumbCache = new ThumbCache(),
   launcher: Launcher = createLauncher(),
+  // Per server run, per app: nothing in it is deleted while the server runs,
+  // since a launched application may still be reading (app-launch L7). A test
+  // can inject its own store (its own root) so it never litters the real
+  // tmpdir (4.5) — additive and trailing, like `cache` and `launcher` above.
+  zipTemp: ZipTempStore = new ZipTempStore(),
 ): Hono {
   const app = new Hono()
-  // Per server run, per app: nothing in it is deleted while the server runs,
-  // since a launched application may still be reading (app-launch L7).
-  const zipTemp = new ZipTempStore()
 
   app.use('/api/*', guard)
 
