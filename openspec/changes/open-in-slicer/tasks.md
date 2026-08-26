@@ -147,7 +147,7 @@
       predates this change and touching the viewer's layout belongs to a change that
       owns the lightbox requirements
 - [ ] 4.4 Dry-run the archive per project convention
-- [ ] 4.5 Give `ZipTempStore` an optional root (and `createApp` an optional store or
+- [x] 4.5 Give `ZipTempStore` an optional root (and `createApp` an optional store or
       root, the way it already takes `cache` and `launcher`) so tests can point it at
       their own swept dirs. Scoped 2026-08-24 (reviewer-verified): 45
       `model-browser-open-*` dirs / 7.1M in the real tmpdir; every *other* test
@@ -159,6 +159,16 @@
       holds one of those paths as a *string* (no fd, `lsof` proves nothing), and an
       early rm makes its next zip launch fail on `renameSync` into a missing dir.
       systemd-tmpfiles reclaims them in 10 days regardless
+      *(landed `750b946`. `ZipTempStore` took a `root` defaulting to the OS tmpdir —
+      behavior unchanged with no argument — and `createApp` a fourth optional
+      trailing `zipTemp`, parallel with `cache` and `launcher`; only the root moved,
+      so L7's vpath-keyed names, staging-rename and never-delete rules are untouched.
+      Falsified by hardcoding `ensureDir` back to the tmpdir: the new test fails
+      `expected false to be true` on the under-the-injected-root assertion. Its
+      negative half is a before/after snapshot delta rather than an absolute
+      cleanliness claim, since the real tmpdir is shared with other processes.
+      Verified on merged main by the coordinator rather than taken from the report:
+      67 dirs before a full server run, 67 after)*
 - [x] 4.6 Implement 4.3's two decisions: kind-aware `open` labels resolved in
       `commandsFor`; drop `openIn`/`openWith` from `LIGHTBOX_PANEL_EXCLUDES` and give
       the panel the pill row above its action strip. Inverts the panel-withholds
