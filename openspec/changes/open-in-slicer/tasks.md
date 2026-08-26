@@ -146,7 +146,13 @@
       the column, so this is not the launch actions' doing). Not fixed here: it
       predates this change and touching the viewer's layout belongs to a change that
       owns the lightbox requirements
-- [ ] 4.4 Dry-run the archive per project convention
+- [x] 4.4 Dry-run the archive per project convention
+      *(run 2026-08-26 on a fresh `mktemp` copy, one copy for this change: applies
+      cleanly — `app-launch` created with 4 requirements, `entry-actions` updated
+      with 2 added, no collisions, no MODIFIED blocks to trip on. It warns about 3
+      incomplete tasks, which is honest: 4.3's pixels and 4.7 are open by design,
+      and this line itself was open while it ran. Re-run at real archive time — main
+      moves under long-lived deltas)*
 - [x] 4.5 Give `ZipTempStore` an optional root (and `createApp` an optional store or
       root, the way it already takes `cache` and `launcher`) so tests can point it at
       their own swept dirs. Scoped 2026-08-24 (reviewer-verified): 45
