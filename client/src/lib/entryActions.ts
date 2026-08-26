@@ -336,7 +336,7 @@ function refreshThumbnail(
     try {
       // Every renderer-touching stage waits out a suspension first: `push`
       // alone is not enough, because `suspend()` cannot stop a job that has
-      // already started (queue.ts:40-47), and there is exactly one
+      // already started (queue.ts's waiters gate), and there is exactly one
       // WebGLRenderer app-wide (architecture D2/D3).
       await host.queue.whenResumed()
       // The stored orientation, read from the cache rather than from the
@@ -367,7 +367,7 @@ function refreshThumbnail(
           cached.axis ?? 'y',
         ))
       } else {
-        // Exactly the sweep's resolution (useThumbnails.ts:194-199): the stored
+        // Exactly the sweep's resolution (useThumbnails' dropStale): the stored
         // camera/axis, else the pose when *both* are absent, else the default.
         const fromPose = cached.camera === undefined && cached.axis === undefined ? pose : null
         posed = fromPose !== null
@@ -391,7 +391,7 @@ function refreshThumbnail(
         // camera (semantic-search), so a re-classification still governs it.
         //
         // `null` is the discard the store gained for this (4b.2); `undefined`
-        // still means keep. And the labels are not optional: `cache.ts:108-110`
+        // still means keep. And the labels are not optional: `ThumbCache.put`
         // clears every label a PNG-bearing PUT omits, so an unlabelled write
         // fails the hit test forever and re-renders the tile on every visit.
         camera: discardFraming ? null : undefined,
@@ -552,7 +552,7 @@ export const flipPillClass = (active: boolean): string =>
 export const FLIP_TITLE = 'Negate the spindle axis (+axis ↔ −axis)'
 
 /** The spindle a model with none stored is framed about — the `'y'` the sweep
- *  (`useThumbnails.ts:223`) and the viewer already fall back to, named here so
+ *  (`useThumbnails`' axis fallback) and the viewer already fall back to, named here so
  *  the menu can mark a model that has never been given one. */
 export const DEFAULT_ORBIT_AXIS: OrbitAxis = 'y'
 
@@ -593,11 +593,11 @@ export function orbitAxisApplies(entry: DirEntry, exclude: readonly MenuItemId[]
  * resolve from and no reason to hold a render slot for a lookup.
  *
  * **No `posed` label, and that is not an omission.** The pose path requires
- * *both* a missing camera and a missing axis (`useThumbnails.ts:218-220`), so a
+ * *both* a missing camera and a missing axis (`useThumbnails`' `posed` test), so a
  * stored axis takes this model out of pose framing for good. That is what
  * choosing an axis *means*: the user has said which way up this model stands,
  * and an index that disagrees no longer reframes it. `lighting` and `rig` do
- * ride along — `cache.ts:108-110` clears every label a PNG-bearing PUT omits,
+ * ride along — `ThumbCache.put` clears every label a PNG-bearing PUT omits,
  * so an unlabelled write fails the next visit's hit test and re-renders this
  * tile on every visit, for ever.
  *
@@ -615,7 +615,7 @@ export function setOrbitAxis(
   host.queue.push(async () => {
     try {
       // The suspension gate, twice, exactly where the other two put it: `push`
-      // alone cannot stop a job that has already started (queue.ts:40-47), and
+      // alone cannot stop a job that has already started (queue.ts's waiters gate), and
       // there is one WebGLRenderer app-wide (architecture D2/D3).
       await host.queue.whenResumed()
       const lighting = getLightingMode() // the mode this render uses
@@ -623,7 +623,7 @@ export function setOrbitAxis(
       await host.queue.whenResumed()
       // The default about the new spindle — which is what an ordinary visit
       // resolves to for a model that has an axis and no camera
-      // (`useThumbnails.ts:222-223`), so the tile and the next sweep agree.
+      // (`useThumbnails`' camera/axis fallbacks), so the tile and the next sweep agree.
       // `renderThumbnail` also hands the axis to the rig, so axis-mode lighting
       // follows the new spindle rather than the old one.
       const png = await renderThumbnail(object, DEFAULT_CAMERA, axis)

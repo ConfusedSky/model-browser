@@ -2,7 +2,7 @@
 
 ## Context
 
-`useThumbnails.ts:113-141` reads the cache for each model and accepts a hit only when
+`useThumbnails`' load effect reads the cache for each model and accepts a hit only when
 `cached.lighting === getLightingMode() && cached.rig === RIG_VERSION`; anything else falls
 through to the re-render tail. That rule is `model-thumbnails`' *Lighting-mode-aware
 thumbnails*, and it works. Note what the tail does *not* do: it holds the old object URL in
@@ -52,11 +52,11 @@ and become defects when it is the same one.
 ### D1a: A posed tile keeps its pose across the toggle
 
 There is a third pixel-recipe label beside lighting and rig — `POSE_VERSION`
-(`client/src/three/pose.ts:39`), added because the index's orientation is an input to the
+(`client/src/three/pose.ts`), added because the index's orientation is an input to the
 pixels that the cache key does not carry. It matters here because a mode toggle sends every
 displayed tile through the same tail that resolves orientation, and that tail reads the
 *absence* of a stored camera and axis as "this model is the index's to orient". A posed tile
-must therefore come back posed, and must re-declare `POSE_VERSION` on the way — `cache.ts:110`
+must therefore come back posed, and must re-declare `POSE_VERSION` on the way — `ThumbCache.put`
 clears the label on any PUT carrying a PNG, and `poseStale` re-renders anything whose label is
 missing. That much self-heals on the next sweep, so dropping it costs one wasted render rather
 than a loop; what does not heal is a tile that comes back *unposed*, since the index's
@@ -87,7 +87,7 @@ already bounds concurrency and suspends under an active orbit or lightbox (archi
 D2/D3), so the work yields to interaction rather than competing with it.
 
 One property keeps it from being felt as a stall, and it is **work this change has to do
-rather than a property it inherits**. `useThumbnails.ts:105` opens the effect with
+rather than a property it inherits**. `useThumbnails`' load effect opens with
 `setThumbs(new Map(models.map(e => [e.path, { status: 'loading' }])))` — every tile drops to
 a spinner, and the stale branch parks the old object URL in a closure (`:146-152`) that only
 the failure path reads. Today that is invisible: the effect re-runs on a listing change,

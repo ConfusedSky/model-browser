@@ -14,25 +14,25 @@
 ## 1. The trigger
 
 - [ ] 1.1 The active lighting mode becomes an input to `useThumbnails` and joins the sweep
-      effect's dependency list (`useThumbnails.ts:235`). `App.tsx` already holds it in state
+      effect's dependency list (`useThumbnails`' load effect). `App.tsx` already holds it in state
       for the viewer, so no new source of truth — pass the value, do not call
       `getLightingMode()` for the dependency (D1)
 - [ ] 1.2 Pass a primitive, not an object rebuilt per render: an equal mode must not
       re-trigger the sweep. This is the failure that turns a toggle into a render loop
-- [ ] 1.2a Leave `poses` (`useThumbnails.ts:79`) out of the dependency list, deliberately and
+- [ ] 1.2a Leave `poses` (`useThumbnails`' last parameter) out of the dependency list, deliberately and
       with a comment saying why. A pose arriving after a tile's pixels is already handled
-      *inside* a run, by `poseStale` against `POSE_VERSION` (`useThumbnails.ts:125-126`) —
+      *inside* a run, by `poseStale` against `POSE_VERSION` —
       not by re-running the effect. Adding `lighting` beside `poses` without a word invites a
       later "consistency fix" that adds both and re-runs the whole sweep whenever a meaning
       search lands its poses
-- [ ] 1.2b `client/test/thumbnailQueue.test.tsx:45` calls the hook with four arguments — fix
+- [ ] 1.2b `thumbnailQueue.test.tsx`'s `Harness` calls the hook with four arguments — fix
       the call sites when the signature changes
 - [ ] 1.3 The rig version stays out of the dependency list (D2) — it changes with a build,
       not with a gesture, and nothing on screen is waiting on it
 
 ## 2. Behaviour under teardown
 
-- [ ] 2.1 **Keep displayed images across a re-run.** `useThumbnails.ts:105` resets every tile
+- [ ] 2.1 **Keep displayed images across a re-run.** `useThumbnails`' load effect resets every tile
       to `{ status: 'loading' }`, and the stale branch's `staleUrl` (`:146-152`) is read only
       by the failure path — so with the mode in the deps a toggle blanks the grid to spinners.
       Carry each tile's current image into the new pass and replace it only when its render
@@ -42,8 +42,8 @@
       A mode dependency turns that into a decoded PNG per visible model per toggle, and D3
       invites repeated toggling, so track ownership and revoke on replacement
 - [ ] 2.3 A mode change cancels the in-flight sweep's queued renders as a navigation does.
-      Note what cancellation does **not** cover: `useThumbnails.ts:189-190` renders and
-      `await api.putThumb(...)` before the `if (!alive)` check at `:198`, and `queue.ts:41-43`
+      Note what cancellation does **not** cover: `useThumbnails`' load effect renders and
+      `await api.putThumb(...)` before the `if (!alive)` check that follows, and `queue.ts`'s `waiters`
       documents that a started job cannot be stopped — so a tile already rendering writes the
       cache under the outgoing mode and can land after the new pass's write. Move the `alive`
       check above the PUT — the delta's own scenario says the grid settles "without the first
@@ -54,11 +54,11 @@
 ## 2b. A pre-existing loop this change makes hotter
 
 - [ ] 2b.1 Fix `poseStale`: it asks whether a pose *exists*, not whether the render would
-      *use* one. `useThumbnails.ts:125-126` sets `poseStale = wantsPose && cached.posed !==
+      *use* one. `useThumbnails`' load effect sets `poseStale = wantsPose && cached.posed !==
       POSE_VERSION`, but the tail applies a pose only when the model has neither a stored
       camera nor a stored axis (`:182-185`). So a model that has been orbited **and** has an
       index pose is permanently stale: `posed` is null, the PUT writes `posed: undefined`
-      (`:196`), `cache.ts:110` clears the label on any PNG write, and the next meaning-grid
+      (before the `alive` re-check), `ThumbCache.put` clears the label on any PNG write, and the next meaning-grid
       visit repeats the whole render and upload. Read-verified against main, not run.
       Narrow the predicate to "a pose that would be applied" — the same condition the tail
       uses — so a model with its own orientation is simply a hit

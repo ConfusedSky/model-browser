@@ -273,7 +273,7 @@ describe('the menu on a viewer surface', () => {
     // The model left the view, so App signalled the persisting close and the
     // session wrote its camera on the way out — not a bare unmount. The camera
     // is what says which write this was: the background sweep PUTs pixels and
-    // labels and never a viewpoint (useThumbnails.ts:202-209), so `putThumb`
+    // labels and never a viewpoint (useThumbnails' sweep PUT), so `putThumb`
     // having been called at all proves nothing here.
     expect(dialog()).toBeNull()
     const closeWrites = putThumb.mock.calls

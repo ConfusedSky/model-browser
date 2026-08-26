@@ -33,6 +33,17 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
 - Work is committed directly to `main` — no feature branches
 - design.md cites specific code (classes, call sites, geometry) — re-check those citations
   against the source when reviewing; plausible-sounding ones have been wrong
+- Cite code by **symbol name, never `file.ts:123`** — line numbers rot silently as code is
+  inserted above them. All sixteen of open-in-slicer's citations, across ten symbols, were
+  wrong within two weeks of the code landing (`LIGHTBOX_PANEL_EXCLUDES` 769→1018), and
+  `COPY_FAILED` was re-fixed twice — cited in two files at two different wrong values —
+  before the numbers were dropped. A name is what a reader greps for anyway;
+  where no symbol encloses the spot, name the nearest one and say which part ("`useThumbnails`'
+  load effect", "`listFlat`'s `budget` assignment")
+- Search spec/design prose with **whitespace collapsed**, not line-by-line — markdown wraps
+  mid-phrase, so `grep` misses what spans a newline. A retracted claim survived two
+  correction passes in normative spec text this way, and it hides edits too, not just reads:
+  `python3 -c "import re,sys;print(re.sub(r'\s+',' ',open(sys.argv[1]).read()))" FILE | grep …`
 - A dev instance is usually already running (check first — not always up; ports 3177/5173,
   EADDRINUSE on a second `bun run dev`) — server (`bun --hot`) and client (Vite HMR) pick
   up edits live

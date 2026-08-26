@@ -2,7 +2,7 @@
 
 ## Context
 
-`listFlat` walks synchronously within one request: `takeStep` (server/src/listing.ts:34) decrements the budget once per directory entry and is the single chokepoint every path funnels through — `listFsDir`, `walkFsLevel`, and `walkZip` all call it before doing per-entry work. There is no shared state between requests and no cancellation anywhere in `server/src`.
+`listFlat` walks synchronously within one request: `takeStep` (`server/src/listing.ts`) decrements the budget once per directory entry and is the single chokepoint every path funnels through — `listFsDir`, `walkFsLevel`, and `walkZip` all call it before doing per-entry work. There is no shared state between requests and no cancellation anywhere in `server/src`.
 
 The client's `requestRef` (App.tsx) stamps each request and ignores all but the newest response. That is a display guarantee, not a work guarantee.
 

@@ -6,7 +6,7 @@ Switching the lighting mode leaves the grid you are looking at drawn under the o
 
 This is not a bug against the spec — it is the spec. `model-thumbnails`' *Lighting-mode-aware
 thumbnails* already requires the client to treat a hit whose stored mode or rig version
-differs as needing re-render, and the client does exactly that (`useThumbnails.ts:130-131`).
+differs as needing re-render, and the client does exactly that (`useThumbnails`' cache-hit check).
 But three of that requirement's four scenarios time the upgrade to a *visit*: "the user
 switches lighting mode and **revisits** a directory", "a directory **is visited** whose cache
 entries predate lighting-mode storage" (the fourth is about lighting matching at handoff and

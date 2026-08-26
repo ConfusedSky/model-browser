@@ -13,7 +13,7 @@
 
 ## 2. Stopping abandoned work
 
-- [ ] 2.1 `takeStep` (listing.ts:34) checks cancellation alongside the budget — it is already the per-entry chokepoint every path funnels through, so no new plumbing through the recursion (D2)
+- [ ] 2.1 `takeStep` (`listing.ts`) checks cancellation alongside the budget — it is already the per-entry chokepoint every path funnels through, so no new plumbing through the recursion (D2)
 - [ ] 2.2 Cancellation is **not** `truncated`: that flag means results were dropped from an answer someone received, and a stopped walk has no reader. Keep them separate states or a cancellation will surface to some future reader as a truncation notice (D2)
 - [ ] 2.3 A walk that did not complete is never persisted, cached, or handed to a joined request; a request arriving after a stop starts fresh (D3)
 - [ ] 2.4 Distinguish cancelled from failed in server-side logging, so the two are not conflated in diagnosis
