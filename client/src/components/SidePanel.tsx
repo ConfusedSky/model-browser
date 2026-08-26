@@ -12,6 +12,47 @@ const TAB_KEY = 'model-browser:panel-tab'
 type Tab = 'chat' | 'search' | 'similar'
 
 /**
+ * What to say about an index that cannot serve *this path*, which is not the
+ * same question as what state the index is in.
+ *
+ * Four of the five states describe the index's own condition. `ready` does not:
+ * a ready index that cannot answer here is **running**, and only out of range.
+ * That case used to fall through to the `absent` sentence, so a healthy index
+ * covering another collection reported itself as not running and told the user
+ * to start it — advice that would do nothing (observed 2026-08-26 against a
+ * live `ready` index, one directory above its `collectionRoot`).
+ *
+ * A `switch` over the whole union rather than a ternary chain with a fallback,
+ * deliberately: the bug was a default arm quietly serving two opposite
+ * conditions, so a sixth state must fail to compile rather than inherit a
+ * sentence written for `absent`.
+ */
+function indexStateSentence(index: IndexAvailability, path: string): string {
+  switch (index.state) {
+    case 'warming':
+      return `Meaning search is starting up${index.elapsed !== undefined ? ` (${Math.round(index.elapsed)}s)` : ''}…`
+    case 'volume-gone':
+      return 'Meaning search is running, but its library volume is not mounted.'
+    case 'wedged':
+      return 'Meaning search did not finish starting.'
+    case 'ready':
+      // In range and ready is `meaningRunnable`, which withholds this line
+      // entirely — so reaching here means out of range, and the two ways of
+      // being out of range are different facts, not one. An archive interior
+      // is never indexed wherever it sits (`indexCovers` refuses `!/` outright);
+      // another folder is merely outside the one collection, which the index
+      // can name.
+      return path.includes('!/')
+        ? 'Meaning search is running, but does not cover the inside of archives.'
+        : `Meaning search is running, but does not cover this folder.${
+            index.collectionRoot === undefined ? '' : ` It covers ${index.collectionRoot}.`
+          }`
+    case 'absent':
+      return 'Meaning search is not running — start the index to use it.'
+  }
+}
+
+/**
  * The tabs that may be *recorded*. Similar is not one of them: it exists only
  * while a similarity view does, so a profile restored onto it with no such view
  * would open on a tab that is not there. Excluding it from the store's type is
@@ -269,13 +310,7 @@ export default function SidePanel({
                   report — most machines will never run it (D4). */}
               {showIndexState && (
                 <p className="text-zinc-500">
-                  {index.state === 'warming'
-                    ? `Meaning search is starting up${index.elapsed !== undefined ? ` (${Math.round(index.elapsed)}s)` : ''}…`
-                    : index.state === 'volume-gone'
-                      ? 'Meaning search is running, but its library volume is not mounted.'
-                      : index.state === 'wedged'
-                        ? 'Meaning search did not finish starting.'
-                        : 'Meaning search is not running — start the index to use it.'}
+                  {indexStateSentence(index, path)}
                   {index.detail !== undefined && ` ${index.detail}`}
                 </p>
               )}

@@ -248,6 +248,47 @@ describe('meaning search', () => {
     expect(panel.querySelector('button[aria-label="Match folder names"]')).not.toBeNull()
   })
 
+  it('a running index out of range says so, rather than claiming it is stopped', async () => {
+    // The bug this pins: `ready` matched none of the named states and fell to
+    // the arm written for `absent`, so an index that was up — merely covering
+    // another collection — reported itself as not running and told the user to
+    // start it. Observed live 2026-08-26 one directory above `collectionRoot`.
+    indexAvailability.mockResolvedValue({
+      state: 'ready',
+      collectionRoot: '/models/library',
+      covers: ['stl'],
+    })
+    await mountApp('/models', NESTED)
+    await settle()
+    await click(searchTab())
+
+    const panel = container.querySelector('aside')!
+    expect(panel.textContent).toContain('does not cover this folder')
+    // Names what it *does* cover, so "why not here" is answerable from the line.
+    expect(panel.textContent).toContain('/models/library')
+    // The whole point: the false claim, and the advice that would do nothing.
+    expect(panel.textContent).not.toContain('not running')
+    expect(panel.textContent).not.toContain('start the index')
+  })
+
+  it('inside an archive it blames archives, not the folder', async () => {
+    // `indexCovers` refuses `!/` outright, so a zip interior is out of range
+    // even within the collection — a different fact from being outside it, and
+    // one no `collectionRoot` would explain.
+    indexAvailability.mockResolvedValue({
+      state: 'ready',
+      collectionRoot: '/models',
+      covers: ['stl'],
+    })
+    await mountApp('/models/kit.zip!/parts', NESTED)
+    await settle()
+    await click(searchTab())
+
+    const panel = container.querySelector('aside')!
+    expect(panel.textContent).toContain('does not cover the inside of archives')
+    expect(panel.textContent).not.toContain('not running')
+  })
+
   it('meaning mode does not show name-search options, running or not', async () => {
     // A submit in meaning mode defers; it does not become a name search. So
     // folder-matching under a mode that says Meaning would describe a search
