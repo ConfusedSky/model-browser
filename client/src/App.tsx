@@ -463,9 +463,13 @@ export default function App() {
    * regression with no failing test to catch it. The accessor form invites that
    * mistake in a way the raw map did not.
    *
-   * `anchor?.path` rather than `anchor`: the identity that matters is the path
-   * compared, and a re-landed answer carrying an equal anchor should not rebuild
-   * every tile's props.
+   * `anchor?.path` rather than `anchor` because the path is all the closure
+   * reads — a dependency should name what is used. It buys nothing today, and
+   * saying so is the point: `anchor` and `scores` change identity together (only
+   * `landing` replaces either, and it replaces both; `patch` spreads the result
+   * and preserves both), so the narrower dep can never be the thing that spares
+   * a rebuild. It is precision, not an optimisation, and a later reader should
+   * not treat it as load-bearing.
    */
   const scoreFor = useCallback(
     (path: string): IndexScore | undefined =>
