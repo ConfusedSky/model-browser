@@ -37,9 +37,11 @@
 - [x] 2.3 `App` reads it off `state.result` the way it reads `poses` (its `NO_POSES`-style
       stable empty default included, so an unscored listing does not mint a new object every
       render). Pass it to `Grid` and look up the viewer's own value for `ViewerLayer`.
-- [x] 2.4 Derive the provenance label from `Result.forView.subject.kind` — `k` for `query`,
-      `sim` for `similar`, nothing for any other arm (D3). Put the derivation in one place
-      both the tile and the panel read; two copies is how the two surfaces drift.
+- [x] 2.4 Derive the provenance label from the landed answer, in one place both the tile and
+      the panel read — two copies is how the two surfaces drift. `sim` for a `similar`
+      subject; `k` for a `query` subject **only when the answer is a meaning answer**, since
+      a `query` subject is a committed phrase of either corpus and a name search would
+      otherwise be labelled as scored (D3, corrected after this line was first written).
 - [x] 2.5 Reducer test in `client/test/searchReducer.test.ts`: a landing carries the map onto
       the result, and a landing without one leaves no stale map from the previous result.
 

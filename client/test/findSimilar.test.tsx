@@ -67,8 +67,22 @@ const NEIGHBOURS = {
 
 /** The same answer with its subject: the model the neighbours were computed
  *  from, which the index never returns among them (it excludes the query model
- *  from its own ranking), so the server adds it beside them. */
-const ANCHORED = { ...NEIGHBOURS, anchor: model('Kits/Baal/hero.stl') }
+ *  from its own ranking), so the server adds it beside them.
+ *
+ *  Its `scores` deliberately DOES carry the anchor's path, which the server
+ *  never sends. Without it the anchor has no score to suppress, and the tile's
+ *  own anchor guard is untestable — the assertion that it draws no badge passes
+ *  whether the guard exists or not. Keying one here is what makes the guard
+ *  falsifiable: it is the defence against a future server that keys a score at
+ *  the anchor's path, so the test has to supply what that server would. */
+const ANCHORED = {
+  ...NEIGHBOURS,
+  anchor: model('Kits/Baal/hero.stl'),
+  scores: {
+    ...NEIGHBOURS.scores,
+    '/models/Kits/Baal/hero.stl': { score: 1, z: 9.99 },
+  },
+}
 
 const READY = { state: 'ready', collectionRoot: '/models', covers: ['stl'] }
 
@@ -287,11 +301,14 @@ describe('a similarity view', () => {
     expect(neighbour!.textContent).toContain('sim 0.912')
     expect(neighbour!.textContent).toContain('z 4.03')
     expect(neighbour!.textContent).not.toContain('k 0.912')
-    // The anchor is the question, not an answer: the index excludes the query
-    // model from its own ranking rather than scoring it, so there is nothing to
-    // draw even though it is a tile in the same grid.
+    // The anchor is the question, not an answer, and stays unbadged even when a
+    // score IS keyed at its path — `ANCHORED` supplies one (1.000 / 9.99, values
+    // no neighbour could reach) precisely so this asserts the tile's guard
+    // rather than the fixture's silence.
     expect(subject!.textContent).not.toContain('sim')
     expect(subject!.textContent).not.toMatch(/z \d/)
+    expect(subject!.textContent).not.toContain('1.000')
+    expect(subject!.textContent).not.toContain('9.99')
   })
 
   it('announces a neighbour’s numbers with the scale spelled out', async () => {

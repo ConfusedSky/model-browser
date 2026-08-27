@@ -44,10 +44,14 @@ const scope = (over: Partial<SemanticListing['scope']> = {}) => ({
   covers: ['stl'],
   ...over,
 })
-/** Text-query cosines really do run this low, and the two hits differ in the
- *  third decimal — which is the case three-place formatting exists for. */
-const HERO_SCORE = { score: 0.1074, z: 3.916 }
-const BASE_SCORE = { score: 0.1068, z: 2.404 }
+/** Text-query cosines really do run this low, and these two are D4's argument
+ *  made concrete: identical at two decimal places (both `0.11`) and distinct at
+ *  three (`0.112`, `0.107`). At the shorter width a grid of genuinely different
+ *  results asserts a tie that does not exist — which is what the third place is
+ *  for. The pair used to be 0.1074/0.1068, which both render `0.107` and so
+ *  illustrated nothing. */
+const HERO_SCORE = { score: 0.1121, z: 3.916 }
+const BASE_SCORE = { score: 0.1074, z: 2.404 }
 const MEANING: SemanticListing = {
   path: '/models',
   entries: [model('Kits/Baal/hero.stl'), model('Kits/Baal/base.stl')],
@@ -183,13 +187,15 @@ describe('meaning search', () => {
     await settle()
 
     const [hero, base] = tiles()
-    expect(hero!.textContent).toContain('k 0.107')
+    expect(hero!.textContent).toContain('k 0.112')
     expect(hero!.textContent).toContain('z 3.92')
-    // The third place is doing work: two results, two different numbers.
+    // The third place is doing work, and this is where it shows: these two
+    // round to the SAME `0.11` at two places and to different values at three.
     expect(base!.textContent).toContain('k 0.107')
     expect(base!.textContent).toContain('z 2.40')
+    expect(hero!.textContent).not.toContain('k 0.107')
     // Spelled out where it is read aloud, never `k` on its own (D8).
-    expect(hero!.getAttribute('aria-label')).toContain('cosine 0.107')
+    expect(hero!.getAttribute('aria-label')).toContain('cosine 0.112')
     expect(hero!.getAttribute('aria-label')).toContain('z 3.92')
 
     // Leaving the search returns to a listing nobody scored: no badge, and
