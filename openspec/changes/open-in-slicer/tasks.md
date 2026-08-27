@@ -113,7 +113,7 @@
       Workshop with F3D honestly gone, since it was only ever the default pin and
       never an association. no-chooser absence remains unit-test-covered only, by
       choice — unconfiguring the live machine would mutate real config)*
-- [ ] 4.3 Tune the pill row visually and settle the naming — **decided by the user
+- [x] 4.3 Tune the pill row visually and settle the naming — **decided by the user
       2026-08-25 on the live app**: (a) `open` becomes kind-aware — "Open lightbox" /
       "Open folder" / "Open archive"; (b) the lightbox's information panel carries the
       launch actions after all (pill row + "Open with…"), reversing this change's own
@@ -122,7 +122,9 @@
       `LAUNCH_FAILED` for a named application and `CHOOSER_FAILED` — "Could not
       open the chooser to pick an application." — for Open with…, falsified by
       reverting the split and watching both surfaces' tests fail with
-      `expected "…chooser to pick an…" received "…file in that…"`.)*
+      `expected "…chooser to pick an…" received "…file in that…"`. Pixels judged
+      good by the user 2026-08-26, after two rounds — the row wrapping, and the
+      panel's caption taking its own line. Frozen.)*
       *(First pixel round done `0e0dedb`: the row inherited the axis row's
       non-wrapping `flex`, built for five tiny fixed children, so application names
       of the registry's choosing overran the panel column and it grew a horizontal
@@ -138,7 +140,7 @@
       The menu keeps its inline caption, where the row has width to spare and sits
       under an inline axis row; this is the second deliberate divergence between
       the two surfaces' classes)*
-- [ ] 4.7 The lightbox does not adapt to narrow windows — pre-existing, surfaced
+- [x] 4.7 The lightbox does not adapt to narrow windows — pre-existing, surfaced
       while judging 4.3: the model area is `shrink-0` at `min(80vh,80vw)`, so at a
       640px viewport it takes 512px and the information panel is crushed from its
       `w-72` to 94px, narrow enough that the path text alone overflows it (measured
@@ -146,6 +148,20 @@
       the column, so this is not the launch actions' doing). Not fixed here: it
       predates this change and touching the viewer's layout belongs to a change that
       owns the lightbox requirements
+      *(fixed anyway, `d8d7558`, once measured: the sizing rule violated no
+      requirement, it defeated one — a panel crushed to 76px cannot "show the
+      model's file name, full virtual path, format, size, and modified time" as
+      `model-viewer` requires — so restoring it is a bug fix, not a change. The
+      square is now sized against the room left after the panel
+      (`min(80vh,max(16rem,calc(95vw-18rem)))`) instead of taking its share first,
+      and stays square, so D1's aspect-1 snapshot contract is untouched. Measured
+      across six widths: panel 288→288 at 1280 (no regression), 126→286 at 760,
+      94→286 at 640, 76→236 at 520; square everywhere; no horizontal scrollbar at
+      any width; metadata fits at all of them. **Residual, deliberately not
+      fixed:** below ~570px the panel narrows again, because both cannot fit —
+      the real answer there is stacking the panel under the model, which would
+      contradict "an info panel **beside** the viewer" and so needs a change that
+      owns that requirement)*
 - [x] 4.4 Dry-run the archive per project convention
       *(run 2026-08-26 on a fresh `mktemp` copy, one copy for this change: applies
       cleanly — `app-launch` created with 4 requirements, `entry-actions` updated
