@@ -3,6 +3,7 @@
 // path is tested as thoroughly as the write path — the AO toggle's read path
 // went untested once and the reload half is where a persistence bug hides.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { MAX_RESULT_COUNT } from '../../shared/types'
 
 const MATCH_KEY = 'model-browser:search-folder-matching'
 const KINDS_KEY = 'model-browser:search-kinds'
@@ -34,16 +35,16 @@ describe('search options', () => {
     expect(m.searchKinds()).toBe('folders')
   })
 
-  it('a profile older than the floor takes the default; a chosen count survives', async () => {
-    // The migration the stored shape exists for. `JSON.stringify` drops
-    // `undefined`, so a count recorded as a missing key would be byte-identical
-    // to a profile written before the floor became the default — and every
-    // existing user would have read back as having opted out of a decision they
-    // were never asked. Written as `null`, the two are distinguishable.
+  it('reads every stored encoding by presence — design D4’s migration table', async () => {
+    // Row 2: a profile written before the floor existed. It carried a count and
+    // no floor, which under the presence rule is exactly what it says.
     localStorage.setItem(TUNING_KEY, JSON.stringify({ raw: false, pool: 'softmax', top: 60 }))
     const older = await import('../src/lib/searchOptions')
-    expect(older.searchTuning().minScore).toBe(older.TUNING_DEFAULTS.minScore)
+    expect(older.searchTuning().minScore).toBeUndefined()
+    expect(older.searchTuning().top).toBe(60)
 
+    // Row 1: the old `null` sentinel meant "count chosen". Absence now says the
+    // same thing, so the two collapse and the sentinel still reads correctly.
     vi.resetModules()
     localStorage.setItem(
       TUNING_KEY,
@@ -53,21 +54,85 @@ describe('search options', () => {
     expect(chose.searchTuning().minScore).toBeUndefined()
     expect(chose.searchTuning().top).toBe(12)
 
-    // A malformed floor falls back to the default like every other field here,
-    // never to the count — which is a choice, not a fallback.
+    // Row 3, the lossy one: written from a floor-only view, whose disabled count
+    // field the old writer emitted anyway. It reads as both bounds, and the
+    // count is whatever was inert in the bytes — here a 10 nobody chose.
     vi.resetModules()
-    localStorage.setItem(TUNING_KEY, JSON.stringify({ pool: 'softmax', minScore: 'x' }))
-    const bad = await import('../src/lib/searchOptions')
-    expect(bad.searchTuning().minScore).toBe(bad.TUNING_DEFAULTS.minScore)
+    localStorage.setItem(
+      TUNING_KEY,
+      JSON.stringify({ raw: false, pool: 'softmax', top: 10, minScore: 0.1 }),
+    )
+    const both = await import('../src/lib/searchOptions')
+    expect(both.searchTuning()).toMatchObject({ top: 10, minScore: 0.1 })
+
+    // Row 4: a floor and no count reads as the floor alone.
+    vi.resetModules()
+    localStorage.setItem(TUNING_KEY, JSON.stringify({ pool: 'softmax', minScore: 0.2 }))
+    const floorOnly = await import('../src/lib/searchOptions')
+    expect(floorOnly.searchTuning().minScore).toBe(0.2)
+    expect(floorOnly.searchTuning().top).toBeUndefined()
   })
 
-  it('writes a chosen count as an explicit null', async () => {
+  it('a bound it cannot parse is not in force, and a record naming none is the defaults', async () => {
+    // A malformed value cannot testify that its bound was set, so it reads as
+    // absent rather than as its default. Here that leaves a count alone.
+    localStorage.setItem(TUNING_KEY, JSON.stringify({ pool: 'softmax', top: 12, minScore: 'x' }))
+    const bad = await import('../src/lib/searchOptions')
+    expect(bad.searchTuning().minScore).toBeUndefined()
+    expect(bad.searchTuning().top).toBe(12)
+
+    // And when nothing survives, the record names no bound — which is the one
+    // case that reads as both at their defaults rather than as neither.
+    vi.resetModules()
+    localStorage.setItem(TUNING_KEY, JSON.stringify({ pool: 'softmax', top: 'x', minScore: 'x' }))
+    const none = await import('../src/lib/searchOptions')
+    expect(none.searchTuning()).toMatchObject({
+      top: none.TUNING_DEFAULTS.top,
+      minScore: none.TUNING_DEFAULTS.minScore,
+    })
+  })
+
+  it('clamps a stored count to what the index will return', async () => {
+    localStorage.setItem(TUNING_KEY, JSON.stringify({ pool: 'softmax', top: 5000 }))
+    const m = await import('../src/lib/searchOptions')
+    expect(m.searchTuning().top).toBe(MAX_RESULT_COUNT)
+  })
+
+  it('writes each bound in force and omits each bound that is not', async () => {
     const m = await import('../src/lib/searchOptions')
     m.setSearchTuning({ ...m.TUNING_DEFAULTS, top: 12, minScore: undefined })
-    expect(JSON.parse(localStorage.getItem(TUNING_KEY)!)).toMatchObject({ top: 12, minScore: null })
-    // And the floor writes itself as the number it is.
+    const countOnly = JSON.parse(localStorage.getItem(TUNING_KEY)!)
+    expect(countOnly.top).toBe(12)
+    expect('minScore' in countOnly).toBe(false)
+
+    // No `null` written any more: absence is the whole encoding, so a profile
+    // carrying a floor carries it as the number it is.
+    m.setSearchTuning({ ...m.TUNING_DEFAULTS, top: undefined })
+    const floorOnly = JSON.parse(localStorage.getItem(TUNING_KEY)!)
+    expect(floorOnly.minScore).toBe(m.TUNING_DEFAULTS.minScore)
+    expect('top' in floorOnly).toBe(false)
+
     m.setSearchTuning({ ...m.TUNING_DEFAULTS })
-    expect(JSON.parse(localStorage.getItem(TUNING_KEY)!).minScore).toBe(m.TUNING_DEFAULTS.minScore)
+    expect(JSON.parse(localStorage.getItem(TUNING_KEY)!)).toMatchObject({
+      top: m.TUNING_DEFAULTS.top,
+      minScore: m.TUNING_DEFAULTS.minScore,
+    })
+  })
+
+  it('round-trips every bound state through storage', async () => {
+    const m = await import('../src/lib/searchOptions')
+    for (const state of [
+      { top: 42, minScore: undefined },
+      { top: undefined, minScore: 0.25 },
+      { top: 42, minScore: 0.25 },
+      { top: m.TUNING_DEFAULTS.top, minScore: m.TUNING_DEFAULTS.minScore },
+    ]) {
+      m.setSearchTuning({ ...m.TUNING_DEFAULTS, ...state })
+      vi.resetModules()
+      const back = await import('../src/lib/searchOptions')
+      expect(back.searchTuning().top).toBe(state.top)
+      expect(back.searchTuning().minScore).toBe(state.minScore)
+    }
   })
 
   it('reads both preferences back at module init — the reload half', async () => {

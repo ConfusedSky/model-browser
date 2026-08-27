@@ -47,7 +47,7 @@ import {
   setSearchKinds,
   setSearchMode,
   setSearchTuning,
-  TUNING_DEFAULTS,
+  resolveTuning,
   type SearchKinds,
   type SearchMode,
   type Tuning,
@@ -186,8 +186,10 @@ function optionsOf(view: UrlView): Prefs {
     kinds: view.kinds ?? 'both',
     mode: view.mode ?? 'name',
     // Absent means the default here too — a tuned link that omitted a field
-    // must not pick up the reader's setting for it.
-    tuning: { ...TUNING_DEFAULTS, ...view.tuning },
+    // must not pick up the reader's setting for it. Not a spread: the bounds
+    // read by presence, and a spread would re-add the one the link left out
+    // (`resolveTuning`, design D4).
+    tuning: resolveTuning(view.tuning),
   }
 }
 
@@ -650,6 +652,7 @@ export default function App() {
             scope: res.scope,
             weak: res.weak,
             capped: res.capped,
+            matched: res.matched,
             poses: res.poses,
             scores: res.scores,
           }),
@@ -1662,6 +1665,15 @@ export default function App() {
           // Not the ranking's horizon (there is always an N+1th) but the
           // index's own ceiling, met by a bound the user set (D2).
           label.capped ? ' The index returned fewer than asked for — its cap.' : ''
+        }${
+          // What the user's own count cut from, which is a different act from
+          // the index's ceiling above and says so in different words (D9). Only
+          // when the index reported it and it exceeds what is shown: equal
+          // means the count cut nothing, and absent means the index did not
+          // say — never counted from the tiles, which are the cut set itself.
+          label.matched !== undefined && label.matched > label.shown
+            ? ` Showing ${label.shown} of ${label.matched} above the floor.`
+            : ''
         }`
       : similarLabel
   // Counted over `kept`, not the whole listing: the kind option is part of the

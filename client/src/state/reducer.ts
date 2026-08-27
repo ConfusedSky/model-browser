@@ -78,6 +78,9 @@ export interface Landed {
   scope?: SemanticScope
   weak?: boolean
   capped?: boolean
+  /** How many cleared the floor before the count cut them, where the index
+   *  reports it (D9). Absent from a plain listing and from an older index. */
+  matched?: number
   poses?: Record<string, IndexPose>
   /**
    * What the index scored each tile at, keyed by path as `poses` is. Optional
@@ -549,6 +552,7 @@ export function reducer(state: SearchState, action: Action): SearchState {
         scope: action.landed.scope,
         weak: action.landed.weak,
         capped: action.landed.capped,
+        matched: action.landed.matched,
         poses: action.landed.poses,
         scores: action.landed.scores,
         anchor: action.landed.anchor,

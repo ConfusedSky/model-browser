@@ -73,32 +73,37 @@
 
 ## 1. Shared types and server
 
-- [ ] 1.1 `shared/types.ts` `SemanticTuning`: both `top?` and `minScore?` optional and both
+- [x] 1.1 `shared/types.ts` `SemanticTuning`: both `top?` and `minScore?` optional and both
       may be present; delete the "ignored when a floor is set" doc line; add
       `MAX_RESULT_COUNT = 500` with a comment naming what it matches (the index's
       `QueryRequest.cap` default) and why it is clamped client-side (design D5)
-- [ ] 1.1a `shared/types.ts` `SemanticSearchResult` and `server/src/semantic.ts`
+- [x] 1.1a `shared/types.ts` `SemanticSearchResult` and `server/src/semantic.ts`
       `QueryResult`: each gains an optional `matched?: number`, documented as the index's
       count of what cleared the floor before the count applied — optional on the wire for the
       same reason `scores` is (`confidence-scores-on-tiles` D1), so an older index or server
       leaves a newer client silent rather than failing. `app.ts`'s meaning route forwards it
       beside `capped`
-- [ ] 1.2 `server/src/semantic.ts` `query()`: forward `min_score` and `top` independently by
+- [x] 1.2 `server/src/semantic.ts` `query()`: forward `min_score` and `top` independently by
       presence; keep the `top: TOP` fallback only for a tuning carrying neither (no caller
       produces one — D7); delete the one-choice guard comment
-- [ ] 1.3 Server tests: a tuning with both bounds sends both fields; either alone sends
+- [x] 1.3 Server tests: a tuning with both bounds sends both fields; either alone sends
       alone; the neither-case fallback still fires (grep `server/test` for the existing
-      `query()` forwarding tests and extend them — do not assume coverage exists)
+      `query()` forwarding tests and extend them — do not assume coverage exists).
+      **Note on what these are worth**: the existing "a floor replaces the count" test asserted
+      the rule being repealed and was rewritten. Of the four bound-forwarding tests, only
+      "sends both bounds" falsifies against the old code — floor-alone and count-alone behave
+      identically before and after, so they characterise rather than guard. Both `matched`
+      tests falsify
 
 ## 2. Client state
 
-- [ ] 2.1 `searchOptions.ts`: `Tuning` makes `top` optional (`top?: number`,
+- [x] 2.1 `searchOptions.ts`: `Tuning` makes `top` optional (`top?: number`,
       `minScore?: number`); `TUNING_DEFAULTS` carries both (`top: 60`, `minScore: 0.1`);
       `StoredTuning` drops the `minScore: null` sentinel — both fields optional, absent =
       not in force; the reader maps old encodings per design D4's table (the `null` and
       absent-`minScore` cases both arrive as absent and read as count-only when a `top` is
       present); the writer writes presence; clamp `top` to `MAX_RESULT_COUNT` on read
-- [ ] 2.2 `urlState.ts`: parse by presence — `min` present = floor in force, `top` present
+- [x] 2.2 `urlState.ts`: parse by presence — `min` present = floor in force, `top` present
       = count in force, neither = both at defaults; delete the "explicit `undefined`
       floor-clearing" branch and the serialize-side "count named even at its default"
       special case (a count-only view names `top` because the bound is in force); clamp
@@ -107,7 +112,7 @@
       `TUNING_DEFAULTS.minScore`, so a floor-only search at the default 0.1 writes no bound
       param at all and reads back as both-at-defaults, silently failing the spec's "A record
       carries each bound it is under"
-- [ ] 2.3 Client tests for the state layer: URL round-trips for all three bound states
+- [x] 2.3 Client tests for the state layer: URL round-trips for all three bound states
       (floor-only, count-only, both) including both-at-defaults serializing to no bound
       params; the D4 migration table's four rows read back as the design says; clamping at
       parse (a `top=5000` URL clamps to 500). Both-at-defaults is the one place the presence
@@ -117,25 +122,32 @@
 
 ## 3. Side panel and notices
 
-- [ ] 3.1 `SidePanel.tsx`: the Top/Floor segmented control becomes three states — count
+- [x] 3.1 `SidePanel.tsx`: the Top/Floor segmented control becomes three states — count
       only / both / floor only (order chosen at implementation; the both state is the
       resting one and is what the control shows by default); in the both state both fields
       are enabled and either edit re-runs the query; in a single-bound state the other
       field is disabled but keeps its value (scenario: one bound can be sent away without
       the other); the count field clamps on entry per D5
-- [ ] 3.2 The reset-link condition (the tuning-differs-from-defaults check that governs the
+- [x] 3.2 The reset-link condition (the tuning-differs-from-defaults check that governs the
       panel's reset affordance) follows the new state shape: a view is at defaults when
-      both bounds sit at their default values and no third state is in force
-- [ ] 3.3 `App.tsx` cap notice: verify (do not change blindly) that `truncated` still reads
+      both bounds sit at their default values and no third state is in force.
+      **Verified, unchanged.** The existing value comparison already says this: a bound out of
+      force is `undefined`, which differs from its default, so floor-only and count-only both
+      read as off-default without a special case. Left alone and pinned by a test instead
+      (3.4), since "it happens to work" and "it is covered" are different claims
+- [x] 3.3 `App.tsx` cap notice: verify (do not change blindly) that `truncated` still reads
       as the index's cap under a both-request — the notice must not fire for a
       user-count-bounded set that came back complete (D8); adjust only if the wiring
-      conflates the two
-- [ ] 3.3a `App.tsx` `resultsLabel`: add the `matched` clause beside the `capped` one and
+      conflates the two.
+      **Verified, unchanged.** `capped: result.truncated === true` (`app.ts`) reads the index's
+      bit and nothing else; nothing in the path consults the user's count, so a complete
+      count-bounded set cannot set it. The wiring did not conflate them and was left alone
+- [x] 3.3a `App.tsx` `resultsLabel`: add the `matched` clause beside the `capped` one and
       keep them distinct — `capped` attributes to the index's ceiling, `matched` to the user's
       count. It renders only when a count is in force, `matched` is present, and it exceeds
       the number of results shown; an absent `matched` renders nothing (never a client-side
       count of the tiles, which is the capped number by construction)
-- [ ] 3.4 Component tests: the three-state control renders and switches; switching to
+- [x] 3.4 Component tests: the three-state control renders and switches; switching to
       floor-only preserves the count value; the both state re-runs on either field's edit;
       the reset affordance appears exactly when the state is off-default; the `matched` clause
       renders under a both-bounded response that reports one, and is absent both when the
@@ -143,14 +155,26 @@
 
 ## 4. Verification and archive
 
-- [ ] 4.1 Contract test end to end: a both-request through ApiClient against the index
+- [x] 4.1 Contract test end to end: a both-request through ApiClient against the index
       returns floor-then-capped order (strongest first, none below the floor, at most the
-      count) — this is the test that fails if upstream composes the other way (D2's risk)
+      count) **and reports `matched` above the count**. The last clause is the whole test:
+      the two composition orders return identical rows (D2's fuzz — 0 divergences in 20000),
+      so an assertion over rows passes under either and reports a safety it does not have.
+      `matched` is the only observable that separates them, being bounded by the count under
+      the wrong order.
+      **Done** as `server/test/indexContract.test.ts` — the one test here that talks to the
+      real index, since a stub composes however the stub was written. It skips unless an index
+      answers `/status` with `ready` (a test that passes when the thing it tests is absent is
+      worse than none); point it elsewhere with `MODEL_BROWSER_INDEX_URL`. Both paths checked:
+      green against the running index, skipped against a dead port
 - [ ] 4.2 Manual E2E via Playwright MCP: with the dev servers up, run a meaning search with
       both defaults (floored and capped), then floor-only (grows past 60 on a generic
       phrase, wall notice at 500), then both with count 60 — the D3 trade-off is visible
       and the URL round-trips each state through a reload
-- [ ] 4.3 `bun run typecheck` and `bun run test` across workspaces
+- [x] 4.3 `bun run typecheck` and `bun run test` across workspaces — green: 178 server, 483
+      client. Every new regression test was falsified against the pre-change code first; three
+      of the added forwarding assertions characterise behaviour that did not change and are
+      marked as such in 1.3 rather than counted as regressions
 - [ ] 4.4 Archive with a dry run first — this change MODIFIES one requirement and
       REMOVED+ADDEDs another in `semantic-search`; no other active change touches that
       capability, but gate on the temp-copy dry run anyway (one fresh copy per change). A dry

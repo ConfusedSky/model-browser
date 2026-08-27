@@ -183,12 +183,22 @@ export interface QueryResult {
   weak: boolean
   /** The index's own cap bit — it returned fewer than was asked for (D2). */
   truncated?: boolean
+  /**
+   * How many models cleared the floor before `top` cut them. Optional: an
+   * older index does not send it, and the client renders nothing rather than
+   * failing (floor-and-count-compose D9).
+   */
+  matched?: number
   results: Hit[]
 }
 
 /**
- * Default result bound — a default now, not a rule (tuning D1). Ten tiles (the
- * index's own default) is not a grid, and 500 is ~168s of thumbnail I/O.
+ * Fallback count for a tuning naming no bound at all. Sixty tiles because ten
+ * is not a grid and 500 is ~168s of thumbnail I/O; it is a floor under this
+ * server's own requests, not a default the UI shows — `TUNING_DEFAULTS` is
+ * where the user-facing count lives. The index no longer defaults `top` to ten
+ * (`mini-classify` add7fd4), so a request omitting every bound would otherwise
+ * be bounded only by the index's cap.
  */
 export const TOP = 60
 
@@ -241,12 +251,16 @@ export async function query(
   return (await askIndex('/query', {
     text,
     path: scope ?? undefined,
-    // A floor and a count are alternatives: the index ignores `top` when
-    // `min_score` is set, so sending both would state a relationship that
-    // does not exist (D1).
-    ...(tuning.minScore !== undefined
-      ? { min_score: tuning.minScore }
-      : { top: tuning.top ?? TOP }),
+    // Each bound forwarded on its own presence, because the two compose in the
+    // index (`rank()` filters by the floor, then caps what survived) and this
+    // app's job is to report which the user set, not to choose between them.
+    // The `TOP` fallback is for a tuning naming neither bound — no caller
+    // produces one today, and an unbounded query would be the whole collection.
+    ...(tuning.minScore !== undefined ? { min_score: tuning.minScore } : {}),
+    ...(tuning.top !== undefined ? { top: tuning.top } : {}),
+    ...(tuning.minScore === undefined && tuning.top === undefined
+      ? { top: TOP }
+      : {}),
     ...(tuning.raw === true ? { raw: true } : {}),
     ...(tuning.pool !== undefined ? { pool: tuning.pool } : {}),
   })) as QueryResult

@@ -288,6 +288,10 @@ export function createApp(
       // The index's ceiling, not the ranking's horizon (D2): it returned fewer
       // than was asked for, and what was asked for is the user's control.
       capped: result.truncated === true,
+      // What the count cut from, forwarded only when the index reports it —
+      // the field is additive both ways, so an older index leaves it absent
+      // and the client says nothing extra (D9).
+      ...(result.matched !== undefined ? { matched: result.matched } : {}),
       scope: {
         path: result.scope.path,
         status: result.scope.status,

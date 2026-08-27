@@ -11,7 +11,7 @@
  * (D1). Storage is the default for the next search; the URL governs the view
  * it names, and opening someone's link never writes to storage (D2).
  */
-import type { SemanticTuning } from '../../../shared/types'
+import { MAX_RESULT_COUNT, type SemanticTuning } from '../../../shared/types'
 import { stored } from './stored'
 
 const MODE_KEY = 'model-browser:search-mode'
@@ -73,25 +73,27 @@ export function setSearchMode(next: SearchMode): void {
  * the first thing anyone does after finding a setting that works is send
  * someone the results (tuning D3).
  *
- * The all-present resolution of the wire's `SemanticTuning`, whose fields are
- * each optional: this is what the UI reads and what a query is built from, so
- * every field a user can set has a value here.
+ * The resolved form of the wire's `SemanticTuning`: `raw` and `pool` always
+ * have a value here, because every view reads them. The two *bounds* stay
+ * optional even after resolution, because absence is meaningful — it says the
+ * bound is not in force — and that is the one rule this change is built on
+ * (design D4). `resolveTuning` is where a partial becomes one of these.
  */
 export interface Tuning {
   raw: boolean
   pool: 'mean' | 'max' | 'softmax'
-  /** Result count. Ignored when `minScore` is set — they are one choice (D1).
-   *  The floor is the default bound, so this is the one a view opts into. */
-  top: number
-  /** Score floor, and the default bound. Absence is the *count* in force, never
-   *  "unset": everything that produces a resolved `Tuning` fills this in, so a
-   *  missing floor is a choice rather than a gap. */
+  /** Result count, capping whatever the floor let through. Absent = uncapped. */
+  top?: number
+  /** Score floor, applied before the count. Absent = no floor. */
   minScore?: number
 }
 
 export const TUNING_DEFAULTS: Tuning = {
   raw: false,
   pool: 'softmax',
+  // Both bounds are in force by default (design D3): the floor keeps the grid
+  // relevant, the count keeps it a grid. The resting state of the controls and
+  // the meaning of an unadorned link are the same thing.
   top: 60,
   // The index's own measurement: text-query cosines run around 0.1, so this is
   // the floor at the distribution's own level rather than a number picked to be
@@ -99,6 +101,44 @@ export const TUNING_DEFAULTS: Tuning = {
   // "everything at least this similar", which is the question a phrase asks.
   minScore: 0.1,
 } satisfies SemanticTuning
+
+/** A count a user or a link supplied, held to what the index will return. */
+export function clampCount(n: number): number {
+  return Math.min(Math.max(Math.floor(n), 1), MAX_RESULT_COUNT)
+}
+
+/**
+ * A partial tuning resolved into a whole one, and the single implementation of
+ * the record rule (design D4): **a bound named is in force, a bound absent is
+ * not** — with the one stated exception that a record naming *neither* bound
+ * reads as both at their defaults, since that is the resting state and an
+ * unadorned link has to mean something.
+ *
+ * `raw` and `pool` are not bounds and take the ordinary treatment: absent means
+ * this app's default, so a tuned link that omitted one does not pick up the
+ * reader's setting for it.
+ *
+ * One function rather than a spread at each call site, because a spread over
+ * the defaults cannot express the rule: `{ ...TUNING_DEFAULTS, ...partial }`
+ * silently re-adds the very bound a count-only link left out, which is what the
+ * `minScore: null` sentinel existed to work around.
+ */
+export function resolveTuning(partial: Partial<Tuning> | undefined): Tuning {
+  const base = {
+    raw: partial?.raw ?? TUNING_DEFAULTS.raw,
+    pool: partial?.pool ?? TUNING_DEFAULTS.pool,
+  }
+  const top = partial?.top
+  const minScore = partial?.minScore
+  if (top === undefined && minScore === undefined) {
+    return { ...base, top: TUNING_DEFAULTS.top, minScore: TUNING_DEFAULTS.minScore }
+  }
+  return {
+    ...base,
+    ...(top !== undefined ? { top: clampCount(top) } : {}),
+    ...(minScore !== undefined ? { minScore } : {}),
+  }
+}
 
 export const POOLS = ['mean', 'max', 'softmax'] as const
 
@@ -108,12 +148,15 @@ export function isPool(v: unknown): v is Tuning['pool'] {
 }
 
 /**
- * What a profile holds on disk. `minScore: null` is the count in force — a
- * choice somebody made — and a *missing* key is a profile written before the
- * floor became the default bound. `JSON.stringify` drops `undefined`, so
- * without the null the two would be one byte-identical state, and every
- * profile that predates the change would read back as a deliberate opt-out
- * from a decision its owner never made.
+ * What a profile holds on disk. Both bounds are plain optionals now: absence
+ * means the bound is not in force, on disk exactly as in a URL and in live
+ * state. The old `minScore: null` sentinel is gone — its whole job was telling
+ * "count chosen" apart from "profile older than the floor", a distinction that
+ * existed only while absence had to mean *floor in force*. With absence meaning
+ * *not in force*, the two collapse into the same true reading: count-only.
+ *
+ * `null` is still accepted on read, because profiles written under the sentinel
+ * are on disk and must keep meaning what they meant (design D4's table).
  */
 type StoredTuning = Omit<Partial<Tuning>, 'minScore'> & { minScore?: number | null }
 
@@ -122,29 +165,35 @@ const tuningStore = stored<Tuning>(
   (raw) => {
     if (raw === null) return { ...TUNING_DEFAULTS }
     const v = JSON.parse(raw) as StoredTuning
-    // Each field validated on its own: a malformed one falls back rather than
-    // discarding a whole stored set that is otherwise usable.
-    return {
+    // Each bound validated on its own, and a malformed one reads as *absent*
+    // rather than as its default: a value that cannot be parsed cannot testify
+    // that its bound was in force. If that leaves no bound at all, the rule
+    // for a record naming none applies and both defaults come back — which is
+    // `resolveTuning`'s job, not this reader's, so it is passed a partial.
+    return resolveTuning({
       raw: v.raw === true,
       pool: isPool(v.pool) ? v.pool : TUNING_DEFAULTS.pool,
-      top:
-        Number.isFinite(v.top) && (v.top as number) > 0
-          ? Math.floor(v.top as number)
-          : TUNING_DEFAULTS.top,
-      // `null` is the count, chosen and written as such. Absence is a profile
-      // older than the field, which takes the default like every other unset
-      // option here — and a malformed value falls back the same way, rather
-      // than to the count, which is a choice nobody made.
-      minScore:
-        v.minScore === null
-          ? undefined
-          : Number.isFinite(v.minScore)
-            ? (v.minScore as number)
-            : TUNING_DEFAULTS.minScore,
-    }
+      ...(Number.isFinite(v.top) && (v.top as number) > 0
+        ? { top: clampCount(v.top as number) }
+        : {}),
+      // `null` was the old sentinel for "count chosen", so it reads as absence
+      // — which is now the same statement. A profile carrying a real floor and
+      // an inert count reads as both bounds (D4's third row): the old writer
+      // emitted `top` on every write, so that count may be a number its owner
+      // never chose, and the bytes cannot say otherwise.
+      ...(v.minScore !== null && Number.isFinite(v.minScore)
+        ? { minScore: v.minScore as number }
+        : {}),
+    })
   },
-  // The count written as `null` rather than left out: see `StoredTuning`.
-  (v) => JSON.stringify({ ...v, minScore: v.minScore ?? null } satisfies StoredTuning),
+  // Presence, on disk as everywhere else: a bound not in force is not written.
+  (v) =>
+    JSON.stringify({
+      raw: v.raw,
+      pool: v.pool,
+      ...(v.top !== undefined ? { top: v.top } : {}),
+      ...(v.minScore !== undefined ? { minScore: v.minScore } : {}),
+    } satisfies StoredTuning),
 )
 let tuning: Tuning = tuningStore.read()
 

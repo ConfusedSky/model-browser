@@ -154,11 +154,27 @@ export interface SemanticTuning {
   raw?: boolean
   /** How a model's per-view scores reduce to one. */
   pool?: 'mean' | 'max' | 'softmax'
-  /** How many results — ignored when a floor is set; they are one choice. */
+  /**
+   * How many results. Composes with `minScore` rather than competing with it:
+   * the floor filters and this caps what survived, so both may be present and
+   * absent means *this bound is not in force* — never "unset". Clamped to
+   * `MAX_RESULT_COUNT` by every reader that accepts one from a user.
+   */
   top?: number
-  /** Everything at or above this score, instead of a count. */
+  /** Everything at or above this score, capped by `top` where one is set. */
   minScore?: number
 }
+
+/**
+ * The largest count this app will send or store. It matches the index's
+ * `QueryRequest.cap` *default* of 500 — `cap` is a per-request field the index
+ * accepts from 1 to 10000 and this app never sends one, so 500 is what it gets.
+ * A count above it names a result set the index would truncate anyway.
+ *
+ * Pinned to a default we rely on rather than to a fixed ceiling, which is worth
+ * saying so it does not rot silently if this app ever starts sending `cap`.
+ */
+export const MAX_RESULT_COUNT = 500
 
 export interface SemanticListing {
   path: string
@@ -181,6 +197,19 @@ export interface SemanticListing {
   weak: boolean
   /** The index's own ceiling stopped it returning what was asked for. */
   capped: boolean
+  /**
+   * How many models cleared the floor *before* a count cut them — the size of
+   * the set the count sampled from, so a view showing 60 can say "of 875"
+   * (floor-and-count-compose D9). Distinct from `capped`, which is the index's
+   * ceiling: three bounds, each reporting its own act rather than borrowing
+   * another's bit.
+   *
+   * Optional on the wire for the reason `scores` is: an index or server that
+   * does not report it leaves a newer client saying nothing extra rather than
+   * failing. Never derived client-side — what arrives has already been cut, so
+   * counting the tiles would just restate the count.
+   */
+  matched?: number
 }
 
 /**

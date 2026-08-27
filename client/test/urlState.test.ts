@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it } from 'vitest'
-import { TUNING_DEFAULTS } from '../src/lib/searchOptions'
+import { resolveTuning, TUNING_DEFAULTS } from '../src/lib/searchOptions'
+import { MAX_RESULT_COUNT } from '../../shared/types'
 import { requestOf, type View } from '../src/state/view'
 import {
   commitUrl,
@@ -185,19 +186,57 @@ describe('search options in the URL', () => {
     expect(serializeView(parseUrl(once))).toBe(once)
   })
 
-  it('a count view names the count even at its own default value', () => {
-    // The other half of the same branch, which must keep working: absence of
-    // both params reads as the floor, so a view under a count says so even at
-    // 60 or the link comes back bounded by something its sender did not choose.
-    const counted = serializeView({
-      path: '/m',
-      flat: false,
-      q: 'dragon',
-      mode: 'meaning',
+  it('names each bound in force, at its default value or not', () => {
+    // The presence rule, on the substrate where it is easiest to get wrong: a
+    // bound's absence says it is not in force, so a bound that *is* in force is
+    // named even when its value happens to equal the default. A floor-only view
+    // at 0.1 that wrote nothing would read back as both bounds — the failure
+    // this replaces, and the reason "at its own default" appears in the title.
+    const base = { path: '/m', flat: false, q: 'dragon', mode: 'meaning' as const }
+
+    const countOnly = serializeView({
+      ...base,
       tuning: { ...TUNING_DEFAULTS, minScore: undefined },
     })
-    expect(counted).toContain('top=60')
-    expect(parseUrl(counted).tuning).toEqual({ top: 60, minScore: undefined })
+    expect(countOnly).toContain('top=60')
+    expect(countOnly).not.toContain('min=')
+    expect(parseUrl(countOnly).tuning).toEqual({ top: 60 })
+
+    const floorOnly = serializeView({ ...base, tuning: { ...TUNING_DEFAULTS, top: undefined } })
+    expect(floorOnly).toContain('min=0.1')
+    expect(floorOnly).not.toContain('top=')
+    expect(parseUrl(floorOnly).tuning).toEqual({ minScore: 0.1 })
+
+    const both = serializeView({ ...base, tuning: { ...TUNING_DEFAULTS, top: 12 } })
+    expect(both).toContain('min=0.1')
+    expect(both).toContain('top=12')
+    expect(parseUrl(both).tuning).toEqual({ top: 12, minScore: 0.1 })
+  })
+
+  it('the resting state is written as absence, and reads back as itself', () => {
+    // D4's one stated overload: both bounds in force at both their defaults are
+    // written by naming neither, because a record naming no bound is read as
+    // exactly that state. The rule holds only if the two spellings are the same
+    // view, so that equivalence is asserted rather than assumed.
+    const base = { path: '/m', flat: false, q: 'dragon', mode: 'meaning' as const }
+    const resting = serializeView({ ...base, tuning: { ...TUNING_DEFAULTS } })
+    expect(resting).not.toContain('min=')
+    expect(resting).not.toContain('top=')
+
+    const spelledOut = `${resting}&min=${TUNING_DEFAULTS.minScore}&top=${TUNING_DEFAULTS.top}`
+    expect(resolveTuning(parseUrl(spelledOut).tuning)).toEqual(
+      resolveTuning(parseUrl(resting).tuning),
+    )
+    expect(resolveTuning(parseUrl(resting).tuning)).toMatchObject({
+      top: TUNING_DEFAULTS.top,
+      minScore: TUNING_DEFAULTS.minScore,
+    })
+  })
+
+  it('clamps a hand-edited count to what the index will return', () => {
+    // A link is hand-editable, and 5000 would spend the index's headroom on
+    // rows its cap deletes (design D5).
+    expect(parseUrl('?q=dragon&mode=meaning&top=5000').tuning).toEqual({ top: MAX_RESULT_COUNT })
   })
 
   it('carries them when they are not the default', () => {
@@ -303,9 +342,9 @@ describe('search options in the URL', () => {
     commitUrl(view)
     commitUrl({ ...view, tuning: { ...TUNING_DEFAULTS } })
     expect(window.history.length).toBe(len)
-    // A tuning change is still a different view, and still pushes. The count is
-    // the off-default bound now, so choosing it means clearing the floor —
-    // `top` alone, with the floor still in force, would be the ignored field.
+    // A tuning change is still a different view, and still pushes. Sending the
+    // floor away is such a change on its own now, since both bounds are the
+    // resting state and dropping one is a bound going out of force.
     commitUrl({ ...view, tuning: { ...TUNING_DEFAULTS, top: 12, minScore: undefined } })
     expect(window.history.length).toBe(len + 1)
   })

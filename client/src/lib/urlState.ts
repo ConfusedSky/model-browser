@@ -1,5 +1,5 @@
 import type { SearchKinds, SearchMode, Tuning } from './searchOptions'
-import { isKinds, isPool, TUNING_DEFAULTS } from './searchOptions'
+import { clampCount, isKinds, isPool, TUNING_DEFAULTS } from './searchOptions'
 
 /**
  * The URL as a record of the committed view (url-navigation D1): query
@@ -97,15 +97,15 @@ export function parseUrl(search: string = window.location.search): UrlView {
   const tuning: Partial<Tuning> = {}
   if (p.get('score-raw') === '1') tuning.raw = true
   if (isPool(pool)) tuning.pool = pool
-  const hasTop = Number.isFinite(top) && top > 0 && p.has('top')
-  if (hasTop) tuning.top = Math.floor(top)
+  // Each bound reported exactly when the link names it, and never otherwise:
+  // presence *is* the assertion (design D4), so there is no sentinel to set and
+  // no bound to clear. `resolveTuning` reads a tuning naming neither as both at
+  // their defaults; that rule lives there, in one place, rather than here.
+  //
+  // Clamped on the way in, because a hand-edited `top=5000` would otherwise
+  // spend the index's headroom on rows its cap deletes (design D5).
+  if (Number.isFinite(top) && top > 0 && p.has('top')) tuning.top = clampCount(top)
   if (Number.isFinite(min) && p.has('min')) tuning.minScore = min
-  // The floor is the default bound, so the count is the choice a link has to
-  // say out loud: `top` alone selects it, and neither param resolves to the
-  // floor. Set as an explicit `undefined` — the count's own sentinel — because
-  // this is spread over the defaults downstream, and an absent key would leave
-  // the floor in force and silently ignore the `top` the link exists to carry.
-  else if (hasTop) tuning.minScore = undefined
   return {
     path: p.get('path') ?? undefined,
     // The flat *toggle*, and only that (design R4). A search runs flat-shaped
@@ -205,24 +205,23 @@ export function serializeView(view: UrlView): string {
   if (meaning && view.tuning?.pool !== undefined && view.tuning.pool !== TUNING_DEFAULTS.pool) {
     p.set('pool', view.tuning.pool)
   }
-  if (meaning && view.tuning?.minScore !== undefined) {
-    if (view.tuning.minScore !== TUNING_DEFAULTS.minScore) {
-      p.set('min', String(view.tuning.minScore))
-    }
-  } else if (meaning && view.tuning !== undefined && 'minScore' in view.tuning) {
-    // The count is the non-default bound now, so it is named even at its own
-    // default value: an omitted pair reads back as the floor (`parseUrl`), and
-    // a link that meant "the best 60" would come back meaning something else.
-    //
-    // Gated on the tuning *naming a bound*, not on a tuning object existing.
-    // `parseUrl` returns a partial: `?…&pool=mean` yields `{pool:'mean'}`, which
-    // asserts nothing about where the set stops, and stamping `top=60` onto it
-    // read back as the count in force with the floor cleared. The three
-    // `parseUrl()` → `commitUrl(…, {replace:true})` sites in App re-serialize a
-    // parsed URL, so that flipped a floor-bounded search to a count-bounded one
-    // on closing a lightbox. `in` rather than a value test, because the count's
-    // sentinel IS `undefined` — the key's presence is the assertion.
-    p.set('top', String(view.tuning.top ?? TUNING_DEFAULTS.top))
+  // Each bound in force is named — including at its own default value, because
+  // absence now says "not in force" rather than "at the default", and a
+  // floor-only view whose floor happens to be 0.1 must not read back as both.
+  //
+  // The one exception is the resting state, and it is the rule's own stated
+  // overload (design D4): when *both* bounds are in force at *both* their
+  // default values, neither is named, because a record naming no bound is read
+  // as exactly that state. So `?min=0.1&top=60` and a bound-less URL name the
+  // same view, and this writes the shorter one — which is what keeps an
+  // ordinary meaning link free of tuning noise, and what makes the three
+  // `parseUrl()` → `commitUrl(…, {replace:true})` sites in App idempotent.
+  const bounds = meaning ? view.tuning : undefined
+  const resting =
+    bounds?.top === TUNING_DEFAULTS.top && bounds?.minScore === TUNING_DEFAULTS.minScore
+  if (bounds !== undefined && !resting) {
+    if (bounds.minScore !== undefined) p.set('min', String(bounds.minScore))
+    if (bounds.top !== undefined) p.set('top', String(bounds.top))
   }
   if (view.model !== undefined && view.model !== '') p.set('model', view.model)
   const s = p.toString()

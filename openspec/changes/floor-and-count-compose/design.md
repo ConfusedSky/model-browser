@@ -110,11 +110,22 @@ collapses two different facts into the single `truncated` bit — a set cut by t
 a set cut by the index's 500 become indistinguishable to the client. So the upstream change is
 not what makes composition *possible*; it is what keeps `truncated` meaning the index (D8).
 
-**D2 — Composition order is floor, then count.** "Best N of everything at least this
-similar." The reverse (floor the best N) returns fewer than N for no stated reason and makes
-the count a floor's guard rather than a cap — a reading nobody asking for "60" means.
-Floor-then-count also degrades gracefully: a floor matching nothing still returns nothing
-(the floor's honest answer survives), and a floor matching more than N returns exactly N.
+**D2 — Composition order is floor, then count, and the reason is D9.** "Best N of everything
+at least this similar." An earlier draft rejected the reverse on the grounds that flooring the
+best N "returns fewer than N for no stated reason". That is false, and the claim is worth
+retracting precisely: the floor tests the same key the sort ordered by, so the floor set is a
+*prefix* of the descending order, and `order[mask][:t]` and `order[:t][mask]` select the same
+rows for every input. Fuzzed here at 20000 cases built to force ties across both cuts: **zero
+row divergences**. The two orders are indistinguishable in what they return.
+
+They are not indistinguishable in what they can *say*. `matched` (D9) is counted between the
+two operations, so it means "how many cleared the floor" only if the floor was applied to the
+whole collection first. Compose the other way and the number is bounded by the count — 60,
+never 875 — and "showing 60 of 875 above the floor" becomes unsayable. In the same fuzz the
+two orders disagree on `matched` in **8926 of 20000 cases**. So the order is load-bearing for
+the reporting, not for the result set, which makes D2 and D9 one decision rather than two.
+Floor-then-count also degrades gracefully: a floor matching nothing still returns nothing (the
+floor's honest answer survives), and a floor matching more than N returns exactly N.
 
 **D3 — Both bounds are the default.** This is the user's call and it reverses my own earlier
 caution (that both-by-default would silently cut the measured specific-phrase sets of
@@ -229,7 +240,7 @@ not the wall notice returning under another name — the wall notice attributes 
 ceiling and must stay narrow — it is the count attributing to itself. `rank()` is being opened
 anyway, and the number is free there and nowhere else: after the floor filter and *before* the
 top slice, `len(order)` is exactly the figure, and it is unrecoverable from the response once
-the slice has happened. So the upstream ask gains a third element, `matched`, alongside the
+the slice has happened. It is also what makes D2's order observable at all — see there. So the upstream ask gains a third element, `matched`, alongside the
 branch and the retired ten-row default. It rides this repo's existing attribution path —
 index `truncated` → `QueryResult.truncated` → the route's `capped` → the label in `App`'s
 `resultsLabel` — as index `matched` → `QueryResult.matched` → the route's `matched` →
@@ -240,10 +251,12 @@ client only ever receives the sliced set, so there is nothing to count.
 
 ## Risks / Trade-offs
 
-- [Upstream lands differently — e.g. count-then-floor] → The staging test in D7 breaks
-  visibly: with the index composing the other way, a both-request returns fewer than N for
-  no stated reason. The upstream task pins the order with a test of its own; this repo's
-  contract test asserts the composed shape end to end.
+- [Upstream lands differently — e.g. count-then-floor] → **Invisible in the rows**, per D2's
+  fuzz: the two orders return identical result sets, so nothing about the grid betrays it. The
+  only observable is `matched`, which is bounded by the count under the wrong order, so that is
+  what this repo's contract test asserts (task 4.1) and what the upstream test pins. A test
+  written against rows alone would pass under either order and report a safety it does not
+  have.
 - [Both-by-default cuts today's floor-only views] → Measured and accepted (D3): specific
   phrases carried 69–177 above the floor; they now show 60. The count field is one edit
   away, and the default is a statement about the resting grid, not a ceiling on intent.

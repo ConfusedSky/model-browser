@@ -3,7 +3,7 @@
 // there, and the reporting that makes an empty grid attributable.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DirListing, SemanticListing } from '../../shared/types'
+import { MAX_RESULT_COUNT, type DirListing, type SemanticListing } from '../../shared/types'
 import {
   click,
   container,
@@ -704,6 +704,167 @@ describe('meaning search', () => {
     )
     expect(location.search).toContain('pool=max')
     expect(JSON.parse(localStorage.getItem('model-browser:search-tuning')!).pool).toBe('max')
+  })
+
+  it('the bounds switch independently, and a bound sent away keeps its value', async () => {
+    // Three states, not two: count only, floor only, both. The old control was
+    // exclusive and disabled the loser's field, which drew a relationship the
+    // index no longer has (design D6).
+    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models', covers: ['stl'] })
+    semanticSearch.mockResolvedValue(MEANING)
+    setSearchTuning({ ...TUNING_DEFAULTS, top: 42 })
+    await mountApp('/models', NESTED)
+    await settle()
+    await click(searchTab())
+    await click(modeButton('meaning')!)
+    await type(searchInput(), 'winged demon')
+    await pressEnter(searchInput())
+    await settle()
+
+    const topBtn = () =>
+      Array.from(container.querySelectorAll<HTMLButtonElement>('aside button')).find(
+        (b) => b.textContent?.trim() === 'top',
+      )!
+    const scoreBtn = () =>
+      Array.from(container.querySelectorAll<HTMLButtonElement>('aside button')).find(
+        (b) => b.textContent?.trim().startsWith('score'),
+      )!
+    const topField = () =>
+      container.querySelector<HTMLInputElement>('input[aria-label="Number of results"]')!
+    const scoreField = () =>
+      container.querySelector<HTMLInputElement>('input[aria-label="Minimum score"]')!
+
+    // Resting state: both in force, both fields live.
+    expect(topBtn().getAttribute('aria-pressed')).toBe('true')
+    expect(scoreBtn().getAttribute('aria-pressed')).toBe('true')
+    expect(topField().disabled).toBe(false)
+    expect(scoreField().disabled).toBe(false)
+
+    // Send the count away: floor only, and the query re-runs without a `top`.
+    await click(topBtn())
+    await settle()
+    expect(semanticSearch).toHaveBeenLastCalledWith(
+      'winged demon',
+      '/models',
+      { raw: false, pool: 'softmax', minScore: TUNING_DEFAULTS.minScore },
+      expect.any(AbortSignal),
+    )
+    expect(topField().disabled).toBe(true)
+    // Remembered, not discarded — the spec asks for the value back.
+    expect(topField().value).toBe('42')
+    // And the floor's own button is now inert: an unbounded meaning search is
+    // the whole collection, which no control here should be able to ask for.
+    expect(scoreBtn().disabled).toBe(true)
+
+    // Bring it back and the remembered count is what returns.
+    await click(topBtn())
+    await settle()
+    expect(semanticSearch).toHaveBeenLastCalledWith(
+      'winged demon',
+      '/models',
+      { raw: false, pool: 'softmax', top: 42, minScore: TUNING_DEFAULTS.minScore },
+      expect.any(AbortSignal),
+    )
+
+    // The other direction: floor away, count alone.
+    await click(scoreBtn())
+    await settle()
+    expect(semanticSearch).toHaveBeenLastCalledWith(
+      'winged demon',
+      '/models',
+      { raw: false, pool: 'softmax', top: 42 },
+      expect.any(AbortSignal),
+    )
+    expect(scoreField().disabled).toBe(true)
+    expect(scoreField().value).toBe(String(TUNING_DEFAULTS.minScore))
+  })
+
+  it('offers the reset exactly when a bound or a parameter is off its default', async () => {
+    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models', covers: ['stl'] })
+    semanticSearch.mockResolvedValue(MEANING)
+    await mountApp('/models', NESTED)
+    await settle()
+    await click(searchTab())
+    await click(modeButton('meaning')!)
+    await type(searchInput(), 'winged demon')
+    await pressEnter(searchInput())
+    await settle()
+
+    const resetLink = () =>
+      Array.from(container.querySelectorAll<HTMLButtonElement>('aside button')).find((b) =>
+        b.textContent?.trim().startsWith('Reset tuning'),
+      )
+    // Resting state is both bounds at their defaults, so there is nothing to
+    // reset — the affordance is the answer to "is this view tuned?".
+    expect(resetLink()).toBeUndefined()
+
+    // A bound going out of force is off-default even though the bound that
+    // remains still sits at its own default value.
+    const topBtn = Array.from(container.querySelectorAll<HTMLButtonElement>('aside button')).find(
+      (b) => b.textContent?.trim() === 'top',
+    )!
+    await click(topBtn)
+    await settle()
+    expect(resetLink()).toBeDefined()
+
+    await click(resetLink()!)
+    await settle()
+    expect(resetLink()).toBeUndefined()
+    expect(semanticSearch).toHaveBeenLastCalledWith(
+      'winged demon',
+      '/models',
+      { ...TUNING_DEFAULTS },
+      expect.any(AbortSignal),
+    )
+  })
+
+  it('a count past the index’s ceiling is clamped in the field, not just on the wire', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models', covers: ['stl'] })
+    semanticSearch.mockResolvedValue(MEANING)
+    await mountApp('/models', NESTED)
+    await settle()
+    await click(searchTab())
+    await click(modeButton('meaning')!)
+    await type(searchInput(), 'winged demon')
+    await pressEnter(searchInput())
+    await settle()
+
+    const top = container.querySelector<HTMLInputElement>('input[aria-label="Number of results"]')!
+    await type(top, '5000')
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(400)
+    })
+    await settle()
+    expect(semanticSearch.mock.calls.at(-1)?.[2]).toMatchObject({ top: MAX_RESULT_COUNT })
+    // The field shows what was stored rather than what was typed: a count above
+    // the ceiling names a set the index will not return.
+    await act(async () => {
+      top.focus()
+      top.blur()
+    })
+    expect(top.value).toBe(String(MAX_RESULT_COUNT))
+  })
+
+  it('says what the count cut from, and says nothing when the index did not report it', async () => {
+    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models', covers: ['stl'] })
+    semanticSearch.mockResolvedValue({ ...MEANING, matched: 875 })
+    await mountApp('/models', NESTED)
+    await settle()
+    await click(searchTab())
+    await click(modeButton('meaning')!)
+    await type(searchInput(), 'winged demon')
+    await pressEnter(searchInput())
+    await settle()
+    expect(container.textContent).toContain(`Showing ${MEANING.entries.length} of 875`)
+
+    // Absent `matched` is the index not saying, which is not a zero and not a
+    // number this app may compute: what arrived has already been cut.
+    semanticSearch.mockResolvedValue(MEANING)
+    await type(searchInput(), 'winged demon two')
+    await pressEnter(searchInput())
+    await settle()
+    expect(container.textContent).not.toContain('above the floor')
   })
 
   it('a tuned link reproduces the sender’s parameters, not the reader’s', async () => {

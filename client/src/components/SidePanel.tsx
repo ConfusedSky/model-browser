@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import type { IndexAvailability, SemanticScope } from '../../../shared/types'
+import { MAX_RESULT_COUNT, type IndexAvailability, type SemanticScope } from '../../../shared/types'
 import type { SearchKinds, SearchMode, Tuning } from '../lib/searchOptions'
-import { POOLS, TUNING_DEFAULTS } from '../lib/searchOptions'
+import { clampCount, POOLS, TUNING_DEFAULTS } from '../lib/searchOptions'
 import { stored } from '../lib/stored'
 import { indexCovers } from '../state/selectors'
 
@@ -165,6 +165,17 @@ export default function SidePanel({
    */
   const [topText, setTopText] = useState<string | null>(null)
   const [scoreText, setScoreText] = useState<string | null>(null)
+  // What each bound goes back to when it is switched on again. A bound sent
+  // away is absent from the tuning — that is the whole encoding — so the value
+  // it held has nowhere else to live, and the spec asks for it back
+  // ("one bound can be sent away without the other"). Seeded from the defaults
+  // and refreshed below whenever a bound is actually in force.
+  const [heldTop, setHeldTop] = useState<number>(TUNING_DEFAULTS.top ?? 60)
+  const [heldScore, setHeldScore] = useState<number>(TUNING_DEFAULTS.minScore ?? 0.1)
+  useEffect(() => {
+    if (tuning.top !== undefined) setHeldTop(tuning.top)
+    if (tuning.minScore !== undefined) setHeldScore(tuning.minScore)
+  }, [tuning.top, tuning.minScore])
   /**
    * The neighbour count while it is being typed in — the same draft the two
    * fields above keep, for the same reason: a field mid-edit is not a value,
@@ -351,28 +362,39 @@ export default function SidePanel({
                       </button>
                     ))}
                   </div>
-                  {/* A count and a floor are one choice: the index ignores the
-                      count when a floor is set, so showing both as live would
-                      state a relationship that does not exist (D1). */}
+                  {/* The two bounds compose, so each button switches its own
+                      bound on or off rather than choosing between them: count
+                      only, floor only, or both (design D6). The old exclusive
+                      pair encoded a relationship the index no longer has, and a
+                      disabled partner field was that lie drawn in pixels.
+
+                      The invariant is that at least one bound stays in force —
+                      an unbounded meaning search is the whole collection, which
+                      no control here should be able to ask for — so the button
+                      of a sole surviving bound is inert and says so. */}
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      aria-pressed={tuning.minScore === undefined}
+                      aria-pressed={tuning.top !== undefined}
+                      disabled={tuning.top !== undefined && tuning.minScore === undefined}
                       onClick={() => {
                         setTopText(null)
-                        setScoreText(null)
-                        onTuning({ ...tuning, minScore: undefined })
+                        onTuning({
+                          ...tuning,
+                          top: tuning.top === undefined ? heldTop : undefined,
+                        })
                       }}
-                      className={`rounded-lg border px-2 py-1.5 ${tuning.minScore === undefined ? 'border-zinc-500 text-zinc-100' : 'border-zinc-800 text-zinc-500'}`}
+                      className={`rounded-lg border px-2 py-1.5 disabled:opacity-60 ${tuning.top !== undefined ? 'border-zinc-500 text-zinc-100' : 'border-zinc-800 text-zinc-500'}`}
                     >
                       top
                     </button>
                     <input
                       type="number"
                       min={1}
+                      max={MAX_RESULT_COUNT}
                       aria-label="Number of results"
-                      value={topText ?? String(tuning.top)}
-                      disabled={tuning.minScore !== undefined}
+                      value={topText ?? String(tuning.top ?? heldTop)}
+                      disabled={tuning.top === undefined}
                       onChange={(e) => {
                         const text = e.target.value
                         setTopText(text)
@@ -380,7 +402,11 @@ export default function SidePanel({
                         // Held, not clamped: a cleared field on its way to "20"
                         // is not a request for one result.
                         if (text.trim() === '' || !Number.isFinite(n) || n < 1) return
-                        onTuning({ ...tuning, top: Math.round(n) }, { defer: true })
+                        // Clamped on the way out, though — a count above the
+                        // index's own ceiling names a set it will not return
+                        // (D5), and the field shows the clamp on blur rather
+                        // than keeping a number the search cannot honour.
+                        onTuning({ ...tuning, top: clampCount(n) }, { defer: true })
                       }}
                       onBlur={() => setTopText(null)}
                       className="w-16 rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-zinc-100 disabled:opacity-40"
@@ -388,12 +414,15 @@ export default function SidePanel({
                     <button
                       type="button"
                       aria-pressed={tuning.minScore !== undefined}
+                      disabled={tuning.minScore !== undefined && tuning.top === undefined}
                       onClick={() => {
-                        setTopText(null)
                         setScoreText(null)
-                        onTuning({ ...tuning, minScore: tuning.minScore ?? 0.1 })
+                        onTuning({
+                          ...tuning,
+                          minScore: tuning.minScore === undefined ? heldScore : undefined,
+                        })
                       }}
-                      className={`rounded-lg border px-2 py-1.5 ${tuning.minScore !== undefined ? 'border-zinc-500 text-zinc-100' : 'border-zinc-800 text-zinc-500'}`}
+                      className={`rounded-lg border px-2 py-1.5 disabled:opacity-60 ${tuning.minScore !== undefined ? 'border-zinc-500 text-zinc-100' : 'border-zinc-800 text-zinc-500'}`}
                     >
                       score ≥
                     </button>
@@ -401,7 +430,7 @@ export default function SidePanel({
                       type="number"
                       step={0.01}
                       aria-label="Minimum score"
-                      value={scoreText ?? (tuning.minScore === undefined ? '' : String(tuning.minScore))}
+                      value={scoreText ?? String(tuning.minScore ?? heldScore)}
                       disabled={tuning.minScore === undefined}
                       onChange={(e) => {
                         const text = e.target.value

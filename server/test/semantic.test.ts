@@ -238,39 +238,76 @@ describe('semantic query', () => {
     expect(body.entries.map((e) => e.path)).toEqual([join(root, 'dragon.stl')])
   })
 
-  it('sends the tuning it is given, and a count by default', async () => {
-    stubIndex(READY, result)
-    await post({ text: 'dragon' })
-    const body = JSON.parse(
+  /** What this server last asked the index for, tuning included. */
+  function lastIndexRequest(): Record<string, unknown> {
+    return JSON.parse(
       ((globalThis.fetch as unknown as { mock: { calls: [string, { body: string }][] } }).mock.calls
         .filter((c) => !String(c[0]).endsWith('/status'))
         .at(-1)![1].body),
     ) as Record<string, unknown>
+  }
+
+  it('sends the tuning it is given, and a count when the tuning names no bound', async () => {
+    stubIndex(READY, result)
+    await post({ text: 'dragon' })
+    const body = lastIndexRequest()
     expect(body.top).toBe(60)
+    expect(body).not.toHaveProperty('min_score')
     expect(body).not.toHaveProperty('raw')
     expect(body).not.toHaveProperty('pool')
   })
 
-  it('a floor replaces the count rather than accompanying it', async () => {
-    // The index ignores `top` when `min_score` is set, so sending both would
-    // state a relationship that does not exist.
+  it('sends both bounds when both are in force, since the index composes them', async () => {
     stubIndex(READY, result)
     await post({ text: 'dragon', minScore: 0.2, top: 5, raw: true, pool: 'max' })
-    const body = JSON.parse(
-      ((globalThis.fetch as unknown as { mock: { calls: [string, { body: string }][] } }).mock.calls
-        .filter((c) => !String(c[0]).endsWith('/status'))
-        .at(-1)![1].body),
-    ) as Record<string, unknown>
+    const body = lastIndexRequest()
     expect(body.min_score).toBe(0.2)
-    expect(body).not.toHaveProperty('top')
+    expect(body.top).toBe(5)
     expect(body.raw).toBe(true)
     expect(body.pool).toBe('max')
+  })
+
+  it('sends a floor alone as a floor alone — no count the user did not set', async () => {
+    // The count's absence is the assertion: the index reads a missing `top` as
+    // "no cap", so adding one here would silently bound an unbounded search.
+    stubIndex(READY, result)
+    await post({ text: 'dragon', minScore: 0.2 })
+    const body = lastIndexRequest()
+    expect(body.min_score).toBe(0.2)
+    expect(body).not.toHaveProperty('top')
+  })
+
+  it('sends a count alone as a count alone', async () => {
+    stubIndex(READY, result)
+    await post({ text: 'dragon', top: 5 })
+    const body = lastIndexRequest()
+    expect(body.top).toBe(5)
+    expect(body).not.toHaveProperty('min_score')
   })
 
   it('reports the index’s own ceiling, distinct from a ranking having more', async () => {
     stubIndex(READY, { ...result, truncated: true })
     const body = (await (await post({ text: 'dragon', top: 900 })).json()) as { capped: boolean }
     expect(body.capped).toBe(true)
+  })
+
+  it('forwards what the count cut from, so a capped view can say what it sampled', async () => {
+    stubIndex(READY, { ...result, matched: 875 })
+    const body = (await (await post({ text: 'dragon', minScore: 0.1, top: 60 })).json()) as {
+      matched?: number
+    }
+    expect(body.matched).toBe(875)
+  })
+
+  it('omits what the count cut from when the index does not report it', async () => {
+    // Additive both ways: an older index sends no `matched`, and the client
+    // renders nothing rather than a zero it would read as "none matched".
+    stubIndex(READY, result)
+    const body = (await (await post({ text: 'dragon', minScore: 0.1, top: 60 })).json()) as Record<
+      string,
+      unknown
+    >
+    expect(body).not.toHaveProperty('matched')
   })
 
   it('an unavailable index is a state to render, not a 500', async () => {

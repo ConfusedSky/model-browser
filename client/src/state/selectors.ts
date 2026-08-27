@@ -146,6 +146,8 @@ export function labelInputs(state: SearchState): {
   weak: boolean
   capped: boolean
   truncated: boolean
+  matched: number | undefined
+  shown: number
 } {
   const r = state.result
   return {
@@ -154,5 +156,13 @@ export function labelInputs(state: SearchState): {
     weak: r?.weak === true,
     capped: r?.capped === true,
     truncated: r?.truncated === true,
+    // A number, not a flag: the label needs the count itself, and its absence
+    // is a third state (the index did not say) rather than a zero.
+    matched: r?.matched,
+    // What the index actually returned for this query — the other half of
+    // "60 of 875". Deliberately not the kind-filtered list: `matched` counts
+    // what the *index* had, so the number set against it has to be the index's
+    // too, or the sentence compares two different populations.
+    shown: r?.entries.length ?? 0,
   }
 }
