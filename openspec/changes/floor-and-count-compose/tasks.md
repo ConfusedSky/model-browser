@@ -1,33 +1,75 @@
 > **Ordering — upstream first is cleanest, not required.** `mini-classify`'s `rank()` must
 > compose floor-then-count for the both state to mean anything (design D2); until it does,
 > a both-request degrades to floor-only, which is today's behaviour (D7). The upstream
-> change is planned in that repo (`~/Documents/tests/mini-classify`, its own openspec);
-> tasks here assume it is landed or landing in parallel, and group 0 verifies the assumption.
+> change has **landed** in that repo (`~/Documents/tests/mini-classify`, commit `add7fd4`,
+> 2026-08-27) and group 0 below is checked off against it — verified in this session against the
+> committed source and a live server on the library cache, not taken on report. If upstream
+> moves before this change lands, re-run group 0 rather than trusting the ticks.
 > Re-read `searchOptions.ts`, `urlState.ts`, `SidePanel.tsx`, and `semantic.ts` against main
 > before editing — parallel sessions work this repo, and `confidence-scores-on-tiles` and
 > `score-floor-by-default` touched these same files days ago.
 
 ## 0. Upstream verification
 
-- [ ] 0.1 Confirm the upstream `rank()` composes — `mini-classify/src/query.py`: with both
+- [x] 0.1 Confirm the upstream `rank()` composes — `mini-classify/src/query.py`: with both
       `top` and `min_score` given, the returned order is floor-filtered then sliced to
       `top`; with neither, the index's own defaults apply. If it composes the other way
       (count first), stop and revise design D2 before any client work
-- [ ] 0.1a **Confirm `QueryRequest.top` is nullable upstream, and test the floor-only case
-      explicitly** — a request carrying `min_score` and **no** `top` must return the whole
-      floor set, not the schema's default. This is the case that breaks: `top` is
-      `int = Field(10, ge=1, le=1000)` today, this app omits `top` whenever it sends a floor,
-      and composition without the schema change slices that set to ten rows (measured against
-      the real `rank()` on the `fantasy character` shape: 875 → 10). It breaks the app **as
-      currently deployed**, whose default is floor-only, so it is not a staging concern for
-      this change — it is a blocking precondition on the index's. If `top` is still
-      non-nullable when the branch lands, stop and fix upstream first
-- [ ] 0.2 Confirm the index's cap layer sits above the composition (`api.py` truncates at
+- [x] 0.1a **Confirm the ten-row count default is gone from every place upstream carries it,
+      not only from the HTTP schema** — a request or call carrying `min_score` and **no** count
+      must return the whole floor set. Four carriers, each of which the composition branch
+      turns into a silent ten-row cut:
+      - `api.py`'s `QueryRequest.top` (`int = Field(10, ge=1, le=1000)`) — this app omits `top`
+        whenever it sends a floor, so a floor-only request arrives with `req.top = 10`
+        (875 → 10 on the `fantasy character` shape, now measured on both sides of `add7fd4`
+        rather than derived from reading the schema — design's Context carries the table and
+        conditions)
+      - `query.py`'s `rank(sims, top=10, min_score=None)` — the *function's own* default, which
+        no schema edit reaches
+      - `test_categories.py`'s `show_query(sims_1d, names, top=10, min_score=None)` — the REPL,
+        where querying actually happens in that repo; it calls `rank` with that default, so
+        `:min 0.1` would go 875 → 10 by the same derivation, with no HTTP request involved
+      - `docs/api/surface.md`'s `POST /query` row `top | int | 10 | ignored when min_score is
+        set` — the jointly-owned contract, which must change in the same commit
+      The upstream tests that encode the rule being repealed are `tests/test_query.py`'s
+      `test_min_score_replaces_the_top_n_cut_with_a_floor` and
+      `test_ranking_matches_the_pre_extraction_repl`, whose `repl_show_query` oracle
+      reimplements the replace branch and must move with it. This breaks the app **as currently
+      deployed**, whose default is floor-only, so it is a blocking precondition on the index's
+      change, not a staging concern for this one. If any carrier still cuts to ten when the
+      branch lands, stop and fix upstream first
+
+      **Verified 2026-08-27 against `add7fd4`.** `QueryRequest.top` is `int | None =
+      Field(None, ge=1, le=1000)`; `rank(sims, top=None, min_score=None)` composes
+      floor-then-slice; `show_query` sends its ten away when a floor is in force (keeping it as
+      a display default, so `:min` output is unchanged); `surface.md`'s row now reads `top | int
+      | — | at most this many, of whatever min_score let through`. Measured through the HTTP
+      path on `embed-cache512` (3380 models, `/run/media/masa/STLLibrary`, softmax, `fantasy
+      character`, CPU): floor 0.1 with no count → 875 rows; the same floor with `top` 10 → 10
+      rows. One contract change to know about even though this app never sends a bare query: a
+      query with no bounds now returns up to `cap` (measured: 3380 rows with `cap` raised) where
+      it used to return 10. `surface.md` states it
+- [x] 0.2 Confirm the index's cap layer sits above the composition (`api.py` truncates at
       `cap` after `rank()`). Note what this now implies rather than assuming the old
       behaviour: with the count clamped at the cap, `rank()` returns at most `top ≤ cap`
       rows, so `truncated` can no longer fire while a count is in force. Verify the bit still
       fires in the **floor-only** state (no `top` sent, floor set exceeding the cap) — that
-      is the only state the wall notice now has, and design D8 records why
+      is the only state the wall notice now has, and design D8 records why.
+      **Verified**: `api.py` truncates at `cap` after `rank()` as before, and floor 0.1 with no
+      count at the default cap returns 500 rows with `truncated: true` — the wall notice's one
+      remaining state, still reachable
+- [x] 0.3 Confirm the index reports `matched` — the number of models that cleared the floor
+      *before* the count sliced them (design D9). It has to come from `rank()`: the count is
+      taken after the floor filter and before the top slice, and nothing downstream can
+      recover it. Verify it is present on a both-bounded response and that it equals the
+      floor-only response's hit count for the same phrase and floor. If the index does not
+      send it, the client says nothing rather than estimating (task 3.3a) — the change still
+      lands, minus that clause.
+      **Verified**: `Ranked.matched` is counted after the floor filter and before the `top` cut;
+      the response carries it, and the unindexed early return carries `matched: 0` so the one
+      shape that skips ranking needs no special case here. Measured: floor 0.1 with `top` 10
+      reports `matched` 875 against 10 rows returned, equal to the floor-only row count for the
+      same phrase and floor
 
 ## 1. Shared types and server
 
@@ -35,6 +77,12 @@
       may be present; delete the "ignored when a floor is set" doc line; add
       `MAX_RESULT_COUNT = 500` with a comment naming what it matches (the index's
       `QueryRequest.cap` default) and why it is clamped client-side (design D5)
+- [ ] 1.1a `shared/types.ts` `SemanticSearchResult` and `server/src/semantic.ts`
+      `QueryResult`: each gains an optional `matched?: number`, documented as the index's
+      count of what cleared the floor before the count applied — optional on the wire for the
+      same reason `scores` is (`confidence-scores-on-tiles` D1), so an older index or server
+      leaves a newer client silent rather than failing. `app.ts`'s meaning route forwards it
+      beside `capped`
 - [ ] 1.2 `server/src/semantic.ts` `query()`: forward `min_score` and `top` independently by
       presence; keep the `top: TOP` fallback only for a tuning carrying neither (no caller
       produces one — D7); delete the one-choice guard comment
@@ -54,11 +102,18 @@
       = count in force, neither = both at defaults; delete the "explicit `undefined`
       floor-clearing" branch and the serialize-side "count named even at its default"
       special case (a count-only view names `top` because the bound is in force); clamp
-      `top` on parse; serialize names each bound in force
+      `top` on parse; serialize names each bound in force — including a **third** special case
+      the two above do not cover: the serializer skips `min` whenever the floor equals
+      `TUNING_DEFAULTS.minScore`, so a floor-only search at the default 0.1 writes no bound
+      param at all and reads back as both-at-defaults, silently failing the spec's "A record
+      carries each bound it is under"
 - [ ] 2.3 Client tests for the state layer: URL round-trips for all three bound states
       (floor-only, count-only, both) including both-at-defaults serializing to no bound
       params; the D4 migration table's four rows read back as the design says; clamping at
-      parse (a `top=5000` URL clamps to 500)
+      parse (a `top=5000` URL clamps to 500). Both-at-defaults is the one place the presence
+      rule is written as *absence*, so assert the equivalence rather than assuming it: parse
+      must read `min=0.1&top=60` and a bound-less URL identically. D4's "one rule, every
+      substrate" holds only on that equivalence — say so where the round-trip asserts it
 
 ## 3. Side panel and notices
 
@@ -75,9 +130,16 @@
       as the index's cap under a both-request — the notice must not fire for a
       user-count-bounded set that came back complete (D8); adjust only if the wiring
       conflates the two
+- [ ] 3.3a `App.tsx` `resultsLabel`: add the `matched` clause beside the `capped` one and
+      keep them distinct — `capped` attributes to the index's ceiling, `matched` to the user's
+      count. It renders only when a count is in force, `matched` is present, and it exceeds
+      the number of results shown; an absent `matched` renders nothing (never a client-side
+      count of the tiles, which is the capped number by construction)
 - [ ] 3.4 Component tests: the three-state control renders and switches; switching to
       floor-only preserves the count value; the both state re-runs on either field's edit;
-      the reset affordance appears exactly when the state is off-default
+      the reset affordance appears exactly when the state is off-default; the `matched` clause
+      renders under a both-bounded response that reports one, and is absent both when the
+      response omits `matched` and when no count is in force
 
 ## 4. Verification and archive
 
@@ -91,4 +153,8 @@
 - [ ] 4.3 `bun run typecheck` and `bun run test` across workspaces
 - [ ] 4.4 Archive with a dry run first — this change MODIFIES one requirement and
       REMOVED+ADDEDs another in `semantic-search`; no other active change touches that
-      capability, but gate on the temp-copy dry run anyway (one fresh copy per change)
+      capability, but gate on the temp-copy dry run anyway (one fresh copy per change). A dry
+      run passes as of 2026-08-27 (`+1 ~1 -1`), and the post-archive main spec carries no
+      surviving statement of the replace rule — the only residue is the retitle-blocked
+      scenario heading the delta's comment explains. Re-run at archive time regardless: main
+      moves

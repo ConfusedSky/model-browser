@@ -3,7 +3,7 @@
 ### Requirement: Meaning search is a mode of the search input
 The client SHALL offer meaning search as a mode the search input runs in, selected by an option carried with the other search options, so that submitting from the input runs whichever search is in force. The option SHALL be sticky per browser profile and carried in the URL under the same rules as the other options that determine which results exist, and changing it while a query is committed SHALL re-run that query in the newly selected mode without the user retyping it. Which mode is in force SHALL be visible without opening the panel, since it is what explains the grid.
 
-The client SHALL also offer the parameters that shape a meaning query: whether the phrase is read as written or expanded into the index's templates, how a model's views are reduced to a single score, and which bounds stop the result set — a minimum score, a number of results, or both together, where the floor applies first and the count caps what survives it. Each SHALL be sticky per profile and carried in the URL under the presence rule the bounds requirement records. A count in force SHALL be presented as showing the strongest matches rather than as truncation: a relevance ranking has no horizon it can run out at, and capping a floor-bounded set is a choice about grid size, not a horizon being reached. The count SHALL be clamped so that no user-chosen count exceeds the ceiling the index itself returns at — a count that asks for what the index would truncate anyway is not a setting this app presents. Options that do not apply to the mode in force SHALL be hidden rather than shown inert — but the controls that explain the current view SHALL NOT be hidden with them. Where meaning mode is in force and the index cannot answer it, the client SHALL still show which mode is in force, a way to leave it, why it cannot run, and the options that govern the search a submit would actually perform. A mode a user can neither see nor leave is a trap, and a link can put this app in one on a machine that has no index.
+The client SHALL also offer the parameters that shape a meaning query: whether the phrase is read as written or expanded into the index's templates, how a model's views are reduced to a single score, and which bounds stop the result set — a minimum score, a number of results, or both together, where the floor applies first and the count caps what survives it. Each SHALL be sticky per profile and carried in the URL under the presence rule the bounds requirement records. A count in force SHALL be presented as showing the strongest matches rather than as truncation: a relevance ranking has no horizon it can run out at, and capping a floor-bounded set is a choice about grid size, not a horizon being reached. Where a count caps a floor-bounded set, the client SHALL say how many models cleared the floor, so a capped view states its own size against the set it was drawn from rather than presenting the cap as the whole answer. That figure SHALL be the index's own count of what passed the floor before the count applied, since the client receives only what survived the count and can neither observe nor estimate it; where the index does not report it, the client SHALL say nothing about it rather than guess. The count SHALL be clamped so that no user-chosen count exceeds the ceiling the index itself returns at — a count that asks for what the index would truncate anyway is not a setting this app presents. Options that do not apply to the mode in force SHALL be hidden rather than shown inert — but the controls that explain the current view SHALL NOT be hidden with them. Where meaning mode is in force and the index cannot answer it, the client SHALL still show which mode is in force, a way to leave it, why it cannot run, and the options that govern the search a submit would actually perform. A mode a user can neither see nor leave is a trap, and a link can put this app in one on a machine that has no index.
 
 Meaning results SHALL replace the grid and SHALL render as an ordinary listing — thumbnails, orbit, lightbox, and camera persistence behave identically, and the in-flight skeleton and latest-wins supersession apply. Results SHALL be presented in the order the index returned them, which is by relevance and is never re-sorted by name. Navigating, toggling flat, or committing another search SHALL supersede them, and clearing the query SHALL restore the ordinary listing for the current path.
 
@@ -25,11 +25,55 @@ The UI SHALL make clear that the grid holds meaning matches for the committed ph
      describing its new body. A MODIFIED block replaces a requirement's prose AND
      its scenarios, and archive refuses to drop a scenario the block does not
      carry, so renaming reads as a deletion and aborts. RENAMED/REMOVED exist for
-     requirements, never for scenarios (project CLAUDE.md). -->
+     requirements, never for scenarios (project CLAUDE.md).
+
+     Tested rather than assumed (2026-08-27, temp-copy dry runs). Retitling this
+     scenario inside the MODIFIED block aborts with `semantic-search MODIFIED
+     failed for header "### Requirement: Meaning search is a mode of the search
+     input" - current spec contains scenario(s) not present in the modified
+     block: "A count and a floor are one choice"`, and no files are written.
+
+     There IS an escape hatch, and this comment used to imply there was none: a
+     REMOVED requirement takes its scenario titles with it, so REMOVE + ADD at
+     the *requirement* level frees every title underneath — which is exactly what
+     this delta does to "The score floor is the default bound". It was tested
+     here too, and it does not work for this requirement: archive rejects
+     `Requirement present in both ADDED and REMOVED: "Meaning search is a mode of
+     the search input"`, so the hatch is only open if the re-added requirement
+     takes a *different* name.
+
+     Renaming is therefore possible and is declined, for a stated reason rather
+     than an imagined constraint. The reason is proportionality, NOT that
+     archived documents cite the title — four do (`2026-08-22-semantic-search`,
+     `-semantic-search-tuning` in both its proposal and its delta, and
+     `-search-view-reducer`'s proposal), but breaking such a citation is not
+     disqualifying and this very delta does it deliberately: it REMOVEs "The
+     score floor is the default bound", which `2026-08-27-score-floor-by-default`
+     names. What makes that acceptable is the REMOVED stanza's Reason and
+     Migration lines, which are the forwarding address the format exists to
+     provide; RENAMED offers the same for a rename. So the cost was never
+     unrecoverable, and a rule of "never break an archived citation" would be
+     wrong in both directions — it would block the removal above, which this
+     change exists to make.
+
+     The discriminator is what the change buys. Removing the floor requirement is
+     load-bearing: its core claim is false, and correcting it is the point of
+     this change, so it earns a dangling citation plus a migration note.
+     Retitling a scenario is cosmetic — it retires a heading — and cosmetic
+     changes do not earn that cost when a comment can tell the next reader
+     everything the heading fails to. This comment is that forwarding address.
+
+     What it costs, plainly: a scenario heading in the main spec that contradicts
+     its own body, which any sweep for the replace rule will keep finding. The
+     body is what the requirement asserts, and it composes. -->
 
 #### Scenario: The index's ceiling is reported, the ranking's horizon is not
 - **WHEN** a result set is bounded by the user's count, and again when the index's own cap stopped it short
 - **THEN** the first is described as the strongest matches and the second says the index returned fewer than was asked for
+
+#### Scenario: A capped view says what it was drawn from
+- **WHEN** a meaning search is bounded by both a floor and a count, and more models clear the floor than the count admits
+- **THEN** the view says how many cleared the floor alongside the results it shows, rather than presenting the capped set as everything above the floor
 
 #### Scenario: A count past the ceiling is not offered
 - **WHEN** the user enters a count greater than the index's own return cap

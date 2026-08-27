@@ -20,16 +20,48 @@ else:
 The index's request schema already accepts both fields (`api.py`'s `QueryRequest`), and its
 outer cap already truncates *after* `rank()` (`truncated = bool(len(order) > req.cap)`).
 
-**The branch is not the only upstream edit, and the other one is load-bearing.**
-`QueryRequest.top` is `int = Field(10, ge=1, le=1000)` — non-nullable, defaulting to **10**.
-This app's `query()` omits `top` entirely when it sends a floor, so a floor-only request
-arrives with `req.top = 10` today and is unharmed only because the replace branch discards
-it. Change the branch to floor-then-slice without touching the schema and that same request
-slices the floor set to ten rows. Measured against the real `rank()` on the
-`fantasy character` shape (875 models above the floor): **875 rows today, 10 rows after**.
+**The branch is not the only upstream edit, and the other one is load-bearing.** The ten-row
+count default is upstream's, and it lives in more than one place. `QueryRequest.top` is
+`int = Field(10, ge=1, le=1000)` — non-nullable, defaulting to **10**. This app's `query()`
+omits `top` entirely when it sends a floor, so a floor-only request arrives with
+`req.top = 10` today and is unharmed only because the replace branch discards it. Change the
+branch to floor-then-slice without touching the schema and that same request slices the floor
+set to ten rows: **875 rows today, 10 rows after** on the `fantasy character` shape.
 
-So `top` must become nullable upstream — absent meaning *no cap* — in the **same** change as
-the composition. That also inverts this change's ordering story, which D7 revises: the
+Both halves are measured, which an earlier draft of this document claimed before it was true:
+it welded the archived 875 to a ten derived from the schema default and called the pair a
+measurement of `rank()`. The composition now exists upstream (`add7fd4`), so the pair has been
+run twice independently — by the session that wrote that change, and again here through the
+HTTP path this app actually uses, against a second server on the same cache:
+
+| request | rows | `matched` | `truncated` |
+|---|---|---|---|
+| floor 0.1, no count | 875 | 875 | false |
+| floor 0.1, `top` 10 (the old schema default) | **10** | 875 | false |
+| `top` 10, no floor | 10 | 3380 | false |
+| floor 0.1, default cap | 500 | 875 | **true** |
+
+Conditions: `embed-cache512`, 3380 models on `/run/media/masa/STLLibrary`, pool softmax, phrase
+`fantasy character`, floor 0.1, `serve_api.py` on CPU, 2026-08-27. The floor set runs 0.1463
+down to 0.1000 with its 10th at 0.1426 and its 500th at 0.1221 — the last reproducing
+`score-floor-by-default`'s archived sweep (`0.146` to `0.122`) independently, which is what
+makes the archived 875 in the same table trustworthy rather than merely cited. The measurement's
+re-runnable home is upstream, in `rank()`'s own docstring; this table is the reading, not the
+record.
+
+The HTTP schema is not the only carrier. `rank(sims, top=10, min_score=None)` carries the
+same default in its **own signature**, which no schema edit reaches, and its other caller is
+`test_categories.py`'s `show_query(sims_1d, names, top=10, min_score=None)` — the REPL, which
+is where querying actually happens in that repo. Composition without that signature would turn
+`:min 0.1` from 875 rows into 10 with no HTTP request involved. Upstream resolved this one
+differently from the schema, and correctly: `show_query` keeps its ten as a *display* default
+and sends it away when a floor is in force, so `:min` still reads as "threshold instead of
+top-10" and the REPL's output is unchanged. `docs/api/surface.md`'s
+`POST /query` table states the rule being repealed (`top | int | 10 | ignored when min_score
+is set`) and is the jointly-owned contract between the two repos.
+
+So the count default must become absent-meaning-*no cap* upstream, in every one of those
+places, in the **same** change as the composition. That also inverts this change's ordering story, which D7 revises: the
 danger is not that this app lands early, it is that the index lands the branch alone, which
 breaks the app *as currently deployed*, whose default is floor-only. The 500 figure exists twice upstream —
 `cap: int = Field(500, ge=1, le=10000)` — and in prose in this repo (`semantic.ts`'s
@@ -47,7 +79,8 @@ architecture constraints).
 Goals:
 
 - Floor-then-count composition end to end, this repo landable before or after the index —
-  but the index's two edits (the branch, and `top` becoming nullable) landing together.
+  but the index's edits (the branch, the ten-row default going from the schema, `rank()`'s own
+  signature, the REPL, and the surface doc, and the `matched` count of D9) landing together.
 - One encoding rule — presence — across live state, profile storage, and URL.
 - A count a user can set that never collides with the index's cap.
 
@@ -68,7 +101,14 @@ set, not the display set, and the wall notice ("the index returned fewer than wa
 for") would start reporting a cut this app made. With composition in `rank()`, every layer
 reports its own act: the floor and count are the user's, the cap is the index's.
 *Alternative rejected*: server-side slicing (same dishonesty, plus the server would need the
-count twice — once for the request, once for the slice).
+count twice — once for the request, once for the slice). *Alternative rejected*: sending the
+user's count as the index's `cap`, which composes **today**, with no upstream change at all —
+`api.py` truncates at `cap` *after* `rank()`, so `{min_score: 0.1, cap: 60}` is already
+floor-then-count against the deployed index. Rejected for the same reason as client-side
+slicing, one layer down: `cap` is where the index's *own* ceiling lives, and overloading it
+collapses two different facts into the single `truncated` bit — a set cut by the user's 60 and
+a set cut by the index's 500 become indistinguishable to the client. So the upstream change is
+not what makes composition *possible*; it is what keeps `truncated` meaning the index (D8).
 
 **D2 — Composition order is floor, then count.** "Best N of everything at least this
 similar." The reverse (floor the best N) returns fewer than N for no stated reason and makes
@@ -94,7 +134,10 @@ a bound not in force*. This kills two special cases landed the day before this c
 "floor-only in force"; with absence meaning "not in force", the two collapse harmlessly) and
 the URL's "count named even at its default" rule (which existed because absence had to read
 as the floor; with absence reading as both-at-defaults, a count-only view names its count
-because it is in force, not because it is non-default).
+because it is in force, not because it is non-default). It kills a **third** the proposal did
+not name: `urlState`'s serializer skips `min` whenever the floor equals its default, so a
+floor-only view at 0.1 writes no bound param at all — under the presence rule that reads back
+as both, which is the opposite of what it recorded.
 
 Migration under this rule:
 
@@ -102,13 +145,20 @@ Migration under this rule:
 |---|---|---|---|
 | `{top: 60, minScore: null}` | count chosen | count-only | yes |
 | `{top: 60}` (no minScore key) | pre-floor profile | count-only | yes — a count *was* in force when it was written |
-| `{top: 60, minScore: 0.1}` | floor-only (top inert) | both 0.1 + 60 | no — but the old bytes cannot say so, and this is the new default |
+| `{top: <inert>, minScore: 0.1}` | floor-only (top inert) | both 0.1 + that inert count | no — and worse than "the new default"; see below |
 | `{minScore: 0.1}` | (impossible under old writer) | floor-only | — |
 
-The third row is the one real loss. It is accepted because the alternative is a
-discriminator field (`bound: 'floor' | 'count' | 'both'`) whose only job is to reconstruct
-a distinction that ceased to matter when both became the default — every old floor profile
-would map to the default either way.
+The third row is the one real loss, and it is larger than an earlier draft of this table
+said. `Tuning.top` is **required** (`searchOptions.ts`'s `Tuning`) and the tuning store's
+serializer spreads the whole object, so the old writer emitted `top` on *every* write,
+including from a floor-only view whose count field was disabled. The stored number is
+therefore whatever that disabled field last held — commonly 60, but possibly 10, or any count
+its owner set before switching to the floor. Row 3 does not read as "floor plus the new
+default"; it reads as "floor plus a stale inert number". A discriminator field
+(`bound: 'floor' | 'count' | 'both'`) is still rejected — its only job would be reconstructing
+a distinction that ceased to matter when both became the default — but "every old floor
+profile would map to the default either way" was simply wrong, and whether the gap is worth a
+read-side mitigation is the open question below.
 
 **D5 — The count clamps at 500, as a constant.** `MAX_RESULT_COUNT = 500` in
 `shared/types.ts`, clamped at every reader of a `top` value: the SidePanel's field entry,
@@ -148,8 +198,9 @@ no window where it promises composition it cannot get. It does **not** hold in t
 direction. The index landing the composition branch *alone* breaks the app as currently
 deployed — today's default is floor-only, `query()` omits `top` when it sends a floor, and
 `QueryRequest.top` then defaults to 10, so every default meaning search would return ten
-rows (measured: 875 → 10 on the `fantasy character` shape). The upstream change must make
-`top` nullable in the same commit as the branch. That is a constraint on the index's change,
+rows (875 → 10 on the `fantasy character` shape, measured on both sides of `add7fd4`; see Context). The upstream change must retire the ten-row
+default in the same commit as the branch — in `rank()`'s own signature and the REPL's, not
+only in `QueryRequest`. That is a constraint on the index's change,
 not on this one, and it is the reason group 0 verifies the schema and not only the branch.
 
 **D8 — The cap notice keeps attributing to the index, and becomes floor-only.** The bit
@@ -161,10 +212,31 @@ occur. The notice therefore survives exactly in the floor-only state, where no `
 sent and the floor set can exceed the cap. That is the state `score-floor-by-default`'s wall
 measurement was taken in, so nothing that has been observed becomes unobservable — but a
 user in the new default state will never see the notice, and that is a deliberate
-consequence rather than an oversight. No new notice is introduced for "your
-count cut the set": a count is presented as showing the strongest matches, the rule
-"Meaning search is a mode of the search input" already records, and a user-chosen cap
-cutting a floor set is that rule's ordinary case.
+consequence rather than an oversight. No notice is introduced for "your count cut the
+set": a count is presented as showing the strongest matches, the rule "Meaning search is a
+mode of the search input" already records, and a user-chosen cap cutting a floor set is that
+rule's ordinary case. One thing D8 does not say, and should: the alternative it rejects was
+not available to reject. `/query` answers `{scope, weak, best_z, truncated, results}` and
+carries no floor-set size, so "875 matched, showing 60" was not implementable at any price
+from the client side — D8's product argument was also a technical floor, and stating it only
+as a choice flattered the reasoning. D9 is what lifts the constraint; it is not a nicety added
+on top of a settled decision.
+
+**D9 — The capped view says what it was drawn from.** D8 leaves the default state with no
+statement of its own size against the set behind it: floor 0.1 and count 60 over the
+`fantasy character` shape shows 60 of 875 with nothing on screen saying 875 exists. That is
+not the wall notice returning under another name — the wall notice attributes to the index's
+ceiling and must stay narrow — it is the count attributing to itself. `rank()` is being opened
+anyway, and the number is free there and nowhere else: after the floor filter and *before* the
+top slice, `len(order)` is exactly the figure, and it is unrecoverable from the response once
+the slice has happened. So the upstream ask gains a third element, `matched`, alongside the
+branch and the retired ten-row default. It rides this repo's existing attribution path —
+index `truncated` → `QueryResult.truncated` → the route's `capped` → the label in `App`'s
+`resultsLabel` — as index `matched` → `QueryResult.matched` → the route's `matched` →
+`SemanticSearchResult.matched`, and is additive on the wire the way `scores` is
+(`confidence-scores-on-tiles` D1): an index or server that does not send it leaves the client
+saying nothing extra rather than failing. *Alternative rejected*: counting client-side — the
+client only ever receives the sliced set, so there is nothing to count.
 
 ## Risks / Trade-offs
 
@@ -199,5 +271,18 @@ ignored — today's behaviour, not an error.
 
 ## Open Questions
 
-None outstanding. The floor's default (0.1), the count's default (60), and the clamp (500)
-are all carried from measured ground rather than chosen here.
+None outstanding. The floor's default (0.1), the count's default (60), and the clamp (500) are
+all carried from measured ground rather than chosen here. One question was raised and closed:
+
+- **Does row 3 of D4's migration table want a mitigation? — No, decided; accepted as
+  recorded.** As corrected there, a profile
+  written under the old floor-only encoding reads back as floor 0.1 plus an inert count its
+  owner never chose, possibly as low as 10 — a materially worse view than the defaults, not
+  the defaults. The cheap fix is a schema marker written by the *new* writer only: a profile
+  lacking it predates composition, so its `top` is read as the default 60 rather than as a
+  choice. That is a discriminator in bytes but not the one D4 rejects — it distinguishes
+  encodings, not bound-states, and it goes inert on its own once no unmarked profile remains.
+  That was weighed against the affected population — profiles written between `de264a3` and
+  this change, on one user's machines — and rejected: the marker costs a permanent field in
+  the stored encoding to repair a window of days, which is a worse trade than the stale count
+  it would fix. Row 3's infidelity stands as the table states it.
