@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import type { CameraState, IndexPose, OrbitAxis } from '../../shared/types'
+import type { CameraState, IndexPose, IndexScore, OrbitAxis } from '../../shared/types'
 import type React from 'react'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -7,6 +7,7 @@ import * as THREE from 'three'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ApiClient } from '../src/api/client'
 import { GestureTracker } from '../src/lib/gesture'
+import type { ScoreScale } from '../src/lib/scoreScale'
 import type { MeshLru } from '../src/three/lru'
 import ViewerLayer, { type ViewerState } from '../src/viewer/ViewerLayer'
 
@@ -56,6 +57,8 @@ function makeProps() {
       camera: undefined as CameraState | undefined,
       axis: undefined as OrbitAxis | undefined,
       pose: undefined as IndexPose | undefined,
+      score: undefined as IndexScore | undefined,
+      scoreScale: null as ScoreScale | null,
       lighting: 'axis' as const,
       ao: true,
       api: { getThumb: vi.fn().mockResolvedValue({ status: 'miss' }) } as unknown as ApiClient,

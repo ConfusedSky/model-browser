@@ -27,7 +27,13 @@
  * `view` — and why a stand-in listing under a deferred meaning search is a
  * legitimate steady state rather than a disagreement.
  */
-import type { DirEntry, IndexAvailability, IndexPose, SemanticScope } from '../../../shared/types'
+import type {
+  DirEntry,
+  IndexAvailability,
+  IndexPose,
+  IndexScore,
+  SemanticScope,
+} from '../../../shared/types'
 import type { SearchKinds, SearchMode, Tuning } from '../lib/searchOptions'
 import {
   corpusOf,
@@ -73,6 +79,13 @@ export interface Landed {
   weak?: boolean
   capped?: boolean
   poses?: Record<string, IndexPose>
+  /**
+   * What the index scored each tile at, keyed by path as `poses` is. Optional
+   * for the same reason the rest of this residue is: only a scored answer has
+   * it, and a landing replaces the whole result (R5), so a plain listing simply
+   * arrives without one rather than having to clear the last one.
+   */
+  scores?: Record<string, IndexScore>
   /**
    * A similarity answer's subject: the model its neighbours were computed from,
    * which the index excludes from them by design. Beside `entries` rather than
@@ -537,6 +550,7 @@ export function reducer(state: SearchState, action: Action): SearchState {
         weak: action.landed.weak,
         capped: action.landed.capped,
         poses: action.landed.poses,
+        scores: action.landed.scores,
         anchor: action.landed.anchor,
       }
       // A stand-in renders without renaming the view: the URL still names the

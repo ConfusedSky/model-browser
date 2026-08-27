@@ -5,7 +5,13 @@
 // races. Each of these was one hand-maintained list missing one field, so each
 // test asks the reducer the question that list got wrong.
 import { describe, expect, it } from 'vitest'
-import type { DirEntry, IndexAvailability, IndexPose, SemanticScope } from '../../shared/types'
+import type {
+  DirEntry,
+  IndexAvailability,
+  IndexPose,
+  IndexScore,
+  SemanticScope,
+} from '../../shared/types'
 import { TUNING_DEFAULTS, type SearchMode, type Tuning } from '../src/lib/searchOptions'
 import { serializeView } from '../src/lib/urlState'
 import {
@@ -288,6 +294,7 @@ describe('the reducer, finding by finding', () => {
         front: null,
       },
     }
+    const scores: Record<string, IndexScore> = { '/lib/a.stl': { score: 0.107, z: 3.9 } }
     let s = run(start({}, READY), { type: 'setMode', mode: 'meaning' })
     const meaningEntries = [entry('a.stl')]
     s = land(search(s, 'dragon'), {
@@ -296,8 +303,13 @@ describe('the reducer, finding by finding', () => {
       weak: true,
       capped: true,
       poses,
+      scores,
     })
     expect(labelInputs(s)).toMatchObject({ meaning: true, weak: true, capped: true })
+    // Carried onto the result by identity, like the entries below it — the map
+    // the landing was handed, not a rebuilt one, so a tile's badge prop is the
+    // same object across re-renders and the grid's memo holds.
+    expect(s.result?.scores).toBe(scores)
     // Identity is the contract useThumbnails resets on — the result carries
     // the array it was handed rather than a rebuilt one.
     expect(s.result?.entries).toBe(meaningEntries)
@@ -306,6 +318,9 @@ describe('the reducer, finding by finding', () => {
     s = land(reducer(s, { type: 'navigate', path: '/other', prefs: PREFS }), { entries: plain })
     expect(s.result?.scope).toBeUndefined()
     expect(s.result?.poses).toBeUndefined()
+    // A landing replaces the whole result (R5), so an unscored answer leaves no
+    // stale numbers behind for the grid to key a badge off.
+    expect(s.result?.scores).toBeUndefined()
     expect(labelInputs(s)).toMatchObject({ meaning: false, weak: false, capped: false })
     expect(s.result?.entries).toBe(plain)
   })

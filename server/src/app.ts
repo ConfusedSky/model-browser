@@ -278,11 +278,12 @@ export function createApp(
       }
       throw err
     }
-    const { entries, poses } = await hitsToEntries(result.results, status.collectionRoot)
+    const { entries, poses, scores } = await hitsToEntries(result.results, status.collectionRoot)
     return c.json({
       path: scope ?? status.collectionRoot,
       entries,
       poses,
+      scores,
       weak: result.weak,
       // The index's ceiling, not the ranking's horizon (D2): it returned fewer
       // than was asked for, and what was asked for is the user's control.
@@ -357,7 +358,7 @@ export function createApp(
     // The same hit→tile join a meaning answer takes: this server's own view of
     // the tree, stat'd once per returned hit, never the index's description of a
     // model (D3).
-    const { entries, poses } = await hitsToEntries(result.results, status.collectionRoot)
+    const { entries, poses, scores } = await hitsToEntries(result.results, status.collectionRoot)
     // The model the neighbours were computed *from*, resolved into a tile of its
     // own. The index excludes the query model from its own ranking by design (it
     // scores 1.0 against itself and skews the z), so if the question is to be
@@ -380,6 +381,10 @@ export function createApp(
       path: status.collectionRoot,
       entries,
       poses,
+      // Keyed by resolved path like `poses`, so the anchor below is simply not
+      // in it: the index excludes the query model from its own ranking rather
+      // than scoring it, and there is no hit to carry a number (D1).
+      scores,
       ...(anchor !== null ? { anchor } : {}),
     })
   })

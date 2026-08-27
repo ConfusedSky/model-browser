@@ -5,6 +5,7 @@ import type {
   CameraState,
   DirEntry,
   IndexPose,
+  IndexScore,
   LightingMode,
   OrbitAxis,
 } from '../../../shared/types'
@@ -31,7 +32,8 @@ import {
   type EntryCommand,
   type LiveFramingView,
 } from '../lib/entryActions'
-import { formatBytes, formatDate } from '../lib/format'
+import { formatBytes, formatCosine, formatDate, formatZ } from '../lib/format'
+import { SCALE_BADGE, Z_LABEL, type ScoreScale } from '../lib/scoreScale'
 import { GestureTracker } from '../lib/gesture'
 import type { MeshLru } from '../three/lru'
 import { DEFAULT_CAMERA } from '../three/camera'
@@ -54,6 +56,12 @@ interface Props {
   axis: OrbitAxis | undefined
   /** The index's orientation for this model, when it has one. Advisory (D5). */
   pose: IndexPose | undefined
+  /** What the index scored this model at, when it was opened from a scored
+   *  result. Absent for a model opened from any ordinary listing. */
+  score: IndexScore | undefined
+  /** Which scale `score` is on — the same derivation the tile reads, so the two
+   *  surfaces cannot report the number under different names (D7). */
+  scoreScale: ScoreScale | null
   /** Active lighting mode — a prop (not read from the store) so toggling repaints the live view. */
   lighting: LightingMode
   /** Ambient occlusion on/off — a prop for the same reason as `lighting`. */
@@ -137,6 +145,8 @@ export default function ViewerLayer({
   camera,
   axis,
   pose,
+  score,
+  scoreScale,
   lighting,
   ao,
   api,
@@ -755,6 +765,25 @@ export default function ViewerLayer({
               </dt>
               <dd className="text-right text-zinc-300">{formatDate(viewer.entry.mtime)}</dd>
             </div>
+            {/* Among the metadata and before the action strip: the panel
+                describes the model first and offers what can be done to it
+                second, which is a requirement of the lightbox and easy to break
+                by appending. Same labels as the tile's corners, from the same
+                derivation, so the two surfaces cannot report one number under
+                two names (D7). Unlike the tile, nothing here needs restating for
+                a reader — a `<dl>` is read as written. */}
+            {score !== undefined && scoreScale !== null && (
+              <>
+                <div className="flex justify-between gap-2">
+                  <dt className="text-zinc-500">{SCALE_BADGE[scoreScale]}</dt>
+                  <dd className="tabular-nums text-zinc-300">{formatCosine(score.score)}</dd>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <dt className="text-zinc-500">{Z_LABEL}</dt>
+                  <dd className="tabular-nums text-zinc-300">{formatZ(score.z)}</dd>
+                </div>
+              </>
+            )}
           </dl>
           {/* The entry actions as affordances rather than only behind a
               secondary press (6.6) — the same commands the menu raises, beside

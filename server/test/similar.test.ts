@@ -108,6 +108,7 @@ describe('a model’s neighbours', () => {
       path: string
       entries: { name: string; path: string; kind: string; size: number; mtime: number }[]
       poses: Record<string, unknown>
+      scores: Record<string, unknown>
     }
     expect(body.entries).toHaveLength(1)
     // mtime and size come from this server's stat, not from the index, which
@@ -119,6 +120,10 @@ describe('a model’s neighbours', () => {
     // Poses ride along, so a neighbour grid renders at the index's orientation
     // exactly as a meaning grid does.
     expect(body.poses[join(root, 'base.stl')]).toEqual(POSE)
+    // So do the scores, keyed by the same resolved path — which is what makes
+    // "no entry" and "no score" one fact rather than two that can disagree.
+    // Verbatim from the index: nothing is rescaled on the way through.
+    expect(body.scores[join(root, 'base.stl')]).toEqual({ score: 0.93, z: 3.3 })
     // The whole collection is what the view is about, and the answer says so.
     expect(body.path).toBe(root)
   })
@@ -127,8 +132,13 @@ describe('a model’s neighbours', () => {
     stubIndex(READY, { ...RESULT, results: [hit('base.stl'), hit('moved-away.stl')] })
     const body = (await (await post({ path: join(root, 'hero.stl') })).json()) as {
       entries: unknown[]
+      scores: Record<string, unknown>
     }
     expect(body.entries).toHaveLength(1)
+    // The stale hit takes its score with it. Keyed alike, dropped alike — a
+    // number left behind for a tile that is not there is exactly what sharing
+    // the key prevents.
+    expect(Object.keys(body.scores)).toEqual([join(root, 'base.stl')])
   })
 
   it('a hit cannot name a file outside the collection', async () => {
@@ -265,16 +275,20 @@ describe('a model’s neighbours', () => {
     // 4.7: the index publishes no `weak` for neighbours (measured — model-to-
     // model cosines run 0.85–0.99 where text cosines run ~0.1), and forwarding
     // its `scope` dict would make the client's label read the view as a meaning
-    // search. Order carries strength; there is nothing else to say.
+    // search.
     stubIndex(READY, { scope: { path: null, status: 'indexed' }, results: [hit('base.stl')] })
     const body = (await (await post({ path: join(root, 'hero.stl') })).json()) as Record<
       string,
       unknown
     >
-    // `anchor` is the one field added since, and it is not residue: it is this
+    // Two fields have been added since, and neither is residue. `anchor` is this
     // server's own answer to "what was this compared against", which the index
     // never says because it excludes the query model from its own ranking.
-    expect(Object.keys(body).sort()).toEqual(['anchor', 'entries', 'path', 'poses'])
+    // `scores` is per-tile strength, which this route now carries precisely
+    // because it publishes no `weak`: withholding the numbers left the ranking
+    // as everything a reader had here (confidence-scores-on-tiles). What stays
+    // out is what describes a *phrase's* result — `scope`, `weak`, `capped`.
+    expect(Object.keys(body).sort()).toEqual(['anchor', 'entries', 'path', 'poses', 'scores'])
   })
 
   it('carries the model the neighbours were computed from, stat’d here like any tile', async () => {

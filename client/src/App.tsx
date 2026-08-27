@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import type * as THREE from 'three'
-import type { AppsReport, DirEntry, IndexPose, LightingMode, OrbitAxis } from '../../shared/types'
+import type {
+  AppsReport,
+  DirEntry,
+  IndexPose,
+  IndexScore,
+  LightingMode,
+  OrbitAxis,
+} from '../../shared/types'
 import { HttpApiClient, HttpError } from './api/client'
 import EntryMenu from './components/EntryMenu'
 import FindBar from './components/FindBar'
@@ -30,6 +37,7 @@ import { GestureTracker } from './lib/gesture'
 import { createHoverWarmer } from './lib/hover'
 import { fitSquareBox, type Box } from './lib/layout'
 import { getLastPath, pushRecent } from './lib/recents'
+import { scaleOf } from './lib/scoreScale'
 import {
   folderMatchingEnabled,
   searchKinds,
@@ -101,6 +109,7 @@ const ACTION_TEXT_MS = 2500
  */
 const NO_ENTRIES: DirEntry[] = []
 const NO_POSES: Record<string, IndexPose> = {}
+const NO_SCORES: Record<string, IndexScore> = {}
 /** "Nothing is deferred", as a subject, so the banner branches on one union
  *  rather than on a null *and* a kind. */
 const NO_SUBJECT: Subject = { kind: 'none' }
@@ -428,6 +437,13 @@ export default function App() {
   const truncated = state.result?.truncated === true
   const entries = state.result?.entries ?? NO_ENTRIES
   const poses = state.result?.poses ?? NO_POSES
+  // What the index scored each tile at, and which scale those numbers are on.
+  // The scale is read off the answer's own question — `label` is the view this
+  // result answers — so a tile can only ever be labelled as the thing that
+  // asked for it (D3), and a listing nobody scored yields `null` and draws
+  // nothing.
+  const scores = state.result?.scores ?? NO_SCORES
+  const scoreScale = scaleOf(label.subject)
   // The model a similarity answer was computed from. It is never counted with
   // the neighbours — `entries` above is what every count and every "nothing
   // similar" sentence reads — and it is folded in at the render layer alone.
@@ -569,7 +585,8 @@ export default function App() {
         // meaning-query residue to render (4.7).
         // The anchor rides along beside the entries, never among them: it is the
         // question, and the neighbours are the answer (D4's addition).
-        (res) => land({ entries: res.entries, poses: res.poses, anchor: res.anchor }),
+        (res) =>
+          land({ entries: res.entries, poses: res.poses, scores: res.scores, anchor: res.anchor }),
         (err: unknown) => {
           const notEmbedded = err instanceof HttpError && err.status === 404
           // A 404 means the index *answered* — about this model, not about
@@ -606,6 +623,7 @@ export default function App() {
             weak: res.weak,
             capped: res.capped,
             poses: res.poses,
+            scores: res.scores,
           }),
         (err: unknown) => {
           // A 503 carries the index's own state; re-read it so the affordance
@@ -1855,6 +1873,8 @@ export default function App() {
                   onEntryMenu={onEntryMenu}
                   markedPath={marked}
                   anchorPath={anchor?.path}
+                  scores={scores}
+                  scoreScale={scoreScale}
                 />
               ) : null}
               {emptyNotice}
@@ -1937,6 +1957,11 @@ export default function App() {
           camera={thumbs.get(viewer.entry.path)?.camera}
           axis={thumbs.get(viewer.entry.path)?.axis}
           pose={poses[viewer.entry.path]}
+          // Looked up the way `pose` is, and paired with the scale that names
+          // it — the panel reports what the tile reported, from the same two
+          // sources (D7).
+          score={scores[viewer.entry.path]}
+          scoreScale={scoreScale}
           lighting={lighting}
           ao={ao}
           api={api}

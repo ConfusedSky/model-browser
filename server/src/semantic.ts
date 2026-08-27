@@ -4,6 +4,7 @@ import type {
   DirEntry,
   IndexAvailability,
   IndexPose,
+  IndexScore,
   IndexState,
   SemanticTuning,
 } from '../../shared/types'
@@ -337,12 +338,26 @@ export async function modelEntryAt(full: string, name: string): Promise<DirEntry
  * the index's `id` is a stem plus 6 hex of the relative path, so a moved file
  * is simply a different model to it — and that is a normal outcome rather than
  * an error.
+ *
+ * Three maps out, all keyed alike — by the resolved absolute path the entry
+ * carries. The scores travel beside the entries rather than on them because
+ * `DirEntry` is what every listing route returns, and a score field there would
+ * be `undefined` for every directory, zip entry and flat-search hit in the app
+ * (confidence-scores-on-tiles D1). Sharing the key with the entry is what makes
+ * "no entry" and "no score" one fact: the drop above removes a stale hit from
+ * all three at once, so no surface can render a number for a tile that is not
+ * there.
  */
 export async function hitsToEntries(
   hits: Hit[],
   collectionRoot: string,
-): Promise<{ entries: DirEntry[]; poses: Record<string, IndexPose> }> {
+): Promise<{
+  entries: DirEntry[]
+  poses: Record<string, IndexPose>
+  scores: Record<string, IndexScore>
+}> {
   const poses: Record<string, IndexPose> = {}
+  const scores: Record<string, IndexScore> = {}
   const settled = await Promise.all(
     hits.map(async (h): Promise<DirEntry | null> => {
       // `rel_path` is the join key and the only field trusted for it: this is
@@ -355,8 +370,9 @@ export async function hitsToEntries(
       const entry = await modelEntryAt(full, h.rel_path)
       if (entry === null) return null
       if (h.pose !== null) poses[full] = h.pose
+      scores[full] = { score: h.score, z: h.z }
       return entry
     }),
   )
-  return { entries: settled.filter((e) => e !== null), poses }
+  return { entries: settled.filter((e) => e !== null), poses, scores }
 }

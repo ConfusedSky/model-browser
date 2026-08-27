@@ -3,9 +3,11 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type * as THREE from 'three'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { IndexScore } from '../../shared/types'
 import { HttpError, type ApiClient } from '../src/api/client'
 import { COPY_FAILED } from '../src/lib/entryActions'
 import { GestureTracker } from '../src/lib/gesture'
+import type { ScoreScale } from '../src/lib/scoreScale'
 import type { MeshLru } from '../src/three/lru'
 import ViewerLayer, { type ViewerState } from '../src/viewer/ViewerLayer'
 
@@ -32,6 +34,8 @@ function makeProps(mode: 'orbit' | 'lightbox') {
     camera: undefined,
     axis: undefined,
     pose: undefined,
+    score: undefined as IndexScore | undefined,
+    scoreScale: null as ScoreScale | null,
     lighting: 'axis' as const,
     ao: true,
     api: {

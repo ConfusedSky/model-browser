@@ -179,21 +179,32 @@ describe('semantic query', () => {
   it('returns tiles built from this server’s own view of the tree', async () => {
     stubIndex(READY, result)
     const body = (await (await post({ text: 'dragon' })).json()) as {
-      entries: { name: string; size: number; mtime: number; kind: string }[]
+      entries: { name: string; path: string; size: number; mtime: number; kind: string }[]
       scope: { indexed: number; scanned: number; covers: string[]; status: string }
+      scores: Record<string, unknown>
       weak: boolean
     }
     expect(body.entries).toHaveLength(1)
     // mtime and size come from stat, not from the index, which reports neither.
     expect(body.entries[0]!.mtime).toBeGreaterThan(0)
     expect(body.entries[0]!.size).toBeGreaterThan(0)
+    // The index's two numbers ride along, keyed by the same resolved path the
+    // entry carries, and verbatim — a text-query cosine really does run this
+    // low, and rescaling it here would break the one thing it can be checked
+    // against (the index's own `WEAK_Z`).
+    expect(body.scores[join(root, 'dragon.stl')]).toEqual({ score: 0.16, z: 3.9 })
     expect(body.scope).toEqual({ path: null, status: 'partial', indexed: 2801, scanned: 3396, covers: ['stl'] })
   })
 
   it('drops a hit that no longer resolves without failing the search', async () => {
     stubIndex(READY, { ...result, results: [hit('dragon.stl'), hit('moved-away.stl')] })
-    const body = (await (await post({ text: 'dragon' })).json()) as { entries: unknown[] }
+    const body = (await (await post({ text: 'dragon' })).json()) as {
+      entries: unknown[]
+      scores: Record<string, unknown>
+    }
     expect(body.entries).toHaveLength(1)
+    // The dropped hit leaves no score behind: one key, one fact.
+    expect(Object.keys(body.scores)).toEqual([join(root, 'dragon.stl')])
   })
 
   it('stats once per returned hit — the bound that lets the two caches disagree', async () => {

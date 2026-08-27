@@ -60,7 +60,12 @@ vi.mock('../src/three/renderer', async (importOriginal) =>
 const FOUND = '/models/Alpha/found.stl'
 const NESTED: DirListing = { path: '/models', entries: [dir('Alpha'), model('Alpha/found.stl')] }
 const ALPHA: DirListing = { path: '/models/Alpha', entries: [model('Alpha/found.stl')] }
-const NEIGHBOURS = { path: '/models', entries: [model('near.stl')], poses: {} }
+const NEIGHBOURS = {
+  path: '/models',
+  entries: [model('near.stl')],
+  poses: {},
+  scores: { '/models/near.stl': { score: 0.9124, z: 4.031 } },
+}
 
 /** The orientation this model has stored — visibly not the default, so a view
  *  that ends up at the default can only have been re-framed. */
@@ -350,6 +355,42 @@ describe('a panel action that changes the view', () => {
     // proves nothing (the lesson from 6.5's find-similar case).
     expect(dialog()).toBeNull()
     expect(writesFor(FOUND).filter((b) => b.camera !== undefined).length).toBeGreaterThan(0)
+  })
+
+  it('reports the index’s two numbers among the metadata, under the tile’s own labels', async () => {
+    // D7: the panel says what the tile said, from the same derivation, so one
+    // number cannot appear under two names across the two surfaces. Reached by
+    // opening a neighbour from a similarity view, which is the only way a
+    // lightbox has a scored entry to describe.
+    similar.mockResolvedValue(NEIGHBOURS)
+    await openLightbox('Alpha/found.stl')
+    await click(action('findSimilar'))
+    await wait(250)
+    await openLightbox('near.stl')
+
+    const meta = document.querySelector('dl')!
+    // `sim`, not `k` — this came from the neighbours route, and the panel reads
+    // the scale off the same view the corners do.
+    expect(meta.textContent).toContain('sim')
+    expect(meta.textContent).toContain('0.912')
+    expect(meta.textContent).toContain('4.03')
+    expect(meta.textContent).not.toContain('k 0.912')
+    // Among the metadata and before the actions: the panel describes the model
+    // first. The action row still follows everything in the `<dl>`.
+    const row = actionRow()!
+    expect(meta.compareDocumentPosition(row) & 4).toBe(4)
+  })
+
+  it('shows no such rows for a model opened from an ordinary listing', async () => {
+    // Nothing scored this one, so there is no number to report and no row held
+    // in reserve for one.
+    await openLightbox('Alpha/found.stl')
+
+    const meta = document.querySelector('dl')!
+    expect(meta.textContent).toContain('format')
+    expect(meta.textContent).not.toMatch(/\bsim\b/)
+    expect(meta.textContent).not.toMatch(/\bk\b/)
+    expect(meta.textContent).not.toMatch(/\bz\b/)
   })
 
   it('find similar lands the similarity view and leaves the same way', async () => {

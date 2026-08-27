@@ -125,6 +125,29 @@ export interface IndexPose {
   front: { view: number; azimuth_deg: number; elevation_deg: number } | null
 }
 
+/**
+ * What the index scored a result at — its two numbers, under the index's own
+ * names rather than the labels a tile draws them with (`k`/`sim`, `z`).
+ *
+ * Both are the index's values verbatim. Nothing here is rescaled, normalised or
+ * banded: the index's thresholds — `WEAK_Z = 2.0` above all — are stated against
+ * these numbers, so a figure derived on this side could not be checked against
+ * anything the index says about itself (confidence-scores-on-tiles D2/D4).
+ *
+ * `score` is comparable only *within* one result set, and the two scoring routes
+ * produce measurably different distributions (model-to-model cosines run
+ * 0.85–0.99 where text-query cosines run ~0.1). Which route produced a set is
+ * therefore not recorded here — it is a fact about the view, read off the
+ * subject it asked under (D3) — but any surface drawing `score` must name the
+ * scale beside it.
+ */
+export interface IndexScore {
+  /** Pooled cosine similarity, under whichever pooling the request asked for. */
+  score: number
+  /** Robust z (median/MAD) over the scored set — comparable across queries. */
+  z: number
+}
+
 /** How a meaning query is shaped, beyond the phrase and the scope. */
 export interface SemanticTuning {
   /** Read the phrase as written rather than through the index's templates. */
@@ -142,6 +165,13 @@ export interface SemanticListing {
   entries: DirEntry[]
   /** Orientation per tile path, where the index has one. Advisory (D5). */
   poses: Record<string, IndexPose>
+  /**
+   * What the index scored each tile at, keyed as `poses` is — by the resolved
+   * path the entry carries, so "no entry" and "no score" are one fact and a hit
+   * that no longer stats falls out of both at once
+   * (confidence-scores-on-tiles D1).
+   */
+  scores: Record<string, IndexScore>
   scope: SemanticScope
   /** The index found nothing standing out — the set is weak, not the results. */
   weak: boolean
@@ -155,8 +185,15 @@ export interface SemanticListing {
  * beyond the tiles describes a *phrase's* result — the scope a query was judged
  * within, whether it stood out, whether a bound bit — and none of it is a fact
  * about a model's neighbours. The index reports no `weak` here at all (measured:
- * model-to-model cosines run 0.85–0.99 where text-query cosines run ~0.1), and
- * order carries strength, so there is nothing to say per tile either.
+ * model-to-model cosines run 0.85–0.99 where text-query cosines run ~0.1).
+ *
+ * Per-tile strength is the exception, and used to be listed above as a third
+ * thing there was nothing to say about. It is carried now
+ * (confidence-scores-on-tiles): a neighbour set has no `weak` flag *at all*, so
+ * withholding the numbers left the ranking as literally everything a reader had
+ * here. The measurement that kept them out is unchanged and is why the cosine is
+ * labelled `sim` rather than `k` on this route — the two scales are named, not
+ * reconciled.
  */
 export interface SimilarListing {
   /** The collection the neighbours were drawn from — the whole of it (D4). */
@@ -164,6 +201,10 @@ export interface SimilarListing {
   entries: DirEntry[]
   /** Orientation per tile path, where the index has one. Advisory (D5). */
   poses: Record<string, IndexPose>
+  /** What the index scored each neighbour at, keyed as `poses` is (D1). The
+   *  anchor below is absent from it: the index excludes the query model from its
+   *  own ranking rather than scoring it. */
+  scores: Record<string, IndexScore>
   /**
    * The model the neighbours were computed from, so the question can be shown
    * beside its answer. A field of its own rather than the head of `entries`,

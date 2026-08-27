@@ -48,10 +48,21 @@ const NESTED: DirListing = { path: '/models', entries: [dir('Alpha'), model('wid
 const HERO = '/models/Kits/Baal/hero.stl'
 const LINK = `/?path=/models&similar=${encodeURIComponent(HERO)}`
 
+/** Model-to-model cosines run an order of magnitude above a text query's — the
+ *  measurement D10 rested on, and the reason this route's badge says `sim`. */
+const BASE_SCORE = { score: 0.9124, z: 4.031 }
+const WING_SCORE = { score: 0.8817, z: 2.688 }
 const NEIGHBOURS = {
   path: '/models',
   entries: [model('Kits/Baal/base.stl'), model('Kits/Other/wing.stl')],
   poses: {},
+  // The anchor is deliberately absent from this map even in `ANCHORED` below:
+  // the index excludes the query model from its own ranking rather than
+  // scoring it, so there is no number to carry.
+  scores: {
+    '/models/Kits/Baal/base.stl': BASE_SCORE,
+    '/models/Kits/Other/wing.stl': WING_SCORE,
+  },
 }
 
 /** The same answer with its subject: the model the neighbours were computed
@@ -129,20 +140,25 @@ describe('a similarity view', () => {
     expect(container.textContent).toContain('Models similar to "hero.stl"')
   })
 
-  it('shows no score, no z, and none of the meaning query’s residue', async () => {
-    // 4.7 / D10: order carries strength. The index publishes no `weak` for
-    // neighbours at all, so a label rendering `weak: false` would report a
-    // measurement that was never taken.
+  it('carries none of the meaning query’s residue', async () => {
+    // 4.7: the index publishes no `weak` for neighbours at all, so a label
+    // rendering `weak: false` would report a measurement that was never taken,
+    // and its `scope` dict would make the view read as a meaning search.
+    //
+    // The per-tile numbers used to be asserted absent here alongside them, on
+    // D10's reasoning that order carries strength. They are shown now
+    // (confidence-scores-on-tiles) — precisely because this route has no `weak`
+    // flag, which left the ranking as everything a reader had. What is residue
+    // and what is a fact about a neighbour were two questions under one
+    // assertion; this test keeps the first.
     indexAvailability.mockResolvedValue(READY)
     similar.mockResolvedValue(NEIGHBOURS)
     await mountAppAtCurrentUrl(LINK, NESTED)
     await settle()
 
-    expect(container.textContent).not.toMatch(/0\.\d\d/)
     expect(container.textContent).not.toContain('Nothing stood out')
     expect(container.textContent).not.toContain('returned fewer than asked for')
     expect(container.textContent).not.toContain('Meaning matches')
-    for (const tile of tiles()) expect(tile.textContent).not.toMatch(/\d\.\d/)
   })
 
   it('names the model, the place and the toggle in the URL — and, when it advances, drops what it never read', async () => {
@@ -251,6 +267,51 @@ describe('a similarity view', () => {
     expect(subject!.getAttribute('aria-label')).toContain('compared against')
     expect(neighbour!.textContent).not.toContain('Compared against')
     expect(neighbour!.getAttribute('aria-label')).not.toContain('compared against')
+  })
+
+  it('labels a neighbour’s cosine `sim`, and leaves the anchor unscored', async () => {
+    // D2, the whole answer to D10: the number is raw, and the scale is named.
+    // A neighbour cosine of 0.912 sits beside a meaning search's 0.107 in the
+    // same grid affordance, and only the label keeps the first from reading as
+    // eight times the match — so the label is what this asserts, not just the
+    // digits.
+    indexAvailability.mockResolvedValue(READY)
+    similar.mockResolvedValue(ANCHORED)
+    await mountAppAtCurrentUrl(LINK, NESTED)
+    await settle()
+
+    const [subject, neighbour] = tiles()
+    // Three places for the cosine, two for the z — and rounded from the
+    // fixture's fourth place rather than truncated, which is what `toFixed`
+    // buys and a slice would not.
+    expect(neighbour!.textContent).toContain('sim 0.912')
+    expect(neighbour!.textContent).toContain('z 4.03')
+    expect(neighbour!.textContent).not.toContain('k 0.912')
+    // The anchor is the question, not an answer: the index excludes the query
+    // model from its own ranking rather than scoring it, so there is nothing to
+    // draw even though it is a tile in the same grid.
+    expect(subject!.textContent).not.toContain('sim')
+    expect(subject!.textContent).not.toMatch(/z \d/)
+  })
+
+  it('announces a neighbour’s numbers with the scale spelled out', async () => {
+    // D8. A tile states its accessible name rather than composing it from its
+    // contents — the thumbnail is `alt=""` for exactly that reason — so a badge
+    // drawn inside the button reaches a screen reader only if the label says
+    // it. Spelled out because `sim` read aloud is not a word, and `k` is a
+    // letter this app already spends on the neighbour count.
+    indexAvailability.mockResolvedValue(READY)
+    similar.mockResolvedValue(ANCHORED)
+    await mountAppAtCurrentUrl(LINK, NESTED)
+    await settle()
+
+    const [subject, neighbour] = tiles()
+    const label = neighbour!.getAttribute('aria-label')!
+    expect(label).toContain('similarity 0.912')
+    expect(label).toContain('z 4.03')
+    // The short form belongs to the corner, which has a reason to be terse.
+    expect(label).not.toContain('sim 0.912')
+    expect(subject!.getAttribute('aria-label')).not.toContain('similarity 0.912')
   })
 
   it('an anchor with no neighbours still reads as nothing similar, and is not counted as one', async () => {

@@ -44,10 +44,21 @@ const scope = (over: Partial<SemanticListing['scope']> = {}) => ({
   covers: ['stl'],
   ...over,
 })
+/** Text-query cosines really do run this low, and the two hits differ in the
+ *  third decimal — which is the case three-place formatting exists for. */
+const HERO_SCORE = { score: 0.1074, z: 3.916 }
+const BASE_SCORE = { score: 0.1068, z: 2.404 }
 const MEANING: SemanticListing = {
   path: '/models',
   entries: [model('Kits/Baal/hero.stl'), model('Kits/Baal/base.stl')],
   poses: {},
+  // Keyed by the tile path, as the server keys them. Carried by the fixture
+  // rather than left empty: a fixture with no scores lets every assertion about
+  // badges pass while badges render nowhere at all.
+  scores: {
+    '/models/Kits/Baal/hero.stl': HERO_SCORE,
+    '/models/Kits/Baal/base.stl': BASE_SCORE,
+  },
   scope: scope(),
   weak: false,
   capped: false,
@@ -135,7 +146,7 @@ describe('meaning search', () => {
     expect(searchInput().value).toBe('winged demon')
   })
 
-  it('a weak set is marked as a set, with no per-result score on any tile', async () => {
+  it('a weak set is marked as a set, whatever any one tile reports', async () => {
     indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models', covers: ['stl'] })
     semanticSearch.mockResolvedValue({ ...MEANING, weak: true })
     await mountApp('/models', NESTED)
@@ -147,7 +158,50 @@ describe('meaning search', () => {
     await settle()
 
     expect(container.textContent).toContain('Nothing stood out')
-    expect(container.textContent).not.toMatch(/0\.\d\d/)
+    // What this test was really guarding: the verdict is about the SET. It is
+    // read off the best result before any cut, so it stands whatever the tiles
+    // say — and now that they say something, that is worth asserting rather
+    // than assuming. `base.stl` sits at z 2.40, above the index's own 2.0, and
+    // the set is still marked weak; no tile restates or contradicts the notice.
+    expect(tiles().length).toBe(2)
+    expect(container.textContent).toContain('z 2.40')
+  })
+
+  it('shows each meaning result’s cosine and z, labelled `k`, and neither in a plain listing', async () => {
+    // The numbers the index computed and this app used to discard. Three places
+    // for the cosine because text-query values cluster near 0.1 and these two
+    // hits differ in the third — at two places both would print `0.11`,
+    // asserting a tie that does not exist (D4).
+    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models', covers: ['stl'] })
+    semanticSearch.mockResolvedValue(MEANING)
+    await mountApp('/models', NESTED)
+    await settle()
+    await click(searchTab())
+    await click(modeButton('meaning')!)
+    await type(searchInput(), 'winged demon')
+    await pressEnter(searchInput())
+    await settle()
+
+    const [hero, base] = tiles()
+    expect(hero!.textContent).toContain('k 0.107')
+    expect(hero!.textContent).toContain('z 3.92')
+    // The third place is doing work: two results, two different numbers.
+    expect(base!.textContent).toContain('k 0.107')
+    expect(base!.textContent).toContain('z 2.40')
+    // Spelled out where it is read aloud, never `k` on its own (D8).
+    expect(hero!.getAttribute('aria-label')).toContain('cosine 0.107')
+    expect(hero!.getAttribute('aria-label')).toContain('z 3.92')
+
+    // Leaving the search returns to a listing nobody scored: no badge, and
+    // nothing held in reserve for one.
+    await click(searchTab())
+    await click(modeButton('name')!)
+    await mountApp('/models', NESTED)
+    await settle()
+    for (const tile of tiles()) {
+      expect(tile.textContent).not.toMatch(/\bk \d/)
+      expect(tile.textContent).not.toMatch(/\bz \d/)
+    }
   })
 
   it('distinguishes nothing-matched from nothing-indexed-here', async () => {

@@ -1,7 +1,9 @@
 import { memo, useEffect, useRef } from 'react'
 import { baseName } from '../../../shared/names'
-import type { DirEntry } from '../../../shared/types'
+import type { DirEntry, IndexScore } from '../../../shared/types'
 import type { ThumbState } from '../hooks/useThumbnails'
+import { formatCosine, formatZ } from '../lib/format'
+import { SCALE_BADGE, SCALE_SPOKEN, Z_LABEL, type ScoreScale } from '../lib/scoreScale'
 
 interface Props {
   entries: DirEntry[]
@@ -21,6 +23,12 @@ interface Props {
    *  It is drawn first and marked as the reference; App prepends it, so this is
    *  only which of the rendered tiles is it. */
   anchorPath?: string
+  /** What the index scored each tile at, keyed by path. Empty for any listing
+   *  nobody scored, which is most of them. */
+  scores: Record<string, IndexScore>
+  /** Which scale those numbers are on, or `null` where the view is not a scored
+   *  one — in which case no tile draws a number at all (D3). */
+  scoreScale: ScoreScale | null
 }
 
 /**
@@ -53,6 +61,8 @@ function Grid({
   onEntryMenu,
   markedPath,
   anchorPath,
+  scores,
+  scoreScale,
 }: Props) {
   if (entries.length === 0) {
     return <p className="mt-16 text-center text-sm text-zinc-600">Nothing to show here.</p>
@@ -75,6 +85,16 @@ function Grid({
           // Per-tile boolean for the same reason `marked` is one: the memo
           // keeps every other tile out of the re-render.
           anchor={entry.path === anchorPath}
+          // Resolved here rather than in the tile, so a tile that draws no
+          // badge is passed nothing and the memo sees `undefined` unchanged
+          // across renders. Three ways to have no number, all of them ordinary:
+          // the view is not a scored one, this tile is the anchor (the index
+          // excludes the query model from its own ranking rather than scoring
+          // it), or the hit that would have carried it did not resolve.
+          score={
+            scoreScale === null || entry.path === anchorPath ? undefined : scores[entry.path]
+          }
+          scale={scoreScale}
         />
       ))}
     </div>
@@ -82,6 +102,17 @@ function Grid({
 }
 
 export default memo(Grid)
+
+/**
+ * A corner badge. Anchored to the top of the thumbnail area and sized to stay
+ * out of the way — the grid's smallest tile is 11rem, so two of these leave the
+ * middle clear. The backing is opaque enough to read over a pale model and dark
+ * enough to read over a bright one; `tabular-nums` keeps a column of them from
+ * jittering as digits change. `pointer-events-none` so the badge is never the
+ * target of the press that orbits or opens the tile.
+ */
+const BADGE_CLASS =
+  'pointer-events-none absolute top-0 rounded bg-zinc-950/80 px-1 py-px text-[0.625rem] font-medium tabular-nums leading-tight text-zinc-300 ring-1 ring-zinc-800/60'
 
 const Tile = memo(function Tile({
   entry,
@@ -93,6 +124,8 @@ const Tile = memo(function Tile({
   onEntryMenu,
   marked,
   anchor,
+  score,
+  scale,
 }: {
   entry: DirEntry
   thumb: ThumbState | undefined
@@ -103,6 +136,10 @@ const Tile = memo(function Tile({
   onEntryMenu: (entry: DirEntry, el: HTMLElement, at: { x: number; y: number }) => void
   marked: boolean
   anchor: boolean
+  /** What the index scored this tile at; absent when nothing did (see `Grid`). */
+  score: IndexScore | undefined
+  /** Which scale `score` is on. Never read when `score` is absent. */
+  scale: ScoreScale | null
 }) {
   const ref = useRef<HTMLButtonElement>(null)
   // Locating is the point of reveal (D3): a grid of identical squares ten
@@ -127,6 +164,12 @@ const Tile = memo(function Tile({
   // neighbours do not have, and deliberately a quiet one — anything louder
   // reads as "this one matched hardest", which is the opposite of what it is.
   const anchorClass = anchor ? ' border-sky-800 ring-1 ring-sky-800' : ''
+  // The two numbers, resolved together: either both are drawn or neither is.
+  // `scale` is what makes the cosine readable at all — the two scoring routes
+  // run on measurably different distributions, so an unlabelled cosine invites
+  // a comparison it cannot support (D2).
+  const badges = score !== undefined && scale !== null ? { score, scale } : null
+
   const onMenuKey = (e: React.KeyboardEvent<HTMLButtonElement>): boolean => {
     // Shift+F10 for the platforms that do not send `contextmenu` for the
     // context-menu key itself.
@@ -170,9 +213,19 @@ const Tile = memo(function Tile({
       // The label is shortened to the file name, so the accessible name carries
       // the full one — in flat view that path is the only thing telling two
       // same-named parts apart.
+      // The badges reach the label explicitly, the way `anchor` does. An
+      // accessible name *replaces* the element's contents rather than joining
+      // them — the `<img>` below says as much — so a number drawn inside this
+      // button is announced to nobody unless it is stated here (D8). The scales
+      // are spelled out: the corner is terse because room there is the
+      // constraint, and read aloud `k` is a letter this app already spends on
+      // the neighbour count.
       aria-label={
         (thumb?.status === 'error' ? `${entry.name} — failed to load` : entry.name) +
-        (anchor ? ' — the model these are compared against' : '')
+        (anchor ? ' — the model these are compared against' : '') +
+        (badges === null
+          ? ''
+          : ` — ${SCALE_SPOKEN[badges.scale]} ${formatCosine(badges.score.score)}, ${Z_LABEL} ${formatZ(badges.score.z)}`)
       }
       className={`${base} touch-none select-none${markClass}${anchorClass}`}
       onPointerDown={(e) => onModelPointerDown(e, entry, e.currentTarget)}
@@ -205,6 +258,21 @@ const Tile = memo(function Tile({
           />
         ) : (
           <span className="size-6 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-400" />
+        )}
+        {/* Over the image, never composited into it: a badge painted into the
+            render would make the score part of the thumbnail's cache key, and
+            every query change would re-render the grid (D5). `aria-hidden`
+            because the button states these numbers in its own name above —
+            drawn here, read there, one source. */}
+        {badges !== null && (
+          <>
+            <span aria-hidden className={`${BADGE_CLASS} left-0`}>
+              {SCALE_BADGE[badges.scale]} {formatCosine(badges.score.score)}
+            </span>
+            <span aria-hidden className={`${BADGE_CLASS} right-0`}>
+              {Z_LABEL} {formatZ(badges.score.z)}
+            </span>
+          </>
         )}
       </div>
       {/* Above the name rather than below it: it captions the tile, and it must
