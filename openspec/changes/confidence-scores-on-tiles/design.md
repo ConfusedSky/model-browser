@@ -95,19 +95,29 @@ deliberately rather than avoided.
 
 The label is not a field on the wire and not a field on the per-tile record. `Result.forView`
 already names the question the result answers, and `Subject` in `client/src/state/view.ts`
-has three arms — `none`, `query`, `similar` — of which exactly two name a scoring route. The
-label is read off that.
+has three arms — `none`, `query`, `similar`. The label is read off that, **plus**
+`labelInputs`' `meaning` flag, and the "plus" is the part that is easy to get wrong: a
+`query` subject is a committed *phrase* of either corpus, since `mode` is a separate `View`
+field, so a plain name search is a `query` subject too. The subject alone would label it `k`.
+`meaning` settles it, read off whether the answer carried a `scope` — something only the
+meaning route sends. A similarity view carries no `scope` and does not consult the flag.
 
 *Why:* a provenance field on each record would be the same string repeated across sixty
 tiles, derivable from state the client already holds, and capable of disagreeing with the
 view it is rendered in. Deriving it means a result can only ever be labelled as the thing
 that asked for it.
 
-*Consequence to honour:* where the subject is neither arm — a name search, a plain listing, a
-stand-in listing rendered while a meaning query is deferred — no label exists, so nothing is
-drawn. That is the correct behaviour and it falls out rather than being special-cased. A
-future third scoring route must extend the union to be rendered at all, which is the failure
-mode we want: unlabelled is unrendered.
+*Consequence to honour:* where no scale is derived — a name search, a plain listing, a
+stand-in listing rendered while a meaning query is deferred — nothing is drawn. A future
+third scoring route must extend this to be rendered at all, which is the failure mode we
+want: unlabelled is unrendered.
+
+*Recorded because it was briefly untrue:* this consequence was first written as though the
+subject alone produced it, which it does not. Nothing rendered for a name search even so,
+because a name landing carries no `scores` and the empty map draws no badge — meaning the
+empty map was the real guard and "unlabelled is unrendered" held only by accident. The flag
+makes the stated property the one actually holding, and `scoreScale.test.ts` asserts it
+where an empty map cannot mask it.
 
 ### D4: Raw values at fixed precision — cosine to 3 places, z to 2
 

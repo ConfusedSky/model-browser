@@ -443,7 +443,7 @@ export default function App() {
   // asked for it (D3), and a listing nobody scored yields `null` and draws
   // nothing.
   const scores = state.result?.scores ?? NO_SCORES
-  const scoreScale = scaleOf(label.subject)
+  const scoreScale = scaleOf(label.subject, label.meaning)
   // The model a similarity answer was computed from. It is never counted with
   // the neighbours — `entries` above is what every count and every "nothing
   // similar" sentence reads — and it is folded in at the render layer alone.

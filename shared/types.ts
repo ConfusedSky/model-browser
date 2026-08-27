@@ -170,8 +170,12 @@ export interface SemanticListing {
    * path the entry carries, so "no entry" and "no score" are one fact and a hit
    * that no longer stats falls out of both at once
    * (confidence-scores-on-tiles D1).
+   *
+   * Optional on the wire, and the migration rests on it: an older server that
+   * does not send it leaves a newer client rendering no badges rather than
+   * failing, which is what makes this field additive.
    */
-  scores: Record<string, IndexScore>
+  scores?: Record<string, IndexScore>
   scope: SemanticScope
   /** The index found nothing standing out — the set is weak, not the results. */
   weak: boolean
@@ -203,8 +207,9 @@ export interface SimilarListing {
   poses: Record<string, IndexPose>
   /** What the index scored each neighbour at, keyed as `poses` is (D1). The
    *  anchor below is absent from it: the index excludes the query model from its
-   *  own ranking rather than scoring it. */
-  scores: Record<string, IndexScore>
+   *  own ranking rather than scoring it. Optional for the same reason it is on a
+   *  meaning answer — an older server simply sends no badges. */
+  scores?: Record<string, IndexScore>
   /**
    * The model the neighbours were computed from, so the question can be shown
    * beside its answer. A field of its own rather than the head of `entries`,

@@ -14,20 +14,34 @@
  * view it is rendered in. Read off the subject, a result can only be labelled as
  * the thing that asked for it.
  *
- * `Subject` has three arms and only two name a scoring route, so `none` — a
- * plain listing, a name search, the stand-in listing shown while a meaning query
- * is deferred — yields no scale and therefore draws nothing. A future third
- * scoring route must extend this to be rendered at all, which is the failure
- * mode we want: unlabelled is unrendered.
+ * The subject alone does not settle it, which is worth stating because it reads
+ * as though it should. `Subject.kind === 'query'` is a *committed phrase*, of
+ * either corpus — `mode` is a separate `View` field — so a plain name search is
+ * a `query` subject too, and asking the subject by itself would label it `k`.
+ * Hence the second argument: `meaning` comes from `labelInputs`, which reads it
+ * off whether the answer carried a `scope`, something only the meaning route
+ * sends. A similarity view is unaffected — it deliberately carries no `scope`,
+ * and `sim` does not consult the flag.
+ *
+ * The remaining arms yield nothing on their own: `none` covers a plain listing
+ * and the stand-in listing shown while a meaning query is deferred. A future
+ * third scoring route must extend this to be rendered at all, which is the
+ * failure mode we want: unlabelled is unrendered.
  */
 import type { Subject } from '../state/view'
 
 export type ScoreScale = 'k' | 'sim'
 
-/** The scale this view's results are on, or `null` where none are scored. */
-export function scaleOf(subject: Subject): ScoreScale | null {
-  if (subject.kind === 'query') return 'k'
+/**
+ * The scale this view's results are on, or `null` where none are scored.
+ *
+ * `meaning` is `labelInputs`' flag: a committed phrase read against the index
+ * rather than against file names. A name search is a committed phrase too and
+ * scores nothing, so it must not be labelled as though it did.
+ */
+export function scaleOf(subject: Subject, meaning: boolean): ScoreScale | null {
   if (subject.kind === 'similar') return 'sim'
+  if (subject.kind === 'query' && meaning) return 'k'
   return null
 }
 
