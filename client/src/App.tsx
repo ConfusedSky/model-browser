@@ -448,6 +448,30 @@ export default function App() {
   // the neighbours — `entries` above is what every count and every "nothing
   // similar" sentence reads — and it is folded in at the render layer alone.
   const anchor = state.result?.anchor
+  /**
+   * The only way to obtain a result's score. The anchor guard lives here rather
+   * than beside each caller, which is the difference between a convention and a
+   * constraint: a surface cannot reach past this to the raw map, so a new one
+   * inherits the rule by having no alternative. It was two call sites, spelled
+   * two ways, and the panel simply forgot its copy — found by review, not by
+   * either of the two people who had read the code.
+   *
+   * **Returns the map's own object, never a constructed one.** `Tile`'s memo
+   * compares `score` by identity, so an accessor that built `{score, z}` per
+   * call would hand every tile a fresh object on each render and silently undo
+   * the memoisation the per-tile-value shape exists for (D6) — a performance
+   * regression with no failing test to catch it. The accessor form invites that
+   * mistake in a way the raw map did not.
+   *
+   * `anchor?.path` rather than `anchor`: the identity that matters is the path
+   * compared, and a re-landed answer carrying an equal anchor should not rebuild
+   * every tile's props.
+   */
+  const scoreFor = useCallback(
+    (path: string): IndexScore | undefined =>
+      path === anchor?.path ? undefined : scores[path],
+    [scores, anchor?.path],
+  )
   // The anchor needs a thumbnail like any tile, so it goes to useThumbnails —
   // memoized because that effect resets the whole thumb map to `loading` on any
   // `entries` identity change (D2), and a fresh array per render would do it on
@@ -1873,7 +1897,7 @@ export default function App() {
                   onEntryMenu={onEntryMenu}
                   markedPath={marked}
                   anchorPath={anchor?.path}
-                  scores={scores}
+                  scoreFor={scoreFor}
                   scoreScale={scoreScale}
                 />
               ) : null}
@@ -1961,17 +1985,10 @@ export default function App() {
           // it — the panel reports what the tile reported, from the same two
           // sources (D7).
           //
-          // The anchor check is the tile's, repeated: `Grid` withholds a badge
-          // from a similarity view's anchor, and a panel without the same test
-          // would report the very numbers the tile beneath it refused — which
-          // is the one thing D7 says cannot happen. The requirement is not
-          // written per surface either: the anchor SHALL show neither number.
-          // Unreachable from the server today (`hitsToEntries` keys only hits,
-          // and the anchor is resolved separately through `modelEntryAt`), and
-          // guarded for the same reason the tile's is — a defence worth having
-          // on one surface is worth having on both, or it is worth having on
-          // neither.
-          score={viewer.entry.path === anchor?.path ? undefined : scores[viewer.entry.path]}
+          // Through `scoreFor`, which is where the anchor guard lives: the panel
+          // gets it by construction rather than by remembering, which is how it
+          // came to be missing here in the first place.
+          score={scoreFor(viewer.entry.path)}
           scoreScale={scoreScale}
           lighting={lighting}
           ao={ao}

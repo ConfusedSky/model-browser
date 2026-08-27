@@ -23,9 +23,11 @@ interface Props {
    *  It is drawn first and marked as the reference; App prepends it, so this is
    *  only which of the rendered tiles is it. */
   anchorPath?: string
-  /** What the index scored each tile at, keyed by path. Empty for any listing
-   *  nobody scored, which is most of them. */
-  scores: Record<string, IndexScore>
+  /** The one way to obtain a tile's score. A guarded lookup rather than the raw
+   *  map: the anchor rule lives inside it, so this component cannot draw a badge
+   *  the rule forbids even by forgetting to check. Returns the map's own object,
+   *  so the memo below still compares by identity. */
+  scoreFor: (path: string) => IndexScore | undefined
   /** Which scale those numbers are on, or `null` where the view is not a scored
    *  one — in which case no tile draws a number at all (D3). */
   scoreScale: ScoreScale | null
@@ -61,7 +63,7 @@ function Grid({
   onEntryMenu,
   markedPath,
   anchorPath,
-  scores,
+  scoreFor,
   scoreScale,
 }: Props) {
   if (entries.length === 0) {
@@ -87,13 +89,16 @@ function Grid({
           anchor={entry.path === anchorPath}
           // Resolved here rather than in the tile, so a tile that draws no
           // badge is passed nothing and the memo sees `undefined` unchanged
-          // across renders. Three ways to have no number, all of them ordinary:
-          // the view is not a scored one, this tile is the anchor (the index
-          // excludes the query model from its own ranking rather than scoring
-          // it), or the hit that would have carried it did not resolve.
-          score={
-            scoreScale === null || entry.path === anchorPath ? undefined : scores[entry.path]
-          }
+          // across renders — `scoreFor` returns the landed map's own object, so
+          // an unchanged answer passes the same reference every time.
+          //
+          // Only the scale is tested here. The other two ways to have no number
+          // are inside the lookup: this tile is the anchor (the index excludes
+          // the query model from its own ranking rather than scoring it), or the
+          // hit that would have carried one did not resolve. `anchorPath` is
+          // still a prop because the ring and the caption below need it — the
+          // anchor *fact* has two readers, but the anchor *guard* now has one.
+          score={scoreScale === null ? undefined : scoreFor(entry.path)}
           scale={scoreScale}
         />
       ))}
