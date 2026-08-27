@@ -80,8 +80,12 @@ export function setSearchMode(next: SearchMode): void {
 export interface Tuning {
   raw: boolean
   pool: 'mean' | 'max' | 'softmax'
-  /** Result count. Ignored when `minScore` is set — they are one choice (D1). */
+  /** Result count. Ignored when `minScore` is set — they are one choice (D1).
+   *  The floor is the default bound, so this is the one a view opts into. */
   top: number
+  /** Score floor, and the default bound. Absence is the *count* in force, never
+   *  "unset": everything that produces a resolved `Tuning` fills this in, so a
+   *  missing floor is a choice rather than a gap. */
   minScore?: number
 }
 
@@ -89,6 +93,11 @@ export const TUNING_DEFAULTS: Tuning = {
   raw: false,
   pool: 'softmax',
   top: 60,
+  // The index's own measurement: text-query cosines run around 0.1, so this is
+  // the floor at the distribution's own level rather than a number picked to be
+  // round. A count answers "the best N of whatever there is"; a floor answers
+  // "everything at least this similar", which is the question a phrase asks.
+  minScore: 0.1,
 } satisfies SemanticTuning
 
 export const POOLS = ['mean', 'max', 'softmax'] as const
@@ -112,6 +121,10 @@ const tuningStore = stored<Tuning>(
         Number.isFinite(v.top) && (v.top as number) > 0
           ? Math.floor(v.top as number)
           : TUNING_DEFAULTS.top,
+      // Absence here means the count, not the default: a profile is written
+      // whole by `setSearchTuning`, so a stored set without a floor recorded a
+      // user who turned it off. A URL is sparse by design and reads the other
+      // way round (`parseUrl`).
       minScore: Number.isFinite(v.minScore) ? (v.minScore as number) : undefined,
     }
   },

@@ -230,7 +230,10 @@ describe('the reducer, finding by finding', () => {
     // spell out, and a meaning search cannot restrict by kind (the index
     // answers with models and nothing else). Sticky options leaking into the
     // other mode's URL is the user-reported bug this half pins.
-    const tuning = { ...TUNING_DEFAULTS, top: 12, pool: 'max' as const }
+    // `minScore: undefined` is the count in force: the floor is the default
+    // bound, so a view that means "the best 12" has to say the floor is off —
+    // left on, `top` is the field the index ignores and the URL omits.
+    const tuning = { ...TUNING_DEFAULTS, top: 12, pool: 'max' as const, minScore: undefined }
     const OPTIONS: Record<SearchMode, { carries: string[]; omits: string[] }> = {
       name: {
         carries: ['q=dragon', 'mode=name', 'kinds=models', 'nofolders=1'],

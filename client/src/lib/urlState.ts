@@ -97,8 +97,15 @@ export function parseUrl(search: string = window.location.search): UrlView {
   const tuning: Partial<Tuning> = {}
   if (p.get('score-raw') === '1') tuning.raw = true
   if (isPool(pool)) tuning.pool = pool
-  if (Number.isFinite(top) && top > 0 && p.has('top')) tuning.top = Math.floor(top)
+  const hasTop = Number.isFinite(top) && top > 0 && p.has('top')
+  if (hasTop) tuning.top = Math.floor(top)
   if (Number.isFinite(min) && p.has('min')) tuning.minScore = min
+  // The floor is the default bound, so the count is the choice a link has to
+  // say out loud: `top` alone selects it, and neither param resolves to the
+  // floor. Set as an explicit `undefined` — the count's own sentinel — because
+  // this is spread over the defaults downstream, and an absent key would leave
+  // the floor in force and silently ignore the `top` the link exists to carry.
+  else if (hasTop) tuning.minScore = undefined
   return {
     path: p.get('path') ?? undefined,
     // The flat *toggle*, and only that (design R4). A search runs flat-shaped
@@ -198,9 +205,15 @@ export function serializeView(view: UrlView): string {
   if (meaning && view.tuning?.pool !== undefined && view.tuning.pool !== TUNING_DEFAULTS.pool) {
     p.set('pool', view.tuning.pool)
   }
-  if (meaning && view.tuning?.minScore !== undefined) p.set('min', String(view.tuning.minScore))
-  else if (meaning && view.tuning?.top !== undefined && view.tuning.top !== TUNING_DEFAULTS.top) {
-    p.set('top', String(view.tuning.top))
+  if (meaning && view.tuning?.minScore !== undefined) {
+    if (view.tuning.minScore !== TUNING_DEFAULTS.minScore) {
+      p.set('min', String(view.tuning.minScore))
+    }
+  } else if (meaning && view.tuning !== undefined) {
+    // The count is the non-default bound now, so it is named even at its own
+    // default value: an omitted pair reads back as the floor (`parseUrl`), and
+    // a link that meant "the best 60" would come back meaning something else.
+    p.set('top', String(view.tuning.top ?? TUNING_DEFAULTS.top))
   }
   if (view.model !== undefined && view.model !== '') p.set('model', view.model)
   const s = p.toString()

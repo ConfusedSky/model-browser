@@ -391,7 +391,7 @@ export default function SidePanel({
                       onClick={() => {
                         setTopText(null)
                         setScoreText(null)
-                        onTuning({ ...tuning, minScore: tuning.minScore ?? 0.2 })
+                        onTuning({ ...tuning, minScore: tuning.minScore ?? 0.1 })
                       }}
                       className={`rounded-lg border px-2 py-1.5 ${tuning.minScore !== undefined ? 'border-zinc-500 text-zinc-100' : 'border-zinc-800 text-zinc-500'}`}
                     >
@@ -420,7 +420,7 @@ export default function SidePanel({
                   {(tuning.raw !== TUNING_DEFAULTS.raw ||
                     tuning.pool !== TUNING_DEFAULTS.pool ||
                     tuning.top !== TUNING_DEFAULTS.top ||
-                    tuning.minScore !== undefined) && (
+                    tuning.minScore !== TUNING_DEFAULTS.minScore) && (
                     <button
                       type="button"
                       onClick={() => {

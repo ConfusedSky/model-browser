@@ -268,8 +268,10 @@ describe('search options in the URL', () => {
     commitUrl(view)
     commitUrl({ ...view, tuning: { ...TUNING_DEFAULTS } })
     expect(window.history.length).toBe(len)
-    // A tuning change is still a different view, and still pushes.
-    commitUrl({ ...view, tuning: { ...TUNING_DEFAULTS, top: 12 } })
+    // A tuning change is still a different view, and still pushes. The count is
+    // the off-default bound now, so choosing it means clearing the floor —
+    // `top` alone, with the floor still in force, would be the ignored field.
+    commitUrl({ ...view, tuning: { ...TUNING_DEFAULTS, top: 12, minScore: undefined } })
     expect(window.history.length).toBe(len + 1)
   })
 
