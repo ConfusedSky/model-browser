@@ -103,15 +103,26 @@ arrives with the floor still in force, and `top` is precisely the field the inde
 that state — the link would land on a different result set than the one it was copied from,
 silently.
 
-### D3: A profile reads absence the other way round from a URL
+### D3: A stored count is an explicit `null`, because `undefined` does not survive the write
 
-A stored profile is written whole by `setSearchTuning`, so a stored set with no floor is a user
-who turned the floor off, not a field nobody has filled in. A URL is sparse by construction —
-"omitted at its default" is its rule — so absence there resolves to the default.
+The first version of this decision said a stored profile with no floor was a user who had
+turned the floor off, where a URL's absence resolves to the default — two rules disagreeing
+deliberately. The storage half could not hold: `setSearchTuning` writes through
+`JSON.stringify`, which **drops** a key whose value is `undefined`, and the count's in-memory
+sentinel is exactly `undefined`. So a chosen count wrote itself as a missing key — byte for
+byte the same as every profile written before this change, when `TUNING_DEFAULTS` had no
+`minScore` at all. The rule asserted a distinction the stored bytes could not carry, and its
+victim was every existing user: each would have read back as having opted out of a decision
+nobody had asked them about.
 
-The two rules disagree deliberately, and both are commented at their site. Reading storage the
-URL's way would silently overwrite a user's standing choice of the count the first time they
-opened the app after this change.
+A count is therefore written as `null` and read as the count. A *missing* key is a profile
+older than the field and takes the default, like every other option here that nobody has set;
+a malformed value falls back the same way, to the default rather than to the count, since a
+count is a choice and a fallback is not. That leaves storage and the URL agreeing after all —
+absence means the default in both — and the count explicit in both.
+
+*Found by review, not by design:* the original rule read plausibly and had a comment at its
+site explaining reasoning that was never true of the code beneath it.
 
 ## Risks / Trade-offs
 
@@ -132,5 +143,10 @@ opened the app after this change.
 
 ## Migration Plan
 
-None. No stored value changes meaning, no cache is invalidated, and no wire field moves. A
-pre-existing profile that recorded a count keeps it; one that never set tuning gets the floor.
+No cache is invalidated and no wire field moves. One stored value does change meaning, and
+deliberately: a profile written before this change carries no `minScore` key, and now resolves
+to the floor rather than to the count (D3). That is the intended reading — such a profile
+predates the option and recorded no choice about it — and it is why the count is written as an
+explicit `null` from here on, so that a real choice is distinguishable from a record that
+predates the question. Nobody loses a setting they made; some people gain the new default,
+which is the point of moving it.

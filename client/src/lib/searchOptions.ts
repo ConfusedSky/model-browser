@@ -107,11 +107,21 @@ export function isPool(v: unknown): v is Tuning['pool'] {
   return typeof v === 'string' && (POOLS as readonly string[]).includes(v)
 }
 
+/**
+ * What a profile holds on disk. `minScore: null` is the count in force — a
+ * choice somebody made — and a *missing* key is a profile written before the
+ * floor became the default bound. `JSON.stringify` drops `undefined`, so
+ * without the null the two would be one byte-identical state, and every
+ * profile that predates the change would read back as a deliberate opt-out
+ * from a decision its owner never made.
+ */
+type StoredTuning = Omit<Partial<Tuning>, 'minScore'> & { minScore?: number | null }
+
 const tuningStore = stored<Tuning>(
   TUNING_KEY,
   (raw) => {
     if (raw === null) return { ...TUNING_DEFAULTS }
-    const v = JSON.parse(raw) as Partial<Tuning>
+    const v = JSON.parse(raw) as StoredTuning
     // Each field validated on its own: a malformed one falls back rather than
     // discarding a whole stored set that is otherwise usable.
     return {
@@ -121,14 +131,20 @@ const tuningStore = stored<Tuning>(
         Number.isFinite(v.top) && (v.top as number) > 0
           ? Math.floor(v.top as number)
           : TUNING_DEFAULTS.top,
-      // Absence here means the count, not the default: a profile is written
-      // whole by `setSearchTuning`, so a stored set without a floor recorded a
-      // user who turned it off. A URL is sparse by design and reads the other
-      // way round (`parseUrl`).
-      minScore: Number.isFinite(v.minScore) ? (v.minScore as number) : undefined,
+      // `null` is the count, chosen and written as such. Absence is a profile
+      // older than the field, which takes the default like every other unset
+      // option here — and a malformed value falls back the same way, rather
+      // than to the count, which is a choice nobody made.
+      minScore:
+        v.minScore === null
+          ? undefined
+          : Number.isFinite(v.minScore)
+            ? (v.minScore as number)
+            : TUNING_DEFAULTS.minScore,
     }
   },
-  (v) => JSON.stringify(v),
+  // The count written as `null` rather than left out: see `StoredTuning`.
+  (v) => JSON.stringify({ ...v, minScore: v.minScore ?? null } satisfies StoredTuning),
 )
 let tuning: Tuning = tuningStore.read()
 

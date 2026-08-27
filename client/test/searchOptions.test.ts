@@ -6,10 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const MATCH_KEY = 'model-browser:search-folder-matching'
 const KINDS_KEY = 'model-browser:search-kinds'
+const TUNING_KEY = 'model-browser:search-tuning'
 
 beforeEach(() => {
   localStorage.removeItem(MATCH_KEY)
   localStorage.removeItem(KINDS_KEY)
+  localStorage.removeItem(TUNING_KEY)
   vi.resetModules()
 })
 
@@ -30,6 +32,42 @@ describe('search options', () => {
     expect(localStorage.getItem(KINDS_KEY)).toBe('folders')
     expect(m.folderMatchingEnabled()).toBe(false)
     expect(m.searchKinds()).toBe('folders')
+  })
+
+  it('a profile older than the floor takes the default; a chosen count survives', async () => {
+    // The migration the stored shape exists for. `JSON.stringify` drops
+    // `undefined`, so a count recorded as a missing key would be byte-identical
+    // to a profile written before the floor became the default — and every
+    // existing user would have read back as having opted out of a decision they
+    // were never asked. Written as `null`, the two are distinguishable.
+    localStorage.setItem(TUNING_KEY, JSON.stringify({ raw: false, pool: 'softmax', top: 60 }))
+    const older = await import('../src/lib/searchOptions')
+    expect(older.searchTuning().minScore).toBe(older.TUNING_DEFAULTS.minScore)
+
+    vi.resetModules()
+    localStorage.setItem(
+      TUNING_KEY,
+      JSON.stringify({ raw: false, pool: 'softmax', top: 12, minScore: null }),
+    )
+    const chose = await import('../src/lib/searchOptions')
+    expect(chose.searchTuning().minScore).toBeUndefined()
+    expect(chose.searchTuning().top).toBe(12)
+
+    // A malformed floor falls back to the default like every other field here,
+    // never to the count — which is a choice, not a fallback.
+    vi.resetModules()
+    localStorage.setItem(TUNING_KEY, JSON.stringify({ pool: 'softmax', minScore: 'x' }))
+    const bad = await import('../src/lib/searchOptions')
+    expect(bad.searchTuning().minScore).toBe(bad.TUNING_DEFAULTS.minScore)
+  })
+
+  it('writes a chosen count as an explicit null', async () => {
+    const m = await import('../src/lib/searchOptions')
+    m.setSearchTuning({ ...m.TUNING_DEFAULTS, top: 12, minScore: undefined })
+    expect(JSON.parse(localStorage.getItem(TUNING_KEY)!)).toMatchObject({ top: 12, minScore: null })
+    // And the floor writes itself as the number it is.
+    m.setSearchTuning({ ...m.TUNING_DEFAULTS })
+    expect(JSON.parse(localStorage.getItem(TUNING_KEY)!).minScore).toBe(m.TUNING_DEFAULTS.minScore)
   })
 
   it('reads both preferences back at module init — the reload half', async () => {

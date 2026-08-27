@@ -234,8 +234,12 @@ export function sameQuestion(a: View, b: View): boolean {
       x.text === y.text &&
       x.tuning.raw === y.tuning.raw &&
       x.tuning.pool === y.tuning.pool &&
-      x.tuning.top === y.tuning.top &&
-      x.tuning.minScore === y.tuning.minScore
+      x.tuning.minScore === y.tuning.minScore &&
+      // The count only where the count is in force. The index ignores `top`
+      // beneath a floor, so two floor-bounded views differing in an inert count
+      // ask the index the same thing, and treating them as different questions
+      // sends a restore down the re-ask path to fetch a set it already has.
+      (x.tuning.minScore !== undefined || x.tuning.top === y.tuning.top)
     )
   }
   return (

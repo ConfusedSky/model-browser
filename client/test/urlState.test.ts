@@ -165,6 +165,41 @@ describe('search options in the URL', () => {
     )
   })
 
+  it('a meaning link naming only an unrelated option does not acquire a bound', () => {
+    // The regression: the count branch tested that a tuning object EXISTS, not
+    // that it names a bound. `parseUrl` returns `{pool:'mean'}` for this link —
+    // no bound at all — and the writer stamped `top=60` onto it, which reads
+    // back as the count in force with the floor explicitly cleared. The three
+    // `parseUrl()` → `commitUrl(…, {replace:true})` sites in App (closing a
+    // lightbox, dropping the model) re-serialize a parsed URL, so closing a
+    // lightbox rewrote a floor-bounded search into a count-bounded one in the
+    // address bar, and nothing afterwards corrected it.
+    const parsed = parseUrl('?path=%2Fm&q=dragon&mode=meaning&pool=mean')
+    expect(parsed.tuning).toEqual({ pool: 'mean' })
+    expect(serializeView(parsed)).not.toContain('top=')
+    expect(parseUrl(serializeView(parsed)).tuning).toEqual({ pool: 'mean' })
+    // `score-raw` is the same shape: tuning asserted, bound unmentioned.
+    expect(serializeView(parseUrl('?q=dragon&mode=meaning&score-raw=1'))).not.toContain('top=')
+    // And the round trip is stable, which is what the replace sites depend on.
+    const once = serializeView(parseUrl('?path=%2Fm&q=dragon&mode=meaning&pool=mean'))
+    expect(serializeView(parseUrl(once))).toBe(once)
+  })
+
+  it('a count view names the count even at its own default value', () => {
+    // The other half of the same branch, which must keep working: absence of
+    // both params reads as the floor, so a view under a count says so even at
+    // 60 or the link comes back bounded by something its sender did not choose.
+    const counted = serializeView({
+      path: '/m',
+      flat: false,
+      q: 'dragon',
+      mode: 'meaning',
+      tuning: { ...TUNING_DEFAULTS, minScore: undefined },
+    })
+    expect(counted).toContain('top=60')
+    expect(parseUrl(counted).tuning).toEqual({ top: 60, minScore: undefined })
+  })
+
   it('carries them when they are not the default', () => {
     expect(
       serializeView({ path: '/m', flat: true, q: 'dragon', folderMatching: false, kinds: 'models' }),

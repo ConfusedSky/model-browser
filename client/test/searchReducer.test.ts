@@ -151,11 +151,43 @@ describe('the reducer, finding by finding', () => {
     // A history entry that differs ONLY in tuning is a different view: the
     // compare that left tuning out made Back change the URL and nothing else,
     // and the restore that left it out ran the old tuning under the new URL.
-    const retuned: View = { ...tuned, tuning: { ...TUNING_DEFAULTS, top: 12 } }
+    // Count-bound, so the two really do differ: under a floor `top` is the
+    // field the index ignores and the URL omits, and `{...TUNING_DEFAULTS,
+    // top: 12}` would serialize identically to `tuned` and ask the same
+    // question — pinning nothing.
+    const retuned: View = {
+      ...tuned,
+      tuning: { ...TUNING_DEFAULTS, top: 12, minScore: undefined },
+    }
     s = reducer(s, { type: 'restore', view: retuned })
     expect(pendingRequest(s)).toMatchObject({ kind: 'meaning', tuning: { top: 12 } })
     s = land(s, { entries: [] })
     expect(s.view.tuning.top).toBe(12)
+  })
+
+  it('a count nobody is bounded by is not a different question', () => {
+    // `top` beneath a floor is the field the index ignores, so two floor-bounded
+    // views differing only in it ask the same thing — and a restore across them
+    // must patch rather than re-ask and refetch the set already on screen.
+    const meaning = view({ subject: asks('dragon'), mode: 'meaning' })
+    const s = land(reducer(start({}, READY), { type: 'restore', view: meaning }), {
+      entries: [entry('a.stl')],
+    })
+    const inert = reducer(s, {
+      type: 'restore',
+      view: { ...s.view, tuning: { ...s.view.tuning, top: 12 } },
+    })
+    expect(pendingRequest(inert)).toBeNull()
+    expect(inert.view.tuning.top).toBe(12)
+
+    // Under a count it IS the question, and that one re-asks.
+    const counted: View = { ...s.view, tuning: { ...s.view.tuning, minScore: undefined } }
+    const s2 = land(reducer(s, { type: 'restore', view: counted }), { entries: [] })
+    const reasked = reducer(s2, {
+      type: 'restore',
+      view: { ...counted, tuning: { ...counted.tuning, top: 12 } },
+    })
+    expect(pendingRequest(reasked)).toMatchObject({ kind: 'meaning', tuning: { top: 12 } })
   })
 
   it('a restore that asks the same question patches instead of re-asking', () => {

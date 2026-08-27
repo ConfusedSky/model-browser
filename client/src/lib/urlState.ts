@@ -209,10 +209,19 @@ export function serializeView(view: UrlView): string {
     if (view.tuning.minScore !== TUNING_DEFAULTS.minScore) {
       p.set('min', String(view.tuning.minScore))
     }
-  } else if (meaning && view.tuning !== undefined) {
+  } else if (meaning && view.tuning !== undefined && 'minScore' in view.tuning) {
     // The count is the non-default bound now, so it is named even at its own
     // default value: an omitted pair reads back as the floor (`parseUrl`), and
     // a link that meant "the best 60" would come back meaning something else.
+    //
+    // Gated on the tuning *naming a bound*, not on a tuning object existing.
+    // `parseUrl` returns a partial: `?…&pool=mean` yields `{pool:'mean'}`, which
+    // asserts nothing about where the set stops, and stamping `top=60` onto it
+    // read back as the count in force with the floor cleared. The three
+    // `parseUrl()` → `commitUrl(…, {replace:true})` sites in App re-serialize a
+    // parsed URL, so that flipped a floor-bounded search to a count-bounded one
+    // on closing a lightbox. `in` rather than a value test, because the count's
+    // sentinel IS `undefined` — the key's presence is the assertion.
     p.set('top', String(view.tuning.top ?? TUNING_DEFAULTS.top))
   }
   if (view.model !== undefined && view.model !== '') p.set('model', view.model)

@@ -18,7 +18,38 @@
       the floor only off 0.1.
 - [x] 2.3 `client/test/urlState.test.ts` and `client/test/searchReducer.test.ts` express the
       count as a cleared floor — a view left at `{ ...TUNING_DEFAULTS, top: 12 }` is a floor
-      with an inert count, and both suites pinned the old reading.
+      with an inert count, and both suites pinned the old reading. **Corrected scope:** this
+      originally claimed both suites were swept; what was actually done was fixing the two
+      fixtures that *failed*. A fixture whose premise the flip had killed but whose assertions
+      still passed — `searchReducer`'s "tuning survives the restore compare" — survived until
+      review, and is fixed in 5.4. The other three `top:`-bearing fixtures were re-read and are
+      sound: two are similarity views, which serialize no tuning at all, and the third pins
+      preference re-seeding rather than URL visibility.
+
+## 5. Found by review
+
+- [x] 5.1 **HIGH — closing a lightbox flipped a floor-bounded search to a count.**
+      `serializeView`'s count branch tested that a tuning object *existed*, not that it named a
+      bound, so `?…&mode=meaning&pool=mean` — whose parsed tuning is `{pool:'mean'}` — was
+      written back with `top=60`, which reads as the count in force with the floor cleared. The
+      three `parseUrl()` → `commitUrl(…, {replace:true})` sites in `App` re-serialize a parsed
+      URL, so closing a lightbox rewrote the address bar and nothing corrected it afterwards.
+      Gated on `'minScore' in view.tuning` — the key's presence is the assertion, since the
+      count's sentinel is `undefined`. The same asymmetry made `sameView` compare unequal
+      against the URL the app was already on, pushing a dead history entry.
+- [x] 5.2 **A stored count could not be told from a profile older than the field** — `null` on
+      the way out, default on a missing key (D3).
+- [x] 5.3 **`sameQuestion` compared an inert count**, so a restore across a `top` the index
+      ignores beneath a floor re-asked and refetched a set already on screen.
+- [x] 5.4 The `retuned` fixture in `searchReducer`'s "tuning survives the restore compare" is
+      count-bound, so the two views genuinely differ; at `{ ...TUNING_DEFAULTS, top: 12 }` they
+      serialized identically and the test pinned nothing.
+- [x] 5.5 Every fix above falsified by reverting it and watching its own test fail. The first
+      attempt at 5.2's falsification reverted the *writer* against a test that exercises only
+      the *reader*, and passed — the vacuous check caught, then split into two.
+- [x] 5.6 The delta's second paragraph reworded so that naming the count in a URL reads as the
+      existing requirement's "carried when it is not its default" rather than as an exception
+      to it: the bound is one option, and the count is its non-default value.
 
 ## 3. Storage and the panel
 
