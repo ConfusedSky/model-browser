@@ -138,7 +138,7 @@ The UI SHALL distinguish three outcomes rather than presenting one empty grid: a
 - **THEN** the UI explains that those models are outside the index rather than reporting that nothing matched
 
 ### Requirement: Weak matches are shown and marked
-When the index reports a result set as weak — its best match not standing out from the collection — the client SHALL still present the results, visibly marked as weak, rather than suppressing them. The marking SHALL apply to the **set**. Per-result strength SHALL be carried by the ranking alone: the client SHALL NOT display a per-result score or z value, since the numbers behind them come from different distributions depending on what produced the set, and showing them side by side would invite a comparison that is not meaningful.
+When the index reports a result set as weak — its best match not standing out from the collection — the client SHALL still present the results, visibly marked as weak, rather than suppressing them. The marking SHALL apply to the **set**, and SHALL remain a statement about the set even where per-result numbers are shown beside the tiles: a weak set stays marked weak whatever any single tile reports, since the verdict is read off the best result before any cut and no per-tile number restates it. The ranking SHALL continue to express relative strength within a set, so that a set is judgeable with every number ignored. The client's earlier prohibition on presenting a per-result score or z value is lifted: the objection it rested on is that scores from different routes come from different distributions, and that is answered by naming the scale on the badge rather than by withholding the number — the requirement below states how.
 
 #### Scenario: A weak query still shows its guesses
 - **WHEN** a phrase produces no result that stands out from the collection
@@ -146,7 +146,7 @@ When the index reports a result set as weak — its best match not standing out 
 
 #### Scenario: Strength is the order, not a number on the tile
 - **WHEN** results of any kind are presented
-- **THEN** their order expresses their relative strength and no per-result score is shown
+- **THEN** their order expresses their relative strength on its own, and any per-result numbers drawn beside them add to that order rather than replace it — removing every number would leave the set still readable, and the numbers never reorder it
 
 ### Requirement: A pose orients the model without becoming its stored camera
 Where the index supplies an orientation for a model, the client SHALL use it to open that model the right way up: its up axis SHALL correspond to one of the app's six orbit spindles and SHALL be mapped to that spindle directly, and any front-view angles SHALL be applied as the live view's orientation, leaving framing distance and target to the viewer. An up axis that does not correspond to one of the six, or an orientation that is internally inconsistent, SHALL be treated as a fault in the index — the orientation ignored and the model opened as though none were supplied — and SHALL NOT be rounded to the nearest spindle, since rounding would conceal an upstream defect behind a plausible result and then persist it if the user orbited. The orientation presented SHALL be the one the index describes for every up axis it reports, not only for models already modelled about the app's default frame. Where the index supplies an up axis but no front view for it, the client SHALL present the model upright at the index's own stated default starting angle rather than discarding the orientation entirely. An orientation from the index SHALL NOT override an axis the user has already established for that model, and applying one SHALL NOT persist a camera or re-render a stored thumbnail — only the user's own manipulation of the view SHALL do that.
@@ -220,4 +220,90 @@ A meaning query held for a warming or absent index SHALL remain bound to the vie
 
 - **WHEN** a deferred meaning view is restored from history or a link and a stand-in listing is fetched while the index warms
 - **THEN** the stand-in is the nested listing for the path, not a flat walk of it — the URL's flat shape belongs to the search being deferred, not to the placeholder
+
+### Requirement: The score floor is the default bound
+A meaning search the user has not bounded for themselves SHALL be bounded by a minimum score rather than by a count. The floor SHALL be the level the index's own published measurement puts text-query scores at, rather than a round number chosen here, since a default floor is a statement about where the interesting part of that distribution starts and only the index has measured it. Where the user turns the floor on having been under a count, it SHALL start at that same default rather than at some other value, so that the control has one resting place instead of a default and an unrelated starting point.
+
+The count SHALL therefore be the bound a view opts into, and any record of a view — a link, a stored profile — SHALL say which bound was in force. Where the count is in force it SHALL be named even where its own value is the default one. This is the existing rule that an option is carried when it is not its default, not an exception to it: where the result set stops is one option, its value is either a count or a floor, and the count is the value that is not the default — the number rides along as part of naming the choice. A record naming neither bound SHALL be read as the floor, which is why a count cannot be left implicit: the field it would fall back to is precisely the one the index ignores beneath a floor.
+
+A record that predates this default SHALL NOT be read as a choice. A stored profile written before the floor became the default bound names no bound at all, and SHALL be resolved to the floor like any profile that set nothing, rather than to a count its owner was never asked about — so a chosen count SHALL be recorded in a form that a profile older than the question cannot be mistaken for.
+
+This SHALL NOT introduce a second bound, a control, or a parameter: a count and a floor remain one choice and never both, and what changes is only which of them applies when nothing has been chosen.
+
+#### Scenario: An unbounded meaning search stops at a score
+- **WHEN** a user who has set no bound of their own commits a meaning search
+- **THEN** the results are every model at or above the default floor rather than a fixed number of them, and a phrase that nothing matches well returns little rather than returning a full grid of weak matches
+
+#### Scenario: A link written under a count comes back under a count
+- **WHEN** a user bounds a meaning search by a count and shares the URL, including where that count is its own default value
+- **THEN** the recipient sees the same result set under a count, rather than the default floor with the sender's count ignored
+
+#### Scenario: A link that names no bound acquires none
+- **WHEN** a link names a meaning option that is not the bound — how the phrase is read, or how its views are pooled — and the app rewrites that URL in place, as it does when a lightbox closes over it
+- **THEN** the rewritten link still names no bound and the search stays under the floor, rather than acquiring a count nobody chose and carrying it onward to whoever the link is shared with
+
+#### Scenario: A profile written before the default moved is not read as a choice
+- **WHEN** a profile stored before the floor became the default bound is read back
+- **THEN** its searches are bounded by the floor, like any profile that set nothing, rather than by a count its owner was never asked about
+
+#### Scenario: A profile that chose the count keeps it
+- **WHEN** a user who has previously turned the floor off returns to the app
+- **THEN** their search is still bounded by their count rather than reverting to the floor, and turning the floor back on starts it at the default
+
+#### Scenario: The floor's default reaches the index's own ceiling
+- **WHEN** a default-bounded search matches more models than the index will return
+- **THEN** the client says the index returned fewer than was asked for, as it does for any bound the index's ceiling stops short, rather than presenting the set as complete
+
+### Requirement: A scored result shows its two numbers under the scale they came from
+Where results came from a scored query, the client SHALL present the index's two per-result numbers — the pooled cosine and the robust z — on each result's tile and in the lightbox's info panel for a model opened from that result. Both SHALL be the index's own values, presented as the index reports them: they SHALL NOT be rescaled, banded, or otherwise recomputed here, since a number this app derived would not be the number the index's own thresholds are stated against. Rounding a value to the places it is displayed at is not such a recomputation and is required below; where that rounding leaves a sign qualifying no surviving digit, the sign SHALL be dropped, since it reports a precision the displayed value does not carry.
+
+The cosine SHALL be labelled by the route that produced it — as `k` for a meaning search and as `sim` for a similarity view — because cosines from the two routes come from measurably different distributions (model-to-model 0.85–0.99 against text-query ~0.1) and an unlabelled number invites a comparison across them that neither supports. The z SHALL be labelled `z` in both, being comparable across queries by construction. The cosine SHALL be shown to three decimal places and the z to two.
+
+On a tile the cosine SHALL occupy the top-left corner over the thumbnail and the z the top-right, and both SHALL be visible without hover, selection, or a setting to enable them. They SHALL be drawn over the rendered image and SHALL NOT be rendered into it, so that no cached thumbnail is invalidated by their presence or absence.
+
+Where a surface is drawn *over* a scored tile — the orbit overlay a press promotes to — the numbers SHALL remain visible on top of it, since a press is not a request to stop seeing them and the thing being turned is the very model they describe. They SHALL NOT move when it appears: they annotate the same tile before and after, and a number that jumps as the model is grasped reads as a different number. They SHALL, however, stay beneath the surfaces that are meant to cover a tile entirely — the lightbox and the entry menu — which replace it rather than sit within it.
+
+Both numbers SHALL also be carried by the tile's accessible name, since a tile states its accessible name rather than composing it from what it contains, and a number drawn inside it would otherwise be presented to everyone except a user who cannot see it. There the scale SHALL be named in full rather than by the short label the corner carries — a single letter being legible in a grid whose view says what produced it, and not legible read aloud on its own.
+
+Tiles that did not come from a scored query SHALL show neither number and SHALL reserve no space for them, an ordinary directory listing being unchanged by this requirement. A similarity view's anchor — the model its neighbours were computed from — SHALL show neither number, the index having excluded it from its own ranking rather than scored it. A result the server could not resolve on disk contributes neither a tile nor a number, the two being keyed alike.
+
+#### Scenario: A meaning result carries its numbers
+- **WHEN** a meaning search returns results
+- **THEN** each tile shows the pooled cosine labelled `k` in its top-left corner to three decimals and the robust z labelled `z` in its top-right to two, both visible without hovering the tile
+
+#### Scenario: A neighbour's number is labelled as a neighbour's
+- **WHEN** a similarity view's results are shown, whose cosines run far higher than a meaning search's
+- **THEN** the cosine is labelled `sim` rather than `k`, at its own unaltered value, so it does not read as a stronger match than a meaning result's lower number
+
+#### Scenario: The numbers are announced, not only drawn
+- **WHEN** a scored result's tile is reached without seeing it
+- **THEN** its accessible name carries both numbers with their scales named in full, rather than naming the model alone and leaving the corners unread
+
+#### Scenario: Turning a model does not hide what it scored
+- **WHEN** the user presses a scored tile and orbits it in place
+- **THEN** the numbers stay visible above the model being turned, in the same place they occupied before the press
+
+#### Scenario: A surface that replaces the tile still covers it
+- **WHEN** the model is opened in the lightbox, or the entry menu is raised over its tile
+- **THEN** that surface covers the tile's numbers rather than being pierced by them, the tile's own corners being no longer what the user is looking at
+
+#### Scenario: Ordinary browsing shows no numbers
+- **WHEN** the user browses a directory, a flat search, or a zip's contents
+- **THEN** no tile shows either number and no space is held for them, the tiles being identical to what they were before this change
+
+#### Scenario: The anchor is the question, not an answer
+- **WHEN** a similarity view is shown with its anchor model beside the neighbours
+- **THEN** the neighbours carry their numbers and the anchor carries none
+
+#### Scenario: The panel says what the tile said
+- **WHEN** the user opens a scored result in the lightbox
+- **THEN** the info panel presents the same two values under the same labels as that result's tile, and a model opened from an unscored listing shows neither row
+
+#### Scenario: A number is never baked into a thumbnail
+- **WHEN** a model appears first in a meaning search and later in a plain directory listing
+- **THEN** its thumbnail is the same cached image in both, carrying no trace of the badges, and re-rendering was not triggered by the difference
+
+#### Scenario: A stale hit takes its number with it
+- **WHEN** the index returns a model that no longer exists on disk
+- **THEN** the hit produces no tile and no number, exactly as the tree-resolution requirement already drops it, and the remaining results keep the numbers the index gave them
 

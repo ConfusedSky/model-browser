@@ -76,6 +76,6 @@
 - [ ] 4.2b Re-measure the 500-tile sweep once `thumbnail-sweep-priority` lands: ~1.07
       thumbnails/s here means such a grid fills for minutes, and prioritising visible tiles is
       exactly what makes a capped set usable rather than merely correct.
-- [ ] 4.3 Archive with a dry run first. This change ADDs a requirement and MODIFIES none, so it
+- [x] 4.3 Archive with a dry run first. This change ADDs a requirement and MODIFIES none, so it
       cannot collide with `confidence-scores-on-tiles`, which MODIFIES "Weak matches are shown
       and marked" in the same capability.
