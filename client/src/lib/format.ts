@@ -28,9 +28,17 @@ export function formatDate(ms: number): string {
  * run of genuinely distinguishable results all print `0.11` — asserting a tie
  * that does not exist, which is worse than printing nothing. A trailing zero is
  * information here and is kept.
+ *
+ * A value just below zero rounds to the string `-0.000`, which reads as broken
+ * rather than as small. The whole collection's cosines are not above zero — the
+ * distribution's minimum is negative — and clearing the score floor puts those
+ * tiles on screen, so this is reachable rather than theoretical. Normalised to
+ * `0.000`: the sign carries no information at that magnitude, and a minus that
+ * survives every displayed digit is a rendering artefact, not a measurement.
  */
 export function formatCosine(score: number): string {
-  return score.toFixed(3)
+  const text = score.toFixed(3)
+  return text === '-0.000' ? '0.000' : text
 }
 
 /**
@@ -41,7 +49,12 @@ export function formatCosine(score: number): string {
  * decimal would imply a precision the median/MAD estimate behind it does not
  * have. Negative values are ordinary — a result below the collection's median
  * has one — and are printed as they come.
+ *
+ * The same `-0.00` normalisation as the cosine, and likelier to be hit here:
+ * z is measured *from* the collection's median, so it is centred on zero by
+ * construction and values a hair below it are ordinary rather than extreme.
  */
 export function formatZ(z: number): string {
-  return z.toFixed(2)
+  const text = z.toFixed(2)
+  return text === '-0.00' ? '0.00' : text
 }

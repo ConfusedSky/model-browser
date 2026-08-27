@@ -59,6 +59,21 @@ describe('formatCosine', () => {
     expect(formatCosine(0.1075)).toBe('0.107')
   })
 
+  it('renders the bottom of the distribution without a phantom minus', () => {
+    // Reachable, not theoretical: the collection's cosines run down through
+    // zero into negatives, and clearing the score floor shows those tiles. A
+    // value a hair under zero rounds to `-0.000`, which reads as broken rather
+    // than as small — the sign carries nothing at that magnitude.
+    expect(formatCosine(-0.0004)).toBe('0.000')
+    expect(formatCosine(0)).toBe('0.000')
+    expect(formatCosine(0.0004)).toBe('0.000')
+    // A negative big enough to survive three places keeps its sign, which IS
+    // information: the model scored below the collection's own middle.
+    expect(formatCosine(-0.012)).toBe('-0.012')
+    // And the genuinely weak tail a cleared floor exposes still reads.
+    expect(formatCosine(0.003)).toBe('0.003')
+  })
+
   it('keeps the two scoring routes apart at their real magnitudes', () => {
     // The distributions D10 measured: a text query's ~0.1 against a
     // model-to-model 0.85-0.99. Neither is rescaled to meet the other.
@@ -77,6 +92,14 @@ describe('formatZ', () => {
   it('rounds up across the place', () => {
     expect(formatZ(2.995)).toBe('3.00')
     expect(formatZ(1.996)).toBe('2.00')
+  })
+
+  it('shows a z at the median as zero, not as minus zero', () => {
+    // Likelier here than for the cosine: z is measured from the median, so it
+    // is centred on zero and a result sitting just under the middle of the
+    // collection is an everyday outcome, not an extreme.
+    expect(formatZ(-0.004)).toBe('0.00')
+    expect(formatZ(0)).toBe('0.00')
   })
 
   it('prints a negative z as it comes', () => {
