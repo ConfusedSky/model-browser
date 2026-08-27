@@ -73,7 +73,9 @@
       floor and the 500th tile still reads k 0.122 against a first tile of k 0.146. A floor
       sweep shows no value that spares specific phrases while holding generic ones under the
       cap, so 0.1 stands. All recorded in design.md D1.
-- [ ] 4.2b Re-measure the 500-tile sweep once `thumbnail-sweep-priority` lands: ~1.07
+- [x] 4.2b **Carried to `thumbnail-sweep-priority` 5.3** (2026-08-27) rather than left open in
+      an archived change, where nothing would have read it. Not done — rehomed to the change
+      that unblocks it. Original text: re-measure the 500-tile sweep once that lands: ~1.07
       thumbnails/s here means such a grid fills for minutes, and prioritising visible tiles is
       exactly what makes a capped set usable rather than merely correct.
 - [x] 4.3 Archive with a dry run first. This change ADDs a requirement and MODIFIES none, so it

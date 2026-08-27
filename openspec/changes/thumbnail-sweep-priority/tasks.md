@@ -27,3 +27,12 @@
 
 - [ ] 5.1 `bun run typecheck` and `bun run test` pass across workspaces
 - [ ] 5.2 Manual E2E via Playwright MCP against the real library, with the thumbnail cache cleared for the target directory (`~/.cache/model-browser`): open a 500-tile flat listing, scroll immediately to the bottom, and confirm visible tiles resolve in seconds rather than after the earlier ~490. Record the measured time-to-first-visible-image before and after — the proposal's claim is time-to-image for what you are looking at, not total sweep time, and the numbers should say exactly that
+- [ ] 5.3 **Inherited from `score-floor-by-default` 4.2b**, which archived (2026-08-27) with this
+      as its one open line — it was blocked on this change and had nowhere else to live. Re-measure
+      the capped-set sweep once 5.2 is done: a generic meaning phrase now caps at 500 tiles
+      (`fantasy character` has 875 models above the 0.1 floor), and at the ~1.07 thumbnails/s
+      measured there such a grid fills for minutes. That cap is a **wall**, not a horizon — the
+      500th tile still reads `k 0.122` against a first tile of `k 0.146` — so the whole 500 are
+      plausible matches a user will scroll, which is exactly the case this change exists for.
+      Prioritising visible tiles is what makes a capped meaning result usable rather than merely
+      correct. Use a capped meaning search as the fixture, not only a flat listing
