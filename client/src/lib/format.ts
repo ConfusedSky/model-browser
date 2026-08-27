@@ -30,11 +30,19 @@ export function formatDate(ms: number): string {
  * information here and is kept.
  *
  * A value just below zero rounds to the string `-0.000`, which reads as broken
- * rather than as small. The whole collection's cosines are not above zero — the
- * distribution's minimum is negative — and clearing the score floor puts those
- * tiles on screen, so this is reachable rather than theoretical. Normalised to
- * `0.000`: the sign carries no information at that magnitude, and a minus that
- * survives every displayed digit is a rendering artefact, not a measurement.
+ * rather than as small. Normalised to `0.000`: the sign carries no information
+ * at that magnitude, and a minus that survives every displayed digit is a
+ * rendering artefact, not a measurement.
+ *
+ * *Measured, not guarded against speculatively.* Swept against the running
+ * index at `top: 97` with the score floor cleared — the state that puts the
+ * distribution's tail on screen — three of four phrases produced at least one:
+ * `dragon` one cosine and one z, `a bust of a woman` two cosines, `a knight
+ * with a sword` one z, `spaceship` none. The worst was a cosine of -5.0e-06: a
+ * minus sign qualifying a value five orders of magnitude below the last digit
+ * shown. That is on a 97-model collection; the real library is ~30x larger and
+ * both windows get proportionally more chances. Do not delete this branch as
+ * paranoia.
  */
 export function formatCosine(score: number): string {
   const text = score.toFixed(3)
@@ -53,6 +61,8 @@ export function formatCosine(score: number): string {
  * The same `-0.00` normalisation as the cosine, and likelier to be hit here:
  * z is measured *from* the collection's median, so it is centred on zero by
  * construction and values a hair below it are ordinary rather than extreme.
+ * The sweep above bears that out per phrase — though the single worst value
+ * was a cosine, z's window is the one more phrases landed in.
  */
 export function formatZ(z: number): string {
   const text = z.toFixed(2)
