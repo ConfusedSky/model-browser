@@ -631,8 +631,25 @@ export default function ViewerLayer({
         className="relative flex max-w-[95vw] overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-900 outline-none"
       >
         {/* The square is load-bearing: snapshot() captures at aspect = 1, so a
-            squeezed live view would disagree with its thumbnail (D1). */}
-        <div className="relative h-[min(80vh,80vw)] w-[min(80vh,80vw)] shrink-0">
+            squeezed live view would disagree with its thumbnail (D1) — which is
+            why this shrinks as a square rather than being allowed to flatten.
+
+            Sized against the space left *after* the panel, not against the
+            viewport alone. It used to be `min(80vh,80vw)`, which took its share
+            first and left the panel whatever remained: measured 2026-08-26, a
+            760px window gave the model 594px and crushed the `w-72` panel to
+            126px, a 640px window to 94px, a 520px window to 76px — narrow
+            enough that the panel's own path text overflowed and it grew a
+            horizontal scrollbar. `95vw` is the dialog's own max-width and
+            `18rem` is the panel's width, so the model now takes what is left
+            over instead. The `16rem` floor is the other direction's honesty:
+            below roughly 570px there is not enough room for both, and a 130px
+            model view is useless where a 256px one beside a narrower panel is
+            still usable. Below that the panel narrows again — genuinely
+            stacking it under the model would contradict "an info panel beside
+            the viewer" in `model-viewer`, so it belongs to a change that owns
+            that requirement. */}
+        <div className="relative h-[min(80vh,max(16rem,calc(95vw_-_18rem)))] w-[min(80vh,max(16rem,calc(95vw_-_18rem)))] shrink-0">
           <div
             ref={canvasHostRef}
             className="h-full w-full cursor-grab touch-none active:cursor-grabbing"
