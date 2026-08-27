@@ -35,10 +35,16 @@
       one, against sixty-with-a-0.003-tail under the old count. The feared "admits nearly
       everything" does not happen — 0.1 is near the top of the distribution, not its centre.
       Recorded in design.md D1.
-- [ ] 4.2a The same against the **2945-model library** (`embed-cache2`, removable media), which
-      is the collection this default is really for and the only place the 500 cap can bite:
-      confirm a generic phrase's cap notice reads as a bound met rather than as an error, and
-      that the tile count is judgeable rather than a wall.
+- [x] 4.2a Measured against the library itself — `embed-cache512`, **3380 models**, mounted at
+      `/run/media/masa/STLLibrary`. Specific phrases are floor-bounded at 69–177 tiles; generic
+      ones cap at 500. The notice renders correctly ("The index returned fewer than asked for —
+      its cap."). Where it caps it is a **wall**: `fantasy character` has 875 models above the
+      floor and the 500th tile still reads k 0.122 against a first tile of k 0.146. A floor
+      sweep shows no value that spares specific phrases while holding generic ones under the
+      cap, so 0.1 stands. All recorded in design.md D1.
+- [ ] 4.2b Re-measure the 500-tile sweep once `thumbnail-sweep-priority` lands: ~1.07
+      thumbnails/s here means such a grid fills for minutes, and prioritising visible tiles is
+      exactly what makes a capped set usable rather than merely correct.
 - [ ] 4.3 Archive with a dry run first. This change ADDs a requirement and MODIFIES none, so it
       cannot collide with `confidence-scores-on-tiles`, which MODIFIES "Weak matches are shown
       and marked" in the same capability.

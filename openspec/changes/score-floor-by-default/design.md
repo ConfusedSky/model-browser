@@ -52,9 +52,38 @@ The count's failure is in that last column: eight real matches for `winged demon
 tiles of noise under them, the last scoring 0.003. That is the grid the floor removes, and it
 is the argument for this change stated in numbers rather than in principle.
 
-The cap is a *broad-phrase* outcome, not the routine one. A quarter of a collection is the
-measured upper end, so on the 2945-model library a generic phrase would land near 700 and meet
-the 500 cap, while a specific one lands in the tens. Unverified at that scale — see tasks 4.2.
+The cap is a *broad-phrase* outcome, not the routine one — and that half is now measured too,
+against the library itself (`embed-cache512`, 3380 models on `/run/media/masa/STLLibrary`):
+
+| phrase | tiles at the floor | |
+|---|---|---|
+| `treasure chest` | 69 | floor-bounded |
+| `a knight with a sword` | 125 | floor-bounded |
+| `winged demon` | 177 | floor-bounded |
+| `a model` / `a miniature figure` / `fantasy character` | **500** | capped |
+
+**Where the cap bites it is a wall, not a horizon.** `fantasy character` scores 875 models above
+the floor; the 500 returned run from k 0.146 down to k 0.122 — the last tile at 84% of the
+first. Nothing tapers, so the cut falls mid-distribution and the badges say so on the tile
+itself, which is the only reason it is legible at all. The notice is correct and reads as a
+bound met rather than as a failure: *"Meaning matches for "fantasy character". The index
+returned fewer than asked for — its cap."*
+
+*Not resolvable by moving the floor,* which is why the number stays at 0.1. Counted across the
+same three phrases:
+
+| floor | `winged demon` | `fantasy character` | `treasure chest` |
+|---|---|---|---|
+| 0.10 | 177 | 875 | 69 |
+| 0.12 | 66 | 558 | 30 |
+| 0.13 | 43 | 275 | 24 |
+| 0.14 | 30 | 39 | 21 |
+
+No floor both keeps a specific phrase's set rich and holds a generic one under the cap. 0.13 is
+the first that clears the cap for all three, and it does so by cutting `treasure chest` to 24
+and `winged demon` to 43 — punishing the phrases that work in order to tame the ones that do
+not. A vague phrase matching a third of a miniatures library is a true answer to a vague
+question, and the honest response is the notice, not a floor tuned to hide it.
 
 ### D2: `undefined` still means the count; only the URL inverts
 
@@ -86,11 +115,16 @@ opened the app after this change.
 
 ## Risks / Trade-offs
 
-- **The default search meets the index's cap.** → Measured, and much smaller than feared: the
-  floor sits near the top of the distribution, not its centre, so ordinary phrases return 1–10
-  results out of 97 and only deliberately generic ones reach a quarter of the collection (D1).
-  At library scale a generic phrase would still meet the cap, which is reported already and is
-  visible rather than silent.
+- **The default search meets the index's cap.** → Only on generic phrases, and measured on the
+  real library: specific phrases return 69–177 tiles floor-bounded, generic ones cap at 500
+  (D1). Reported by a notice that reads as a bound met, and the badges make the cut visible —
+  a 500th tile at 84% of the first is a wall, and it looks like one.
+- **A generic phrase now builds the most expensive grid the app can produce.** → 500 tiles is
+  the worst case the old count of 60 could never reach. Thumbnails filled at ~1.07/s in the
+  measurement above (24 → 40 tiles in 15s, cold cache on removable media), so such a grid
+  sweeps for minutes. That cost is `thumbnail-sweep-priority`'s subject — an active change that
+  prioritises visible tiles — and not a reason to move the floor, but the two now interact and
+  whichever lands second should re-measure.
 - **A user's stored count survives, so two profiles disagree about what "default" means.** →
   Correct: one of them chose. The reset affordance restores the floor in one click, and it now
   compares against the default rather than against `undefined`, so it appears exactly when
