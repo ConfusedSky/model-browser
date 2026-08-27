@@ -204,6 +204,40 @@ describe('meaning search', () => {
     }
   })
 
+  it('a tile being orbited yields its badges rather than doubling the overlay’s', async () => {
+    // The overlay is a fixed square drawn over the tile, and it is NARROWER
+    // than the tile's own content box — measured 183px against 203px at a
+    // 221px tile — so a tile that kept drawing its badges showed them poking
+    // out either side of the overlay's, as a stray `k` and a stray digit. One
+    // pair, drawn by whichever layer is on top.
+    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models', covers: ['stl'] })
+    semanticSearch.mockResolvedValue(MEANING)
+    await mountApp('/models', NESTED)
+    await settle()
+    await click(searchTab())
+    await click(modeButton('meaning')!)
+    await type(searchInput(), 'winged demon')
+    await pressEnter(searchInput())
+    await settle()
+
+    const [hero, other] = tiles()
+    expect(hero!.querySelectorAll('span[aria-hidden]').length).toBe(2)
+
+    // Promote it to an orbit overlay: pointerdown on the tile, then the window
+    // release the overlay listens for.
+    await act(async () => {
+      hero!.dispatchEvent(
+        new PointerEvent('pointerdown', { bubbles: true, clientX: 50, clientY: 50, button: 0 }),
+      )
+    })
+    await settle()
+
+    // The tile has yielded; only one pair exists anywhere for this model.
+    expect(hero!.querySelectorAll('span[aria-hidden]').length).toBe(0)
+    // And no other tile is disturbed by one tile being orbited.
+    expect(other!.querySelectorAll('span[aria-hidden]').length).toBe(2)
+  })
+
   it('distinguishes nothing-matched from nothing-indexed-here', async () => {
     indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models', covers: ['stl'] })
     semanticSearch.mockResolvedValue({

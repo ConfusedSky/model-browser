@@ -119,6 +119,41 @@ afterEach(async () => {
 })
 
 describe('orbit → thumbnail handoff', () => {
+  it('keeps the index’s numbers visible while the overlay covers the tile', async () => {
+    // The overlay is a `fixed` layer with an opaque background, drawn over the
+    // tile at its own rect — so the tile's badges are behind it the instant a
+    // press promotes to orbit, and the numbers would vanish for exactly as long
+    // as the user is looking at the model. Drawn again on the overlay, from the
+    // same component the tile uses.
+    const { props } = makeProps()
+    await render({
+      ...props,
+      score: { score: 0.9124, z: 4.031 },
+      scoreScale: 'sim' as ScoreScale,
+    })
+
+    const overlay = container!.querySelector('.fixed')!
+    expect(overlay.textContent).toContain('sim 0.912')
+    expect(overlay.textContent).toContain('z 4.03')
+    // Never the target of the gesture: every pointer event over this layer is
+    // the orbit drag, and a badge that swallowed one would stall the rotation.
+    // The class, not the computed style — no stylesheet is loaded here, so
+    // `getComputedStyle` reports nothing and asserting it would pass on an
+    // element that had no such rule at all.
+    const badges = overlay.querySelectorAll('span[aria-hidden]')
+    expect(badges.length).toBe(2)
+    for (const badge of badges) {
+      expect(badge.className).toContain('pointer-events-none')
+    }
+  })
+
+  it('draws no numbers over a model nothing scored', async () => {
+    const { props } = makeProps()
+    await render(props)
+    const overlay = container!.querySelector('.fixed')!
+    expect(overlay.querySelectorAll('span[aria-hidden]').length).toBe(0)
+  })
+
   it('holds dismissal until the persist resolves, then dismisses once', async () => {
     const { props, resolvePersist } = makeProps()
     await render(props)

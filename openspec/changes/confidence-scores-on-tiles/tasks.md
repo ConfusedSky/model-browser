@@ -89,6 +89,22 @@
       accessible name carries both numbers with their scales spelled out (4.5). Grep the test
       file before checking this off — a task line claiming coverage is not coverage.
 
+## 4b. The orbit overlay (follow-up, 2026-08-27)
+
+> Raised after 4.4 was frozen: the badges were correct on a resting tile and gone
+> the moment one was pressed.
+
+- [x] 4b.1 Extract the badge pair into `ScoreBadges`, drawn by both the tile and the
+      orbit overlay — one component, not copied markup, so the two cannot drift.
+- [x] 4b.2 Draw it on the orbit overlay, after the canvas host. The overlay is a `fixed`
+      layer with an opaque background: a z-index on the tile cannot reach above it, so the
+      numbers are drawn again there rather than raised.
+- [x] 4b.3 Have the orbiting tile yield its own badges (`orbitingPath`, a per-tile boolean
+      like `marked`/`anchor`). The overlay is a centred *square* — measured 183px inside a
+      203px content box — so both drawing a pair showed the tile's poking out either side.
+- [x] 4b.4 Tests: the overlay carries both numbers and neither is the gesture's target; an
+      unscored model draws none there; the orbiting tile yields while its neighbours do not.
+
 ## 5. Info panel rows
 
 - [x] 5.1 Add the two rows to the `<dl>` in `client/src/viewer/ViewerLayer.tsx` carrying

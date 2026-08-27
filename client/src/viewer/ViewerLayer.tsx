@@ -11,6 +11,7 @@ import type {
 } from '../../../shared/types'
 import type { ApiClient } from '../api/client'
 import { MENU_ITEM_CLASS } from '../components/EntryMenu'
+import ScoreBadges from '../components/ScoreBadges'
 import {
   AXIS_CAPTION_CLASS,
   AXIS_DIVIDER_CLASS,
@@ -606,6 +607,15 @@ export default function ViewerLayer({
         }}
       >
         <div ref={canvasHostRef} className="h-full w-full" />
+        {/* The tile's own badges are underneath this overlay, not hidden by
+            choice: it is a `fixed` layer drawn over the tile with an opaque
+            background, so the numbers are covered the moment a press promotes
+            to orbit. Drawn again here rather than raised there — a z-index on
+            the tile cannot reach above a fixed layer whose stacking context is
+            not the tile's, and the same numbers over the same model is what the
+            user is looking at either way. After the canvas host so they paint
+            on top of it, and `pointer-events-none` so the gesture is untouched. */}
+        <ScoreBadges score={score} scale={scoreScale} />
         {session === null &&
           (loadError !== null ? (
             <span
