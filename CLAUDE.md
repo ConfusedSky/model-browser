@@ -62,6 +62,15 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
 - A tasks.md line claiming test coverage is not coverage — grep the test file before
   checking it off; `search-options` 5.1 claimed the truncation notice was tested, it was
   not, and the notice contradicted its own requirement through two reviews
+- Put a measurement where it can be **re-run**, not where it can be **re-typed** — in the
+  source beside what it justifies, with the conditions that produce it (`formatCosine`
+  carries its own sweep). A number living only in prose gets copied by hand, and a hand
+  keeps digits its probe already dropped: a `round(x, 4)` printout of `-0.0` was relayed
+  as "-0.00004" when `-0.0` at four places means anything in (-0.00005, 0) — the value was
+  -5.0e-06. Counts from the same sweep were mechanical and all correct; only the retyped
+  magnitude was wrong. So re-run a relayed measurement before citing it and say whose run
+  it is from — and grep for a bad figure yourself, since "it never spread" is the claim
+  the relaying session is least able to check about itself
 
 ## Architecture constraints (violating these breaks recorded design decisions)
 
