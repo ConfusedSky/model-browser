@@ -3,8 +3,7 @@ import { baseName } from '../../../shared/names'
 import type { DirEntry, IndexScore } from '../../../shared/types'
 import type { ThumbState } from '../hooks/useThumbnails'
 import { formatCosine, formatZ } from '../lib/format'
-import { SCALE_SPOKEN, Z_LABEL, type ScoreScale } from '../lib/scoreScale'
-import ScoreBadges from './ScoreBadges'
+import { SCALE_BADGE, SCALE_SPOKEN, Z_LABEL, type ScoreScale } from '../lib/scoreScale'
 
 interface Props {
   entries: DirEntry[]
@@ -30,10 +29,6 @@ interface Props {
   /** Which scale those numbers are on, or `null` where the view is not a scored
    *  one — in which case no tile draws a number at all (D3). */
   scoreScale: ScoreScale | null
-  /** The tile whose orbit overlay is currently up, if any. That overlay draws
-   *  the badges itself, so this tile yields them rather than showing a second
-   *  pair from underneath. */
-  orbitingPath?: string
 }
 
 /**
@@ -68,7 +63,6 @@ function Grid({
   anchorPath,
   scores,
   scoreScale,
-  orbitingPath,
 }: Props) {
   if (entries.length === 0) {
     return <p className="mt-16 text-center text-sm text-zinc-600">Nothing to show here.</p>
@@ -97,16 +91,8 @@ function Grid({
           // the view is not a scored one, this tile is the anchor (the index
           // excludes the query model from its own ranking rather than scoring
           // it), or the hit that would have carried it did not resolve.
-          // A fourth way to have no badge, and the only transient one: this
-          // tile's orbit overlay is up and drawing them itself. A boolean per
-          // tile like `marked` and `anchor`, so promoting one tile does not
-          // re-render the other 499.
           score={
-            scoreScale === null ||
-            entry.path === anchorPath ||
-            entry.path === orbitingPath
-              ? undefined
-              : scores[entry.path]
+            scoreScale === null || entry.path === anchorPath ? undefined : scores[entry.path]
           }
           scale={scoreScale}
         />
@@ -116,6 +102,32 @@ function Grid({
 }
 
 export default memo(Grid)
+
+/**
+ * A corner badge. Small, corner-anchored, and backed opaquely enough to read
+ * over a pale model and darkly enough to read over a bright one;
+ * `tabular-nums` keeps a column of them from jittering as digits change.
+ * `pointer-events-none` so a badge is never the target of the press that
+ * orbits or opens the tile.
+ *
+ * `z-[35]` is what keeps the numbers on screen while the model is turned. The
+ * orbit overlay is a `fixed z-30` layer drawn over this tile with an opaque
+ * background, so at the default z it simply covered the badges — they vanished
+ * for exactly as long as the user was looking at the model they describe. No
+ * ancestor of a tile creates a stacking context (checked: every one is
+ * `position: static`, `z-index: auto`, no transform/filter/opacity/isolation),
+ * so this z and the overlay's resolve against the same root context and 35
+ * wins. It sits deliberately below the lightbox's `z-40` and the entry menu's
+ * `z-50`, both of which SHOULD cover a tile.
+ *
+ * The alternative was drawing a second pair on the overlay itself. That is
+ * worse twice over: two copies of the markup to drift, and the overlay is a
+ * centred *square* (the `<img>`'s box, which `overlayRectFor` measures) inside
+ * a content box ten pixels wider, so its corners are not this tile's corners
+ * and the badges visibly jumped inward on every press.
+ */
+const BADGE_CLASS =
+  'pointer-events-none absolute top-0 z-[35] rounded bg-zinc-950/80 px-1 py-px text-[0.625rem] font-medium tabular-nums leading-tight text-zinc-300 ring-1 ring-zinc-800/60'
 
 const Tile = memo(function Tile({
   entry,
@@ -264,10 +276,19 @@ const Tile = memo(function Tile({
         )}
         {/* Over the image, never composited into it: a badge painted into the
             render would make the score part of the thumbnail's cache key, and
-            every query change would re-render the grid (D5). The same component
-            the orbit overlay draws, so a press does not change the numbers or
-            how they look — only which layer is drawing them. */}
-        <ScoreBadges score={badges?.score} scale={badges?.scale ?? null} />
+            every query change would re-render the grid (D5). `aria-hidden`
+            because the button states these numbers in its own name above —
+            drawn here, read there, one source. */}
+        {badges !== null && (
+          <>
+            <span aria-hidden className={`${BADGE_CLASS} left-0`}>
+              {SCALE_BADGE[badges.scale]} {formatCosine(badges.score.score)}
+            </span>
+            <span aria-hidden className={`${BADGE_CLASS} right-0`}>
+              {Z_LABEL} {formatZ(badges.score.z)}
+            </span>
+          </>
+        )}
       </div>
       {/* Above the name rather than below it: it captions the tile, and it must
           not become the tile's last line, which is what a label is read from. */}

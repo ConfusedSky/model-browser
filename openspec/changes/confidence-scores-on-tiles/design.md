@@ -127,6 +127,34 @@ invalidated, and the same cached image serves a model whether it is being browse
 scored. A badge painted into the render would have made the score part of the cache key,
 which is how a thumbnail ends up re-rendering every time a query changes.
 
+### D5b: The badge outranks the orbit overlay rather than being redrawn on it
+
+*(Added 2026-08-27, after the badges were found to vanish on every press.)*
+
+The orbit overlay is a `fixed z-30` layer with an opaque background, drawn over
+the tile a press promotes. At the default z it simply covered the numbers, for
+exactly as long as the user was looking at the model they describe. The badge
+carries `z-[35]` instead: above the overlay, below the lightbox's `z-40` and the
+entry menu's `z-50`, both of which are meant to cover a tile entirely.
+
+*The premise was checked, not assumed.* A z-index only outranks a `fixed` layer
+when the two resolve in the same stacking context. Walking a tile's ancestors in
+the running app: every one is `position: static`, `z-index: auto`, with no
+transform, filter, opacity, isolation or containment. So both resolve against
+the root context and 35 wins. This is the one fact the decision rests on, and it
+is the one a future change could silently break — an ancestor that gains a
+`transform` or an `isolate` would trap the badge below the overlay again.
+
+*Rejected: drawing a second pair on the overlay itself.* Tried first, on the
+assumption above being false. It fails on its own terms even setting that aside:
+`overlayRectFor` measures the `<img>`, and a thumbnail is always square (512² at
+aspect 1) while the tile's content box is wider — 183px inside 203px, measured.
+So the overlay's corners are not the tile's corners, and the badges jumped ten
+pixels inward on every press. Making them line up would have meant either
+teaching the overlay the tile's content box, or suppressing the tile's own pair
+while its overlay was up — two mechanisms, a shared component, and a `orbitingPath`
+prop threaded through the grid, to reproduce what one CSS property already does.
+
 ### D6: Per-tile values, following the `marked`/`anchor` pattern
 
 `Tile` is memoized specifically so that marking one tile does not re-render the other 499,

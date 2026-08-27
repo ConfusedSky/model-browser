@@ -20,7 +20,7 @@ The cosine SHALL be labelled by the route that produced it — as `k` for a mean
 
 On a tile the cosine SHALL occupy the top-left corner over the thumbnail and the z the top-right, and both SHALL be visible without hover, selection, or a setting to enable them. They SHALL be drawn over the rendered image and SHALL NOT be rendered into it, so that no cached thumbnail is invalidated by their presence or absence.
 
-Where a surface is drawn *over* a scored tile — the orbit overlay a press promotes to — the numbers SHALL remain visible on top of it, since a press is not a request to stop seeing them and the thing being turned is the very model they describe. Exactly one pair SHALL be visible at a time: the covering surface and the tile beneath it are separately positioned, so a tile SHALL yield its own badges while its overlay draws them rather than both drawing a pair that cannot align.
+Where a surface is drawn *over* a scored tile — the orbit overlay a press promotes to — the numbers SHALL remain visible on top of it, since a press is not a request to stop seeing them and the thing being turned is the very model they describe. They SHALL NOT move when it appears: they annotate the same tile before and after, and a number that jumps as the model is grasped reads as a different number. They SHALL, however, stay beneath the surfaces that are meant to cover a tile entirely — the lightbox and the entry menu — which replace it rather than sit within it.
 
 Both numbers SHALL also be carried by the tile's accessible name, since a tile states its accessible name rather than composing it from what it contains, and a number drawn inside it would otherwise be presented to everyone except a user who cannot see it. There the scale SHALL be named in full rather than by the short label the corner carries — a single letter being legible in a grid whose view says what produced it, and not legible read aloud on its own.
 
@@ -40,7 +40,11 @@ Tiles that did not come from a scored query SHALL show neither number and SHALL 
 
 #### Scenario: Turning a model does not hide what it scored
 - **WHEN** the user presses a scored tile and orbits it in place
-- **THEN** the numbers stay visible above the model being turned, and exactly one pair is on screen for it rather than a second pair emerging from the tile underneath
+- **THEN** the numbers stay visible above the model being turned, in the same place they occupied before the press
+
+#### Scenario: A surface that replaces the tile still covers it
+- **WHEN** the model is opened in the lightbox, or the entry menu is raised over its tile
+- **THEN** that surface covers the tile's numbers rather than being pierced by them, the tile's own corners being no longer what the user is looking at
 
 #### Scenario: Ordinary browsing shows no numbers
 - **WHEN** the user browses a directory, a flat search, or a zip's contents

@@ -204,12 +204,17 @@ describe('meaning search', () => {
     }
   })
 
-  it('a tile being orbited yields its badges rather than doubling the overlay’s', async () => {
-    // The overlay is a fixed square drawn over the tile, and it is NARROWER
-    // than the tile's own content box — measured 183px against 203px at a
-    // 221px tile — so a tile that kept drawing its badges showed them poking
-    // out either side of the overlay's, as a stray `k` and a stray digit. One
-    // pair, drawn by whichever layer is on top.
+  it('a tile being orbited keeps its own badges, raised above the overlay', async () => {
+    // The orbit overlay is a `fixed z-30` layer with an opaque background drawn
+    // over the tile, so at the default z it covered the numbers for exactly as
+    // long as the user was looking at the model. The tile keeps drawing them
+    // and outranks it: no ancestor of a tile creates a stacking context, so the
+    // badge's z and the overlay's resolve against the same root context.
+    //
+    // The paint order itself is not observable here — happy-dom lays nothing
+    // out — so this asserts the two things that are: the tile does not yield
+    // its badges, and they carry a z above the overlay's. The stacking-context
+    // walk that licenses the second is recorded in `BADGE_CLASS`.
     indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models', covers: ['stl'] })
     semanticSearch.mockResolvedValue(MEANING)
     await mountApp('/models', NESTED)
@@ -220,11 +225,10 @@ describe('meaning search', () => {
     await pressEnter(searchInput())
     await settle()
 
-    const [hero, other] = tiles()
+    const [hero] = tiles()
     expect(hero!.querySelectorAll('span[aria-hidden]').length).toBe(2)
 
-    // Promote it to an orbit overlay: pointerdown on the tile, then the window
-    // release the overlay listens for.
+    // Promote it to an orbit overlay: pointerdown on the tile is what mounts it.
     await act(async () => {
       hero!.dispatchEvent(
         new PointerEvent('pointerdown', { bubbles: true, clientX: 50, clientY: 50, button: 0 }),
@@ -232,10 +236,16 @@ describe('meaning search', () => {
     })
     await settle()
 
-    // The tile has yielded; only one pair exists anywhere for this model.
-    expect(hero!.querySelectorAll('span[aria-hidden]').length).toBe(0)
-    // And no other tile is disturbed by one tile being orbited.
-    expect(other!.querySelectorAll('span[aria-hidden]').length).toBe(2)
+    const overlay = container.querySelector('.fixed.z-30')
+    expect(overlay).not.toBeNull()
+    // Still drawn by the tile — one pair, the same element, never moved or
+    // re-created by the press.
+    const badges = hero!.querySelectorAll('span[aria-hidden]')
+    expect(badges.length).toBe(2)
+    for (const badge of badges) expect(badge.className).toContain('z-[35]')
+    // The overlay draws none of its own: a second pair could not line up with
+    // this one anyway, its rect being the image's square rather than the tile's.
+    expect(overlay!.querySelectorAll('span[aria-hidden]').length).toBe(0)
   })
 
   it('distinguishes nothing-matched from nothing-indexed-here', async () => {

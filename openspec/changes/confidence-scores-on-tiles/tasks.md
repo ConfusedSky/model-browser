@@ -89,21 +89,22 @@
       accessible name carries both numbers with their scales spelled out (4.5). Grep the test
       file before checking this off — a task line claiming coverage is not coverage.
 
-## 4b. The orbit overlay (follow-up, 2026-08-27)
+## 4b. Staying visible under the orbit overlay (follow-up, 2026-08-27)
 
 > Raised after 4.4 was frozen: the badges were correct on a resting tile and gone
-> the moment one was pressed.
+> the moment one was pressed. Solved twice — the first attempt drew a second pair
+> on the overlay itself, which moved them and needed the tile to yield its own.
+> The tile simply outranks the overlay instead; see `BADGE_CLASS`.
 
-- [x] 4b.1 Extract the badge pair into `ScoreBadges`, drawn by both the tile and the
-      orbit overlay — one component, not copied markup, so the two cannot drift.
-- [x] 4b.2 Draw it on the orbit overlay, after the canvas host. The overlay is a `fixed`
-      layer with an opaque background: a z-index on the tile cannot reach above it, so the
-      numbers are drawn again there rather than raised.
-- [x] 4b.3 Have the orbiting tile yield its own badges (`orbitingPath`, a per-tile boolean
-      like `marked`/`anchor`). The overlay is a centred *square* — measured 183px inside a
-      203px content box — so both drawing a pair showed the tile's poking out either side.
-- [x] 4b.4 Tests: the overlay carries both numbers and neither is the gesture's target; an
-      unscored model draws none there; the orbiting tile yields while its neighbours do not.
+- [x] 4b.1 Give the badge a `z` above the orbit overlay's `z-30` and below the lightbox's
+      `z-40` and the entry menu's `z-50` — both of which should cover a tile. Verified the
+      premise rather than assumed it: no ancestor of a tile creates a stacking context, so
+      the badge's z and the overlay's resolve against the same root context.
+- [x] 4b.2 Remove the ring from the orbit overlay (`ring-1 ring-sky-700/50`). Not specified
+      anywhere — checked the main specs before removing.
+- [x] 4b.3 Test: a tile being orbited still draws its own badges, carrying the raised z,
+      and the overlay draws none of its own. Paint order is not observable in happy-dom —
+      the browser check is what confirms it, and `BADGE_CLASS` records why the z suffices.
 
 ## 5. Info panel rows
 

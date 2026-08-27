@@ -1875,13 +1875,6 @@ export default function App() {
                   anchorPath={anchor?.path}
                   scores={scores}
                   scoreScale={scoreScale}
-                  // The tile whose orbit overlay is up. That overlay is a fixed
-                  // square drawn over the tile — narrower than the tile's own
-                  // content box — so a tile that kept drawing its badges would
-                  // show them sticking out either side of the ones the overlay
-                  // draws. Only in `orbit`: the lightbox is a modal elsewhere on
-                  // screen and the tile beneath it is not being covered.
-                  orbitingPath={viewer?.mode === 'orbit' ? viewer.entry.path : undefined}
                 />
               ) : null}
               {emptyNotice}
