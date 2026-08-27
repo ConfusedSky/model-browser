@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import type * as THREE from 'three'
 import type {
   AppRef,
@@ -628,7 +628,15 @@ export default function ViewerLayer({
         aria-modal="true"
         aria-label={viewer.entry.name}
         tabIndex={-1}
-        className="relative flex max-w-[95vw] overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-900 outline-none"
+        // The dialog's two width facts, declared once here because it is the
+        // element that owns both: everything inside sizes itself from them.
+        // The square below is `--lb-width` minus `--lb-panel`, which is only
+        // true while those are *the* max-width and *the* panel width — so they
+        // are read, not restated. Three sites used to spell `95vw`, `18rem` and
+        // `w-72` independently, and a panel widened in one place would have
+        // silently overlapped the model rather than visibly breaking.
+        style={{ '--lb-width': '95vw', '--lb-panel': '18rem' } as CSSProperties}
+        className="relative flex max-w-[var(--lb-width)] overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-900 outline-none"
       >
         {/* The square is load-bearing: snapshot() captures at aspect = 1, so a
             squeezed live view would disagree with its thumbnail (D1) — which is
@@ -637,19 +645,19 @@ export default function ViewerLayer({
             Sized against the space left *after* the panel, not against the
             viewport alone. It used to be `min(80vh,80vw)`, which took its share
             first and left the panel whatever remained: measured 2026-08-26, a
-            760px window gave the model 594px and crushed the `w-72` panel to
-            126px, a 640px window to 94px, a 520px window to 76px — narrow
-            enough that the panel's own path text overflowed and it grew a
-            horizontal scrollbar. `95vw` is the dialog's own max-width and
-            `18rem` is the panel's width, so the model now takes what is left
-            over instead. The `16rem` floor is the other direction's honesty:
+            760px window gave the model 594px and crushed the panel to 126px, a
+            640px window to 94px, a 520px window to 76px — narrow enough that
+            the panel's own path text overflowed and it grew a horizontal
+            scrollbar. `--lb-width` minus `--lb-panel` (both declared on the
+            dialog) is the room left over, which is what the model now takes.
+            The `16rem` floor is the other direction's honesty:
             below roughly 570px there is not enough room for both, and a 130px
             model view is useless where a 256px one beside a narrower panel is
             still usable. Below that the panel narrows again — genuinely
             stacking it under the model would contradict "an info panel beside
             the viewer" in `model-viewer`, so it belongs to a change that owns
             that requirement. */}
-        <div className="relative h-[min(80vh,max(16rem,calc(95vw_-_18rem)))] w-[min(80vh,max(16rem,calc(95vw_-_18rem)))] shrink-0">
+        <div className="relative h-[min(80vh,max(16rem,calc(var(--lb-width)_-_var(--lb-panel))))] w-[min(80vh,max(16rem,calc(var(--lb-width)_-_var(--lb-panel))))] shrink-0">
           <div
             ref={canvasHostRef}
             className="h-full w-full cursor-grab touch-none active:cursor-grabbing"
@@ -708,7 +716,7 @@ export default function ViewerLayer({
             </div>
           )}
         </div>
-        <div className="flex w-72 min-w-0 flex-col gap-4 overflow-y-auto p-4">
+        <div className="flex w-[var(--lb-panel)] min-w-0 flex-col gap-4 overflow-y-auto p-4">
           {/* pr-9 keeps the name clear of the dialog-anchored close button */}
           <p className="break-all pr-9 text-sm font-medium text-zinc-200">{viewer.entry.name}</p>
           <div className="flex flex-col gap-1">
