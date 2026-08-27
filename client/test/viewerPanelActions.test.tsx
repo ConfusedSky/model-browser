@@ -67,6 +67,18 @@ const NEIGHBOURS = {
   scores: { '/models/near.stl': { score: 0.9124, z: 4.031 } },
 }
 
+/** The same answer with its subject, and — deliberately — a score keyed at the
+ *  anchor's own path, which the server never sends: `hitsToEntries` keys only
+ *  hits and the anchor is resolved separately. Supplied here for the same
+ *  reason `findSimilar`'s `ANCHORED` supplies one. Without it the panel has no
+ *  score to withhold and the assertion below passes whether the guard exists or
+ *  not — the fixture's silence standing in for the code's. */
+const ANCHORED = {
+  ...NEIGHBOURS,
+  anchor: model('Alpha/found.stl'),
+  scores: { ...NEIGHBOURS.scores, [FOUND]: { score: 1, z: 9.99 } },
+}
+
 /** The orientation this model has stored — visibly not the default, so a view
  *  that ends up at the default can only have been re-framed. */
 const STORED = { az: 1.25, el: -0.4, distR: 4.5, target: [0, 0, 0] as [number, number, number] }
@@ -379,6 +391,28 @@ describe('a panel action that changes the view', () => {
     // first. The action row still follows everything in the `<dl>`.
     const row = actionRow()!
     expect(meta.compareDocumentPosition(row) & 4).toBe(4)
+  })
+
+  it('withholds the numbers from a similarity view’s anchor, as its tile does', async () => {
+    // Two surfaces, one guard. `Grid` withholds a badge from the anchor; a
+    // panel without the same test would report the numbers the tile beneath it
+    // refused, which is exactly what D7 says cannot happen — and the anchor
+    // requirement is not written per surface.
+    similar.mockResolvedValue(ANCHORED)
+    await openLightbox('Alpha/found.stl')
+    await click(action('findSimilar'))
+    await wait(250)
+    // Open the ANCHOR itself, not a neighbour — it is drawn first in the grid.
+    await openLightbox('Alpha/found.stl')
+
+    const meta = document.querySelector('dl')!
+    // The fixture keys 1.000 / 9.99 at this very path; the panel must not read
+    // them, and a neighbour opened from the same view still would.
+    expect(meta.textContent).not.toContain('1.000')
+    expect(meta.textContent).not.toContain('9.99')
+    expect(meta.textContent).not.toMatch(/\bsim\b/)
+    // Still a description of the model, just without a score it never had.
+    expect(meta.textContent).toContain('format')
   })
 
   it('shows no such rows for a model opened from an ordinary listing', async () => {

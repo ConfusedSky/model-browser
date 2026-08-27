@@ -1960,7 +1960,18 @@ export default function App() {
           // Looked up the way `pose` is, and paired with the scale that names
           // it — the panel reports what the tile reported, from the same two
           // sources (D7).
-          score={scores[viewer.entry.path]}
+          //
+          // The anchor check is the tile's, repeated: `Grid` withholds a badge
+          // from a similarity view's anchor, and a panel without the same test
+          // would report the very numbers the tile beneath it refused — which
+          // is the one thing D7 says cannot happen. The requirement is not
+          // written per surface either: the anchor SHALL show neither number.
+          // Unreachable from the server today (`hitsToEntries` keys only hits,
+          // and the anchor is resolved separately through `modelEntryAt`), and
+          // guarded for the same reason the tile's is — a defence worth having
+          // on one surface is worth having on both, or it is worth having on
+          // neither.
+          score={viewer.entry.path === anchor?.path ? undefined : scores[viewer.entry.path]}
           scoreScale={scoreScale}
           lighting={lighting}
           ao={ao}
