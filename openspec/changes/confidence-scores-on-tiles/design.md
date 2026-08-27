@@ -210,6 +210,19 @@ one.
   It is not a contradiction: z under 2.0 across the set is precisely what "weak" is measuring,
   so the number and the marking agree. The spec keeps the marking a statement about the set
   and says so explicitly, and the badge never restates it.
+- **The z is labelled `z` on both routes, where the cosine is not.** → The spec calls z
+  "comparable across queries by construction", which is true of how it is computed —
+  median/MAD over the scored subset — and less true of how it reads. The index measured the
+  *best* neighbour's robust z never once falling below the 2.0 cutoff over 200 random query
+  models from `embed-cache2`, min 2.0 and median 3.3 (`docs/api/surface.md`, the `/similar`
+  section, which is also why that route publishes no `weak` flag). So the top of a neighbour
+  set is always above the only landmark z has, and z there positions a neighbour within its
+  set rather than saying whether the set is any good — where the same 3.3 in a meaning search
+  is genuinely notable. One label is kept knowingly: the number is the index's own on both
+  routes, the badge never restates the weak marking, and a second provenance label would
+  double the vocabulary a corner carries in order to qualify a distinction a reader meets only
+  by flipping between two views. Revisit if a neighbour's z is read as strength rather than as
+  position; the label is one string, `Z_LABEL`.
 - **Badges obscure the model at the smallest grid width.** → Corner-anchored, small type,
   translucent backing; the grid's minimum tile is 11rem, so two short badges leave the centre
   clear. This is a pixel judgement, not a code one — see Open Questions.
