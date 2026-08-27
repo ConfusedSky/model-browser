@@ -30,8 +30,15 @@
 ## 4. Close it out
 
 - [x] 4.1 `bun run typecheck` clean; client suite 461 passing.
-- [ ] 4.2 Look at it against the real index: confirm the default search meets the 500 cap and
-      says so, and that the notice reads correctly at that volume rather than as an error.
+- [x] 4.2 Measured against the running index (97 models, `embed-cache-test`) through
+      `/api/semantic`: 1–10 results for an ordinary phrase, 21–24 for a deliberately generic
+      one, against sixty-with-a-0.003-tail under the old count. The feared "admits nearly
+      everything" does not happen — 0.1 is near the top of the distribution, not its centre.
+      Recorded in design.md D1.
+- [ ] 4.2a The same against the **2945-model library** (`embed-cache2`, removable media), which
+      is the collection this default is really for and the only place the 500 cap can bite:
+      confirm a generic phrase's cap notice reads as a bound met rather than as an error, and
+      that the tile count is judgeable rather than a wall.
 - [ ] 4.3 Archive with a dry run first. This change ADDs a requirement and MODIFIES none, so it
       cannot collide with `confidence-scores-on-tiles`, which MODIFIES "Weak matches are shown
       and marked" in the same capability.

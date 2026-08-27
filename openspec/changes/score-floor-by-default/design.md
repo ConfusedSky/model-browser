@@ -34,10 +34,27 @@ statement about where the interesting part of that distribution starts, so it ta
 distribution's own number. 0.2 was double it, which is why the control's first click behaved
 like a filter rather than like a starting point.
 
-*Consequence accepted:* a floor at the distribution's own level admits far more than a count of
-60 would, so the default search will routinely meet the index's 500 `cap`. That is reported
-already, by a requirement that exists for exactly this, and it is the honest shape of the
-question — "everything at least this similar" has no reason to return sixty things.
+*Consequence, now measured rather than feared.* The worry when this landed was that 0.1 sits at
+the *centre* of the text-query distribution, so the default would admit nearly everything and
+meet the index's 500 `cap` on every phrase. Measured against the running index — 97 models,
+`embed-cache-test`, softmax — that is wrong, and wrong in the useful direction. 0.1 sits near
+the *top* of the distribution, whose median is 0.02–0.05 and whose floor is negative:
+
+| phrase | at the floor | at the old count of 60 |
+|---|---|---|
+| `treasure chest` | 1 | 60, tail at 0.038 |
+| `spaceship` (nothing in the collection) | 2, weak | 60 |
+| `winged demon` | 8 | 60, tail at **0.003** |
+| `dragon` | 10 | 60 |
+| `a model` / `fantasy character` (deliberately generic) | 21–24 | 60 |
+
+The count's failure is in that last column: eight real matches for `winged demon`, and fifty-two
+tiles of noise under them, the last scoring 0.003. That is the grid the floor removes, and it
+is the argument for this change stated in numbers rather than in principle.
+
+The cap is a *broad-phrase* outcome, not the routine one. A quarter of a collection is the
+measured upper end, so on the 2945-model library a generic phrase would land near 700 and meet
+the 500 cap, while a specific one lands in the tens. Unverified at that scale — see tasks 4.2.
 
 ### D2: `undefined` still means the count; only the URL inverts
 
@@ -69,8 +86,11 @@ opened the app after this change.
 
 ## Risks / Trade-offs
 
-- **The default search meets the index's cap.** → Accepted (D1), reported already, and visible
-  rather than silent.
+- **The default search meets the index's cap.** → Measured, and much smaller than feared: the
+  floor sits near the top of the distribution, not its centre, so ordinary phrases return 1–10
+  results out of 97 and only deliberately generic ones reach a quarter of the collection (D1).
+  At library scale a generic phrase would still meet the cap, which is reported already and is
+  visible rather than silent.
 - **A user's stored count survives, so two profiles disagree about what "default" means.** →
   Correct: one of them chose. The reset affordance restores the floor in one click, and it now
   compares against the default rather than against `undefined`, so it appears exactly when

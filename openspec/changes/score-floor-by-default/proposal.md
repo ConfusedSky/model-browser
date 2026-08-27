@@ -63,9 +63,13 @@ None.
   builder already sends whichever is in force.
 - Every other search option, and name search entirely.
 
-**Consequence worth stating**
+**Consequence, measured**
 
-- A floor at the distribution's own level admits far more than 60 models, so the default search
-  will routinely meet the index's 500 `cap` and report that it returned fewer than was asked
-  for. That notice is correct and already specified; it will simply be a common sight, and the
-  thumbnail sweep behind 500 tiles is the cost `thumbnail-sweep-priority` measures.
+- Measured against the running index (97 models): the floor returns 1–10 results for an ordinary
+  phrase and 21–24 for a deliberately generic one, because 0.1 sits near the top of the
+  text-query distribution rather than at its centre — the collection median is 0.02–0.05. The
+  same phrase under the old count of 60 returned sixty, the last scoring 0.003: eight real
+  matches with fifty-two tiles of noise beneath them.
+- The index's 500 `cap` is therefore a broad-phrase outcome at library scale rather than a
+  routine one, and the notice for it is already specified. Unverified on the 2945-model
+  library — task 4.2.
