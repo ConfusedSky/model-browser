@@ -148,6 +148,7 @@ export function labelInputs(state: SearchState): {
   truncated: boolean
   matched: number | undefined
   shown: number
+  counted: boolean
 } {
   const r = state.result
   return {
@@ -164,5 +165,11 @@ export function labelInputs(state: SearchState): {
     // what the *index* had, so the number set against it has to be the index's
     // too, or the sentence compares two different populations.
     shown: r?.entries.length ?? 0,
+    // Whether a count of the *user's* was in force for this result. `matched`
+    // alone is not enough to speak: in the floor-only state the set is short
+    // because the index's cap bit, which the cap notice already attributes,
+    // and a second sentence there would report the same cut twice while
+    // crediting it to a bound nobody set (found in the E2E pass).
+    counted: r?.forView.tuning.top !== undefined,
   }
 }

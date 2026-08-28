@@ -878,6 +878,20 @@ describe('meaning search', () => {
     await pressEnter(searchInput())
     await settle()
     expect(container.textContent).not.toContain('above the floor')
+
+    // And with no count in force it stays silent even though `matched` exceeds
+    // what came back: in the floor-only state the set is short because the
+    // index's cap bit, the notice above already says so, and repeating it here
+    // would credit that cut to a bound nobody set. Caught in the E2E pass,
+    // where both sentences appeared side by side.
+    semanticSearch.mockResolvedValue({ ...MEANING, matched: 755, capped: true })
+    const topBtn = Array.from(container.querySelectorAll<HTMLButtonElement>('aside button')).find(
+      (b) => b.textContent?.trim() === 'top',
+    )!
+    await click(topBtn)
+    await settle()
+    expect(container.textContent).toContain('The index returned fewer than asked for')
+    expect(container.textContent).not.toContain('above the floor')
   })
 
   it('a tuned link reproduces the sender’s parameters, not the reader’s', async () => {

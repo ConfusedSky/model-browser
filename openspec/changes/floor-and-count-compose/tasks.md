@@ -167,10 +167,39 @@
       answers `/status` with `ready` (a test that passes when the thing it tests is absent is
       worse than none); point it elsewhere with `MODEL_BROWSER_INDEX_URL`. Both paths checked:
       green against the running index, skipped against a dead port
-- [ ] 4.2 Manual E2E via Playwright MCP: with the dev servers up, run a meaning search with
+- [x] 4.2 Manual E2E: with the dev servers up, run a meaning search with
       both defaults (floored and capped), then floor-only (grows past 60 on a generic
       phrase, wall notice at 500), then both with count 60 — the D3 trade-off is visible
-      and the URL round-trips each state through a reload
+      and the URL round-trips each state through a reload.
+      **Run 2026-08-27** against the live app and index (`embed-cache-test`, 1669 models,
+      `fantasy character`; the Playwright profile was held by a parallel session, so this went
+      through the Chrome extension instead). Everything measured, not eyeballed:
+      - defaults → 60 tiles, both fields live, "Showing 60 of 755 above the floor", and **no
+        bound params in the URL** — the resting state written as absence
+      - floor-only → grid 60 → 500, the wall notice fires ("the index returned fewer than
+        asked for — its cap"), `min=0.1` **is** named though it equals its own default, the
+        count field greys out still holding 60, and the sole in-force bound is filled rather
+        than dimmed (the reported highlighting bug, confirmed fixed in the running app)
+      - back to both → the count returns to the held 60 and the bound params leave the URL
+      - both at count 25 → "Showing 25 of 755", and a reload restores 25/0.1 with both bounds
+        in force
+      Two defects found, one fixed here and one **not**:
+      - **Fixed**: the `matched` clause spoke in the floor-only state, where the set is short
+        because the *cap* bit — so the label said "the index returned fewer than asked for"
+        and "Showing 500 of 755" together, reporting one cut twice and crediting it to a bound
+        nobody set. `labelInputs` now carries whether a count is in force and the clause is
+        gated on it, per the requirement's own wording ("where a count caps a floor-bounded
+        set"). Pinned by a test that fails without the gate
+      - **Not fixed, needs its own change**: a *typed* tuning value never reaches the URL —
+        only a clicked toggle does. Typing 25 into the count re-runs the query and relabels
+        the grid while the URL keeps saying nothing; typing 0.4 into the floor leaves
+        `min=0.1`. Pre-existing and not about bounds: `setTuning`'s deferred path dispatches
+        `run: false` to record the keystroke, the projection effect assigns
+        `projectedRef.current` before it checks for an intent, and the debounced
+        `commit({run: true})` then reads as "not advanced" and declines to write. It predates
+        this change (the floor field and its debounce landed in `score-floor-by-default`) and
+        it sits inside the R3/R7 history fence, whose invariants govern Back and lightbox
+        teardown — not something to reopen from inside this change
 - [x] 4.3 `bun run typecheck` and `bun run test` across workspaces — green: 178 server, 483
       client. Every new regression test was falsified against the pre-change code first; three
       of the added forwarding assertions characterise behaviour that did not change and are
