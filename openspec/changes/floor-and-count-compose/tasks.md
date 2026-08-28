@@ -144,9 +144,12 @@
       count-bounded set cannot set it. The wiring did not conflate them and was left alone
 - [x] 3.3a `App.tsx` `resultsLabel`: add the `matched` clause beside the `capped` one and
       keep them distinct — `capped` attributes to the index's ceiling, `matched` to the user's
-      count. It renders only when a count is in force, `matched` is present, and it exceeds
-      the number of results shown; an absent `matched` renders nothing (never a client-side
-      count of the tiles, which is the capped number by construction)
+      count. It renders only when **both** bounds are in force, `matched` is present, and it
+      exceeds the number of results shown; an absent `matched` renders nothing (never a
+      client-side count of the tiles, which is the capped number by construction). Both halves
+      of that gate were learned by getting them wrong: without the count the index's cap is
+      what shortened the set, and without the floor `matched` is everything scored rather than
+      a floor set at all
 - [x] 3.4 Component tests: the three-state control renders and switches; switching to
       floor-only preserves the count value; the both state re-runs on either field's edit;
       the reset affordance appears exactly when the state is off-default; the `matched` clause
