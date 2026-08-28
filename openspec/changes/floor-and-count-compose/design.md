@@ -116,14 +116,18 @@ best N "returns fewer than N for no stated reason". That is false, and the claim
 retracting precisely: the floor tests the same key the sort ordered by, so the floor set is a
 *prefix* of the descending order, and `order[mask][:t]` and `order[:t][mask]` select the same
 rows for every input. Fuzzed here at 20000 cases built to force ties across both cuts: **zero
-row divergences**. The two orders are indistinguishable in what they return.
+row divergences**. That half is parameter-free — it follows from the prefix argument, so any
+fuzz reproduces it — which is why it is the half quoted.
 
 They are not indistinguishable in what they can *say*. `matched` (D9) is counted between the
 two operations, so it means "how many cleared the floor" only if the floor was applied to the
 whole collection first. Compose the other way and the number is bounded by the count — 60,
 never 875 — and "showing 60 of 875 above the floor" becomes unsayable. In the same fuzz the
-two orders disagree on `matched` in **8926 of 20000 cases**. So the order is load-bearing for
-the reporting, not for the result set, which makes D2 and D9 one decision rather than two.
+two orders disagree on `matched` often — how often depends entirely on the fuzz's parameters
+(this session's run: 8926 of 20000; `mini-classify`'s `eval/compose_bounds.py --orders`, on its
+own defaults: 11560), so no single rate is worth citing and the re-runnable script is the place
+to get one. What matters is not the rate but that it is nonzero: the order is load-bearing for
+the reporting and not for the result set, which makes D2 and D9 one decision rather than two.
 Floor-then-count also degrades gracefully: a floor matching nothing still returns nothing (the
 floor's honest answer survives), and a floor matching more than N returns exactly N.
 

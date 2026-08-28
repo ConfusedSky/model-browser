@@ -371,7 +371,20 @@ export default function SidePanel({
                       The invariant is that at least one bound stays in force —
                       an unbounded meaning search is the whole collection, which
                       no control here should be able to ask for — so the button
-                      of a sole surviving bound is inert and says so. */}
+                      of a sole surviving bound is inert and says so in its title.
+
+                      Being inert must not make it look unselected, which is the
+                      trap the first version fell into: a `disabled:opacity-60`
+                      washed out the one bound actually in force, so the active
+                      button rendered fainter than the inactive one and the
+                      focus ring left on the button just clicked read as the
+                      selection instead. Hence no dimming here, and an on-state
+                      carrying a filled background rather than a border alone.
+                      Every other button row in this panel is a radio group where
+                      exactly one is lit and position carries the meaning; this
+                      is the only row of independent toggles, where which one is
+                      lit is the whole message and has to survive a focus ring
+                      sitting on its neighbour. */}
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
@@ -384,7 +397,12 @@ export default function SidePanel({
                           top: tuning.top === undefined ? heldTop : undefined,
                         })
                       }}
-                      className={`rounded-lg border px-2 py-1.5 disabled:opacity-60 ${tuning.top !== undefined ? 'border-zinc-500 text-zinc-100' : 'border-zinc-800 text-zinc-500'}`}
+                      title={
+                        tuning.top !== undefined && tuning.minScore === undefined
+                          ? 'The only bound in force — a search has to stop somewhere'
+                          : undefined
+                      }
+                      className={`rounded-lg border px-2 py-1.5 disabled:cursor-default ${tuning.top !== undefined ? 'border-zinc-500 bg-zinc-800 text-zinc-100' : 'border-zinc-800 text-zinc-500'}`}
                     >
                       top
                     </button>
@@ -422,7 +440,12 @@ export default function SidePanel({
                           minScore: tuning.minScore === undefined ? heldScore : undefined,
                         })
                       }}
-                      className={`rounded-lg border px-2 py-1.5 disabled:opacity-60 ${tuning.minScore !== undefined ? 'border-zinc-500 text-zinc-100' : 'border-zinc-800 text-zinc-500'}`}
+                      title={
+                        tuning.minScore !== undefined && tuning.top === undefined
+                          ? 'The only bound in force — a search has to stop somewhere'
+                          : undefined
+                      }
+                      className={`rounded-lg border px-2 py-1.5 disabled:cursor-default ${tuning.minScore !== undefined ? 'border-zinc-500 bg-zinc-800 text-zinc-100' : 'border-zinc-800 text-zinc-500'}`}
                     >
                       score ≥
                     </button>

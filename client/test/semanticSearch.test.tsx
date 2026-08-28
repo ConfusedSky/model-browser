@@ -777,6 +777,19 @@ describe('meaning search', () => {
     )
     expect(scoreField().disabled).toBe(true)
     expect(scoreField().value).toBe(String(TUNING_DEFAULTS.minScore))
+
+    // Reported from the running app: with one bound in force, which one was
+    // unreadable. The sole survivor's button is inert (it cannot be switched
+    // off) and the first version dimmed it for being disabled, so the bound
+    // actually in force rendered fainter than the one that was not — and the
+    // focus ring left on the just-clicked button read as the selection. The
+    // in-force button must carry the on-state and never the dimming, whether
+    // or not it is inert.
+    expect(topBtn().className).toContain('bg-zinc-800')
+    expect(topBtn().className).toContain('text-zinc-100')
+    expect(topBtn().className).not.toContain('opacity-60')
+    expect(scoreBtn().className).not.toContain('bg-zinc-800')
+    expect(scoreBtn().className).toContain('text-zinc-500')
   })
 
   it('offers the reset exactly when a bound or a parameter is off its default', async () => {
