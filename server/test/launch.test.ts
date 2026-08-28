@@ -6,6 +6,7 @@ import {
   type ExecFn,
   type SpawnOptions,
   type SpawnResult,
+  HANDLED_MIMES,
   createLauncher,
   loadLaunchConfig,
   mimeFor,
@@ -71,6 +72,17 @@ Type=Application
 Name=Photon Workshop
 Exec=wine start /ProgIDOpen PhotonWorkShop %f
 MimeType=model/stl;
+`,
+)
+
+// A malformed entry: the key is present but the value is empty. It must not
+// count as having been named, or the pill it produces has no label at all.
+write(
+  join(userApps, 'blank-name.desktop'),
+  `[Desktop Entry]
+Type=Application
+Name=
+MimeType=model/obj;
 `,
 )
 
@@ -278,6 +290,16 @@ describe('desktop-entry reader', () => {
     })
   })
 
+  it('names an entry after itself when its Name is present but empty', async () => {
+    // The guard is `!named`, so a blank value used to latch: it overwrote the
+    // id fallback with '' *and* shut the key, leaving an unlabelled pill.
+    const report = await reportWith()
+    expect(report.types['model/obj']?.associated).toContainEqual({
+      id: 'blank-name.desktop',
+      name: 'blank-name.desktop',
+    })
+  })
+
   it('reports the default separately and drops it from the associations', async () => {
     const report = await reportWith()
     const stl = report.types['model/stl']
@@ -386,6 +408,73 @@ describe('templates', () => {
     await expect(
       createLauncher({ env: ENV, exec, config: {} }).launch('x.desktop', '/m/a.stl'),
     ).rejects.toThrow(/ENOENT/)
+  })
+
+  it('pipes output for the queries and nothing else, so a launch cannot outlive its request', async () => {
+    // A piped write-end is inherited by every descendant, and `close` waits for
+    // EOF on the pipes rather than for the child — so a captured launch keeps
+    // the request open until the *launched application* quits, which the spec
+    // forbids ("the request SHALL complete when the chooser command does").
+    // Only the two query operations read output, so only they may ask for it.
+    // Both query branches, builtin and configured: the configured ones read
+    // stdout too, so they need capture for the same reason.
+    for (const config of [{}, { default: ['q-def', '{mime}'], associations: ['q-assoc', '{mime}'] }]) {
+      const { calls, exec } = recorder(xdgMime)
+      await createLauncher({ env: ENV, exec, config }).report()
+      expect(calls.length).toBeGreaterThan(0)
+      expect(calls.every((c) => c.opts.capture === true)).toBe(true)
+    }
+
+    const { calls, exec } = recorder(xdgMime)
+    const launcher = createLauncher({
+      env: ENV,
+      exec,
+      config: { chooser: ['open-with', '{file}'] },
+    })
+
+    calls.length = 0
+    await launcher.launch('x.desktop', '/m/a.stl')
+    await launcher.chooser('/m/a.stl')
+    expect(calls.map((c) => c.opts.capture)).toEqual([undefined, undefined])
+  })
+
+  it('resolves a launch when the command exits, not when its children do', async () => {
+    // The real `nodeExec`, not a recorder — the wiring under test *is* the
+    // stdio wiring. `sh` exits at once and leaves a child holding whatever fds
+    // it inherited; with the launch piped, `close` waits for that child.
+    const launcher = createLauncher({
+      env: ENV,
+      config: { launch: ['sh', '-c', 'sleep 5 & exit 0'] },
+    })
+    const started = Date.now()
+    await launcher.launch('x.desktop', '/m/a.stl')
+    expect(Date.now() - started).toBeLessThan(1000)
+  })
+
+  it('treats a failing configured query as absence rather than a failed report', async () => {
+    // The builtin branch already says this is the policy; the override branch
+    // used to throw, and one bad template took every type's pills down with it.
+    const exec: ExecFn = async (file) =>
+      file === 'bad-default'
+        ? { code: 2, stdout: '', stderr: 'boom\n' }
+        : { code: 0, stdout: '', stderr: '' }
+    const report = await createLauncher({
+      env: ENV,
+      exec,
+      config: { default: ['bad-default', '{mime}'], associations: ['bad-assoc', '{mime}'] },
+    }).report()
+    expect(report.types['model/stl']?.default).toBeNull()
+    expect(Object.keys(report.types)).toEqual([...HANDLED_MIMES])
+  })
+
+  it('treats an unspawnable configured query as absence too', async () => {
+    const exec: ExecFn = () => Promise.reject(new Error('spawn bad-default ENOENT'))
+    const report = await createLauncher({
+      env: ENV,
+      exec,
+      config: { default: ['bad-default', '{mime}'], associations: ['bad-assoc', '{mime}'] },
+    }).report()
+    expect(report.types['model/stl']).toEqual({ default: null, associated: [] })
   })
 
   it('treats a missing xdg-mime as no default rather than a failed report', async () => {

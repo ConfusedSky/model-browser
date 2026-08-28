@@ -63,14 +63,24 @@ export interface SpawnResult {
 export interface SpawnOptions {
   /** Own process group, so neither a request nor a `bun --hot` reload reaps it. */
   detached?: boolean
+  /**
+   * Pipe and read the child's output. **Only the two query operations set it.**
+   * A launch or a chooser leaves it off, and that is what bounds the request:
+   * a piped write-end is inherited by every descendant, so `close` — which
+   * waits for EOF on the pipes, not for the child — would not fire until the
+   * *launched application* quit. Off means the fds are `ignore`d and `close`
+   * arrives when the spawned command does.
+   */
+  capture?: boolean
 }
 
 /** Runs an argv. Resolves with the exit code; rejects only when unspawnable. */
 export type ExecFn = (file: string, args: string[], opts: SpawnOptions) => Promise<SpawnResult>
 
 /**
- * `spawn`, not `execFile`: `detached` is what keeps a chooser alive past the
- * request (L9) and `@types/node` does not admit it on `execFile`'s options.
+ * `spawn`, not `execFile`: `detached` is what puts a chooser in its own process
+ * group (L9) and `@types/node` does not admit it on `execFile`'s options. What
+ * ends the request is `capture`, not `detached` — see SpawnOptions.
  * The guarantee that matters is unchanged — an argv array, never a shell
  * string, so nothing is ever word-split or metacharacter-interpreted.
  */
@@ -78,7 +88,7 @@ const nodeExec: ExecFn = (file, args, opts) =>
   new Promise((resolve, reject) => {
     const child = spawn(file, args, {
       detached: opts.detached === true,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: opts.capture === true ? ['ignore', 'pipe', 'pipe'] : ['ignore', 'ignore', 'ignore'],
     })
     let stdout = ''
     let stderr = ''
@@ -220,7 +230,7 @@ function parseEntry(text: string, id: string): DesktopEntry {
     if (eq === -1) continue
     const key = line.slice(0, eq).trim()
     const value = line.slice(eq + 1).trim()
-    if (key === 'Name' && !named) {
+    if (key === 'Name' && !named && value !== '') {
       entry.name = value
       named = true
     } else if (key === 'MimeType') {
@@ -563,7 +573,14 @@ export function createLauncher(opts: LauncherOptions = {}): Launcher {
   async function queryDefault(mime: string, reader: Reader): Promise<AppRef | null> {
     if (config.default !== undefined) {
       const argv = fill(config.default, { mime })
-      const { stdout } = await run(argv, {}, 'the default query')
+      // Same policy as the builtin below: a failing query is "no default" for
+      // this one mime, never an error that sinks the whole report.
+      let stdout: string
+      try {
+        ;({ stdout } = await run(argv, { capture: true }, 'the default query'))
+      } catch {
+        return null
+      }
       const first = parseQueryLines(stdout)[0]
       if (first === undefined) return null
       return { id: first.id, name: first.name ?? reader.name(first.id) }
@@ -572,7 +589,7 @@ export function createLauncher(opts: LauncherOptions = {}): Launcher {
     // not an error that should sink the whole report.
     let out: SpawnResult
     try {
-      out = await exec('xdg-mime', ['query', 'default', mime], {})
+      out = await exec('xdg-mime', ['query', 'default', mime], { capture: true })
     } catch {
       return null
     }
@@ -585,7 +602,12 @@ export function createLauncher(opts: LauncherOptions = {}): Launcher {
   async function queryAssociations(mime: string, reader: Reader): Promise<AppRef[]> {
     if (config.associations !== undefined) {
       const argv = fill(config.associations, { mime })
-      const { stdout } = await run(argv, {}, 'the associations query')
+      let stdout: string
+      try {
+        ;({ stdout } = await run(argv, { capture: true }, 'the associations query'))
+      } catch {
+        return []
+      }
       return parseQueryLines(stdout).map((l) => ({ id: l.id, name: l.name ?? reader.name(l.id) }))
     }
     return reader.associations(mime)
