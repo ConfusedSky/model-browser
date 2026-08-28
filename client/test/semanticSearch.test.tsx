@@ -986,10 +986,21 @@ describe('meaning search', () => {
     // all: the index reports it on every response, and floorless it counts
     // everything it scored. Speaking here would name a floor nobody set and
     // call the whole collection its result.
-    await click(boundBtn('top'))
-    await click(boundBtn('score'))
+    //
+    // The mock is armed *before* the clicks, not after: each click re-asks, so
+    // a response staged afterwards is never fetched and the assertion below
+    // would be checking the previous landing — true, and vacuously so.
     semanticSearch.mockResolvedValue({ ...MEANING, matched: 2165 })
+    await click(boundBtn('top'))
     await settle()
+    await click(boundBtn('score'))
+    await settle()
+    // Count-only reached, asserted off the controls rather than off the last
+    // request: the re-ask is issued a tick later than the state change, so
+    // reading `mock.calls` here races it (it passed only while a `console.log`
+    // sat in front of it, which is the tell).
+    expect(boundBtn('top').getAttribute('aria-pressed')).toBe('true')
+    expect(boundBtn('score').getAttribute('aria-pressed')).toBe('false')
     expect(container.textContent).not.toContain('above the floor')
     expect(container.textContent).not.toContain('2165')
   })

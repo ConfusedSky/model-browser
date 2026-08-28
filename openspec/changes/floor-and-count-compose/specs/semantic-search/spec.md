@@ -146,7 +146,7 @@ Where the index's own ceiling stops a bounded set short, the client SHALL say so
 - **THEN** the result set grows to everything above the floor, and the count the user had set is offered back unchanged when they switch it on again rather than being replaced by the default — for as long as the view is open, a bound out of force having no record of its own to survive in
 
 #### Scenario: A record carries each bound it is under
-- **WHEN** a meaning search is bounded by the floor alone, the count alone, or both, and its URL is shared or its parameters are stored
+- **WHEN** a meaning search is bounded by the floor alone, the count alone, or by both at values not all their defaults, and its URL is shared or its parameters are stored
 - **THEN** the record names the bounds in force — a floor-only view's link names no count, and a count-only view's link names no floor — and the recipient's or the returning user's view is bounded as the sender's was, including where a bound in force sits at its own default value
 
 #### Scenario: A link that names no bound reads as the defaults

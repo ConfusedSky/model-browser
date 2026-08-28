@@ -155,7 +155,8 @@ describe('the reducer, finding by finding', () => {
     // and `{...TUNING_DEFAULTS, top: 12}` would have serialized identically to
     // `tuned` and asked the same question, pinning nothing. The bounds compose
     // now, so a count differs under a floor too; the count-only shape is kept
-    // because it is the state this test's URL assertions are about.
+    // because it is the state this test was built around, and it still makes
+    // the two views differ.
     const retuned: View = {
       ...tuned,
       tuning: { ...TUNING_DEFAULTS, top: 12, minScore: undefined },
