@@ -58,7 +58,15 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   so a loop over one copy reports phantom blocks for later changes. Main moves under
   long-lived deltas, so nothing is wrong when they are written. To retire a scenario a
   change invalidates, rewrite its body under the same title — RENAMED/REMOVED exist for
-  requirements, never for scenarios
+  requirements, never for scenarios. Renaming one at the *requirement* level via REMOVE+ADD
+  is refused too: archive rejects a title present in both blocks (`Requirement present in
+  both ADDED and REMOVED`), so the hatch only opens under a different name
+- **A delta's HTML comments land in the main spec verbatim.** Prose written for the change
+  — "this delta", the alternatives weighed, citations to sibling changes — reads as the
+  capability's own description once applied, permanently. Write comments a delta needs in
+  the delta and check `openspec/specs/<cap>/spec.md` after archiving: keep only what a
+  future editor of the *capability* needs, and point at the archived change for the rest
+  (`floor-and-count-compose` carried 45 lines of change-scoped argument across)
 - A tasks.md line claiming test coverage is not coverage — grep the test file before
   checking it off; `search-options` 5.1 claimed the truncation notice was tested, it was
   not, and the notice contradicted its own requirement through two reviews
