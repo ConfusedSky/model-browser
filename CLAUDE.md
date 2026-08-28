@@ -113,9 +113,14 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
 - Run vitest from the workspace dir (`cd client && bunx vitest run …`) — from the
   repo root bunx fetches an unpinned vitest that can't resolve workspace deps
 - Manual/E2E: Playwright MCP works here including headless WebGL
-  - E2E fixture models: `.superpowers/sdd/tasks/e2e-models/` — six STLs spanning small
-    (Enforcer), large-flat (paint-rack), flat-faced (bod_test_cube, the acne/AO test), and
-    organic (fat_cat) cases
+  - E2E fixture models: there is no dedicated fixture set. The six STLs this line used to
+    name (Enforcer, paint-rack, bod_test_cube, fat_cat) lived under
+    `.superpowers/sdd/tasks/e2e-models/`, which no longer exists and whose contents were not
+    tracked — do not go looking for it. Drive E2E against a leaf directory of the real
+    library instead, e.g.
+    `~/Documents/tests/test-models/miniatures/original/Locked_Chest_3040102`
+    (one STL, `case_meshmixed.stl`). A case the old set covered deliberately — flat-faced
+    for acne/AO, large-flat, organic — has to be picked out of the library by hand now
   - Thumbnail cache: `~/.cache/model-browser/<hash>.{png,json}`; the .json sidecar carries
     `{path, mtime, lighting, rig, posed}` — grep it to map fixtures to hashes or verify a
     RIG_VERSION sweep; `rm -rf` the dir to force re-renders during visual tuning
