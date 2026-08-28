@@ -11,7 +11,7 @@
  */
 
 import { spawn } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import {
   closeSync,
   fstatSync,
@@ -111,23 +111,36 @@ const STDERR_LIMIT = 8192
  *
  * Unlinked at once, so there is no name to clean up on any path — the fd is the
  * only handle, and the space returns when the last descendant exits. That is a
- * POSIX assumption (`docs/platform-surface.md`).
+ * POSIX assumption (`docs/platform-surface.md`). A bare file rather than
+ * `mkdtemp` plus a file inside it, because the directory is not unlinkable the
+ * same way and would outlive every launch as empty litter in the temp dir;
+ * `wx+` is what makes the name ours without one.
  */
 function stderrSink(): number {
-  const path = join(mkdtempSync(join(tmpdir(), 'mb-launch-')), 'stderr')
-  const fd = openSync(path, 'w+')
+  const path = join(tmpdir(), `mb-launch-${randomUUID()}`)
+  const fd = openSync(path, 'wx+')
   unlinkSync(path)
   return fd
 }
 
-/** What the sink caught, capped — read from 0, since the fd's own offset is the child's. */
+/**
+ * What the sink caught, capped to the **tail**. A reason is the last thing a
+ * command prints, not the first: a child that chatters through startup and then
+ * fails would, read from the front, hand back the chatter and drop the very
+ * line this whole mechanism exists to deliver. An explicit `position` leaves the
+ * fd's own offset alone, which matters because that offset belongs to the child.
+ */
 function readSink(fd: number): string {
   try {
-    const size = Math.min(fstatSync(fd).size, STDERR_LIMIT)
+    const total = fstatSync(fd).size
+    const size = Math.min(total, STDERR_LIMIT)
     if (size === 0) return ''
     const buf = Buffer.alloc(size)
-    readSync(fd, buf, 0, size, 0)
-    return buf.toString('utf8')
+    readSync(fd, buf, 0, size, total - size)
+    const text = buf.toString('utf8')
+    // Say so when the head was dropped, so a truncated reason cannot read as a
+    // command that only said this much.
+    return total > size ? `…${text}` : text
   } catch {
     // A reason is a nicety; failing to read one must never fail the request.
     return ''

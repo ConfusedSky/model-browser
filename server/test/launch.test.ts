@@ -423,6 +423,26 @@ describe('templates', () => {
     )
   })
 
+  it('keeps the tail of a chattering command’s stderr, which is where the reason is', async () => {
+    // The cap is a guard against an unbounded read, not a budget on the child.
+    // Read from the front it would defeat itself: a command that logs its way
+    // through startup and then fails hands back the startup and drops the
+    // failure, which is the one line the sink exists to carry.
+    const launcher = createLauncher({
+      env: ENV,
+      config: {
+        launch: [
+          'sh',
+          '-c',
+          'i=0; while [ $i -lt 400 ]; do echo "chatter chatter chatter chatter chatter" >&2; i=$((i+1)); done; echo "no such application" >&2; exit 3',
+        ],
+      },
+    })
+    await expect(launcher.launch('x.desktop', '/m/a.stl')).rejects.toThrow(
+      /exited 3: ….*no such application/s,
+    )
+  })
+
   it('gets the reason from a command whose child outlives it, and does not kill that child', async () => {
     // Both hazards of the obvious fix, in one command. Piping stderr would hang
     // the request here — the backgrounded child inherits the write-end and
@@ -430,8 +450,10 @@ describe('templates', () => {
     // that kills the child the moment it writes (measured: SIGPIPE, and for a
     // launcher that means killing the application it just started). A file has
     // neither problem.
-    const dir = mkdtempSync(join(tmpdir(), 'mb-launch-test-'))
-    const marker = join(dir, 'survived')
+    // Under `root`, which `afterAll` removes either way — a cleanup line at the
+    // end of the test only runs when the test passes, and the runs that matter
+    // most for this one are the runs where it fails.
+    const marker = join(root, 'survived')
     const launcher = createLauncher({
       env: ENV,
       config: {
@@ -451,7 +473,6 @@ describe('templates', () => {
     // And the descendant is still alive to write after we let go of the sink.
     await new Promise((r) => setTimeout(r, 1500))
     expect(existsSync(marker)).toBe(true)
-    rmSync(dir, { recursive: true, force: true })
   })
 
   it('reports an unspawnable launch command with its reason', async () => {
