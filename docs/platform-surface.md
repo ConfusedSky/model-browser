@@ -33,6 +33,14 @@ contracts and placeholder rules: `openspec/changes/open-in-slicer/design.md` (L2
 - **Content types**: the fixed extension→mime table (app-launch L6) is
   platform-neutral, but anything that would *consume* those mimes is registry-specific
   per the table above.
+- **Unlink-while-open**: a launch or chooser collects its stderr into a temp file that
+  `stderrSink` (`server/src/launch.ts`) unlinks immediately, keeping only the fd — so
+  there is nothing to clean up on any exit path and the space returns when the last
+  descendant closes it. POSIX allows that; Windows refuses to unlink an open file, so a
+  port needs a named temp file plus explicit cleanup. The file is not incidental: stderr
+  cannot be a *pipe* here, since every descendant inherits the write-end (which is what
+  `close` would then wait on) and closing the read end early kills any descendant that
+  writes to stderr afterwards — measured, a launched app takes SIGPIPE and dies.
 
 ## Deferred: native drag-out (future Electron change)
 

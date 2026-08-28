@@ -13,12 +13,17 @@
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
+  closeSync,
+  fstatSync,
   mkdtempSync,
+  openSync,
   readFileSync,
+  readSync,
   readdirSync,
   realpathSync,
   renameSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
@@ -64,12 +69,17 @@ export interface SpawnOptions {
   /** Own process group, so neither a request nor a `bun --hot` reload reaps it. */
   detached?: boolean
   /**
-   * Pipe and read the child's output. **Only the two query operations set it.**
-   * A launch or a chooser leaves it off, and that is what bounds the request:
-   * a piped write-end is inherited by every descendant, so `close` — which
-   * waits for EOF on the pipes, not for the child — would not fire until the
-   * *launched application* quit. Off means the fds are `ignore`d and `close`
-   * arrives when the spawned command does.
+   * Pipe and read the child's **stdout**. **Only the two query operations set
+   * it**, because only they read what the command printed. A launch or a
+   * chooser leaves it off, and that is what bounds the request: a piped
+   * write-end is inherited by every descendant, so `close` — which waits for
+   * EOF on the pipes, not for the child — would not fire until the *launched
+   * application* quit.
+   *
+   * Off does not mean output is discarded. `stderr` is collected either way,
+   * into a file rather than a pipe when this is off (`stderrSink`), so a failed
+   * launch or chooser can still say why without any descendant holding the
+   * request open. `stdout` is what is genuinely dropped.
    */
   capture?: boolean
 }
@@ -84,12 +94,69 @@ export type ExecFn = (file: string, args: string[], opts: SpawnOptions) => Promi
  * The guarantee that matters is unchanged — an argv array, never a shell
  * string, so nothing is ever word-split or metacharacter-interpreted.
  */
+/** Most of a reason fits in a line; this is a guard, not a budget. */
+const STDERR_LIMIT = 8192
+
+/**
+ * An anonymous file to collect a non-capturing command's stderr in.
+ *
+ * A *file* rather than a pipe, and that is the whole point. Piping stderr would
+ * reintroduce the hang this module already fixed once — `close` waits for EOF
+ * on a pipe, and every descendant inherits the write-end — and closing the read
+ * end early to dodge that is worse than the hang: measured here, a descendant
+ * that writes to stderr after the parent destroys its end takes SIGPIPE and
+ * dies, which for a *launcher* means killing the application it just started.
+ * A file has neither failure mode: nothing waits on it, descendants may write
+ * to it for as long as they live, and the reason is there to read at exit.
+ *
+ * Unlinked at once, so there is no name to clean up on any path — the fd is the
+ * only handle, and the space returns when the last descendant exits. That is a
+ * POSIX assumption (`docs/platform-surface.md`).
+ */
+function stderrSink(): number {
+  const path = join(mkdtempSync(join(tmpdir(), 'mb-launch-')), 'stderr')
+  const fd = openSync(path, 'w+')
+  unlinkSync(path)
+  return fd
+}
+
+/** What the sink caught, capped — read from 0, since the fd's own offset is the child's. */
+function readSink(fd: number): string {
+  try {
+    const size = Math.min(fstatSync(fd).size, STDERR_LIMIT)
+    if (size === 0) return ''
+    const buf = Buffer.alloc(size)
+    readSync(fd, buf, 0, size, 0)
+    return buf.toString('utf8')
+  } catch {
+    // A reason is a nicety; failing to read one must never fail the request.
+    return ''
+  } finally {
+    try {
+      closeSync(fd)
+    } catch {
+      /* already gone */
+    }
+  }
+}
+
 const nodeExec: ExecFn = (file, args, opts) =>
   new Promise((resolve, reject) => {
-    const child = spawn(file, args, {
-      detached: opts.detached === true,
-      stdio: opts.capture === true ? ['ignore', 'pipe', 'pipe'] : ['ignore', 'ignore', 'ignore'],
-    })
+    const capture = opts.capture === true
+    // Non-capturing commands still get their stderr collected — it is the only
+    // place a failed launch or chooser says *why* — but into a file, never a
+    // pipe. See `stderrSink`.
+    const sink = capture ? null : stderrSink()
+    let child
+    try {
+      child = spawn(file, args, {
+        detached: opts.detached === true,
+        stdio: capture ? ['ignore', 'pipe', 'pipe'] : ['ignore', 'ignore', sink as number],
+      })
+    } catch (err) {
+      if (sink !== null) closeSync(sink)
+      return reject(err as Error)
+    }
     let stdout = ''
     let stderr = ''
     child.stdout?.setEncoding('utf8')
@@ -102,8 +169,12 @@ const nodeExec: ExecFn = (file, args, opts) =>
     })
     // `error` is unspawnable (ENOENT, EACCES) — not a result. A close with a
     // null code is a signal death, which is also not a result.
-    child.once('error', reject)
+    child.once('error', (err) => {
+      if (sink !== null) closeSync(sink)
+      reject(err)
+    })
     child.once('close', (code, signal) => {
+      if (sink !== null) stderr = readSink(sink)
       if (code === null) return reject(new Error(`killed by ${signal ?? 'a signal'}`))
       resolve({ code, stdout, stderr })
     })

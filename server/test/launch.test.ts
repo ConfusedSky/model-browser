@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
@@ -396,11 +396,62 @@ describe('templates', () => {
     })
   })
 
-  it('reports a failed launch command with its reason', async () => {
+  it('formats a failed command as actor, code and reason', async () => {
+    // The formatting, at the seam: a fabricated `SpawnResult` proves how `run`
+    // renders one, and nothing about what a real launch can produce. The test
+    // below is the one that answers that, and it exists because this one used
+    // to be read as if it did.
     const { exec } = recorder(() => ({ code: 3, stdout: '', stderr: 'no such application\n' }))
     await expect(
       createLauncher({ env: ENV, exec, config: {} }).launch('x.desktop', '/m/a.stl'),
     ).rejects.toThrow(/exited 3: no such application/)
+  })
+
+  it('carries the real command’s reason out of a real launch', async () => {
+    // No recorder: `nodeExec` itself, because the question is whether the
+    // *production* path can deliver a reason at all. It could not — the
+    // non-capture stdio was `ignore` on all three fds, so `run`'s detail was
+    // built from a string that was always empty for launch and chooser, the two
+    // operations where the reason matters most. The seam test above passed
+    // throughout, on a stderr the seam invented.
+    const launcher = createLauncher({
+      env: ENV,
+      config: { launch: ['sh', '-c', 'echo "no such application" >&2; exit 3'] },
+    })
+    await expect(launcher.launch('x.desktop', '/m/a.stl')).rejects.toThrow(
+      /the launch command exited 3: no such application/,
+    )
+  })
+
+  it('gets the reason from a command whose child outlives it, and does not kill that child', async () => {
+    // Both hazards of the obvious fix, in one command. Piping stderr would hang
+    // the request here — the backgrounded child inherits the write-end and
+    // `close` waits for EOF — and destroying the read end at `exit` to dodge
+    // that kills the child the moment it writes (measured: SIGPIPE, and for a
+    // launcher that means killing the application it just started). A file has
+    // neither problem.
+    const dir = mkdtempSync(join(tmpdir(), 'mb-launch-test-'))
+    const marker = join(dir, 'survived')
+    const launcher = createLauncher({
+      env: ENV,
+      config: {
+        launch: [
+          'sh',
+          '-c',
+          `(sleep 1; echo late >&2; echo yes > ${marker}) & echo "no such application" >&2; exit 3`,
+        ],
+      },
+    })
+    const started = Date.now()
+    await expect(launcher.launch('x.desktop', '/m/a.stl')).rejects.toThrow(
+      /exited 3: no such application/,
+    )
+    // Prompt: the request ended with the command, not with its descendant.
+    expect(Date.now() - started).toBeLessThan(1000)
+    // And the descendant is still alive to write after we let go of the sink.
+    await new Promise((r) => setTimeout(r, 1500))
+    expect(existsSync(marker)).toBe(true)
+    rmSync(dir, { recursive: true, force: true })
   })
 
   it('reports an unspawnable launch command with its reason', async () => {
