@@ -6,11 +6,11 @@ TBD - created by archiving change semantic-search. Update Purpose after archive.
 ### Requirement: Meaning search is a mode of the search input
 The client SHALL offer meaning search as a mode the search input runs in, selected by an option carried with the other search options, so that submitting from the input runs whichever search is in force. The option SHALL be sticky per browser profile and carried in the URL under the same rules as the other options that determine which results exist, and changing it while a query is committed SHALL re-run that query in the newly selected mode without the user retyping it. Which mode is in force SHALL be visible without opening the panel, since it is what explains the grid.
 
-The client SHALL also offer the parameters that shape a meaning query: whether the phrase is read as written or expanded into the index's templates, how a model's views are reduced to a single score, and where the result set stops — either a number of results or a minimum score, as a single choice rather than two settings that can disagree, since the index honours only one of them. Each SHALL be sticky per profile and carried in the URL when it is not its default, on the same rule as every other option that determines which entries a view contains. Options that do not apply to the mode in force SHALL be hidden rather than shown inert — but the controls that explain the current view SHALL NOT be hidden with them. Where meaning mode is in force and the index cannot answer it, the client SHALL still show which mode is in force, a way to leave it, why it cannot run, and the options that govern the search a submit would actually perform. A mode a user can neither see nor leave is a trap, and a link can put this app in one on a machine that has no index.
+The client SHALL also offer the parameters that shape a meaning query: whether the phrase is read as written or expanded into the index's templates, how a model's views are reduced to a single score, and which bounds stop the result set — a minimum score, a number of results, or both together, where the floor applies first and the count caps what survives it. Each SHALL be sticky per profile and carried in the URL under the presence rule the bounds requirement records. A count in force SHALL be presented as showing the strongest matches rather than as truncation: a relevance ranking has no horizon it can run out at, and capping a floor-bounded set is a choice about grid size, not a horizon being reached. Where a count caps a floor-bounded set, the client SHALL say how many models cleared the floor, so a capped view states its own size against the set it was drawn from rather than presenting the cap as the whole answer. That figure SHALL be the index's own count of what passed the floor before the count applied, since the client receives only what survived the count and can neither observe nor estimate it; where the index does not report it, the client SHALL say nothing about it rather than guess. The count SHALL be clamped so that no user-chosen count exceeds the ceiling the index itself returns at — a count that asks for what the index would truncate anyway is not a setting this app presents. Options that do not apply to the mode in force SHALL be hidden rather than shown inert — but the controls that explain the current view SHALL NOT be hidden with them. Where meaning mode is in force and the index cannot answer it, the client SHALL still show which mode is in force, a way to leave it, why it cannot run, and the options that govern the search a submit would actually perform. A mode a user can neither see nor leave is a trap, and a link can put this app in one on a machine that has no index.
 
 Meaning results SHALL replace the grid and SHALL render as an ordinary listing — thumbnails, orbit, lightbox, and camera persistence behave identically, and the in-flight skeleton and latest-wins supersession apply. Results SHALL be presented in the order the index returned them, which is by relevance and is never re-sorted by name. Navigating, toggling flat, or committing another search SHALL supersede them, and clearing the query SHALL restore the ordinary listing for the current path.
 
-The UI SHALL make clear that the grid holds meaning matches for the committed phrase and that they came from the index rather than from the directory listing. Where the result set is bounded by a count, that bound SHALL be presented as showing the strongest matches rather than as truncation: a relevance ranking has no horizon it can run out at. Where the index reports that its own ceiling stopped it returning what was asked for, the client SHALL say so, since that bound was not the user's choice and their control is what met it.
+The UI SHALL make clear that the grid holds meaning matches for the committed phrase and that they came from the index rather than from the directory listing. Where the index reports that its own ceiling stopped it returning what was asked for, the client SHALL say so, since that bound was not the user's choice and their control is what met it.
 
 #### Scenario: A phrase finds models whose names do not contain it
 - **WHEN** the user commits a search in meaning mode for a phrase describing a subject
@@ -21,12 +21,31 @@ The UI SHALL make clear that the grid holds meaning matches for the committed ph
 - **THEN** the results reflect that setting, and the setting is what a later search in this profile uses
 
 #### Scenario: A count and a floor are one choice
-- **WHEN** the user sets a minimum score
-- **THEN** the result set is everything at or above it rather than a fixed number, and no count is presented as also being in force
+- **WHEN** the user sets both a minimum score and a count
+- **THEN** the result set is the strongest models at or above the floor, capped at the count — the two composing rather than one replacing the other, and neither presented as having silently disabled its partner
+
+<!-- The title is stale on purpose and cannot be fixed in passing: this
+     scenario's body says the two bounds compose, which is the opposite of what
+     its heading says. Renaming it aborts the archive — a MODIFIED block
+     replaces a requirement's prose AND its scenarios, and archive refuses to
+     drop a scenario the block does not carry, so a rename reads as a deletion
+     (tested, 2026-08-27). The requirement-level escape hatch, REMOVE + ADD,
+     needs a differently-named requirement, which this one is the capability's
+     anchor for. Weighed and declined in
+     `openspec/changes/archive/2026-08-28-floor-and-count-compose/specs/semantic-search/spec.md`,
+     which carries the full reasoning. The body is what this asserts. -->
 
 #### Scenario: The index's ceiling is reported, the ranking's horizon is not
 - **WHEN** a result set is bounded by the user's count, and again when the index's own cap stopped it short
 - **THEN** the first is described as the strongest matches and the second says the index returned fewer than was asked for
+
+#### Scenario: A capped view says what it was drawn from
+- **WHEN** a meaning search is bounded by both a floor and a count, and more models clear the floor than the count admits
+- **THEN** the view says how many cleared the floor alongside the results it shows, rather than presenting the capped set as everything above the floor
+
+#### Scenario: A count past the ceiling is not offered
+- **WHEN** the user enters a count greater than the index's own return cap
+- **THEN** the field holds the clamped value rather than the typed one, since a count above the ceiling names a result set the index cannot answer
 
 #### Scenario: A tuned result set reproduces from its URL
 - **WHEN** a user shares the URL of a meaning search run under non-default parameters
@@ -221,39 +240,6 @@ A meaning query held for a warming or absent index SHALL remain bound to the vie
 - **WHEN** a deferred meaning view is restored from history or a link and a stand-in listing is fetched while the index warms
 - **THEN** the stand-in is the nested listing for the path, not a flat walk of it — the URL's flat shape belongs to the search being deferred, not to the placeholder
 
-### Requirement: The score floor is the default bound
-A meaning search the user has not bounded for themselves SHALL be bounded by a minimum score rather than by a count. The floor SHALL be the level the index's own published measurement puts text-query scores at, rather than a round number chosen here, since a default floor is a statement about where the interesting part of that distribution starts and only the index has measured it. Where the user turns the floor on having been under a count, it SHALL start at that same default rather than at some other value, so that the control has one resting place instead of a default and an unrelated starting point.
-
-The count SHALL therefore be the bound a view opts into, and any record of a view — a link, a stored profile — SHALL say which bound was in force. Where the count is in force it SHALL be named even where its own value is the default one. This is the existing rule that an option is carried when it is not its default, not an exception to it: where the result set stops is one option, its value is either a count or a floor, and the count is the value that is not the default — the number rides along as part of naming the choice. A record naming neither bound SHALL be read as the floor, which is why a count cannot be left implicit: the field it would fall back to is precisely the one the index ignores beneath a floor.
-
-A record that predates this default SHALL NOT be read as a choice. A stored profile written before the floor became the default bound names no bound at all, and SHALL be resolved to the floor like any profile that set nothing, rather than to a count its owner was never asked about — so a chosen count SHALL be recorded in a form that a profile older than the question cannot be mistaken for.
-
-This SHALL NOT introduce a second bound, a control, or a parameter: a count and a floor remain one choice and never both, and what changes is only which of them applies when nothing has been chosen.
-
-#### Scenario: An unbounded meaning search stops at a score
-- **WHEN** a user who has set no bound of their own commits a meaning search
-- **THEN** the results are every model at or above the default floor rather than a fixed number of them, and a phrase that nothing matches well returns little rather than returning a full grid of weak matches
-
-#### Scenario: A link written under a count comes back under a count
-- **WHEN** a user bounds a meaning search by a count and shares the URL, including where that count is its own default value
-- **THEN** the recipient sees the same result set under a count, rather than the default floor with the sender's count ignored
-
-#### Scenario: A link that names no bound acquires none
-- **WHEN** a link names a meaning option that is not the bound — how the phrase is read, or how its views are pooled — and the app rewrites that URL in place, as it does when a lightbox closes over it
-- **THEN** the rewritten link still names no bound and the search stays under the floor, rather than acquiring a count nobody chose and carrying it onward to whoever the link is shared with
-
-#### Scenario: A profile written before the default moved is not read as a choice
-- **WHEN** a profile stored before the floor became the default bound is read back
-- **THEN** its searches are bounded by the floor, like any profile that set nothing, rather than by a count its owner was never asked about
-
-#### Scenario: A profile that chose the count keeps it
-- **WHEN** a user who has previously turned the floor off returns to the app
-- **THEN** their search is still bounded by their count rather than reverting to the floor, and turning the floor back on starts it at the default
-
-#### Scenario: The floor's default reaches the index's own ceiling
-- **WHEN** a default-bounded search matches more models than the index will return
-- **THEN** the client says the index returned fewer than was asked for, as it does for any bound the index's ceiling stops short, rather than presenting the set as complete
-
 ### Requirement: A scored result shows its two numbers under the scale they came from
 Where results came from a scored query, the client SHALL present the index's two per-result numbers — the pooled cosine and the robust z — on each result's tile and in the lightbox's info panel for a model opened from that result. Both SHALL be the index's own values, presented as the index reports them: they SHALL NOT be rescaled, banded, or otherwise recomputed here, since a number this app derived would not be the number the index's own thresholds are stated against. Rounding a value to the places it is displayed at is not such a recomputation and is required below; where that rounding leaves a sign qualifying no surviving digit, the sign SHALL be dropped, since it reports a precision the displayed value does not carry.
 
@@ -306,4 +292,37 @@ Tiles that did not come from a scored query SHALL show neither number and SHALL 
 #### Scenario: A stale hit takes its number with it
 - **WHEN** the index returns a model that no longer exists on disk
 - **THEN** the hit produces no tile and no number, exactly as the tree-resolution requirement already drops it, and the remaining results keep the numbers the index gave them
+
+### Requirement: Which bounds are in force is recorded by presence
+A meaning search SHALL be bounded by a minimum score, a count, or both together, the floor applying first and the count capping what survives it. Both SHALL be in force when the user has chosen neither: the floor at the level the index's own published measurement puts text-query scores at, the count at the default the grid has always been sized for — the resting state of the controls and the meaning of an unadorned link being one and the same. Each bound SHALL be settable independently, and turning one off SHALL NOT change the other's value.
+
+Every record of a view — a link, a stored profile — SHALL be read under one rule: a bound named in a record is in force, and a bound absent from it is not in force, never merely sitting at its default. That rule SHALL govern the URL, the stored profile, and the live state alike. A record naming neither bound SHALL be read as both bounds at their defaults, which is the single state absence does not describe and the reason a record may omit a bound it is under: a writer MAY leave both bounds unnamed where both are in force at their default values, since that record reads back as exactly the view it was written from. Every other bound in force SHALL be named, at its own default value or not.
+
+A stored profile SHALL be read under the presence rule regardless of what its writer meant: a profile whose floor is recorded as absent names a count-only choice whether it was written as one or inherited from before the floor existed, and a profile carrying both bounds reads as both — the reading of last resort where old bytes cannot say which of the two their owner saw, being the state the defaults now name.
+
+Where the index's own ceiling stops a bounded set short, the client SHALL say so, as it does for any bound the index's ceiling stops short.
+
+#### Scenario: An unadorned meaning search is floored and capped
+- **WHEN** a user who has set no bound of their own commits a meaning search
+- **THEN** the results are the strongest models at or above the default floor, capped at the default count, rather than an unbounded floor set or a count carrying weak matches
+
+#### Scenario: One bound can be sent away without the other
+- **WHEN** the user switches from both bounds to the floor alone
+- **THEN** the result set grows to everything above the floor, and the count the user had set is offered back unchanged when they switch it on again rather than being replaced by the default — for as long as the view is open, a bound out of force having no record of its own to survive in
+
+#### Scenario: A record carries each bound it is under
+- **WHEN** a meaning search is bounded by the floor alone, the count alone, or by both at values not all their defaults, and its URL is shared or its parameters are stored
+- **THEN** the record names the bounds in force — a floor-only view's link names no count, and a count-only view's link names no floor — and the recipient's or the returning user's view is bounded as the sender's was, including where a bound in force sits at its own default value
+
+#### Scenario: A link that names no bound reads as the defaults
+- **WHEN** a link names a meaning option that is not a bound — how the phrase is read, or how its views are pooled — and the app rewrites that URL in place, as it does when a lightbox closes over it
+- **THEN** the rewritten link still names no bound, and the search it names stays bounded by both at their defaults rather than acquiring a bound nobody chose
+
+#### Scenario: A profile written before the bounds composed is not promoted to a choice
+- **WHEN** a profile stored under the one-bound encoding is read back
+- **THEN** its recorded bounds are read by presence — an absent floor meaning no floor, a chosen count staying a count — rather than being reinterpreted by rules about what the profile's writer probably meant
+
+#### Scenario: The floor's default reaches the index's own ceiling
+- **WHEN** a floor-only search matches more models than the index will return
+- **THEN** the client says the index returned fewer than was asked for, rather than presenting the set as complete
 
