@@ -138,9 +138,13 @@ function readSink(fd: number): string {
     const buf = Buffer.alloc(size)
     readSync(fd, buf, 0, size, total - size)
     const text = buf.toString('utf8')
+    if (total <= size) return text
     // Say so when the head was dropped, so a truncated reason cannot read as a
-    // command that only said this much.
-    return total > size ? `…${text}` : text
+    // command that only said this much — and drop the mojibake the cut can
+    // leave: slicing at a byte offset can land inside a multibyte character,
+    // whose orphaned bytes decode to U+FFFD apiece right where the ellipsis
+    // already says something is missing.
+    return `…${text.replace(/^\uFFFD+/, '')}`
   } catch {
     // A reason is a nicety; failing to read one must never fail the request.
     return ''

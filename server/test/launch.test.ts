@@ -443,6 +443,26 @@ describe('templates', () => {
     )
   })
 
+  it('does not leave mojibake where the cap cut a character in half', async () => {
+    // Cosmetic, and deterministic: 10 ASCII bytes, a 3-byte `€`, then 8190 more
+    // makes 8203, so the tail begins one byte inside the euro and its orphaned
+    // bytes decode to a U+FFFD each — right after the ellipsis, where the
+    // reason is supposed to start.
+    const launcher = createLauncher({
+      env: ENV,
+      config: {
+        launch: [
+          'sh',
+          '-c',
+          'printf "aaaaaaaaaa€" >&2; yes b | head -8171 | tr -d "[:space:]" >&2; printf "no such application" >&2; exit 3',
+        ],
+      },
+    })
+    const err = await launcher.launch('x.desktop', '/m/a.stl').catch((e: Error) => e)
+    expect(err.message).toMatch(/exited 3: …bb+no such application/)
+    expect(err.message).not.toContain('\uFFFD')
+  })
+
   it('gets the reason from a command whose child outlives it, and does not kill that child', async () => {
     // Both hazards of the obvious fix, in one command. Piping stderr would hang
     // the request here — the backgrounded child inherits the write-end and
