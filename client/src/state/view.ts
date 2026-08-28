@@ -235,11 +235,16 @@ export function sameQuestion(a: View, b: View): boolean {
       x.tuning.raw === y.tuning.raw &&
       x.tuning.pool === y.tuning.pool &&
       x.tuning.minScore === y.tuning.minScore &&
-      // The count only where the count is in force. The index ignores `top`
-      // beneath a floor, so two floor-bounded views differing in an inert count
-      // ask the index the same thing, and treating them as different questions
-      // sends a restore down the re-ask path to fetch a set it already has.
-      (x.tuning.minScore !== undefined || x.tuning.top === y.tuning.top)
+      // Both bounds, unconditionally. This used to exempt the count wherever a
+      // floor was set, because the index ignored `top` beneath one and two
+      // floor-bounded views differing in an inert count really did ask the same
+      // thing. They compose now (floor-and-count-compose): the count caps what
+      // the floor let through, so it is part of the question whenever it is in
+      // force, and `undefined` compares equal to `undefined` for the state where
+      // it is not. Left as it was, a Back across a count change took `restore`'s
+      // patch branch — the previous count's answer kept on screen under a URL
+      // naming the new one.
+      x.tuning.top === y.tuning.top
     )
   }
   return (

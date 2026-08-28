@@ -165,22 +165,28 @@ describe('the reducer, finding by finding', () => {
     expect(s.view.tuning.top).toBe(12)
   })
 
-  it('a count nobody is bounded by is not a different question', () => {
-    // `top` beneath a floor is the field the index ignores, so two floor-bounded
-    // views differing only in it ask the same thing — and a restore across them
-    // must patch rather than re-ask and refetch the set already on screen.
+  it('a count beneath a floor is the question too, now that they compose', () => {
+    // This test used to assert the opposite, and was right to: `top` beneath a
+    // floor was the field the index ignored, so two floor-bounded views
+    // differing only in it asked the same thing and a restore across them
+    // patched rather than refetching a set already on screen. Composition ended
+    // that — the count caps what the floor let through — so the same restore
+    // must now re-ask, or the grid keeps the old count's results under a URL
+    // naming the new one.
     const meaning = view({ subject: asks('dragon'), mode: 'meaning' })
     const s = land(reducer(start({}, READY), { type: 'restore', view: meaning }), {
       entries: [entry('a.stl')],
     })
-    const inert = reducer(s, {
+    const recounted = reducer(s, {
       type: 'restore',
       view: { ...s.view, tuning: { ...s.view.tuning, top: 12 } },
     })
-    expect(pendingRequest(inert)).toBeNull()
-    expect(inert.view.tuning.top).toBe(12)
+    expect(pendingRequest(recounted)).toMatchObject({ kind: 'meaning', tuning: { top: 12 } })
+    // The asserted view deliberately still holds the old count here: a re-ask
+    // advances it on landing, not on asking (R2). The request is the claim.
+    expect(land(recounted, { entries: [] }).view.tuning.top).toBe(12)
 
-    // Under a count it IS the question, and that one re-asks.
+    // Under a count alone it was always the question, and still is.
     const counted: View = { ...s.view, tuning: { ...s.view.tuning, minScore: undefined } }
     const s2 = land(reducer(s, { type: 'restore', view: counted }), { entries: [] })
     const reasked = reducer(s2, {
@@ -188,6 +194,14 @@ describe('the reducer, finding by finding', () => {
       view: { ...counted, tuning: { ...counted.tuning, top: 12 } },
     })
     expect(pendingRequest(reasked)).toMatchObject({ kind: 'meaning', tuning: { top: 12 } })
+
+    // What genuinely is not a different question: a bound that is not in force
+    // at either end. Two floor-only views carry no count at all, so there is
+    // nothing to differ in and the restore still patches.
+    const floorOnly: View = { ...s.view, tuning: { ...s.view.tuning, top: undefined } }
+    const s3 = land(reducer(s, { type: 'restore', view: floorOnly }), { entries: [] })
+    const patched = reducer(s3, { type: 'restore', view: { ...floorOnly, model: null } })
+    expect(pendingRequest(patched)).toBeNull()
   })
 
   it('a restore that asks the same question patches instead of re-asking', () => {

@@ -190,16 +190,24 @@
         nobody set. `labelInputs` now carries whether a count is in force and the clause is
         gated on it, per the requirement's own wording ("where a count caps a floor-bounded
         set"). Pinned by a test that fails without the gate
-      - **Not fixed, needs its own change**: a *typed* tuning value never reaches the URL —
-        only a clicked toggle does. Typing 25 into the count re-runs the query and relabels
-        the grid while the URL keeps saying nothing; typing 0.4 into the floor leaves
-        `min=0.1`. Pre-existing and not about bounds: `setTuning`'s deferred path dispatches
-        `run: false` to record the keystroke, the projection effect assigns
-        `projectedRef.current` before it checks for an intent, and the debounced
-        `commit({run: true})` then reads as "not advanced" and declines to write. It predates
-        this change (the floor field and its debounce landed in `score-floor-by-default`) and
-        it sits inside the R3/R7 history fence, whose invariants govern Back and lightbox
-        teardown — not something to reopen from inside this change
+      - **Fixed**: a *typed* tuning value never reached the URL — only a clicked toggle did.
+        Typing 25 into the count re-ran the query and relabelled the grid while the URL kept
+        saying nothing; typing 0.4 into the floor left `min=0.1`. `setTuning`'s deferred path
+        dispatches `run: false` to record the keystroke, and the projection effect assigned
+        `projectedRef.current` before checking for an intent, so the debounced
+        `commit({run: true})` read as "not advanced" and declined to write. An intentless pass
+        now absorbs only a view the address bar already agrees with — which still covers what
+        that ref exists for (a Back that patched the view, a URL rewritten underneath it) while
+        refusing to absorb a view this app recorded and deliberately did not project
+      - **Fixed, and the one this change should have caught in its own sweep**: `sameQuestion`
+        exempted the count wherever a floor was set — "the index ignores `top` beneath a
+        floor" — which was true under the replace rule and false under composition. A Back
+        across a count change therefore took `restore`'s patch branch: the field updated, no
+        re-ask went out, and the grid kept the previous count's results under a URL naming the
+        new one. Both bounds are compared unconditionally now. The sweep missed it because it
+        searched for the phrases this change had *written* ("one choice", "ignored when a floor
+        is set") rather than for the rule; that predicate states the same rule in its own
+        words, in a file the sweep did read
 - [x] 4.3 `bun run typecheck` and `bun run test` across workspaces — green: 178 server, 483
       client. Every new regression test was falsified against the pre-change code first; three
       of the added forwarding assertions characterise behaviour that did not change and are

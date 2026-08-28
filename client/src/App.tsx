@@ -281,8 +281,9 @@ export default function App() {
    * keystroke.
    */
   const urlIntent = useRef<{ replace?: boolean; state?: unknown } | null>(null)
-  /** The view as of the last time the projection looked — updated on every
-   *  state change, written or not. The URL can run ahead of the view (the
+  /** The view as of the last time the projection looked — updated on any pass
+   *  that wrote, and on an intentless pass only where the address bar already
+   *  agrees (see the effect). The URL can run ahead of the view (the
    *  browser rewinds it on Back while the restoration is still in flight), so
    *  "did this dispatch advance the view" is asked of what the view was, never
    *  of what the address bar currently says. Tracking only the writes made this
@@ -558,8 +559,23 @@ export default function App() {
     urlIntent.current = null
     const url = serializeView(toUrlView(state.view))
     const advanced = url !== projectedRef.current
+    if (intent === null) {
+      // An intentless pass may only *absorb* a view the address bar already
+      // agrees with. That still covers what this ref exists for — a Back that
+      // patched the view, or a URL rewritten out from under it, both of which
+      // leave the view matching the bar once the dust settles — while refusing
+      // to absorb a view this app recorded and deliberately did not project.
+      //
+      // The debounced tuning re-run is exactly that: `setTuning` records a
+      // keystroke with `run: false` precisely so it does *not* mint a history
+      // entry per character, then commits for real when the typing stops.
+      // Absorbing the record made the commit read as unadvanced, so it declined
+      // to write and a typed count or floor never reached the URL at all —
+      // the grid re-ran under a bound the link then failed to carry.
+      if (url === window.location.search) projectedRef.current = url
+      return
+    }
     projectedRef.current = url
-    if (intent === null) return
     if (!advanced && intent.replace !== true) return
     commitUrl(toUrlView(state.view), intent)
   }, [state])

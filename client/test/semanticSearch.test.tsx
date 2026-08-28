@@ -792,6 +792,93 @@ describe('meaning search', () => {
     expect(scoreBtn().className).toContain('text-zinc-500')
   })
 
+  it('a typed bound reaches the URL, once, when the typing stops', async () => {
+    // Found in the E2E pass: typing a count re-ran the query and relabelled the
+    // grid while the URL kept saying nothing, so the view was bounded by a count
+    // its own link did not carry. The record rule is not substrate-specific —
+    // a bound in force is named wherever the view is recorded.
+    //
+    // Both halves matter and they pull against each other: the value has to
+    // land, and it must not land once per keystroke (R3's fence). That is why
+    // the deferred path records first and commits later, and why the fix was to
+    // stop the *record* from being mistaken for a projection.
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models', covers: ['stl'] })
+    semanticSearch.mockResolvedValue(MEANING)
+    await mountApp('/models', NESTED)
+    await settle()
+    await click(searchTab())
+    await click(modeButton('meaning')!)
+    await type(searchInput(), 'winged demon')
+    await pressEnter(searchInput())
+    await settle()
+
+    const entriesBefore = history.length
+    const top = container.querySelector<HTMLInputElement>('input[aria-label="Number of results"]')!
+    for (const v of ['1', '12', '125']) {
+      await type(top, v)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(50)
+      })
+    }
+    // Mid-typing the URL says nothing yet — the fence holding.
+    expect(new URLSearchParams(location.search).get('top')).toBeNull()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(600)
+    })
+    await settle()
+    expect(new URLSearchParams(location.search).get('top')).toBe('125')
+    // The floor is in force too, so the link names it as well.
+    expect(new URLSearchParams(location.search).get('min')).toBe(String(TUNING_DEFAULTS.minScore))
+    // Three keystrokes, one entry.
+    expect(history.length).toBe(entriesBefore + 1)
+  })
+
+  it('Back returns the bounds the entry was written under', async () => {
+    // The other half of the typed-bound fix: an entry is only worth writing if
+    // going back to it restores what it named. Plays the browser the way the
+    // lightbox history tests do — rewind the address bar, then fire popstate.
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models', covers: ['stl'] })
+    semanticSearch.mockResolvedValue(MEANING)
+    await mountApp('/models', NESTED)
+    await settle()
+    await click(searchTab())
+    await click(modeButton('meaning')!)
+    await type(searchInput(), 'winged demon')
+    await pressEnter(searchInput())
+    await settle()
+
+    const top = () => container.querySelector<HTMLInputElement>('input[aria-label="Number of results"]')!
+    const restingUrl = location.search
+    await type(top(), '15')
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(600)
+    })
+    await settle()
+    expect(new URLSearchParams(location.search).get('top')).toBe('15')
+
+    // Blur first: while the field is focused it shows the text being typed, not
+    // the bound in force, and that override would mask what the view holds.
+    await act(async () => {
+      top().focus()
+      top().blur()
+    })
+    window.history.replaceState(null, '', restingUrl)
+    await act(async () => {
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+    await settle()
+    expect(top().value).toBe(String(TUNING_DEFAULTS.top))
+    // The discriminating half. Before the count became part of the question,
+    // this restore took `restore`'s patch branch: the field updated and no
+    // re-ask went out, so the grid kept the previous count's results under a URL
+    // naming the new one — the exact failure the `similar` branch already
+    // guarded `k` and `pool` against.
+    expect(semanticSearch.mock.calls.at(-1)?.[2]).toMatchObject({ top: TUNING_DEFAULTS.top })
+  })
+
   it('offers the reset exactly when a bound or a parameter is off its default', async () => {
     indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models', covers: ['stl'] })
     semanticSearch.mockResolvedValue(MEANING)
