@@ -151,10 +151,11 @@ describe('the reducer, finding by finding', () => {
     // A history entry that differs ONLY in tuning is a different view: the
     // compare that left tuning out made Back change the URL and nothing else,
     // and the restore that left it out ran the old tuning under the new URL.
-    // Count-bound, so the two really do differ: under a floor `top` is the
-    // field the index ignores and the URL omits, and `{...TUNING_DEFAULTS,
-    // top: 12}` would serialize identically to `tuned` and ask the same
-    // question — pinning nothing.
+    // Count-bound, which is how this was written when a floor made `top` inert
+    // and `{...TUNING_DEFAULTS, top: 12}` would have serialized identically to
+    // `tuned` and asked the same question, pinning nothing. The bounds compose
+    // now, so a count differs under a floor too; the count-only shape is kept
+    // because it is the state this test's URL assertions are about.
     const retuned: View = {
       ...tuned,
       tuning: { ...TUNING_DEFAULTS, top: 12, minScore: undefined },
@@ -276,9 +277,11 @@ describe('the reducer, finding by finding', () => {
     // spell out, and a meaning search cannot restrict by kind (the index
     // answers with models and nothing else). Sticky options leaking into the
     // other mode's URL is the user-reported bug this half pins.
-    // `minScore: undefined` is the count in force: the floor is the default
-    // bound, so a view that means "the best 12" has to say the floor is off —
-    // left on, `top` is the field the index ignores and the URL omits.
+    // `minScore: undefined` is the count alone, which under the presence rule
+    // is what a view meaning "the best 12, unfloored" records. (When this was
+    // written the floor was the *default* bound and clearing it was the only
+    // way to make `top` mean anything; both bounds compose and are in force by
+    // default now, and a both-bounded view names them both.)
     const tuning = { ...TUNING_DEFAULTS, top: 12, pool: 'max' as const, minScore: undefined }
     const OPTIONS: Record<SearchMode, { carries: string[]; omits: string[] }> = {
       name: {

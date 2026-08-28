@@ -131,7 +131,7 @@ wall-notice behaviour, and adds the composed default and the clamp.
 ### Requirement: Which bounds are in force is recorded by presence
 A meaning search SHALL be bounded by a minimum score, a count, or both together, the floor applying first and the count capping what survives it. Both SHALL be in force when the user has chosen neither: the floor at the level the index's own published measurement puts text-query scores at, the count at the default the grid has always been sized for — the resting state of the controls and the meaning of an unadorned link being one and the same. Each bound SHALL be settable independently, and turning one off SHALL NOT change the other's value.
 
-Every record of a view — a link, a stored profile — SHALL name each bound that is in force and omit each bound that is not, including where a named bound's value is its own default: a bound's absence in a record SHALL mean the bound is not in force, never that it sits at its default, so one rule governs the URL, the stored profile, and the live state alike. A record naming neither bound SHALL be read as both bounds at their defaults.
+Every record of a view — a link, a stored profile — SHALL be read under one rule: a bound named in a record is in force, and a bound absent from it is not in force, never merely sitting at its default. That rule SHALL govern the URL, the stored profile, and the live state alike. A record naming neither bound SHALL be read as both bounds at their defaults, which is the single state absence does not describe and the reason a record may omit a bound it is under: a writer MAY leave both bounds unnamed where both are in force at their default values, since that record reads back as exactly the view it was written from. Every other bound in force SHALL be named, at its own default value or not.
 
 A stored profile SHALL be read under the presence rule regardless of what its writer meant: a profile whose floor is recorded as absent names a count-only choice whether it was written as one or inherited from before the floor existed, and a profile carrying both bounds reads as both — the reading of last resort where old bytes cannot say which of the two their owner saw, being the state the defaults now name.
 
@@ -143,11 +143,11 @@ Where the index's own ceiling stops a bounded set short, the client SHALL say so
 
 #### Scenario: One bound can be sent away without the other
 - **WHEN** the user switches from both bounds to the floor alone
-- **THEN** the result set grows to everything above the floor and the count field's value is remembered rather than discarded, so returning to both restores the count that was set
+- **THEN** the result set grows to everything above the floor, and the count the user had set is offered back unchanged when they switch it on again rather than being replaced by the default — for as long as the view is open, a bound out of force having no record of its own to survive in
 
 #### Scenario: A record carries each bound it is under
 - **WHEN** a meaning search is bounded by the floor alone, the count alone, or both, and its URL is shared or its parameters are stored
-- **THEN** the record names exactly the bounds in force — a floor-only view's link names no count, and a count-only view's link names no floor — and the recipient's or the returning user's view is bounded as the sender's was
+- **THEN** the record names the bounds in force — a floor-only view's link names no count, and a count-only view's link names no floor — and the recipient's or the returning user's view is bounded as the sender's was, including where a bound in force sits at its own default value
 
 #### Scenario: A link that names no bound reads as the defaults
 - **WHEN** a link names a meaning option that is not a bound — how the phrase is read, or how its views are pooled — and the app rewrites that URL in place, as it does when a lightbox closes over it

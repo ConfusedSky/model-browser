@@ -148,7 +148,7 @@ export function labelInputs(state: SearchState): {
   truncated: boolean
   matched: number | undefined
   shown: number
-  counted: boolean
+  capping: boolean
 } {
   const r = state.result
   return {
@@ -160,16 +160,29 @@ export function labelInputs(state: SearchState): {
     // A number, not a flag: the label needs the count itself, and its absence
     // is a third state (the index did not say) rather than a zero.
     matched: r?.matched,
-    // What the index actually returned for this query — the other half of
-    // "60 of 875". Deliberately not the kind-filtered list: `matched` counts
-    // what the *index* had, so the number set against it has to be the index's
-    // too, or the sentence compares two different populations.
+    // How many tiles this view actually has — the other half of "60 of 875".
+    // Deliberately not the kind-filtered list: `matched` counts what the
+    // *index* had, so the number set against it has to be the index's too, or
+    // the sentence compares two different populations. Not quite "what the
+    // index returned" either: a hit whose file no longer stats is dropped
+    // building the entries, so this can sit a little under the count in force.
+    // The sentence stays true — it says how many are shown, not what cut them.
     shown: r?.entries.length ?? 0,
-    // Whether a count of the *user's* was in force for this result. `matched`
-    // alone is not enough to speak: in the floor-only state the set is short
-    // because the index's cap bit, which the cap notice already attributes,
-    // and a second sentence there would report the same cut twice while
-    // crediting it to a bound nobody set (found in the E2E pass).
-    counted: r?.forView.tuning.top !== undefined,
+    // Whether **both** bounds were in force for this result, which is the only
+    // state where "N of M above the floor" is a true sentence. Each half was
+    // learned the hard way and from opposite directions:
+    //
+    // - without the count, the set is short because the index's *cap* bit, and
+    //   a second sentence reports that cut twice while crediting it to a bound
+    //   nobody set (found in the E2E pass);
+    // - without the floor, `matched` is not a floor set at all — the index
+    //   reports it on every response, and floorless it is everything scored
+    //   (measured: `{top: 10}` with no floor answers `matched` 2165 of a 2165
+    //   model collection), so the sentence would name a floor nobody set and
+    //   call the whole collection its result.
+    //
+    // The requirement scopes the clause the same way: *where a count caps a
+    // floor-bounded set*.
+    capping: r?.forView.tuning.top !== undefined && r?.forView.tuning.minScore !== undefined,
   }
 }

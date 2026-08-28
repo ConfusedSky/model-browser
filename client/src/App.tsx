@@ -1715,15 +1715,15 @@ export default function App() {
         }${
           // What the user's own count cut from, which is a different act from
           // the index's ceiling above and says so in different words (D9).
-          // Gated on a count actually being in force, not merely on the numbers
-          // differing: in the floor-only state the set is short because the
-          // *cap* bit, which the clause above already attributes, so speaking
-          // here would report one cut twice and credit it to a bound nobody
-          // set. Beyond that: only when the index reported `matched` and it
+          // Gated on *both* bounds being in force, not merely on the numbers
+          // differing — `capping` carries why, in both directions: floorless,
+          // `matched` is everything scored rather than a floor set, and
+          // countless, the short set is the index's cap saying so twice.
+          // Beyond that: only when the index reported `matched` and it
           // exceeds what is shown — equal means the count cut nothing, absent
           // means the index did not say — and never counted from the tiles,
           // which are the cut set itself.
-          label.counted && label.matched !== undefined && label.matched > label.shown
+          label.capping && label.matched !== undefined && label.matched > label.shown
             ? ` Showing ${label.shown} of ${label.matched} above the floor.`
             : ''
         }`

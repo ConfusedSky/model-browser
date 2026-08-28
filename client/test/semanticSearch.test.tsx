@@ -972,13 +972,26 @@ describe('meaning search', () => {
     // would credit that cut to a bound nobody set. Caught in the E2E pass,
     // where both sentences appeared side by side.
     semanticSearch.mockResolvedValue({ ...MEANING, matched: 755, capped: true })
-    const topBtn = Array.from(container.querySelectorAll<HTMLButtonElement>('aside button')).find(
-      (b) => b.textContent?.trim() === 'top',
-    )!
-    await click(topBtn)
+    const boundBtn = (label: string) =>
+      Array.from(container.querySelectorAll<HTMLButtonElement>('aside button')).find((b) =>
+        b.textContent?.trim().startsWith(label),
+      )!
+    await click(boundBtn('top'))
     await settle()
     expect(container.textContent).toContain('The index returned fewer than asked for')
     expect(container.textContent).not.toContain('above the floor')
+
+    // The other single-bound state, and the cell this test used to leave out.
+    // With the count in force and no floor, `matched` is not a floor set at
+    // all: the index reports it on every response, and floorless it counts
+    // everything it scored. Speaking here would name a floor nobody set and
+    // call the whole collection its result.
+    await click(boundBtn('top'))
+    await click(boundBtn('score'))
+    semanticSearch.mockResolvedValue({ ...MEANING, matched: 2165 })
+    await settle()
+    expect(container.textContent).not.toContain('above the floor')
+    expect(container.textContent).not.toContain('2165')
   })
 
   it('a tuned link reproduces the sender’s parameters, not the reader’s', async () => {

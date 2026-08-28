@@ -233,6 +233,17 @@ describe('search options in the URL', () => {
     })
   })
 
+  it('reads an unparseable floor as a floor not named', () => {
+    // `?min=` alone would otherwise be `Number('') === 0`, a floor of zero —
+    // the whole collection, under a bound the link appears to set. The panel's
+    // score field already refuses that reading from an empty box.
+    expect(parseUrl('?q=dragon&mode=meaning&min=').tuning).toBeUndefined()
+    expect(parseUrl('?q=dragon&mode=meaning&min=%20').tuning).toBeUndefined()
+    expect(parseUrl('?q=dragon&mode=meaning&min=abc').tuning).toBeUndefined()
+    // A real zero, spelled out, is still a choice someone can make.
+    expect(parseUrl('?q=dragon&mode=meaning&min=0').tuning).toEqual({ minScore: 0 })
+  })
+
   it('clamps a hand-edited count to what the index will return', () => {
     // A link is hand-editable, and 5000 would spend the index's headroom on
     // rows its cap deletes (design D5).

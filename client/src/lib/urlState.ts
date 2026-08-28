@@ -105,7 +105,11 @@ export function parseUrl(search: string = window.location.search): UrlView {
   // Clamped on the way in, because a hand-edited `top=5000` would otherwise
   // spend the index's headroom on rows its cap deletes (design D5).
   if (Number.isFinite(top) && top > 0 && p.has('top')) tuning.top = clampCount(top)
-  if (Number.isFinite(min) && p.has('min')) tuning.minScore = min
+  // `p.get('min')` blank is the trap: `Number('')` is 0, and a floor of 0 is
+  // the whole collection — the one value the panel's own field refuses to read
+  // out of an empty box, so a truncated or hand-edited `?min=` must not mean it
+  // here either. An unparseable floor is a floor not named.
+  if (Number.isFinite(min) && (p.get('min') ?? '').trim() !== '') tuning.minScore = min
   return {
     path: p.get('path') ?? undefined,
     // The flat *toggle*, and only that (design R4). A search runs flat-shaped
