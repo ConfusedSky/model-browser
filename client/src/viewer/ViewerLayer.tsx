@@ -131,6 +131,16 @@ interface Props {
    * private to this component.
    */
   onCommand: (id: CommandId, live: LiveFramingView | null) => void
+  /**
+   * A launch failure's sentence, rendered *here* rather than under the path
+   * bar. The lightbox is `fixed inset-0 z-40` over that bar behind a 70% scrim,
+   * so a sentence sent there is dimmed, corner-parked and gone in 2.5s while
+   * the user is looking at the panel on the right. Success is silent by design,
+   * which makes this the only feedback a launch raised from the panel gives —
+   * the same per-surface split `copyError` already makes, App holding the
+   * sentence and the surface holding where it lands.
+   */
+  actionError?: string | null
 }
 
 /** Longest the orbit overlay holds its dismissal waiting for the refreshed thumbnail. */
@@ -163,6 +173,7 @@ export default function ViewerLayer({
   panelCommands,
   openIn = null,
   onCommand,
+  actionError = null,
 }: Props) {
   const [session, setSession] = useState<ViewerSession | null>(null)
   const [sessionAxis, setSessionAxis] = useState<OrbitAxis>('y')
@@ -842,6 +853,11 @@ export default function ViewerLayer({
                 </button>
               ))}
             </div>
+          )}
+          {actionError !== null && (
+            <p role="status" className="text-xs text-red-400">
+              {actionError}
+            </p>
           )}
         </div>
         <button

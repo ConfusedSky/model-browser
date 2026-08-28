@@ -58,7 +58,11 @@ vi.mock('../src/three/renderer', async (importOriginal) =>
 
 /** A model that lives one folder down, so *reveal* has somewhere to go. */
 const FOUND = '/models/Alpha/found.stl'
-const NESTED: DirListing = { path: '/models', entries: [dir('Alpha'), model('Alpha/found.stl')] }
+// A second model, so the panel can be moved from one to another without a close.
+const NESTED: DirListing = {
+  path: '/models',
+  entries: [dir('Alpha'), model('Alpha/found.stl'), model('Alpha/other.stl')],
+}
 const ALPHA: DirListing = { path: '/models/Alpha', entries: [model('Alpha/found.stl')] }
 const NEIGHBOURS = {
   path: '/models',
@@ -104,9 +108,13 @@ const openInRow = (): HTMLElement | null =>
   dialog()?.querySelector<HTMLElement>('[aria-label="Open in"]') ?? null
 const panelPills = (): HTMLButtonElement[] =>
   Array.from(openInRow()?.querySelectorAll<HTMLButtonElement>('[data-app-id]') ?? [])
-/** The path bar's transient line, where every entry action reports a failure. */
+/** The path bar's transient line, where a failure raised from a *tile* lands. */
 const pathError = (): string | null =>
   container.querySelector('header p.text-red-400')?.textContent ?? null
+/** The panel's own failure lines. `copyError` shares the class, so these read
+ *  the text rather than counting nodes. */
+const panelErrors = (): string[] =>
+  Array.from(dialog()?.querySelectorAll('p.text-red-400') ?? []).map((p) => p.textContent ?? '')
 const actions = (): string[] =>
   Array.from(actionRow()?.querySelectorAll<HTMLButtonElement>('button') ?? []).map(
     (b) => b.dataset.command ?? '',
@@ -323,7 +331,13 @@ describe('the panel’s launch actions (the 4.3 reversal, open-in-slicer L10)', 
     expect(pathError()).toBeNull()
   })
 
-  it('reports a failed launch with the sentence for a named application', async () => {
+  it('reports a failed launch with the sentence for a named application, in the panel', async () => {
+    // *In the panel*, not under the path bar: the lightbox is `fixed inset-0
+    // z-40` over that bar behind a 70% scrim, so a sentence sent there is
+    // dimmed, parked in the far corner away from the pill just pressed, and
+    // gone in 2.5s. Success is silent, so this is the only feedback the press
+    // gives. The sentence is still the shared one — only where it lands is
+    // per-surface.
     await remountWithApps(REPORT)
     await openLightbox('Alpha/found.stl')
 
@@ -331,7 +345,23 @@ describe('the panel’s launch actions (the 4.3 reversal, open-in-slicer L10)', 
     await click(panelPills()[0]!)
     await settle()
 
-    expect(pathError()).toBe(LAUNCH_FAILED)
+    expect(panelErrors()).toContain(LAUNCH_FAILED)
+    expect(pathError()).toBeNull()
+  })
+
+  it('drops a failure when the panel moves to another model', async () => {
+    // The sentence belongs to the model that was open when it happened, and
+    // outlives it only until the panel swaps.
+    await remountWithApps(REPORT)
+    await openLightbox('Alpha/found.stl')
+
+    openApp.mockRejectedValueOnce(new Error('gtk-launch exited 1'))
+    await click(panelPills()[0]!)
+    await settle()
+    expect(panelErrors()).toContain(LAUNCH_FAILED)
+
+    await openLightbox('Alpha/other.stl')
+    expect(panelErrors()).toEqual([])
   })
 
   it('reports a failed chooser with its own sentence, which names no application', async () => {
@@ -344,8 +374,10 @@ describe('the panel’s launch actions (the 4.3 reversal, open-in-slicer L10)', 
 
     // The panel reaches the same bodies the menu does, so it inherits the split
     // too: nothing was chosen here, and the sentence must not say otherwise.
-    expect(pathError()).toBe(CHOOSER_FAILED)
-    expect(pathError()).not.toBe(LAUNCH_FAILED)
+    // It lands where the press was, for the reason the launch sentence does.
+    expect(panelErrors()).toContain(CHOOSER_FAILED)
+    expect(panelErrors()).not.toContain(LAUNCH_FAILED)
+    expect(pathError()).toBeNull()
   })
 })
 

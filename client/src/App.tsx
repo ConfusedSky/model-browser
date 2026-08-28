@@ -376,6 +376,22 @@ export default function App() {
     setActionText({ text, tone })
     actionTimerRef.current = setTimeout(() => setActionText(null), ACTION_TEXT_MS)
   }, [])
+  /**
+   * The same sentence, sent to the lightbox instead of the path bar. The
+   * lightbox covers that bar (`fixed inset-0 z-40`, 70% scrim), so a failure
+   * raised from its panel is otherwise dimmed and corner-parked away from the
+   * pill that raised it — and since success is silent, it is the *only* signal
+   * a launch gives. Where the sentence lands is per-surface; the sentence
+   * itself is not, so both paths still spell it from `entryActions`.
+   */
+  const [viewerError, setViewerError] = useState<string | null>(null)
+  const viewerErrorTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(() => () => clearTimeout(viewerErrorTimerRef.current), [])
+  const sayInViewer = useCallback((text: string): void => {
+    clearTimeout(viewerErrorTimerRef.current)
+    setViewerError(text)
+    viewerErrorTimerRef.current = setTimeout(() => setViewerError(null), ACTION_TEXT_MS)
+  }, [])
 
   /**
    * Reveal's two ephemeral cells (D3/D8): the entry whose containing folder is
@@ -397,6 +413,13 @@ export default function App() {
   const tuningForRef = useRef<View | null>(null)
   useEffect(() => () => clearTimeout(tuningTimerRef.current), [])
   const [viewer, setViewer] = useState<ViewerState | null>(null)
+  // A launch failure belongs to the model that was open when it happened. Drop
+  // it on close and on a swap, or a reopen inside the 2.5s window would greet
+  // the next model with the last one's sentence.
+  useEffect(() => {
+    clearTimeout(viewerErrorTimerRef.current)
+    setViewerError(null)
+  }, [viewer?.entry.path])
   const [lighting, setLightingState] = useState<LightingMode>(getLightingMode)
   // AO preference pill state (persisted per browser profile, aoToggle.ts).
   const [ao, setAoState] = useState(aoEnabled)
@@ -1299,7 +1322,14 @@ export default function App() {
         if (el !== null) openLightbox(entry, el)
       },
       confirm: () => say('Path copied.', 'ok'),
-      report: (message) => say(message, 'error'),
+      // Read off the ref, not the state: the host is memoized and `viewer`
+      // changes on every open and close, so depending on it here would rebuild
+      // the host for a reason that has nothing to do with what it holds. Only
+      // the lightbox reroutes — an orbit overlay covers one tile, not the bar.
+      report: (message) => {
+        if (viewerRef.current?.mode === 'lightbox') sayInViewer(message)
+        else say(message, 'error')
+      },
       poses,
       // The thumbnail half: the one cache client, the mesh LRU the grid loads
       // through, the one render queue, and `useThumbnails`' own setter. Handed
@@ -1320,6 +1350,7 @@ export default function App() {
       enterEntry,
       openLightbox,
       say,
+      sayInViewer,
       poses,
       api,
       lru,
@@ -1999,6 +2030,7 @@ export default function App() {
       {viewer !== null && (
         <ViewerLayer
           viewer={viewer}
+          actionError={viewerError}
           camera={thumbs.get(viewer.entry.path)?.camera}
           axis={thumbs.get(viewer.entry.path)?.axis}
           pose={poses[viewer.entry.path]}
