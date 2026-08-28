@@ -458,9 +458,14 @@ describe('templates', () => {
         ],
       },
     })
-    const err = await launcher.launch('x.desktop', '/m/a.stl').catch((e: Error) => e)
-    expect(err.message).toMatch(/exited 3: …bb+no such application/)
-    expect(err.message).not.toContain('\uFFFD')
+    let err: Error | null = null
+    try {
+      await launcher.launch('x.desktop', '/m/a.stl')
+    } catch (e) {
+      err = e as Error
+    }
+    expect(err?.message).toMatch(/exited 3: …bb+no such application/)
+    expect(err?.message).not.toContain('\uFFFD')
   })
 
   it('gets the reason from a command whose child outlives it, and does not kill that child', async () => {
