@@ -104,6 +104,14 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
 - Scene teardown (renderThumbnail's finally, ViewerSession.close) disposes every
   DirectionalLight — shadow maps are VRAM; the model is LRU-owned and never disposed there
 
+## Web demo (not yet a change)
+
+- docs/web-demo-notes.md records the 2026-08-28 exploration of a public demo over the
+  CC-BY corpus: what is decided, what still needs a call, the defaults a proposal
+  would take, and the measurements (CPU index sizing, hosting prices) with where
+  each can be re-run. Read it before proposing anything demo-shaped; a proposal
+  supersedes it and should say so there
+
 ## OS-specific surface
 
 - docs/platform-surface.md catalogs everything OS-specific: the per-OS operations
