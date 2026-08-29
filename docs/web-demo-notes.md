@@ -20,6 +20,28 @@ count), root `miniatures/deduplicated/`.
 Audience: recruiters viewing a portfolio (from the other session). First
 impression and the link never being dead outrank everything else.
 
+## Drafted (2026-08-28) — these supersede the items they cover
+
+The pre-split main-app sequence exists as OpenSpec changes, each validated and
+archive-dry-run **in this order** on one fresh copy (hard orderings are declared in
+each tasks.md; several deltas stack on the same requirements and only apply in
+sequence):
+
+1. `library-root` — item 2, decided form: library identity + marker, `/` = library top,
+   confinement, per-library cache under XDG, one-time re-key
+2. `remove-axis-lighting` — item 9
+3. `ao-as-recipe-dimension` — item 8's two-render cache (sibling file, no migration)
+4. `ao-refreshes-thumbnails` — the re-targeted `lighting-refreshes-thumbnails` (directory
+   renamed with `git mv`; §2 and §2b kept verbatim)
+5. `adaptive-ao-default` — item 8's frame sampling (lightbox-measured, three-state
+   preference, budget tune-then-freeze)
+6. `folder-contact-sheets` — the decided row; per-tile bounded peek, zips excluded
+
+Not drafted: the override store / credits (item 1 — waits on nothing but has no proposal
+yet), the demo split itself (confinement is now free; guard, read-only thumbs, launcher
+off, chat tab hidden, static serving, bake, credits page), pose-for-every-model (other
+session), and the remaining open items 3–7.
+
 ## The inversion at the center
 
 Every security decision in the repo rests on one premise (`guard.ts`,
@@ -43,7 +65,7 @@ own origin"; only its body hardcodes loopback.
 | Credits/provenance shown in the lightbox info panel | Masa | plus a generated credits page for CC-BY |
 | ~~Lighting menu hidden in demo mode~~ → **axis lighting mode removed from the main app; camera is the only mode; the pill goes** | Masa | the hide was only ever to stop visitors picking axis. Item 9 has the grounding (1,758 sidecars say `camera`, 0 `axis`; axis's motivating bug has no counterpart in camera mode) |
 | **SSAO stays a user option** (pill kept), default chosen adaptively by sampling frames; both AO variants baked for the demo | Masa | item 8 has the design: AO becomes a thumbnail recipe dimension, cache keyed by recipe |
-| **`lighting-refreshes-thumbnails` is re-targeted, not retired**: its trigger becomes the AO pill | Masa | the mechanism — a toggle re-runs the staleness sweep in place, tiles keep their image while the replacement renders (§2), `poseStale` fix (§2b) — carries over unchanged; on the demo the sweep finds the other baked variant, so toggling is instant. Prerequisite: AO as a recipe dimension (item 8). Rename/`opsx:update` the change rather than start a new one |
+| **`ao-refreshes-thumbnails` (formerly `lighting-refreshes-thumbnails`) is re-targeted, not retired**: its trigger becomes the AO pill | Masa | the mechanism — a toggle re-runs the staleness sweep in place, tiles keep their image while the replacement renders (§2), `poseStale` fix (§2b) — carries over unchanged; on the demo the sweep finds the other baked variant, so toggling is instant. Prerequisite: AO as a recipe dimension (item 8). Rename/`opsx:update` the change rather than start a new one |
 | Chat **tab** hidden in demo mode | Masa | the side panel keeps its search-options tab |
 | app-launch dies (`/api/apps`, `/api/open`, `/api/open-with`, launch.json) | all | `openInApps` builds from the `/api/apps` report and `Open with…` gates on `ctx.apps?.chooser` — an injected empty-report launcher withholds both with zero client code (verified) |
 | GLB conversion deferred | other session, agreed | touches mini-classify `COVERS`, re-embedding, client loader; wire cost is fine |
@@ -193,7 +215,7 @@ own origin"; only its body hardcodes loopback.
    adaptive AO default, folder contact sheets, credits + store, chat tab hidden. One
    ordered set, with hard ordering against the four in-flight changes
    (`listing-tree-cache`, `search-cancellation`, `thumbnail-sweep-priority`,
-   `lighting-refreshes-thumbnails`) — the first and third overlap directly
+   `ao-refreshes-thumbnails`) — the first and third overlap directly
    (a baked tree is the tree cache's limit case; the bake is a sweep).
 
 8. **Ambient occlusion on weak GPUs** (raised by Masa). On the demo thumbnails
@@ -235,7 +257,7 @@ own origin"; only its body hardcodes loopback.
    1,705 cached here = 205 MB). Keyed-by-recipe would also allow the lighting
    menu to stay visible on the demo if all four variants were baked (~1.1 GB)
    — moot if item 9 removes the lighting pill. Hard ordering: after
-   `lighting-refreshes-thumbnails` (same files, same pattern). No
+   `ao-refreshes-thumbnails` (same files, same pattern). No
    `RIG_VERSION` bump — each recipe is unchanged; the set grows.
 
 9. **Remove the axis/camera lighting pill from the main app** — **decided (B), remove axis mode** (Masa: "camera almost always looks better"; the demo hide was only to keep visitors off axis). Grounded: of 1,758 thumbnail sidecars
@@ -245,7 +267,7 @@ own origin"; only its body hardcodes loopback.
    the other mode. Axis mode's motivating bug (world-fixed +Y rig lighting
    ±X/±Z-spindle models from the side, `axis-aware-lighting`) has no
    counterpart in camera mode, so dropping it loses nothing. Consequences:
-   `lighting-refreshes-thumbnails` (active, 0/22) exists only because the pill
+   `ao-refreshes-thumbnails` (active, 0/22) exists only because the pill
    does — **re-target it to the AO pill** (Masa): §1's trigger changes, §2 and
    the §2b `poseStale` fix (orbited + posed models re-render and re-PUT on every
    meaning-grid visit; read-verified, not run) carry over unchanged. Cache
