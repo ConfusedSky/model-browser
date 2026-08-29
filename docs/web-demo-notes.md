@@ -59,11 +59,125 @@ own origin"; only its body hardcodes loopback.
    Display → sidecars. Search → sqlite as a rebuildable index over sidecars.
    Note the thumb-cache sidecar is already a per-path store for camera/axis but
    is bounded and **evicts** — provenance cannot live there.
-2. **Path model.** Root-confined but absolute (`?path=/corpus/Kit…`; less code;
-   PNG cache keys hash the absolute path so the bake must run at the container's
-   exact path) vs root-relative (`?path=/Kit…`; clean shareable links; portable
-   cache keys; touches every `isAbsolute` check in `listing.ts`, `app.ts`,
-   `vpath.ts`, `launch.ts`). Other session leans absolute; this one relative.
+   **Resolved by item 2's `.model-browser/` decision (Masa: all per-library
+   data in one folder at the library top, no noise in subdirectories):** one
+   `overrides.json` there, keyed by library-relative path, directory keys
+   applying to their subtree (longest prefix), files overriding; loaded at
+   start, written atomically (temp + rename); poses (other session) are a
+   field in it; the demo's credits are generated into it from
+   `miniatures.json`. "Search by author" is trivial in memory once loaded, so
+   sqlite only if a library outgrows load-at-start — it won't at hundreds of
+   kits. Price accepted: a kit copied out of the library carries no metadata.
+2. **Path model — decided: a library root as a first-class parameter, paths
+   root-relative everywhere** (Masa; Electron later repoints it with a file
+   dialog). Not a demo mode: it fixes remount orphaning locally — thumb cache
+   key is `sha256(absolute path)` and the sidecar stores that path, so a moved
+   mount point orphans every thumbnail *and camera*; `listing-tree-cache`
+   keys on the root path and admits the same ("wasteful, correct"). Deep
+   links become portable. `hitsToEntries` already ignores the index's absolute
+   path and resolves `collection_root + rel_path` "so as not to undo D4's
+   remount reasoning" — the app's own paths catch up. Design points: root from
+   `~/.config/model-browser/config.json` (`launch.json` precedent) with
+   `MODEL_BROWSER_ROOT` overriding, **required** (no root → a clear message,
+   not an empty grid); root missing at start is a *state* (removable media),
+   the `volume-gone` shape mini-classify reports; confinement =
+   `realpath(root/path)` under `realpath(root)`, symlinks escaping the library
+   rejected, one rule for local and demo; **migration**: re-key the cache
+   once from each sidecar's stored absolute path
+   (`sha256(relative(root, meta.path))`) so cameras survive — mini-classify's
+   `migrate_cache_keys.py` is the precedent; recents/last-path just reset.
+   One root, repointable — multiple named libraries deferred. Blast radius:
+   seven `isAbsolute` sites (`listing.ts`, `app.ts`), `vpath.ts`,
+   `/api/complete`, `urlState` `path`/`model`, recents, the cache key, the
+   index-root → app-relative mapping; specs: directory-browsing (path bar,
+   autocomplete, recents), url-navigation, zip-browsing, model-thumbnails
+   (D4), semantic-search. Hard ordering against `listing-tree-cache`,
+   `search-cancellation`, `thumbnail-sweep-priority`. Diverges from the other
+   session's `library-root-confinement` ("absent = unchanged", absolute
+   paths): root always required, paths always relative is the version to
+   carry.
+   **Masa's objections, later the same day, both accepted:** (i) re-rooting
+   from `/a/b/c` to `/a/b/c/d` shifts every relative path — cache orphaned,
+   deep links broken — bad for Electron where the root is picked freely;
+   (ii) two libraries with the same layout (`/a/b/c` vs `/d/b/c`) collide on
+   relative keys — PNGs mostly survive via `path + mtime` (exposed case:
+   same relpath, same mtime, different content; copies preserve mtime), but
+   **cameras are keyed by path alone (D4, for re-exports) and would leak and
+   write back across libraries.** A relative path is a name, not an identity.
+   **Revised model — library ≠ root.** A *library* is identity + cache
+   namespace + deep-link base, marked by `<library>/.model-browser/
+   library.json { id }` at its top; a *root* is merely where the app opens —
+   any folder inside a library. Cache key = `hash(libraryId + path relative
+   to the library top)`: remount anywhere hits; identical layouts never
+   collide. Picking a subfolder walks up to the marker, keys stay relative to
+   the library top, the app opens at the pick — nothing invalidates, deep
+   links survive. A pick with no marker above it becomes a new library (marker
+   written; the corpus build writes the demo's). Converges with item 1: the
+   marker is the top-level instance of the per-folder sidecar family. Edges
+   noted, not solved: picking *above* an existing library (refuse and offer
+   the inner one, or migrate by prefixing keys); read-only media (id
+   remembered in `config.json` against the volume — degrades to today);
+   a library copied wholesale shares an id and content, so the cache is
+   correct for both. The cheaper partial — key PNGs on `relpath + size +
+   mtime`, no marker — fixes most pixel collisions and no camera ones; not
+   sufficient alone.
+   **Masa, then: all `.model-browser` data lives in that one folder at the
+   library top.** Grounded: listings already skip dot-entries (`listing.ts`
+   `startsWith('.')` guards, both walks), `ThumbCache` takes its dir as a
+   constructor arg, and `listing-tree-cache`'s design inherits that dir and
+   its eviction sweep. Layout: `library.json` (id, the marker),
+   `overrides.json` (item 1), `thumbs/` (the bounded cache, **inside the
+   library** — location becomes the namespace: remount or another machine
+   brings thumbnails and cameras along; the id matters only for the fallback),
+   `tree/` (the active change's snapshots, relocated). Fallback for read-only
+   or unwanted-write volumes: XDG cache namespaced by the id (today's shape).
+   Demo: the bake ships inside the corpus tree, read-only. **Measure before
+   committing:** cache writes happen per render and per orbit release, and
+   the removable library is the exFAT volume measured 15× slower on cold
+   reads — if writes are worse, XDG becomes a per-library config choice, not
+   just a read-only fallback. Ordering: `listing-tree-cache`'s design names
+   `~/.cache/model-browser`; same code path pointed elsewhere, but its
+   design.md must say so — hard ordering. Real library not mounted at the
+   time of writing; store not sized against it.
+   **Masa, weighing `<library>/.model-browser/` against
+   `~/.cache/model-browser/<library>/`:** XDG fixes read-only, keeps the
+   library clean, and keeps writes off the spinning drive; but does not
+   travel. Comparison (this session): in-library travels (thumbnails *and*
+   cameras — XDG strands cameras per machine, D4's stranding one level up),
+   needs a fallback path, writes every render/orbit release onto exFAT with
+   no journal (temp+rename weaker), churns sync/backup tools, and a
+   git-managed library must gitignore part of it; XDG is one code path on
+   SSD but must **name the library without writing to it** (marker anyway —
+   not fully clean; or volume id + mount-relative path — platform-specific;
+   or absolute path — today, breaks on remount), accumulates orphan dirs by
+   id, isolates machines sharing one network library. **The split hiding in
+   it:** derived/large/hot (PNGs, tree snapshots — regenerable, wants SSD,
+   excluded from backups) vs authored/small/rare (identity, credits, names,
+   poses, and arguably camera/axis — a user's choice, in the thumb sidecar
+   only by convenience; the corpus's credits *should* be committed with it).
+   Leaning: **hybrid** — `<library>/.model-browser/{library.json,
+   overrides.json}` in-library; `~/.cache/model-browser/<id>/{thumbs,tree}`
+   in XDG; cache-in-library as a per-library opt-in for a drive that should
+   carry its thumbnails. Sub-question: camera/axis into `overrides.json` so
+   orientations travel — then orbit releases rewrite a small file on the
+   library volume; needs a debounce and the exFAT write measurement first.
+   **Decided (Masa): the hybrid split.**
+   **exFAT write measurement (this session, 2026-08-28, scratchpad
+   `write_probe.py`, 100 writes each, median/p90):** on `/dev/sda2` — a
+   3.6 TB *spinning* USB exFAT volume ("Files and S…", STLs under `3d/`;
+   same medium class as the library, not confirmed to be it) — 100 KB PNG
+   0.14/0.16 ms, 300 KB temp+rename 0.31/0.33 ms, 300 B temp+rename
+   0.09/0.10 ms; **with fsync ~40/~50 ms regardless of size** (seek + flush).
+   SSD (`~/.cache`): 0.04–0.11 ms, 0.5 ms with fsync. `ThumbCache` writes with
+   plain `writeFile` — no fsync, no rename — so today's writes are the
+   sub-millisecond rows: **write cost is not a reason to keep anything off
+   the drive**; the split stands on read-only, cleanliness, backup churn and
+   journal-less durability. Camera/axis in `overrides.json` is feasible and a
+   durability *improvement* over today's unprotected sidecars if written
+   temp + rename + fsync, debounced (40 ms per flush every few seconds of
+   orbiting). exFAT unplug mid-write can tear a file — acceptable for a
+   regenerable PNG, not for saved orientations. Not yet decided where
+   camera/axis land; the measurement no longer blocks it.
 3. **Visitor orbits.** With `PUT /api/thumb` rejected, persist a visitor's
    drag-to-orbit in *their* localStorage, or freeze curated framings?
 4. **Landing.** Kit tiles with contact sheets — is that the whole first screen,
@@ -74,7 +188,9 @@ own origin"; only its body hardcodes loopback.
 6. **Domain.** On the critical path for TLS and the configured-origin guard.
 7. **Which session owns the proposal.** Other session's sequence:
    pose-for-every-model → library-root-confinement → web-demo-deployment. This
-   session adds: folder contact sheets, credits + store, hidden controls. One
+   session adds: library-root (item 2, supersedes its confinement change),
+   remove-axis-lighting, AO-as-recipe-dimension + re-targeted refresh change,
+   adaptive AO default, folder contact sheets, credits + store, chat tab hidden. One
    ordered set, with hard ordering against the four in-flight changes
    (`listing-tree-cache`, `search-cancellation`, `thumbnail-sweep-priority`,
    `lighting-refreshes-thumbnails`) — the first and third overlap directly
