@@ -122,8 +122,9 @@ export default memo(Grid)
  * ancestor of a tile creates a stacking context (checked: every one is
  * `position: static`, `z-index: auto`, no transform/filter/opacity/isolation),
  * so this z and the overlay's resolve against the same root context and 35
- * wins. It sits deliberately below the lightbox's `z-40` and the entry menu's
- * `z-50`, both of which SHOULD cover a tile.
+ * wins. It sits deliberately below the header's `z-[36]` (its path suggestions
+ * drop over the grid), the lightbox's `z-40` and the entry menu's `z-50`, all
+ * of which SHOULD cover a tile.
  *
  * The alternative was drawing a second pair on the overlay itself. That is
  * worse twice over: two copies of the markup to drift, and the overlay is a
