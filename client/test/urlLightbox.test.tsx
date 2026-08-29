@@ -188,7 +188,7 @@ describe('lightbox history', () => {
     })
     // The backdrop is the overlay itself: only a press landing on it, not on
     // the dialog inside, closes.
-    const backdrop = container.querySelector<HTMLElement>('.fixed.inset-0.z-40')!
+    const backdrop = container.querySelector<HTMLElement>('.fixed.inset-0.z-lightbox')!
     await act(async () => {
       backdrop.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
     })

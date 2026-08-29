@@ -211,7 +211,7 @@ describe('meaning search', () => {
   })
 
   it('a tile being orbited keeps its own badges, raised above the overlay', async () => {
-    // The orbit overlay is a `fixed z-30` layer with an opaque background drawn
+    // The orbit overlay is a `z-orbit-overlay` layer with an opaque background drawn
     // over the tile, so at the default z it covered the numbers for exactly as
     // long as the user was looking at the model. The tile keeps drawing them
     // and outranks it: no ancestor of a tile creates a stacking context, so the
@@ -242,13 +242,13 @@ describe('meaning search', () => {
     })
     await settle()
 
-    const overlay = container.querySelector('.fixed.z-30')
+    const overlay = container.querySelector('.fixed.z-orbit-overlay')
     expect(overlay).not.toBeNull()
     // Still drawn by the tile — one pair, the same element, never moved or
     // re-created by the press.
     const badges = hero!.querySelectorAll('span[aria-hidden]')
     expect(badges.length).toBe(2)
-    for (const badge of badges) expect(badge.className).toContain('z-[35]')
+    for (const badge of badges) expect(badge.className).toContain('z-tile-badge')
     // The overlay draws none of its own: a second pair could not line up with
     // this one anyway, its rect being the image's square rather than the tile's.
     expect(overlay!.querySelectorAll('span[aria-hidden]').length).toBe(0)

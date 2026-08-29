@@ -133,7 +133,7 @@ interface Props {
   onCommand: (id: CommandId, live: LiveFramingView | null) => void
   /**
    * A launch failure's sentence, rendered *here* rather than under the path
-   * bar. The lightbox is `fixed inset-0 z-40` over that bar behind a 70% scrim,
+   * bar. The lightbox is `fixed inset-0 z-lightbox` over that bar behind a 70% scrim,
    * so a sentence sent there is dimmed, corner-parked and gone in 2.5s while
    * the user is looking at the panel on the right. Success is silent by design,
    * which makes this the only feedback a launch raised from the panel gives —
@@ -608,7 +608,7 @@ export default function ViewerLayer({
     return (
       <div
         ref={containerRef}
-        className="fixed z-30 cursor-grab touch-none rounded-lg bg-zinc-900 active:cursor-grabbing"
+        className="fixed z-orbit-overlay cursor-grab touch-none rounded-lg bg-zinc-900 active:cursor-grabbing"
         style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
         onPointerDown={startGesture}
         onContextMenu={raiseEntryMenu}
@@ -634,7 +634,7 @@ export default function ViewerLayer({
 
   return (
     <div
-      className="fixed inset-0 z-40 flex items-center justify-center bg-black/70"
+      className="fixed inset-0 z-lightbox flex items-center justify-center bg-black/70"
       onContextMenu={raiseEntryMenu}
       onPointerDown={(e) => {
         // Primary button only, for the same reason `startGesture` checks it: a

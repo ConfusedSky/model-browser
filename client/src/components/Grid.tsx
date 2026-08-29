@@ -115,16 +115,16 @@ export default memo(Grid)
  * `pointer-events-none` so a badge is never the target of the press that
  * orbits or opens the tile.
  *
- * `z-[35]` is what keeps the numbers on screen while the model is turned. The
- * orbit overlay is a `fixed z-30` layer drawn over this tile with an opaque
- * background, so at the default z it simply covered the badges — they vanished
- * for exactly as long as the user was looking at the model they describe. No
- * ancestor of a tile creates a stacking context (checked: every one is
- * `position: static`, `z-index: auto`, no transform/filter/opacity/isolation),
- * so this z and the overlay's resolve against the same root context and 35
- * wins. It sits deliberately below the header's `z-[36]` (its path suggestions
- * drop over the grid), the lightbox's `z-40` and the entry menu's `z-50`, all
- * of which SHOULD cover a tile.
+ * `z-tile-badge` is what keeps the numbers on screen while the model is turned.
+ * The orbit overlay is a `z-orbit-overlay` layer drawn over this tile with an
+ * opaque background, so at the default z it simply covered the badges — they
+ * vanished for exactly as long as the user was looking at the model they
+ * describe. No ancestor of a tile creates a stacking context (checked: every
+ * one is `position: static`, `z-index: auto`, no
+ * transform/filter/opacity/isolation), so this z and the overlay's resolve
+ * against the same root context and the badge wins. It sits deliberately below
+ * `z-chrome`, `z-lightbox` and `z-menu`, all of which SHOULD cover a tile.
+ * index.css orders the five and says why.
  *
  * The alternative was drawing a second pair on the overlay itself. That is
  * worse twice over: two copies of the markup to drift, and the overlay is a
@@ -133,7 +133,7 @@ export default memo(Grid)
  * and the badges visibly jumped inward on every press.
  */
 const BADGE_CLASS =
-  'pointer-events-none absolute top-0 z-[35] rounded bg-zinc-950/80 px-1 py-px text-[0.625rem] font-medium tabular-nums leading-tight text-zinc-300 ring-1 ring-zinc-800/60'
+  'pointer-events-none absolute top-0 z-tile-badge rounded bg-zinc-950/80 px-1 py-px text-[0.625rem] font-medium tabular-nums leading-tight text-zinc-300 ring-1 ring-zinc-800/60'
 
 const Tile = memo(function Tile({
   entry,

@@ -72,7 +72,7 @@ const WHOLE_TABLE = [
 const AXIS_LETTERS = ['x', 'y', 'z']
 const GROUP_ROLES = ['menuitemradio', 'menuitemradio', 'menuitemradio', 'menuitemcheckbox']
 /** The orbit overlay: the fixed layer over the pressed tile. */
-const overlay = (): HTMLElement | null => container.querySelector<HTMLElement>('.z-30.cursor-grab')
+const overlay = (): HTMLElement | null => container.querySelector<HTMLElement>('.z-orbit-overlay.cursor-grab')
 const modelTile = (): HTMLElement =>
   tiles().find((t) => (t.getAttribute('title') ?? '') === 'widget.stl')!
 

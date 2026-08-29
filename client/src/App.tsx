@@ -379,7 +379,7 @@ export default function App() {
   }, [])
   /**
    * The same sentence, sent to the lightbox instead of the path bar. The
-   * lightbox covers that bar (`fixed inset-0 z-40`, 70% scrim), so a failure
+   * lightbox covers that bar (`fixed inset-0 z-lightbox`, 70% scrim), so a failure
    * raised from its panel is otherwise dimmed and corner-parked away from the
    * pill that raised it — and since success is silent, it is the *only* signal
    * a launch gives. Where the sentence lands is per-surface; the sentence
@@ -1805,14 +1805,14 @@ export default function App() {
       {/* Top-aligned, not centred: PathBar grows downward when it shows its
           error/notice line, and centring would slide every other control down
           by half that line's height while the path input itself stayed put.
-          Every control in this row is the same height, so the tops line up. */}
-      {/* `z-[36]`: the path bar's suggestion list hangs down over the grid, and
-          a tile's score badges are `z-[35]` (see `BADGE_CLASS`) — at the list's
-          own `z-20` those badges painted straight through the recents. This
-          lifts the whole header, so any later popover in this row lands above
-          the grid too, and stays below the lightbox's `z-40`, which SHOULD
-          cover this bar. */}
-      <header className="relative z-[36] flex items-start gap-2 border-b border-zinc-800 p-3">
+          Every control in this row is the same height, so the tops line up.
+
+          `z-chrome` (index.css) is what the layer is for: the path bar's
+          suggestion list hangs down over the grid, and a tile's score badges
+          sit above the list's own `z-20`, so they painted straight through the
+          recents. Lifting the header rather than the list puts any later
+          popover in this row over the grid too. */}
+      <header className="relative z-chrome flex items-start gap-2 border-b border-zinc-800 p-3">
         <button
           type="button"
           onClick={goUp}

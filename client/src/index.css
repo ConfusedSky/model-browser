@@ -1,6 +1,50 @@
 @import 'tailwindcss';
 
 /**
+ * The paint order, in one place. A bare `z-40` in a component says nothing
+ * about what it is meant to beat, and that is how the header's path
+ * suggestions came to be painted through by a tile's score badges: the badges
+ * were numbered against the orbit overlay, in another file, and nothing on
+ * either side named the layer it had to clear.
+ *
+ * Named lowest first. The gaps are room to insert a layer without renumbering.
+ *
+ * Not named here: the path suggestions' own `z-20`, which orders that list
+ * against its siblings inside the chrome context and against nothing else, and
+ * the experimental lighting pill's `z-50` — a widget with a removal date rather
+ * than a layer of the app.
+ */
+
+/** The fixed layer drawn over a tile while its model is being turned. */
+@utility z-orbit-overlay {
+  z-index: 30;
+}
+
+/** A tile's score badges: above the overlay, so the numbers survive the press
+ *  that turns the model they describe (see `BADGE_CLASS`). */
+@utility z-tile-badge {
+  z-index: 35;
+}
+
+/** The header row. Its path suggestions hang down over the grid, so anything
+ *  at or below `z-tile-badge` lets those badges paint through the list. */
+@utility z-chrome {
+  z-index: 36;
+}
+
+/** The full-screen viewer and its scrim, which covers the chrome deliberately:
+ *  a failure raised in the path bar is unreadable behind it, so the lightbox
+ *  reports its own (`ViewerLayer`). */
+@utility z-lightbox {
+  z-index: 40;
+}
+
+/** The entry menu, over everything it can be raised from. */
+@utility z-menu {
+  z-index: 50;
+}
+
+/**
  * The reveal mark (entry-actions D3): the located tile is ringed brightly, holds
  * for a beat so the eye has somewhere to land in a grid of identical squares,
  * then fades on its own.

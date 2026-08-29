@@ -333,7 +333,7 @@ describe('the panel’s launch actions (the 4.3 reversal, open-in-slicer L10)', 
 
   it('reports a failed launch with the sentence for a named application, in the panel', async () => {
     // *In the panel*, not under the path bar: the lightbox is `fixed inset-0
-    // z-40` over that bar behind a 70% scrim, so a sentence sent there is
+    // z-lightbox` over that bar behind a 70% scrim, so a sentence sent there is
     // dimmed, parked in the far corner away from the pill just pressed, and
     // gone in 2.5s. Success is silent, so this is the only feedback the press
     // gives. The sentence is still the shared one — only where it lands is

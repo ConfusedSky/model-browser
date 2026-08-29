@@ -248,7 +248,7 @@ export default function EntryMenu({
       // application names, and an uncapped menu grows past a narrow window
       // rather than wrapping inside it (4.3). `EDGE` twice over, so the cap
       // agrees with where `clampToViewport` will put it.
-      className="fixed z-50 min-w-44 max-w-[calc(100vw-12px)] rounded-lg border border-zinc-700 bg-zinc-900 py-1 text-sm text-zinc-200 shadow-xl"
+      className="fixed z-menu min-w-44 max-w-[calc(100vw-12px)] rounded-lg border border-zinc-700 bg-zinc-900 py-1 text-sm text-zinc-200 shadow-xl"
       onKeyDown={(e) => {
         if (e.key === 'ArrowDown') {
           e.preventDefault()

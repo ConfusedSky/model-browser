@@ -17,6 +17,11 @@
 - Preference modules (`lighting.ts`, `aoToggle.ts`, `lib/searchOptions.ts`) hold state in a
   module closure: `localStorage.clear()` does not reset them and tests inherit each other's
   settings. Reset via their setters in `beforeEach`, or re-import after `vi.resetModules()`
+- Reading a source file as text: the client workspace has no `@types/node`, so `node:fs`
+  does not typecheck, and happy-dom replaces global `URL` (so `fileURLToPath(new URL(...))`
+  fails "must be of scheme file"). Import it through Vite instead — `import CSS from
+  '../src/index.css?raw'` — which needs `test: { css: true }` in vite.config.ts, since
+  vitest otherwise stubs every CSS import, `?raw` included, to an empty string
 - The harness stubs `URL` for object URLs, so `history.back()` throws "URL is not a
   constructor" — play the browser instead: `replaceState` then dispatch `PopStateEvent`
   (urlLightbox.test.tsx). `mountApp` resets the URL; use `mountAppAtCurrentUrl` for deep links
