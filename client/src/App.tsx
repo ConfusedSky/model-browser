@@ -1805,17 +1805,16 @@ export default function App() {
    * that it did something, or a failure — so a brief report never needs a
    * surface of its own.
    *
-   * A command's failure outranks the view's, and only while it is up: it is the
-   * newer news, and it is about the thing the user just did. A command's
-   * *success* does not outrank it — a listing nobody can read is the more
-   * useful sentence to be looking at than "copied".
+   * A command's line outranks the view's failure while it is up, in either
+   * tone: it is the newer news, it is about the thing the user just did, and
+   * entry-actions requires a copy that succeeds to confirm *briefly* — where
+   * an error-first rule swallowed that confirmation outright rather than
+   * delaying it, for as long as the path bar had a failure standing. Nothing
+   * is lost by the yield: `say` clears its line after ACTION_TEXT_MS, and the
+   * view's own error is what the line falls back to.
    */
   const headerMessage: { text: string; tone: 'ok' | 'error' } | null =
-    actionText?.tone === 'error'
-      ? actionText
-      : error !== null
-        ? { text: error, tone: 'error' }
-        : actionText
+    actionText ?? (error !== null ? { text: error, tone: 'error' } : null)
 
   return (
     <div className="flex h-screen flex-col bg-zinc-950 text-zinc-100">

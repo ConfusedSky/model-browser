@@ -15,6 +15,7 @@ import {
   mountApp,
   openFind,
   findInput,
+  pathInput,
   pressEnter,
   searchInput,
   settle,
@@ -83,6 +84,9 @@ const marked = (): HTMLElement | null =>
   container.querySelector<HTMLElement>('.animate-reveal-mark')
 const pathError = (): string | null =>
   container.querySelector('header p.text-red-400')?.textContent ?? null
+/** The same line in its other tone — what a command reports having done. */
+const pathNotice = (): string | null =>
+  container.querySelector('header p.text-zinc-400')?.textContent ?? null
 
 beforeEach(async () => {
   await mountApp('/models', NESTED)
@@ -236,6 +240,36 @@ describe('copy path from either surface', () => {
       await click(item('copyPath'))
       await settle()
       expect(pathError()).toBe(COPY_FAILED)
+    } finally {
+      Reflect.deleteProperty(navigator, 'clipboard')
+    }
+  })
+
+  it('confirms a copy while the view’s failure stands, and the failure comes back', async () => {
+    // entry-actions: a copy that succeeds SHALL confirm briefly. The line is
+    // shared with the path bar's failure, and letting the failure win meant a
+    // copy made while a listing was broken confirmed nowhere at all — not
+    // late, never. The failure is only covered for as long as the report lives.
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    try {
+      listDir.mockRejectedValueOnce(new Error('no such path: /models/nope'))
+      await type(pathInput(), '/models/nope')
+      await pressEnter(pathInput())
+      await settle()
+      expect(pathError()).toBe('no such path: /models/nope')
+
+      await secondaryPress(tile('widget.stl'))
+      await click(item('copyPath'))
+      await settle()
+      expect(writeText).toHaveBeenCalledWith('/models/widget.stl')
+      expect(pathNotice()).toBe('Path copied.')
+      expect(pathError()).toBeNull()
+
+      // Longer than App's ACTION_TEXT_MS, which is what clears the report.
+      await wait(2600)
+      expect(pathNotice()).toBeNull()
+      expect(pathError()).toBe('no such path: /models/nope')
     } finally {
       Reflect.deleteProperty(navigator, 'clipboard')
     }
