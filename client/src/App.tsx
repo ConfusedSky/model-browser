@@ -1800,70 +1800,91 @@ export default function App() {
     <p className="mt-16 text-center text-sm text-zinc-600">The filter is hiding everything below.</p>
   ) : null
 
+  /**
+   * The header's one transient line, in one of two tones — a command reporting
+   * that it did something, or a failure — so a brief report never needs a
+   * surface of its own.
+   *
+   * A command's failure outranks the view's, and only while it is up: it is the
+   * newer news, and it is about the thing the user just did. A command's
+   * *success* does not outrank it — a listing nobody can read is the more
+   * useful sentence to be looking at than "copied".
+   */
+  const headerMessage: { text: string; tone: 'ok' | 'error' } | null =
+    actionText?.tone === 'error'
+      ? actionText
+      : error !== null
+        ? { text: error, tone: 'error' }
+        : actionText
+
   return (
     <div className="flex h-screen flex-col bg-zinc-950 text-zinc-100">
-      {/* Top-aligned, not centred: PathBar grows downward when it shows its
-          error/notice line, and centring would slide every other control down
-          by half that line's height while the path input itself stayed put.
-          Every control in this row is the same height, so the tops line up.
+      {/* A block header around a flex row, so the transient line below can grow
+          the header without touching the row. Drawn inside the row (it used to
+          be PathBar's) it made that one item taller than the controls beside
+          it, and `items-center` slid all of them down by half of it while the
+          path input stayed put.
 
           `z-chrome` (index.css) is what the layer is for: the path bar's
           suggestion list hangs down over the grid, and a tile's score badges
           sit above the list's own `z-20`, so they painted straight through the
           recents. Lifting the header rather than the list puts any later
           popover in this row over the grid too. */}
-      <header className="relative z-chrome flex items-start gap-2 border-b border-zinc-800 p-3">
-        <button
-          type="button"
-          onClick={goUp}
-          disabled={target === '' || target === '/'}
-          aria-label="Parent directory"
-          className="rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-500 disabled:opacity-40"
-        >
-          ↑
-        </button>
-        <PathBar
-          path={target}
-          // A command's failure overrides the view's, and only while it is up:
-          // it is the newer news, and it is about the thing the user just did.
-          error={actionText?.tone === 'error' ? actionText.text : error}
-          notice={actionText?.tone === 'ok' ? actionText.text : null}
-          api={api}
-          onNavigate={navigate}
-        />
-        <input
-          value={state.drafts.queryText}
-          onChange={(e) => handleQueryTextChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') submitSearch()
-          }}
-          placeholder="Search names and folders…"
-          aria-label="Search names and folders"
-          spellCheck={false}
-          className="w-64 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-500"
-        />
-        <button
-          type="button"
-          onClick={submitSearch}
-          disabled={state.drafts.queryText.trim() === ''}
-          title="Search this folder and everything below it by name — files and folders"
-          className="rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-500 disabled:opacity-40"
-        >
-          Deep
-        </button>
-        <button
-          type="button"
-          onClick={toggleFlat}
-          aria-pressed={live.flat}
-          title="Show every model under this folder in one grid"
-          className={`rounded-lg border px-3 py-2 text-sm ${
-            live.flat
-              ? 'border-sky-500 text-sky-400 hover:border-sky-400'
-              : 'border-zinc-700 text-zinc-300 hover:border-zinc-500'
-          }`}
-        >
-          Flat
-        </button>
+      <header className="relative z-chrome border-b border-zinc-800 p-3">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={goUp}
+            disabled={target === '' || target === '/'}
+            aria-label="Parent directory"
+            className="rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-500 disabled:opacity-40"
+          >
+            ↑
+          </button>
+          <PathBar path={target} api={api} onNavigate={navigate} />
+          <input
+            value={state.drafts.queryText}
+            onChange={(e) => handleQueryTextChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') submitSearch()
+            }}
+            placeholder="Search names and folders…"
+            aria-label="Search names and folders"
+            spellCheck={false}
+            className="w-64 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-500"
+          />
+          <button
+            type="button"
+            onClick={submitSearch}
+            disabled={state.drafts.queryText.trim() === ''}
+            title="Search this folder and everything below it by name — files and folders"
+            className="rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-500 disabled:opacity-40"
+          >
+            Deep
+          </button>
+          <button
+            type="button"
+            onClick={toggleFlat}
+            aria-pressed={live.flat}
+            title="Show every model under this folder in one grid"
+            className={`rounded-lg border px-3 py-2 text-sm ${
+              live.flat
+                ? 'border-sky-500 text-sky-400 hover:border-sky-400'
+                : 'border-zinc-700 text-zinc-300 hover:border-zinc-500'
+            }`}
+          >
+            Flat
+          </button>
+        </div>
+        {headerMessage !== null && (
+          <p
+            className={`mt-1 text-xs ${
+              headerMessage.tone === 'error' ? 'text-red-400' : 'text-zinc-400'
+            }`}
+          >
+            {headerMessage.text}
+          </p>
+        )}
       </header>
       <div className="flex min-h-0 flex-1">
         {/* `scrollbar-gutter: stable` keeps the gutter reserved whether or not

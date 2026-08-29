@@ -4,16 +4,15 @@ import { getRecents } from '../lib/recents'
 
 interface Props {
   path: string
-  error: string | null
-  /** The same transient line in its other tone — a command reporting that it
-   *  did something, rather than that it failed. One line, two tones, so a brief
-   *  report never needs a surface of its own. */
-  notice?: string | null
   api: ApiClient
   onNavigate: (path: string) => void
 }
 
-export default function PathBar({ path, error, notice = null, api, onNavigate }: Props) {
+/** The input and its suggestions, and nothing taller: the transient line that
+ *  reports a path failure or a command's result is the header's (App.tsx), one
+ *  row below. Drawn here it would grow this flex item past the controls beside
+ *  it, which is what the row's alignment then had to work around. */
+export default function PathBar({ path, api, onNavigate }: Props) {
   const [value, setValue] = useState(path)
   const [suggestions, setSuggestions] = useState<string[]>([])
   const [open, setOpen] = useState(false)
@@ -74,11 +73,6 @@ export default function PathBar({ path, error, notice = null, api, onNavigate }:
           if (e.key === 'Escape') setOpen(false)
         }}
       />
-      {error !== null ? (
-        <p className="mt-1 text-xs text-red-400">{error}</p>
-      ) : notice !== null ? (
-        <p className="mt-1 text-xs text-zinc-400">{notice}</p>
-      ) : null}
       {open && suggestions.length > 0 && (
         <ul className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-zinc-700 bg-zinc-900 py-1 shadow-xl">
           {suggestions.map((s) => (

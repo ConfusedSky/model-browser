@@ -8,8 +8,8 @@
  * that class stands for in index.css, and the DOM shape each of those depends
  * on to mean anything — which is where both of these bugs actually lived: the
  * suggestion list is only lifted if it renders *inside* the element carrying
- * the layer, and the row only needs top alignment because the path bar's
- * error line shares a flex item with the input above it.
+ * the layer, and the controls can only be centred while nothing that grows —
+ * the failure line — shares their row.
  */
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -45,6 +45,8 @@ function layer(name: string): number {
 }
 
 const header = (): HTMLElement => container.querySelector('header')!
+/** The controls' own flex row — the header's first child, message excluded. */
+const row = (): HTMLElement => header().firstElementChild as HTMLElement
 
 beforeEach(() => mountApp('/models', NESTED))
 afterEach(() => unmountApp())
@@ -78,19 +80,16 @@ describe('the chrome layer', () => {
 })
 
 describe('the toolbar row', () => {
-  it('is top-aligned, because the path bar grows downward inside it', async () => {
-    // Centring is what slid the up button, the search field and Deep/Flat down
-    // by half the error line the moment a path failed to resolve. Every control
-    // in the row is the same height, so top alignment is identical when there
-    // is no message and correct when there is.
-    expect(header().className).toContain('items-start')
-    expect(header().className).not.toContain('items-center')
+  it('centres its controls, the message being no part of the row', () => {
+    // The row is a flex container of its own inside a block header. When the
+    // message shared this row (PathBar drew it), that item stood taller than
+    // the controls beside it and centring slid all of them down by half of it.
+    expect(header().className).not.toContain('flex')
+    expect(row().className).toContain('items-center')
+    expect(row().contains(pathInput())).toBe(true)
   })
 
-  it('draws the failure inside the same flex item as the path input', async () => {
-    // Which is why the row needs the alignment above. Move this line out into a
-    // row of its own and the constraint lifts — that is a fine change to make,
-    // but it is not the layout this row is written for.
+  it('draws a failure under the row, where it cannot change the row’s height', async () => {
     listDir.mockRejectedValue(new Error('no such path: /models/nope'))
     await typeInto(pathInput(), '/models/nope')
     await pressEnter(pathInput())
@@ -98,6 +97,7 @@ describe('the toolbar row', () => {
 
     const failure = header().querySelector('p.text-red-400')
     expect(failure).not.toBeNull()
-    expect(pathInput().closest('header > *')).toBe(failure!.closest('header > *'))
+    expect(row().contains(failure)).toBe(false)
+    expect(failure!.parentElement).toBe(header())
   })
 })
