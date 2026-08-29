@@ -27,8 +27,12 @@ Every path the server accepts or emits — listings, file bytes, thumbnails, cam
 - **THEN** the text is the entry's filesystem path — the library's top joined to its library path, with `!/` kept for archive entries — which another program can open
 
 #### Scenario: A filesystem path is refused
-- **WHEN** a request names a path that does not begin with `/`, or names the library by its filesystem location
+- **WHEN** a request names a path that does not begin with `/`
 - **THEN** the request is refused with an error and no listing, file bytes or cache write occurs
+
+#### Scenario: A filesystem location is only a library path that is not there
+- **WHEN** a request names the library by its filesystem location, which begins with `/` and so reads as a library path
+- **THEN** it resolves under the library's top like any other path — not found unless the library happens to hold that path, in which case that entry is what is served
 
 ### Requirement: Nothing outside the library is reachable
 Every filesystem location the server derives from a request path SHALL resolve, through symlinks, to the library's top or a location beneath it, or the request SHALL be refused without naming any filesystem detail. `..` components SHALL be normalised before resolution and SHALL NOT escape. A directory reached during a recursive walk that resolves outside the library SHALL be skipped rather than listed.
@@ -46,7 +50,7 @@ Every filesystem location the server derives from a request path SHALL resolve, 
 - **THEN** it is listed and served like any other entry
 
 ### Requirement: The root is configured, and its absence is a state
-The root SHALL be read from the `MODEL_BROWSER_ROOT` environment variable, else from `root` in the app's configuration file (`~/.config/model-browser/config.json`, location overridable by `MODEL_BROWSER_CONFIG`), at server start. The server SHALL start whether or not a root is configured. The library's state SHALL be reported on request as one of: `ready` (identifier, top and root known), `unconfigured` (no root given), `missing` (the configured root is not present or is not a directory), or `unmarked` (no marker exists above the root and one could not be written; the identifier falls back to a hash of the root's resolved location and the library behaves as though its location were its identity). While the state is `unconfigured` or `missing`, every path route SHALL answer with that state rather than with an empty listing, and the UI SHALL show it — naming the configured root when it is missing, since mounting it is the remedy.
+The root SHALL be read from the `MODEL_BROWSER_ROOT` environment variable, else from `root` in the app's configuration file (`config.json` under the XDG config home — `~/.config/model-browser/` by default — location overridable by `MODEL_BROWSER_CONFIG`), at server start. The server SHALL start whether or not a root is configured. The library's state SHALL be reported on request as one of: `ready` (identifier, top and root known), `unconfigured` (no root given), `missing` (the configured root is not present or is not a directory), or `unmarked` (no marker exists above the root and one could not be written; the identifier falls back to a hash of the root's resolved location and the library behaves as though its location were its identity). While the state is `unconfigured` or `missing`, every path route SHALL answer with that state rather than with an empty listing, and the UI SHALL show it — naming the configured root when it is missing, since mounting it is the remedy.
 
 #### Scenario: No root configured
 - **WHEN** the server starts with neither the environment variable nor a configured root

@@ -117,7 +117,8 @@ measured as noise even on the spinning volume.
 ### D4: Configuration, and the states a library can be in
 
 The root comes from `MODEL_BROWSER_ROOT` if set, else `root` in
-`~/.config/model-browser/config.json` (`MODEL_BROWSER_CONFIG` overrides the file's location —
+`config.json` in the XDG config home (`~/.config/model-browser/config.json` by default —
+`configHome` honours `XDG_CONFIG_HOME`; `MODEL_BROWSER_CONFIG` overrides the file's location —
 the `launch.json` precedent, `loadLaunchConfig`). Read once at start; the `Library` object
 exposes `refresh()` so a later change can repoint without a restart.
 
@@ -206,9 +207,11 @@ bar's existing error line: one line, two tones, no new surface.
   differ, which is what the mtime in the key is for.
 - [Migration moves files; an interrupted move leaves an entry half-migrated] → Move the PNG
   first, then write the new sidecar, then remove the old sidecar: an interruption leaves
-  either a complete new entry plus a stale old sidecar (swept as "PNG missing" next
-  maintenance) or an untouched old entry. Never a sidecar without its pixels under the new
-  key.
+  either a complete new entry plus a stale old sidecar, or an untouched old entry — never a
+  sidecar without its pixels under the new key. The stale old sidecar is **not** swept by
+  `maintain` (a missing PNG is how a camera-only entry looks, and is kept on purpose), so
+  the migration itself must tolerate a legacy sidecar whose PNG is already gone: re-key the
+  sidecar (cameras travel), then remove it. Idempotent by construction.
 - [`realpath` on every request on cold removable media] → One call per request, lstat per
   path component; the walk already does this per directory. Measured as noise against a
   32 s cold walk.

@@ -3,8 +3,9 @@
 The light rig has two orientations: `axis` — up along the model's spindle, so an
 overridden-axis model is lit from its own top — and `camera` — fixed in camera space, so
 the lit side follows the viewer. `axis` is the code's default; `camera` is the one that
-gets used. Of the 1,758 thumbnail sidecars in this machine's cache, 1,758 say `camera` and
-none say `axis`, and the judgement behind that is simple: camera lighting almost always
+gets used. Every thumbnail sidecar in this machine's cache says `camera` and none says `axis` (1,792
+of 1,792 at the second reviewer's run, 2026-08-28; 1,758 of 1,758 at this session's earlier
+count the same day — the cache grows, the ratio does not), and the judgement behind that is simple: camera lighting almost always
 looks better. The bug `axis` was built to fix — a world-fixed +Y rig lighting a ±X/±Z
 spindle from the side (`axis-aware-lighting`) — has no counterpart in camera mode, where
 the rig follows the view whatever the spindle is.

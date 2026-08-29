@@ -11,8 +11,8 @@ getLightingMode()`). `rim-lights` added a `rig` version label beside `lighting` 
 cache meta, "mirroring `lighting` end-to-end". The server stores and echoes both without
 interpreting them.
 
-The cache on this machine says which mode is used: 1,758 sidecars labelled `camera`, none
-`axis`. The decision to remove `axis` is recorded in `docs/web-demo-notes.md` item 9.
+The cache on this machine says which mode is used: every sidecar labelled `camera`, none
+`axis` (1,792 of 1,792 at the second reviewer's run, 2026-08-28). The decision to remove `axis` is recorded in `docs/web-demo-notes.md` item 9.
 
 ## Goals / Non-Goals
 
@@ -48,7 +48,7 @@ the spindle, which is geometry, not lighting.
 Three options for the `lighting` field the cache stores and echoes:
 
 1. Drop it and bump `RIG_VERSION`. Simple; re-renders every thumbnail on every machine,
-   including the 1,758 here that are already correct.
+   including every one here, all already correct.
 2. Drop it and bump nothing. An `axis`-rendered PNG would then be indistinguishable from a
    camera one and stay wrong while looking fresh — the failure `rig` versioning exists to
    prevent.

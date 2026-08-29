@@ -261,7 +261,7 @@ own origin"; only its body hardcodes loopback.
    `RIG_VERSION` bump — each recipe is unchanged; the set grows.
 
 9. **Remove the axis/camera lighting pill from the main app** — **decided (B), remove axis mode** (Masa: "camera almost always looks better"; the demo hide was only to keep visitors off axis). Grounded: of 1,758 thumbnail sidecars
-   in `~/.cache/model-browser`, **1,758 say `camera`, 0 say `axis`** — this
+   in `~/.cache/model-browser`, **every one says `camera`, 0 say `axis`** (1,758 at this session's count; 1,792 at the second reviewer's run the same day) — this
    machine has run camera mode throughout — while `lighting.ts` has
    `DEFAULT_MODE = 'axis'`, so every fresh profile (every demo visitor) gets
    the other mode. Axis mode's motivating bug (world-fixed +Y rig lighting

@@ -49,7 +49,8 @@ WebGL calls are asynchronous; timing `chain.render` on the CPU measures command 
 not the GPU. What the GPU cannot keep up with shows as the *interval* between consecutive
 rAF-driven frames stretching past the display's period. So the measurement is: in a
 `requestAnimationFrame` loop that calls `renderNow()` each tick, the time between ticks.
-The existing tween loop (`runTweenLoop`, axis changes only) is one such loop; the probe
+The existing tween loop (`runTweenLoop`, axis changes only; it serves both surfaces, so it
+feeds the sampler only in lightbox mode) is one such loop; the probe
 adds another — on **each** lightbox open while the preference is unset, a fixed run of
 `PROBE_FRAMES` ticks at the lightbox's real render size, the first `PROBE_WARMUP`
 discarded (shader compilation and target allocation land there). Intervals from either

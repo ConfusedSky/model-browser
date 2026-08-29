@@ -67,23 +67,26 @@ None.
 - `components/Grid.tsx`: the folder tile requests its peek when it enters the viewport
   (an `IntersectionObserver` per grid, not per tile), renders 1–4 `<img>` in a 2×2 layout
   from the thumbs map, and keeps the icon for none.
-- `App.tsx` / `hooks/useThumbnails.ts`: previews are rendered by a **second instance** of
-  the hook over a separate, stable preview list — never appended to `thumbEntries`, whose
-  identity change would reset every tile in the grid to a spinner (the hook's effect opens
-  with `setThumbs(new Map(…loading))` and depends on `entries`). A small per-listing map of
-  `folder path → preview entries`, dropped on navigation; models that are already tiles are
-  read from the main map instead of previewed twice.
+- `App.tsx` / `hooks/useThumbnails.ts`: preview models are appended to `thumbEntries`
+  (deduplicated by path) and rendered by the one hook instance — which is only safe once
+  `ao-refreshes-thumbnails` has made the sweep incremental over its entries (today the
+  effect resets every entry to loading when its array changes; a second instance over a
+  preview list has the same defect, one level down). A small per-listing map of
+  `folder path → preview entries`, dropped on navigation.
 - Tests: peek order and budget on a fixture tree; a folder tile with 0/1/3/4 previews; a
   preview model shares its thumbnail with its own tile; no peek before the tile is visible.
 
 **Ordering**
 
 - After `library-root` (paths); after `ao-as-recipe-dimension` (previews follow the
-  preference through the shared hook — automatic, but the tests assert it).
+  preference through the shared hook); **after `ao-refreshes-thumbnails`** (the incremental
+  sweep this change's D3 relies on, and the preference-refresh its scenario "A preview is
+  an ordinary thumbnail" asserts).
   `thumbnail-sweep-priority` adds an `IntersectionObserver` to `Grid` and a visibility band
   per *tile path*; a preview model has no tile, so without work here it is unranked (after
   every visible tile) and cancellable. This change therefore declares: if that change has
-  landed, the folder tile registers its preview paths under its own band and the two share
-  one observer; if it has not, this change's observer is the one it extends. Whichever lands
-  second does the joining. `listing-tree-cache` can later serve the peek from its snapshot
+  landed, the folder tile registers its preview paths under its own band, the single
+  ranking the one hook instance hands the queue carries them (two instances would erase each
+  other's wholesale rankings), and the two share one observer; if it has not, this change's
+  observer is the one it extends. Whichever lands second does the joining. `listing-tree-cache` can later serve the peek from its snapshot
   and extend it to zips; the endpoint's contract is written so it can.

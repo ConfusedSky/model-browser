@@ -51,25 +51,29 @@ is skipped; an unreadable root is a 404 like `listDir`'s. Archives met on the wa
 not entered (Non-Goals), and a zip path as the root returns `[]` rather than an error, so
 the client can treat "no preview" uniformly.
 
-### D3: Preview models go through the same pipeline, as a second stable input
+### D3: Preview models join the one thumbnail pipeline, which is incremental
 
-`useThumbnails` takes `entries`, and its load effect opens by resetting every entry to
+`useThumbnails` takes `entries`, and today its load effect opens by resetting every entry to
 `{ status: 'loading' }` and re-runs whenever the array's identity changes. Appending peek
-results to `thumbEntries` — the obvious move — would therefore blank the whole grid to
-spinners and re-issue every lookup on every scroll-triggered peek response, which is
-exactly the defect `ao-refreshes-thumbnails` §2.1 exists to fix, and would make this
-change depend on it. So previews never touch the listing's entries. `App.tsx` holds a
-separate preview list (all peeked models, deduplicated by path, minus any that are already
-tiles in this listing) and runs a **second `useThumbnails` instance** over it, with the same
-`api`, `lru`, `queue` and `poses`. A folder tile reads a preview's state from the preview
-map, falling back to the main map for a model that is also a tile. Each instance's effect
-re-runs only when *its* list changes, so a peek landing resets preview cells that are
-still loading and nothing else.
+results to `thumbEntries` would therefore blank the grid on every peek response — and so
+would a second hook instance over a "preview list", since that list's identity changes on
+every peek too (the first draft of this design tried that; it moves the flicker to the
+sheets and adds O(n²) lookups). The fix is not a second pipeline but a pipeline that does
+not reset: `ao-refreshes-thumbnails` makes the sweep **incremental over its entries** —
+remaining entries keep state and image, only added ones start loading, removed ones are
+dropped. This change hard-orders after it and then does the simple thing: preview models are
+appended to `thumbEntries` (deduplicated by path — a preview model may also be a tile in a
+flat listing) and rendered by the **one** hook instance. A peek landing adds a few entries
+and touches nothing else.
 
-Both instances share the cache, the queue, the LRU and the recipe, which is what makes
-`ao-as-recipe-dimension` and `ao-refreshes-thumbnails` apply to previews with no code of
-their own — the preference is read inside the hook, and a preference change re-runs both
-sweeps.
+One instance is also what the other seams need: `thumbnail-sweep-priority` replaces the
+queue's ranking wholesale from `useThumbnails` (its tasks 1.2/2.2), so two instances would
+erase each other's ranks; and `App.tsx`'s `placeholderRef` is one ref to one instance. With
+previews in the same list, the folder tile reports its preview paths under its own
+visibility band and the single ranking carries them; the embedded-3MF placeholder works
+for a preview model as for a tile. Both the cache, the queue, the LRU and the recipe are
+shared, which is what makes `ao-as-recipe-dimension` and `ao-refreshes-thumbnails` apply
+to previews with no code of their own.
 
 ### D4: Four cells, filled in order, icon for none
 
@@ -84,13 +88,16 @@ a sheet fills in progressively as renders land.
 
 - [A grid of many folders fires many peeks on first paint] → Each is one small bounded
   read; they run under the cache-lookup concurrency limit, not the render queue; the
-  observer issues them viewport-first. Measured on the demo root, this is 297 × (≤64
-  entries) worst case, 297 × ~5 in practice — a fraction of one listing's walk.
+  observer issues them viewport-first. On the demo root that is 297 × ~5 entries in practice
+  (arithmetic, not a measurement); the worst case — 297 × 64 ≈ 19k entries — would be a cold
+  walk of its own (~45 s at the 2.4 ms/entry cold figure `search-cancellation` records),
+  which is why peeks are viewport-driven and bounded rather than issued for a whole listing.
 - [Preview renders compete with tile renders for the queue] → They *are* tile renders in
   the queue's eyes. But `thumbnail-sweep-priority` ranks by the *tile path* an observer
   reports, and a preview model has no tile: left alone it is unranked (after every visible
   tile) and, if its path ever reads as far from the viewport, cancelled. So the folder tile
-  registers its preview paths under its own visibility band, and the two changes share one
+  registers its preview paths under its own visibility band, the one ranking the single hook
+  instance hands the queue carries them (D3), and the two changes share one
   `IntersectionObserver` in `Grid` — whichever lands second does the joining (proposal,
   ordering). Visible-first for previews is work, not an inheritance.
 - [A folder whose first four models are all bases or the same part] → Correct and

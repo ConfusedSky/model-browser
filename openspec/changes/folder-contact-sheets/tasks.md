@@ -1,9 +1,10 @@
 # Tasks — folder-contact-sheets
 
-> Ordering: after `library-root` (paths are library paths) and `ao-as-recipe-dimension`
-> (previews follow the preference through the shared hook — asserted in 3.3). Prefers
-> `thumbnail-sweep-priority` first so previews inherit visible-first ordering; does not
-> depend on it. `listing-tree-cache` may later back the peek from its snapshot. Re-read
+> Ordering (hard): after `library-root` (paths are library paths), `ao-as-recipe-dimension`
+> (previews follow the preference through the shared hook — asserted in 3.3) and
+> `ao-refreshes-thumbnails` (the incremental sweep D3 relies on — without it every landing
+> peek resets the grid). Prefers `thumbnail-sweep-priority` first so previews inherit
+> visible-first ordering; if it has landed, 2.2 joins its ranking and observer. `listing-tree-cache` may later back the peek from its snapshot. Re-read
 > `Grid.tsx`, `useThumbnails.ts`, `App.tsx`, `listing.ts`, `app.ts` against main before
 > starting.
 
@@ -26,14 +27,15 @@
 ## 2. Client: the tile (D1, D3, D4)
 
 - [ ] 2.1 `api/client.ts` `peek(path, n)`; `App.tsx` keeps a per-listing `Map<folderPath,
-      DirEntry[]>` cleared on navigation, derives a **separate** preview list from it
-      (deduplicated by path, minus models already tiles in this listing), and runs a second
-      `useThumbnails` instance over that list — never appended to `thumbEntries` (D3: the
-      hook resets every entry to loading when its array identity changes)
+      DirEntry[]>` cleared on navigation, and appends the preview entries (deduplicated by
+      path) to `thumbEntries` for the **one** `useThumbnails` instance — relying on
+      `ao-refreshes-thumbnails` 2.1's incremental sweep, so a landing peek adds entries and
+      resets nothing (D3; a second instance was tried on paper and has the same defect one
+      level down, plus two wholesale rankings and an unreachable `setPlaceholder`)
 - [ ] 2.2 `Grid.tsx`: one `IntersectionObserver` for the grid observing folder tiles —
       shared with `thumbnail-sweep-priority`'s if it has landed, and a folder tile then
-      registers its preview paths under its own visibility band so previews are ranked and
-      not cancelled as far-away work; on first visibility a tile requests its peek (once per
+      registers its preview paths under its own visibility band so the single ranking carries
+      them and they are neither unranked nor cancelled as far-away work; on first visibility a tile requests its peek (once per
       listing); the folder tile
       renders 1–4 previews from `thumbs` in the D4 layouts, each cell the model tile's
       spinner-or-image, and the icon for none / not-yet-answered / zip
@@ -42,9 +44,11 @@
       re-render sheets
 - [ ] 2.4 Client tests: a tile requests no peek until visible, then exactly one; 0/1/3/4
       previews render the D4 layouts; the icon shows while the peek is in flight; a preview
-      model that is also a tile is read from the main map (one render, two images); a peek
-      landing does **not** reset any listing tile to loading (assert the main map's states
-      are untouched across a peek response); the map clears on navigation
+      model that is also a tile shares one `thumbs` entry (one render, two images); a peek
+      landing does **not** reset any tile or sheet cell already shown (assert every
+      pre-existing state is untouched across a peek response and only the added paths
+      issue lookups); an embedded-3MF placeholder shows in a sheet cell as it would on a
+      tile; the map clears on navigation
 
 ## 3. Verification
 

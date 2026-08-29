@@ -15,7 +15,8 @@
 ## 1. Server: the library (D1, D2, D4)
 
 - [ ] 1.1 `server/src/library.ts`: read the root from `MODEL_BROWSER_ROOT`, else `root`
-      in `~/.config/model-browser/config.json` (`MODEL_BROWSER_CONFIG` overrides the file
+      in `config.json` under the XDG config home (`~/.config/model-browser/` by default;
+      `MODEL_BROWSER_CONFIG` overrides the file
       path; `configHome` from `launch.ts` — extract it so both use one), at start; expose
       `refresh()` re-evaluating the same
 - [ ] 1.2 Marker discovery: walk up from the root's real path to the filesystem root
@@ -50,8 +51,14 @@
       `posix.join(browsePath, name)` at `listFsDir`'s seam, `joinVPath` for archives — never
       `realpath`'d, so an in-library symlink alias keeps its own route (the flat-listing
       scenarios "Aliased directory is listed once" / "under the route walked first" must
-      keep passing); `realpath` is for the confinement test and the visited set only; `walkFsLevel` skips a subdirectory whose
-      `realpath` falls outside the top (the visited-set `realpath` is already there);
+      keep passing); `realpath` is for the confinement test and the visited set only. `listFsDir` returns the
+      filesystem path beside the logical one (an internal `fsPath`, never emitted), because
+      the walk consumes `e.path` as a filesystem path in `walkFsLevel`'s `realpath`,
+      `listFsDir(e.path, walk)` and `walkZip(e.path, …)` — re-resolving the logical path
+      through 1.4 would realpath the alias away. `walkFsLevel` skips a subdirectory whose
+      `realpath` falls outside the top **at the `walk.dirs.push` site, before the push** —
+      the visited-set check sits after the push by design (the aliased-directory comment),
+      so a check placed there would still list the escaping entry;
       the `path must be absolute` checks go
 - [ ] 2.2 `complete(prefix)`: prefix is a library path; completes within the library;
       returns library paths; a prefix that does not start with `/` or resolves outside
@@ -89,7 +96,8 @@
 
 ## 4. Server: the index maps through its root (D6)
 
-- [ ] 4.1 `semantic.ts`: `scopeWithin` takes a library path and resolves through 1.4;
+- [ ] 4.1 `semantic.ts`: `scopeWithin` takes a library path, resolves through 1.4, and still
+      returns the absolute real path — that is what goes to the index;
       `hitsToEntries` computes the collection root's library path once
       (`libPathOf(realpath(collection_root))`, null when outside) and names each entry
       `collectionLibPath + '/' + rel_path`; the `resolve(collectionRoot, rel_path)`

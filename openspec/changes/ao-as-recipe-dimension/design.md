@@ -63,10 +63,18 @@ Left alone, the *other* render would keep its `mtime` label, read as a hit, and 
 model at the pre-orbit angle the next time the preference flipped: two angles for one
 camera, and browser A (occlusion on) disagreeing with browser B (off) about a model's
 orientation, which the shipped "Orientation shared across browsers" scenario forbids. So
-any PUT that carries a PNG, a camera, or an axis for one render clears the other render's
-`mtime` label — it becomes `stale`, keeps its pixels for the client to show until the
-replacement lands, and re-renders under the shared orientation when next requested. A PUT
-that carries neither (a label-only write) touches nothing.
+a PUT that **changes the shared orientation** — a `camera` or `axis` value that differs from
+what is stored, or a `null` discard of either (`resetFramingLive` in `entryActions.ts`
+PUTs `camera: null, axis: null` with no PNG) — clears the other render's `mtime` label: it
+becomes `stale`, keeps its pixels for the client to show until the replacement lands, and
+re-renders under the new orientation when next requested. A PUT that carries only a PNG
+and labels touches the other render **never**: both renders are drawn under the stored
+orientation, so pixels alone cannot put them at two angles, and the ordinary render PUT
+(`useThumbnails`' tail sends `png` and labels, no camera) must leave the sibling a hit or
+"toggling back is a lookup" is unreachable — the first draft of this rule fired on every
+render and would have re-rendered the whole grid on every toggle, forever. Compared
+against the stored value, not merely present: `App.tsx`'s `persist` sends the camera on
+every lightbox close whether or not the user moved it.
 
 ### D3: Each render is its own LRU file; the entry is one existence
 
@@ -113,8 +121,10 @@ renders' `rig` labels are compared against it.
   rule every recipe input already follows, and the re-targeted refresh change makes it
   answer on the grid in front of the user rather than on the next visit. Renders without
   the AO passes are cheaper than the ones the cache was built with.
-- [`library-root`'s migration must move the sibling file too] → Its tasks move every file
-  of a key (`<key>.*`); called out in its 3.2. Ordering declared in both proposals.
+- [`library-root`'s migration must move the sibling file too] → It need not: a legacy
+  absolute-keyed entry cannot carry a `.noao.png` — the sibling is born after this change,
+  under a per-library key — so its 3.2 moving the PNG and sidecar is complete. Ordering is
+  declared here; `library-root` does not mention this change and need not.
 - [The demo needs both renders baked] → The bake is a sweep under each preference; the
   deployment change owns it. This change makes the second render *exist* to be baked.
 - [An old client PUTs an unoccluded render without `ao`] → Impossible: an old client never

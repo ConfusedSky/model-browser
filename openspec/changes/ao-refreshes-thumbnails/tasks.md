@@ -40,8 +40,11 @@
       tile to `{ status: 'loading' }`, and the stale branch's `staleUrl` is read only by the
       failure path — so with the preference in the deps a toggle blanks the grid to spinners.
       Carry each tile's current image into the new pass and replace it only when its lookup
-      or render lands (D3). This is the change's real work, not an assertion about existing
-      behaviour
+      or render lands (D3). The same carry applies when the *entries* change while some
+      remain: remaining entries keep state and image and issue no lookup, only added
+      entries start loading, removed entries are dropped and their URLs revoked —
+      `folder-contact-sheets` depends on exactly this. This is the change's real work, not
+      an assertion about existing behaviour
 - [ ] 2.2 Own the object URLs across re-runs. Today the URLs of *displayed* tiles are never
       revoked when the map is discarded — one leak per navigation. A preference dependency
       turns that into a decoded PNG per visible model per toggle, and D3 invites repeated
@@ -90,6 +93,8 @@
       the render count, since 1.2's regression is invisible to a correctness-only assertion
 - [ ] 3.2a A toggle over a grid of rendered tiles never shows a spinner where an image was
       (2.1), and the object-URL count does not grow across repeated toggles (2.2)
+- [ ] 3.2c Adding entries to a rendered grid leaves the existing tiles' states untouched and
+      issues lookups only for the additions; removing entries revokes their URLs
 - [ ] 3.2b A posed tile survives a toggle at its pose, not at the default: the tail resolves
       the orientation from the *absence* of a stored camera and axis, so a toggle must
       render it under the pose and re-declare `POSE_VERSION`. Assert it on a meaning grid,

@@ -31,7 +31,8 @@
       `SAMPLE_WINDOW` — each with the measurement that placed it in a comment (the 780M
       59 ms / 18 ms pair; the probe's duration at 60 Hz)
 - [ ] 2.2 `viewer/ViewerLayer.tsx`: a `FrameSampler` fed by rAF-driven loops only — the
-      tween loop and a new probe loop that runs on **every** lightbox open while
+      tween loop (fed only while `viewer.mode === 'lightbox'` — `runTweenLoop` serves both
+      surfaces) and a new probe loop that runs on **every** lightbox open while
       `aoState() === 'unset'`; overlay frames and drag frames never feed it. Median over
       the window; on exceeding the budget call `noteAutoOff(median)` and report it through
       a new `onAoAuto(ms)` prop, which `App.tsx` routes into the same `ao` state the pill

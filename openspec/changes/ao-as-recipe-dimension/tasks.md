@@ -1,7 +1,7 @@
 # Tasks — ao-as-recipe-dimension
 
-> Ordering (hard): after `library-root` (its cache migration moves every file of a key —
-> `<key>.*` — which covers the sibling this adds; confirm its 3.2 does so before applying)
+> Ordering (hard): after `library-root` (its migration re-keys legacy entries, none of which
+> can carry a `.noao.png` — the sibling is born after this change under a per-library key)
 > and after `remove-axis-lighting` (sibling requirement in `model-viewer`, and the
 > lighting mode this delta stops mentioning). Before `ao-refreshes-thumbnails` (formerly `lighting-refreshes-thumbnails`) is
 > re-targeted (this is the dimension it will refresh) and before `adaptive-ao-default`.
@@ -16,9 +16,10 @@
 - [ ] 1.1 `ThumbCache`: `get(path, mtime, ao)` — `ao` selects `<key>.png` + top-level
       labels or `<key>.noao.png` + the sidecar's `noao` labels; status is for that render;
       `camera`/`axis` returned on every status. `put(path, { ao, png, … })` writes the
-      selected render and its labels, and **clears the other render's `mtime` label whenever
-      the PUT carries a PNG, a camera, or an axis** (D2: one camera, two renders); a
-      label-only PUT touches neither render
+      selected render and its labels, and **clears the other render's `mtime` label only when the PUT changes the shared
+      orientation** — a `camera`/`axis` value differing from the stored one, or a `null`
+      discard (D2: one camera, two renders); a PUT carrying only a PNG and labels, or
+      re-sending the stored camera unchanged, leaves the other render alone
 - [ ] 1.2 `maintain`: list both PNG files per sidecar as separate LRU candidates; evicting
       `<key>.png` clears the top-level `mtime`, evicting `<key>.noao.png` clears `noao`;
       the existence sweep removes the sidecar and both PNGs
@@ -29,9 +30,10 @@
       camera and axis; a PUT with `ao:false` writes the sibling and leaves the occluded
       labels untouched; both hit afterwards; eviction takes the older-read sibling first
       and leaves the other a hit; the existence sweep removes all three files; a
-      camera-only PUT marks the *other* render stale and leaves the written render's labels
-      alone; a label-only PUT changes nothing; after an orbit-release PUT under `off`, a GET
-      under `on` is `stale` carrying the new camera
+      PUT with a changed camera marks the *other* render stale and leaves the written
+      render's labels alone; a PNG-only PUT, and a PUT re-sending the stored camera
+      unchanged, leave the other render a hit; a `null` discard marks it stale; after an
+      orbit-release PUT under `off`, a GET under `on` is `stale` carrying the new camera
 
 ## 2. Client: render and look up under the preference (D4)
 

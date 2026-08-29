@@ -110,6 +110,13 @@ So the sweep must carry displayed images across a re-run and drop each only as i
 replacement arrives, which also means tracking which object URLs it still owns. That is the
 substance of the change; the dependency-list edit is one line of it.
 
+The same carry makes the sweep **incremental over its entries**: a re-run whose entry set
+changed keeps every remaining entry's state and image, starts loading only the added ones,
+and drops the removed ones (revoking their URLs). Today an entries change is always a
+navigation, so "reset everything" was harmless; `folder-contact-sheets` adds preview
+entries to the list as peeks land, and without this rule each landing peek would reset the
+whole grid. One mechanism serves both triggers.
+
 ## Risks / Trade-offs
 
 - [Blanking the grid to spinners on every toggle] → D3; the sweep has to preserve displayed
