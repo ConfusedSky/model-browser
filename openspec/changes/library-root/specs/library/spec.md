@@ -16,11 +16,15 @@ A library SHALL be a directory tree whose top is marked by `.model-browser/libra
 - **THEN** the `.model-browser` directory does not appear among its entries
 
 ### Requirement: Every path is relative to the library
-Every path the server accepts or emits — listings, file bytes, thumbnails, camera state, completion, and the `<zip-path>` half of a virtual path — SHALL be the path relative to the library's top, written with a leading slash, so that the library's top is `/`. A path that does not begin with `/` SHALL be refused. The same string SHALL name the same file wherever the library is mounted and on whichever machine holds it.
+Every path the server accepts or emits — listings, file bytes, thumbnails, camera state, completion, and the `<zip-path>` half of a virtual path — SHALL be the path relative to the library's top, written with a leading slash, so that the library's top is `/`. A path that does not begin with `/` SHALL be refused. The same string SHALL name the same file wherever the library is mounted and on whichever machine holds it. Where a path is shown or copied for use outside the app — the copy-path action, the lightbox's file details — it SHALL be expanded to the filesystem path by prefixing the library's top, keeping the `!/` notation for archive entries.
 
 #### Scenario: A remount changes nothing
 - **WHEN** the library is mounted at a different filesystem location and the root is repointed to it
 - **THEN** every listing, thumbnail, camera state and deep link that worked before resolves unchanged
+
+#### Scenario: A copied path is a filesystem path
+- **WHEN** the user copies an entry's path, or reads it in the lightbox's file details
+- **THEN** the text is the entry's filesystem path — the library's top joined to its library path, with `!/` kept for archive entries — which another program can open
 
 #### Scenario: A filesystem path is refused
 - **WHEN** a request names a path that does not begin with `/`, or names the library by its filesystem location

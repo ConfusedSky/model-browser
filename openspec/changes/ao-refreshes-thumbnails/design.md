@@ -68,7 +68,11 @@ costs one wasted render rather than a loop; what does not heal is a tile that co
 *unposed*, since the index's orientation is then simply gone from the picture.
 
 This is a property to test rather than a decision to make: the tail already does the right
-thing, and the change's obligation is not to break it while giving the tail a second trigger.
+thing — `poseStale` on main reads `wantsPose && cached.camera === undefined && cached.axis
+=== undefined && cached.posed !== POSE_VERSION` since `28289d1`, the applied-only form —
+and the change's obligation is not to break it while giving the tail a second trigger. The
+original draft of this change described that predicate as a bug still to fix; it is not,
+and §2b is now about stating and asserting it.
 
 ### D2: The rig version stays lazy, and the asymmetry is the point
 

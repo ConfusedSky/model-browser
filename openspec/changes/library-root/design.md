@@ -87,10 +87,12 @@ shortest.
 
 `library.resolve(libPath)` is the only way a request's path becomes a filesystem path:
 
-1. refuse unless the path starts with `/`; `posix.normalize` it (this folds `..`);
-2. `join(top, normalized)`;
-3. `realpath` the result — for a zip virtual path, the `fsPath` half — and require the real
-   path to equal the library's real top or start with it plus a separator.
+1. refuse unless the path starts with `/`; split the virtual path first (`parseVPath`),
+   then `posix.normalize` the `fsPath` half only — an archive entry name is opaque and
+   must not be rewritten (a `..` in the fs half is folded; `a.zip!` is one segment);
+2. `join(top, normalizedFsHalf)`;
+3. `realpath` the result and require the real path to equal the library's real top or
+   start with it plus a separator.
 
 Step 3 is the confinement: a `..` that survived normalisation, or a symlink inside the library
 pointing outside, both resolve to a real path outside the top and are refused. The real top
@@ -101,8 +103,12 @@ library"), the shape `path must be absolute` has today.
 The walk applies the same predicate: `walkFsLevel` already `realpath`s every subdirectory for
 its visited set, so a symlinked subdirectory escaping the library is skipped there rather than
 emitted as an entry the next request would refuse. Entries emitted by any listing carry the
-library path (`'/' + relative(top, real)` at the seam where the walk names them), so the
-client never sees a filesystem path.
+*logical* library path — `posix.join(browsePath, name)` at the seam where the walk names
+them, never a `realpath`'d one — so the client never sees a filesystem path and a symlink
+alias inside the library keeps its own route: `directory-browsing`'s flat-listing scenarios
+require an aliased directory to be addressable under the route walked, and naming by real
+path would collapse it onto its target. `realpath` serves the confinement test and the
+visited set only.
 
 *Alternative:* string-prefix check on the joined path without `realpath` — cheaper, and
 defeated by a symlink. Rejected; one `realpath` per request is lstat per component and
@@ -142,8 +148,13 @@ On the first `ready` under a library, the legacy flat directory (`~/.cache/model
 beside its PNGs) is scanned once: every sidecar whose recorded absolute path — or, for a
 virtual path, its `fsPath` half — lies under the library's real top is **moved** to
 `<id>/<sha256(libraryPath)>` with `path` rewritten. Entries elsewhere are left where they
-are: another library may claim them later, and an entry nobody claims is swept by the legacy
-directory's own maintenance as before. The move preserves the PNG's mtime (the LRU clock).
+are for another library to claim. Nothing else would ever look at them again — `maintain`
+reads one directory, and that directory is now `<base>/<id>/` — so the legacy flat
+directory gets its own existence sweep at each start (every legacy sidecar records an
+absolute path, so existence is testable without a library) and counts toward no cap. The
+cap is therefore **per library**; a directory left by an `unmarked` library whose hashed id
+changed on remount is an orphan this change does not reclaim, and says so. The move
+preserves the PNG's mtime (the LRU clock).
 mini-classify's `migrate_cache_keys.py` is the precedent for "re-key from the recorded path".
 
 *Alternative:* copy rather than move, for rollback. Rejected — it doubles a 2 GB-capped
@@ -202,8 +213,11 @@ bar's existing error line: one line, two tones, no new surface.
   path component; the walk already does this per directory. Measured as noise against a
   32 s cold walk.
 - [Deep links and recents from before the change stop resolving] → Accepted and stated
-  **BREAKING**. Old links are absolute paths that fail the leading-slash-plus-confinement
-  check with a clear 400; there is no way to know which library they meant.
+  **BREAKING**. An old link's path begins with `/`, so it passes the leading-slash test and
+  resolves as a library path that does not exist — the ordinary 404, which is what the
+  delta scenario says. One edge is accepted rather than fixed: an old `/home/x` against a
+  library that holds a `home/` kit resolves to a different real file. There is no way to
+  know which library an old link meant.
 - [The in-flight `listing-tree-cache` keys its snapshots on the root path and inherits
   `ThumbCache`'s directory] → Hard ordering: this change lands first; that change's design
   is updated to key on `id + library path` under the per-library directory before it is

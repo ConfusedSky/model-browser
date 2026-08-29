@@ -8,7 +8,7 @@
 ## ADDED Requirements
 
 ### Requirement: A thumbnail exists per occlusion recipe
-A model's cache entry SHALL hold up to two renders — with ambient occlusion and without — each keyed by the path, the mtime, and the occlusion setting it was rendered under, and each carrying its own recipe labels. A thumbnail read SHALL name the occlusion setting it wants and SHALL receive that render's status, pixels and labels; a read naming no setting SHALL be served the occluded render. A thumbnail write SHALL name the setting its pixels were rendered under; a write naming none SHALL be stored as the occluded render. Camera state and orbit axis SHALL be shared by both renders of an entry and SHALL be returned on a read of either, including a miss. Each render SHALL be evicted by the size cap on its own least-recently-read clock, leaving the other in place; the existence sweep SHALL remove the entry whole. Renders cached before this requirement SHALL be served as the occluded render without migration.
+A model's cache entry SHALL hold up to two renders — with ambient occlusion and without — each keyed by the path, the mtime, and the occlusion setting it was rendered under, and each carrying its own recipe labels. A thumbnail read SHALL name the occlusion setting it wants and SHALL receive that render's status, pixels and labels; a read naming no setting SHALL be served the occluded render. A thumbnail write SHALL name the setting its pixels were rendered under; a write naming none SHALL be stored as the occluded render. Camera state and orbit axis SHALL be shared by both renders of an entry and SHALL be returned on a read of either, including a miss. Because the orientation is shared, a write that carries pixels, a camera, or an axis for one render SHALL mark the other render stale, so that a model orbited under one setting is re-rendered under the shared orientation when next viewed under the other, and the two renders never show one camera at two angles. Each render SHALL be evicted by the size cap on its own least-recently-read clock, leaving the other in place; the existence sweep SHALL remove the entry whole. Renders cached before this requirement SHALL be served as the occluded render without migration.
 
 #### Scenario: Toggling back is a lookup
 - **WHEN** a directory's thumbnails have been rendered under both settings and the user switches the preference
@@ -17,6 +17,14 @@ A model's cache entry SHALL hold up to two renders — with ambient occlusion an
 #### Scenario: The other render is a miss that keeps its orientation
 - **WHEN** a model has an occluded thumbnail and a saved camera, and its unoccluded thumbnail is requested for the first time
 - **THEN** the response is a miss carrying the saved camera and axis, and the client renders the unoccluded thumbnail under that orientation
+
+#### Scenario: Orbiting under one setting invalidates the other render
+- **WHEN** a model with both renders cached is orbited and released with the preference off, and the preference is then turned on
+- **THEN** the occluded render is stale, is shown until its replacement exists, and is re-rendered at the new orientation rather than served at the old one
+
+#### Scenario: A snapshot follows the preference
+- **WHEN** an orbit is released or the lightbox closed with the preference off
+- **THEN** the thumbnail persisted from that view is the unoccluded render, matching the overlay the user was looking at
 
 #### Scenario: A pre-existing cache is the occluded render
 - **WHEN** the server starts over a cache written before renders were keyed by occlusion

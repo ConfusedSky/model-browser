@@ -49,11 +49,15 @@ WebGL calls are asynchronous; timing `chain.render` on the CPU measures command 
 not the GPU. What the GPU cannot keep up with shows as the *interval* between consecutive
 rAF-driven frames stretching past the display's period. So the measurement is: in a
 `requestAnimationFrame` loop that calls `renderNow()` each tick, the time between ticks.
-The existing tween loop is one such loop; the probe adds another — on the first lightbox
-open in the unset state, a fixed run of `PROBE_FRAMES` ticks at the lightbox's real render
-size, the first `PROBE_WARMUP` discarded (shader compilation and target allocation land
-there). Intervals from either loop feed one running median over the last `SAMPLE_WINDOW`
-frames.
+The existing tween loop (`runTweenLoop`, axis changes only) is one such loop; the probe
+adds another — on **each** lightbox open while the preference is unset, a fixed run of
+`PROBE_FRAMES` ticks at the lightbox's real render size, the first `PROBE_WARMUP`
+discarded (shader compilation and target allocation land there). Intervals from either
+loop feed one running median over the last `SAMPLE_WINDOW` frames. Nothing else is
+sampled: an orbit drag calls `renderNow` per `pointermove`, so its intervals measure the
+hand as much as the GPU (below), and there is no free-running render loop to listen to.
+"Continuous" therefore means *repeated on every lightbox open plus every tween*, not
+every frame the viewer ever draws.
 
 *Alternative:* time during pointer drags. Pointer events arrive at input rate, and a slow
 GPU stretches those intervals too, but so does a slow hand — a drag measures the user as
@@ -73,7 +77,7 @@ can be re-run.
 
 The overlay is a tile-sized canvas at 1.5× — a few hundred thousand pixels; the lightbox is
 up to six million. A device measured in the overlay would pass and then stall in the
-lightbox, which is where a visitor lingers. So the probe runs on the first lightbox open
+lightbox, which is where a visitor lingers. So the probe runs on every lightbox open while the preference is unset
 and the running median is fed only by lightbox frames. Overlay frames are not sampled:
 their intervals say nothing about the surface that matters, and mixing them in would
 dilute the median toward "fine".
@@ -91,6 +95,10 @@ Why sticky: a device that stalled once will stall again on the next heavy model;
 between states re-renders the grid each way (`ao-refreshes-thumbnails`) for no gain.
 
 ### D6: The decision reaches the grid through the same path a press does
+
+`ViewerLayer` owns the sampler but `App.tsx` owns the `ao` state the pill sets and the
+viewer and thumbnails read, so the decision travels up through a new `onAoAuto(ms)` prop
+and `App.tsx` routes it into that state — the same setter a press uses.
 
 `ao-as-recipe-dimension` makes thumbnails follow `aoEnabled()`; `ao-refreshes-thumbnails`
 makes a change in the preference re-run the sweep in place. The automatic decision goes

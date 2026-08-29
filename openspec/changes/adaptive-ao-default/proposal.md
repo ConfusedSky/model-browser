@@ -24,9 +24,11 @@ the user's GPU").
 - **A choice is never overridden.** Pressing the pill makes the state a user's choice — on
   or off — and no measurement touches it again. An automatic *off* is sticky until the user
   turns it on; the pill shows when the current state was decided automatically.
-- **Measurement is continuous, not one-shot.** While occlusion is on in the unset state,
-  every rAF-driven run of live frames feeds the same running median, so a device that
-  passed on a small model and stalls on a heavy one is caught the first time it stalls.
+- **Measurement repeats, it is not one-shot.** While the preference is unset, every
+  lightbox open runs the probe, and the axis-change tween — the one other rAF-driven loop
+  that exists — feeds the same running median, so a device that passed on a small model
+  and stalls on a heavy one is caught the next time the lightbox opens on one. Drags
+  render per pointer event and are not sampled.
 - **The lightbox is the surface measured**, because it is the heavier one: the orbit
   overlay renders a tile-sized canvas at 1.5× and would pass on hardware the lightbox
   chokes on.
@@ -58,7 +60,9 @@ None.
   new `aoState()` for the pill and `recordFrame(ms)` / `noteAutoOff(ms)` for the probe.
   Old stored values (`'on'`/`'off'`) read as a user choice — they were one.
 - `viewer/ViewerLayer.tsx`: the rAF-driven loops (the tween loop, and a new short probe
-  loop on lightbox open in the unset state) report inter-frame intervals; the budget lives
+  loop on each lightbox open while unset) report inter-frame intervals, and a new
+  `onAoAuto(ms)` callback prop carries an automatic decision up to `App.tsx`'s `ao` state
+  — the same state a press sets; the budget lives
   beside `LIVE_SUPERSAMPLE` in `viewer/renderSize.ts` as the other live-view tuning
   constant.
 - `App.tsx`: the pill reads `aoState()` and shows an *auto* marker when the state was
@@ -70,4 +74,6 @@ None.
 - After `ao-as-recipe-dimension` and `ao-refreshes-thumbnails`: an automatic decision must
   reach thumbnails and the visible grid the way a press does, or the decision would
   reintroduce the handoff jump it exists to avoid.
-- Independent of `library-root`, `remove-axis-lighting` and `folder-contact-sheets`.
+- Independent in spec of `library-root`, `remove-axis-lighting` and
+  `folder-contact-sheets` — but `remove-axis-lighting` rewrites the same corner-pill block
+  in `App.tsx` that this change edits: whichever lands second re-reads it.

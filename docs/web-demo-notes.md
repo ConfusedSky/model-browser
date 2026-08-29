@@ -109,7 +109,7 @@ own origin"; only its body hardcodes loopback.
    (`sha256(relative(root, meta.path))`) so cameras survive — mini-classify's
    `migrate_cache_keys.py` is the precedent; recents/last-path just reset.
    One root, repointable — multiple named libraries deferred. Blast radius:
-   seven `isAbsolute` sites (`listing.ts`, `app.ts`), `vpath.ts`,
+   five `isAbsolute` sites (`listing.ts`, `app.ts`; `/api/thumb` validates nothing today), `vpath.ts`,
    `/api/complete`, `urlState` `path`/`model`, recents, the cache key, the
    index-root → app-relative mapping; specs: directory-browsing (path bar,
    autocomplete, recents), url-navigation, zip-browsing, model-thumbnails

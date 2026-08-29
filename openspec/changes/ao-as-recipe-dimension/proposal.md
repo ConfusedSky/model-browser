@@ -24,7 +24,9 @@ why "just default it off" was rejected — it pays the handoff jump on every mac
   thumbnail key, not a label: the occluded PNG and the unoccluded PNG are siblings under one
   entry, each with its own recipe labels and its own place in the size-cap LRU, sharing the
   model's camera and axis. Switching the preference back finds the other render instead of
-  re-rendering it.
+  re-rendering it — **unless the model was orbited in between**: a write that carries
+  pixels or an orientation for one render marks the other stale, so the shared camera is
+  never shown at two different angles.
 - **No migration.** Every existing PNG is the occluded render and keeps its file name; the
   unoccluded render is a new sibling file. No `RIG_VERSION` bump: neither recipe's pixels
   change — the recipe *set* grows.
@@ -75,8 +77,12 @@ None.
 - `three/renderer.ts` `renderThumbnail(object, state, axis, ao)` passes `ao` to the thumb
   chain's `render` — the argument already exists on the chain and the live view already
   uses it.
-- `hooks/useThumbnails.ts` and the two re-render commands in `lib/entryActions.ts`: read
-  `aoEnabled()` once per render, request and PUT under it.
+- `hooks/useThumbnails.ts`, the two re-render commands in `lib/entryActions.ts`,
+  `ViewerSession.snapshot` (which goes through `renderThumbnail`, not the live chain) and
+  `App.tsx`'s `persist` (which PUTs every orbit-release and lightbox-close snapshot): read
+  `aoEnabled()` once per render, request and PUT under it. Today a snapshot is rendered
+  occluded whatever the pill says — a standing mismatch between the overlay and the tile
+  it persists into, which this closes.
 - `api/client.ts`: `getThumb(path, mtime, ao)`, `putThumb` carries `ao`.
 - `viewer/aoToggle.ts` unchanged: still the one preference, still per profile.
 

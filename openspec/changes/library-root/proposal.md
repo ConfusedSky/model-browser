@@ -96,7 +96,9 @@ The exploration behind this is recorded in `docs/web-demo-notes.md` (item 2).
   function every route uses, and the missing-volume state.
 - `listing.ts` (`listDir`, `listFlat`, `complete`), `app.ts` (`/api/file`,
   `resolveEntryFile`, `/api/thumb`), `semantic.ts` (`scopeWithin`, `hitsToEntries`,
-  `modelEntryAt`): the seven `isAbsolute` checks become "resolves under the library top";
+  `modelEntryAt`): the five `isAbsolute` checks (`listDir`, `listFlat`, `complete`, `/api/file`,
+  `resolveEntryFile`) become "resolves under the library top", and `/api/thumb` GET/PUT —
+  which validate nothing today — gain the same check;
   every entry `path` emitted is library-relative. `vpath.ts` is untouched — its grammar is
   about `!/`, not about where the zip lives.
 - `cache.ts` (`ThumbCache`): directory per library id; key from the relative path; a
@@ -108,6 +110,9 @@ The exploration behind this is recorded in `docs/web-demo-notes.md` (item 2).
 
 - `lib/urlState.ts`: `path` and `model` are library-relative; a root path serializes as
   nothing.
+- Copy path (`entryActions.ts`) and the lightbox info panel expand a library path to the
+  filesystem path by prefixing the library's `top` (from the library state), keeping the
+  `!/` notation — what a user pastes into another program must still open there.
 - `lib/recents.ts`, `components/PathBar.tsx`, `App.tsx`'s `resolveView`: the default view is
   the root; recents are relative; the bar shows `/` for the root.
 - `api/client.ts`: request shapes unchanged; one new call for the library state.
@@ -129,8 +134,12 @@ The exploration behind this is recorded in `docs/web-demo-notes.md` (item 2).
 **Ordering against in-flight changes (hard)**
 
 - `listing-tree-cache` keys its snapshots on the root path and inherits `ThumbCache`'s
-  directory; after this change both are per-library (id + relative path). This change lands
-  first; that change's design.md must be updated to say so before it is applied.
+  directory; after this change both are per-library (id + relative path). Its *spec delta*
+  collides, not only its design: *The filesystem is authoritative* requires "the same library
+  reached by a different path is a miss rather than a hit" and has an unmounted-volume
+  scenario that fails as an unreadable path, and *Walked trees are cached across restarts*
+  shares "the storage location" of the thumbnail cache. This change lands first; that
+  change's delta and design must be rewritten against it before it is applied.
 - `search-cancellation` and `thumbnail-sweep-priority` carry `path` through their listing and
   sweep paths; they are unaffected by the *meaning* of a path but touch the same functions.
   Land this change first, or rebase theirs onto it.

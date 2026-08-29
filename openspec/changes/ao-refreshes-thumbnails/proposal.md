@@ -39,12 +39,13 @@ that opens over it, which is the handoff jump the whole sequence exists to remov
   a listing change. Making a toggle re-run it would blank the grid, so preserving
   displayed images is part of this change rather than a property it inherits.
 - **Camera state and axis are preserved**, exactly as on a visit — this replaces pixels.
-- **A staleness bug in the sweep is fixed on the way past** (§2b): `poseStale` asks whether
-  a pose exists rather than whether the render would use one, so a model that has been
-  orbited *and* has an index pose re-renders and re-uploads on every meaning-grid visit,
-  permanently. It predates this change; it is fixed here because this change adds a
-  second trigger to the same sweep, and because the fix belongs beside the rule it
-  corrects.
+- **The applied-only staleness rule is stated in the spec and proven to survive the second
+  trigger** (§2b). The original of this change described `poseStale` as a bug to fix — a
+  model orbited *and* posed re-rendering on every meaning-grid visit. That was fixed on
+  main in `28289d1` (2026-08-21, "Stops posed thumbnails re-rendering forever"), with the
+  test the original asked for already in `semanticSearch.test.tsx`. What remains is to
+  write the rule down — nothing in `openspec/specs/` describes the orientation-source label
+  or the applied-only predicate — and to assert it holds when the sweep gains a trigger.
 - **The rig-version path stays lazy.** A new rig version arrives with a new build, where
   there is no gesture to respond to and nothing on screen waiting for an answer.
 - Unchanged: the cache, its keys, its sidecars, the queue's ordering, and what either

@@ -16,8 +16,9 @@
 - [ ] 1.1 `ThumbCache`: `get(path, mtime, ao)` — `ao` selects `<key>.png` + top-level
       labels or `<key>.noao.png` + the sidecar's `noao` labels; status is for that render;
       `camera`/`axis` returned on every status. `put(path, { ao, png, … })` writes the
-      selected render and its labels only; a PUT without a PNG touches neither render's
-      labels
+      selected render and its labels, and **clears the other render's `mtime` label whenever
+      the PUT carries a PNG, a camera, or an axis** (D2: one camera, two renders); a
+      label-only PUT touches neither render
 - [ ] 1.2 `maintain`: list both PNG files per sidecar as separate LRU candidates; evicting
       `<key>.png` clears the top-level `mtime`, evicting `<key>.noao.png` clears `noao`;
       the existence sweep removes the sidecar and both PNGs
@@ -28,7 +29,9 @@
       camera and axis; a PUT with `ao:false` writes the sibling and leaves the occluded
       labels untouched; both hit afterwards; eviction takes the older-read sibling first
       and leaves the other a hit; the existence sweep removes all three files; a
-      camera-only PUT changes no labels on either render
+      camera-only PUT marks the *other* render stale and leaves the written render's labels
+      alone; a label-only PUT changes nothing; after an orbit-release PUT under `off`, a GET
+      under `on` is `stale` carrying the new camera
 
 ## 2. Client: render and look up under the preference (D4)
 
@@ -38,13 +41,20 @@
       carries `ao`; `ThumbResult`/`ThumbSave` gain the field
 - [ ] 2.3 `hooks/useThumbnails.ts`: read `aoEnabled()` once per entry's load; request,
       render and PUT under it. The hit test is unchanged — the server answered for the
-      requested render. `lib/entryActions.ts`: both re-render commands do the same
+      requested render. `lib/entryActions.ts`: both re-render commands do the same.
+      `viewer/session.ts` `snapshot()` passes `aoEnabled()` to `renderThumbnail` (it does
+      not use the live chain — the site a grep for `aoEnabled` misses), and `App.tsx`
+      `persist` declares `ao` on its PUT
+- [ ] 2.3a Copy that asserts the old contract goes: the pill's `title` in `App.tsx`
+      ("thumbnails keep the shipped recipe") and `viewer/aoToggle.ts`'s module docstring
+      ("thumbnails always render the shipped recipe … never see the preference")
 - [ ] 2.4 Client tests: with the preference off, the request carries `ao=off`, the render
       is called with `ao=false`, and the PUT declares `ao:false`; with it on, all three say
       on and the request is byte-identical to before this change; a miss carrying a
       camera renders under that camera; the orbit overlay opened over an unoccluded
       thumbnail renders unoccluded (handoff parity — assert the chain's `ao` on both
-      paths)
+      paths); an orbit released with the preference off snapshots through `renderThumbnail`
+      with `ao=false` and PUTs `ao:false`; after that PUT the other render reads `stale`
 
 ## 3. Docs and verification
 

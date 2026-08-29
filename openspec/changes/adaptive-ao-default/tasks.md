@@ -16,7 +16,11 @@
       new `aoState()` (`'choice-on' | 'choice-off' | 'auto-off' | 'unset'`),
       `chooseAo(on)`, `noteAutoOff(ms)` (no-op unless unset)
 - [ ] 1.2 `App.tsx`: the pill calls `chooseAo`, reads `aoState()`, and renders an *auto*
-      marker (title text says what was measured) when the state is `auto-off`
+      marker (title text says what was measured) when the state is `auto-off`; its `title`
+      and `viewer/aoToggle.ts`'s docstring stop claiming thumbnails ignore the preference
+      (already false after `ao-as-recipe-dimension`; verify that change removed the copy,
+      else remove it here). `remove-axis-lighting` edits the same pill block — whichever
+      lands second re-reads it
 - [ ] 1.3 Tests (`aoToggle.test.ts`): legacy strings read as a choice; unset is on; `noteAutoOff`
       flips unset to auto-off and is a no-op on a choice; `chooseAo` clears auto; a
       malformed value is unset
@@ -27,10 +31,11 @@
       `SAMPLE_WINDOW` — each with the measurement that placed it in a comment (the 780M
       59 ms / 18 ms pair; the probe's duration at 60 Hz)
 - [ ] 2.2 `viewer/ViewerLayer.tsx`: a `FrameSampler` fed by rAF-driven loops only — the
-      tween loop and a new probe loop that runs on lightbox open while `aoState() ===
-      'unset'`; overlay frames never feed it. Median over the window; on exceeding the
-      budget call `noteAutoOff(median)` and push the change through the same state path
-      the pill uses, so `useThumbnails` and the live view react as to a press
+      tween loop and a new probe loop that runs on **every** lightbox open while
+      `aoState() === 'unset'`; overlay frames and drag frames never feed it. Median over
+      the window; on exceeding the budget call `noteAutoOff(median)` and report it through
+      a new `onAoAuto(ms)` prop, which `App.tsx` routes into the same `ao` state the pill
+      sets, so `useThumbnails` and the live view react as to a press
 - [ ] 2.3 The probe renders the model already on screen at the lightbox's real render size
       (`liveRenderSize` of the host), discards the first `PROBE_WARMUP` intervals, and stops
       after `PROBE_FRAMES` or on the first decision; a drag or close cancels it

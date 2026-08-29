@@ -26,10 +26,15 @@
 ## 2. Client: the tile (D1, D3, D4)
 
 - [ ] 2.1 `api/client.ts` `peek(path, n)`; `App.tsx` keeps a per-listing `Map<folderPath,
-      DirEntry[]>` cleared on navigation, and appends the preview entries (deduplicated by
-      path) to `thumbEntries` so `useThumbnails` renders them
-- [ ] 2.2 `Grid.tsx`: one `IntersectionObserver` for the grid observing folder tiles;
-      on first visibility a tile requests its peek (once per listing); the folder tile
+      DirEntry[]>` cleared on navigation, derives a **separate** preview list from it
+      (deduplicated by path, minus models already tiles in this listing), and runs a second
+      `useThumbnails` instance over that list — never appended to `thumbEntries` (D3: the
+      hook resets every entry to loading when its array identity changes)
+- [ ] 2.2 `Grid.tsx`: one `IntersectionObserver` for the grid observing folder tiles —
+      shared with `thumbnail-sweep-priority`'s if it has landed, and a folder tile then
+      registers its preview paths under its own visibility band so previews are ranked and
+      not cancelled as far-away work; on first visibility a tile requests its peek (once per
+      listing); the folder tile
       renders 1–4 previews from `thumbs` in the D4 layouts, each cell the model tile's
       spinner-or-image, and the icon for none / not-yet-answered / zip
 - [ ] 2.3 Memoisation: the folder tile compares on its entry, its preview entries and their
@@ -37,8 +42,9 @@
       re-render sheets
 - [ ] 2.4 Client tests: a tile requests no peek until visible, then exactly one; 0/1/3/4
       previews render the D4 layouts; the icon shows while the peek is in flight; a preview
-      model that is also a tile shares one `thumbs` entry (one render, two images); the
-      map clears on navigation
+      model that is also a tile is read from the main map (one render, two images); a peek
+      landing does **not** reset any listing tile to loading (assert the main map's states
+      are untouched across a peek response); the map clears on navigation
 
 ## 3. Verification
 

@@ -33,7 +33,9 @@
       render writes (`THUMB_LIGHTING = 'camera'`), living beside `RIG_VERSION` in
       `three/renderer.ts` — the other recipe label lives there already
 - [ ] 2.2 `hooks/useThumbnails.ts`: the hit test compares `cached.lighting` to the constant;
-      the PUT writes it. `lib/entryActions.ts`: both re-render commands write the constant
+      the PUT writes it. `lib/entryActions.ts`: both re-render commands write the constant.
+      `App.tsx` `persist` (the orbit-release / lightbox-close snapshot PUT) writes it too —
+      the fifth read site, the one a grep for `getLightingMode` finds last
 - [ ] 2.3 `shared/types.ts`: `LightingMode` documented as a legacy label type — `'axis'` is
       readable from old entries, never written. `server/src/app.ts`: `LIGHTING_MODES`
       becomes the single producible value; a PUT declaring `axis` is a 400
@@ -43,7 +45,11 @@
       written is the constant; a cached `axis` label is stale and re-renders with camera
       and axis preserved; a cached `camera` label at the current rig is a hit with no
       render and no PUT (the "camera-lit cache needs nothing" scenario — assert the render
-      count)
+      count). **Mocks that chose `'axis'` as "the current mode" switch to the constant, or
+      their meaning inverts**: `semanticSearch.test.tsx` ("a thumbnail the user already
+      aimed is left alone, pose or no pose" mocks `lighting: 'axis'` and asserts a hit),
+      `orbitAxisMenu.test.tsx`, `apiClient.test.ts`, `server/test/cache.test.ts` — and
+      `client/test/CLAUDE.md`'s lighting note
 
 ## 3. The pill and the prop (D1, D4)
 
@@ -60,8 +66,11 @@
 ## 4. Specs, docs, verification
 
 - [ ] 4.1 Archive dry run per CLAUDE.md on a fresh copy, **after** `library-root` has
-      archived on that copy: the RENAMED + MODIFIED pair on `model-thumbnails` and the
+      archived on that copy: the two RENAMED + MODIFIED pairs (`model-thumbnails`,
+      `model-viewer`), the *Shadowed model display* MODIFIED (five scenario titles) and the
       `url-navigation` MODIFIED must apply cleanly
+- [ ] 4.1a `adaptive-ao-default` edits the same corner-pill block in `App.tsx` — whichever
+      lands second re-reads it (shared-file ordering, CLAUDE.md)
 - [ ] 4.2 `ao-refreshes-thumbnails`: open an `opsx:update` on it (separate session or
       after this) re-targeting its trigger to the AO toggle and rewriting its
       `model-thumbnails` delta under *Recipe-labelled thumbnails*; until then it must not

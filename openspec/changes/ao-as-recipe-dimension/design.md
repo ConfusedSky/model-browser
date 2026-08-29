@@ -54,8 +54,19 @@ the client re-renders under the stored orientation, exactly as a `stale` does to
 absent means `on`, so a client from before this change reads what it always read.
 
 `PUT` carries `ao` beside `png`; absent means `on`. Labels on a PUT apply to the render it
-carries: the sidecar's top-level labels for `on`, the `noao` field for `off`. A PUT with no
-PNG (camera/axis only) touches neither render's labels, as today.
+carries: the sidecar's top-level labels for `on`, the `noao` field for `off`.
+
+**One camera, two renders, so a write to either invalidates the other.** The orientation
+is shared by design (D4 in the v1 design: keyed by path, survives re-export), and an orbit
+rewrites it together with the current render's pixels — `App.tsx`'s `persist` PUTs both.
+Left alone, the *other* render would keep its `mtime` label, read as a hit, and show the
+model at the pre-orbit angle the next time the preference flipped: two angles for one
+camera, and browser A (occlusion on) disagreeing with browser B (off) about a model's
+orientation, which the shipped "Orientation shared across browsers" scenario forbids. So
+any PUT that carries a PNG, a camera, or an axis for one render clears the other render's
+`mtime` label — it becomes `stale`, keeps its pixels for the client to show until the
+replacement lands, and re-renders under the shared orientation when next requested. A PUT
+that carries neither (a label-only write) touches nothing.
 
 ### D3: Each render is its own LRU file; the entry is one existence
 
@@ -74,6 +85,17 @@ per hook mount — is what lets `ao-refreshes-thumbnails`, re-targeted, re-run t
 same sweep after a toggle and get the other render. Handoff parity follows from both paths
 reading the same store: the thumbnail on screen and the overlay that opens over it were
 rendered under the same answer.
+
+### D4a: Every path that renders or persists a thumbnail passes the preference
+
+Four sites call `renderThumbnail` — `useThumbnails`' tail, the two re-render commands in
+`entryActions.ts`, and `ViewerSession.snapshot` — and `putThumb` is called from those plus
+`App.tsx`'s `persist`. `snapshot` is the one that is easy to miss: it renders through
+`renderThumbnail`, not the live chain, so with `ao = true` as the default every
+orbit-release and lightbox-close snapshot would be occluded whatever the pill says and
+PUT with `ao` absent. That is the standing behaviour today (thumbnails always shipped
+recipe), and it is the mismatch this change exists to close; `snapshot` passes
+`aoEnabled()` and `persist` declares it.
 
 ### D5: No `RIG_VERSION` bump
 

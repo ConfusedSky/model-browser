@@ -43,11 +43,14 @@ None.
 
 ### Modified Capabilities
 
-- `model-viewer`: **MODIFY** *Spindle-aligned lighting with camera-relative option* —
-  rewritten as camera-relative lighting only; the axis-mode scenarios go, the camera-mode
+- `model-viewer`: **RENAME** *Spindle-aligned lighting with camera-relative option* →
+  *Camera-fixed lighting rig* and **MODIFY** it — rewritten as camera-relative lighting only; the axis-mode scenarios go, the camera-mode
   and rim-accent scenarios stay, the axis-change scenario becomes continuity through the
-  tween. The *Ambient-occlusion shading* requirement's "in both lighting modes" is left
-  for `ao-as-recipe-dimension`, which rewrites that requirement anyway.
+  tween. **MODIFY** *Shadowed model display* — its shadow-direction clause and its "Shadows
+  follow the lighting mode" scenario name both modes; they become camera-only (the floor's
+  spindle-frame placement is unchanged). The *Ambient-occlusion shading* requirement's "in
+  both lighting modes" is left for `ao-as-recipe-dimension`, which rewrites that
+  requirement anyway.
 - `model-thumbnails`: **RENAME** *Lighting-mode-aware thumbnails* → *Recipe-labelled
   thumbnails*, and **MODIFY** it: the labels are the rig version and the lighting label;
   a stored lighting label other than the one the client renders is stale; no mode
@@ -63,7 +66,8 @@ None.
 **Client**
 
 - `viewer/lighting.ts` deleted; `LIGHTING_MODES`, `getLightingMode`, `setLightingMode`
-  gone from `App.tsx` (the corner pill's lighting buttons), `hooks/useThumbnails.ts`,
+  gone from `App.tsx` (the corner pill's lighting buttons **and `persist`**, which PUTs
+  the label with every orbit-release and lightbox-close snapshot), `hooks/useThumbnails.ts`,
   `lib/entryActions.ts` (both re-render commands), `viewer/session.ts`,
   `three/renderer.ts` (`renderThumbnail`), `viewer/ViewerLayer.tsx` (the `lighting` prop).
 - `viewer/session.ts`: the rig copies the camera quaternion every render; the axis-tween's

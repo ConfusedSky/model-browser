@@ -49,7 +49,8 @@
 - [ ] 2.3 A preference change cancels the in-flight sweep's queued renders as a navigation
       does. Note what cancellation does **not** cover: the load effect renders and
       `await api.putThumb(...)` before the `if (!alive)` check that follows, and `queue.ts`'s
-      `waiters` documents that a started job cannot be stopped — so a tile already rendering
+      `whenResumed` documents that a started job cannot be stopped (`waiters` is a local
+      in `resume()`; grep for the method) — so a tile already rendering
       writes the cache under the outgoing setting and can land after the new pass's write.
       Move the `alive` check above the PUT — the delta's own scenario says the grid settles
       "without the first pass's renders landing on top of it", so accepting the write would
@@ -58,29 +59,26 @@
       still be replaced by the outgoing pass; the `alive` check stays)
 - [ ] 2.4 Two toggles in quick succession settle under the setting chosen last
 
-## 2b. A pre-existing loop this change makes hotter
+## 2b. A rule that exists on main but not in the spec
 
-- [ ] 2b.1 Fix `poseStale`: it asks whether a pose *exists*, not whether the render would
-      *use* one. The load effect sets `poseStale = wantsPose && cached.posed !==
-      POSE_VERSION`, but the tail applies a pose only when the model has neither a stored
-      camera nor a stored axis. So a model that has been orbited **and** has an index pose
-      is permanently stale: `posed` is null, the PUT writes `posed: undefined` (before the
-      `alive` re-check), `ThumbCache.put` clears the label on any PNG write, and the next
-      meaning-grid visit repeats the whole render and upload. Read-verified against main,
-      not run. Narrow the predicate to "a pose that would be applied" — the same condition
-      the tail uses — so a model with its own orientation is simply a hit
-- [ ] 2b.2 Test it: a model with a stored camera and a pose is a cache hit on the second
-      meaning-grid visit, with no render and no PUT. Assert the render count, since the
-      output looks identical either way — which is why this has gone unnoticed
-- [ ] 2b.3 Land the requirement with the fix: the *Recipe-labelled thumbnails* MODIFY states
+- [ ] 2b.1 Confirm against main before touching anything: `poseStale` already reads
+      `wantsPose && cached.camera === undefined && cached.axis === undefined &&
+      cached.posed !== POSE_VERSION` (`28289d1`, 2026-08-21). The original of this change
+      called it a bug to fix; it is the applied-only predicate the tail uses. Do not "fix"
+      it again
+- [ ] 2b.2 Assert it survives the second trigger: `semanticSearch.test.tsx` already covers
+      the visit case ("a thumbnail the user already aimed is left alone, pose or no pose");
+      add the toggle case — a model with a stored camera and a pose, on a meaning grid,
+      across a preference change, is a lookup and no render and no PUT beyond the variant
+      switch itself. Assert the render count, since the output looks identical either way
+- [ ] 2b.3 Land the requirement: the *Recipe-labelled thumbnails* MODIFY states
       the orientation-source label and the applied-only staleness rule, which nothing in
       `openspec/specs/` described before — the label is shipped code with no requirement
       behind it, and `entry-context-menu`'s entry-actions requirement already leans on it
       ("SHALL record which recipe produced those pixels")
-- [ ] 2b.4 Note for the reviewer of this change: the defect predates it. It is fixed here
-      because this change gives the sweep a second trigger, so what was one wasted render
-      per meaning-grid visit becomes one per toggle as well, and because the fix belongs
-      beside the staleness rule rather than in a change about menus
+- [ ] 2b.4 Note for the reviewer of this change: the predicate is not touched here; the
+      section exists because a second trigger is where a regression in it would first
+      show, and because the rule belongs in the spec beside the staleness rule it refines
 
 ## 3. Tests
 

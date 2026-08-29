@@ -1,11 +1,12 @@
 ## Context
 
 `axis-aware-lighting` (archived 2026-08-11) gave the rig two orientations and a
-localStorage-backed mode (`viewer/lighting.ts`, default `axis`) read at four sites: the
+localStorage-backed mode (`viewer/lighting.ts`, default `axis`) read at five sites: the
 live view (`ViewerSession.render` copies the camera quaternion in `camera` mode, else the
 spindle frame's `rigQuaternion`, slerping through the axis tween), the thumbnail path
 (`renderThumbnail` does the same for the rest camera), the two re-render commands in
-`entryActions.ts`, and the hit test in `useThumbnails` (`cached.lighting ===
+`entryActions.ts`, `App.tsx`'s `persist` (which labels every orbit-release and
+lightbox-close snapshot), and the hit test in `useThumbnails` (`cached.lighting ===
 getLightingMode()`). `rim-lights` added a `rig` version label beside `lighting` in the
 cache meta, "mirroring `lighting` end-to-end". The server stores and echoes both without
 interpreting them.
@@ -62,14 +63,18 @@ value a client can produce. `ao-as-recipe-dimension` will restructure the labels
 makes occlusion a cache-key dimension; retiring `lighting` belongs there or later, with a
 `RIG_VERSION` bump if it ever means re-rendering.
 
-### D3: The requirement is renamed to what it now describes
+### D3: The requirements are renamed to what they now describe
 
 *Lighting-mode-aware thumbnails* is about labels and staleness, and after this change no
 lighting mode exists. It is RENAMED to *Recipe-labelled thumbnails* and MODIFIED under the
 new title: the rig version and the lighting label are the recipe inputs the key does not
 carry; a mismatch on either is stale; the scenarios about switching modes go, the ones
 about legacy entries and rig revisions stay. `ao-refreshes-thumbnails` (formerly `lighting-refreshes-thumbnails`) MODIFIES the
-old title and is re-targeted after this lands (proposal, ordering).
+old title and is re-targeted after this lands (proposal, ordering). *Spindle-aligned
+lighting with camera-relative option* is renamed for the same reason — its body now says
+there is no option — to *Camera-fixed lighting rig*; and *Shadowed model display*, whose
+shadow-direction clause and one scenario name both modes, is MODIFIED to camera-only,
+every scenario title kept.
 
 ### D4: The URL requirement stops naming a preference that no longer exists
 
@@ -89,7 +94,11 @@ ambient-occlusion preference. Hard ordering: after `library-root` archives.
   in the proposal; `ao-refreshes-thumbnails` is being re-targeted regardless, and
   `library-root` lands first.
 - [Sixteen test files mention lighting] → Most assert the label round-trips or the hit
-  test; those keep passing against the constant. The mode-switch and axis-orientation
+  test; those keep passing against the constant — except where a mock *chooses* `'axis'`
+  as a stand-in for "the current mode": `semanticSearch.test.tsx`'s pose-loop regression
+  mocks `getThumb` with `lighting: 'axis'` and asserts a hit with no render, which this
+  change would silently invert into a stale re-render. Such mocks switch to the constant
+  so the tests keep meaning what they mean. The mode-switch and axis-orientation
   cases (`lighting.test.ts`, `sessionLighting.test.ts`, parts of `orbitHandoff` and
   `viewerLayer`) are deleted with the behaviour, not rewritten to pass.
 
