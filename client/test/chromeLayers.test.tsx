@@ -14,8 +14,9 @@
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DirListing } from '../../shared/types'
-// The stylesheet as text, through Vite's `?raw` rather than `fs`: this file
-// runs in happy-dom, where `import.meta.url` is not a file: URL.
+// The stylesheet as text, through Vite's `?raw` rather than `fs`: this workspace
+// has no @types/node, and happy-dom replaces the global `URL`, so the URL object
+// `new URL(…, import.meta.url)` builds is one `fileURLToPath` refuses.
 import CSS from '../src/index.css?raw'
 import {
   container,
@@ -64,6 +65,11 @@ describe('the chrome layer', () => {
     // Below the lightbox is the constraint that fix must not break — the
     // lightbox covers this bar deliberately (`viewerError`, App.tsx).
     expect(header().className).toContain('z-chrome')
+    // `relative` is the other half of the fix and the easier half to drop:
+    // z-index is inert on a statically positioned element, so a header carrying
+    // the layer without it creates no stacking context and the badges paint
+    // through again — with every other assertion in this file still green.
+    expect(header().className).toContain('relative')
     expect(layer('z-chrome')).toBeGreaterThan(layer('z-tile-badge'))
     expect(layer('z-lightbox')).toBeGreaterThan(layer('z-chrome'))
   })

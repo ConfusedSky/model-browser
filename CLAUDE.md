@@ -164,6 +164,12 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
     works; the API (3177) binds IPv4 127.0.0.1
   - Verify layout claims by measuring (`getBoundingClientRect` via `browser_evaluate`), not
     screenshots — the MCP screenshot file may not land anywhere findable in the repo
+  - A probe that mutates the DOM poisons every later measurement in that tab. One left the
+    path error `position:absolute`; the next run read the moved geometry as the app's own,
+    and "the suggestion list already covered the error" reached a commit message as recorded
+    fact when the opposite was true. Restore what you set inside the same `evaluate`, or
+    reload before measuring again — and prefer rebuilding the *other* layout in the live DOM
+    over trusting a memory of what it measured
   - Generated STL fixtures need outward *winding* (vertex order): parsing ignores stored
     facet normals and recomputes from winding, so a zeroed normal field is fine — but
     inverted winding still mirrors lighting left/right (false bugs in lighting assertions)
