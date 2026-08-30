@@ -135,13 +135,22 @@
       interrupted migration (PNG moved, old sidecar still present) converges on the next
       start; the sweep does not delete while `missing`
  — done 2026-08-29 (B2, `aa9eadd`, cherry-picked; 11 new cache tests, 23 total; the ready guard, the live top-stat guard and mtime preservation each falsified; merged server suite 222 passed). `index.ts` still constructs `ThumbCache` without the library until B1 lands — wired by the coordinator at that merge
-- [ ] 3.4 Follow-up recorded in the fix round (2026-08-29): `maintain()` races `put()`.
+- [x] 3.4 Follow-up recorded in the fix round (2026-08-29): `maintain()` races `put()`.
       `maintain` reads each sidecar, then in its size-cap pass deletes the PNG and rewrites
       the entry from the `Meta` it read earlier — so a `put` landing in between has its PNG
       deleted and its camera reverted to the pre-read value. Pre-existing, but the window is
       wider now that `maintain` also runs the migration and the legacy sweep before it
       reaches that pass. Fix by re-reading the sidecar immediately before the rewrite, or by
-      merging into the current one rather than writing back a snapshot
+      merging into the current one rather than writing back a snapshot — done 2026-08-29 (W2):
+      the cap pass re-reads each victim's sidecar before evicting, skips it (counting nothing
+      against the cap) when it is gone or its `mtime` moved, and otherwise writes back
+      `{...fresh, mtime: undefined}` from the re-read. `readMeta` is `protected` so the test
+      can interpose; `cache.test.ts` gains `InterposingCache` and two cells — "spares an entry
+      a mid-sweep put re-rendered, png and camera both" and "keeps a camera-only put that
+      lands mid-sweep while still clearing the png". Both falsified against the old
+      write-back (`expected 'stale' to be 'hit'`; the camera read back as `CAM`, not `CAM2`);
+      server suite 264 passed (10 files). The window between the re-read and the `rm` remains, is
+      commented in `maintain` and stated in design.md's Risks
 
 ## 4. Server: the index maps through its root (D6)
 

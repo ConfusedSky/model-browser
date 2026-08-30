@@ -12,6 +12,7 @@ import {
   utimesSync,
   writeFileSync,
 } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -36,6 +37,7 @@ const CAM2 = { az: 2, el: 1, distR: 3, target: [1, 0, 0] as [number, number, num
 const CAP = 2 * 1024 ** 3
 const PNG_A = Buffer.from('png-a')
 const PNG_B = Buffer.from('png-b')
+const PNG_NEW = Buffer.from('png-new')
 /** The one model every library tree below holds, by its library path. */
 const LIB = '/kits/a/x.stl'
 
@@ -69,6 +71,33 @@ function makeLibraryTree(id: string): { top: string; model: string } {
 const jsons = (dir: string): string[] => readdirSync(dir).filter((f) => f.endsWith('.json'))
 const onlyFile = (dir: string, ext: string): string =>
   join(dir, readdirSync(dir).find((f) => f.endsWith(ext)) as string)
+
+/**
+ * A cache that can run one `put` inside `maintain`'s size-cap pass, in the
+ * window that pass has to defend: `readMeta` is called twice for an eviction
+ * candidate — once for the snapshot at the top of `maintain`, once as the
+ * re-read that guards the eviction — so arming on the *second* read of a key
+ * lands the put exactly between them, deterministically and without a timer.
+ */
+class InterposingCache extends ThumbCache {
+  private armed: { key: string; run: () => Promise<void> } | null = null
+  private reads = 0
+
+  /** Run `run` after the snapshot has read `path`'s sidecar, before the re-read. */
+  arm(path: string, run: () => Promise<void>): void {
+    this.armed = { key: createHash('sha256').update(path).digest('hex'), run }
+    this.reads = 0
+  }
+
+  protected override async readMeta(dir: string, key: string) {
+    if (this.armed !== null && key === this.armed.key && ++this.reads === 2) {
+      const { run } = this.armed
+      this.armed = null // exactly once — `run`'s own put reads this sidecar too
+      await run()
+    }
+    return super.readMeta(dir, key)
+  }
+}
 
 describe('ThumbCache maintenance', () => {
   it('a new mtime replaces the png in place (no superseded accumulation)', async () => {
@@ -243,6 +272,60 @@ describe('ThumbCache maintenance', () => {
     expect(resA.axis).toBe('z') // …axis spared too
     const pngs = readdirSync(cache.dir).filter((f) => f.endsWith('.png'))
     expect(pngs.length).toBeLessThanOrEqual(1)
+  })
+
+  /**
+   * The size cap evicts from a snapshot of every sidecar taken at the top of
+   * `maintain`. A `put` landing after that snapshot used to have its PNG
+   * deleted and its camera reverted to the snapshot; the pass re-reads the
+   * sidecar immediately before evicting. Both cells drive that window through
+   * `InterposingCache`.
+   */
+  it('spares an entry a mid-sweep put re-rendered, png and camera both', async () => {
+    const dir = tempDir('mb-cache-')
+    const cache = new InterposingCache(dir, 10) // tiny cap: any two pngs exceed it
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const a = join(fx.dir, 'loose.stl')
+    const b = fx.zipPath
+    const tick = () => new Promise((r) => setTimeout(r, 5))
+    await cache.put(a, { mtime: 1, png: Buffer.from('aaaaaaaa'), camera: CAM })
+    await tick()
+    await cache.put(b, { mtime: 1, png: Buffer.from('bbbbbbbb'), camera: CAM })
+    await tick()
+    await cache.get(b, 1) // a is now the least-recently-read: the eviction victim
+    cache.arm(a, () => cache.put(a, { mtime: 2, png: PNG_NEW, camera: CAM2 }))
+    await cache.maintain()
+
+    const res = await cache.get(a, 2)
+    expect(res.status).toBe('hit') // the png written mid-sweep is still there…
+    expect(Buffer.from(res.png as string, 'base64')).toEqual(PNG_NEW)
+    expect(res.camera).toEqual(CAM2) // …and the snapshot did not revert the camera
+    // Skipped, not counted: the cap still had to be met, so b paid instead.
+    expect((await cache.get(b, 1)).status).toBe('stale')
+  })
+
+  it('keeps a camera-only put that lands mid-sweep while still clearing the png', async () => {
+    const dir = tempDir('mb-cache-')
+    const cache = new InterposingCache(dir, 10)
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const a = join(fx.dir, 'loose.stl')
+    const b = fx.zipPath
+    const tick = () => new Promise((r) => setTimeout(r, 5))
+    await cache.put(a, { mtime: 1, png: Buffer.from('aaaaaaaa'), camera: CAM })
+    await tick()
+    await cache.put(b, { mtime: 1, png: Buffer.from('bbbbbbbb'), camera: CAM })
+    await tick()
+    await cache.get(b, 1)
+    // No new pixels, so the mtime does not move: this entry *is* still a cap
+    // candidate, and the eviction must write back the camera it now holds.
+    cache.arm(a, () => cache.put(a, { mtime: 1, camera: CAM2 }))
+    await cache.maintain()
+
+    const res = await cache.get(a, 1)
+    expect(res.status).toBe('stale') // png evicted and mtime cleared, as the cap requires
+    expect(res.camera).toEqual(CAM2) // the mid-sweep camera, not the snapshot's CAM
   })
 
   it('a cap it cannot parse falls back to the default instead of evicting everything', async () => {

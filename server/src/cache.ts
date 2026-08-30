@@ -92,7 +92,12 @@ export class ThumbCache {
     return join(dir, `${key}.png`)
   }
 
-  private async readMeta(dir: string, key: string): Promise<Meta | null> {
+  /**
+   * `protected` rather than `private` so a test can observe the two reads the
+   * size-cap pass makes of one sidecar (snapshot, then re-read) and interpose a
+   * `put` between them; nothing in production subclasses this.
+   */
+  protected async readMeta(dir: string, key: string): Promise<Meta | null> {
     try {
       return JSON.parse(await readFile(this.metaFile(dir, key), 'utf8')) as Meta
     } catch {
@@ -236,8 +241,20 @@ export class ThumbCache {
     for (const m of metas) {
       if (total <= this.sizeCap) break
       if (m.pngSize === 0) continue
+      // A `put` can land between the snapshot above and this eviction: writing
+      // the snapshot back would delete its fresh PNG and revert its camera. So
+      // re-read the sidecar here. A vanished entry, or one whose mtime moved
+      // (only a `put` writes a new mtime, and only with new pixels), is not the
+      // entry this pass measured — leave it alone and count nothing against the
+      // cap. Otherwise evict from the re-read, so a camera written meanwhile
+      // survives even though the mtime did not move.
+      const fresh = await this.readMeta(dir, m.key)
+      if (fresh === null || fresh.mtime !== m.meta.mtime) continue
+      // The window that remains is accepted, and unclosable without locking: a
+      // `put` landing after that re-read still loses its PNG below, and a
+      // camera it wrote is overwritten by the one the re-read carries.
       await rm(this.pngFile(dir, m.key), { force: true })
-      await this.writeMeta(dir, m.key, { ...m.meta, mtime: undefined })
+      await this.writeMeta(dir, m.key, { ...fresh, mtime: undefined })
       total -= m.pngSize
     }
   }

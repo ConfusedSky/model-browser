@@ -255,6 +255,15 @@ bar's existing error line: one line, two tones, no new surface.
   `maintain` (a missing PNG is how a camera-only entry looks, and is kept on purpose), so
   the migration itself must tolerate a legacy sidecar whose PNG is already gone: re-key the
   sidecar (cameras travel), then remove it. Idempotent by construction.
+- [`maintain`'s size-cap pass races `put`: it evicts from a snapshot of every sidecar taken
+  at the top of the run, and the migration and legacy sweep now sit between the two] → The
+  pass re-reads the sidecar immediately before evicting (task 3.4). An entry that is gone, or
+  whose `mtime` moved — only a `put` writes a new mtime, and only with new pixels — is
+  skipped and counted against nothing: it is fresh, not a cap candidate. Otherwise the
+  write-back is `{...fresh, mtime: undefined}` from the re-read, so a camera-only `put` in the
+  same window survives too. What remains is the window between that re-read and the `rm`,
+  accepted rather than closed: closing it needs a lock, and losing a PNG there costs pixels
+  the next sweep-triggering render regenerates.
 - [`realpath` on every request on cold removable media] → One call per request, lstat per
   path component; the walk already does this per directory. **Not measured** — the 32 s cold
   walk this would have been compared against is `listing-tree-cache`'s figure for a volume
