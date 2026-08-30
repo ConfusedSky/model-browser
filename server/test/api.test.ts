@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, unlinkSync } from 'node:fs'
+import { mkdtempSync, readdirSync, rmSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
@@ -136,6 +136,34 @@ describe('GET /api/dir', () => {
     const res = await get('/api/dir?path=relative/path')
     expect(res.status).toBe(400)
     expect(((await res.json()) as { error: string }).error).toBe('path must be a library path')
+  })
+
+  it('echoes one spelling of a path, whatever spelling was asked for', async () => {
+    // The echoed `path` is what the client asks for next — and, on the thumb
+    // routes, what the cache is keyed by. A spelling taken in verbatim is
+    // therefore a spelling handed back and carried forward: `//sub` minted a
+    // second identity for one directory.
+    for (const spelling of ['//sub', '/sub/.', '/sub/', '/loose.stl/../sub']) {
+      const res = await get(`/api/dir?path=${encodeURIComponent(spelling)}`)
+      expect([spelling, res.status]).toEqual([spelling, 200])
+      expect([spelling, ((await res.json()) as DirListing).path]).toEqual([spelling, '/sub'])
+    }
+  })
+
+  it('refuses an entry half on something that is not an archive, without an errno', async () => {
+    // A `!/` on a directory (or on a plain file) reached the zip reader, which
+    // opened it and raised EISDIR — a 500 carrying an errno and the filesystem
+    // path, for a request that was merely malformed.
+    for (const path of ['/sub!/', '/sub!/x', '/notes.txt!/', '/notes.txt!/x']) {
+      for (const extra of ['', '&flat=true']) {
+        const res = await get(`/api/dir?path=${encodeURIComponent(path)}${extra}`)
+        expect([path, extra, res.status]).toEqual([path, extra, 400])
+        const body = (await res.json()) as { error: string }
+        expect(body.error).toBe(`not an archive: ${path}`)
+        expect(body.error).not.toMatch(/EISDIR|ENOTDIR|errno/)
+        expect(body.error).not.toContain(fx.dir)
+      }
+    }
   })
 })
 
@@ -348,5 +376,67 @@ describe('thumbnail cache API', () => {
     expect(body.camera).toBeUndefined()
     expect(body.axis).toBeUndefined()
     expect(body.rig).toBe(9) // the pixels' own labels still land
+  })
+
+  it('keys one file on one entry, however the path was spelled', async () => {
+    // The cache key is the string itself, so an uncanonicalised path is a
+    // second entry for the same file: a thumbnail written under one spelling
+    // was a miss under the other, and the tile re-rendered forever.
+    const put = await app.request('/api/thumb', {
+      method: 'PUT',
+      headers: { ...LOOPBACK, 'content-type': 'application/json' },
+      body: JSON.stringify({ path: '/sub/../loose.stl', mtime: 424, png, camera }),
+    })
+    expect(put.status).toBe(200)
+    const res = await get(`/api/thumb?path=${encodeURIComponent('/loose.stl')}&mtime=424`)
+    const body = (await res.json()) as ThumbGetResponse
+    expect(body.status).toBe('hit')
+    expect(body.png).toBe(png)
+    expect(body.camera).toEqual(camera)
+  })
+})
+
+/**
+ * The wiring production runs on, which no test built before: a cache that was
+ * given the library it files under. Everything above shares one flat-layout
+ * cache (no library), so the per-library directory — the whole point of D5 —
+ * was exercised only by `cache.test.ts` calling the class directly.
+ */
+describe('a cache under the app’s own library', () => {
+  const perLib = libraryFor(fx.dir)
+  const perLibCache = mkdtempSync(join(tmpdir(), 'mb-perlib-cache-'))
+  const perLibApp = createApp(
+    new ThumbCache(perLibCache, undefined, undefined, perLib),
+    undefined,
+    undefined,
+    perLib,
+  )
+
+  afterAll(() => rmSync(perLibCache, { recursive: true, force: true }))
+
+  it('files an entry under the library’s id and serves it back', async () => {
+    const png = Buffer.from('per-library-png').toString('base64')
+    const put = await perLibApp.request('/api/thumb', {
+      method: 'PUT',
+      headers: { ...LOOPBACK, 'content-type': 'application/json' },
+      body: JSON.stringify({ path: '/loose.stl', mtime: 7, png }),
+    })
+    expect(put.status).toBe(200)
+
+    // Nothing flat: the id directory is the only thing in the cache dir.
+    const idDir = join(perLibCache, perLib.id())
+    expect(readdirSync(perLibCache)).toEqual([perLib.id()])
+    expect(readdirSync(idDir).map((f) => f.slice(f.lastIndexOf('.'))).sort()).toEqual([
+      '.json',
+      '.png',
+    ])
+
+    const res = await perLibApp.request(
+      `/api/thumb?path=${encodeURIComponent('/loose.stl')}&mtime=7`,
+      { headers: LOOPBACK },
+    )
+    const body = (await res.json()) as ThumbGetResponse
+    expect(body.status).toBe('hit')
+    expect(body.png).toBe(png)
   })
 })

@@ -1,7 +1,7 @@
 // The semantic index is a separate service that is usually not running. These
 // stub it at `fetch` so every state it can be in is reachable — the states are
 // the feature's real surface, and four of the five are failures.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -35,6 +35,10 @@ writeFileSync(join(root, 'kits', 'a.stl'), stlBytes(2))
 // A collection the library does not hold — a sibling of the top, not under it.
 const outside = realTempDir('mb-sem-out-')
 writeFileSync(join(outside, 'dragon.stl'), stlBytes(3))
+// Two links inside the collection: one leaving the library, one staying. The
+// index follows both when it embeds, so both can come back as hits.
+symlinkSync(join(outside, 'dragon.stl'), join(root, 'escape.stl'))
+symlinkSync(join(root, 'kits', 'a.stl'), join(root, 'alias.stl'))
 const cacheDir = mkdtempSync(join(tmpdir(), 'mb-sem-cache-'))
 const library = libraryFor(root)
 const app = createApp(new ThumbCache(cacheDir), undefined, undefined, library)
@@ -252,6 +256,32 @@ describe('semantic query', () => {
       entries: { path: string }[]
     }
     expect(body.entries.map((e) => e.path)).toEqual(['/dragon.stl'])
+  })
+
+  it('drops a hit that escapes the library, and keeps one that only aliases inside it', async () => {
+    // Inside the collection is not yet inside the library: the collection root
+    // sits in the library, but a symlink in it resolves wherever it points and
+    // the index embedded what it found. An escaping hit was named and scored
+    // on a surface where `/api/file` refuses the very same path.
+    stubIndex(READY, {
+      ...result,
+      results: [hit('escape.stl'), hit('alias.stl'), hit('dragon.stl')],
+    })
+    const body = (await (await post({ text: 'dragon' })).json()) as {
+      entries: { path: string }[]
+      poses: Record<string, unknown>
+      scores: Record<string, unknown>
+    }
+    expect(body.entries.map((e) => e.path)).toEqual(['/alias.stl', '/dragon.stl'])
+    // All three maps or none: a tile that is not there must carry no pose and
+    // no number anywhere.
+    expect(Object.keys(body.poses).sort()).toEqual(['/alias.stl', '/dragon.stl'])
+    expect(Object.keys(body.scores).sort()).toEqual(['/alias.stl', '/dragon.stl'])
+    // The path the search would have offered is the one the file route refuses.
+    const file = await app.request(`/api/file?path=${encodeURIComponent('/escape.stl')}`, {
+      headers: LOOPBACK,
+    })
+    expect(file.status).toBe(400)
   })
 
   /** What this server last asked the index for, tuning included. */

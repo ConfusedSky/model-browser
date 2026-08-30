@@ -5,7 +5,6 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
-  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -17,8 +16,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ThumbCache } from '../src/cache'
-import { type Library, createLibrary } from '../src/library'
-import { makeFixtures } from './helpers'
+import { libraryFor, makeFixtures, realTempDir } from './helpers'
 
 const cleanups: string[] = []
 
@@ -41,22 +39,16 @@ const PNG_B = Buffer.from('png-b')
 /** The one model every library tree below holds, by its library path. */
 const LIB = '/kits/a/x.stl'
 
+/**
+ * `realTempDir` (every comparison here is against a real path — the library
+ * resolves through realpath, and /tmp could be a symlink tomorrow), registered
+ * for cleanup. The library itself comes from `helpers.ts` too: this file kept
+ * its own copy of both only to avoid a merge collision that is long gone.
+ */
 function tempDir(prefix: string): string {
-  // Every comparison here is against a real path (the library resolves through
-  // realpath, and /tmp could be a symlink tomorrow), so the name is real from
-  // the start.
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)))
+  const dir = realTempDir(prefix)
   cleanups.push(dir)
   return dir
-}
-
-/**
- * A library rooted at `dir`, with HOME and the XDG config home pointed at a
- * temp directory of its own so no config on this machine is read.
- */
-function libraryFor(dir: string): Library {
-  const home = tempDir('mb-home-')
-  return createLibrary({ MODEL_BROWSER_ROOT: dir, HOME: home, XDG_CONFIG_HOME: home })
 }
 
 /**
@@ -251,6 +243,27 @@ describe('ThumbCache maintenance', () => {
     expect(resA.axis).toBe('z') // …axis spared too
     const pngs = readdirSync(cache.dir).filter((f) => f.endsWith('.png'))
     expect(pngs.length).toBeLessThanOrEqual(1)
+  })
+
+  it('a cap it cannot parse falls back to the default instead of evicting everything', async () => {
+    // `Number('2GB')` is NaN and `total <= NaN` is false, so the knob's most
+    // natural spelling emptied the cache on every sweep — a malformed value
+    // doing the exact opposite of what it says.
+    const dir = tempDir('mb-cache-')
+    const prev = process.env.MODEL_BROWSER_CACHE_CAP
+    process.env.MODEL_BROWSER_CACHE_CAP = '2GB'
+    try {
+      const cache = new ThumbCache(dir) // reads the environment, as production does
+      const fx = makeFixtures()
+      cleanups.push(fx.dir)
+      const path = join(fx.dir, 'loose.stl')
+      await cache.put(path, { mtime: 1, png: PNG_A, camera: CAM })
+      await cache.maintain()
+      expect((await cache.get(path, 1)).status).toBe('hit')
+    } finally {
+      if (prev === undefined) delete process.env.MODEL_BROWSER_CACHE_CAP
+      else process.env.MODEL_BROWSER_CACHE_CAP = prev
+    }
   })
 
   it('a concurrent read cannot resurrect an entry the sweep removed', async () => {
@@ -486,6 +499,40 @@ describe('ThumbCache under a library', () => {
 
     // Nobody claimed it and nothing else will ever read it: sidecar and png go.
     expect(readdirSync(base)).toHaveLength(0)
+  })
+
+  it('reads an unmounted volume as unmounted, and a deleted file as deleted', async () => {
+    // The flat directory holds *other* libraries' entries, recorded by absolute
+    // path. Stat'ing the file alone cannot tell a deletion from a volume that
+    // is not plugged in, and reading the second as the first took every
+    // camera of every library that happened to be unmounted — the loss D5
+    // leaves those entries in place to avoid.
+    const base = tempDir('mb-cache-')
+    const lib = makeLibraryTree('lib-legacy-mount')
+    const vol = join(tempDir('mb-mountpoint-'), 'OTHERVOL')
+    const kit = join(vol, 'Kit')
+    mkdirSync(kit, { recursive: true })
+    const stranger = join(kit, 'x.stl')
+    writeFileSync(stranger, 'x')
+    const legacy = new ThumbCache(base)
+    await legacy.put(stranger, { mtime: 1, png: PNG_B, camera: CAM })
+    const before = jsons(base)
+
+    // Unplugged: the file is gone and so is everything above it.
+    rmSync(vol, { recursive: true, force: true })
+    await new ThumbCache(base, CAP, 32, libraryFor(lib.top)).maintain()
+    expect(jsons(base)).toEqual(before)
+
+    // Back on the same mount point, it is the entry it always was.
+    mkdirSync(kit, { recursive: true })
+    writeFileSync(stranger, 'x')
+    expect((await legacy.get(stranger, 1)).camera).toEqual(CAM)
+
+    // Mounted, and the file itself deleted: now the directory says it was a
+    // deletion, and the whole entry goes.
+    unlinkSync(stranger)
+    await new ThumbCache(base, CAP, 32, libraryFor(lib.top)).maintain()
+    expect(readdirSync(base).filter((f) => !statSync(join(base, f)).isDirectory())).toEqual([])
   })
 
   it('sweeps an entry out of the library directory when its file no longer resolves', async () => {

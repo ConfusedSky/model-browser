@@ -255,6 +255,24 @@ function libHalfOf(libPath: string): string {
   return posix.normalize(parseVPath(libPath).fsPath)
 }
 
+/**
+ * A request carrying an entry half only means something when the filesystem
+ * half is an archive. Read as one, a directory raises `EISDIR` from the first
+ * `open` and a text file raises `ZipError`, so `/kit!/` answered 500 with an
+ * errno and the filesystem path in it — a fault where the request was simply
+ * malformed, and a probe of the tree besides.
+ *
+ * A path that does not stat at all is left alone: that is the zip readers' own
+ * 404, and "not found" and "not an archive" are different answers.
+ */
+async function requireArchive(fsPath: string, libPath: string): Promise<void> {
+  const s = await stat(fsPath).catch(() => null)
+  if (s === null) return
+  if (!s.isFile() || !/\.zip$/i.test(fsPath)) {
+    throw new ListingError(400, `not an archive: ${libPath}`)
+  }
+}
+
 export async function listDir(library: Library, libPath: string): Promise<DirListing> {
   const { fsPath, entry } = await library.resolve(libPath)
   const realTop = library.realTop()
@@ -270,6 +288,7 @@ export async function listDir(library: Library, libPath: string): Promise<DirLis
     }
     throw new ListingError(400, `not a directory or zip: ${libPath}`)
   }
+  await requireArchive(fsPath, libPath)
   return { path: libPath, entries: await listZipDir(fsPath, libHalf, entry) }
 }
 
@@ -493,6 +512,7 @@ export async function listFlat(
     // Inside an archive the containers are its immediate *directories*: a
     // nested zip file is not enterable, so offering it as a tile would hand
     // the user a link that 400s on click.
+    await requireArchive(fsPath, libPath)
     containers = await walkZip(fsPath, libHalf, entry, '', walk, true)
   }
 

@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { zipSync } from 'fflate'
 import { afterAll, describe, expect, it } from 'vitest'
@@ -129,7 +129,12 @@ describe('completion is a library path in and out', () => {
   })
 
   it('offers nothing for a prefix that is not a library path', async () => {
+    // Paired with the spelling that *does* complete: the same name, one
+    // leading slash apart. Without the second line an implementation that
+    // completed nothing at all would pass this test.
     expect(await complete('kit')).toEqual([])
+    expect(await complete('kit/')).toEqual([])
+    expect(await complete('/kit')).toEqual(['/kit/'])
   })
 
   it('offers nothing for a filesystem path, which is a library path that is not there', async () => {
@@ -140,6 +145,55 @@ describe('completion is a library path in and out', () => {
 
   it('offers nothing for a prefix that resolves outside the library', async () => {
     expect(await complete('/in/escapedir/')).toEqual([])
+  })
+})
+
+describe('the marker directory is the app’s own, not a folder to browse', () => {
+  it('refuses to list it or to read the marker, however the path is spelled', async () => {
+    // The marker is written when the library is first evaluated, so ask for a
+    // listing before looking for it — this test must not depend on which
+    // others ran first.
+    await listing('/')
+    // The file is really there — what follows is a refusal, not a miss.
+    expect(existsSync(join(lib, '.model-browser', 'library.json'))).toBe(true)
+    const cases: [string, string][] = [
+      ['/api/dir', '/.model-browser'],
+      ['/api/dir', '/.model-browser/'],
+      ['/api/dir', '/kit/../.model-browser'],
+      ['/api/file', '/.model-browser/library.json'],
+      ['/api/dir', '/.model-browser/library.json'],
+    ]
+    for (const [route, path] of cases) {
+      const res = await get(`${route}?path=${encodeURIComponent(path)}`)
+      expect([route, path, res.status]).toEqual([route, path, 400])
+      expect(((await res.json()) as { error: string }).error).toBe('path outside the library')
+    }
+  })
+
+  it('still lists the library root, where the marker was already hidden', async () => {
+    const body = await listing('/')
+    expect(body.entries.map((e) => e.name)).toEqual(['in', 'kit'])
+  })
+})
+
+describe('a path built to cost rather than to name a file', () => {
+  // `resolve` walks to the nearest ancestor that exists, one `realpath` per
+  // component, so the depth of a path naming nothing is the requester's to
+  // choose. Both bounds are checked before any filesystem call.
+  async function status(path: string): Promise<[number, string]> {
+    const res = await get(`/api/dir?path=${encodeURIComponent(path)}`)
+    return [res.status, ((await res.json()) as { error?: string }).error ?? '']
+  }
+
+  it('walks a path at the component bound and refuses one past it', async () => {
+    expect(await status('/a'.repeat(256))).toEqual([404, 'no such path: ' + '/a'.repeat(256)])
+    expect(await status('/a'.repeat(257))).toEqual([400, 'path too long'])
+  })
+
+  it('walks a path at the byte bound and refuses one past it', async () => {
+    const long = `/${'a'.repeat(4095)}` // 4096 bytes exactly
+    expect((await status(long))[0]).toBe(404)
+    expect(await status(`/${'a'.repeat(4096)}`)).toEqual([400, 'path too long'])
   })
 })
 

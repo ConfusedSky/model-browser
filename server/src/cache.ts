@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, readdir, realpath, rename, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join, sep } from 'node:path'
+import { dirname, join, sep } from 'node:path'
 import type { CameraState, LightingMode, OrbitAxis, ThumbGetResponse } from '../../shared/types'
 import { type Library, LibraryError } from './library'
 import { VPathError, joinVPath, parseVPath } from './vpath'
@@ -26,6 +26,20 @@ const DEFAULT_CAP = 2 * 1024 ** 3
 const MAINTAIN_EVERY = 32
 
 /**
+ * The size cap from the environment — parsed, never coerced, on `envLimit`'s
+ * rule (`listing.ts`): a non-finite or non-positive value falls back to the
+ * default. `Number('2GB')` is NaN, `total <= NaN` is false, and a NaN cap
+ * therefore evicted every PNG in the cache on every sweep — a malformed knob
+ * doing the opposite of what it spells.
+ */
+function envCap(): number {
+  const raw = process.env.MODEL_BROWSER_CACHE_CAP
+  if (raw === undefined || raw.trim() === '') return DEFAULT_CAP
+  const n = Number(raw)
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_CAP
+}
+
+/**
  * Server-side `{png, cameraState}` store, filed under a hash of the library
  * path (paths contain `/`, `!`, spaces). PNG keyed by path+mtime; camera by
  * path only.
@@ -44,7 +58,7 @@ export class ThumbCache {
 
   constructor(
     readonly dir: string = process.env.MODEL_BROWSER_CACHE ?? join(homedir(), '.cache', 'model-browser'),
-    readonly sizeCap: number = Number(process.env.MODEL_BROWSER_CACHE_CAP ?? DEFAULT_CAP),
+    readonly sizeCap: number = envCap(),
     readonly maintainEvery: number = MAINTAIN_EVERY,
     /**
      * Omitting the library is test- and legacy-only: entries then live flat in
@@ -254,6 +268,15 @@ export class ThumbCache {
    * absolute filesystem path — another library's, or nobody's. Nothing else
    * reads it any more (`maintain` reads `<dir>/<id>/`), so it gets an existence
    * sweep of its own at each run; its entries count toward no library's cap.
+   *
+   * These entries belong to *other* libraries, and the sweep gets the same
+   * protection this library's own does: an absent file is only a deleted file
+   * when its containing directory is there to say so. A missing file whose
+   * whole directory is gone is the shape of an unmounted volume — the case the
+   * spec names ("an unmounted volume is not a deleted library") and the one
+   * D5 leaves "for another library to claim" — so it is left alone. Stat'ing
+   * the file alone could not tell the two apart, and took the cameras of every
+   * library that happened not to be plugged in.
    */
   private async sweepLegacy(): Promise<void> {
     let files
@@ -267,8 +290,15 @@ export class ThumbCache {
       const key = f.slice(0, -'.json'.length)
       const meta = await this.readMeta(this.dir, key)
       if (meta === null) continue
+      // A path that does not parse names no file in any library — nobody will
+      // claim it and nothing else reads it — so it goes without a test.
       const source = parseVPathSafe(meta.path)
-      if (source !== null && (await stat(source).catch(() => null)) !== null) continue
+      if (source !== null) {
+        if ((await stat(source).catch(() => null)) !== null) continue
+        // The file is not there. Only its containing directory can say whether
+        // that is a deletion or a volume that is not mounted.
+        if ((await stat(dirname(source)).catch(() => null)) === null) continue
+      }
       await rm(this.metaFile(this.dir, key), { force: true })
       await rm(this.pngFile(this.dir, key), { force: true })
     }

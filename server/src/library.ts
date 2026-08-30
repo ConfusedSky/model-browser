@@ -17,7 +17,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, posix, relative, sep } from 'node:path'
 import type { LibraryState } from '../../shared/types'
-import { parseVPath } from './vpath'
+import { joinVPath, parseVPath } from './vpath'
 import { configHome } from './xdg'
 
 /**
@@ -37,6 +37,53 @@ export class LibraryError extends Error {
 
 /** The one refusal `resolve` gives for anything outside the tree. */
 const OUTSIDE = 'path outside the library'
+
+/**
+ * Bounds on a request's path, tested before any filesystem call is made.
+ *
+ * `resolve`'s nearest-ancestor loop costs one `realpath` per component of a
+ * path that does not exist, and the depth of that path is the requester's to
+ * choose: a 4,000-component path measured ~53 ms against ~0.6 ms for an
+ * ordinary one, from a request that names nothing at all. Both bounds sit far
+ * above anything a real tree produces — 4096 is `PATH_MAX` on Linux, and a
+ * library path is shorter than the filesystem path it becomes.
+ */
+const MAX_PATH_BYTES = 4096
+const MAX_COMPONENTS = 256
+
+/** The refusal for a path built to be expensive rather than to name a file. */
+const TOO_LONG = 'path too long'
+
+function tooLong(libPath: string): boolean {
+  return (
+    Buffer.byteLength(libPath) > MAX_PATH_BYTES ||
+    libPath.split('/').length - 1 > MAX_COMPONENTS
+  )
+}
+
+/**
+ * The one spelling of a library path: the same split-then-normalise `resolve`
+ * performs, with nothing else done to it. Pure — no filesystem is touched — so
+ * a route can canonicalise once and then key a cache, name a temp file and echo
+ * a listing by the string the resolver would itself have used.
+ *
+ * Without it each spelling of one file is its own key: `/kit/../kit/a.stl`
+ * minted a second thumbnail entry beside `/kit/a.stl`, and `//kit` came back in
+ * a listing's `path` verbatim, so the client's next request carried the
+ * spelling forward.
+ *
+ * Only the filesystem half is normalised; the entry half is an opaque archive
+ * name (D3). A trailing slash goes too — `/kit/` and `/kit` are one directory —
+ * except at the root, whose whole spelling is that slash.
+ */
+export function canonicalLibPath(libPath: string): string {
+  if (!libPath.startsWith('/')) throw new LibraryError('path must be a library path', 400)
+  if (tooLong(libPath)) throw new LibraryError(TOO_LONG, 400)
+  const { fsPath, entry } = parseVPath(libPath)
+  let normalized = posix.normalize(fsPath)
+  if (normalized.length > 1 && normalized.endsWith('/')) normalized = normalized.slice(0, -1)
+  return entry === undefined ? normalized : joinVPath(normalized, entry)
+}
 
 export interface Resolved {
   /** Filesystem path — the file, or the containing zip for a virtual path. */
@@ -198,11 +245,22 @@ export function createLibrary(env: NodeJS.ProcessEnv = process.env): Library {
     async resolve(libPath) {
       const realTop = requireReady().top
       if (!libPath.startsWith('/')) throw new LibraryError('path must be a library path', 400)
+      // Before any filesystem call: the loop below pays per component of a path
+      // that is not there, so its length is a cost the request chooses.
+      if (tooLong(libPath)) throw new LibraryError(TOO_LONG, 400)
       // The virtual path splits **first**: only the filesystem half is a path
       // in this tree. The entry half is an opaque archive name — normalising it
       // would rewrite a cache key that is the string itself.
       const { fsPath, entry } = parseVPath(libPath)
-      const candidate = join(realTop, posix.normalize(fsPath))
+      const normalized = posix.normalize(fsPath)
+      // The marker directory is this app's own corner of the library — its
+      // identity, and the home of every file the app keeps beside the models.
+      // Listings and completions already hide it; refusing it here is what
+      // keeps it unreadable by a request that spells it out. Refused as
+      // "outside", because that is what it is from the browsing side: the
+      // library is the models, and this is the app's own file.
+      if (normalized.split('/')[1] === MARKER_DIR) throw new LibraryError(OUTSIDE, 400)
+      const candidate = join(realTop, normalized)
 
       // Confinement is decided on the nearest ancestor that exists, so a path
       // that is merely absent (a completion prefix, a deleted folder, a thumb
@@ -216,6 +274,14 @@ export function createLibrary(env: NodeJS.ProcessEnv = process.env): Library {
           anchorReal = await realpath(anchor)
           break
         } catch {
+          // Every `realpath` failure is read as "this component is not there",
+          // ENOENT and EACCES and ELOOP and ENOTDIR alike. Deliberate, not an
+          // oversight: the confinement test below still runs against the
+          // nearest ancestor that *did* resolve, so a component this process
+          // cannot traverse can never widen the answer — and opening the file
+          // afterwards needs exactly the rights `realpath` was refused, so an
+          // unreadable ancestor becomes the route's own error rather than
+          // access to anything.
           const parent = dirname(anchor)
           // The filesystem root always resolves, so this terminates.
           if (parent === anchor) throw new LibraryError(OUTSIDE, 400)

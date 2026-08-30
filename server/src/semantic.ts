@@ -437,7 +437,8 @@ export async function modelEntryAt(
  * A hit carries `rel_path` and no mtime or size, and a tile needs both —
  * thumbnails are keyed path+mtime. So each hit is stat'd, at most once, bounded
  * by the number returned (`TOP`) and never by the size of the tree: no walk
- * happens behind a query.
+ * happens behind a query. Confining it costs one `realpath` beside that stat —
+ * the same per-hit bound, and the same call every other route makes.
  *
  * A hit that resolves to nothing is dropped without failing the search. Two
  * independently-cached views of one removable volume drift by construction —
@@ -473,6 +474,7 @@ export async function hitsToEntries(
 }> {
   const poses: Record<string, IndexPose> = {}
   const scores: Record<string, IndexScore> = {}
+  const realTop = library.realTop()
   let collectionLibPath: string
   try {
     collectionLibPath = library.libPathOf(await realpath(collectionRoot).catch(() => collectionRoot))
@@ -489,6 +491,15 @@ export async function hitsToEntries(
       // trusting a mount point this app resolved for itself.
       const full = resolve(collectionRoot, h.rel_path)
       if (full !== collectionRoot && !full.startsWith(collectionRoot + sep)) return null
+      // Inside the collection is not yet inside the library: a symlink in the
+      // indexed tree resolves wherever it points, and the index followed it
+      // when it embedded the file. Confined the way every other route is
+      // confined (D3), so a hit cannot be named and scored on a surface where
+      // `/api/file` refuses the very same path. `realpath` rather than `stat`,
+      // so the single stat a tile costs stays the query's per-hit bound.
+      const real = await realpath(full).catch(() => null)
+      if (real === null) return null
+      if (real !== realTop && !real.startsWith(realTop + sep)) return null
       // The same `rel_path`, joined onto the collection's library path instead
       // of onto its filesystem path — one hit, two addresses, from one string.
       const libPath = posix.join(collectionLibPath, h.rel_path)

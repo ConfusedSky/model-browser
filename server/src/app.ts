@@ -7,7 +7,7 @@ import type { LightingMode, OrbitAxis, ThumbPutRequest } from '../../shared/type
 import { ThumbCache } from './cache'
 import { guard } from './guard'
 import { LaunchError, type Launcher, ZipTempStore, createLauncher } from './launch'
-import { LibraryError, type Library, createLibrary } from './library'
+import { LibraryError, type Library, canonicalLibPath, createLibrary } from './library'
 import { ListingError, complete, listDir, listFlat } from './listing'
 import {
   IndexError,
@@ -122,8 +122,13 @@ export function createApp(
     if (!blankQ && !flat) return c.json({ error: 'q requires flat=true' }, 400)
     // Additive and default-on: absent means the shipped predicate.
     const folderMatching = c.req.query('folders') !== 'false'
-    if (flat) return c.json(await listFlat(library, path, q, { folderMatching }))
-    return c.json(await listDir(library, path))
+    // Canonicalised once, then used for everything downstream: what a listing
+    // echoes as its `path` is what the client asks for next, so a spelling
+    // taken in verbatim (`//kit`, `/kit/.`) would be handed straight back and
+    // carried forward.
+    const libPath = canonicalLibPath(path)
+    if (flat) return c.json(await listFlat(library, libPath, q, { folderMatching }))
+    return c.json(await listDir(library, libPath))
   })
 
   app.get('/api/file', async (c) => {
@@ -161,7 +166,11 @@ export function createApp(
     | { ok: true; file: string }
     | { ok: false; body: { error: string }; status: 400 | 404 }
 
-  async function resolveEntryFile(path: string): Promise<Resolved> {
+  async function resolveEntryFile(raw: string): Promise<Resolved> {
+    // One spelling before the temp file is named: `fileFor` keys the extracted
+    // entry on this string, and two spellings of one entry would otherwise
+    // stage the same bytes twice.
+    const path = canonicalLibPath(raw)
     const { fsPath, entry } = await library.resolve(path)
     if (entry !== undefined && /\.zip$/i.test(entry)) {
       return { ok: false, body: { error: 'nested zips are unsupported' }, status: 400 }
@@ -458,9 +467,11 @@ export function createApp(
     }
     // Validated, not translated: the cache keys on the library path itself, so
     // what the library decides here is only whether this path is one the server
-    // will speak about at all.
-    await library.resolve(path)
-    return c.json(await cache.get(path, mtime))
+    // will speak about at all. Canonical, though — the key *is* the string, and
+    // `/kit/../kit/a.stl` must not be a second entry beside `/kit/a.stl`.
+    const libPath = canonicalLibPath(path)
+    await library.resolve(libPath)
+    return c.json(await cache.get(libPath, mtime))
   })
 
   app.put('/api/thumb', async (c) => {
@@ -469,8 +480,10 @@ export function createApp(
       return c.json({ error: 'path and mtime are required' }, 400)
     }
     // Before any write: a cache entry for a path this server would not serve is
-    // a write the request had no standing to ask for.
-    await library.resolve(body.path)
+    // a write the request had no standing to ask for. Canonical for the same
+    // reason the read above is — one file, one entry, whatever it was spelled.
+    const libPath = canonicalLibPath(body.path)
+    await library.resolve(libPath)
     // `null` is the discard, not a bad axis: absence keeps, a value sets, null
     // clears (entry-context-menu D7). Only a value is worth validating.
     if (body.axis !== undefined && body.axis !== null && !ORBIT_AXES.includes(body.axis)) {
@@ -482,7 +495,7 @@ export function createApp(
     if (body.rig !== undefined && typeof body.rig !== 'number') {
       return c.json({ error: `invalid rig: ${String(body.rig)}` }, 400)
     }
-    await cache.put(body.path, {
+    await cache.put(libPath, {
       mtime: body.mtime,
       png: body.png !== undefined ? Buffer.from(body.png, 'base64') : undefined,
       camera: body.camera,
