@@ -14,20 +14,20 @@
 
 ## 1. Server: the library (D1, D2, D4)
 
-- [ ] 1.1 `server/src/library.ts`: read the root from `MODEL_BROWSER_ROOT`, else `root`
+- [x] 1.1 `server/src/library.ts`: read the root from `MODEL_BROWSER_ROOT`, else `root`
       in `config.json` under the XDG config home (`~/.config/model-browser/` by default;
       `MODEL_BROWSER_CONFIG` overrides the file
       path; `configHome` from `launch.ts` — extract it so both use one), at start; expose
-      `refresh()` re-evaluating the same
-- [ ] 1.2 Marker discovery: walk up from the root's real path to the filesystem root
+      `refresh()` re-evaluating the same — done 2026-08-29 (Stage A, `e8a4339`, cherry-picked; 21 tests in `library.test.ts`, confinement and marker-walk falsified; merged server suite 211 passed)
+- [x] 1.2 Marker discovery: walk up from the root's real path to the filesystem root
       looking for `.model-browser/library.json`; first found is the library
       (`{ id, version: 1 }`, unknown fields ignored, malformed file = not a marker).
       None found → write one at the root with `randomUUID()`; write failure → state
-      `unmarked` with `id = sha256(real top)`
-- [ ] 1.3 States: `ready {id, top, root}` / `unconfigured` / `missing {root}` /
+      `unmarked` with `id = sha256(real top)` — done 2026-08-29 (Stage A, `e8a4339`, cherry-picked; 21 tests in `library.test.ts`, confinement and marker-walk falsified; merged server suite 211 passed)
+- [x] 1.3 States: `ready {id, top, root}` / `unconfigured` / `missing {root}` /
       `unmarked` (ready plus a flag). `missing` is re-checked on each request while
-      missing (a mount arriving must not need a restart); `ready` is not re-checked
-- [ ] 1.4 `resolve(libPath)` → `{ fsPath, entry? }`: refuse unless it starts with `/`;
+      missing (a mount arriving must not need a restart); `ready` is not re-checked — done 2026-08-29 (Stage A, `e8a4339`, cherry-picked; 21 tests in `library.test.ts`, confinement and marker-walk falsified; merged server suite 211 passed)
+- [x] 1.4 `resolve(libPath)` → `{ fsPath, entry? }`: refuse unless it starts with `/`;
       `parseVPath` **first**, then `posix.normalize` the `fsPath` half only (the entry half is
       opaque — normalizing it would rewrite cache keys); `join(top, fsHalf)`; `realpath` and
       require `=== realTop || startsWith(realTop + sep)`. Refusals are
@@ -36,17 +36,17 @@
       for the reverse direction (`'/' + relative(realTop, real)`). A path that does not exist — every completion prefix, a listing of a deleted
       folder, a thumb PUT after a delete — is confined on the `realpath` of its nearest
       existing ancestor: under the top → the ordinary 404 (`[]` for completion); outside →
-      the 400. `realpath` throwing ENOENT is never reported as either
+      the 400. `realpath` throwing ENOENT is never reported as either — done 2026-08-29 (Stage A, `e8a4339`, cherry-picked; 21 tests in `library.test.ts`, confinement and marker-walk falsified; merged server suite 211 passed)
 - [ ] 1.5 `GET /api/library` returns the state; while `unconfigured`/`missing`, every
       `/api/*` path route answers 503 `{ state, root? }` before touching a path (the
       `indexErrorReply` shape). Log the resolved library top and id once at start
-- [ ] 1.6 Server tests (`server/test/library.test.ts`, per-test temp trees): subfolder
+- [x] 1.6 Server tests (`server/test/library.test.ts`, per-test temp trees): subfolder
       pick keeps the outer marker's id; no marker → written with a fresh id; env beats
       config; missing root → `missing` and 503 on `/api/dir`; unwritable top → `unmarked`
       with the hashed id; `resolve` refuses `..` escapes, a relative path, an absolute
       filesystem path, a symlink whose target is outside; follows a symlink whose target
       is inside; a vpath's archive half is confined and its entry half untouched
-
+ — done 2026-08-29 (Stage A, `e8a4339`, cherry-picked; 21 tests in `library.test.ts`, confinement and marker-walk falsified; merged server suite 211 passed)
 ## 2. Server: every path is a library path (D2, D3)
 
 - [ ] 2.1 `listing.ts`: `listDir`/`listFlat` take a library path, resolve through 1.4,
