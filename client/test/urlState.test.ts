@@ -49,7 +49,29 @@ describe('url state', () => {
     expect(serializeView({ path: '/a', flat: false, q: '', model: '' })).toBe(
       `?${new URLSearchParams({ path: '/a' }).toString()}`,
     )
-    expect(serializeView({ flat: false })).toBe('')
+    // The root is written by omission, which is the same claim this line always
+    // made — "a view with no path serializes to nothing" — in the vocabulary
+    // library-root gives it: `/` is what "no path" now spells (design D2).
+    expect(serializeView({ path: '/', flat: false })).toBe('')
+  })
+
+  it('round-trips library paths and names the root by omitting it', () => {
+    // Every path on the wire, in the URL and in the bar is library-relative
+    // with a leading slash (library R2): `/` is the library's top, `/Kit` a
+    // folder in it, `/Kit/a.zip!/x.stl` an entry inside an archive in it.
+    for (const path of ['/', '/Kit', '/Kit/a.zip!/x.stl']) {
+      expect(roundTrip({ path, flat: false }).path).toBe(path)
+    }
+    // The top is the default view, so it needs no parameter — and a URL that
+    // carries none names it. That equivalence is what makes the shortest deep
+    // link the shortest.
+    expect(serializeView({ path: '/', flat: false })).toBe('')
+    expect(serializeView({ path: '/', flat: true, q: 'gear' })).not.toContain('path=')
+    expect(parseUrl('').path).toBe('/')
+    expect(parseUrl('?flat=1').path).toBe('/')
+    // A folder is still named, so omission cannot be mistaken for a general
+    // rule about paths.
+    expect(serializeView({ path: '/Kit', flat: false })).toContain('path=%2FKit')
   })
 
   it('parses a bare `flat` key the same as a valued one', () => {

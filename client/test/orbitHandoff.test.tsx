@@ -76,6 +76,7 @@ function makeProps() {
       // No panel affordances either: these cases are the gesture and the
       // persist, and App is what decides that row's contents.
       panelCommands: [],
+      libraryTop: '/lib',
       onCommand: vi.fn(),
     },
   }

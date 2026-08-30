@@ -78,7 +78,10 @@ export interface Prefs {
 /** The resolved view as `urlState` writes it: absences are its business, not ours. */
 export function toUrlView(view: View): UrlView {
   return {
-    path: view.path === '' ? undefined : view.path,
+    // Passed through: `serializeView` owns which paths are written by omission,
+    // and the root is now one of them (D2). Eliding here as well would be the
+    // same rule in two places, disagreeing the first time one of them moved.
+    path: view.path,
     flat: view.flat,
     q: view.subject.kind === 'query' ? view.subject.text : undefined,
     similar: view.subject.kind === 'similar' ? view.subject.model : undefined,

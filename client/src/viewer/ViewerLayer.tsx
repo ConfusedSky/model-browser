@@ -33,6 +33,7 @@ import {
   type LiveFramingView,
 } from '../lib/entryActions'
 import { formatBytes, formatCosine, formatDate, formatZ } from '../lib/format'
+import { expandLibraryPath } from '../lib/libraryPath'
 import { SCALE_BADGE, Z_LABEL, type ScoreScale } from '../lib/scoreScale'
 import { GestureTracker } from '../lib/gesture'
 import type { MeshLru } from '../three/lru'
@@ -112,6 +113,19 @@ interface Props {
    */
   panelCommands: readonly EntryCommand[]
   /**
+   * The library's top as a filesystem path, or null while the library is not
+   * `ready` (library R4). App reads it once from `ApiClient.library()`; this
+   * panel is handed the string.
+   *
+   * The two places a path leaves the app are the copy affordance and the `path`
+   * line below, and both expand through it (library R2): a library path is this
+   * app's private spelling, and the file details are read by someone about to
+   * open the file somewhere else. Everything else here — the `modified (zip)`
+   * test, the entry lookups, the thumb cache key — goes on reading
+   * `viewer.entry.path`, which is and stays the library path.
+   */
+  libraryTop: string | null
+  /**
    * The panel's open-in row (open-in-slicer L10, reversed 2026-08-25): the
    * applications the platform associates with this model's type, default
    * first, or `null` where the row is not offered — a type with no
@@ -171,6 +185,7 @@ export default function ViewerLayer({
   onEntryMenu,
   menuOpen,
   panelCommands,
+  libraryTop,
   openIn = null,
   onCommand,
   actionError = null,
@@ -529,6 +544,7 @@ export default function ViewerLayer({
    */
   function copyPath(): void {
     copyEntryPath(viewer.entry, {
+      libraryTop,
       confirm: () => {
         setCopyError(null)
         setCopied(true)
@@ -752,7 +768,13 @@ export default function ViewerLayer({
                 {copied ? 'copied' : 'copy'}
               </button>
             </div>
-            <p className="select-text break-all text-xs text-zinc-300">{viewer.entry.path}</p>
+            {/* The filesystem path, not the library path (library R2): this
+                line is read to be typed or pasted somewhere else, and it has to
+                agree with what the copy button beside it puts on the clipboard
+                — one expansion, `expandLibraryPath`, called from both. */}
+            <p className="select-text break-all text-xs text-zinc-300">
+              {expandLibraryPath(libraryTop, viewer.entry.path)}
+            </p>
             {copyError !== null && (
               <p role="status" className="text-xs text-red-400">
                 {copyError}

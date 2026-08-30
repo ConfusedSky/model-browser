@@ -20,6 +20,9 @@ vi.mock('../src/api/client', () => ({
     // Hand-listed rather than shared, so it goes stale on new methods — see
     // client/test/CLAUDE.md's note about spreading the real module.
     indexAvailability = vi.fn().mockResolvedValue({ state: 'absent' })
+    // Read once on mount like the two above. A ready library so the grid
+    // renders — nothing about the persist path depends on the state.
+    library = vi.fn().mockResolvedValue({ state: 'ready', id: 'test', top: '/lib', root: '/' })
     semanticSearch = vi.fn()
     // The session's one registry reading, which App does on mount: a machine
     // with nothing associated and no chooser, so nothing about the persist
@@ -90,7 +93,10 @@ const settle = () => act(() => new Promise((r) => setTimeout(r, 30)))
 
 beforeEach(async () => {
   opts.persist = undefined
-  localStorage.setItem('model-browser:last-path', '/models')
+  // The boot path, through the URL: `resolveView` opens at the library's top
+  // (design D2/D7) and reads no last path, so this is what puts the app in
+  // /models the way the storage seed used to.
+  window.history.replaceState(null, '', '/?path=%2Fmodels')
   vi.stubGlobal('URL', { ...URL, createObjectURL: () => 'blob:m', revokeObjectURL: () => {} })
   vi.stubGlobal('createImageBitmap', () => Promise.resolve({ close: () => {} }))
   listDir.mockReset()

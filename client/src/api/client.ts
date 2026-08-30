@@ -3,6 +3,7 @@ import type {
   CameraState,
   DirListing,
   IndexAvailability,
+  LibraryState,
   SemanticListing,
   SemanticTuning,
   SimilarListing,
@@ -62,6 +63,17 @@ export interface ApiClient {
   fetchModel(path: string): Promise<ArrayBuffer>
   /** Availability of the semantic index — cheap, cached server-side (D4). */
   indexAvailability(opts?: { fresh?: boolean }): Promise<IndexAvailability>
+  /**
+   * What state the library is in (library R4). Always answers — this is the one
+   * route that has something to say while the library is `unconfigured` or
+   * `missing`, which is exactly when every other route is answering 503.
+   *
+   * Read once at boot and again whenever a path route reports a library state,
+   * so a volume mounted after start is picked up by the next navigation rather
+   * than by a reload. Its `top` is the only filesystem path the client holds,
+   * and only `expandLibraryPath` reads it.
+   */
+  library(): Promise<LibraryState>
   /**
    * A meaning query. Throws HttpError(503) carrying the index's state.
    *
@@ -132,16 +144,36 @@ export class HttpError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /**
+     * The library state a path route reports while it cannot serve (library
+     * R4): `'unconfigured'` or `'missing'`, absent on every other failure.
+     *
+     * Carried, not interpreted. It says only *that* the library is why this
+     * failed — the sentence the user reads, and the root a `missing` names, come
+     * from `library()`, whose answer is the one place that knows both. Typed as
+     * a bare string for that reason: narrowing it here would invite a caller to
+     * render off the error and quietly grow a second copy of the state.
+     */
+    readonly state?: string,
   ) {
     super(message)
   }
 }
 
+/**
+ * The failure body, read once. Four call sites parsed this identically before
+ * the library state gave them a third field to agree about; one shared reader
+ * is what keeps them from disagreeing.
+ */
+async function errorOf(res: Response): Promise<HttpError> {
+  const body = (await res.json().catch(() => null)) as
+    | { error?: string; state?: string }
+    | null
+  return new HttpError(res.status, body?.error ?? res.statusText, body?.state)
+}
+
 async function jsonOrThrow<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null
-    throw new HttpError(res.status, body?.error ?? res.statusText)
-  }
+  if (!res.ok) throw await errorOf(res)
   return res.json() as Promise<T>
 }
 
@@ -149,8 +181,7 @@ async function jsonOrThrow<T>(res: Response): Promise<T> {
  *  reads: the same `HttpError`, no body parsed on the way past. */
 async function okOrThrow(res: Response): Promise<void> {
   if (res.ok) return
-  const body = (await res.json().catch(() => null)) as { error?: string } | null
-  throw new HttpError(res.status, body?.error ?? res.statusText)
+  throw await errorOf(res)
 }
 
 function base64ToBlobUrl(b64: string): string {
@@ -196,6 +227,11 @@ export class HttpApiClient implements ApiClient {
     return jsonOrThrow<IndexAvailability>(res)
   }
 
+  async library(): Promise<LibraryState> {
+    const res = await this.fetchFn('/api/library')
+    return jsonOrThrow<LibraryState>(res)
+  }
+
   async semanticSearch(
     text: string,
     path?: string,
@@ -236,10 +272,7 @@ export class HttpApiClient implements ApiClient {
 
   async fetchModel(path: string): Promise<ArrayBuffer> {
     const res = await this.fetchFn(`/api/file?path=${encodeURIComponent(path)}`)
-    if (!res.ok) {
-      const body = (await res.json().catch(() => null)) as { error?: string } | null
-      throw new HttpError(res.status, body?.error ?? res.statusText)
-    }
+    if (!res.ok) throw await errorOf(res)
     return res.arrayBuffer()
   }
 
@@ -300,9 +333,6 @@ export class HttpApiClient implements ApiClient {
         posed: save.posed,
       }),
     })
-    if (!res.ok) {
-      const body = (await res.json().catch(() => null)) as { error?: string } | null
-      throw new HttpError(res.status, body?.error ?? res.statusText)
-    }
+    if (!res.ok) throw await errorOf(res)
   }
 }

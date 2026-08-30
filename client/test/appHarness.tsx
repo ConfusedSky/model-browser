@@ -25,6 +25,16 @@ export const putThumb = vi.fn().mockResolvedValue(undefined)
 // The semantic index is a separate service; the default is the state most
 // machines are in — not running — so a test opts *into* it existing.
 export const indexAvailability = vi.fn().mockResolvedValue({ state: 'absent' })
+// The library's state (library R4). The default is `ready`, unlike the two
+// stubs above: an absent index and an empty launch registry are ordinary states
+// a machine sits in, whereas a library that is not there is the state in which
+// *nothing* renders — so it is the one a test opts into, and every test written
+// before the library existed goes on seeing the grid it was written against.
+// `top` is `/lib` so an expanded path is visibly different from the library path
+// it came from; `root` is `/`, the app opening at the library's top.
+export const library = vi
+  .fn()
+  .mockResolvedValue({ state: 'ready', id: 'test', top: '/lib', root: '/' })
 // Shared (like listDir) so a test can assert *how* a thumbnail was rendered —
 // the camera and axis a pose produced, not just that pixels appeared.
 export const renderThumbnail = vi.fn(() => Promise.resolve(new Blob()))
@@ -61,10 +71,15 @@ export function apiClientModule(): Record<string, unknown> {
     // 404 from the similar call means "this model is not embedded", and the app
     // chooses its sentence from the code rather than from the index's words. A
     // statusless stub would let that dispatch pass by accident.
+    // Carries `state` beside `status` for the same reason: a 503 from a path
+    // route names the library's state, and App reads that field to decide
+    // whether to re-probe. A stateless stub would let that branch pass by
+    // accident.
     HttpError: class extends Error {
       constructor(
         readonly status: number,
         message: string,
+        readonly state?: string,
       ) {
         super(message)
       }
@@ -76,6 +91,7 @@ export function apiClientModule(): Record<string, unknown> {
       getThumb = getThumb
       putThumb = putThumb
       indexAvailability = indexAvailability
+      library = library
       semanticSearch = semanticSearch
       similar = similar
       apps = apps
@@ -201,6 +217,9 @@ async function mount(initial: DirListing): Promise<void> {
   // session's own one reading of the registry and nothing left over — which is
   // exactly the count "raising a menu fires no fetch" is measured against.
   apps.mockClear()
+  // Cleared before the render like `apps`, so a count read afterwards is this
+  // session's own — one boot probe, plus whatever the test provoked.
+  library.mockClear()
   openApp.mockClear()
   openWith.mockClear()
   // The persist chain decodes its PNG via createImageBitmap, which happy-dom
@@ -218,11 +237,20 @@ async function mount(initial: DirListing): Promise<void> {
   await settle()
 }
 
-export async function mountApp(lastPath: string, initial: DirListing): Promise<void> {
+/**
+ * Mount with the app opening at `bootPath`.
+ *
+ * Seeded through the URL, because under `library-root` that is the only way to
+ * open anywhere but the library's top: the boot view is `/` (design D2/D7) and
+ * the last-path read `resolveView` used to start from is gone. The resulting
+ * address bar and `history.length` are what a boot from the old storage seed
+ * produced anyway — the seed was written with `replaceState`, not a push — so
+ * this is the same starting position by a supported route.
+ */
+export async function mountApp(bootPath: string, initial: DirListing): Promise<void> {
   // The app writes navigation state into the URL; happy-dom's location
   // persists across tests in a file, so every mount starts from a clean one.
-  window.history.replaceState(null, '', '/')
-  localStorage.setItem('model-browser:last-path', lastPath)
+  window.history.replaceState(null, '', `/?path=${encodeURIComponent(bootPath)}`)
   await mount(initial)
 }
 
@@ -236,6 +264,9 @@ export async function unmountApp(): Promise<void> {
   // Reset on teardown, not on mount: the index's availability is read during
   // mount, so a test has to be able to configure it *before* mounting.
   indexAvailability.mockResolvedValue({ state: 'absent' })
+  // Same rule again: the state is read during mount, so a test configures it
+  // before mounting and the ready default is restored on the way out.
+  library.mockResolvedValue({ state: 'ready', id: 'test', top: '/lib', root: '/' })
   // Same rule as the index's, and for the same reason: the report is read
   // during mount, so a test configures it *before* mounting and the default is
   // restored on the way out.

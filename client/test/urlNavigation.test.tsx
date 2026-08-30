@@ -56,7 +56,13 @@ afterEach(async () => {
 
 describe('url navigation', () => {
   it('committed navigation, flat, and search each push one entry; re-commits do not stack', async () => {
-    expect(search()).toContain('path=%2Fmodels') // boot seeded via replace
+    // The boot URL survives into the committed view. It no longer proves a
+    // *seed*: under library-root the root is the default view and
+    // `serializeView` omits it (design D2), so a bare boot writes an empty URL
+    // and has nothing to seed. That property has its own coverage — urlState's
+    // root-omission test, and url-navigation's "The library's top has the
+    // shortest URL".
+    expect(search()).toContain('path=%2Fmodels')
     const len0 = window.history.length
 
     await click(container.querySelector<HTMLButtonElement>('main .grid button')!) // → Alpha
@@ -148,8 +154,17 @@ describe('url navigation', () => {
 })
 
 describe('url deep links', () => {
-  it('boot with path+flat+q skips last-path and lands in the search view', async () => {
+  it('boot with path+flat+q lands in the search view, reading no pre-library key', async () => {
     await unmountApp()
+    // The PRE-library key, deliberately: `recents.ts` re-keyed to `:v2` and
+    // never reads this one, so a value here must not reach the boot view. It
+    // held every stored path before library-root, and every one of them was an
+    // absolute filesystem path that now names nothing.
+    //
+    // This documents the key rather than gating it: a URL path won over
+    // last-path before this change too, so the line cannot fail. The gate is
+    // libraryState.test.tsx's boot with NO path parameter, which lands at `/`
+    // and does fail if `getLastPath` comes back.
     localStorage.setItem('model-browser:last-path', '/somewhere/else')
     const { mountAppAtCurrentUrl } = await import('./appHarness')
     await mountAppAtCurrentUrl('/?path=%2Fmodels&flat=1&q=found', SEARCH)

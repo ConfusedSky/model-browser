@@ -78,7 +78,7 @@ describe('the chrome layer', () => {
     // A stacking context lifts its descendants and nothing else: portal this
     // list out of the header, or lift the list alone, and the badges are back
     // over it.
-    localStorage.setItem('model-browser:recents', JSON.stringify(['/models/elsewhere']))
+    localStorage.setItem('model-browser:recents:v2', JSON.stringify(['/models/elsewhere']))
     act(() => pathInput().focus())
 
     expect(header().querySelector('ul')).not.toBeNull()

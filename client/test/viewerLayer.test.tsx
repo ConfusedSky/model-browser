@@ -57,6 +57,8 @@ function makeProps(mode: 'orbit' | 'lightbox') {
     // is App's list, and an empty one leaves the copy affordance they assert on
     // exactly where it was.
     panelCommands: [],
+    // Widened so a case can override it with `null` — the not-ready library.
+    libraryTop: '/lib' as string | null,
     onCommand: vi.fn(),
   }
 }
@@ -100,8 +102,19 @@ describe('ViewerLayer missing-model error', () => {
   it('info panel is up for a model that failed to load, with a copyable path', async () => {
     const props = makeProps('lightbox')
     const el = await render(props)
-    expect(el.textContent).toContain('/models/gone.stl')
+    // The FILESYSTEM path (library R2), read exactly rather than by
+    // containment: the library path `/models/gone.stl` is a substring of the
+    // expanded `/lib/models/gone.stl`, so a `toContain` here would pass whether
+    // or not the expansion happened.
+    expect(el.querySelector('.select-text')!.textContent).toBe('/lib/models/gone.stl')
     expect(el.querySelector('button[aria-label="Copy path"]')).not.toBeNull()
+  })
+
+  it('info panel shows the library path bare while the library is not ready', async () => {
+    // No top to join onto — the panel shows what the app holds rather than a
+    // filesystem path it cannot know.
+    const el = await render({ ...makeProps('lightbox'), libraryTop: null })
+    expect(el.querySelector('.select-text')!.textContent).toBe('/models/gone.stl')
   })
 
   it('closing an errored lightbox raises the close intent, then dismisses without persisting', async () => {
@@ -194,8 +207,10 @@ describe('copy-path feedback', () => {
 
       await act(async () => copy.click())
       expect(copy.textContent).toBe('copied')
-      // The same implementation the menu invokes, over the same virtual path.
-      expect(writeText).toHaveBeenCalledWith(ENTRY.path)
+      // The same implementation the menu invokes, over the same path — the
+      // filesystem one, expanded from the library's top (library R2), which is
+      // what makes the two surfaces put the identical text on the clipboard.
+      expect(writeText).toHaveBeenCalledWith('/lib/models/gone.stl')
       expect(el.querySelector('[role="status"]')).toBeNull()
 
       // Second copy fails inside the first one's confirmation window.

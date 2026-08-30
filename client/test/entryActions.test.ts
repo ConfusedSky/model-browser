@@ -141,17 +141,44 @@ describe("D6's per-kind table", () => {
 })
 
 describe('copyEntryPath', () => {
-  it('copies the virtual path verbatim, zip notation included', async () => {
+  it('copies the filesystem path, expanded from the library top, zip notation included', async () => {
+    // What lands on the clipboard is going somewhere else, so it is the
+    // filesystem path (library R2) — the library top joined to the entry's
+    // library path, with `!/` intact. The entry's own `path` stays the library
+    // path everywhere inside the app.
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
     const confirm = vi.fn()
     const report = vi.fn()
     try {
-      copyEntryPath(model('/m/kit.zip!/parts/lid.stl'), { confirm, report })
+      copyEntryPath(model('/m/kit.zip!/parts/lid.stl'), {
+        libraryTop: '/lib',
+        confirm,
+        report,
+      })
       await Promise.resolve()
-      expect(writeText).toHaveBeenCalledWith('/m/kit.zip!/parts/lid.stl')
+      expect(writeText).toHaveBeenCalledWith('/lib/m/kit.zip!/parts/lid.stl')
       expect(confirm).toHaveBeenCalled()
       expect(report).not.toHaveBeenCalled()
+    } finally {
+      Reflect.deleteProperty(navigator, 'clipboard')
+    }
+  })
+
+  it('copies the library path bare when the library is not ready', async () => {
+    // No top to join onto, so no guess is made: the honest answer is the path
+    // as the app holds it, not a prefix invented for a volume that is not
+    // mounted, which would name a real file somewhere else.
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    try {
+      copyEntryPath(model('/m/a.stl'), {
+        libraryTop: null,
+        confirm: vi.fn(),
+        report: vi.fn(),
+      })
+      await Promise.resolve()
+      expect(writeText).toHaveBeenCalledWith('/m/a.stl')
     } finally {
       Reflect.deleteProperty(navigator, 'clipboard')
     }
@@ -167,7 +194,9 @@ describe('copyEntryPath', () => {
     for (const clipboard of [undefined, { writeText: () => { throw new Error('blocked') } }]) {
       Object.defineProperty(navigator, 'clipboard', { value: clipboard, configurable: true })
       report.mockClear()
-      expect(() => copyEntryPath(model('/m/a.stl'), { confirm: vi.fn(), report })).not.toThrow()
+      expect(() =>
+        copyEntryPath(model('/m/a.stl'), { libraryTop: '/lib', confirm: vi.fn(), report }),
+      ).not.toThrow()
       expect(report).toHaveBeenCalledWith(COPY_FAILED)
     }
     Reflect.deleteProperty(navigator, 'clipboard')
@@ -178,7 +207,7 @@ describe('copyEntryPath', () => {
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
     const report = vi.fn()
     try {
-      copyEntryPath(model('/m/a.stl'), { confirm: vi.fn(), report })
+      copyEntryPath(model('/m/a.stl'), { libraryTop: '/lib', confirm: vi.fn(), report })
       await Promise.resolve()
       await Promise.resolve()
       expect(report).toHaveBeenCalledWith(COPY_FAILED)

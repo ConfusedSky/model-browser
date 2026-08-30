@@ -38,6 +38,7 @@ import type {
 } from '../../../shared/types'
 import type { ApiClient } from '../api/client'
 import type { ThumbState } from '../hooks/useThumbnails'
+import { expandLibraryPath } from './libraryPath'
 import type { Action } from '../state/reducer'
 import { indexCovers } from '../state/selectors'
 import { DEFAULT_CAMERA } from '../three/camera'
@@ -87,6 +88,21 @@ export interface Feedback {
 }
 
 /**
+ * The library's top as a filesystem path, or null while the library is not
+ * `ready` (library R4).
+ *
+ * Its own interface rather than a field on `Feedback`, because the two are
+ * wanted separately: the lightbox's panel has feedback of its own and no
+ * `ActionHost`, and it needs this. A **string**, not the client — the host is
+ * handed the answer `ApiClient.library()` already gave App, so no command can
+ * grow a second reader of that route (architecture D1's spirit: one caller, one
+ * place the answer lives).
+ */
+export interface LibraryTop {
+  libraryTop: string | null
+}
+
+/**
  * What a command needs from the app. One object, passed by every surface — a
  * command that took a DOM node, a URL builder or a fetch would be a second
  * implementation wearing the module's name.
@@ -97,7 +113,7 @@ export interface Feedback {
  * dispatches `{ type: 'similar' }`. Neither builds a URL, calls `pushState`, or
  * touches `window.history`.
  */
-export interface ActionHost extends Feedback {
+export interface ActionHost extends Feedback, LibraryTop {
   /** App's `navigate`: one `commit({ type: 'navigate', … })`, plus the ephemeral
    *  resets every navigation owes (find text, the reveal mark). */
   navigate: (path: string) => void
@@ -217,9 +233,18 @@ export const CHOOSER_FAILED = 'Could not open the chooser to pick an application
  * no dispatch and no tile. Two entry points, one body: the same text on the
  * clipboard, the same sentence when the write fails (R1).
  *
- * `entry.path` is the virtual path, `foo.zip!/parts/lid.stl` for archive
- * entries, unchanged (D2). It is what the info panel shows, what the path bar
- * accepts, and what a shared link uses.
+ * `entry.path` is a **library path** (design D2) — `/Kit/parts.zip!/lid.stl` for
+ * an archive entry — and that is what the info panel shows, what the path bar
+ * accepts, and what a shared link carries. What reaches the clipboard is not:
+ * this text is going somewhere else entirely, and a library path means nothing
+ * outside this app, so it is expanded to the filesystem path first
+ * (`expandLibraryPath`, library R2). The `!/` notation survives the expansion.
+ *
+ * While the library is not `ready` there is no top to join onto and the library
+ * path is copied bare. That is the honest answer rather than a broken one: the
+ * app cannot know where the volume would have been mounted, and inventing a
+ * prefix would put a path on the clipboard that names a real file somewhere
+ * else.
  *
  * The old panel-only fallback — select the rendered text for a manual copy —
  * does not come along. It ranged over a `<p>` a context menu does not have, and
@@ -230,15 +255,15 @@ export const CHOOSER_FAILED = 'Could not open the chooser to pick an application
  * The `try` stays even so: outside a secure context `navigator.clipboard` is
  * undefined and the call throws *synchronously*, which a bare `.catch()` misses.
  */
-export function copyEntryPath(entry: DirEntry, feedback: Feedback): void {
+export function copyEntryPath(entry: DirEntry, host: Feedback & LibraryTop): void {
   try {
     if (navigator.clipboard === undefined) throw new Error('clipboard unavailable')
-    void navigator.clipboard.writeText(entry.path).then(
-      () => feedback.confirm(),
-      () => feedback.report(COPY_FAILED),
+    void navigator.clipboard.writeText(expandLibraryPath(host.libraryTop, entry.path)).then(
+      () => host.confirm(),
+      () => host.report(COPY_FAILED),
     )
   } catch {
-    feedback.report(COPY_FAILED)
+    host.report(COPY_FAILED)
   }
 }
 

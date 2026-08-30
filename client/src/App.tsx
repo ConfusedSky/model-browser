@@ -5,6 +5,7 @@ import type {
   DirEntry,
   IndexPose,
   IndexScore,
+  LibraryState,
   LightingMode,
   OrbitAxis,
 } from '../../shared/types'
@@ -36,7 +37,7 @@ import {
 import { GestureTracker } from './lib/gesture'
 import { createHoverWarmer } from './lib/hover'
 import { fitSquareBox, type Box } from './lib/layout'
-import { getLastPath, pushRecent } from './lib/recents'
+import { pushRecent } from './lib/recents'
 import { scaleOf } from './lib/scoreScale'
 import {
   folderMatchingEnabled,
@@ -212,7 +213,11 @@ function ownPrefs(): Prefs {
  */
 function resolveView(url: UrlView): View {
   return {
-    path: url.path ?? getLastPath(),
+    // Always a string, and `/` when the URL named none: the library's top is
+    // the default view (design D2/D7), so there is no absence left to read and
+    // no last-path to fall back on. What a previous session was looking at is
+    // still recorded (`pushRecent`) and is no longer where the app opens.
+    path: url.path,
     flat: url.flat,
     // Where the URL's deliberate leniency is resolved (D4): the parameter that
     // names a subject is the more specific one, so a hand-edited link carrying
@@ -232,6 +237,19 @@ function resolveView(url: UrlView): View {
     ...optionsOf(url),
   }
 }
+
+/**
+ * What the header says while the library cannot be browsed (library R4).
+ *
+ * `missing` names the configured root because mounting it is the remedy and it
+ * takes seconds; `unconfigured` names the two places a root is set, because
+ * there is nothing to mount and the fix is a line of configuration. Both are
+ * *states*, not failures — hence one line in the header's existing slot and an
+ * empty grid, rather than an error surface of their own (design D4/D7).
+ */
+const LIBRARY_UNCONFIGURED =
+  'No library configured — set MODEL_BROWSER_ROOT or root in config.json'
+const libraryMissingText = (root: string): string => `The library at ${root} is not present`
 
 export default function App() {
   const api = useMemo(() => new HttpApiClient(), [])
@@ -347,6 +365,37 @@ export default function App() {
    *  otherwise close over the menu as it was at mount. */
   const menuOpenRef = useRef(false)
   menuOpenRef.current = menu !== null
+
+  /**
+   * The library's state (library R4), the app's one new concept (design D7).
+   * App-level state deliberately, never a `View` field: it is a fact about the
+   * *server*, not about the view a URL names, so it belongs in neither the URL,
+   * the history, nor the reducer.
+   *
+   * `null` is "not asked yet", which is not the same as any of the states: the
+   * boot listing goes out beside the probe, so treating the unknown as blocked
+   * would blank the grid for a round trip on every healthy start.
+   */
+  const [libraryState, setLibraryState] = useState<LibraryState | null>(null)
+  /**
+   * Re-read it. Stable, so the callbacks that re-probe do not rebuild for it.
+   *
+   * A rejection is swallowed: `/api/library` is the one route that answers in
+   * every state, so a failure here is the server being unreachable, which the
+   * request that provoked this is already reporting in the header. Overwriting
+   * that with a second sentence about the same outage says nothing new.
+   */
+  const probeLibrary = useCallback((): void => {
+    void api.library().then(setLibraryState, () => {})
+  }, [api])
+  useEffect(() => probeLibrary(), [probeLibrary])
+  /**
+   * Read by the re-probe conditions without making them depend on the value —
+   * `navigate` is `actionHost`'s, and rebuilding the host on every library
+   * answer would churn every memoized surface that holds it.
+   */
+  const libraryRef = useRef<LibraryState | null>(null)
+  libraryRef.current = libraryState
 
   /**
    * A command's brief report, shown on the path bar's transient line (task
@@ -524,6 +573,28 @@ export default function App() {
   // D9 exists to refuse.
   const dismissable = live.subject.kind !== 'none'
   const error = state.failure?.message ?? null
+  /**
+   * The library's top, filesystem-side, or null while it is not `ready` —
+   * `expandLibraryPath`'s first argument wherever a path leaves the app.
+   */
+  const libraryTop = libraryState?.state === 'ready' ? libraryState.top : null
+  /**
+   * The one sentence a not-`ready` library gets, or null. Non-null is also what
+   * "there is nothing to browse" means below: a library that is unconfigured or
+   * unmounted has no listing to show, no folder to call empty, and nothing on
+   * its way — so the grid, the skeleton and the landing line are all withheld
+   * and the message stands alone (library R4).
+   *
+   * `null` state — not asked yet — reads as unblocked on purpose: the boot
+   * listing is already in flight beside the probe, and blanking the grid until
+   * the probe answers would cost every healthy start a flash of nothing.
+   */
+  const libraryMessage: string | null =
+    libraryState === null || libraryState.state === 'ready'
+      ? null
+      : libraryState.state === 'unconfigured'
+        ? LIBRARY_UNCONFIGURED
+        : libraryMissingText(libraryState.root)
 
   const showSkeleton = useDelayedFlag(busy(state), SKELETON_DELAY_MS)
   const { thumbs, setThumb, setPlaceholder, discardThumbFraming } = useThumbnails(
@@ -627,6 +698,13 @@ export default function App() {
     }
     const fail = (err: unknown): void => {
       if (controller.signal.aborted) return
+      // A 503 carrying a library state says the *library* is why this failed,
+      // not the path (library R4). Re-read the state so the header names it —
+      // and so `missing` can name the configured root, which the error body
+      // carries but `HttpError` deliberately does not: one place knows both.
+      if (err instanceof HttpError && (err.state === 'unconfigured' || err.state === 'missing')) {
+        probeLibrary()
+      }
       dispatch({
         type: 'failure',
         id,
@@ -741,9 +819,16 @@ export default function App() {
       // left.
       setPendingReveal(null)
       setMarked(null)
+      // A volume mounted after the server started is picked up by the next
+      // navigation rather than by a reload (library R4): the state is asked
+      // again on the way out, so pressing ↑ or retyping the path is enough.
+      // Only while it is not `ready` — a healthy library is not re-asked on
+      // every click.
+      const lib = libraryRef.current
+      if (lib !== null && lib.state !== 'ready') probeLibrary()
       commit({ type: 'navigate', path, prefs: ownPrefs() })
     },
-    [commit],
+    [commit, probeLibrary],
   )
 
   function toggleFlat(): void {
@@ -1105,7 +1190,9 @@ export default function App() {
   useEffect(() => {
     function onPop(): void {
       const v = parseUrl()
-      if (v.path === undefined) return
+      // No path guard: a URL naming none names the library's top (design D2),
+      // which is a view like any other, so popping back to a bare URL restores
+      // the root instead of being ignored.
       // The input shows the restored query; the filter is not part of the view
       // a URL names, so it starts empty here as everywhere else.
       setFindText('')
@@ -1347,6 +1434,10 @@ export default function App() {
         else say(message, 'error')
       },
       poses,
+      // The one filesystem path the client holds, for the one command that puts
+      // a path somewhere else (library R2). A string, not the client: no command
+      // gets to ask `/api/library` itself.
+      libraryTop,
       // The thumbnail half: the one cache client, the mesh LRU the grid loads
       // through, the one render queue, and `useThumbnails`' own setter. Handed
       // over rather than reimplemented — App has no business resolving an
@@ -1368,6 +1459,7 @@ export default function App() {
       say,
       sayInViewer,
       poses,
+      libraryTop,
       api,
       lru,
       queue,
@@ -1814,7 +1906,17 @@ export default function App() {
    * view's own error is what the line falls back to.
    */
   const headerMessage: { text: string; tone: 'ok' | 'error' } | null =
-    actionText ?? (error !== null ? { text: error, tone: 'error' } : null)
+    actionText ??
+    // Above the view's own failure, because it explains it: while the library
+    // is unconfigured or unmounted every path route answers 503, and the
+    // route's sentence describes the symptom where this one names the cause and
+    // the remedy (library R4). A command's line still outranks both, unchanged
+    // — it is the newer news, and `say` clears it on its own.
+    (libraryMessage !== null
+      ? { text: libraryMessage, tone: 'error' }
+      : error !== null
+        ? { text: error, tone: 'error' }
+        : null)
 
   return (
     <div className="flex h-screen flex-col bg-zinc-950 text-zinc-100">
@@ -1892,9 +1994,14 @@ export default function App() {
             auto-fill from 7 columns to 6 and resize every tile by ~29px. */}
         <main
           className="min-w-0 flex-1 overflow-auto [scrollbar-gutter:stable]"
-          aria-busy={showSkeleton || undefined}
+          aria-busy={(libraryMessage === null && showSkeleton) || undefined}
         >
-          {target === '' && !showSkeleton ? (
+          {/* Nothing at all while the library is not there (library R4). Not a
+              skeleton, which promises a listing that is not coming; not an
+              "empty folder", which is a claim about a folder nobody could open.
+              The header's line above is the whole answer, and the region under
+              it stays empty so it is the only thing to read. */}
+          {libraryMessage !== null ? null : target === '' && !showSkeleton ? (
             <p className="mt-24 text-center text-sm text-zinc-500">
               Enter a directory path above to browse your models.
             </p>
@@ -2103,6 +2210,7 @@ export default function App() {
           onEntryMenu={onViewerEntryMenu}
           menuOpen={menuOpenRef}
           panelCommands={panelCommands}
+          libraryTop={libraryTop}
           openIn={panelOpenIn === null ? null : { apps: panelOpenIn, onChoose: onPanelChooseApp }}
           onCommand={onViewerCommand}
         />

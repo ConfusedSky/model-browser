@@ -232,7 +232,10 @@ describe('copy path from either surface', () => {
       await secondaryPress(tile('widget.stl'))
       await click(item('copyPath'))
       await settle()
-      expect(writeText).toHaveBeenCalledWith('/models/widget.stl')
+      // The FILESYSTEM path, expanded from the library's top (library R2) —
+      // the harness's library is at `/lib`, and `/models/widget.stl` is the
+      // entry's library path.
+      expect(writeText).toHaveBeenCalledWith('/lib/models/widget.stl')
       expect(menu()).toBeNull()
 
       writeText.mockRejectedValueOnce(new Error('denied'))
@@ -262,7 +265,10 @@ describe('copy path from either surface', () => {
       await secondaryPress(tile('widget.stl'))
       await click(item('copyPath'))
       await settle()
-      expect(writeText).toHaveBeenCalledWith('/models/widget.stl')
+      // The FILESYSTEM path, expanded from the library's top (library R2) —
+      // the harness's library is at `/lib`, and `/models/widget.stl` is the
+      // entry's library path.
+      expect(writeText).toHaveBeenCalledWith('/lib/models/widget.stl')
       expect(pathNotice()).toBe('Path copied.')
       expect(pathError()).toBeNull()
 

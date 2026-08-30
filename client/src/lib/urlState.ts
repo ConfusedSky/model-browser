@@ -20,7 +20,21 @@ import { clampCount, isKinds, isPool, TUNING_DEFAULTS } from './searchOptions'
  * would double-encode and read back wrong.
  */
 export interface UrlView {
-  path?: string
+  /**
+   * The directory or zip vpath, as a **library path** (library R2, design D2):
+   * `/` is the library's top, `/Kit` a folder in it, `/Kit/a.zip!/lid.stl` an
+   * archive entry. Never optional, unlike every other field here: the root is a
+   * real view with a real spelling, so "at the top" and "no path given" stop
+   * being the same absence. `parseUrl` reads a missing `path` as `/` and
+   * `serializeView` writes nothing for it — the default view needs no
+   * parameter, which keeps the shortest deep link the shortest.
+   *
+   * A link written before paths were library-relative carries a filesystem
+   * location, which begins with `/` and so parses as an ordinary library path.
+   * It is not special-cased anywhere: it resolves under the top like any other
+   * and fails as the ordinary not-found.
+   */
+  path: string
   flat: boolean
   q?: string
   /**
@@ -111,7 +125,9 @@ export function parseUrl(search: string = window.location.search): UrlView {
   // here either. An unparseable floor is a floor not named.
   if (Number.isFinite(min) && (p.get('min') ?? '').trim() !== '') tuning.minScore = min
   return {
-    path: p.get('path') ?? undefined,
+    // Absence is the root (D2), not "no path": the library's top is the default
+    // view, so a URL that names no path names it.
+    path: p.get('path') ?? '/',
     // The flat *toggle*, and only that (design R4). A search runs flat-shaped
     // whatever the toggle says — that shape is derived where the request is
     // built (`requestOf`), never read back out of the URL — so inferring the
@@ -169,7 +185,11 @@ export function parseUrl(search: string = window.location.search): UrlView {
  */
 export function serializeView(view: UrlView): string {
   const p = new URLSearchParams()
-  if (view.path !== undefined && view.path !== '') p.set('path', view.path)
+  // The root is written by omission (D2) — it is the default view, and a URL
+  // that carries no path is read back as it by `parseUrl`. `''` is kept beside
+  // it as the same kind of nothing, for the one view that still spells its path
+  // that way.
+  if (view.path !== '/' && view.path !== '') p.set('path', view.path)
   if (view.flat) p.set('flat', '1')
   // The subject, and only one of them can be it. `similar` wins for the same
   // reason `resolveView` resolves it first — it is the more specific parameter
