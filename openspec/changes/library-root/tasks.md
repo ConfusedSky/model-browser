@@ -111,8 +111,7 @@
       it**, not as `resolve` canonicalises it, so `/Kit/./x.stl` and `/Kit//x.stl` named the
       same file under different keys and came back in the response under the caller's
       spelling — done in the fix round, 2026-08-29: requests are canonicalised before they
-      are echoed or keyed. The code change is a parallel worker's and was not yet on `main`
-      when this line was written; reconcile the commit reference at merge
+      are echoed or keyed. Landed as `103b5a6` (W1, fix round): `canonicalLibPath` at every keying and echo site, the marker directory refused, a 4096-byte/256-component bound, `not an archive` for a `!/` on a non-zip, safe `MODEL_BROWSER_CACHE_CAP` parsing, semantic hits confined against the library, and a legacy sweep that leaves an unmounted volume alone; 11 tests, nine falsifications; merged server suite 262 ×3, client 515
 
 ## 3. Server: cache per library, migrated once (D5)
 
