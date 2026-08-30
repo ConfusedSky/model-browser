@@ -184,6 +184,23 @@ describe('the states in which there is no library', () => {
     expect((await ask('/api/semantic/status')).status).toBe(200)
   })
 
+  it('gates the scoring routes too, which take a path like any other', async () => {
+    // 4.0. Both were briefly exempt so B3's absolute-path tests stayed green;
+    // they are path routes and answer the state envelope like the rest. The
+    // index is off in this file, so an ungated route would answer 503
+    // `absent` — a different state, which is what tells the two apart.
+    for (const route of ['/api/semantic', '/api/semantic/similar']) {
+      const res = await absentApp.request(route, {
+        method: 'POST',
+        headers: { ...LOOPBACK, 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'dragon', path: '/' }),
+      })
+      const body = (await res.json()) as { state: string; root?: string }
+      expect([route, res.status, body.state]).toEqual([route, 503, 'missing'])
+      expect(body.root).toBe(absent)
+    }
+  })
+
   it('serves the library as soon as the directory appears, without a restart', async () => {
     mkdirSync(absent, { recursive: true })
     writeFileSync(join(absent, 'arrived.stl'), stlBytes(6))

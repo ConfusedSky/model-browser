@@ -1,7 +1,7 @@
 // The semantic index is a separate service that is usually not running. These
 // stub it at `fetch` so every state it can be in is reachable — the states are
 // the feature's real surface, and four of the five are failures.
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -23,15 +23,25 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 import { createApp } from '../src/app'
 import { ThumbCache } from '../src/cache'
 import { resetIndexStatus } from '../src/semantic'
-import { LOOPBACK, stlBytes } from './helpers'
+import { LOOPBACK, libraryFor, realTempDir, stlBytes } from './helpers'
 
-const root = mkdtempSync(join(tmpdir(), 'mb-sem-'))
+// The library's top *is* the collection root here, so a hit's library path is
+// its `rel_path` with a leading slash. The collections that sit elsewhere —
+// beneath the top, and outside it altogether — get their own describes below.
+const root = realTempDir('mb-sem-')
 writeFileSync(join(root, 'dragon.stl'), stlBytes(1))
+mkdirSync(join(root, 'kits'), { recursive: true })
+writeFileSync(join(root, 'kits', 'a.stl'), stlBytes(2))
+// A collection the library does not hold — a sibling of the top, not under it.
+const outside = realTempDir('mb-sem-out-')
+writeFileSync(join(outside, 'dragon.stl'), stlBytes(3))
 const cacheDir = mkdtempSync(join(tmpdir(), 'mb-sem-cache-'))
-const app = createApp(new ThumbCache(cacheDir))
+const library = libraryFor(root)
+const app = createApp(new ThumbCache(cacheDir), undefined, undefined, library)
 
 afterAll(() => {
   rmSync(root, { recursive: true, force: true })
+  rmSync(outside, { recursive: true, force: true })
   rmSync(cacheDir, { recursive: true, force: true })
 })
 
@@ -86,7 +96,13 @@ const post = (body: unknown) =>
     body: JSON.stringify(body),
   })
 
-beforeEach(() => resetIndexStatus())
+beforeEach(async () => {
+  resetIndexStatus()
+  // The library's first `state()` stats the configured root, and the stat count
+  // below is asserted exactly. Warmed here so the number is the query's cost
+  // whether the whole file runs or one test does.
+  await library.state()
+})
 afterEach(() => vi.unstubAllGlobals())
 
 describe('semantic index availability', () => {
@@ -192,7 +208,7 @@ describe('semantic query', () => {
     // entry carries, and verbatim — a text-query cosine really does run this
     // low, and rescaling it here would break the one thing it can be checked
     // against (the index's own `WEAK_Z`).
-    expect(body.scores[join(root, 'dragon.stl')]).toEqual({ score: 0.16, z: 3.9 })
+    expect(body.scores['/dragon.stl']).toEqual({ score: 0.16, z: 3.9 })
     expect(body.scope).toEqual({ path: null, status: 'partial', indexed: 2801, scanned: 3396, covers: ['stl'] })
   })
 
@@ -204,7 +220,7 @@ describe('semantic query', () => {
     }
     expect(body.entries).toHaveLength(1)
     // The dropped hit leaves no score behind: one key, one fact.
-    expect(Object.keys(body.scores)).toEqual([join(root, 'dragon.stl')])
+    expect(Object.keys(body.scores)).toEqual(['/dragon.stl'])
   })
 
   it('stats once per returned hit — the bound that lets the two caches disagree', async () => {
@@ -235,7 +251,7 @@ describe('semantic query', () => {
     const body = (await (await post({ text: 'dragon' })).json()) as {
       entries: { path: string }[]
     }
-    expect(body.entries.map((e) => e.path)).toEqual([join(root, 'dragon.stl')])
+    expect(body.entries.map((e) => e.path)).toEqual(['/dragon.stl'])
   })
 
   /** What this server last asked the index for, tuning included. */
@@ -348,18 +364,112 @@ describe('semantic query', () => {
 
   it('rejects a virtual path rather than letting the index reject it', async () => {
     stubIndex(READY, result)
-    const res = await post({ text: 'dragon', path: `${root}/kit.zip!/inner` })
+    const res = await post({ text: 'dragon', path: '/kit.zip!/inner' })
     expect(res.status).toBe(400)
   })
 
-  it('rejects a scope outside the indexed collection', async () => {
+  it('rejects a scope the library does not hold', async () => {
+    // A library path that is not there. The collection root *is* the library
+    // top in this file, so this is as far outside the collection as a library
+    // path can be — a scope inside the library and outside the *collection*
+    // needs a collection below the top, which the describe further down builds.
     stubIndex(READY, result)
-    const res = await post({ text: 'dragon', path: tmpdir() })
+    const res = await post({ text: 'dragon', path: '/nowhere' })
     expect(res.status).toBe(400)
   })
 
   it('a blank query is not a search', async () => {
     stubIndex(READY, result)
     expect((await post({ text: '   ' })).status).toBe(400)
+  })
+})
+
+describe('a collection beneath the library top', () => {
+  // The index keeps its own absolute root; what reaches the client is that root
+  // as a library path, and every hit named under it (D6).
+  const KITS = { ...READY, collection_root: join(root, 'kits') }
+  const result = {
+    scope: { path: null, status: 'indexed', n_indexed: 1, n_scanned: 1, covers: ['stl'] },
+    weak: false,
+    results: [hit('a.stl')],
+  }
+
+  it('names the covered subtree by its library path, not by the index’s own', async () => {
+    stubIndex(KITS, result)
+    const body = (await (await app.request('/api/semantic/status', { headers: LOOPBACK })).json()) as {
+      collectionRoot?: string
+    }
+    expect(body.collectionRoot).toBe('/kits')
+  })
+
+  it('names hits by library path, so they address the same tile a listing does', async () => {
+    stubIndex(KITS, result)
+    const body = (await (await post({ text: 'dragon' })).json()) as {
+      entries: { name: string; path: string; mtime: number }[]
+      poses: Record<string, unknown>
+      scores: Record<string, unknown>
+    }
+    expect(body.entries.map((e) => e.path)).toEqual(['/kits/a.stl'])
+    // Named as a hit is — relative to the collection — which the addresses
+    // changing does not touch.
+    expect(body.entries[0]!.name).toBe('a.stl')
+    expect(body.entries[0]!.mtime).toBeGreaterThan(0)
+    // Both maps keyed by the path the entry carries, which is what
+    // `useThumbnails` looks a pose up by (`poses[entry.path]`). Keyed by the
+    // absolute path instead, every index pose is silently never found.
+    expect(body.poses['/kits/a.stl']).toBeDefined()
+    expect(body.scores['/kits/a.stl']).toEqual({ score: 0.16, z: 3.9 })
+  })
+
+  it('scopes to a library path inside the collection, and refuses one above it', async () => {
+    stubIndex(KITS, result)
+    const inside = await post({ text: 'dragon', path: '/kits' })
+    expect(inside.status).toBe(200)
+    // The library top is inside the library and outside the collection — the
+    // case the index is not the one to answer.
+    stubIndex(KITS, result)
+    expect((await post({ text: 'dragon', path: '/' })).status).toBe(400)
+  })
+})
+
+describe('a collection outside the library', () => {
+  // It covers nothing this app can address: no hit inside it has a library
+  // path, and neither has the root itself.
+  const ELSEWHERE = { ...READY, collection_root: outside }
+  const result = {
+    scope: { path: null, status: 'indexed', n_indexed: 1, n_scanned: 1, covers: ['stl'] },
+    weak: false,
+    results: [hit('dragon.stl')],
+  }
+
+  it('reports no collection root, and says why instead of naming a path', async () => {
+    stubIndex(ELSEWHERE, result)
+    const body = (await (await app.request('/api/semantic/status', { headers: LOOPBACK })).json()) as {
+      state: string
+      collectionRoot?: string
+      detail?: string
+    }
+    expect(body.state).toBe('ready')
+    // Absent rather than absolute: the side panel would otherwise offer a path
+    // the user cannot navigate to, and `indexCovers` would read it as coverage.
+    expect(body.collectionRoot).toBeUndefined()
+    expect(body.detail).toBe('the index covers a location outside the library')
+  })
+
+  it('offers no scope at any library path', async () => {
+    for (const path of ['/', '/kits']) {
+      stubIndex(ELSEWHERE, result)
+      const res = await post({ text: 'dragon', path })
+      expect([path, res.status]).toEqual([path, 400])
+    }
+  })
+
+  it('answers an unscoped query with nothing, rather than tiles nothing can address', async () => {
+    stubIndex(ELSEWHERE, result)
+    const res = await post({ text: 'dragon' })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { entries: unknown[]; scores: Record<string, unknown> }
+    expect(body.entries).toEqual([])
+    expect(body.scores).toEqual({})
   })
 })

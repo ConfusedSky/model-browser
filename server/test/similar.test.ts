@@ -10,13 +10,21 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import { createApp } from '../src/app'
 import { ThumbCache } from '../src/cache'
 import { resetIndexStatus } from '../src/semantic'
-import { LOOPBACK, stlBytes } from './helpers'
+import { LOOPBACK, libraryFor, realTempDir, stlBytes } from './helpers'
 
-const root = mkdtempSync(join(tmpdir(), 'mb-sim-'))
+// The collection root is the library's top here, so a hit's library path is its
+// `rel_path` with a leading slash. What the *index* is told stays absolute — it
+// is another process with its own view of the volume (D6) — and the two
+// spellings appearing side by side below is the translation being asserted.
+const root = realTempDir('mb-sim-')
 writeFileSync(join(root, 'hero.stl'), stlBytes(1))
 writeFileSync(join(root, 'base.stl'), stlBytes(2))
+// A kit, for the collection that covers only part of the library further down.
+mkdirSync(join(root, 'Kits'), { recursive: true })
+writeFileSync(join(root, 'Kits', 'anchor.stl'), stlBytes(3))
+writeFileSync(join(root, 'Kits', 'near.stl'), stlBytes(4))
 const cacheDir = mkdtempSync(join(tmpdir(), 'mb-sim-cache-'))
-const app = createApp(new ThumbCache(cacheDir))
+const app = createApp(new ThumbCache(cacheDir), undefined, undefined, libraryFor(root))
 
 afterAll(() => {
   rmSync(root, { recursive: true, force: true })
@@ -104,7 +112,7 @@ afterEach(() => vi.unstubAllGlobals())
 describe('a model’s neighbours', () => {
   it('joins hits to tiles through the same path a meaning answer takes', async () => {
     stubIndex(READY, RESULT)
-    const body = (await (await post({ path: join(root, 'hero.stl'), k: 16 })).json()) as {
+    const body = (await (await post({ path: '/hero.stl', k: 16 })).json()) as {
       path: string
       entries: { name: string; path: string; kind: string; size: number; mtime: number }[]
       poses: Record<string, unknown>
@@ -113,24 +121,25 @@ describe('a model’s neighbours', () => {
     expect(body.entries).toHaveLength(1)
     // mtime and size come from this server's stat, not from the index, which
     // reports neither — the same join, and the same reason for it.
-    expect(body.entries[0]!.path).toBe(join(root, 'base.stl'))
+    expect(body.entries[0]!.path).toBe('/base.stl')
     expect(body.entries[0]!.kind).toBe('model')
     expect(body.entries[0]!.mtime).toBeGreaterThan(0)
     expect(body.entries[0]!.size).toBeGreaterThan(0)
     // Poses ride along, so a neighbour grid renders at the index's orientation
     // exactly as a meaning grid does.
-    expect(body.poses[join(root, 'base.stl')]).toEqual(POSE)
+    expect(body.poses['/base.stl']).toEqual(POSE)
     // So do the scores, keyed by the same resolved path — which is what makes
     // "no entry" and "no score" one fact rather than two that can disagree.
     // Verbatim from the index: nothing is rescaled on the way through.
-    expect(body.scores[join(root, 'base.stl')]).toEqual({ score: 0.93, z: 3.3 })
-    // The whole collection is what the view is about, and the answer says so.
-    expect(body.path).toBe(root)
+    expect(body.scores['/base.stl']).toEqual({ score: 0.93, z: 3.3 })
+    // The whole collection is what the view is about, and the answer says so —
+    // as a library path, like every other path on the wire (D2).
+    expect(body.path).toBe('/')
   })
 
   it('drops a hit that no longer resolves, without failing the request', async () => {
     stubIndex(READY, { ...RESULT, results: [hit('base.stl'), hit('moved-away.stl')] })
-    const body = (await (await post({ path: join(root, 'hero.stl') })).json()) as {
+    const body = (await (await post({ path: '/hero.stl' })).json()) as {
       entries: unknown[]
       scores: Record<string, unknown>
     }
@@ -138,7 +147,7 @@ describe('a model’s neighbours', () => {
     // The stale hit takes its score with it. Keyed alike, dropped alike — a
     // number left behind for a tile that is not there is exactly what sharing
     // the key prevents.
-    expect(Object.keys(body.scores)).toEqual([join(root, 'base.stl')])
+    expect(Object.keys(body.scores)).toEqual(['/base.stl'])
   })
 
   it('a hit cannot name a file outside the collection', async () => {
@@ -151,10 +160,10 @@ describe('a model’s neighbours', () => {
         { ...hit('base.stl'), rel_path: 'base.stl', path: '/etc/passwd' },
       ],
     })
-    const body = (await (await post({ path: join(root, 'hero.stl') })).json()) as {
+    const body = (await (await post({ path: '/hero.stl' })).json()) as {
       entries: { path: string }[]
     }
-    expect(body.entries.map((e) => e.path)).toEqual([join(root, 'base.stl')])
+    expect(body.entries.map((e) => e.path)).toEqual(['/base.stl'])
   })
 
   it('sends no scope: neighbours are collection-wide', async () => {
@@ -163,9 +172,11 @@ describe('a model’s neighbours', () => {
     // meaning search, which IS rooted at the browsed directory. A reviewer
     // finding the two scoped differently should find this test.
     stubIndex(READY, RESULT)
-    await post({ path: join(root, 'hero.stl'), k: 16 })
+    await post({ path: '/hero.stl', k: 16 })
     const body = sentBody()
     expect(body).not.toHaveProperty('scope')
+    // Absolute, and this is the one place it must be: the index resolves its
+    // own paths, and a library path would name nothing to it.
     expect(body.path).toBe(join(root, 'hero.stl'))
     expect(body.k).toBe(16)
     // No pool named, no pool sent: 4.2's rule survives the parameter becoming
@@ -179,30 +190,30 @@ describe('a model’s neighbours', () => {
     // here would mint a second default for a choice this server has no opinion
     // about, and forwarding an unknown value would make the index guess.
     stubIndex(READY, RESULT)
-    await post({ path: join(root, 'hero.stl'), k: 16, pool: 'max' })
+    await post({ path: '/hero.stl', k: 16, pool: 'max' })
     expect(sentBody().pool).toBe('max')
 
     for (const pool of ['softmax', 'mean']) {
       stubIndex(READY, RESULT)
-      await post({ path: join(root, 'hero.stl'), pool })
+      await post({ path: '/hero.stl', pool })
       expect(sentBody().pool).toBe(pool)
     }
 
     stubIndex(READY, RESULT)
-    expect((await post({ path: join(root, 'hero.stl'), pool: 'sideways' })).status).toBe(400)
-    expect((await post({ path: join(root, 'hero.stl'), pool: 3 })).status).toBe(400)
+    expect((await post({ path: '/hero.stl', pool: 'sideways' })).status).toBe(400)
+    expect((await post({ path: '/hero.stl', pool: 3 })).status).toBe(400)
   })
 
   it('leaves k to the index when the caller names none, rather than minting a second default', async () => {
     stubIndex(READY, RESULT)
-    await post({ path: join(root, 'hero.stl') })
+    await post({ path: '/hero.stl' })
     expect(sentBody()).not.toHaveProperty('k')
   })
 
   it('refuses a k the index would refuse', async () => {
     stubIndex(READY, RESULT)
-    expect((await post({ path: join(root, 'hero.stl'), k: 0 })).status).toBe(400)
-    expect((await post({ path: join(root, 'hero.stl'), k: 4.5 })).status).toBe(400)
+    expect((await post({ path: '/hero.stl', k: 0 })).status).toBe(400)
+    expect((await post({ path: '/hero.stl', k: 4.5 })).status).toBe(400)
   })
 
   it('a model the index has never embedded comes back as a 404, in its own words', async () => {
@@ -211,7 +222,7 @@ describe('a model’s neighbours', () => {
     // is unambiguous because the other unembeddable case (an archive interior)
     // never reaches this server.
     stubIndex(READY, { detail: `${join(root, 'hero.stl')} is not in the cache` }, { similarStatus: 404 })
-    const res = await post({ path: join(root, 'hero.stl') })
+    const res = await post({ path: '/hero.stl' })
     expect(res.status).toBe(404)
     const body = (await res.json()) as { error: string; state?: string }
     expect(body.error).toContain('not in the cache')
@@ -225,28 +236,28 @@ describe('a model’s neighbours', () => {
     // them as the latter would tell the user to run the classifier over a path
     // that can never be in it.
     stubIndex(READY, { detail: 'names 2 models; /similar takes one' }, { similarStatus: 422 })
-    const res = await post({ path: join(root, 'hero.stl') })
+    const res = await post({ path: '/hero.stl' })
     expect(res.status).toBe(400)
     expect((await res.json()).error).toContain('takes one')
   })
 
   it('an index that fails on its own side is a bad gateway', async () => {
     stubIndex(READY, { detail: 'CUDA out of memory' }, { similarStatus: 500 })
-    const res = await post({ path: join(root, 'hero.stl') })
+    const res = await post({ path: '/hero.stl' })
     expect(res.status).toBe(502)
     expect((await res.json()).error).toBe('CUDA out of memory')
   })
 
   it('an unavailable index keeps the 503 envelope, state and all', async () => {
     stubIndex('refused')
-    const res = await post({ path: join(root, 'hero.stl') })
+    const res = await post({ path: '/hero.stl' })
     expect(res.status).toBe(503)
     expect((await res.json()).state).toBe('absent')
   })
 
   it('a 503 racing the warmup folds back into warming', async () => {
     stubIndex(READY, {}, { similarStatus: 503 })
-    const res = await post({ path: join(root, 'hero.stl') })
+    const res = await post({ path: '/hero.stl' })
     expect(res.status).toBe(503)
     expect((await res.json()).state).toBe('warming')
   })
@@ -257,8 +268,8 @@ describe('a model’s neighbours', () => {
     // means a hand-made request — and it must not become a 404, which would say
     // "index it again" about a path the index can never hold.
     stubIndex(READY, RESULT)
-    expect((await post({ path: `${root}/kit.zip!/inner.stl` })).status).toBe(400)
-    expect((await post({ path: join(tmpdir(), 'elsewhere.stl') })).status).toBe(400)
+    expect((await post({ path: '/kit.zip!/inner.stl' })).status).toBe(400)
+    expect((await post({ path: '/elsewhere.stl' })).status).toBe(400)
     const posts = (globalThis.fetch as unknown as { mock: { calls: [string][] } }).mock.calls.filter(
       (c) => String(c[0]).endsWith('/similar'),
     )
@@ -277,7 +288,7 @@ describe('a model’s neighbours', () => {
     // its `scope` dict would make the client's label read the view as a meaning
     // search.
     stubIndex(READY, { scope: { path: null, status: 'indexed' }, results: [hit('base.stl')] })
-    const body = (await (await post({ path: join(root, 'hero.stl') })).json()) as Record<
+    const body = (await (await post({ path: '/hero.stl' })).json()) as Record<
       string,
       unknown
     >
@@ -295,14 +306,14 @@ describe('a model’s neighbours', () => {
     // The index excludes the query model from its own ranking by design (it
     // scores 1.0 against itself), so the only place the question can be made
     // visible beside its answer is here.
-    mkdirSync(join(root, 'Kits'), { recursive: true })
-    writeFileSync(join(root, 'Kits', 'anchor.stl'), stlBytes(3))
     stubIndex(READY, RESULT)
-    const body = (await (await post({ path: join(root, 'Kits', 'anchor.stl'), k: 16 })).json()) as {
+    const body = (await (await post({ path: '/Kits/anchor.stl', k: 16 })).json()) as {
       entries: { path: string }[]
       anchor?: { name: string; path: string; kind: string; size: number; mtime: number }
     }
-    expect(body.anchor?.path).toBe(join(root, 'Kits', 'anchor.stl'))
+    // Addressed by its library path, like the neighbours beside it — the tile
+    // is navigable, and a listing would give it the same string.
+    expect(body.anchor?.path).toBe('/Kits/anchor.stl')
     // Named relative to the collection, exactly as a hit is, so the anchor tile
     // reads like the neighbours beside it rather than as an absolute path.
     expect(body.anchor?.name).toBe(join('Kits', 'anchor.stl'))
@@ -313,7 +324,7 @@ describe('a model’s neighbours', () => {
     expect(body.anchor?.size).toBeGreaterThan(0)
     // Beside the answer, never inside it: an anchor counted among the entries
     // would say a model with no neighbours had one.
-    expect(body.entries.map((e) => e.path)).toEqual([join(root, 'base.stl')])
+    expect(body.entries.map((e) => e.path)).toEqual(['/base.stl'])
   })
 
   it('omits the anchor when it no longer resolves, and still answers with the neighbours', async () => {
@@ -334,12 +345,48 @@ describe('a model’s neighbours', () => {
         return new Response(JSON.stringify(RESULT))
       }),
     )
-    const res = await post({ path: ghost })
+    const res = await post({ path: '/ghost.stl' })
     expect(res.status).toBe(200)
     const body = (await res.json()) as { entries: unknown[]; anchor?: unknown }
     // Silently: the neighbours are a true answer without it, and a 404 here
     // would say "not indexed" about a model that was.
     expect(body).not.toHaveProperty('anchor')
     expect(body.entries).toHaveLength(1)
+  })
+})
+
+describe('a collection beneath the library top', () => {
+  // The index covers one kit rather than the whole library. Its own root stays
+  // absolute; every path this route answers with is a library path (D6).
+  const KITS = { ...READY, collection_root: join(root, 'Kits') }
+
+  it('addresses the anchor and its neighbours by library path', async () => {
+    stubIndex(KITS, { scope: { path: null }, results: [hit('near.stl')] })
+    const body = (await (await post({ path: '/Kits/anchor.stl' })).json()) as {
+      path: string
+      entries: { path: string }[]
+      poses: Record<string, unknown>
+      anchor?: { name: string; path: string }
+    }
+    expect(body.anchor?.path).toBe('/Kits/anchor.stl')
+    // Still named relative to the collection, which is how a hit reads — only
+    // the address changed.
+    expect(body.anchor?.name).toBe('anchor.stl')
+    expect(body.entries.map((e) => e.path)).toEqual(['/Kits/near.stl'])
+    expect(body.poses['/Kits/near.stl']).toEqual(POSE)
+    expect(body.path).toBe('/Kits')
+  })
+
+  it('refuses a model inside the library but outside the collection', async () => {
+    // The case the migrated fixtures above cannot show while the collection is
+    // the whole library: a real file, addressable by this server, that the
+    // index has no business being asked about.
+    stubIndex(KITS, { scope: { path: null }, results: [hit('near.stl')] })
+    const res = await post({ path: '/hero.stl' })
+    expect(res.status).toBe(400)
+    const posts = (globalThis.fetch as unknown as { mock: { calls: [string][] } }).mock.calls.filter(
+      (c) => String(c[0]).endsWith('/similar'),
+    )
+    expect(posts).toHaveLength(0)
   })
 })

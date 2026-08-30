@@ -14,6 +14,7 @@ import {
   hitsToEntries,
   indexStatus,
   modelEntryAt,
+  probeStatus,
   query as indexQuery,
   scopeWithin,
   similar as indexSimilar,
@@ -87,20 +88,8 @@ export function createApp(
    * path: the state itself, the machine's application registry, and the index's
    * availability. Re-asked per request, because `missing` is re-evaluated each
    * time — a volume mounted after start needs no restart.
-   *
-   * The last two entries are **temporary**. `/api/semantic` and
-   * `/api/semantic/similar` are path routes and belong behind this gate; they
-   * are exempt only until task 4.1 makes `scopeWithin`/`hitsToEntries` take
-   * library paths, because until then they still take absolute ones. Remove
-   * both entries there.
    */
-  const UNGATED = new Set([
-    '/api/library',
-    '/api/apps',
-    '/api/semantic/status',
-    '/api/semantic',
-    '/api/semantic/similar',
-  ])
+  const UNGATED = new Set(['/api/library', '/api/apps', '/api/semantic/status'])
   app.use('/api/*', async (c, next) => {
     if (UNGATED.has(c.req.path)) return next()
     const s = await library.state()
@@ -269,7 +258,7 @@ export function createApp(
    * already makes; `fresh=true` is the explicit retry (D4).
    */
   app.get('/api/semantic/status', async (c) => {
-    const s = await indexStatus({ fresh: c.req.query('fresh') === 'true' })
+    const s = await indexStatus(library, { fresh: c.req.query('fresh') === 'true' })
     return c.json(s)
   })
 
@@ -293,8 +282,14 @@ export function createApp(
     if (typeof text !== 'string' || text.trim() === '') {
       return c.json({ error: 'text is required' }, 400)
     }
-    const status = await indexStatus()
-    if (status.state !== 'ready' || status.collectionRoot === undefined) {
+    // Both halves of availability from one probe: the library path the client
+    // is told about, and the absolute root the index itself must be asked
+    // about (D6). The gate is the *index's* root — a collection the library
+    // does not hold is not unavailability, it is a collection that covers
+    // nothing here, and every scope inside the library then fails the
+    // containment test below on its own.
+    const { status, collectionRootFs } = await probeStatus(library)
+    if (status.state !== 'ready' || collectionRootFs === undefined) {
       // Not a 500: "the index is not there" is a state the UI renders, and the
       // state itself is what tells the user which thing to do about it.
       return c.json({ error: 'index unavailable', state: status.state, detail: status.detail }, 503)
@@ -304,7 +299,7 @@ export function createApp(
     const scope =
       body?.path === undefined || body.path === ''
         ? null
-        : await scopeWithin(body.path, status.collectionRoot)
+        : await scopeWithin(library, body.path, collectionRootFs)
     if (body?.path !== undefined && body.path !== '' && scope === null) {
       return c.json({ error: 'path is outside the indexed collection' }, 400)
     }
@@ -323,9 +318,13 @@ export function createApp(
       }
       throw err
     }
-    const { entries, poses, scores } = await hitsToEntries(result.results, status.collectionRoot)
+    const { entries, poses, scores } = await hitsToEntries(library, result.results, collectionRootFs)
     return c.json({
-      path: scope ?? status.collectionRoot,
+      // A library path, like every other path on the wire (D2): the scope's,
+      // else the collection's. A collection the library does not hold has no
+      // library path — and no hit inside it does either, so what comes back is
+      // the library root and an empty set of tiles.
+      path: scope !== null ? library.libPathOf(scope) : (status.collectionRoot ?? '/'),
       entries,
       poses,
       scores,
@@ -386,11 +385,11 @@ export function createApp(
     if (pool !== undefined && pool !== 'mean' && pool !== 'max' && pool !== 'softmax') {
       return c.json({ error: `invalid pool: ${String(pool)}` }, 400)
     }
-    const status = await indexStatus()
-    if (status.state !== 'ready' || status.collectionRoot === undefined) {
+    const { status, collectionRootFs } = await probeStatus(library)
+    if (status.state !== 'ready' || collectionRootFs === undefined) {
       return c.json({ error: 'index unavailable', state: status.state, detail: status.detail }, 503)
     }
-    const model = await scopeWithin(path, status.collectionRoot)
+    const model = await scopeWithin(library, path, collectionRootFs)
     if (model === null) {
       return c.json({ error: 'path is outside the indexed collection' }, 400)
     }
@@ -407,7 +406,7 @@ export function createApp(
     // The same hit→tile join a meaning answer takes: this server's own view of
     // the tree, stat'd once per returned hit, never the index's description of a
     // model (D3).
-    const { entries, poses, scores } = await hitsToEntries(result.results, status.collectionRoot)
+    const { entries, poses, scores } = await hitsToEntries(library, result.results, collectionRootFs)
     // The model the neighbours were computed *from*, resolved into a tile of its
     // own. The index excludes the query model from its own ranking by design (it
     // scores 1.0 against itself and skews the z), so if the question is to be
@@ -417,17 +416,25 @@ export function createApp(
     // and the anchor is the question, and a client that counted it would say a
     // model with no neighbours had one.
     //
-    // Named the way a hit is — relative to the collection — so the anchor tile
-    // reads like the neighbours beside it rather than as an absolute path.
+    // Addressed by its library path, like every tile, and *named* the way a hit
+    // is — relative to the collection — so it reads like the neighbours beside
+    // it rather than as a path from the index's own view of the volume.
     // Omitted silently when it no longer stats: a model can be deleted after it
     // was embedded, and the neighbours are still a true answer without it.
-    const anchor = await modelEntryAt(model, relative(status.collectionRoot, model))
+    const anchor = await modelEntryAt(
+      model,
+      library.libPathOf(model),
+      relative(collectionRootFs, model),
+    )
     // Deliberately without the index's `scope` dict. A similarity view reads
     // none of the meaning residue — `weak`, `capped`, the scope's coverage
     // counts are all facts about a *phrase's* result — and forwarding it would
     // make the client's label read the view as a meaning search (4.7).
     return c.json({
-      path: status.collectionRoot,
+      // The collection as a library path (D2), and the library root where the
+      // collection has none — it then encloses or misses the library, and the
+      // entries are empty either way.
+      path: status.collectionRoot ?? '/',
       entries,
       poses,
       // Keyed by resolved path like `poses`, so the anchor below is simply not

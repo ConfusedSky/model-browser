@@ -375,6 +375,47 @@ describe('meaning search', () => {
     expect(panel.textContent).not.toContain('start the index')
   })
 
+  it('names the collection as a library path, which is a place the user can go', async () => {
+    // library-root D6: what the index publishes is its own absolute root, and
+    // what reaches the client is that root as a library path — so the sentence
+    // names somewhere the path bar accepts rather than a mount point.
+    indexAvailability.mockResolvedValue({
+      state: 'ready',
+      collectionRoot: '/kits',
+      covers: ['stl'],
+    })
+    await mountApp('/models', NESTED)
+    await settle()
+    await click(searchTab())
+
+    const panel = container.querySelector('aside')!
+    expect(panel.textContent).toContain('It covers /kits.')
+  })
+
+  it('says what the index covers when it covers nothing here, and names no path', async () => {
+    // A collection outside the library has no library path at all. The server
+    // sends the reason instead of an absolute root, and the panel says it —
+    // naming a path nothing in this app could navigate to is the thing being
+    // avoided (D6).
+    indexAvailability.mockResolvedValue({
+      state: 'ready',
+      covers: ['stl'],
+      detail: 'the index covers a location outside the library',
+    })
+    await mountApp('/models', NESTED)
+    await settle()
+    await click(searchTab())
+
+    const panel = container.querySelector('aside')!
+    expect(panel.textContent).toContain('the index covers a location outside the library')
+    // No root, so nothing to point at — the "It covers …" clause is withheld
+    // rather than rendered around an undefined.
+    expect(panel.textContent).not.toContain('It covers')
+    // And with it every scope affordance: `indexCovers` is false without a
+    // root, so meaning search is not offered here or anywhere.
+    expect(modeButton('meaning')).toBeUndefined()
+  })
+
   it('inside an archive it blames archives, not the folder', async () => {
     // `indexCovers` refuses `!/` outright, so a zip interior is out of range
     // even within the collection — a different fact from being outside it, and

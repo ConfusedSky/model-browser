@@ -257,7 +257,13 @@ export type IndexState = 'ready' | 'warming' | 'wedged' | 'volume-gone' | 'absen
 
 export interface IndexAvailability {
   state: IndexState
-  /** Present when the index answered: the collection it covers. */
+  /**
+   * The collection the index covers, as a **library path** (library-root D6);
+   * absent when the index answered but covers a location outside the library,
+   * which `detail` then names. The index keeps its own absolute root — it is
+   * another process with its own view of the volume — and only the server sees
+   * it.
+   */
   collectionRoot?: string
   /** Extensions the index can hold — read, never assumed (semantic-search D3). */
   covers?: string[]

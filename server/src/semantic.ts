@@ -1,5 +1,5 @@
 import { realpath, stat } from 'node:fs/promises'
-import { resolve, sep } from 'node:path'
+import { posix, resolve, sep } from 'node:path'
 import type {
   DirEntry,
   IndexAvailability,
@@ -8,6 +8,7 @@ import type {
   IndexState,
   SemanticTuning,
 } from '../../shared/types'
+import { type Library, LibraryError } from './library'
 import { modelFormat } from './listing'
 
 /**
@@ -104,10 +105,12 @@ async function probe(base: string): Promise<IndexAvailability> {
 }
 
 /**
- * Availability, cached per state rather than probed per query (D4). Callers may
- * force a fresh look — the client's explicit retry.
+ * What the index says about itself, `collectionRoot` still absolute — the index
+ * is another process with its own view of the volume, and the path it names is
+ * the one it must be asked about (D6). Cached per state rather than probed per
+ * query (D4); callers may force a fresh look — the client's explicit retry.
  */
-export async function indexStatus(opts: { fresh?: boolean } = {}): Promise<IndexAvailability> {
+async function rawStatus(opts: { fresh?: boolean }): Promise<IndexAvailability> {
   const base = baseUrl()
   if (base === null) return { state: 'absent' }
   const now = Date.now()
@@ -117,6 +120,67 @@ export async function indexStatus(opts: { fresh?: boolean } = {}): Promise<Index
   const status = await probe(base)
   cached = { status, at: now }
   return status
+}
+
+/** What the UI says when the index covers a tree this library does not hold. */
+const OUTSIDE_LIBRARY = 'the index covers a location outside the library'
+
+/**
+ * Availability as the client reads it: the collection root mapped through the
+ * library, so what reaches the wire is a path the user can navigate to (D6).
+ *
+ * A collection outside the library has no library path at all, and that is
+ * reported as absence with a reason rather than as an absolute path nothing in
+ * this app could address — `indexCovers` then withholds every scope affordance,
+ * and the side panel names the situation.
+ *
+ * The mapping is applied on the way out, per call, rather than cached with the
+ * probe: the raw status is what the TTL protects, and a library that becomes
+ * ready after a status was cached must not be described by a mapping made
+ * before it existed. The cost is one `realpath` of a path already in the page
+ * cache — the same call `scopeWithin` makes beside it.
+ */
+async function mapCollectionRoot(
+  library: Library,
+  raw: IndexAvailability,
+): Promise<IndexAvailability> {
+  const abs = raw.collectionRoot
+  if (abs === undefined) return raw
+  const { collectionRoot: _abs, ...rest } = raw
+  // Nothing to map *through* yet. The library's own state is what the client is
+  // being told about in that case, so no reason is invented here.
+  if ((await library.state()).state !== 'ready') return rest
+  const real = await realpath(abs).catch(() => abs)
+  try {
+    return { ...rest, collectionRoot: library.libPathOf(real) }
+  } catch (err) {
+    if (!(err instanceof LibraryError)) throw err
+    return { ...rest, detail: OUTSIDE_LIBRARY }
+  }
+}
+
+/**
+ * Both halves of availability at once, from one probe: what the client is told
+ * (`status`, whose `collectionRoot` is a library path) and what the index has
+ * to be asked about (`collectionRootFs`, absolute and its own).
+ *
+ * One call rather than two so a scoring route cannot pair a library path with
+ * an absolute root read a TTL apart.
+ */
+export async function probeStatus(
+  library: Library,
+  opts: { fresh?: boolean } = {},
+): Promise<{ status: IndexAvailability; collectionRootFs: string | undefined }> {
+  const raw = await rawStatus(opts)
+  return { status: await mapCollectionRoot(library, raw), collectionRootFs: raw.collectionRoot }
+}
+
+/** Availability for the status route: the wire half of `probeStatus`. */
+export async function indexStatus(
+  library: Library,
+  opts: { fresh?: boolean } = {},
+): Promise<IndexAvailability> {
+  return (await probeStatus(library, opts)).status
 }
 
 /** Test seam: forget what we think we know about the index. */
@@ -141,18 +205,35 @@ export class IndexError extends Error {
 }
 
 /**
- * A scope this app may ask the index about: a real path inside the collection.
+ * A scope this app may ask the index about: a library path, in — a real
+ * filesystem path, out. The index is another process with its own view of the
+ * volume, so the absolute path is what it must be told (D6), and this is the
+ * one place that translation happens.
+ *
  * Virtual paths never leave this server (D7) — the index rejects `!/` and no
  * archive-resident model has an embedding, so the affordance is withheld rather
- * than the failure reported.
+ * than the failure reported. A path the library refuses is `null` for the same
+ * reason rather than an error: out of the library is out of scope, and the
+ * caller withholds the affordance instead of reporting a fault.
  *
  * Compared by resolved path, not string prefix: the library lives on removable
  * media and a remount moves the mount point without changing the tree (D4).
  */
-export async function scopeWithin(path: string, collectionRoot: string): Promise<string | null> {
-  if (path.includes('!/')) return null
+export async function scopeWithin(
+  library: Library,
+  libPath: string,
+  collectionRoot: string,
+): Promise<string | null> {
+  if (libPath.includes('!/')) return null
+  let fsPath: string
+  try {
+    fsPath = (await library.resolve(libPath)).fsPath
+  } catch (err) {
+    if (err instanceof LibraryError) return null
+    throw err
+  }
   const [real, root] = await Promise.all([
-    realpath(path).catch(() => null),
+    realpath(fsPath).catch(() => null),
     realpath(collectionRoot).catch(() => collectionRoot),
   ])
   if (real === null) return null
@@ -324,13 +405,24 @@ export async function similar(
  * already been through `scopeWithin`, which compares resolved real paths and is
  * the stronger test. Re-running the prefix form over it here would reject a
  * legitimate anchor under a symlinked collection root.
+ *
+ * Three arguments because a tile's address and its label are different facts
+ * here: `full` is the filesystem path this server stats, `libPath` is what the
+ * tile is *addressed* by (a library path — the only kind that reaches the wire,
+ * D2), and `name` is what it reads as, which is the path relative to the
+ * collection for a hit and stays exactly what it was before the addresses
+ * changed.
  */
-export async function modelEntryAt(full: string, name: string): Promise<DirEntry | null> {
+export async function modelEntryAt(
+  full: string,
+  libPath: string,
+  name: string,
+): Promise<DirEntry | null> {
   const s = await stat(full).catch(() => null)
   if (s === null || !s.isFile()) return null
   return {
     name,
-    path: full,
+    path: libPath,
     kind: 'model' as const,
     format: modelFormat(full),
     size: s.size,
@@ -353,16 +445,25 @@ export async function modelEntryAt(full: string, name: string): Promise<DirEntry
  * is simply a different model to it — and that is a normal outcome rather than
  * an error.
  *
- * Three maps out, all keyed alike — by the resolved absolute path the entry
- * carries. The scores travel beside the entries rather than on them because
- * `DirEntry` is what every listing route returns, and a score field there would
- * be `undefined` for every directory, zip entry and flat-search hit in the app
- * (confidence-scores-on-tiles D1). Sharing the key with the entry is what makes
- * "no entry" and "no score" one fact: the drop above removes a stale hit from
- * all three at once, so no surface can render a number for a tile that is not
- * there.
+ * Three maps out, all keyed alike — by the **library path** the entry carries,
+ * which is what the client looks a tile up by (`useThumbnails` reads
+ * `poses[entry.path]`). The scores travel beside the entries rather than on
+ * them because `DirEntry` is what every listing route returns, and a score
+ * field there would be `undefined` for every directory, zip entry and
+ * flat-search hit in the app (confidence-scores-on-tiles D1). Sharing the key
+ * with the entry is what makes "no entry" and "no score" one fact: the drop
+ * above removes a stale hit from all three at once, so no surface can render a
+ * number for a tile that is not there.
+ *
+ * The collection root's own library path is computed **once**, before the hits
+ * are walked (D6): the per-hit cost is the single `stat` a tile needs, and
+ * `realpath`ing per hit would put the number of index results back into the
+ * filesystem work a query does. A collection root the library does not hold has
+ * no library path, and then no hit inside it can have one either — the answer
+ * is empty rather than a set of tiles nothing in this app could address.
  */
 export async function hitsToEntries(
+  library: Library,
   hits: Hit[],
   collectionRoot: string,
 ): Promise<{
@@ -372,6 +473,13 @@ export async function hitsToEntries(
 }> {
   const poses: Record<string, IndexPose> = {}
   const scores: Record<string, IndexScore> = {}
+  let collectionLibPath: string
+  try {
+    collectionLibPath = library.libPathOf(await realpath(collectionRoot).catch(() => collectionRoot))
+  } catch (err) {
+    if (!(err instanceof LibraryError)) throw err
+    return { entries: [], poses, scores }
+  }
   const settled = await Promise.all(
     hits.map(async (h): Promise<DirEntry | null> => {
       // `rel_path` is the join key and the only field trusted for it: this is
@@ -381,10 +489,13 @@ export async function hitsToEntries(
       // trusting a mount point this app resolved for itself.
       const full = resolve(collectionRoot, h.rel_path)
       if (full !== collectionRoot && !full.startsWith(collectionRoot + sep)) return null
-      const entry = await modelEntryAt(full, h.rel_path)
+      // The same `rel_path`, joined onto the collection's library path instead
+      // of onto its filesystem path — one hit, two addresses, from one string.
+      const libPath = posix.join(collectionLibPath, h.rel_path)
+      const entry = await modelEntryAt(full, libPath, h.rel_path)
       if (entry === null) return null
-      if (h.pose !== null) poses[full] = h.pose
-      scores[full] = { score: h.score, z: h.z }
+      if (h.pose !== null) poses[libPath] = h.pose
+      scores[libPath] = { score: h.score, z: h.z }
       return entry
     }),
   )
