@@ -322,9 +322,12 @@ export function createLibrary(env: NodeJS.ProcessEnv = process.env): Library {
 
   /**
    * Whether the last thing `state()` said about a settled library was that its
-   * top was gone. It is the transition — not the absence — that has to be
-   * caught: while the top is simply present, nothing can have been swapped
-   * underneath it without passing through this flag first.
+   * top was gone. It is the transition — not the absence — that is caught,
+   * and only a transition a request observed: an unplug and replug that both
+   * fall between two requests never sets the flag, so a swap in that window
+   * is still inherited. The case that matters — automounted drives trading
+   * places under a server that is being used — serves requests during the
+   * gap, which is what makes the flag worth its one branch.
    */
   let wasMissing = false
 

@@ -302,9 +302,10 @@ export interface AppsReport {
 
 /**
  * What the server knows about the library (library-root D4). `ready` is the
- * only state in which a path route answers; the other two are states the UI
- * renders rather than faults, and `missing` names the root because mounting it
- * is the remedy.
+ * only state in which a path route answers; the others are states the UI
+ * renders rather than faults — `missing` names the root because mounting it is
+ * the remedy, `nested` names the enclosed library because pointing the root at
+ * it is.
  */
 export type LibraryState =
   | {
