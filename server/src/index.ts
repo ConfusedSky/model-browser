@@ -5,8 +5,10 @@ import { createApp } from './app'
 import { ZipTempStore, createLauncher } from './launch'
 import { createLibrary } from './library'
 
-const cache = new ThumbCache()
 const library = createLibrary()
+// Positional to keep the three existing parameters' defaults; the library is
+// what files entries under `<cache>/<id>/` and gates the sweep (D5).
+const cache = new ThumbCache(undefined, undefined, undefined, library)
 // The resolved library, named once at start: the root is a viewpoint and the
 // top is found by walking up from it, so which tree is open is not something a
 // reader can infer from the configuration alone (D1, and R1's warning).
