@@ -47,6 +47,14 @@
       filesystem path, a symlink whose target is outside; follows a symlink whose target
       is inside; a vpath's archive half is confined and its entry half untouched
  — done 2026-08-29 (Stage A, `e8a4339`, cherry-picked; 21 tests in `library.test.ts`, confinement and marker-walk falsified; merged server suite 211 passed)
+- [ ] 1.7 Follow-up recorded at B2's check-in (2026-08-29): `Library.state()` caches `ready`
+      (D4), so a volume unmounted *mid-session* keeps answering `ready` — routes 404 every
+      path instead of reporting `missing`, and the thumbnail sweep would have judged every
+      entry deleted. The sweep now stats the top before running (3.1, cache-side, the
+      destructive case). Whether `state()` should re-stat the top per request so the UI
+      shows `missing` mid-session is a later refinement: one `stat` per request against a
+      clearer message; decide with a measurement on the removable volume
+
 ## 2. Server: every path is a library path (D2, D3)
 
 - [ ] 2.1 `listing.ts`: `listDir`/`listFlat` take a library path, resolve through 1.4,
@@ -85,26 +93,26 @@
 
 ## 3. Server: cache per library, migrated once (D5)
 
-- [ ] 3.1 `ThumbCache`: constructed with the base dir and the library; files live under
+- [x] 3.1 `ThumbCache`: constructed with the base dir and the library; files live under
       `<base>/<id>/`; key = `sha256(libPath)`; sidecar `path` is the library path; the
       existence sweep resolves through 1.4 and is **skipped** while the library is
       `missing` or `unconfigured`; the startup `void cache.maintain()` in `index.ts` runs
-      only once the library is `ready`
-- [ ] 3.2 Migration on first `ready`: scan `<base>/*.json` (legacy flat layout only —
+      only once the library is `ready` — done 2026-08-29 (B2, `aa9eadd`, cherry-picked; 11 new cache tests, 23 total; the ready guard, the live top-stat guard and mtime preservation each falsified; merged server suite 222 passed). `index.ts` still constructs `ThumbCache` without the library until B1 lands — wired by the coordinator at that merge
+- [x] 3.2 Migration on first `ready`: scan `<base>/*.json` (legacy flat layout only —
       never recurse into id directories); for each sidecar whose recorded absolute
       path — or, for a vpath, its `fsPath` half — has a `realpath` under the real top,
       compute the library path, then: rename the PNG to the new key (preserving its
       mtime, the LRU clock), write the new sidecar with `path` rewritten, remove the old
       sidecar. Entries elsewhere are left, and the legacy flat directory gets an existence sweep of
       its own at each start (sidecars record absolute paths) so nothing there outlives its
-      file; it counts toward no cap. Idempotent: a second start finds nothing to move
-- [ ] 3.3 Server tests: hit after a simulated remount (same tree copied to a new
+      file; it counts toward no cap. Idempotent: a second start finds nothing to move — done 2026-08-29 (B2, `aa9eadd`, cherry-picked; 11 new cache tests, 23 total; the ready guard, the live top-stat guard and mtime preservation each falsified; merged server suite 222 passed). `index.ts` still constructs `ThumbCache` without the library until B1 lands — wired by the coordinator at that merge
+- [x] 3.3 Server tests: hit after a simulated remount (same tree copied to a new
       location, root repointed); two libraries with identical layouts and mtimes serve
       distinct PNGs and cameras; legacy entries under the top are moved with camera and
       axis intact and PNG mtime preserved; legacy entries outside are untouched; an
       interrupted migration (PNG moved, old sidecar still present) converges on the next
       start; the sweep does not delete while `missing`
-
+ — done 2026-08-29 (B2, `aa9eadd`, cherry-picked; 11 new cache tests, 23 total; the ready guard, the live top-stat guard and mtime preservation each falsified; merged server suite 222 passed). `index.ts` still constructs `ThumbCache` without the library until B1 lands — wired by the coordinator at that merge
 ## 4. Server: the index maps through its root (D6)
 
 - [ ] 4.1 `semantic.ts`: `scopeWithin` takes a library path, resolves through 1.4, and still
@@ -146,6 +154,14 @@
       `/Kit/a.zip!/x.stl`, and omit the root; `resolveView` with no URL path is `/`;
       old recents keys are not read; the missing-library state shows the root and does
       not render a grid
+
+- [ ] 5.7 Follow-up recorded at B4's check-in (2026-08-29): `App.tsx`'s `target === ''` landing
+      ("Enter a directory path above to browse your models.") and its `toggleFlat` guard are
+      unreachable once boot is `/` and the library states render ahead of it — left in
+      place by design here; delete in a later cleanup, not as a point fix. The test harness
+      now seeds a test's starting place through the URL (`bootPath` →
+      `replaceState('/?path=…')`) instead of the retired last-path key — under D2 the URL is
+      the only legitimate way to start anywhere but `/`
 
 ## 6. Docs, ordering, verification
 
