@@ -145,14 +145,18 @@ export class HttpError extends Error {
     readonly status: number,
     message: string,
     /**
-     * The library state a path route reports while it cannot serve (library
-     * R4): `'unconfigured'`, `'missing'` or `'nested'`, absent on every other
-     * failure.
+     * The `state` field of the failure body, whichever route sent it — absent
+     * when the body carried none. *Whose* state it is depends on the route: a
+     * path route that cannot serve reports the **library's** (`'unconfigured'`,
+     * `'missing'`, `'nested'` — library R4), while an index route reports the
+     * **index's** (`IndexState`) in the same field.
      *
-     * Carried, not interpreted. It says only *that* the library is why this
-     * failed — the sentence the user reads, and the root a `missing` names, come
-     * from `library()`, whose answer is the one place that knows both. Typed as
-     * a bare string for that reason: narrowing it here would invite a caller to
+     * Carried, not interpreted, and not attributed either: a caller that wants
+     * "the library is why this failed" has to match the value against the
+     * library's own states, because the field alone does not say whose it is.
+     * The sentence the user reads, and the root a `missing` names, come from
+     * `library()`, whose answer is the one place that knows both. Typed as a
+     * bare string for that reason: narrowing it here would invite a caller to
      * render off the error and quietly grow a second copy of the state.
      */
     readonly state?: string,

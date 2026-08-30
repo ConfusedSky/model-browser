@@ -255,6 +255,29 @@ const libraryMissingText = (root: string): string => `The library at ${root} is 
 const libraryNestedText = (library: string): string =>
   `This root contains a library at ${library}. Point the root at it, or at a folder inside it.`
 
+/**
+ * The library states that mean "the library is why this failed" — the ones a
+ * path route 503s with. `ready` is not among them: it is the state in which a
+ * route answers rather than faults.
+ *
+ * Exhaustive over `LibraryState` by construction, so a variant added to that
+ * union is a type error here until someone says which side of the line it
+ * falls on. The set exists because `HttpError.state` is the `state` field of
+ * *any* failure body: an index route 503s with the index's state in the same
+ * field, and matching on the field's mere presence would send those to
+ * `library()` too.
+ */
+const LIBRARY_STATES: ReadonlySet<string> = new Set(
+  Object.entries({
+    ready: false,
+    unconfigured: true,
+    missing: true,
+    nested: true,
+  } satisfies Record<LibraryState['state'], boolean>)
+    .filter(([, isFault]) => isFault)
+    .map(([state]) => state),
+)
+
 export default function App() {
   const api = useMemo(() => new HttpApiClient(), [])
   const queue = useMemo(() => new RenderQueue(2), [])
@@ -706,11 +729,14 @@ export default function App() {
     }
     const fail = (err: unknown): void => {
       if (controller.signal.aborted) return
-      // A 503 carrying a library state says the *library* is why this failed,
-      // not the path (library R4). Re-read the state so the header names it —
-      // and so `missing` can name the configured root, which the error body
-      // carries but `HttpError` deliberately does not: one place knows both.
-      if (err instanceof HttpError && err.state !== undefined) {
+      // A 503 naming one of the *library's* states says the library is why
+      // this failed, not the path (library R4). Re-read the state so the header
+      // names it — and so `missing` can name the configured root, which the
+      // error body carries but `HttpError` deliberately does not: one place
+      // knows both. Matched against `LIBRARY_STATES` rather than on the field
+      // being present at all, because an index route puts the *index's* state
+      // in that same field: a wedged index is not news about the library.
+      if (err instanceof HttpError && err.state !== undefined && LIBRARY_STATES.has(err.state)) {
         probeLibrary()
       }
       dispatch({

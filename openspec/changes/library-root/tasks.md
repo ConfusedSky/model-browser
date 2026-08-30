@@ -82,7 +82,19 @@
       siblings — deterministic: reaching any depth-2 directory needs 601 reads in every
       order), and `client/test/libraryState.test.tsx` "nested names the library the root would
       have enclosed". Falsified by skipping the probe (4 fail), by raising the depth bound to
-      5, by raising the read budget to 5000, and client-side by dropping the message branch
+      5, by raising the read budget to 5000, and client-side by dropping the message branch.
+      Narrowed 2026-08-30 (R-C): 75a677a widened App's `fail` handler to re-probe on any
+      `HttpError.state`, but `errorOf` copies the `state` of *any* 503 body and an index
+      route sends the **index's** state, so every meaning query against an unavailable index
+      also GET `/api/library`. The handler now tests membership of `LIBRARY_STATES` — one
+      source of truth beside the three sentences, exhaustive over `LibraryState['state']` via
+      a `satisfies` record, so a new variant is a type error (TS1360) until it is classified —
+      and `HttpError.state`'s doc says what is true: the `state` field of any error body,
+      whose owner depends on the route. Tests in `client/test/libraryState.test.tsx`: "a 503
+      naming `nested` re-reads the state, like the other two" and "a 503 naming an *index*
+      state re-reads nothing about the library". Falsified by dropping `nested` from the set
+      (the first fails, "expected 1 to be greater than 1") and by reverting the guard to
+      `err.state !== undefined` (the second fails, "expected 2 to be 1")
 - [x] 1.9 Follow-up recorded in the fix round (2026-08-29): `findMarker` walks from the root
       to the filesystem root unbounded, and the first marker wins. A stray
       `.model-browser/library.json` above the root — one left in `$HOME` by an earlier root

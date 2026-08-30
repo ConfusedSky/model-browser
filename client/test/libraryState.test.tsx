@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DirListing } from '../../shared/types'
 import {
   container,
   dir,
+  indexAvailability,
   library,
   listDir,
   model,
@@ -11,12 +12,15 @@ import {
   mountAppAtCurrentUrl,
   pathInput,
   pressEnter,
+  searchInput,
+  semanticSearch,
   settle,
   tiles,
   type,
   unmountApp,
   upButton,
 } from './appHarness'
+import { setSearchMode } from '../src/lib/searchOptions'
 
 vi.mock('../src/api/client', async () => (await import('./appHarness')).apiClientModule())
 vi.mock('../src/three/renderer', async (importOriginal) =>
@@ -32,13 +36,18 @@ const grid = (): Element | null => container.querySelector('main .grid')
 const skeleton = (): Element | null => container.querySelector('.animate-pulse')
 
 /** The mocked HttpError, so a rejection carries a `state` the way a 503 does. */
-async function libraryError(state: string): Promise<Error> {
+async function stateError(state: string, message: string): Promise<Error> {
   const { HttpError } = (await import('../src/api/client')) as unknown as {
     HttpError: new (status: number, message: string, state?: string) => Error
   }
-  return new HttpError(503, 'the library is not available', state)
+  return new HttpError(503, message, state)
 }
+const libraryError = (state: string): Promise<Error> =>
+  stateError(state, 'the library is not available')
 
+// The mode lives in a module closure, so a test that switches it would leak
+// into the next one; `localStorage.clear()` in unmountApp does not reach it.
+beforeEach(() => setSearchMode('name'))
 afterEach(() => unmountApp())
 
 describe('the library states render instead of a grid', () => {
@@ -172,6 +181,60 @@ describe('the library states render instead of a grid', () => {
     await pressEnter(pathInput())
     await settle()
 
+    expect(library.mock.calls.length).toBe(afterBoot)
+  })
+
+  it('a 503 naming `nested` re-reads the state, like the other two', async () => {
+    // `nested` is a library state as much as `missing` is, so a route that
+    // 503s with it is the same trigger. Named on its own because the fault it
+    // guards is a list: the handler tests membership of `LIBRARY_STATES`, and
+    // a set written without this one would leave a root pointed above a
+    // library showing the route's words forever, with no re-read to correct
+    // them once the root is repointed.
+    await mountApp('/', AT_ROOT)
+    await settle()
+    const afterBoot = library.mock.calls.length
+    expect(headerLine()).toBeNull()
+
+    library.mockResolvedValue({
+      state: 'nested',
+      root: '/run/media/masa',
+      library: '/run/media/masa/STL Library',
+    })
+    listDir.mockRejectedValue(await libraryError('nested'))
+    await type(pathInput(), '/Alpha')
+    await pressEnter(pathInput())
+    await settle()
+
+    expect(library.mock.calls.length).toBeGreaterThan(afterBoot)
+    expect(headerLine()).toBe(
+      'This root contains a library at /run/media/masa/STL Library. Point the root at it, or at a folder inside it.',
+    )
+  })
+
+  it('a 503 naming an *index* state re-reads nothing about the library', async () => {
+    // The other side of the membership test. `HttpError.state` is the `state`
+    // field of any failure body, and a meaning route 503s with the index's own
+    // state in it — `wedged` here (shared `IndexState`). That says nothing
+    // about the library, so the library must not be asked: matching on the
+    // field merely being present would fetch `/api/library` on every failed
+    // query against an unavailable index.
+    setSearchMode('meaning')
+    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/', covers: ['stl'] })
+    await mountApp('/', AT_ROOT)
+    await settle()
+    const afterBoot = library.mock.calls.length
+    expect(afterBoot).toBeGreaterThan(0)
+
+    semanticSearch.mockRejectedValue(await stateError('wedged', 'the index is not answering'))
+    await type(searchInput(), 'a winged demon')
+    await pressEnter(searchInput())
+    await settle()
+
+    // The query really did fail through the state-carrying path — otherwise
+    // the count below would hold for want of anything having happened.
+    expect(semanticSearch).toHaveBeenCalled()
+    expect(headerLine()).toBe('the index is not answering')
     expect(library.mock.calls.length).toBe(afterBoot)
   })
 })
