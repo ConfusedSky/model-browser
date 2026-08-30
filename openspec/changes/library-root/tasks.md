@@ -246,6 +246,15 @@
       and the base at that view (`.playwright-mcp/64-*.png`); the sidecar's content and mtime
       were unchanged after two press-and-release cycles; the old absolute deep link 404s
       (verified earlier the same day); server 262, client 515, typecheck clean
+- [x] 6.6 Regression found by the user 2026-08-29 after 6.4 closed: with the index rooted at
+      the library top its `collectionRoot` is `/`, and the client's `indexCovers` prefix
+      check built `//`, so meaning search read every subfolder as outside the index
+      ("does not cover this folder. It covers /."). Every client test mocked the root as
+      `/models`. Fixed in `indexCovers` (a root ending in `/` is its own prefix);
+      `client/test/indexCovers.test.ts` fails on the unfixed selector
+      (`expected false to be true`) and passes on the fix; verified in the browser at
+      `/Loot Studios/…/No Supports` on the real library. `scopeWithin` server-side was
+      never affected — it compares realpaths
 - [x] 6.5 Live verification of confinement: with the dev server on the library,
       `curl` `/api/dir?path=/../` and `/api/file?path=/etc/passwd`-shaped requests are
       refused with no filesystem detail in the body; a symlink planted inside the

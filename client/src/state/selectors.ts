@@ -128,7 +128,9 @@ export function noticeKinds(state: SearchState): SearchKinds {
 export function indexCovers(index: IndexAvailability | null, path: string): boolean {
   const root = index?.collectionRoot
   if (root === undefined || path.includes('!/')) return false
-  return path === root || path.startsWith(`${root}/`)
+  // The root is `/` whenever the index is rooted at the library top — the
+  // common case — and `${'/'}/` is `//`, which no path begins with.
+  return path === root || path.startsWith(root.endsWith('/') ? root : `${root}/`)
 }
 
 /**
