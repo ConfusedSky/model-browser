@@ -77,12 +77,20 @@ path **with a leading slash**: the library top is `/`, a kit is `/Kit`, an archi
 `/Kit/parts.zip!/lid.stl`. One form everywhere, including display: the path bar shows `/` at
 the root. The root of the *view* (where the app opens) is just a path in that space.
 
-Why a leading slash rather than `''`-for-root: the app already treats `''` as "no path" in
+Why a leading slash rather than `''`-for-root: the app *used to* treat `''` as "no path" in
 `resolveView` and `serializeView`; giving the root a real spelling keeps "at the root" and
 "no path given" distinct, and a path that always starts with `/` is what `posix.normalize`
 and the confinement check below want as input. `serializeView` omits `path` when it is `/` —
 the root is the default view and needs no parameter — which keeps the shortest deep link the
 shortest.
+
+The distinction that motivated the spelling is then *collapsed*, deliberately: once the boot
+is `/`, "no path given" has nothing left to mean, so `''` is not a value `view.path` can
+hold. `parseUrl` reads a blank `path` — `?path=`, or a bare `?path`, both of which
+`URLSearchParams.get` answers with `''` rather than `null` — as the root, the same reading a
+blank `q` or `similar` already gets; an empty path in a hand-edited URL names the library
+top rather than a state of its own. That is what retires the `''` landing and its guards
+(follow-up 5.7).
 
 ### D3: One resolver, every route
 

@@ -200,13 +200,36 @@
       old recents keys are not read; the missing-library state shows the root and does
       not render a grid
  — done 2026-08-29 (B4, `8a20e7c` → `f582b35` on main; 18 client tests added, 511 total; the not-ready gate, the `!/` expansion and the navigation re-probe falsified; the harness now seeds a test's start through the URL)
-- [ ] 5.7 Follow-up recorded at B4's check-in (2026-08-29): `App.tsx`'s `target === ''` landing
+- [x] 5.7 Follow-up recorded at B4's check-in (2026-08-29): `App.tsx`'s `target === ''` landing
       ("Enter a directory path above to browse your models.") and its `toggleFlat` guard are
       unreachable once boot is `/` and the library states render ahead of it — left in
-      place by design here; delete in a later cleanup, not as a point fix. The test harness
+      place by design there; deleted in a later cleanup, not as a point fix. The test harness
       now seeds a test's starting place through the URL (`bootPath` →
       `replaceState('/?path=…')`) instead of the retired last-path key — under D2 the URL is
-      the only legitimate way to start anywhere but `/`
+      the only legitimate way to start anywhere but `/`.
+      **Done 2026-08-29 (W3):** `''` was *not* yet unreachable — `parseUrl` read the path as
+      `p.get('path') ?? '/'`, and `URLSearchParams.get` answers `''`, not `null`, for `?path=`
+      and for a bare `?path`, so a hand-edited URL still booted the view at `''`; that is what
+      the landing rendered for (the boot effect's early return suppressed the fetch, so no
+      skeleton stood in front of it). PathBar's submit refuses an empty target and
+      `serializeView` never wrote one, so the URL was the only source. Adjudicated at check-in
+      (coordinator): read blank as the root in `parseUrl` — the leniency `q` and `similar`
+      already get — then delete all five remnants. Removed: `parseUrl`'s `??` default (now
+      `rawPath === null || rawPath === '' ? '/' : rawPath`); `serializeView`'s `view.path !== ''`
+      clause and the comment about "the one view that still spells its path that way";
+      `App`'s landing `<p>` with its `target === '' && !showSkeleton` ternary branch (the
+      surrounding comment about the region staying empty under a library message still reads
+      true and is kept); `toggleFlat`'s `if (target === '') return`; the boot effect's
+      `if (state.view.path === '') return`; and the `target === ''` disjunct in the ↑ button's
+      `disabled`. `grep -rn "target === ''\|view.path === ''\|path !== ''" client/src/` now
+      answers nothing, and `grep -rn "Enter a directory path" client server openspec docs`
+      found the sentence only in `App.tsx` and in this line — no test referenced it, so no
+      test was fixed. New coverage in `urlState.test.ts` ("reads a blank `path` as the root"):
+      `?path=`, `?path` and `?path=&flat=1` all parse to `/`, and what a blank one resolves to
+      serializes back to nothing. Falsified by reverting the parser line alone to `rawPath ?? '/'`:
+      `expect(parseUrl('?path=').path).toBe('/')` fails with `AssertionError: expected '' to be
+      '/' // Object.is equality`. D2 records the collapse. Client 519 passed / 0 failed (50 files),
+      typecheck clean, `openspec validate library-root` clean
 
 ## 6. Docs, ordering, verification
 

@@ -838,7 +838,6 @@ export default function App() {
     // an ordinary request that supersedes the search, so the query stops being
     // committed. Targeted at `dest` — the newest place the user asked for — so
     // untoggling mid-navigation follows the user rather than snapping back.
-    if (target === '') return
     commit({ type: 'toggleFlat' })
   }
 
@@ -1041,7 +1040,6 @@ export default function App() {
   // rendering the ordinary listing meanwhile would flatten the whole volume for
   // tiles the meaning results are about to replace.
   useEffect(() => {
-    if (state.view.path === '') return
     dispatch({ type: 'restore', view: state.view })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -1939,7 +1937,7 @@ export default function App() {
           <button
             type="button"
             onClick={goUp}
-            disabled={target === '' || target === '/'}
+            disabled={target === '/'}
             aria-label="Parent directory"
             className="rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-500 disabled:opacity-40"
           >
@@ -2004,11 +2002,7 @@ export default function App() {
               "empty folder", which is a claim about a folder nobody could open.
               The header's line above is the whole answer, and the region under
               it stays empty so it is the only thing to read. */}
-          {libraryMessage !== null ? null : target === '' && !showSkeleton ? (
-            <p className="mt-24 text-center text-sm text-zinc-500">
-              Enter a directory path above to browse your models.
-            </p>
-          ) : showSkeleton ? (
+          {libraryMessage !== null ? null : showSkeleton ? (
             // The old tiles are stale navigation targets while a slower listing
             // is fetched — unmounting the grid is what makes them unclickable.
             // The notice line is rendered empty rather than omitted, so the

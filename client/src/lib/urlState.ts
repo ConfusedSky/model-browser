@@ -124,10 +124,15 @@ export function parseUrl(search: string = window.location.search): UrlView {
   // out of an empty box, so a truncated or hand-edited `?min=` must not mean it
   // here either. An unparseable floor is a floor not named.
   if (Number.isFinite(min) && (p.get('min') ?? '').trim() !== '') tuning.minScore = min
+  // Blank is absence, the same reading `q` and `similar` get above: a hand-edited
+  // `?path=` names no path, and `URLSearchParams.get` answers `''` rather than
+  // `null` for it, so `??` alone would let `''` through as a value.
+  const rawPath = p.get('path')
   return {
     // Absence is the root (D2), not "no path": the library's top is the default
-    // view, so a URL that names no path names it.
-    path: p.get('path') ?? '/',
+    // view, so a URL that names no path names it. `''` is never a value the view
+    // holds — there is no "no path" state left for it to mean.
+    path: rawPath === null || rawPath === '' ? '/' : rawPath,
     // The flat *toggle*, and only that (design R4). A search runs flat-shaped
     // whatever the toggle says — that shape is derived where the request is
     // built (`requestOf`), never read back out of the URL — so inferring the
@@ -186,10 +191,8 @@ export function parseUrl(search: string = window.location.search): UrlView {
 export function serializeView(view: UrlView): string {
   const p = new URLSearchParams()
   // The root is written by omission (D2) — it is the default view, and a URL
-  // that carries no path is read back as it by `parseUrl`. `''` is kept beside
-  // it as the same kind of nothing, for the one view that still spells its path
-  // that way.
-  if (view.path !== '/' && view.path !== '') p.set('path', view.path)
+  // that carries no path is read back as it by `parseUrl`.
+  if (view.path !== '/') p.set('path', view.path)
   if (view.flat) p.set('flat', '1')
   // The subject, and only one of them can be it. `similar` wins for the same
   // reason `resolveView` resolves it first — it is the more specific parameter

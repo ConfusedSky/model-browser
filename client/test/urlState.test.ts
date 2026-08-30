@@ -74,6 +74,21 @@ describe('url state', () => {
     expect(serializeView({ path: '/Kit', flat: false })).toContain('path=%2FKit')
   })
 
+  it('reads a blank `path` as the root', () => {
+    // `URLSearchParams.get` answers `''`, not `null`, for `?path=` and for a
+    // bare `?path` — so a `??` default would have let `''` through as a value
+    // the view holds. It is not one: `/` is what "no path" spells (design D2),
+    // and the landing that once rendered for `''` is gone with the last-path
+    // boot. Blank reads as absence here, the same as a blank `q` or `similar`.
+    expect(parseUrl('?path=').path).toBe('/')
+    expect(parseUrl('?path').path).toBe('/')
+    expect(parseUrl('?path=&flat=1').path).toBe('/')
+    // And what a blank one resolves to serializes back to nothing, so a URL
+    // that arrived with `?path=` stops carrying it the moment the view advances.
+    expect(serializeView({ path: parseUrl('?path=').path, flat: false })).toBe('')
+    expect(roundTrip(parseUrl('?path=')).path).toBe('/')
+  })
+
   it('parses a bare `flat` key the same as a valued one', () => {
     expect(parseUrl('?path=%2Fa&flat').flat).toBe(true)
     expect(parseUrl('?path=%2Fa&flat=1').flat).toBe(true)
