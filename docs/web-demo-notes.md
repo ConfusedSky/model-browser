@@ -341,7 +341,8 @@ All re-runnable; say whose run when quoting.
 ## Go-live gates (corpus side, not app decisions)
 
 - IP pass by eye over the corpus (one Monster Hunter dragon known).
-- `metadata/miniatures.json` backed up or tracked — sole copy today.
+- ~~`metadata/miniatures.json` backed up or tracked~~ — decided 2026-08-29: regenerable by the
+  fetch scripts and gitignored on purpose; not a gate.
 - Credits page generated from it (CC-BY requires displayed attribution).
 - One paid hour on the actual instance for the query-latency number.
 - Optional: Caddy access logs answer "did anyone visit" without an analytics script.
