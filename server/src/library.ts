@@ -97,16 +97,26 @@ export interface Resolved {
 
 export interface Library {
   /**
-   * The current state. Every not-ready state is re-evaluated on each call, so a
-   * volume mounted after start needs no restart. A `ready` library keeps its
-   * identity, and its top is stat'd per call, so a volume unplugged
-   * *mid-session* answers `missing` rather than 404-ing every path (D4). The
-   * marker is re-read on exactly one transition — the top present again after
-   * an absence — so a *different* tree arriving at the same mount point is a
-   * different library rather than an inheritor of this one's identity.
+   * The current state. A not-ready state is re-evaluated on each call, so a
+   * volume mounted after start needs no restart — except `nested`, whose answer
+   * costs a tree walk and stands for `NESTED_RECHECK_MS` before being asked
+   * again. A `ready` library keeps its identity, and its top is stat'd per
+   * call, so a volume unplugged *mid-session* answers `missing` rather than
+   * 404-ing every path (D4). The marker is re-read on exactly one transition —
+   * the top present again after an absence — so a *different* tree arriving at
+   * the same mount point is a different library rather than an inheritor of
+   * this one's identity.
+   *
+   * Concurrent calls share one evaluation: the whole body is single-flighted,
+   * because everything it decides it decides across `await`s.
    */
   state(): Promise<LibraryState>
-  /** Re-evaluate config and marker from scratch, whatever the current state. */
+  /**
+   * Re-evaluate config, marker and probe from scratch, whatever the current
+   * state — the seam a later repoint-without-restart works through (D4).
+   * Nothing is carried over: the settled library, the pending
+   * return-transition and the `nested` memo are all dropped first.
+   */
   refresh(): Promise<LibraryState>
   /** The library top's resolved filesystem path. Throws unless `ready`. */
   realTop(): string
@@ -228,47 +238,70 @@ export async function findMarker(
  * The depth bound is where the mistake actually lives: a root pointed one or
  * two folders above a drive's library is the case worth catching, and a library
  * buried five levels under a deliberately chosen root is not a mistake anyone
- * makes by accident. The read budget bounds the directories *read* — the
- * `readdir`s, which is what keeps a root pointed at a wide tree from paying for
- * a full descent — and it is paid on every `state()` call while the state is
- * not ready, not once at start. It does not bound the directories *checked*:
- * every directory a paid-for `readdir` enumerated has its marker opened, so
- * whether a library is found never depends on where the filesystem happened to
- * list it. Both bounds are best-effort by design: running out is "not found",
- * and the root becomes a library, which is what happened before the probe
- * existed.
+ * makes by accident.
+ *
+ * `PROBE_MAX_VISITS` bounds the directories *visited* — one bound, counted
+ * where a directory leaves the queue, and the queue is capped at the same
+ * number so nothing beyond it is ever enqueued. Every per-directory cost is
+ * therefore bounded by it and by nothing else: at most 2000 `readdir`s, at most
+ * 2000 marker opens, at most 2000 queue entries held. An earlier version
+ * budgeted the `readdir`s alone and let the queue fill freely, which bounded
+ * neither the marker opens nor the memory, and every one of them was paid on
+ * *every* request while the state was not ready.
+ *
+ * Re-run: build the fixture with
+ *   python3 -c "import os
+ *   [os.makedirs('wide/kit-%d/sub-%d'%(i,j)) for i in range(600) for j in range(300)]"
+ * `chmod 0555 wide` so the marker cannot be written and the evaluation is
+ * repeatable, and time `createLibrary({MODEL_BROWSER_ROOT: wide}).refresh()`
+ * while logging `visited` and `queue.length` where `findNestedLibrary` returns.
+ * R2-A's run, 2026-08-30, vitest on tmpfs, three evaluations each: the old
+ * read budget queued 150,301 directories and marker-opened 150,300 of them for
+ * 500 `readdir`s, at 3003/2893/2855 ms an evaluation; this one queues and
+ * visits 2000, at 138/132/135 ms. (The review that found this reported ~570 ms
+ * for the old shape rather than ~2.9 s — a different machine or a warmer cache;
+ * the ratio, ~21×, is what the constant is chosen against.)
+ *
+ * What that buys, exactly:
+ *
+ * - A root with **fewer than `PROBE_MAX_VISITS` direct children** has every one
+ *   of them marker-checked, whatever order the filesystem listed them in. This
+ *   is the case R1 is about — a drive whose library sits one folder down — and
+ *   it is order-free.
+ * - Beyond that, and at depth ≥ 2 in any tree wide enough to fill the queue,
+ *   what is examined is "the first `PROBE_MAX_VISITS` directories breadth-first
+ *   **in the order the filesystem lists them**". That order is not stable
+ *   across runtimes — Node's `readdir` sorts what libuv returns, Bun's does not
+ *   — so at depth ≥ 2 in a wide tree the probe's answer is genuinely
+ *   order-dependent, and no test may assume otherwise.
+ *
+ * Both bounds are best-effort by design: running out is "not found", and the
+ * root becomes a library, which is what happened before the probe existed.
  */
 const PROBE_MAX_DEPTH = 4
-const PROBE_MAX_DIRS = 500
+const PROBE_MAX_VISITS = 2000
 
 /**
  * The shallowest library top beneath `start`, within the bounds above.
  *
  * Breadth-first, so a library at depth 1 is found before one at depth 3 — the
- * shallower is the one the root would enclose most of. Only `readdir`s count
- * against the budget: reading a marker is one open of a known name.
+ * shallower is the one the root would enclose most of.
  */
 async function findNestedLibrary(start: string): Promise<string | undefined> {
   const queue: { dir: string; depth: number }[] = [{ dir: start, depth: 0 }]
-  let read = 0
+  let visited = 0
   // The queue is appended to while it is walked, which an array iterator
   // follows — it re-reads the length each step, so a directory pushed below
   // gets its turn after everything already queued. That ordering *is* the
-  // breadth-first guarantee this function's callers rely on.
+  // breadth-first guarantee this function's callers rely on. Nothing is ever
+  // shifted off, so `queue.length` is the number of directories ever pushed,
+  // which is what the push guard below tests.
   for (const { dir, depth } of queue) {
+    if (visited >= PROBE_MAX_VISITS) break
+    visited++
     // `start` itself has already been tested by the upward walk.
     if (depth > 0 && (await markerIdAt(dir)) !== undefined) return dir
     if (depth === PROBE_MAX_DEPTH) continue
-    // Exhausting the budget stops *reading*, not the loop. The queue still
-    // holds directories an already-paid `readdir` enumerated, and returning
-    // here left them unchecked — which made the answer depend on the order the
-    // filesystem listed entries in: a root with 600 siblings and the marker in
-    // the one listed last read `ready` and had a marker written over that
-    // library, at depth 1. Nothing more is enqueued once the budget is gone, so
-    // the loop drains what was paid for and ends: the marker opens are bounded
-    // by the entries those `readdir`s enumerated.
-    if (read >= PROBE_MAX_DIRS) continue
-    read++
     let entries: Dirent[]
     try {
       entries = await readdir(dir, { withFileTypes: true })
@@ -281,6 +314,18 @@ async function findNestedLibrary(start: string): Promise<string | undefined> {
       // enumerated — and a symlink's dirent is not `isDirectory()`, so the
       // probe never descends out of the tree it was pointed at.
       if (e.name.startsWith('.') || !e.isDirectory()) continue
+      // Memory, and only memory: nothing past the 2000th entry is ever
+      // dequeued, so truncating the pushes here cannot change which
+      // directories are examined — it stops the queue holding the ones that
+      // would never get a turn, which is why no test can tell it apart and
+      // this comment is the record instead. Measured 2026-08-30 (R2-A) on a
+      // root of 600 directories of 300 entries each, built with
+      //   python3 -c "import os
+      //   [os.makedirs('wide/kit-%d/sub-%d'%(i,j)) for i in range(600) for j in range(300)]"
+      // and logging `queue.length` beside `visited` where this function
+      // returns: 2000 queued with this line, 180,601 without it, 2000 visited
+      // either way.
+      if (queue.length >= PROBE_MAX_VISITS) break
       queue.push({ dir: join(dir, e.name), depth: depth + 1 })
     }
   }
@@ -310,6 +355,21 @@ function toLibPath(realTop: string, real: string): string | undefined {
   return `/${relative(realTop, real).split(sep).join(posix.sep)}`
 }
 
+/**
+ * How long a `nested` answer stands before the probe is paid for again.
+ *
+ * A not-ready state is a question about the filesystem right now, so the gate
+ * asks it on every request — and `nested` is the one not-ready answer that
+ * costs a tree walk to produce rather than a `stat`: 138 ms over the 600×300
+ * fixture `PROBE_MAX_VISITS` documents, even bounded at 2000 visits. Memoised,
+ * the walk runs at most once per window however many requests arrive (a
+ * client's boot burst is a dozen), and the state is still self-correcting: the
+ * user repoints the root or moves the inner library and the next window sees
+ * it. Five seconds is chosen against a human at a file manager, not against a
+ * poller.
+ */
+const NESTED_RECHECK_MS = 5000
+
 export function createLibrary(env: NodeJS.ProcessEnv = process.env): Library {
   /**
    * What a successful evaluation settled on: the library, and the root string
@@ -331,7 +391,20 @@ export function createLibrary(env: NodeJS.ProcessEnv = process.env): Library {
    */
   let wasMissing = false
 
+  /**
+   * The last `nested` answer and when it stops standing. `nested` is not
+   * settled — nothing serves under it — so this is a cost memo, not an
+   * identity: it only keeps the gate from re-walking the tree once per request
+   * (`NESTED_RECHECK_MS`). Cleared by `refresh()`, which is the caller asking
+   * for the filesystem as it is now.
+   */
+  let nestedMemo: { state: LibraryState; until: number } | undefined
+
   async function evaluate(): Promise<LibraryState> {
+    if (nestedMemo !== undefined) {
+      if (Date.now() < nestedMemo.until) return nestedMemo.state
+      nestedMemo = undefined
+    }
     const root = await configuredRoot(env)
     if (root === undefined) return { state: 'unconfigured' }
     try {
@@ -375,7 +448,11 @@ export function createLibrary(env: NodeJS.ProcessEnv = process.env): Library {
     // signal is a line in the log (R1). The probe is bounded and runs only on
     // this branch, so a library that is already marked pays nothing for it.
     const nested = await findNestedLibrary(realRoot)
-    if (nested !== undefined) return { state: 'nested', root, library: nested }
+    if (nested !== undefined) {
+      const state: LibraryState = { state: 'nested', root, library: nested }
+      nestedMemo = { state, until: Date.now() + NESTED_RECHECK_MS }
+      return state
+    }
     // No library either way: the root becomes one, if the volume will say so.
     const written = await writeMarker(realRoot)
     settled = {
@@ -393,63 +470,94 @@ export function createLibrary(env: NodeJS.ProcessEnv = process.env): Library {
     return settled.ready
   }
 
+  /**
+   * The in-flight `state()`, if any. Everything `state()` does — the probe, the
+   * marker write, the return-transition check — reads and writes `settled` and
+   * `wasMissing` across `await`s, and nothing serialised them: four concurrent
+   * first calls each ran the probe and each wrote a marker, handing out four
+   * identities for one tree, and on the return transition the flag was cleared
+   * before the marker read, so only the first of a burst re-checked. A burst is
+   * the normal case, not a contrived one — `index.ts` calls `state()` without
+   * awaiting it and the client's boot hits the gate with a dozen requests at
+   * once. Single-flighting the whole body makes every one of them the same
+   * evaluation.
+   */
+  let pending: Promise<LibraryState> | undefined
+
+  async function compute(): Promise<LibraryState> {
+    const current = settled
+    // Not settled yet: every not-ready state is a question about the
+    // filesystem right now, and is asked again every time.
+    if (current === undefined) return evaluate()
+    // Settled, but the tree it named can still go away under a running
+    // server. One `stat` per request buys the difference between "the
+    // library is not present" and a 404 on every path in it.
+    //
+    // Measured on the removable volume this library lives on, warm (the top
+    // is in the dentry cache after the first call, which is the state every
+    // request after the first finds it in): `os.stat` ×1000 against the
+    // mounted top /run/media/masa/STLLibrary took 1.72 ms in total — ~1.7 µs
+    // a call — and 2.17 ms against a path that is not there. W1's run,
+    // 2026-08-29; the coordinator's run the same day read 2.03 ms for the
+    // first of those. Either way one stat per request is free beside the
+    // `realpath` the same request already pays (D3). Re-run:
+    //   python3 -c "import os,time; p='/run/media/masa/STLLibrary'; os.stat(p); \
+    //     t=time.perf_counter(); [os.stat(p) for _ in range(1000)]; \
+    //     print((time.perf_counter()-t)*1e3, 'ms')"
+    const top = await stat(current.ready.top).catch(() => null)
+    if (top === null || !top.isDirectory()) {
+      // The cached `ready` is deliberately *not* discarded: the same tree
+      // returning at the same place is the same library, and
+      // `realTop()`/`id()` keep answering meanwhile — the cache's own sweep
+      // guard reads them to decide it must not run (`ThumbCache.maintain`).
+      wasMissing = true
+      return { state: 'missing', root: current.root }
+    }
+    // Present again after an absence — the one moment a *different* tree can
+    // have arrived at the same path. Two drives that automount at the same
+    // mount point in one session would otherwise both be served under the
+    // first one's identity, and `maintain` would then sweep every path the
+    // second does not have, cameras included (F7). So the marker is re-read
+    // exactly here, once per absence, and a library that is not the one that
+    // went away is evaluated from scratch.
+    //
+    // The test is "the marker says what it said", not "there is a marker":
+    // exempting an `unmarked` library from the read altogether — its id being
+    // path-derived, so the path looked like the whole test — let a *marked*
+    // drive arriving at that same path be served under the hash of it, which is
+    // the same swap this branch exists to catch. An `unmarked` library expects
+    // no marker, so `undefined` is what it compares equal to.
+    if (wasMissing) {
+      const id = await markerIdAt(current.ready.top)
+      const expected = current.ready.unmarked === true ? undefined : current.ready.id
+      // Cleared only once the read is done, so a caller that is somehow not
+      // behind the single flight still re-checks rather than skipping past it.
+      wasMissing = false
+      if (id !== expected) {
+        settled = undefined
+        return evaluate()
+      }
+    }
+    return current.ready
+  }
+
   return {
-    async state() {
-      const current = settled
-      // Not settled yet: every not-ready state is a question about the
-      // filesystem right now, and is asked again every time.
-      if (current === undefined) return evaluate()
-      // Settled, but the tree it named can still go away under a running
-      // server. One `stat` per request buys the difference between "the
-      // library is not present" and a 404 on every path in it.
-      //
-      // Measured on the removable volume this library lives on, warm (the top
-      // is in the dentry cache after the first call, which is the state every
-      // request after the first finds it in): `os.stat` ×1000 against the
-      // mounted top /run/media/masa/STLLibrary took 1.72 ms in total — ~1.7 µs
-      // a call — and 2.17 ms against a path that is not there. W1's run,
-      // 2026-08-29; the coordinator's run the same day read 2.03 ms for the
-      // first of those. Either way one stat per request is free beside the
-      // `realpath` the same request already pays (D3). Re-run:
-      //   python3 -c "import os,time; p='/run/media/masa/STLLibrary'; os.stat(p); \
-      //     t=time.perf_counter(); [os.stat(p) for _ in range(1000)]; \
-      //     print((time.perf_counter()-t)*1e3, 'ms')"
-      const top = await stat(current.ready.top).catch(() => null)
-      if (top === null || !top.isDirectory()) {
-        // The cached `ready` is deliberately *not* discarded: the same tree
-        // returning at the same place is the same library, and
-        // `realTop()`/`id()` keep answering meanwhile — the cache's own sweep
-        // guard reads them to decide it must not run (`ThumbCache.maintain`).
-        wasMissing = true
-        return { state: 'missing', root: current.root }
-      }
-      // Present again after an absence — the one moment a *different* tree can
-      // have arrived at the same path. Two drives that automount at the same
-      // mount point in one session would otherwise both be served under the
-      // first one's identity, and `maintain` would then sweep every path the
-      // second does not have, cameras included (F7). So the marker is re-read
-      // exactly here, once per absence, and a library that is not the one that
-      // went away is evaluated from scratch. An `unmarked` library is exempt:
-      // its identity is derived from the path, so the path is the whole test.
-      if (wasMissing) {
-        wasMissing = false
-        if (current.ready.unmarked !== true) {
-          // Absent counts as different: a bare directory appearing at the mount
-          // point is a new tree, not the marked one that left.
-          const id = await markerIdAt(current.ready.top)
-          if (id !== current.ready.id) {
-            settled = undefined
-            return evaluate()
-          }
-        }
-      }
-      return current.ready
+    state() {
+      return (pending ??= compute().finally(() => {
+        pending = undefined
+      }))
     },
 
     async refresh() {
+      // An evaluation already in flight is reading the state this call is about
+      // to discard; let it finish rather than clearing `settled` underneath it.
+      if (pending !== undefined) await pending.catch(() => undefined)
       settled = undefined
       wasMissing = false
-      return evaluate()
+      nestedMemo = undefined
+      return (pending ??= evaluate().finally(() => {
+        pending = undefined
+      }))
     },
 
     realTop: () => requireReady().top,

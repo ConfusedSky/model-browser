@@ -5,6 +5,7 @@ import { afterAll, describe, expect, it } from 'vitest'
 import type { DirListing, LibraryState } from '../../shared/types'
 import { createApp } from '../src/app'
 import { ThumbCache } from '../src/cache'
+import { createLibrary } from '../src/library'
 import { LOOPBACK, libraryFor, realTempDir, stlBytes } from './helpers'
 
 /**
@@ -286,6 +287,28 @@ describe('the states in which there is no library', () => {
     // Nothing written over the library the root would have enclosed.
     expect(existsSync(join(enclosing, '.model-browser'))).toBe(false)
     rmSync(enclosing, { recursive: true, force: true })
+    rmSync(cache, { recursive: true, force: true })
+  })
+
+  it('gates a server with no root at all, and says which thing is missing', async () => {
+    // The fourth state, and the one the gate used to answer by falling through
+    // rather than by naming: any state it did not recognise got this body. It
+    // is now the `unconfigured` branch, with `unreachable` after it, so a state
+    // added to `LibraryState` is a compile error instead of a user reading
+    // "no library root is configured" about something else.
+    const home = realTempDir('mb-unconfigured-home-')
+    const cache = realTempDir('mb-unconfigured-cache-')
+    const library = createLibrary({ HOME: home, XDG_CONFIG_HOME: join(home, 'config') })
+    const app = createApp(new ThumbCache(cache), undefined, undefined, library)
+
+    const res = await app.request('/api/dir?path=/', { headers: LOOPBACK })
+    expect(res.status).toBe(503)
+    expect(await res.json()).toEqual({ error: 'no library root is configured', state: 'unconfigured' })
+
+    const state = await app.request('/api/library', { headers: LOOPBACK })
+    expect(state.status).toBe(200)
+    expect(await state.json()).toEqual({ state: 'unconfigured' })
+    rmSync(home, { recursive: true, force: true })
     rmSync(cache, { recursive: true, force: true })
   })
 

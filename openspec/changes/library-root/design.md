@@ -173,7 +173,7 @@ The server always starts. What it answers depends on the library's state, report
 | `unconfigured` | no root in env or config | 503 `{ state }` |
 | `missing` | root configured, not present or not a directory — the volume is not mounted, at start or since | 503 `{ state, root }` |
 | `nested` | the root has no marker at or above it but encloses one (task 1.8): claiming it would write a marker over an existing library | 503 `{ state, root, library }` |
-| `unmarked` | no marker above the root, none below it, and it could not be written (read-only volume); the id falls back to `sha256(real top)` and the library behaves as today: a remount is a different library | normally, with `unmarked: true` in the state |
+| `unmarked` | no marker above the root, none below it, and it could not be written (read-only volume); the id falls back to `sha256(real top)`, so the library's location is its identity: a remount **at a different location** is a different library, and one at the same location — which is what automount gives removable media, returning them to the same `/run/media/<user>/<label>` — is the same one, cache and all | normally, with `unmarked: true` in the state |
 
 503 with a state envelope is the shape `indexErrorReply` already gives the client for an
 absent index — "the thing is not there" is a state the UI renders, not a fault. The client
@@ -192,9 +192,22 @@ transition that can hide a swap — the top being present again after `state()` 
 at all, is evaluated from scratch. Two drives that automount at the same mount point in one
 session are otherwise both served under the first one's identity, out of the first one's
 cache directory, and `maintain` then sweeps every path the second does not have, cameras
-included. An `unmarked` library is exempt: its id is derived from the path, so the path is
-the whole test. Outside that transition the marker is never re-read, so an identity cannot
-change under a running server. The stat is affordable at the granularity of a request: on the removable
+included. The test is that the marker *says what it said*, not that there is one: an
+`unmarked` library is not exempt from the read, it simply expects to find nothing, because
+exempting it let a *marked* drive arriving at that same path be served under the hash of the
+path. Outside that transition the marker is never re-read, so an identity cannot
+change under a running server.
+
+`state()` is single-flighted as a whole — everything it decides it decides across `await`s,
+and concurrent callers are the ordinary case: `index.ts` fires it un-awaited at start and
+the client's boot hits the gate with a dozen requests at once. Unserialised, four first
+calls each ran the probe and each wrote a marker, minting four identities for one tree, and
+on the return transition the flag was cleared before the marker read so only the first of a
+burst re-checked. `refresh()` — the seam a later repoint-without-restart works through —
+goes through the same single flight, after dropping the settled library, the pending
+transition and the `nested` memo.
+
+The stat is affordable at the granularity of a request: on the removable
 volume this library lives on, 1000 warm `stat`s of the top took 1.72 ms (~1.7 µs each; W1's
 run, 2026-08-29, the sweep re-runnable from the comment beside the call in `createLibrary`'s
 `state`), against the `realpath` per request that D3 already pays. Its one visible cost is
@@ -275,20 +288,38 @@ bar's existing error line: one line, two tones, no new surface.
   bounds, and refused where it is detected** (task 1.8). Only where the upward walk found
   nothing — a marked library never pays for this — the root is probed *downward* for
   `.model-browser/library.json` before any marker is written: breadth-first so the shallowest
-  library wins, at most 4 levels below the root and at most 500 directories *read* —
-  the budget bounds `readdir`s, never marker checks: every directory a paid-for `readdir`
-  enumerated has its marker opened, so what is found can never depend on the order the
-  filesystem listed entries in (an earlier version abandoned the queue when the budget ran
-  out, and a root with 600 siblings whose marked one was listed last was claimed) —
-  descending only real subdirectories (`readdir(…, { withFileTypes: true })`, `isDirectory()`, so no
-  symlink is followed) and skipping dot-entries, the marker itself being opened by name.
-  Found → the state is `nested`, naming the library's filesystem path, nothing is written,
-  and every path route answers 503 with it; the UI says where to point the root instead.
-  What is **still not detected**: a library deeper than 4 levels, or one under a directory
-  the 500-`readdir` budget never reached — the probe is best-effort, and running out is "not
+  library wins, at most 4 levels below the root and at most **2000 directories visited**
+  (`PROBE_MAX_VISITS`, counted where a directory leaves the queue, with the queue capped at
+  the same number so nothing beyond it is enqueued), descending only real subdirectories
+  (`readdir(…, { withFileTypes: true })`, `isDirectory()`, so no symlink is followed) and
+  skipping dot-entries, the marker itself being opened by name. One bound over visits, so
+  every per-directory cost hangs off it: ≤ 2000 `readdir`s, ≤ 2000 marker opens, ≤ 2000
+  queue entries. Found → the state is `nested`, naming the library's filesystem path,
+  nothing is written, and every path route answers 503 with it; the UI says where to point
+  the root instead.
+  **Where listing order matters, stated once:** a root with fewer than 2000 direct children
+  has every one of them marker-checked whatever order the filesystem listed them in — that
+  is the case this risk is about, a drive whose library sits one folder down, and it is
+  order-free. Beyond that, and at depth ≥ 2 in any tree wide enough to fill the queue, what
+  is examined is "the first 2000 directories breadth-first *in the order the filesystem
+  lists them*", and that order is not even stable across runtimes: Node sorts what libuv
+  returns, Bun does not, and a 600-sibling fixture whose marked sibling sat at index 555
+  under vitest sat at index 0 under the server (measured 2026-08-30 on tmpfs; re-run with
+  `bun -e` / `node -e` building 600 `kit-<i>` directories and printing
+  `readdirSync(d).indexOf('kit-599')`). So no test may assume a particular sibling is the
+  one found, and the tests here assert only that *some* enclosed library is.
+  What is **still not detected**: a library deeper than 4 levels, or one past the 2000th
+  directory visited — the probe is best-effort, and running out is "not
   found", exactly the behaviour that existed before it. Both bounds are what keep a root
   pointed at a wide slow volume from paying for a full descent at every evaluation, which
-  matters because a not-ready state is re-evaluated per request. There is still deliberately
+  matters because a not-ready state is re-evaluated per request — and because it is, the
+  `nested` answer is memoised for `NESTED_RECHECK_MS` (5 s) so a burst of requests costs one
+  walk rather than one each. Over a fixture of 600 directories of 300 entries, `chmod 0555`
+  so the evaluation repeats, three `refresh()`es each (R2-A's run, 2026-08-30, vitest on
+  tmpfs; the re-run recipe is beside `PROBE_MAX_VISITS`): the old read budget queued 150,301
+  directories and marker-opened 150,300 of them for 500 `readdir`s at 3003/2893/2855 ms, and
+  the visit bound queues and visits 2000 at 138/132/135 ms — and that 138 ms is still per
+  request without the memo. There is still deliberately
   no "a listing passed a foreign `library.json`" warning — such a warning could not fire even
   if it were written, because `listFsDir` skips every dot-entry, so `.model-browser` is never
   enumerated by a listing or a walk at all.

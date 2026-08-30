@@ -75,6 +75,47 @@
       behaviour, not a property worth keeping — so its fixture was corrected to restore the
       marker (a remount brings the tree back marker and all) and its comment rewritten to the
       property that now holds.
+      2026-08-30 (R2-A), the second review's F3/F4/F5/F7 against that same transition:
+      **F3** — the check exempted an `unmarked` library from the marker read entirely
+      (`current.ready.unmarked !== true`), so a *marked* drive arriving at that path was
+      served under the hash of the path, which is the swap the branch exists to catch. The
+      read now always happens and is compared against what the library expects to find —
+      `undefined` for an `unmarked` one, its id otherwise. Test: `library.test.ts` "takes a
+      marked tree arriving where an unmarked library was as a different library", falsified
+      by restoring the exemption ("expected { state: 'ready', ...(4) } to deeply equal
+      { state: 'ready', ...(3) }" — the four-field object being the stale `unmarked` one).
+      **F4** — nothing serialised `state()`, whose every decision spans an `await`. Four
+      concurrent first calls each ran the probe and each wrote a marker, minting four ids for
+      one tree; and `wasMissing` was cleared *before* the marker read, so only the first of a
+      burst re-checked the return transition. `state()` is now single-flighted as a whole
+      (`pending ??= compute().finally(...)`), `refresh()` awaits any flight before clearing
+      and then joins the same seam, and the flag is cleared after the read rather than
+      before. Tests: "answers a burst of first calls with one evaluation, and writes one
+      marker" (falsified by dropping the single flight — "expected [ ...(4) ] to have a
+      length of 1 but got 4") and "answers a burst across a return transition with the tree
+      that arrived" (falsified only by restoring *both* defects, since either fix alone
+      covers it — with both reverted, "expected [ { state: 'ready', ...(3) }, ...(3) ] to
+      deeply equal [ { state: 'ready', ...(3) }, ...(3) ]"; the late clear is therefore
+      defence in depth behind the single flight, and is commented as such).
+      **F5** — `app.ts`'s gate ended in a fall-through that answered "no library root is
+      configured" for any state it did not recognise, so a new `LibraryState` variant would
+      have been reported to the user as a missing configuration and nothing would have failed
+      to build. `unconfigured` is now its own branch and the gate ends at `unreachable(s)`
+      (`function unreachable(value: never): never`, new in `app.ts`; no such helper existed —
+      grepped). Verified by adding a `{ state: 'scratch-variant' }` member to `LibraryState`
+      in a scratch copy: `server/src/app.ts(135,24): error TS2345: Argument of type
+      '{ state: "scratch-variant"; }' is not assignable to parameter of type 'never'`,
+      restored after. The branch had no server test either, so `library-paths.test.ts`
+      "gates a server with no root at all, and says which thing is missing" now pins the 503
+      body and `/api/library`.
+      **F7** — `refresh()` is kept rather than deleted (D4 names it as the seam a later
+      repoint-without-restart uses) and tested: `library.test.ts` "leaves nothing settled
+      after nested, and re-probes when refreshed" (falsified by skipping the probe) and
+      "refresh clears a pending return transition, so the marker is not re-read after it" —
+      whose fixture deletes the marker after the refresh, because clearing `wasMissing` is
+      otherwise unobservable: a stale flag would re-read, find nothing where `drive-id` was,
+      and mint a new id (falsified by dropping `wasMissing = false` from `refresh`,
+      "expected { state: 'ready', ...(3) } to deeply equal { Object (state, id, ...) }").
 - [x] 1.8 Follow-up recorded in the fix round (2026-08-29): a root chosen *above* an existing
       library is **not** refused and not warned about (design R1). The marker walk only goes
       up, so the enclosed library is never seen; the enclosing marker is written over it and
@@ -122,6 +163,58 @@
       state re-reads nothing about the library". Falsified by dropping `nested` from the set
       (the first fails, "expected 1 to be greater than 1") and by reverting the guard to
       `err.state !== undefined` (the second fails, "expected 2 to be 1")
+      **Corrected 2026-08-30 (R2-A) — the evidence above was wrong.** The claim recorded for
+      the 600-sibling fixture, "deterministic: reaching any depth-2 directory needs 601 reads
+      in every order", is false: with the budget bounding `readdir`s and the queue drained,
+      *which* depth-1 directories were read was decided by listing position, so a depth-2
+      library was found only if its parent was listed early. That fixture passed only because
+      vitest runs on **Node**, whose `readdir` sorts what libuv returns and put `kit-599` at
+      index 555 — past the 500-read budget. The server runs on **Bun**, whose `readdir` does
+      not sort: measured 2026-08-30, the same 600 directories put `kit-599` at index **0** on
+      tmpfs, so the same tree answered `nested` under the server while the test asserted
+      `ready`. Re-run: `bun -e` and `node -e`, 600 `mkdirSync(d + '/kit-' + i)`, then
+      `readdirSync(d).indexOf('kit-599')` -> 0 and 555.
+      The second review's F1+F2, fixed together: the read budget is replaced by one bound on
+      directories **visited**, `PROBE_MAX_VISITS = 2000`, counted at dequeue, with the queue
+      capped at the same number. `readdir`s <= 2000, marker opens <= 2000, queue <= 2000 —
+      and the property worth stating, now stated in the `PROBE_*` comment, design R1 and the
+      repo CLAUDE.md rather than the false one: a root with fewer than 2000 direct children
+      has every child checked in any listing order, while past that, and at depth >= 2 in a
+      tree wide enough to fill the queue, what is examined is the first 2000 directories
+      breadth-first in the filesystem's own order. The old drain-the-queue behaviour also
+      left the marker opens bounded only by what those 500 `readdir`s enumerated, recomputed
+      per request while `nested`: measured over 600 directories of 300 entries (R2-A's run,
+      2026-08-30, vitest on tmpfs, three `refresh()`es), 150,301 directories queued and
+      150,300 marker-opened for 500 `readdir`s at 3003/2893/2855 ms an evaluation, against
+      2000 queued and visited at 138/132/135 ms now. So `nested` is additionally memoised for
+      `NESTED_RECHECK_MS = 5000`, dropped by `refresh()`.
+      Tests in `library.test.ts`: "checks every direct child of the root, wherever it was
+      listed" (the old cell, retitled to what is now true — 600 siblings, the marker at depth
+      1 in `kit-599` and again in `kit-0`; falsified by lowering the cap below 601, "expected
+      { state: 'ready', ...(3) } to deeply equal { state: 'nested', ...(2) }"); "gives up on
+      a tree too wide to reach the depth the library sits at", replacing the
+      runtime-dependent cell — 2100 siblings **each** carrying a marker at `kit-i/inner`, so
+      the queue fills with depth-1 entries before any depth-2 entry can be pushed whatever
+      the order, plus the 3-sibling control (falsified by raising the cap to 5000, "expected
+      { state: 'nested', ...(2) } to deeply equal { state: 'ready', ...(3) }"); and "walks
+      the tree once per recheck window however often the state is asked for", which counts
+      `readdir`s through a pass-through `vi.mock('node:fs/promises')` — `vi.spyOn` cannot
+      touch an ESM namespace ("Cannot spy on export \"readFile\". Module namespace is not
+      configurable in ESM"), the limitation `semantic.test.ts` already documents — falsified
+      by dropping the memo write ("expected 44 to be 22") and by dropping
+      `nestedMemo = undefined` from `refresh()` ("expected { state: 'nested', ...(2) } to
+      deeply equal { state: 'ready', ...(3) }").
+      **The queue cap is not falsifiable by test, and that is the finding.** Nothing past the
+      2000th entry is ever dequeued, so truncating the pushes cannot change which directories
+      are examined; the whole suite stays green with the line removed. It is a memory bound
+      only, recorded where it lives: over the 600x300 fixture, 2000 entries queued with it
+      and 180,601 without, 2000 visited either way (R2-A, 2026-08-30).
+      Verified under the runtime that actually matters as well: the four probe fixtures were
+      run against `createLibrary` under `bun run`, and all four answer as the vitest cells
+      assert (`bun test` is not vitest and cannot run these files, so this was a standalone
+      script rather than the suite). That run is what caught the replacement cell's own
+      control being order-dependent — it asserted `kit-0` and Bun answered `kit-2` — so the
+      control now asserts only that one of the three enclosed libraries is named
 - [x] 1.9 Follow-up recorded in the fix round (2026-08-29): `findMarker` walks from the root
       to the filesystem root unbounded, and the first marker wins. A stray
       `.model-browser/library.json` above the root — one left in `$HOME` by an earlier root
@@ -147,6 +240,14 @@
       Test: `library.test.ts` "throws rather than reporting no marker when it cannot see its
       own start", a `devOf` that rejects for the start, falsified by restoring the
       `return undefined`
+      2026-08-30 (R2-A), the second review's F6 — a documentation correction, no code: design
+      D4's `unmarked` row and `docs/platform-surface.md`'s marker bullet both said "a remount
+      is a different library", which is false at the same mount point. The id is
+      `sha256(real top)` and automount returns removable media to the same
+      `/run/media/<user>/<label>`, so a remount there yields the same id and the cache
+      follows. Both now say "a remount **at a different location** is a different library",
+      and the platform bullet names where the distinction bites per OS (Windows drive letters
+      and macOS `/Volumes/<name>` are re-assigned rather than fixed — unverified)
 
 ## 2. Server: every path is a library path (D2, D3)
 

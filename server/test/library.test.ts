@@ -12,8 +12,32 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+// A pass-through mock that only counts: `vi.spyOn(fsp, 'readdir')` throws
+// "Cannot spy on export … Module namespace is not configurable in ESM", so the
+// count comes from a mock that still does the real work — the same shape, and
+// for the same reason, as the one `semantic.test.ts` documents. Only the cells
+// that read `probeReads` arm it; everything else in this file runs against the
+// real filesystem exactly as before.
+const probeReads = vi.hoisted(() => ({ n: 0 }))
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return {
+    ...actual,
+    readdir: ((...args: Parameters<typeof actual.readdir>) => {
+      probeReads.n++
+      return actual.readdir(...args)
+    }) as typeof actual.readdir,
+  }
+})
 import { LibraryError, createLibrary, findMarker } from '../src/library'
+
+// Reset per cell rather than per read, so a reordering cannot carry a count
+// from one test into another's assertion.
+beforeEach(() => {
+  probeReads.n = 0
+})
 
 const cleanups: string[] = []
 
@@ -279,6 +303,107 @@ describe('library configuration', () => {
       state.state === 'ready' ? state.id : undefined,
     )
   })
+
+  it('takes a marked tree arriving where an unmarked library was as a different library', async () => {
+    const tmp = tempTree()
+    const root = join(tmp, 'readonly')
+    mkdirSync(root)
+    chmodSync(root, 0o555)
+    // Root ignores mode bits, so this can only be set up as an unprivileged
+    // user; skip rather than pass vacuously (the fixture the `unmarked` test
+    // above uses).
+    if (process.getuid?.() === 0) {
+      chmodSync(root, 0o755)
+      console.warn('skipped: running as root, which may write into a 0555 directory')
+      return
+    }
+    const library = libraryAt(root)
+    expect(await library.state()).toEqual({
+      state: 'ready',
+      id: createHashOf(root),
+      top: root,
+      root: '/',
+      unmarked: true,
+    })
+
+    // A read-only volume leaves and a *marked* one automounts in its place.
+    // The transition check used to skip the marker read entirely for an
+    // `unmarked` library — its id being path-derived, so the path looked like
+    // the whole test — and the second drive was then served under the first's
+    // hash, out of the first's cache directory.
+    chmodSync(root, 0o755)
+    rmSync(root, { recursive: true, force: true })
+    expect(await library.state()).toEqual({ state: 'missing', root })
+    mkdirSync(root)
+    markerAt(root, 'the-marked-drive')
+    const back = await library.state()
+    expect(back).toEqual({ state: 'ready', id: 'the-marked-drive', top: root, root: '/' })
+    expect(back.state === 'ready' && back.unmarked).toBeUndefined()
+    expect(library.id()).toBe('the-marked-drive')
+  })
+
+  it('answers a burst of first calls with one evaluation, and writes one marker', async () => {
+    const root = join(tempTree(), 'fresh')
+    mkdirSync(root)
+    const library = libraryAt(root)
+
+    // A burst is the ordinary case, not a contrived one: `index.ts` fires
+    // `state()` without awaiting it and the client's boot hits the gate with a
+    // dozen requests at once. Unserialised, each of these ran the probe and
+    // each wrote a marker — four identities minted for one tree, and the three
+    // whose write lost the race handed out an id the file does not carry.
+    const states = await Promise.all([library.state(), library.state(), library.state(), library.state()])
+    const ids = [...new Set(states.map((s) => (s.state === 'ready' ? s.id : s.state)))]
+    expect(ids).toHaveLength(1)
+    const onDisk = JSON.parse(readFileSync(join(root, '.model-browser', 'library.json'), 'utf8')).id
+    expect(ids[0]).toBe(onDisk)
+    expect(library.id()).toBe(onDisk)
+  })
+
+  it('answers a burst across a return transition with the tree that arrived', async () => {
+    const tmp = tempTree()
+    const top = join(tmp, 'vol')
+    mkdirSync(top)
+    markerAt(top, 'first-drive')
+    const library = libraryAt(top)
+    expect(await library.state()).toEqual({ state: 'ready', id: 'first-drive', top, root: '/' })
+    rmSync(top, { recursive: true, force: true })
+    expect(await library.state()).toEqual({ state: 'missing', root: top })
+    mkdirSync(top)
+    markerAt(top, 'second-drive')
+
+    // Before the fix, `state()` was not serialised *and* the flag was cleared
+    // before the marker read, so the first call of a burst consumed the
+    // transition and the other three answered from the cached `ready`: the
+    // first drive's identity for the second drive's tree, which is exactly
+    // what the transition check exists to prevent. Either fix alone closes it,
+    // so this cell only reddens when both are reverted — the late clear is
+    // defence in depth behind the single flight, and this is what says so.
+    const states = await Promise.all([library.state(), library.state(), library.state(), library.state()])
+    expect(states).toEqual(Array(4).fill({ state: 'ready', id: 'second-drive', top, root: '/' }))
+  })
+
+  it('refresh clears a pending return transition, so the marker is not re-read after it', async () => {
+    const tmp = tempTree()
+    const top = join(tmp, 'vol')
+    mkdirSync(top)
+    markerAt(top, 'drive-id')
+    const library = libraryAt(top)
+    await library.state()
+    rmSync(top, { recursive: true, force: true })
+    // Arms the transition: the next present-again call would re-read the marker.
+    expect(await library.state()).toEqual({ state: 'missing', root: top })
+    mkdirSync(top)
+    markerAt(top, 'drive-id')
+    expect(await library.refresh()).toEqual({ state: 'ready', id: 'drive-id', top, root: '/' })
+
+    // Refreshed from scratch, so there is no absence left to return from. The
+    // marker is deleted to make the difference visible: a transition still
+    // pending here would re-read it, find nothing where `drive-id` was, and
+    // evaluate the tree into a new library with a fresh id.
+    rmSync(join(top, '.model-browser'), { recursive: true, force: true })
+    expect(await library.state()).toEqual({ state: 'ready', id: 'drive-id', top, root: '/' })
+  })
 })
 
 describe('the marker walk stops at a mount boundary', () => {
@@ -381,14 +506,18 @@ describe('a root above an existing library', () => {
     expect(existsSync(join(five, '.model-browser', 'library.json'))).toBe(true)
   })
 
-  it('gives up on a tree too wide to search rather than reading it all', async () => {
-    // Breadth-first, so no directory at depth 2 is opened until every one at
-    // depth 1 has been read. 600 of them is past the 500-directory budget
-    // whatever order the filesystem hands them back in — this test does not
-    // depend on where `kit-599` lands in that order.
+  it('gives up on a tree too wide to reach the depth the library sits at', async () => {
+    // 2100 siblings, each holding the library one level further down. The
+    // queue is capped at the same 2000 the visit count is, so the root's own
+    // `readdir` fills it with depth-1 entries and no depth-2 entry is ever
+    // pushed — whatever order the filesystem listed the siblings in, and
+    // whichever of them the cap left out. This is the property the earlier
+    // 600-sibling fixture only *appeared* to have: it depended on `kit-599`
+    // landing past the 500th read, which is true of Node's sorted `readdir`
+    // and not of Bun's raw one, so the same tree answered `ready` under vitest
+    // and `nested` under the server.
     const wide = join(tempTree(), 'drive')
-    for (let i = 0; i < 600; i++) mkdirSync(join(wide, `kit-${i}`), { recursive: true })
-    markerAt(join(wide, 'kit-599', 'inner'), 'past-the-budget')
+    for (let i = 0; i < 2100; i++) markerAt(join(wide, `kit-${i}`, 'inner'), `past-the-cap-${i}`)
     expect(await libraryAt(wide).state()).toEqual({
       state: 'ready',
       id: expect.any(String),
@@ -396,28 +525,31 @@ describe('a root above an existing library', () => {
       root: '/',
     })
 
-    // The control, and what makes the first half about the *budget* rather
-    // than about depth: the same marker at the same depth, in a tree the
-    // budget covers, is found.
+    // The control, and what makes the first half about the *cap* rather than
+    // about depth: the same shape, in a tree the cap leaves room in, is found.
+    //
+    // *Which* of the three is named is the filesystem's listing order to
+    // decide, so only "one of them" is asserted. Naming `kit-0` passed under
+    // vitest and failed under Bun, which lists these in creation order on
+    // tmpfs and answered `kit-2` — the same trap the old wide fixture fell
+    // into, in the cell written to replace it.
     const narrow = join(tempTree(), 'drive')
-    for (let i = 0; i < 3; i++) mkdirSync(join(narrow, `kit-${i}`), { recursive: true })
-    const inner = join(narrow, 'kit-2', 'inner')
-    markerAt(inner, 'within-the-budget')
-    expect(await libraryAt(narrow).state()).toEqual({ state: 'nested', root: narrow, library: inner })
+    for (let i = 0; i < 3; i++) markerAt(join(narrow, `kit-${i}`, 'inner'), `within-the-cap-${i}`)
+    const control = await libraryAt(narrow).state()
+    expect(control.state).toBe('nested')
+    expect(control.state === 'nested' && control.root).toBe(narrow)
+    expect([0, 1, 2].map((i) => join(narrow, `kit-${i}`, 'inner'))).toContain(
+      control.state === 'nested' ? control.library : undefined,
+    )
   })
 
-  it('checks every directory the budget already paid to enumerate, wherever it was listed', async () => {
-    // The budget bounds `readdir`s, not marker checks. All 600 of these were
-    // enumerated by the root's single `readdir` — already paid for — and a
-    // marker check is one open of a known name, so each is checked whatever
-    // the budget's state.
-    //
-    // Before the fix, running out of budget *returned* instead of draining the
-    // queue, so the siblings listed after the 500th were never checked and the
-    // answer depended on the order the filesystem listed them in: on this
-    // machine's /tmp `kit-599` lists at index 555, and this root came back
-    // `ready` with a marker written over a library at depth 1. Both ends of the
-    // listing are asserted so no order can make this pass by luck.
+  it('checks every direct child of the root, wherever it was listed', async () => {
+    // The guarantee the cap buys: a root with fewer than 2000 direct children
+    // has every one of them visited, so a library one folder down is found in
+    // any listing order. Both ends of the listing are asserted so no order can
+    // make this pass by luck — on this machine's /tmp under vitest `kit-599`
+    // lists at index 555, and under Bun's raw `readdir` on tmpfs it came back
+    // first.
     for (const marked of ['kit-599', 'kit-0']) {
       const wide = join(tempTree(), 'drive')
       for (let i = 0; i < 600; i++) mkdirSync(join(wide, `kit-${i}`), { recursive: true })
@@ -430,6 +562,58 @@ describe('a root above an existing library', () => {
       })
       expect(existsSync(join(wide, '.model-browser'))).toBe(false)
     }
+  })
+
+  it('walks the tree once per recheck window however often the state is asked for', async () => {
+    // `nested` is the one not-ready answer that costs a walk rather than a
+    // stat, and the gate asks for the state on every request. Unmemoised, a
+    // wide tree paid for the whole probe per request: over 600 directories of
+    // 300 entries the old read budget marker-opened 150,300 of them at ~2.9 s
+    // an evaluation, and the visit bound still costs ~138 ms (the numbers and
+    // the way to re-run them are beside `PROBE_MAX_VISITS`).
+    const root = join(tempTree(), 'drive')
+    const inner = join(root, 'kits', 'STL Library')
+    mkdirSync(inner, { recursive: true })
+    for (let i = 0; i < 20; i++) mkdirSync(join(root, `other-${i}`))
+    markerAt(inner, 'the-inner-library')
+    const library = libraryAt(root)
+
+    const nested = { state: 'nested', root, library: inner }
+    expect(await library.state()).toEqual(nested)
+    const afterFirst = probeReads.n
+    expect(afterFirst).toBeGreaterThan(1)
+    expect(await library.state()).toEqual(nested)
+    // The second answer is the first one, not a second walk.
+    expect(probeReads.n).toBe(afterFirst)
+
+    // Still self-correcting, because the memo is a cost memo and not an
+    // identity: `refresh()` drops it, and the enclosed library going away is
+    // seen at once.
+    rmSync(join(inner, '.model-browser'), { recursive: true, force: true })
+    expect(await library.refresh()).toEqual({
+      state: 'ready',
+      id: expect.any(String),
+      top: root,
+      root: '/',
+    })
+    expect(probeReads.n).toBeGreaterThan(afterFirst)
+  })
+
+  it('leaves nothing settled after nested, and re-probes when refreshed', async () => {
+    const root = join(tempTree(), 'drive')
+    const inner = join(root, 'STL Library')
+    mkdirSync(inner, { recursive: true })
+    markerAt(inner, 'the-inner-library')
+    const library = libraryAt(root)
+
+    expect(await library.state()).toEqual({ state: 'nested', root, library: inner })
+    expect(() => library.realTop()).toThrow()
+    expect(() => library.id()).toThrow()
+    // `refresh()` is the seam a later repoint-without-restart uses (D4), so it
+    // has to answer from the filesystem rather than from anything held: still
+    // `nested`, and still nothing to serve from.
+    expect(await library.refresh()).toEqual({ state: 'nested', root, library: inner })
+    expect(() => library.realTop()).toThrow()
   })
 })
 

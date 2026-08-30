@@ -61,6 +61,17 @@ function indexErrorReply(err: IndexError): {
   return { body: { error: err.message }, status: bad ? 400 : 502 }
 }
 
+/**
+ * The end of a chain of narrowing branches, which the compiler reaches only if
+ * one is missing: `never` accepts nothing, so an unhandled member of the union
+ * is a type error at the call rather than a wrong answer at runtime. It throws
+ * if it is ever reached anyway — a hand-written state object from a test, say —
+ * because an unrecognised state is not something to answer 200 to.
+ */
+function unreachable(value: never): never {
+  throw new Error(`unhandled case: ${JSON.stringify(value)}`)
+}
+
 export function createApp(
   cache: ThumbCache = new ThumbCache(),
   launcher: Launcher = createLauncher(),
@@ -113,7 +124,15 @@ export function createApp(
         503,
       )
     }
-    return c.json({ error: 'no library root is configured', state: s.state }, 503)
+    if (s.state === 'unconfigured') {
+      return c.json({ error: 'no library root is configured', state: s.state }, 503)
+    }
+    // Every state is handled above, and the compiler is what says so. This
+    // branch used to be the fall-through, answering "no library root is
+    // configured" for anything it did not recognise — so a state added to
+    // `LibraryState` would have been reported to the user as a missing
+    // configuration, and nothing would have failed to build.
+    return unreachable(s)
   })
 
   app.get('/api/library', async (c) => c.json(await library.state()))

@@ -47,11 +47,17 @@ contracts and placeholder rules: `openspec/changes/open-in-slicer/design.md` (L2
   top above a subvolume boundary is not found from a root inside it (the root becomes its own
   library; degraded, not broken). Windows/macOS are unverified: `st_dev` is per-volume on
   macOS, and Node reports a synthesised device number on Windows — a per-OS check before
-  either is claimed. Where the walk finds nothing, a bounded probe **down** (4 levels, 500
-  directories) refuses a root that encloses an existing library rather than writing a marker
-  over it. A volume that refuses the write (read-only media) runs `unmarked`: the id falls
-  back to a hash of the top's real path, so a remount is a different library and its cache
-  does not follow. Listings never show the marker directory.
+  either is claimed. Where the walk finds nothing, a bounded probe **down** (4 levels, 2000
+  directories visited) refuses a root that encloses an existing library rather than writing a
+  marker over it. A volume that refuses the write (read-only media) runs `unmarked`: the id
+  falls back to a hash of the top's real path, so the library's *location* is its identity —
+  a remount **at a different location** is a different library and its cache does not follow,
+  while one at the same location is the same library. On Linux that distinction is the one
+  that usually applies: automount returns removable media to the same
+  `/run/media/<user>/<label>`, so an unplug and replug keeps the id and the cache. Windows
+  drive letters and macOS `/Volumes/<name>` are re-assigned rather than fixed, so the same
+  volume can come back under a different path there — unverified. Listings never show the
+  marker directory.
 - **Content types**: the fixed extension→mime table (app-launch L6) is
   platform-neutral, but anything that would *consume* those mimes is registry-specific
   per the table above.

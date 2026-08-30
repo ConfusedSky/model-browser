@@ -19,9 +19,15 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   home directory the library and widening confinement to all of it. Symptom: the app opens on
   your home folders instead of your kits. A root that *encloses* a library is refused
   instead — state `nested`, nothing written — but only within the probe's bounds (4 levels
-  down, 500 directories *read* — the budget bounds `readdir`s, and every directory one of
-  them enumerated is marker-checked, so listing order never decides the answer). The startup line `library <id> at <top>` names the top actually
-  resolved — read it
+  down, 2000 directories *visited*, which bounds the `readdir`s, the marker opens and the
+  queue alike). A root with fewer than 2000 direct children has every child checked whatever
+  order the filesystem listed them in; past that, and at depth ≥ 2 in a tree wide enough to
+  fill the queue, what is found depends on listing order — and that order differs between
+  runtimes, so a fixture built to be deterministic under vitest (Node sorts `readdir`) can
+  answer differently under the server (Bun does not: 600 `kit-<i>` directories put `kit-599`
+  at index 555 on Node and index 0 on Bun). A `nested` answer is memoised for 5 s, so
+  repointing the root shows up on the next window rather than the next request. The startup
+  line `library <id> at <top>` names the top actually resolved — read it
 - Semantic search needs a second server, not started by `bun run dev` (its collection root
   must lie inside the library, or the index covers nothing):
   `cd ~/Documents/tests/mini-classify && .venv/bin/python serve_api.py --cache-dir embed-cache2 --port 8077`
@@ -144,6 +150,14 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
 - Suite-specific conventions live with the tests: client/test/CLAUDE.md, server/test/CLAUDE.md
 - Run vitest from the workspace dir (`cd client && bunx vitest run …`) — from the
   repo root bunx fetches an unpinned vitest that can't resolve workspace deps
+- **vitest runs on Node, the server runs on Bun, and their `readdir` order differs** — Node
+  sorts what libuv returns, Bun hands back raw directory order. A fixture whose expected
+  answer depends on *which* entry is reached first passes green and asserts nothing about
+  production: 600 `kit-<i>` directories put `kit-599` at index 555 on Node and index 0 on
+  Bun, which is how a probe test claiming "deterministic in every order" survived a review
+  round, and how its replacement's own control cell was wrong until it was run under Bun.
+  Assert the order-free property (that *some* match is found, that a bound is respected),
+  and re-run anything order-sensitive with `bun run <script.ts>` against the real module
 - Manual/E2E: Playwright MCP works here including headless WebGL
   - E2E fixture models: there is no dedicated fixture set. The six STLs this line used to
     name (Enforcer, paint-rack, bod_test_cube, fat_cat) lived under
