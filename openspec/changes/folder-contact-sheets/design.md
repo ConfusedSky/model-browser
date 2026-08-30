@@ -40,11 +40,12 @@ to what is looked at, which is the same argument `thumbnail-sweep-priority` make
 renders. One `IntersectionObserver` on the grid, observing folder tiles, with a small
 in-memory map per listing; a re-mounted tile (scrolled away and back) reuses the map.
 
-### D2: A bounded depth-first walk in listing order
+### D2: A bounded depth-first walk, models first at each level
 
 The peek walks the folder with `listFsDir`: models at this level in sorted order, then each
 subfolder in sorted order, recursively, until `n` models are found or `PEEK_BUDGET`
-entries have been examined (a constant — 64 — not an env knob; a preview is a glance, not
+entries have been examined — passing a walk object so `takeStep` charges every entry
+`listFsDir` stats; without it a single wide folder pays its whole `readdir` and stat pass before the budget is consulted. Charging inside the level costs determinism unless the dirents are **sorted by code-point name order before the charge loop** (`sortEntries`' `localeCompare` is ICU/locale-dependent and cannot promise the same cut on two machines; the display order it produces afterwards may stay locale-aware): `listFsDir` charges before each stat, breaks at the budget, and sorts afterwards, so an over-budget level would otherwise keep the first N in `readdir` order — filesystem order, not stable across machines. Sorting first also makes `listFlat`'s own truncation deterministic, with no other behaviour change. Hidden entries are skipped before the charge and are not counted; the bound counts stats (a constant — 64 — not an env knob; a preview is a glance, not
 a search). Deterministic, so a folder's contact sheet is the same on every visit and on
 every machine. Hidden directories are skipped as everywhere else; an unreadable subfolder
 is skipped; an unreadable root is a 404 like `listDir`'s. Archives met on the way are

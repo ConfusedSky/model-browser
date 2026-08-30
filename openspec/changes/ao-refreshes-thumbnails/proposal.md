@@ -67,8 +67,7 @@ that opens over it, which is the handoff jump the whole sequence exists to remov
 - `client/src/hooks/useThumbnails.ts` — the sweep effect re-runs when the effective
   occlusion preference changes; it carries displayed images across the re-run and owns
   their object URLs; `poseStale` narrows to "a pose that would be applied".
-- `client/src/viewer/aoToggle.ts` — the preference is read through `aoEnabled()` inside the
-  effect; making it a dependency means it has to be observable rather than only readable.
+- `client/src/viewer/aoToggle.ts` — the effective preference is passed in from `App.tsx`, which already holds it in state, and joins the effect's inputs (task 1.1: pass the value; do not call `aoEnabled()` for the dependency).
   `App.tsx` already holds it in state for the pill.
 - Interacts with `entry-context-menu`: its per-tile re-render (D7) stays useful afterwards —
   it covers a tile that is wrong for a reason no sweep can detect. Neither depends on the

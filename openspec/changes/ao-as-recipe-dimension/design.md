@@ -48,33 +48,55 @@ migration it then earns.
 ### D2: The request names the render; the entry shares the orientation
 
 `GET /api/thumb?path&mtime&ao=on|off`. The response's `status`/`png`/labels are for the
-requested render; `camera` and `axis` are the entry's, whichever render was asked for. A
-`miss` on the unoccluded render of a model with an occluded one still carries the camera —
+requested render; `camera` and `axis` are the entry's, whichever render was asked for. A `stale` on the unoccluded render of a model with an occluded one and a camera still carries the camera —
 the client re-renders under the stored orientation, exactly as a `stale` does today. `ao`
 absent means `on`, so a client from before this change reads what it always read.
 
 `PUT` carries `ao` beside `png`; absent means `on`. Labels on a PUT apply to the render it
 carries: the sidecar's top-level labels for `on`, the `noao` field for `off`.
 
-**One camera, two renders, so a write to either invalidates the other.** The orientation
+**One camera, two renders, so a write that moves the camera invalidates the render it did not draw.** The orientation
 is shared by design (D4 in the v1 design: keyed by path, survives re-export), and an orbit
 rewrites it together with the current render's pixels — `App.tsx`'s `persist` PUTs both.
 Left alone, the *other* render would keep its `mtime` label, read as a hit, and show the
 model at the pre-orbit angle the next time the preference flipped: two angles for one
 camera, and browser A (occlusion on) disagreeing with browser B (off) about a model's
 orientation, which the shipped "Orientation shared across browsers" scenario forbids. So
-a PUT that **changes the shared orientation** — a `camera` or `axis` value that differs from
-what is stored, or a `null` discard of either (`resetFramingLive` in `entryActions.ts`
-PUTs `camera: null, axis: null` with no PNG) — clears the other render's `mtime` label: it
-becomes `stale`, keeps its pixels for the client to show until the replacement lands, and
-re-renders under the new orientation when next requested. A PUT that carries only a PNG
-and labels touches the other render **never**: both renders are drawn under the stored
-orientation, so pixels alone cannot put them at two angles, and the ordinary render PUT
-(`useThumbnails`' tail sends `png` and labels, no camera) must leave the sibling a hit or
-"toggling back is a lookup" is unreachable — the first draft of this rule fired on every
-render and would have re-rendered the whole grid on every toggle, forever. Compared
-against the stored value, not merely present: `App.tsx`'s `persist` sends the camera on
-every lightbox close whether or not the user moved it.
+a PUT that **changes the shared orientation** invalidates the render it did not write — and,
+when it carries no pixels, **both** (`resetFramingLive` in `entryActions.ts` PUTs `camera: null, axis: framing.posed ? null : undefined` with no PNG — the axis is discarded only when a usable pose exists; there is no "written render", and the first draft of this rule
+would have invalidated the render on screen and left the other at the discarded angle). A
+PUT that carries only a PNG and labels touches the other render **never**: both renders are
+drawn under the stored orientation, so pixels alone cannot put them at two angles, and the
+ordinary render PUT (`useThumbnails`' tail sends `png` and labels, no camera) must leave
+the sibling a hit or "toggling back is a lookup" is unreachable.
+
+**What counts as a change is a tolerance, not equality — and a first-ever camera is a change.** A camera the entry did not hold has nothing to be compared against and must invalidate: a posed model rendered under both settings, orbited, then closed writes its first camera while the sibling is still drawn at the pose. The axis is an enum and compares by equality. The cost of the first-camera rule, stated: an un-oriented, un-posed model's first unmoved lightbox close persists a first camera (`closeLightbox`'s `decided = everManipulated || !unowned` is true for it), and if both renders were already cached the sibling re-renders once to pixels identical to what it had. Once per model, and only when both renders exist — accepted over the alternative of the client deciding what the server should compare. `App.tsx`'s `persist` sends the
+camera on every lightbox close whether or not the user moved it, and `closeLightbox`
+settles through `captureState` — a round trip az/el → cartesian → `asin`/`atan2` → az/el
+that is not bit-exact. Measured (the fourth reviewer's re-run, 2026-08-28: the `applyState` → `captureState` round
+trip, y-frame, bounds pivoted to the origin, 200k random states at each of radius 0.01, 1
+and 137): `DEFAULT_CAMERA` drifts by 1.1e-16, the **maximum** drift is 7.1e-15, and most
+states differ. Under value equality every close of an oriented model would invalidate its
+sibling — the first-draft failure moved from "every render" to "every close". So the
+comparison is `|Δ| > CAMERA_EPSILON` per component of `CameraState` — every component is
+O(1) and unit-free in the same sense (`az`/`el` radians, `distR` clamped to [1.1, 20],
+`target` in bounding-sphere-radius units), the drift is scale-independent, and 1e-9 has
+five orders of headroom. The probe lands as a **test beside the constant** (task 1.5)
+asserting max round-trip drift ≪ `CAMERA_EPSILON`, so the number is re-runnable where it is
+used rather than quoted from a session that is gone.
+
+**Invalidate by clearing labels, not `mtime`.** A `stale` response carries no pixels
+(`ThumbCache.get` returns labels and camera only when `mtime` mismatches), so clearing the
+sibling's `mtime` would produce exactly the pixel-less answer that makes "shown until its
+replacement exists" false as a server mechanism. Clearing the sibling's recipe labels
+(`rig`, `lighting`, `posed`) instead leaves it a *hit* whose labels fail the client's check
+— the path `Recipe-labelled thumbnails` already defines — so its pixels are served, shown,
+and replaced. The per-render status is then simply: hit when this render's pixels are present at the
+requested mtime; stale when it was written before or the entry holds a *camera* — `get`'s
+predicate today is `meta.camera !== undefined || meta.mtime !== undefined`, camera only,
+applied per render; an axis-only entry is a miss — miss otherwise. A PNG written at a newer
+mtime supersedes the sibling's pixels as well: they are deleted then, or the unvisited render
+would hold stale pixels until next rendered.
 
 ### D3: Each render is its own LRU file; the entry is one existence
 
@@ -88,8 +110,7 @@ whole entry — both PNGs and the sidecar — when the source is gone.
 
 `useThumbnails` and the two re-render commands call `aoEnabled()` when they build a
 request or a render, and pass the value through `getThumb`, `renderThumbnail` and
-`putThumb`. The live view already does this per frame. Reading once per render — not once
-per hook mount — is what lets `ao-refreshes-thumbnails`, re-targeted, re-run the
+`putThumb`. The live view already does this per frame. (Superseded for the hook by `ao-refreshes-thumbnails` 1.1, which passes the value from `App.tsx` and lets the dependency drive the re-run; the re-render commands and `persist` still read it themselves.) Reading once per render — not once per hook mount — is what lets `ao-refreshes-thumbnails`, re-targeted, re-run the
 same sweep after a toggle and get the other render. Handoff parity follows from both paths
 reading the same store: the thumbnail on screen and the overlay that opens over it were
 rendered under the same answer.
@@ -102,8 +123,13 @@ Four sites call `renderThumbnail` — `useThumbnails`' tail, the two re-render c
 `renderThumbnail`, not the live chain, so with `ao = true` as the default every
 orbit-release and lightbox-close snapshot would be occluded whatever the pill says and
 PUT with `ao` absent. That is the standing behaviour today (thumbnails always shipped
-recipe), and it is the mismatch this change exists to close; `snapshot` passes
-`aoEnabled()` and `persist` declares it.
+recipe), and it is the mismatch this change exists to close; `persist` reads `aoEnabled()`
+**once, before its await** — it already captures `state` and the label that way ("a rapid
+toggle mid-snapshot must not pair this PNG with newer values in one PUT") — passes it into
+`snapshot(ao)` and declares the same value on the PUT; two independent reads would let a
+toggle between them file occluded pixels under the `noao` slot with matching labels, a
+wrong-recipe hit nothing invalidates. `resetFramingLive` is the fifth `putThumb` site — `useThumbnails`' tail, both `entryActions` re-render commands, `persist`, and it (a `null` discard, no PNG) — and declares `ao` too, though with no pixels the value only names
+the request.
 
 ### D5: No `RIG_VERSION` bump
 

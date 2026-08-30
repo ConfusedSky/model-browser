@@ -33,7 +33,10 @@
       require `=== realTop || startsWith(realTop + sep)`. Refusals are
       one error (`path outside the library`, 400) with no filesystem detail; a path
       that does not exist is the 404 the route already gives. Also `libPathOf(real)`
-      for the reverse direction (`'/' + relative(realTop, real)`)
+      for the reverse direction (`'/' + relative(realTop, real)`). A path that does not exist — every completion prefix, a listing of a deleted
+      folder, a thumb PUT after a delete — is confined on the `realpath` of its nearest
+      existing ancestor: under the top → the ordinary 404 (`[]` for completion); outside →
+      the 400. `realpath` throwing ENOENT is never reported as either
 - [ ] 1.5 `GET /api/library` returns the state; while `unconfigured`/`missing`, every
       `/api/*` path route answers 503 `{ state, root? }` before touching a path (the
       `indexErrorReply` shape). Log the resolved library top and id once at start
@@ -58,7 +61,12 @@
       through 1.4 would realpath the alias away. `walkFsLevel` skips a subdirectory whose
       `realpath` falls outside the top **at the `walk.dirs.push` site, before the push** —
       the visited-set check sits after the push by design (the aliased-directory comment),
-      so a check placed there would still list the escaping entry;
+      so a check placed there would still list the escaping entry. The same confinement
+      applies to **every emitted entry**, not only directories: `listFsDir` `stat`s through
+      symlinks and classifies by extension, so a symlinked `evil.stl`/`evil.zip` pointing
+      outside would otherwise be listed as a model/archive, and `walkFsLevel`'s zip branch
+      calls `walkZip(e.path, …)` with no test, enumerating an outside archive's names —
+      test the real path of each entry before emitting it — gated on `dirent.isSymbolicLink()`, since a non-symlink entry can only escape through an already-confined ancestor and a 200,000-entry search walk cannot afford an lstat chain per entry (design Risks);
       the `path must be absolute` checks go
 - [ ] 2.2 `complete(prefix)`: prefix is a library path; completes within the library;
       returns library paths; a prefix that does not start with `/` or resolves outside
@@ -67,7 +75,10 @@
 - [ ] 2.3 `app.ts`: `/api/file`, `resolveEntryFile` (launch), `/api/thumb` GET/PUT,
       `/api/complete`, `/api/dir` all go through 1.4; `zipTemp.fileFor` keeps hashing
       the library vpath (its key was the vpath already)
-- [ ] 2.4 Server tests: an entry's `path` in a listing is library-relative and round-trips
+- [ ] 2.4 Server tests: an entry's `path` in a listing is library-relative and
+      round-trips; an escaping symlinked *file* and an escaping symlinked *archive* are
+      omitted from a listing and a walk (no entry, no archive names); a nonexistent path
+      under the top is 404 and a completion prefix under the top completes; round-trips
       through `/api/file` and `/api/thumb`; a flat walk over a tree containing an
       escaping symlink omits it; completion within and outside; `/api/file` on a vpath
       whose archive is outside the library is refused
@@ -142,7 +153,8 @@
       `~/.cache/model-browser/<id>/`; a new bullet states that the marker is the first
       file this app writes beside the models, and what `unmarked` means on a read-only
       volume
-- [ ] 6.2 `CLAUDE.md`: the dev-instance line names `MODEL_BROWSER_ROOT`; the semantic
+- [ ] 6.2 `CLAUDE.md`: the dev-instance line names `MODEL_BROWSER_ROOT`; `directory-browsing`'s
+      guard rationale ("reads and serves arbitrary local paths") becomes "the user's model library" — a one-phrase truth fix in the delta (*API restricted to the app's own origin*, every scenario carried) and in `guard.ts`'s docstring; the guard itself is unchanged, the demo's public-origin change rewrites it later; the semantic
       line notes the index root must lie inside the library; `docs/web-demo-notes.md`
       item 2 points here as superseded
 - [ ] 6.3 `listing-tree-cache`: rewrite its **delta spec** and design before it is applied —

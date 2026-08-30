@@ -35,7 +35,7 @@ Every path the server accepts or emits — listings, file bytes, thumbnails, cam
 - **THEN** it resolves under the library's top like any other path — not found unless the library happens to hold that path, in which case that entry is what is served
 
 ### Requirement: Nothing outside the library is reachable
-Every filesystem location the server derives from a request path SHALL resolve, through symlinks, to the library's top or a location beneath it, or the request SHALL be refused without naming any filesystem detail. `..` components SHALL be normalised before resolution and SHALL NOT escape. A directory reached during a recursive walk that resolves outside the library SHALL be skipped rather than listed.
+Every filesystem location the server derives from a request path SHALL resolve, through symlinks, to the library's top or a location beneath it, or the request SHALL be refused without naming any filesystem detail. `..` components SHALL be normalised before resolution and SHALL NOT escape. Any entry — file, archive or directory — that resolves outside the library SHALL be omitted from listings and skipped by walks: never named, fetched, thumbnailed, or, for an archive, enumerated. A path under the library's top that does not exist SHALL be reported as not found, distinct from a refusal, and confinement SHALL be decided for such a path on the nearest existing ancestor of its filesystem half; an archive entry that does not exist inside an existing archive is the archive layer's not-found, not a confinement decision.
 
 #### Scenario: Dot-dot cannot escape
 - **WHEN** a request path contains `..` components that would resolve above the library's top
@@ -43,7 +43,11 @@ Every filesystem location the server derives from a request path SHALL resolve, 
 
 #### Scenario: A symlink out of the library is refused
 - **WHEN** a path inside the library is a symlink whose target lies outside it
-- **THEN** listing it, fetching it or thumbnailing it is refused, and a recursive walk skips it
+- **THEN** naming it as a request is refused; as an entry of its parent it is omitted from the listing and skipped by a recursive walk
+
+#### Scenario: An escaping entry is omitted, whatever it is
+- **WHEN** a directory inside the library holds a symlinked file, archive or subdirectory whose target lies outside
+- **THEN** none of them appears in the directory's listing, no archive names are enumerated, and a flat walk emits nothing for them
 
 #### Scenario: A symlink within the library is followed
 - **WHEN** a path inside the library is a symlink whose target also lies inside it

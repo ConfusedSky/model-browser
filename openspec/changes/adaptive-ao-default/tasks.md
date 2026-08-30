@@ -14,7 +14,9 @@
       | absent`; `parse` reads legacy `'on'`/`'off'` as `{ choice }` and anything malformed
       as absent; `aoEnabled()` returns the effective boolean unchanged for every consumer;
       new `aoState()` (`'choice-on' | 'choice-off' | 'auto-off' | 'unset'`),
-      `chooseAo(on)`, `noteAutoOff(ms)` (no-op unless unset)
+      `chooseAo(on)`, `noteAutoOff(ms)` (no-op unless unset). The effective state is held in
+      memory as well as storage, so a profile whose storage refuses writes keeps its
+      automatic decision for the session instead of re-probing every open
 - [ ] 1.2 `App.tsx`: the pill calls `chooseAo`, reads `aoState()`, and renders an *auto*
       marker (title text says what was measured) when the state is `auto-off`; its `title`
       and `viewer/aoToggle.ts`'s docstring stop claiming thumbnails ignore the preference
@@ -22,17 +24,14 @@
       else remove it here). `remove-axis-lighting` edits the same pill block — whichever
       lands second re-reads it
 - [ ] 1.3 Tests (`aoToggle.test.ts`): legacy strings read as a choice; unset is on; `noteAutoOff`
-      flips unset to auto-off and is a no-op on a choice; `chooseAo` clears auto; a
-      malformed value is unset
+      flips unset to auto-off and is a no-op on a choice; `chooseAo` clears auto; a malformed value is unset; with storage throwing on write, `noteAutoOff` still changes `aoEnabled()` for the session
 
 ## 2. The measurement (D2, D4, D5)
 
 - [ ] 2.1 `viewer/renderSize.ts`: `AO_FRAME_BUDGET_MS = 33`, `PROBE_FRAMES`, `PROBE_WARMUP`,
       `SAMPLE_WINDOW` — each with the measurement that placed it in a comment (the 780M
       59 ms / 18 ms pair; the probe's duration at 60 Hz)
-- [ ] 2.2 `viewer/ViewerLayer.tsx`: a `FrameSampler` fed by rAF-driven loops only — the
-      tween loop (fed only while `viewer.mode === 'lightbox'` — `runTweenLoop` serves both
-      surfaces) and a new probe loop that runs on **every** lightbox open while
+- [ ] 2.2 `viewer/ViewerLayer.tsx`: a `FrameSampler` fed by rAF-driven loops only — the tween loop (fed only while `viewer.mode === 'lightbox'` — `runTweenLoop` serves both surfaces — and discarding its own first `PROBE_WARMUP` frames like the probe) and a new probe loop that runs on **every** lightbox open while
       `aoState() === 'unset'`; overlay frames and drag frames never feed it. Median over
       the window; on exceeding the budget call `noteAutoOff(median)` and report it through
       a new `onAoAuto(ms)` prop, which `App.tsx` routes into the same `ao` state the pill
@@ -40,7 +39,8 @@
 - [ ] 2.3 The probe renders the model already on screen at the lightbox's real render size
       (`liveRenderSize` of the host), discards the first `PROBE_WARMUP` intervals, and stops
       after `PROBE_FRAMES` or on the first decision; a drag or close cancels it
-- [ ] 2.4 Tests (component, fake rAF clock): intervals over budget for a window → auto-off
+- [ ] 2.4 Tests (component, fake rAF clock): the pill shows the auto marker after a decision and
+      drops it after a press; intervals over budget for a window → auto-off
       recorded with the median and the grid's thumbnail requests switch to `ao=off`; one
       spike in a fast window → no decision; a `choice` → the sampler never runs; overlay
       frames → the sampler is not fed; the probe cancels on close

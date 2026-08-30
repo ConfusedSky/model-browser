@@ -72,8 +72,7 @@ The exploration behind this is recorded in `docs/web-demo-notes.md` (item 2).
 - `directory-browsing`: **MODIFY** *Directory listing* (the server lists directories within
   the library, not any readable directory), *Editable path bar* (shows and accepts
   library-relative paths; the root is `/`), *Server-backed path autocomplete* (completes
-  within the library), *Recent directories* (library-relative; reset on first start under a
-  library).
+  within the library), *Recent directories* (library-relative; reset on first start under a library), *API restricted to the app's own origin* (its rationale said the server serves "arbitrary local paths"; it now serves the user's model library — one phrase, every scenario carried, the guard unchanged).
 - `url-navigation`: **MODIFY** *The URL names the committed view* (paths are
   library-relative) and *Deep links restore the view* (a link resolves on any machine holding
   the same library; the no-parameter boot lands on the root, not a last absolute path).

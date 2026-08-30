@@ -24,9 +24,7 @@ why "just default it off" was rejected — it pays the handoff jump on every mac
   thumbnail key, not a label: the occluded PNG and the unoccluded PNG are siblings under one
   entry, each with its own recipe labels and its own place in the size-cap LRU, sharing the
   model's camera and axis. Switching the preference back finds the other render instead of
-  re-rendering it — **unless the model was orbited in between**: a write that carries
-  pixels or an orientation for one render marks the other stale, so the shared camera is
-  never shown at two different angles.
+  re-rendering it — **unless the model was orbited in between**: a write that changes the shared orientation invalidates the other render (both, when it carries no pixels), so the shared camera is never shown at two different angles; a write that carries only pixels never touches the other render.
 - **No migration.** Every existing PNG is the occluded render and keeps its file name; the
   unoccluded render is a new sibling file. No `RIG_VERSION` bump: neither recipe's pixels
   change — the recipe *set* grows.
@@ -51,9 +49,7 @@ None.
   "in both lighting modes" clause goes (there is one, after `remove-axis-lighting`).
 - `model-thumbnails`: **ADD** *A thumbnail exists per occlusion recipe* — the occluded and
   unoccluded renders as siblings under one entry, keyed by the preference, each carrying its
-  own labels and evicted independently, sharing camera and axis. *Server-side thumbnail
-  persistence*, *Bounded, self-maintaining cache* and *Recipe-labelled thumbnails* are left
-  as they are: the key gains a dimension, the labels and their staleness rule are unchanged.
+  own labels and evicted independently, sharing camera and axis. *Server-side thumbnail persistence* and *Bounded, self-maintaining cache* are left as they are: the key gains a dimension. *Recipe-labelled thumbnails* is not modified, but the new requirement states one exception to its "a write not replacing a PNG leaves the labels alone" rule: sibling invalidation clears them.
 
 ## Impact
 

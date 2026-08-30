@@ -115,7 +115,15 @@ changed keeps every remaining entry's state and image, starts loading only the a
 and drops the removed ones (revoking their URLs). Today an entries change is always a
 navigation, so "reset everything" was harmless; `folder-contact-sheets` adds preview
 entries to the list as peeks land, and without this rule each landing peek would reset the
-whole grid. One mechanism serves both triggers.
+whole grid. One mechanism serves both triggers — and it cannot live inside the effect. React runs an
+effect's cleanup before every re-run, whatever caused it, so per-entry flags created in the
+closure are torn down together however fine-grained they are. The per-entry state (alive,
+cancel handle, owned URL) is held in a ref that outlives the effect; the effect body *reconciles* `entries` against it and only an unmount cleanup disposes everything — and disposal clears the map, because `<StrictMode>` (`main.tsx`) simulates unmount→remount with refs preserved: a populated map on remount would start nothing. The
+reconciliation has two inputs beyond entry identity (path + mtime): the effective
+preference — a change of it retires every entry's generation even though the set is
+unchanged (2.3) — and the entry's `IndexPose` compared by value, since `poses` is deliberately not a dependency (1.2a), the map is rebuilt on every landing (reference comparison would re-look-up everything), and a surviving entry must still notice a pose that arrived with a meaning search over the same tiles. Retiring an entry's work on a preference change keeps its URL and displayed state; only removal revokes. A third per-entry state, *parked* (cancelled by `thumbnail-sweep-priority`'s
+far-band rule, restartable on re-entry), is what keeps that change composable: parked is not
+finished, and reconciliation restarts it when its tile comes back.
 
 ## Risks / Trade-offs
 

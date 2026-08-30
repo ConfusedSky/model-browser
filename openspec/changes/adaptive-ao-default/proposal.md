@@ -17,8 +17,8 @@ the user's GPU").
 ## What Changes
 
 - **The occlusion preference gains an *unset* state, and unset means measured.** A profile
-  that has never pressed the pill starts with occlusion on and, the first time the lightbox
-  opens, times a short run of frames; if the median exceeds a budget, occlusion is turned
+  that has never pressed the pill starts with occlusion on and, each time the lightbox
+  opens while still unset, times a short run of frames; if the median exceeds a budget, occlusion is turned
   off for that profile, recorded as an automatic decision alongside the number that made
   it.
 - **A choice is never overridden.** Pressing the pill makes the state a user's choice — on

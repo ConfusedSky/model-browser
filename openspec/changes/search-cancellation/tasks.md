@@ -1,6 +1,6 @@
 # Tasks — search-cancellation
 
-> Ordering: independent of the search-matching and options changes, but coordinate with `listing-tree-cache` — task 2.3's "never persist a partial walk" rule is what keeps a stopped traversal from poisoning that cache, and the two share the equivalence key. Re-read `listing.ts` and `app.ts` against main before starting (parallel sessions).
+> Ordering: independent of the search-matching and options changes; `folder-contact-sheets`' peek states in its own requirement that it is neither shared nor stopped (bounded), so this change's traversal rules do not cover it; `library-root` lands first and changes what a path means in `listing.ts`/`app.ts`. Coordinate with `listing-tree-cache` — task 2.3's "never persist a partial walk" rule is what keeps a stopped traversal from poisoning that cache, and the two share the equivalence key. Re-read `listing.ts` and `app.ts` against main before starting (parallel sessions).
 
 ## 0. Verify the premise first
 

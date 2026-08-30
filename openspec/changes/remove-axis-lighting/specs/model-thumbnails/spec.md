@@ -4,7 +4,9 @@
 > re-targeted on top of this change and must rewrite its delta under the new title.
 > `thumbnail-sweep-priority` modifies *Client-side thumbnail rendering*; no collision.
 > Every scenario title is kept (the archive refuses a MODIFIED block that drops one);
-> the two that named the retired mode now describe a stored legacy label.
+> the two that named the retired mode now describe a stored legacy label. The recipe-input
+> list below names the lighting label and the rig version; the shipped `posed` label is
+> stated by `ao-refreshes-thumbnails`, which MODIFIES this requirement after it.
 
 ## RENAMED Requirements
 

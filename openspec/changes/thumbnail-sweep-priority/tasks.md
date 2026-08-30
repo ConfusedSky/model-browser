@@ -1,6 +1,6 @@
 # Tasks — thumbnail-sweep-priority
 
-> Ordering: independent of the search and cache changes — it touches the client render queue and grid only. Re-read `queue.ts`, `useThumbnails.ts`, and `Grid.tsx` against main before starting (parallel sessions).
+> Ordering: independent of the search and cache changes — it touches the client render queue and grid only. Two drafted changes reach into it: `ao-refreshes-thumbnails` (its 2.1 names a *parked* per-entry state for this change's far-band cancellation — whichever lands second names it) and `folder-contact-sheets` (its 2.2 needs the wholesale ranking to take a per-path *max* band and to share one `IntersectionObserver` in `Grid`). Re-read `queue.ts`, `useThumbnails.ts`, and `Grid.tsx` against main before starting (parallel sessions).
 
 ## 1. Queue priority
 

@@ -214,7 +214,10 @@ bar's existing error line: one line, two tones, no new surface.
   sidecar (cameras travel), then remove it. Idempotent by construction.
 - [`realpath` on every request on cold removable media] → One call per request, lstat per
   path component; the walk already does this per directory. Measured as noise against a
-  32 s cold walk.
+  32 s cold walk. Per-*entry* confinement (task 2.1) is not one call — a flat walk is
+  budgeted at 20,000 entries (browse) or 200,000 (search) — so it is gated on
+  `dirent.isSymbolicLink()`: `listFsDir` already has the dirent from `readdir(…,
+  { withFileTypes: true })`, and a non-symlink entry can only escape through an ancestor the descent has already confined. The flag is reliable: Node resolves `DT_UNKNOWN` dirents with an `lstat` before reporting `isSymbolicLink()`, so the gate never sees an unknown type.
 - [Deep links and recents from before the change stop resolving] → Accepted and stated
   **BREAKING**. An old link's path begins with `/`, so it passes the leading-slash test and
   resolves as a library path that does not exist — the ordinary 404, which is what the

@@ -32,7 +32,7 @@ sequence):
 2. `remove-axis-lighting` — item 9
 3. `ao-as-recipe-dimension` — item 8's two-render cache (sibling file, no migration)
 4. `ao-refreshes-thumbnails` — the re-targeted `lighting-refreshes-thumbnails` (directory
-   renamed with `git mv`; §2 and §2b kept verbatim)
+   renamed with `git mv`; §2b kept, §2 rewritten in review into a ref-held incremental reconciler)
 5. `adaptive-ao-default` — item 8's frame sampling (lightbox-measured, three-state
    preference, budget tune-then-freeze)
 6. `folder-contact-sheets` — the decided row; per-tile bounded peek, zips excluded
@@ -63,9 +63,9 @@ own origin"; only its body hardcodes loopback.
 | CPU-only index, fp32, US-located, 4–8 GB | Masa | see Measurements; GPU warmed is tens of ms, CPU 0.3–0.6 s judged acceptable (<1 s) |
 | Folder tiles get a 2×2 contact sheet — **a main-app change, before the split** | Masa | today `Grid.tsx` renders a dir as 📁 + name; the demo root is 297 of them |
 | Credits/provenance shown in the lightbox info panel | Masa | plus a generated credits page for CC-BY |
-| ~~Lighting menu hidden in demo mode~~ → **axis lighting mode removed from the main app; camera is the only mode; the pill goes** | Masa | the hide was only ever to stop visitors picking axis. Item 9 has the grounding (1,758 sidecars say `camera`, 0 `axis`; axis's motivating bug has no counterpart in camera mode) |
+| ~~Lighting menu hidden in demo mode~~ → **axis lighting mode removed from the main app; camera is the only mode; the pill goes** | Masa | the hide was only ever to stop visitors picking axis. Item 9 has the grounding (every sidecar says `camera`, 0 `axis` — 1,758 at this session's count, 1,792 at later reviewers' runs the same day; axis's motivating bug has no counterpart in camera mode) |
 | **SSAO stays a user option** (pill kept), default chosen adaptively by sampling frames; both AO variants baked for the demo | Masa | item 8 has the design: AO becomes a thumbnail recipe dimension, cache keyed by recipe |
-| **`ao-refreshes-thumbnails` (formerly `lighting-refreshes-thumbnails`) is re-targeted, not retired**: its trigger becomes the AO pill | Masa | the mechanism — a toggle re-runs the staleness sweep in place, tiles keep their image while the replacement renders (§2), `poseStale` fix (§2b) — carries over unchanged; on the demo the sweep finds the other baked variant, so toggling is instant. Prerequisite: AO as a recipe dimension (item 8). Rename/`opsx:update` the change rather than start a new one |
+| **`ao-refreshes-thumbnails` (formerly `lighting-refreshes-thumbnails`) is re-targeted, not retired**: its trigger becomes the AO pill | Masa | the mechanism — a toggle re-runs the staleness sweep in place, tiles keep their image while the replacement renders (§2, rewritten in review as a per-entry reconciler), the `poseStale` rule stated and asserted (§2b — the bug it named was already fixed in `28289d1`) — carries over; on the demo the sweep finds the other baked variant, so toggling is instant. Prerequisite: AO as a recipe dimension (item 8). Rename/`opsx:update` the change rather than start a new one |
 | Chat **tab** hidden in demo mode | Masa | the side panel keeps its search-options tab |
 | app-launch dies (`/api/apps`, `/api/open`, `/api/open-with`, launch.json) | all | `openInApps` builds from the `/api/apps` report and `Open with…` gates on `ctx.apps?.chooser` — an injected empty-report launcher withholds both with zero client code (verified) |
 | GLB conversion deferred | other session, agreed | touches mini-classify `COVERS`, re-embedding, client loader; wire cost is fine |
