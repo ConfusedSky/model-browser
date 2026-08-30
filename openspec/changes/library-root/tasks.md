@@ -37,9 +37,9 @@
       folder, a thumb PUT after a delete — is confined on the `realpath` of its nearest
       existing ancestor: under the top → the ordinary 404 (`[]` for completion); outside →
       the 400. `realpath` throwing ENOENT is never reported as either — done 2026-08-29 (Stage A, `e8a4339`, cherry-picked; 21 tests in `library.test.ts`, confinement and marker-walk falsified; merged server suite 211 passed)
-- [ ] 1.5 `GET /api/library` returns the state; while `unconfigured`/`missing`, every
+- [x] 1.5 `GET /api/library` returns the state; while `unconfigured`/`missing`, every
       `/api/*` path route answers 503 `{ state, root? }` before touching a path (the
-      `indexErrorReply` shape). Log the resolved library top and id once at start
+      `indexErrorReply` shape). Log the resolved library top and id once at start — done 2026-08-29 (B1, `cca3d4b` → `e1fb0a0` on main; api 34 / flat 49 / open 21 migrated to library paths, 14 new in `library-paths.test.ts`; the symlink gate and the 503 gate falsified; merged server suite 242 passed ×3)
 - [x] 1.6 Server tests (`server/test/library.test.ts`, per-test temp trees): subfolder
       pick keeps the outer marker's id; no marker → written with a fresh id; env beats
       config; missing root → `missing` and 503 on `/api/dir`; unwritable top → `unmarked`
@@ -57,7 +57,7 @@
 
 ## 2. Server: every path is a library path (D2, D3)
 
-- [ ] 2.1 `listing.ts`: `listDir`/`listFlat` take a library path, resolve through 1.4,
+- [x] 2.1 `listing.ts`: `listDir`/`listFlat` take a library path, resolve through 1.4,
       and emit every `DirEntry.path` as the **logical** library path —
       `posix.join(browsePath, name)` at `listFsDir`'s seam, `joinVPath` for archives — never
       `realpath`'d, so an in-library symlink alias keeps its own route (the flat-listing
@@ -75,22 +75,22 @@
       outside would otherwise be listed as a model/archive, and `walkFsLevel`'s zip branch
       calls `walkZip(e.path, …)` with no test, enumerating an outside archive's names —
       test the real path of each entry before emitting it — gated on `dirent.isSymbolicLink()`, since a non-symlink entry can only escape through an already-confined ancestor and a 200,000-entry search walk cannot afford an lstat chain per entry (design Risks);
-      the `path must be absolute` checks go
-- [ ] 2.2 `complete(prefix)`: prefix is a library path; completes within the library;
+      the `path must be absolute` checks go — done 2026-08-29 (B1, `cca3d4b` → `e1fb0a0` on main; api 34 / flat 49 / open 21 migrated to library paths, 14 new in `library-paths.test.ts`; the symlink gate and the 503 gate falsified; merged server suite 242 passed ×3)
+- [x] 2.2 `complete(prefix)`: prefix is a library path; completes within the library;
       returns library paths; a prefix that does not start with `/` or resolves outside
       → `[]`; `.model-browser` is never offered, even for a `/.` prefix (the marker is
-      invisible everywhere, and `complete` otherwise lets a dot-prefix reveal dot-entries)
-- [ ] 2.3 `app.ts`: `/api/file`, `resolveEntryFile` (launch), `/api/thumb` GET/PUT,
+      invisible everywhere, and `complete` otherwise lets a dot-prefix reveal dot-entries) — done 2026-08-29 (B1, `cca3d4b` → `e1fb0a0` on main; api 34 / flat 49 / open 21 migrated to library paths, 14 new in `library-paths.test.ts`; the symlink gate and the 503 gate falsified; merged server suite 242 passed ×3)
+- [x] 2.3 `app.ts`: `/api/file`, `resolveEntryFile` (launch), `/api/thumb` GET/PUT,
       `/api/complete`, `/api/dir` all go through 1.4; `zipTemp.fileFor` keeps hashing
-      the library vpath (its key was the vpath already)
-- [ ] 2.4 Server tests: an entry's `path` in a listing is library-relative and
+      the library vpath (its key was the vpath already) — done 2026-08-29 (B1, `cca3d4b` → `e1fb0a0` on main; api 34 / flat 49 / open 21 migrated to library paths, 14 new in `library-paths.test.ts`; the symlink gate and the 503 gate falsified; merged server suite 242 passed ×3)
+- [x] 2.4 Server tests: an entry's `path` in a listing is library-relative and
       round-trips; an escaping symlinked *file* and an escaping symlinked *archive* are
       omitted from a listing and a walk (no entry, no archive names); a nonexistent path
       under the top is 404 and a completion prefix under the top completes; round-trips
       through `/api/file` and `/api/thumb`; a flat walk over a tree containing an
       escaping symlink omits it; completion within and outside; `/api/file` on a vpath
       whose archive is outside the library is refused
-
+ — done 2026-08-29 (B1, `cca3d4b` → `e1fb0a0` on main; api 34 / flat 49 / open 21 migrated to library paths, 14 new in `library-paths.test.ts`; the symlink gate and the 503 gate falsified; merged server suite 242 passed ×3)
 ## 3. Server: cache per library, migrated once (D5)
 
 - [x] 3.1 `ThumbCache`: constructed with the base dir and the library; files live under
@@ -115,6 +115,12 @@
  — done 2026-08-29 (B2, `aa9eadd`, cherry-picked; 11 new cache tests, 23 total; the ready guard, the live top-stat guard and mtime preservation each falsified; merged server suite 222 passed). `index.ts` still constructs `ThumbCache` without the library until B1 lands — wired by the coordinator at that merge
 ## 4. Server: the index maps through its root (D6)
 
+- [ ] 4.0 Remove the two temporary allow-list entries B1 left in `app.ts`'s library gate
+      (`/api/semantic`, `/api/semantic/similar` — added 2026-08-29 at B1's check-in so
+      B3's untouched tests stayed green rather than 503 for a reason unrelated to B3), and
+      test that both routes answer the 503 state envelope while the library is not ready.
+      Until this lands the two scoring routes answer over an unready library — a known,
+      dated hole, not a design
 - [ ] 4.1 `semantic.ts`: `scopeWithin` takes a library path, resolves through 1.4, and still
       returns the absolute real path — that is what goes to the index;
       `hitsToEntries` computes the collection root's library path once
@@ -135,26 +141,26 @@
 
 ## 5. Client: the root is `/` (D7)
 
-- [ ] 5.1 `urlState.ts`: `path` and `model` are library paths; `serializeView` omits
-      `path` when it is `/`; `parseUrl` reads an absent `path` as `/`
-- [ ] 5.2 `App.tsx` `resolveView`: default `path` is `/` (no `getLastPath()`);
+- [x] 5.1 `urlState.ts`: `path` and `model` are library paths; `serializeView` omits
+      `path` when it is `/`; `parseUrl` reads an absent `path` as `/` — done 2026-08-29 (B4, `8a20e7c` → `f582b35` on main; 18 client tests added, 511 total; the not-ready gate, the `!/` expansion and the navigation re-probe falsified; the harness now seeds a test's start through the URL)
+- [x] 5.2 `App.tsx` `resolveView`: default `path` is `/` (no `getLastPath()`);
       `recents.ts` keys become `model-browser:recents:v2` / `last-path:v2` and store
-      library paths — old keys are never read
-- [ ] 5.3 `PathBar.tsx`: shows the library path verbatim (`/` at the top); completion and
-      recents are library paths; `ApiClient.library()` added, no request shape changes
-- [ ] 5.4 The `unconfigured` and `missing` states render in the path bar's error line
+      library paths — old keys are never read — done 2026-08-29 (B4, `8a20e7c` → `f582b35` on main; 18 client tests added, 511 total; the not-ready gate, the `!/` expansion and the navigation re-probe falsified; the harness now seeds a test's start through the URL)
+- [x] 5.3 `PathBar.tsx`: shows the library path verbatim (`/` at the top); completion and
+      recents are library paths; `ApiClient.library()` added, no request shape changes — done 2026-08-29 (B4, `8a20e7c` → `f582b35` on main; 18 client tests added, 511 total; the not-ready gate, the `!/` expansion and the navigation re-probe falsified; the harness now seeds a test's start through the URL)
+- [x] 5.4 The `unconfigured` and `missing` states render in the path bar's error line
       (naming the root when missing), retried on the next navigation; `useThumbnails`
       and the listing reducer treat the 503 state envelope as a non-crashing empty
-      view
-- [ ] 5.5 Copy path (`entryActions.ts`, both surfaces) and the lightbox info panel's path
+      view — done 2026-08-29 (B4, `8a20e7c` → `f582b35` on main; 18 client tests added, 511 total; the not-ready gate, the `!/` expansion and the navigation re-probe falsified; the harness now seeds a test's start through the URL)
+- [x] 5.5 Copy path (`entryActions.ts`, both surfaces) and the lightbox info panel's path
       expand a library path to the filesystem path — `posix.join(library.top, path)` with
       the `!/` notation kept — so what a user pastes elsewhere still opens; the library
-      state exposes `top` for it (`ApiClient.library()`)
-- [ ] 5.6 Client tests: `serializeView`/`parseUrl` round-trip `/`, `/Kit`,
+      state exposes `top` for it (`ApiClient.library()`) — done 2026-08-29 (B4, `8a20e7c` → `f582b35` on main; 18 client tests added, 511 total; the not-ready gate, the `!/` expansion and the navigation re-probe falsified; the harness now seeds a test's start through the URL)
+- [x] 5.6 Client tests: `serializeView`/`parseUrl` round-trip `/`, `/Kit`,
       `/Kit/a.zip!/x.stl`, and omit the root; `resolveView` with no URL path is `/`;
       old recents keys are not read; the missing-library state shows the root and does
       not render a grid
-
+ — done 2026-08-29 (B4, `8a20e7c` → `f582b35` on main; 18 client tests added, 511 total; the not-ready gate, the `!/` expansion and the navigation re-probe falsified; the harness now seeds a test's start through the URL)
 - [ ] 5.7 Follow-up recorded at B4's check-in (2026-08-29): `App.tsx`'s `target === ''` landing
       ("Enter a directory path above to browse your models.") and its `toggleFlat` guard are
       unreachable once boot is `/` and the library states render ahead of it — left in
