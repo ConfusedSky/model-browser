@@ -115,13 +115,13 @@
  — done 2026-08-29 (B2, `aa9eadd`, cherry-picked; 11 new cache tests, 23 total; the ready guard, the live top-stat guard and mtime preservation each falsified; merged server suite 222 passed). `index.ts` still constructs `ThumbCache` without the library until B1 lands — wired by the coordinator at that merge
 ## 4. Server: the index maps through its root (D6)
 
-- [ ] 4.0 Remove the two temporary allow-list entries B1 left in `app.ts`'s library gate
+- [x] 4.0 Remove the two temporary allow-list entries B1 left in `app.ts`'s library gate
       (`/api/semantic`, `/api/semantic/similar` — added 2026-08-29 at B1's check-in so
       B3's untouched tests stayed green rather than 503 for a reason unrelated to B3), and
       test that both routes answer the 503 state envelope while the library is not ready.
       Until this lands the two scoring routes answer over an unready library — a known,
-      dated hole, not a design
-- [ ] 4.1 `semantic.ts`: `scopeWithin` takes a library path, resolves through 1.4, and still
+      dated hole, not a design — done 2026-08-29 (B3, `aaee758`, cherry-picked; semantic 30 / similar 19 / library-paths 15 / client semantic 35; the library-path keying and the allow-list removal falsified; merged suites server 251, client 513)
+- [x] 4.1 `semantic.ts`: `scopeWithin` takes a library path, resolves through 1.4, and still
       returns the absolute real path — that is what goes to the index;
       `hitsToEntries` computes the collection root's library path once
       (`libPathOf(realpath(collection_root))`, null when outside) and names each entry
@@ -129,15 +129,15 @@
       containment guard stays; `modelEntryAt` receives the library path to emit; the
       `poses` and `scores` maps are keyed by that same library path (today by the absolute
       `full`), or `useThumbnails`' `poses[entry.path]` silently stops finding every index
-      pose
-- [ ] 4.2 `IndexAvailability`: `collectionRoot` becomes the library path when inside,
+      pose — done 2026-08-29 (B3, `aaee758`, cherry-picked; semantic 30 / similar 19 / library-paths 15 / client semantic 35; the library-path keying and the allow-list removal falsified; merged suites server 251, client 513)
+- [x] 4.2 `IndexAvailability`: `collectionRoot` becomes the library path when inside,
       absent with `detail` naming the situation when outside; the side panel's
       "It covers …" line reads it (`SidePanel.tsx`), and every scope affordance is
-      withheld when it is absent (the existing `scopeWithin`-null path)
-- [ ] 4.3 Server tests: hits under a collection root beneath the top are named by library
+      withheld when it is absent (the existing `scopeWithin`-null path) — done 2026-08-29 (B3, `aaee758`, cherry-picked; semantic 30 / similar 19 / library-paths 15 / client semantic 35; the library-path keying and the allow-list removal falsified; merged suites server 251, client 513)
+- [x] 4.3 Server tests: hits under a collection root beneath the top are named by library
       path and resolve to tiles; a collection root outside the top yields no scope for
       any path and the availability names it; the poses/scores maps are keyed by the
-      library path the entry carries
+      library path the entry carries — done 2026-08-29 (B3, `aaee758`, cherry-picked; semantic 30 / similar 19 / library-paths 15 / client semantic 35; the library-path keying and the allow-list removal falsified; merged suites server 251, client 513)
 
 ## 5. Client: the root is `/` (D7)
 
