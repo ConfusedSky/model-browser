@@ -710,7 +710,7 @@ export default function App() {
       // not the path (library R4). Re-read the state so the header names it —
       // and so `missing` can name the configured root, which the error body
       // carries but `HttpError` deliberately does not: one place knows both.
-      if (err instanceof HttpError && (err.state === 'unconfigured' || err.state === 'missing')) {
+      if (err instanceof HttpError && err.state !== undefined) {
         probeLibrary()
       }
       dispatch({
