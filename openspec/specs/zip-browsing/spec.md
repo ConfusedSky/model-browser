@@ -19,7 +19,7 @@ Activating a zip tile SHALL navigate into it like a directory. The server SHALL 
 - **THEN** the server returns an error and the UI surfaces it without crashing
 
 ### Requirement: Virtual path addressing
-Zip entries SHALL be addressed with the scheme `<zip-path>!/<entry-path>` (e.g. `models/foo.zip!/parts/lid.stl`) across all APIs (listing, file bytes, thumbnails, camera state), so the rest of the system treats zip entries as ordinary paths. The scheme SHALL support at most one `!/` level: a zip nested inside a zip is listed but not enterable.
+Zip entries SHALL be addressed with the scheme `<zip-path>!/<entry-path>` (e.g. `/models/foo.zip!/parts/lid.stl`) across all APIs (listing, file bytes, thumbnails, camera state), so the rest of the system treats zip entries as ordinary paths. The `<zip-path>` half SHALL be the archive's library-relative path (see `library`), and the archive SHALL be subject to the same confinement as any other path. The scheme SHALL support at most one `!/` level: a zip nested inside a zip is listed but not enterable.
 
 #### Scenario: Entry thumbnail cached by virtual path
 - **WHEN** a thumbnail is rendered for a model inside a zip
@@ -32,6 +32,10 @@ Zip entries SHALL be addressed with the scheme `<zip-path>!/<entry-path>` (e.g. 
 #### Scenario: Zip inside a zip
 - **WHEN** the user activates a zip entry that is itself a zip
 - **THEN** the UI reports that nested zips are unsupported and the current view is unchanged
+
+#### Scenario: An archive outside the library is unreachable
+- **WHEN** a virtual path's archive half resolves outside the library
+- **THEN** the request is refused like any other path outside it
 
 ### Requirement: Zip entry staleness follows the containing zip
 Thumbnails for zip entries SHALL be keyed by the containing zip's mtime, never by the entry's timestamp stored in the central directory, because archive timestamps are preserved across re-downloads and cannot detect a replaced zip.

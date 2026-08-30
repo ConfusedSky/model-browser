@@ -27,8 +27,9 @@ archive-dry-run **in this order** on one fresh copy (hard orderings are declared
 each tasks.md; several deltas stack on the same requirements and only apply in
 sequence):
 
-1. `library-root` — item 2, decided form: library identity + marker, `/` = library top,
-   confinement, per-library cache under XDG, one-time re-key
+1. `library-root` — **archived 2026-08-30** (`openspec/changes/archive/2026-08-30-library-root`;
+   the capability is `openspec/specs/library/`) — item 2, decided form: library identity +
+   marker, `/` = library top, confinement, per-library cache under XDG, one-time re-key
 2. `remove-axis-lighting` — item 9
 3. `ao-as-recipe-dimension` — item 8's two-render cache (sibling file, no migration)
 4. `ao-refreshes-thumbnails` — the re-targeted `lighting-refreshes-thumbnails` (directory

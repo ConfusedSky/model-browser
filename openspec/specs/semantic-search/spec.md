@@ -123,11 +123,11 @@ The client and server SHALL treat the semantic index as an optional, independent
 - **THEN** the error is surfaced and the label continues to describe what is actually shown
 
 ### Requirement: Results are assembled from this app's own view of the tree
-The server SHALL build tiles for meaning results from its own listing data rather than from the index's description of a model, resolving each hit by its path relative to the collection root. A hit that resolves to nothing on disk SHALL be omitted from the results without failing the search, since the index and this app maintain independent views of the same removable volume and a moved or deleted file is an expected difference rather than an error. Resolution work SHALL be bounded by the number of hits returned, never by the size of the tree: no filesystem walk SHALL be performed to answer a meaning search.
+The server SHALL build tiles for meaning results from its own listing data rather than from the index's description of a model, resolving each hit by its path relative to the collection root and naming the tile by the resulting library-relative path (see `library`). A hit that resolves to nothing on disk SHALL be omitted from the results without failing the search, since the index and this app maintain independent views of the same removable volume and a moved or deleted file is an expected difference rather than an error. A collection root that lies outside the library SHALL be treated as covering nothing: no scope within the library is offered to it, and the UI SHALL state that the index covers a location outside the library rather than naming a path the user cannot navigate to. Resolution work SHALL be bounded by the number of hits returned, never by the size of the tree: no filesystem walk SHALL be performed to answer a meaning search.
 
 #### Scenario: Tiles carry what tiles need
 - **WHEN** meaning results are rendered
-- **THEN** each tile has the metadata an ordinary listing entry has, and its thumbnail resolves from the cache exactly as it would in a directory listing
+- **THEN** each tile has the metadata an ordinary listing entry has, is addressed by a library-relative path, and its thumbnail resolves from the cache exactly as it would in a directory listing
 
 #### Scenario: A stale hit is dropped, not raised
 - **WHEN** the index returns a model that has since been moved or deleted
@@ -136,6 +136,14 @@ The server SHALL build tiles for meaning results from its own listing data rathe
 #### Scenario: No walk behind a query
 - **WHEN** a meaning search runs over a large collection on slow media
 - **THEN** the response does not depend on walking the tree, and its cost does not grow with the size of the collection
+
+#### Scenario: The index covers a subtree of the library
+- **WHEN** the index's collection root is a directory beneath the library's top
+- **THEN** hits are named by their library-relative paths, and the UI names the covered subtree as a library path
+
+#### Scenario: The index covers something outside the library
+- **WHEN** the index's collection root resolves outside the library
+- **THEN** meaning search is unavailable at every location, and the UI says the index covers a location outside the library
 
 ### Requirement: What the index covers is stated, not implied
 The UI SHALL distinguish three outcomes rather than presenting one empty grid: a search that ran against indexed models and matched nothing, a location where nothing has been indexed at all, and a location the index covers only partly. Counts the UI presents SHALL be attributed to the index rather than to the location: how many models under the location the index holds, and how many the last indexing run walked and still found present when the index loaded. Neither SHALL be presented as a claim about how many models the location contains — the second in particular tracks the folder loosely rather than exactly, and can shift when the index reloads — and neither SHALL be combined with the app's own count into a single ratio the grid beside it can contradict. Where the corpus differs from what the grid shows, the UI SHALL say so, taking which formats the index can hold from what the index itself publishes rather than from an assumption compiled in here: models in archives and models in formats the index does not process cannot appear in results, and a location holding only such models SHALL NOT be described as having nothing that matched.
