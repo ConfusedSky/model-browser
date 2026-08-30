@@ -293,3 +293,40 @@ export interface AppsReport {
   /** Keyed by mime, only the model types the app handles (open-in-slicer L6). */
   types: Record<string, TypeApps>
 }
+
+/**
+ * What the server knows about the library (library-root D4). `ready` is the
+ * only state in which a path route answers; the other two are states the UI
+ * renders rather than faults, and `missing` names the root because mounting it
+ * is the remedy.
+ */
+export type LibraryState =
+  | {
+      state: 'ready'
+      /** The library's identity: its marker's id, or a hash when `unmarked`. */
+      id: string
+      /**
+       * The **filesystem** path of the library's top — the marker's own
+       * directory, resolved. The client joins a library path onto it to expand
+       * one into a filesystem path for copy/paste.
+       */
+      top: string
+      /**
+       * The configured root as a **library path**: `/` when the root is the
+       * top, `/sub/dir` when it is a folder inside the library. Where the app
+       * opens is a viewpoint inside the library, not a namespace (D1).
+       */
+      root: string
+      /**
+       * Present only when no marker could be written (a read-only volume) and
+       * the id fell back to a hash of the top: the library's location is its
+       * identity again, so a remount is a different library.
+       */
+      unmarked?: true
+    }
+  | { state: 'unconfigured' }
+  | {
+      state: 'missing'
+      /** The configured root's filesystem path, verbatim, so the UI can name it. */
+      root: string
+    }

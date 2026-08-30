@@ -26,10 +26,11 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
+import { tmpdir } from 'node:os'
 import { extname, join, relative, sep } from 'node:path'
 import type { AppRef, AppsReport, TypeApps } from '../../shared/types'
 import { modelFormat } from './listing'
+import { configHome, dataDirs } from './xdg'
 import { extractEntry } from './zip'
 
 /** A launch or chooser command that failed or could not be spawned. */
@@ -251,38 +252,6 @@ export function loadLaunchConfig(env: NodeJS.ProcessEnv = process.env): LaunchCo
  */
 function fill(argv: readonly string[], vars: Record<string, string>): string[] {
   return argv.map((el) => el.replace(/\{(mime|appId|file)\}/g, (m, k: string) => vars[k] ?? m))
-}
-
-// ---------------------------------------------------------------------------
-// XDG locations
-// ---------------------------------------------------------------------------
-
-function home(env: NodeJS.ProcessEnv): string {
-  const h = env.HOME
-  return h !== undefined && h !== '' ? h : homedir()
-}
-
-function configHome(env: NodeJS.ProcessEnv): string {
-  const c = env.XDG_CONFIG_HOME
-  return c !== undefined && c !== '' ? c : join(home(env), '.config')
-}
-
-/**
- * Data dirs in precedence order, **with the XDG defaults applied**. Reading
- * the variables literally is not equivalent: on the development machine
- * `XDG_DATA_HOME` is unset and `~/.local/share` is absent from
- * `XDG_DATA_DIRS` (verified), so the literal read misses the one directory
- * holding every entry that matters (L2).
- */
-function dataDirs(env: NodeJS.ProcessEnv): string[] {
-  const dataHome = env.XDG_DATA_HOME
-  const first = dataHome !== undefined && dataHome !== '' ? dataHome : join(home(env), '.local', 'share')
-  const rest = env.XDG_DATA_DIRS
-  const dirs = (rest !== undefined && rest !== '' ? rest : '/usr/local/share:/usr/share')
-    .split(':')
-    .filter((d) => d !== '')
-  const seen = new Set<string>()
-  return [first, ...dirs].filter((d) => (seen.has(d) ? false : (seen.add(d), true)))
 }
 
 // ---------------------------------------------------------------------------

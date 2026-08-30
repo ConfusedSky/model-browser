@@ -1,0 +1,328 @@
+import { createHash } from 'node:crypto'
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
+import { LibraryError, createLibrary } from '../src/library'
+
+const cleanups: string[] = []
+
+function tempTree(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'mb-lib-'))
+  cleanups.push(dir)
+  // Every assertion compares against real paths (macOS puts the temp dir behind
+  // /private, and this machine's /tmp could be a symlink tomorrow), so the tree
+  // is named by its real path from the start.
+  return realpathSync(dir)
+}
+
+afterEach(() => {
+  while (cleanups.length > 0) {
+    const dir = cleanups.pop()!
+    // A test that made a directory unwritable has to hand it back before rm.
+    try {
+      chmodSync(dir, 0o755)
+    } catch {
+      /* already gone or never touched */
+    }
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+function markerAt(dir: string, id: string): void {
+  mkdirSync(join(dir, '.model-browser'), { recursive: true })
+  writeFileSync(join(dir, '.model-browser', 'library.json'), JSON.stringify({ id, version: 1 }))
+}
+
+/** A library whose root is `root` and whose config file is elsewhere (unset). */
+function libraryAt(root: string, extra: NodeJS.ProcessEnv = {}) {
+  return createLibrary({ MODEL_BROWSER_ROOT: root, MODEL_BROWSER_CONFIG: join(tempTree(), 'absent.json'), ...extra })
+}
+
+describe('library discovery', () => {
+  it('picks the marked tree above a root that is a subfolder of it', async () => {
+    const tmp = tempTree()
+    const top = join(tmp, 'lib')
+    const root = join(top, 'kits', 'a')
+    mkdirSync(root, { recursive: true })
+    markerAt(top, 'id-from-the-top')
+
+    const state = await libraryAt(root).state()
+    expect(state).toEqual({ state: 'ready', id: 'id-from-the-top', top, root: '/kits/a' })
+  })
+
+  it('writes a marker at a root with none above it, and reads it back next time', async () => {
+    const tmp = tempTree()
+    const root = join(tmp, 'fresh')
+    mkdirSync(root)
+
+    const first = await libraryAt(root).state()
+    expect(first.state).toBe('ready')
+    if (first.state !== 'ready') return
+    expect(first.top).toBe(root)
+    expect(first.root).toBe('/')
+    expect(first.unmarked).toBeUndefined()
+    expect(first.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+    expect(JSON.parse(readFileSync(join(root, '.model-browser', 'library.json'), 'utf8'))).toEqual({
+      id: first.id,
+      version: 1,
+    })
+
+    // Idempotent: the second library finds the first one's marker, it does not
+    // mint a second identity for the same tree.
+    expect(await libraryAt(root).state()).toEqual(first)
+  })
+
+  it('keeps walking past a malformed marker and past one whose id is not a string', async () => {
+    const tmp = tempTree()
+    const top = join(tmp, 'lib')
+    const broken = join(top, 'broken')
+    const idless = join(broken, 'idless')
+    const root = join(idless, 'kit')
+    mkdirSync(root, { recursive: true })
+    markerAt(top, 'the-real-one')
+    mkdirSync(join(idless, '.model-browser'))
+    writeFileSync(join(idless, '.model-browser', 'library.json'), '{ not json at all')
+    mkdirSync(join(broken, '.model-browser'))
+    writeFileSync(join(broken, '.model-browser', 'library.json'), JSON.stringify({ id: 7, version: 1 }))
+
+    const state = await libraryAt(root).state()
+    expect(state).toEqual({ state: 'ready', id: 'the-real-one', top, root: '/broken/idless/kit' })
+  })
+
+  it('serves an unwritable top under a hashed id and says it is unmarked', async () => {
+    const tmp = tempTree()
+    const root = join(tmp, 'readonly')
+    mkdirSync(root)
+    chmodSync(root, 0o555)
+    // Root ignores mode bits, so this can only be asserted as an unprivileged
+    // user; skip rather than pass vacuously.
+    if (process.getuid?.() === 0) {
+      chmodSync(root, 0o755)
+      console.warn('skipped: running as root, which may write into a 0555 directory')
+      return
+    }
+
+    const state = await libraryAt(root).state()
+    expect(state).toEqual({
+      state: 'ready',
+      id: createHashOf(root),
+      top: root,
+      root: '/',
+      unmarked: true,
+    })
+  })
+})
+
+function createHashOf(text: string): string {
+  return createHash('sha256').update(text).digest('hex')
+}
+
+describe('library configuration', () => {
+  it('takes the root from the environment over the config file', async () => {
+    const tmp = tempTree()
+    const chosen = join(tmp, 'chosen')
+    const ignored = join(tmp, 'ignored')
+    mkdirSync(chosen)
+    mkdirSync(ignored)
+    const config = join(tmp, 'config.json')
+    writeFileSync(config, JSON.stringify({ root: ignored }))
+
+    const state = await createLibrary({ MODEL_BROWSER_ROOT: chosen, MODEL_BROWSER_CONFIG: config }).state()
+    expect(state.state === 'ready' && state.top).toBe(chosen)
+  })
+
+  it('takes the root from the config file when the environment has none', async () => {
+    const tmp = tempTree()
+    const root = join(tmp, 'from-config')
+    mkdirSync(root)
+    const config = join(tmp, 'config.json')
+    writeFileSync(config, JSON.stringify({ root }))
+
+    const state = await createLibrary({ MODEL_BROWSER_CONFIG: config }).state()
+    expect(state.state === 'ready' && state.top).toBe(root)
+  })
+
+  it('is unconfigured with neither, and with a config file that is absent or malformed', async () => {
+    const tmp = tempTree()
+    expect(await createLibrary({ MODEL_BROWSER_CONFIG: join(tmp, 'absent.json') }).state()).toEqual({
+      state: 'unconfigured',
+    })
+    const malformed = join(tmp, 'malformed.json')
+    writeFileSync(malformed, '{ "root": ')
+    expect(await createLibrary({ MODEL_BROWSER_CONFIG: malformed }).state()).toEqual({ state: 'unconfigured' })
+  })
+
+  it('reports a root that is not there as missing, verbatim, and re-checks it every time', async () => {
+    const tmp = tempTree()
+    const root = join(tmp, 'not', 'mounted', 'yet')
+    const library = libraryAt(root)
+
+    expect(await library.state()).toEqual({ state: 'missing', root })
+    expect(() => library.realTop()).toThrow()
+
+    // The volume arrives: no restart, no refresh() — the next question is
+    // answered against the filesystem as it is now.
+    mkdirSync(root, { recursive: true })
+    const state = await library.state()
+    expect(state).toEqual({ state: 'ready', id: expect.any(String), top: root, root: '/' })
+  })
+
+  it('reports a root that is a file rather than a directory as missing', async () => {
+    const tmp = tempTree()
+    const root = join(tmp, 'a-file')
+    writeFileSync(root, 'not a directory')
+    expect(await libraryAt(root).state()).toEqual({ state: 'missing', root })
+  })
+
+  it('refresh re-evaluates a ready library', async () => {
+    const tmp = tempTree()
+    const first = join(tmp, 'first')
+    const second = join(tmp, 'second')
+    mkdirSync(first)
+    mkdirSync(second)
+    markerAt(first, 'first-id')
+    markerAt(second, 'second-id')
+    const env: NodeJS.ProcessEnv = { MODEL_BROWSER_ROOT: first, MODEL_BROWSER_CONFIG: join(tmp, 'absent.json') }
+    const library = createLibrary(env)
+
+    expect((await library.state()).state === 'ready' && library.id()).toBe('first-id')
+    env.MODEL_BROWSER_ROOT = second
+    // Still cached until asked to look again.
+    expect(library.id()).toBe('first-id')
+    expect(await library.refresh()).toEqual({ state: 'ready', id: 'second-id', top: second, root: '/' })
+  })
+})
+
+/** A ready library over `<tmp>/lib` holding `kits/a`, plus the tmp root. */
+async function readyLibrary(): Promise<{ tmp: string; top: string; library: ReturnType<typeof libraryAt> }> {
+  const tmp = tempTree()
+  const top = join(tmp, 'lib')
+  mkdirSync(join(top, 'kits', 'a'), { recursive: true })
+  markerAt(top, 'resolve-id')
+  const library = libraryAt(top)
+  await library.state()
+  return { tmp, top, library }
+}
+
+describe('library resolve', () => {
+  it('folds `..` against the top instead of escaping through it', async () => {
+    const { top, library } = await readyLibrary()
+    // `posix.normalize` drops leading `..` on a rooted path, so this is a path
+    // under the library that does not exist — the route's ordinary 404, not a
+    // refusal, and nothing outside the library is read (D3).
+    expect(await library.resolve('/a/../../etc')).toEqual({ fsPath: join(top, 'etc'), entry: undefined })
+    expect(await library.resolve('/kits/../kits/a')).toEqual({ fsPath: join(top, 'kits', 'a'), entry: undefined })
+  })
+
+  it('reads a filesystem-looking path as the library path it is', async () => {
+    const { top, library } = await readyLibrary()
+    expect(await library.resolve('/etc/passwd')).toEqual({ fsPath: join(top, 'etc', 'passwd'), entry: undefined })
+  })
+
+  it('refuses a path that does not begin with a slash', async () => {
+    const { library } = await readyLibrary()
+    await expect(library.resolve('a/b')).rejects.toThrow(LibraryError)
+    await expect(library.resolve('a/b')).rejects.toMatchObject({ status: 400 })
+  })
+
+  it('resolves a path that does not exist without stat-ing or throwing', async () => {
+    const { top, library } = await readyLibrary()
+    expect(await library.resolve('/does/not/exist')).toEqual({
+      fsPath: join(top, 'does', 'not', 'exist'),
+      entry: undefined,
+    })
+    expect(await library.resolve('/')).toEqual({ fsPath: top, entry: undefined })
+  })
+
+  it('refuses a symlink whose target is outside and follows one whose target is inside', async () => {
+    const { tmp, top, library } = await readyLibrary()
+    const outside = join(tmp, 'outside')
+    mkdirSync(outside)
+    writeFileSync(join(outside, 'secret.stl'), 'x')
+    symlinkSync(outside, join(top, 'escape'))
+    symlinkSync(join(top, 'kits'), join(top, 'alias'))
+
+    await expect(library.resolve('/escape')).rejects.toMatchObject({ status: 400 })
+    await expect(library.resolve('/escape/secret.stl')).rejects.toMatchObject({ status: 400 })
+    // Inside: allowed, and what comes back is the target's real path.
+    expect(await library.resolve('/alias/a')).toEqual({ fsPath: join(top, 'kits', 'a'), entry: undefined })
+  })
+
+  it('decides a nonexistent path on its nearest existing ancestor', async () => {
+    const { tmp, top, library } = await readyLibrary()
+    const outside = join(tmp, 'outside')
+    mkdirSync(outside)
+    symlinkSync(outside, join(top, 'escape'))
+
+    // Absent under the top: not a refusal.
+    expect(await library.resolve('/kits/a/gone.stl')).toEqual({
+      fsPath: join(top, 'kits', 'a', 'gone.stl'),
+      entry: undefined,
+    })
+    // Absent, but its nearest existing ancestor leaves the library: refused.
+    await expect(library.resolve('/escape/gone.stl')).rejects.toMatchObject({ status: 400 })
+  })
+
+  it('confines a virtual path by its archive half and leaves the entry half untouched', async () => {
+    const { top, library } = await readyLibrary()
+    const zip = join(top, 'kits', 'a', 'parts.zip')
+    writeFileSync(zip, 'PK')
+    expect(await library.resolve('/kits/a/parts.zip!/x//y.stl')).toEqual({ fsPath: zip, entry: 'x//y.stl' })
+    // The entry is opaque: a `..` in it is a name, not a traversal, and is
+    // handed on exactly as it arrived (normalising it would rewrite a cache key).
+    expect((await library.resolve('/kits/a/parts.zip!/../x.stl')).entry).toBe('../x.stl')
+  })
+
+  it('refuses a virtual path whose archive is outside the library', async () => {
+    const { tmp, top, library } = await readyLibrary()
+    const outside = join(tmp, 'outside')
+    mkdirSync(outside)
+    writeFileSync(join(outside, 'parts.zip'), 'PK')
+    symlinkSync(join(outside, 'parts.zip'), join(top, 'parts.zip'))
+    await expect(library.resolve('/parts.zip!/x.stl')).rejects.toMatchObject({ status: 400 })
+  })
+
+  it('names no filesystem detail in any refusal', async () => {
+    const { tmp, top, library } = await readyLibrary()
+    symlinkSync(tmp, join(top, 'escape'))
+    const messages: string[] = []
+    for (const path of ['a/b', '/escape', '/escape/gone.stl']) {
+      messages.push(await library.resolve(path).then(() => '', (e: Error) => e.message))
+    }
+    expect(messages).toEqual(['path must be a library path', 'path outside the library', 'path outside the library'])
+    for (const message of messages) {
+      expect(message).not.toContain(tmp)
+      expect(message).not.toContain('/')
+    }
+  })
+})
+
+describe('library libPathOf', () => {
+  it('maps the top to the root and a real path under it to its library path', async () => {
+    const { top, library } = await readyLibrary()
+    expect(library.libPathOf(top)).toBe('/')
+    expect(library.libPathOf(join(top, 'kits', 'a'))).toBe('/kits/a')
+  })
+
+  it('refuses a real path outside the top, including a sibling with the same prefix', async () => {
+    const { tmp, top, library } = await readyLibrary()
+    expect(() => library.libPathOf(join(tmp, 'elsewhere'))).toThrow(LibraryError)
+    try {
+      library.libPathOf(`${top}-next-door`)
+      expect.unreachable('a sibling directory sharing the prefix is not inside the library')
+    } catch (err) {
+      expect((err as LibraryError).status).toBe(400)
+      expect((err as Error).message).toBe('path outside the library')
+    }
+  })
+})
