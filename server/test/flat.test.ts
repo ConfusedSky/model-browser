@@ -1,37 +1,43 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { zipSync } from 'fflate'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 import type { DirListing } from '../../shared/types'
 import { createApp } from '../src/app'
 import { ThumbCache } from '../src/cache'
-import { LOOPBACK, stlBytes } from './helpers'
+import { LOOPBACK, libraryFor, realTempDir, stlBytes } from './helpers'
 
 /**
+ * One library holding both fixture trees, so every request path below is a
+ * library path (`/root`, `/root2`) and the filesystem locations are the test's
+ * own business (library-root D2).
+ *
  * root/
  *   loose.stl  notes.txt  .hidden/h.stl
  *   a/bracket.stl  a/deep/part.stl  z/bracket.stl
  *   alias -> a  loop/back -> root
  *   kit.zip { box.stl, arms/left.stl, inner.zip (nested zip), v2.zip/deep2.stl }
  */
-const root = mkdtempSync(join(tmpdir(), 'mb-flat-'))
-writeFileSync(join(root, 'loose.stl'), stlBytes(1))
-writeFileSync(join(root, 'notes.txt'), 'not a model')
-mkdirSync(join(root, '.hidden'))
-writeFileSync(join(root, '.hidden', 'h.stl'), stlBytes(2))
-mkdirSync(join(root, 'a', 'deep'), { recursive: true })
-writeFileSync(join(root, 'a', 'bracket.stl'), stlBytes(3))
-writeFileSync(join(root, 'a', 'deep', 'part.stl'), stlBytes(4))
-mkdirSync(join(root, 'z'))
-writeFileSync(join(root, 'z', 'bracket.stl'), stlBytes(5))
-symlinkSync(join(root, 'a'), join(root, 'alias'))
-mkdirSync(join(root, 'loop'))
-symlinkSync(root, join(root, 'loop', 'back'))
-const zipPath = join(root, 'kit.zip')
+const libTop = realTempDir('mb-flat-')
+const rootFs = join(libTop, 'root')
+const root = '/root'
+mkdirSync(rootFs)
+writeFileSync(join(rootFs, 'loose.stl'), stlBytes(1))
+writeFileSync(join(rootFs, 'notes.txt'), 'not a model')
+mkdirSync(join(rootFs, '.hidden'))
+writeFileSync(join(rootFs, '.hidden', 'h.stl'), stlBytes(2))
+mkdirSync(join(rootFs, 'a', 'deep'), { recursive: true })
+writeFileSync(join(rootFs, 'a', 'bracket.stl'), stlBytes(3))
+writeFileSync(join(rootFs, 'a', 'deep', 'part.stl'), stlBytes(4))
+mkdirSync(join(rootFs, 'z'))
+writeFileSync(join(rootFs, 'z', 'bracket.stl'), stlBytes(5))
+symlinkSync(join(rootFs, 'a'), join(rootFs, 'alias'))
+mkdirSync(join(rootFs, 'loop'))
+symlinkSync(rootFs, join(rootFs, 'loop', 'back'))
+const zipPath = `${root}/kit.zip`
 writeFileSync(
-  zipPath,
+  join(rootFs, 'kit.zip'),
   zipSync({
     'box.stl': new Uint8Array(stlBytes(6)),
     'arms/left.stl': new Uint8Array(stlBytes(7)),
@@ -50,32 +56,32 @@ writeFileSync(
  *   SetRocks/base.stl
  *   SetKit.zip { top.stl, lvl1/SetInner/x.stl }
  */
-const root2 = mkdtempSync(join(tmpdir(), 'mb-folder-'))
-mkdirSync(join(root2, 'SetDunes', 'spares'), { recursive: true })
-writeFileSync(join(root2, 'SetDunes', 'base.stl'), stlBytes(11))
-writeFileSync(join(root2, 'SetDunes', 'body.stl'), stlBytes(12))
-writeFileSync(join(root2, 'SetDunes', 'spares', 'clip.stl'), stlBytes(13))
-mkdirSync(join(root2, 'SetRocks'))
-writeFileSync(join(root2, 'SetRocks', 'base.stl'), stlBytes(14))
-mkdirSync(join(root2, 'nested'))
+const root2Fs = join(libTop, 'root2')
+const root2 = '/root2'
+mkdirSync(join(root2Fs, 'SetDunes', 'spares'), { recursive: true })
+writeFileSync(join(root2Fs, 'SetDunes', 'base.stl'), stlBytes(11))
+writeFileSync(join(root2Fs, 'SetDunes', 'body.stl'), stlBytes(12))
+writeFileSync(join(root2Fs, 'SetDunes', 'spares', 'clip.stl'), stlBytes(13))
+mkdirSync(join(root2Fs, 'SetRocks'))
+writeFileSync(join(root2Fs, 'SetRocks', 'base.stl'), stlBytes(14))
+mkdirSync(join(root2Fs, 'nested'))
 writeFileSync(
-  join(root2, 'nested', 'SetDeep.zip'),
+  join(root2Fs, 'nested', 'SetDeep.zip'),
   zipSync({ 'inner.stl': new Uint8Array(stlBytes(17)) }),
 )
 writeFileSync(
-  join(root2, 'SetKit.zip'),
+  join(root2Fs, 'SetKit.zip'),
   zipSync({
     'top.stl': new Uint8Array(stlBytes(15)),
     'lvl1/SetInner/x.stl': new Uint8Array(stlBytes(16)),
   }),
 )
 
-const cacheDir = mkdtempSync(join(tmpdir(), 'mb-cache-'))
-const app = createApp(new ThumbCache(cacheDir))
+const cacheDir = realTempDir('mb-cache-')
+const app = createApp(new ThumbCache(cacheDir), undefined, undefined, libraryFor(libTop))
 
 afterAll(() => {
-  rmSync(root, { recursive: true, force: true })
-  rmSync(root2, { recursive: true, force: true })
+  rmSync(libTop, { recursive: true, force: true })
   rmSync(cacheDir, { recursive: true, force: true })
 })
 
@@ -130,7 +136,7 @@ describe('flat listing of a directory', () => {
   it('model virtual paths match what nested browsing yields', async () => {
     const body = await flat(root)
     const bracket = body.entries.find((e) => e.name === 'a/bracket.stl')!
-    expect(bracket.path).toBe(join(root, 'a', 'bracket.stl'))
+    expect(bracket.path).toBe(`${root}/a/bracket.stl`)
     const left = body.entries.find((e) => e.name === 'kit.zip!/arms/left.stl')!
     expect(left.path).toBe(`${zipPath}!/arms/left.stl`)
   })
@@ -214,13 +220,13 @@ describe('bounding', () => {
   it('charges for every entry examined, not just models and entered dirs', async () => {
     // A folder of non-model files is the walk's real cost — statting them all
     // for one charged step would leave the budget nominal.
-    const dir = mkdtempSync(join(tmpdir(), 'mb-flat-noise-'))
-    mkdirSync(join(dir, 'sub'))
+    const dir = join(libTop, 'noise')
+    mkdirSync(join(dir, 'sub'), { recursive: true })
     for (let i = 0; i < 10; i++) writeFileSync(join(dir, 'sub', `t${i}.txt`), 'x')
     writeFileSync(join(dir, 'sub', 'part.stl'), stlBytes(1))
     try {
       process.env.MODEL_BROWSER_FLAT_BUDGET = '4'
-      const body = await flat(dir)
+      const body = await flat('/noise')
       expect(body.entries.filter((e) => e.kind === 'model')).toEqual([])
       expect(body.truncated).toBe(true)
     } finally {
@@ -254,13 +260,14 @@ describe('flag and errors', () => {
   })
 
   it('skips an unreadable subdirectory without failing the request', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'mb-flat-locked-'))
+    const dir = join(libTop, 'has-locked')
+    mkdirSync(dir)
     writeFileSync(join(dir, 'ok.stl'), stlBytes(1))
     mkdirSync(join(dir, 'locked'))
     writeFileSync(join(dir, 'locked', 'secret.stl'), stlBytes(2))
     chmodSync(join(dir, 'locked'), 0o000)
     try {
-      const body = await flat(dir)
+      const body = await flat('/has-locked')
       expect(body.entries.map((e) => e.name)).toEqual(['locked', 'ok.stl'])
     } finally {
       chmodSync(join(dir, 'locked'), 0o755)
@@ -270,17 +277,18 @@ describe('flag and errors', () => {
 
   it('404s on a nonexistent root', async () => {
     const res = await app.request(
-      `/api/dir?path=${encodeURIComponent(join(root, 'nope'))}&flat=true`,
+      `/api/dir?path=${encodeURIComponent(`${root}/nope`)}&flat=true`,
       { headers: LOOPBACK },
     )
     expect(res.status).toBe(404)
   })
 
   it('404s on an unreadable root — only *sub*directory failures are swallowed', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'mb-flat-root-locked-'))
+    const dir = join(libTop, 'root-locked')
+    mkdirSync(dir)
     chmodSync(dir, 0o000)
     try {
-      const res = await app.request(`/api/dir?path=${encodeURIComponent(dir)}&flat=true`, {
+      const res = await app.request('/api/dir?path=/root-locked&flat=true', {
         headers: LOOPBACK,
       })
       expect(res.status).toBe(404)

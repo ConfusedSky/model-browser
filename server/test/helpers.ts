@@ -1,7 +1,35 @@
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { zipSync } from 'fflate'
+import { type Library, createLibrary } from '../src/library'
+
+/**
+ * A library rooted at `dir`, with the machine's own configuration steered well
+ * clear: `MODEL_BROWSER_ROOT` wins outright, and the HOME/XDG pair exists so
+ * that nothing here can fall back to the developer's real `config.json`.
+ *
+ * Writes the marker at `<dir>/.model-browser/library.json` — dot-prefixed, so
+ * every listing skips it.
+ */
+export function libraryFor(dir: string): Library {
+  const home = mkdtempSync(join(tmpdir(), 'mb-home-'))
+  return createLibrary({
+    MODEL_BROWSER_ROOT: dir,
+    HOME: home,
+    XDG_CONFIG_HOME: join(home, 'config'),
+  })
+}
+
+/**
+ * A temp directory whose path is already its own real path. The library's top
+ * is the *resolved* root, so on a machine where the tmpdir is itself a symlink
+ * (`/tmp` → `/private/tmp`) an unresolved fixture path is not the one the
+ * server hands back.
+ */
+export function realTempDir(prefix: string): string {
+  return realpathSync(mkdtempSync(join(tmpdir(), prefix)))
+}
 
 /** Minimal binary STL: 80-byte header, triangle count, one triangle. */
 export function stlBytes(seed = 1): Buffer {
@@ -17,7 +45,7 @@ export function makeFixtures(): {
   lidStl: Buffer
   boxStl: Buffer
 } {
-  const dir = mkdtempSync(join(tmpdir(), 'mb-test-'))
+  const dir = realTempDir('mb-test-')
   const lidStl = stlBytes(1)
   const boxStl = stlBytes(2)
 

@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, sep } from 'node:path'
+import { basename, join, sep } from 'node:path'
 import { zipSync } from 'fflate'
 import { afterAll, describe, expect, it } from 'vitest'
 import { createApp } from '../src/app'
@@ -22,10 +22,12 @@ import {
   createLauncher,
   ZipTempStore,
 } from '../src/launch'
-import { LOOPBACK, stlBytes } from './helpers'
+import { LOOPBACK, libraryFor, realTempDir, stlBytes } from './helpers'
 
-const dir = mkdtempSync(join(tmpdir(), 'mb-open-'))
-const cacheDir = mkdtempSync(join(tmpdir(), 'mb-open-cache-'))
+// `dir` is the library's top, so requests name `/loose.stl` while the launcher
+// still receives the filesystem path it has to hand an application (L5/L7).
+const dir = realTempDir('mb-open-')
+const cacheDir = realTempDir('mb-open-cache-')
 
 afterAll(() => {
   rmSync(dir, { recursive: true, force: true })
@@ -73,7 +75,12 @@ function harness(
     return reply(file, args)
   }
   const env: NodeJS.ProcessEnv = { HOME: join(dir, 'no-such-home'), XDG_DATA_DIRS: join(dir, 'no-such-share') }
-  const app = createApp(new ThumbCache(cacheDir), createLauncher({ env, exec, config }), zipTemp)
+  const app = createApp(
+    new ThumbCache(cacheDir),
+    createLauncher({ env, exec, config }),
+    zipTemp,
+    libraryFor(dir),
+  )
   return { calls, app }
 }
 
@@ -110,7 +117,7 @@ describe('POST /api/open', () => {
   it('launches a plain file with an absolute path', async () => {
     const { calls, app } = harness()
     const res = await post(app, '/api/open', {
-      path: join(dir, 'loose.stl'),
+      path: '/loose.stl',
       appId: 'lycheeslicer.desktop',
     })
     expect(res.status).toBe(200)
@@ -122,14 +129,14 @@ describe('POST /api/open', () => {
   it('requires a path and an appId', async () => {
     const { calls, app } = harness()
     expect((await post(app, '/api/open', { appId: 'x.desktop' })).status).toBe(400)
-    expect((await post(app, '/api/open', { path: join(dir, 'loose.stl') })).status).toBe(400)
+    expect((await post(app, '/api/open', { path: '/loose.stl' })).status).toBe(400)
     expect(calls).toHaveLength(0)
   })
 
   it('errors on a missing file without launching', async () => {
     const { calls, app } = harness()
     const res = await post(app, '/api/open', {
-      path: join(dir, 'ghost.stl'),
+      path: '/ghost.stl',
       appId: 'x.desktop',
     })
     expect(res.status).toBe(404)
@@ -140,7 +147,7 @@ describe('POST /api/open', () => {
   it('errors on a zip that does not exist without launching', async () => {
     const { calls, app } = harness()
     const res = await post(app, '/api/open', {
-      path: `${join(dir, 'ghost.zip')}!/part.stl`,
+      path: '/ghost.zip!/part.stl',
       appId: 'x.desktop',
     })
     expect(res.status).toBe(404)
@@ -151,14 +158,14 @@ describe('POST /api/open', () => {
     const { calls, app } = harness()
     const res = await post(app, '/api/open', { path: 'loose.stl', appId: 'x.desktop' })
     expect(res.status).toBe(400)
-    expect(((await res.json()) as { error: string }).error).toBe('path must be absolute')
+    expect(((await res.json()) as { error: string }).error).toBe('path must be a library path')
     expect(calls).toHaveLength(0)
   })
 
   it('rejects a nested zip entry without launching', async () => {
     const { calls, app } = harness()
     const res = await post(app, '/api/open', {
-      path: `${join(dir, 'nest.zip')}!/inner.zip`,
+      path: '/nest.zip!/inner.zip',
       appId: 'x.desktop',
     })
     expect(res.status).toBe(400)
@@ -168,8 +175,8 @@ describe('POST /api/open', () => {
 
   it('gives same-named entries in different archives distinct files', async () => {
     const { calls, app } = harness()
-    await post(app, '/api/open', { path: `${join(dir, 'a.zip')}!/part.stl`, appId: 'x.desktop' })
-    await post(app, '/api/open', { path: `${join(dir, 'b.zip')}!/part.stl`, appId: 'x.desktop' })
+    await post(app, '/api/open', { path: '/a.zip!/part.stl', appId: 'x.desktop' })
+    await post(app, '/api/open', { path: '/b.zip!/part.stl', appId: 'x.desktop' })
     const first = calls[0]?.args[1] as string
     const second = calls[1]?.args[1] as string
     expect(first).not.toBe(second)
@@ -188,7 +195,7 @@ describe('POST /api/open', () => {
 
     const { calls, app } = harness()
     writeFileSync(zipPath, zipSync({ 'part.stl': new Uint8Array(v1) }))
-    await post(app, '/api/open', { path: `${zipPath}!/part.stl`, appId: 'x.desktop' })
+    await post(app, '/api/open', { path: '/churn.zip!/part.stl', appId: 'x.desktop' })
     const temp = calls[0]?.args[1] as string
     expect(readFileSync(temp).equals(v1)).toBe(true)
 
@@ -196,7 +203,7 @@ describe('POST /api/open', () => {
     const held = openSync(temp, 'r')
     try {
       writeFileSync(zipPath, zipSync({ 'part.stl': new Uint8Array(v2) }))
-      await post(app, '/api/open', { path: `${zipPath}!/part.stl`, appId: 'x.desktop' })
+      await post(app, '/api/open', { path: '/churn.zip!/part.stl', appId: 'x.desktop' })
       // Same name — the naming is keyed on the virtual path, not the launch.
       expect(calls[1]?.args[1]).toBe(temp)
       // New bytes under the name...
@@ -214,7 +221,7 @@ describe('POST /api/open', () => {
     const nasty = join(dir, 'a; rm -rf ~ && $(whoami) `id` | tee "x".stl')
     writeFileSync(nasty, looseStl)
     const { calls, app } = harness({ launch: ['opener', '{file}'] })
-    const res = await post(app, '/api/open', { path: nasty, appId: 'x.desktop' })
+    const res = await post(app, '/api/open', { path: `/${basename(nasty)}`, appId: 'x.desktop' })
     expect(res.status).toBe(200)
     expect(calls[0]?.args).toEqual([nasty])
     expect(calls[0]?.args).toHaveLength(1)
@@ -222,7 +229,7 @@ describe('POST /api/open', () => {
 
   it('runs the configured argv in place of the builtin', async () => {
     const { calls, app } = harness({ launch: ['my-opener', '--app', '{appId}', '--file', '{file}'] })
-    await post(app, '/api/open', { path: join(dir, 'loose.stl'), appId: 'x.desktop' })
+    await post(app, '/api/open', { path: '/loose.stl', appId: 'x.desktop' })
     expect(calls[0]?.file).toBe('my-opener')
     expect(calls[0]?.args).toEqual(['--app', 'x.desktop', '--file', join(dir, 'loose.stl')])
   })
@@ -230,7 +237,7 @@ describe('POST /api/open', () => {
   it('surfaces a failing launch command with its reason', async () => {
     const { app } = harness({}, () => ({ code: 4, stdout: '', stderr: 'no such application\n' }))
     const res = await post(app, '/api/open', {
-      path: join(dir, 'loose.stl'),
+      path: '/loose.stl',
       appId: 'ghost.desktop',
     })
     expect(res.status).toBe(502)
@@ -242,7 +249,7 @@ describe('POST /api/open', () => {
       throw new Error('spawn gtk-launch ENOENT')
     })
     const res = await post(app, '/api/open', {
-      path: join(dir, 'loose.stl'),
+      path: '/loose.stl',
       appId: 'x.desktop',
     })
     expect(res.status).toBe(502)
@@ -256,7 +263,7 @@ describe('POST /api/open', () => {
     const before = new Set(readdirSync(tmpdir()).filter((n) => n.startsWith('model-browser-open-')))
     const root = mkdtempSync(join(dir, 'regression-root-'))
     const { calls, app } = harness({}, undefined, new ZipTempStore(root))
-    await post(app, '/api/open', { path: `${join(dir, 'a.zip')}!/part.stl`, appId: 'x.desktop' })
+    await post(app, '/api/open', { path: '/a.zip!/part.stl', appId: 'x.desktop' })
     const file = calls[0]?.args[1] as string
     // Positive assertion: the extracted file resolves under the store's own
     // injected root, not wherever the OS tmpdir happens to be.
@@ -270,7 +277,7 @@ describe('POST /api/open', () => {
 describe('POST /api/open-with', () => {
   it('reports unavailable, spawning nothing, when no chooser is configured', async () => {
     const { calls, app } = harness()
-    const res = await post(app, '/api/open-with', { path: join(dir, 'loose.stl') })
+    const res = await post(app, '/api/open-with', { path: '/loose.stl' })
     expect(res.status).toBe(503)
     expect(await res.json()).toEqual({ error: 'no chooser is configured', unavailable: true })
     expect(calls).toHaveLength(0)
@@ -278,7 +285,7 @@ describe('POST /api/open-with', () => {
 
   it('spawns the configured argv with the absolute path, detached and unsignalled', async () => {
     const { calls, app } = harness({ chooser: ['open-with', '{file}'] })
-    const res = await post(app, '/api/open-with', { path: join(dir, 'loose.stl') })
+    const res = await post(app, '/api/open-with', { path: '/loose.stl' })
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ ok: true })
     expect(calls[0]?.file).toBe('open-with')
@@ -289,7 +296,7 @@ describe('POST /api/open-with', () => {
 
   it('temp-extracts a zip entry for the chooser, as launching does', async () => {
     const { calls, app } = harness({ chooser: ['open-with', '{file}'] })
-    await post(app, '/api/open-with', { path: `${join(dir, 'a.zip')}!/part.stl` })
+    await post(app, '/api/open-with', { path: '/a.zip!/part.stl' })
     const file = calls[0]?.args[0] as string
     expect(file).not.toBe(join(dir, 'a.zip'))
     expect(file.endsWith('.stl')).toBe(true)
@@ -299,7 +306,7 @@ describe('POST /api/open-with', () => {
   it('rejects a nested zip entry and a relative path without spawning', async () => {
     const { calls, app } = harness({ chooser: ['open-with', '{file}'] })
     expect(
-      (await post(app, '/api/open-with', { path: `${join(dir, 'nest.zip')}!/inner.zip` })).status,
+      (await post(app, '/api/open-with', { path: '/nest.zip!/inner.zip' })).status,
     ).toBe(400)
     expect((await post(app, '/api/open-with', { path: 'loose.stl' })).status).toBe(400)
     expect(calls).toHaveLength(0)
@@ -321,12 +328,13 @@ describe('POST /api/open-with', () => {
       new ThumbCache(cacheDir),
       createLauncher({ env, exec, config: { chooser: ['open-with', '{file}'] } }),
       new ZipTempStore(dir),
+      libraryFor(dir),
     )
     const controller = new AbortController()
     const pending = app.request('/api/open-with', {
       method: 'POST',
       headers: { ...LOOPBACK, 'content-type': 'application/json' },
-      body: JSON.stringify({ path: join(dir, 'loose.stl') }),
+      body: JSON.stringify({ path: '/loose.stl' }),
       signal: controller.signal,
     })
     // Let the handler reach the chooser, then drop the connection under it.
@@ -349,7 +357,7 @@ describe('POST /api/open-with', () => {
       stdout: '',
       stderr: 'another instance is already running\n',
     }))
-    const res = await post(app, '/api/open-with', { path: join(dir, 'loose.stl') })
+    const res = await post(app, '/api/open-with', { path: '/loose.stl' })
     expect(res.status).toBe(502)
     expect(((await res.json()) as { error: string }).error).toMatch(/another instance/)
   })

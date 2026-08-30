@@ -1,7 +1,8 @@
 import { readdir, realpath, stat } from 'node:fs/promises'
-import { basename, dirname, isAbsolute, join } from 'node:path'
+import { join, posix, sep } from 'node:path'
 import { baseName } from '../../shared/names'
 import type { DirEntry, DirListing } from '../../shared/types'
+import { MARKER_DIR, type Library } from './library'
 import { joinVPath, parseVPath, VPathError } from './vpath'
 import { ZipError, listZipEntries } from './zip'
 
@@ -20,6 +21,32 @@ const MODEL_EXT = /\.(stl|3mf|obj)$/i
 export function modelFormat(name: string): 'stl' | '3mf' | 'obj' | undefined {
   const m = MODEL_EXT.exec(name)
   return m ? (m[1]!.toLowerCase() as 'stl' | '3mf' | 'obj') : undefined
+}
+
+/**
+ * A listing entry plus the filesystem path it was read from. Every emitted
+ * `path` is the **logical** library path — the route the client asks for again
+ * — while the walk descends filesystem paths (library-root D3); re-resolving a
+ * logical path inside the walk would realpath an in-library alias onto its
+ * target and collapse the two routes into one. `fsPath` never leaves this
+ * module: `wire` strips it at the boundary.
+ */
+interface FsEntry extends DirEntry {
+  fsPath: string
+}
+
+/** The library's own confinement test, applied to an already-resolved real path. */
+function within(realTop: string, real: string): boolean {
+  return real === realTop || real.startsWith(realTop + sep)
+}
+
+/** Drop the internal filesystem path: only the logical path leaves this module. */
+function wire(entries: readonly DirEntry[]): DirEntry[] {
+  return entries.map((e) => {
+    const out: DirEntry = { name: e.name, path: e.path, kind: e.kind, size: e.size, mtime: e.mtime }
+    if (e.format !== undefined) out.format = e.format
+    return out
+  })
 }
 
 interface FlatWalk {
@@ -57,50 +84,82 @@ function takeStep(walk: FlatWalk): boolean {
   return true
 }
 
-async function listFsDir(path: string, walk?: FlatWalk): Promise<DirEntry[]> {
+/**
+ * One filesystem directory: `fsDir` is read, `browseLibPath` names what is
+ * found. Failures name the library path — a miss that described the volume
+ * would be a probe of the tree the server just declined to show.
+ */
+async function listFsDir(
+  fsDir: string,
+  browseLibPath: string,
+  realTop: string,
+  walk?: FlatWalk,
+): Promise<FsEntry[]> {
   let names
   try {
-    names = await readdir(path, { withFileTypes: true })
+    names = await readdir(fsDir, { withFileTypes: true })
   } catch {
-    throw new ListingError(404, `cannot read directory: ${path}`)
+    throw new ListingError(404, `cannot read directory: ${browseLibPath}`)
   }
-  const entries: DirEntry[] = []
+  const entries: FsEntry[] = []
   for (const d of names) {
     if (d.name.startsWith('.')) continue
     // A flat walk pays for every entry it examines, not just the ones it
     // keeps: the stat below is the walk's real per-entry cost, so a folder of
     // a million non-model files has to consume budget too.
     if (walk !== undefined && !takeStep(walk)) break
-    const full = join(path, d.name)
+    const full = join(fsDir, d.name)
+    // Confinement, entry by entry — but only for symlinks: a plain entry can
+    // only leave the library through an ancestor the descent has already
+    // confined, and a 200,000-step search walk cannot afford an lstat chain per
+    // entry (design Risks). The dirent's flag is reliable: Node resolves a
+    // DT_UNKNOWN with an lstat before answering `isSymbolicLink`.
+    if (d.isSymbolicLink()) {
+      const real = await realpath(full).catch(() => null)
+      if (real === null || !within(realTop, real)) continue
+    }
     let s
     try {
       s = await stat(full)
     } catch {
       continue
     }
+    const path = posix.join(browseLibPath, d.name)
     // stat (not the dirent) so symlinked directories are followed and listed.
     if (s.isDirectory()) {
-      entries.push({ name: d.name, path: full, kind: 'dir', size: 0, mtime: s.mtimeMs })
+      entries.push({ name: d.name, path, fsPath: full, kind: 'dir', size: 0, mtime: s.mtimeMs })
     } else if (/\.zip$/i.test(d.name)) {
-      entries.push({ name: d.name, path: full, kind: 'zip', size: s.size, mtime: s.mtimeMs })
+      entries.push({ name: d.name, path, fsPath: full, kind: 'zip', size: s.size, mtime: s.mtimeMs })
     } else {
       const format = modelFormat(d.name)
       if (format) {
-        entries.push({ name: d.name, path: full, kind: 'model', format, size: s.size, mtime: s.mtimeMs })
+        entries.push({
+          name: d.name,
+          path,
+          fsPath: full,
+          kind: 'model',
+          format,
+          size: s.size,
+          mtime: s.mtimeMs,
+        })
       }
     }
   }
   return sortEntries(entries)
 }
 
-async function listZipDir(zipPath: string, prefix: string): Promise<DirEntry[]> {
+async function listZipDir(
+  zipFsPath: string,
+  zipLibPath: string,
+  prefix: string,
+): Promise<DirEntry[]> {
   let zipStat
   try {
-    zipStat = await stat(zipPath)
+    zipStat = await stat(zipFsPath)
   } catch {
-    throw new ListingError(404, `cannot read zip: ${zipPath}`)
+    throw new ListingError(404, `cannot read zip: ${zipLibPath}`)
   }
-  const zipEntries = await listZipEntries(zipPath)
+  const zipEntries = await listZipEntries(zipFsPath)
   const norm = prefix === '' ? '' : prefix.endsWith('/') ? prefix : `${prefix}/`
 
   // A prefix that is itself a *file* entry in the archive is not a directory.
@@ -125,7 +184,7 @@ async function listZipDir(zipPath: string, prefix: string): Promise<DirEntry[]> 
     if (/\.zip$/i.test(rest)) {
       entries.push({
         name: rest,
-        path: joinVPath(zipPath, e.name),
+        path: joinVPath(zipLibPath, e.name),
         kind: 'zip',
         size: e.size,
         mtime: zipStat.mtimeMs,
@@ -136,7 +195,7 @@ async function listZipDir(zipPath: string, prefix: string): Promise<DirEntry[]> 
     if (format) {
       entries.push({
         name: rest,
-        path: joinVPath(zipPath, e.name),
+        path: joinVPath(zipLibPath, e.name),
         kind: 'model',
         format,
         size: e.size,
@@ -147,7 +206,7 @@ async function listZipDir(zipPath: string, prefix: string): Promise<DirEntry[]> 
   for (const d of dirs) {
     entries.push({
       name: d,
-      path: joinVPath(zipPath, `${norm}${d}`),
+      path: joinVPath(zipLibPath, `${norm}${d}`),
       kind: 'dir',
       size: 0,
       mtime: zipStat.mtimeMs,
@@ -183,29 +242,56 @@ function kindRank(kind: DirEntry['kind']): number {
   return KIND_RANK[kind] ?? 9
 }
 
-function sortEntries(entries: DirEntry[]): DirEntry[] {
+function sortEntries<T extends DirEntry>(entries: T[]): T[] {
   return entries.sort((a, b) => kindRank(a.kind) - kindRank(b.kind) || a.name.localeCompare(b.name))
 }
 
-export async function listDir(vpath: string): Promise<DirListing> {
-  const { fsPath, entry } = parseVPath(vpath)
-  if (!isAbsolute(fsPath)) throw new ListingError(400, 'path must be absolute')
-  if (entry === undefined) {
-    const s = await stat(fsPath).catch(() => null)
-    if (s === null) throw new ListingError(404, `no such path: ${fsPath}`)
-    if (s.isDirectory()) return { path: vpath, entries: await listFsDir(fsPath) }
-    if (/\.zip$/i.test(fsPath)) return { path: vpath, entries: await listZipDir(fsPath, '') }
-    throw new ListingError(400, `not a directory or zip: ${fsPath}`)
-  }
-  return { path: vpath, entries: await listZipDir(fsPath, entry) }
+/**
+ * The library path of a request's filesystem half, canonicalised the way the
+ * resolver canonicalises it — so an entry's emitted path is a route the client
+ * can ask for again, whatever spelling this request arrived in.
+ */
+function libHalfOf(libPath: string): string {
+  return posix.normalize(parseVPath(libPath).fsPath)
 }
 
-async function walkFsLevel(level: DirEntry[], rel: string, walk: FlatWalk): Promise<void> {
+export async function listDir(library: Library, libPath: string): Promise<DirListing> {
+  const { fsPath, entry } = await library.resolve(libPath)
+  const realTop = library.realTop()
+  const libHalf = libHalfOf(libPath)
+  if (entry === undefined) {
+    const s = await stat(fsPath).catch(() => null)
+    if (s === null) throw new ListingError(404, `no such path: ${libPath}`)
+    if (s.isDirectory()) {
+      return { path: libPath, entries: wire(await listFsDir(fsPath, libHalf, realTop)) }
+    }
+    if (/\.zip$/i.test(fsPath)) {
+      return { path: libPath, entries: await listZipDir(fsPath, libHalf, '') }
+    }
+    throw new ListingError(400, `not a directory or zip: ${libPath}`)
+  }
+  return { path: libPath, entries: await listZipDir(fsPath, libHalf, entry) }
+}
+
+async function walkFsLevel(
+  level: FsEntry[],
+  rel: string,
+  walk: FlatWalk,
+  realTop: string,
+): Promise<void> {
   for (const e of level) {
     if (walk.truncated) return
     if (e.kind === 'model') {
       walk.models.push({ ...e, name: `${rel}${e.name}` })
     } else if (e.kind === 'dir') {
+      // Confinement is decided **before** the push below, not at the visited
+      // check after it: the push is deliberately unguarded (see the alias
+      // reasoning), so a subdirectory leaving the library would otherwise still
+      // be emitted as a tile that the next request refuses. A real path that
+      // cannot be read is a confinement that cannot be established, and is
+      // skipped the same way.
+      const real = await realpath(e.fsPath).catch(() => null)
+      if (real === null || !within(realTop, real)) continue
       // Pushed before the visited check, and before descending: the spec's rule
       // is every directory under the root whose own name matches, and a
       // directory reached through a symlink alias is one. Deduping it here
@@ -216,19 +302,20 @@ async function walkFsLevel(level: DirEntry[], rel: string, walk: FlatWalk): Prom
       // is `listFlat`'s containers, and pushing here too would return one
       // folder as two identical tiles.
       if (rel !== '') walk.dirs.push({ ...e, name: `${rel}${e.name}` })
-      const real = await realpath(e.path).catch(() => null)
-      if (real === null || walk.visited.has(real)) continue
+      if (walk.visited.has(real)) continue
       walk.visited.add(real)
       let sub
       try {
-        sub = await listFsDir(e.path, walk)
+        sub = await listFsDir(e.fsPath, e.path, realTop, walk)
       } catch {
         continue // unreadable subdirectory: skipped, only an unreadable root fails
       }
-      await walkFsLevel(sub, `${rel}${e.name}/`, walk)
+      await walkFsLevel(sub, `${rel}${e.name}/`, walk, realTop)
     } else {
+      // The archive's filesystem path was confined when `listFsDir` emitted it,
+      // so enumerating its names needs no further test here.
       if (rel !== '') walk.dirs.push({ ...e, name: `${rel}${e.name}` })
-      await walkZip(e.path, '', `${rel}${e.name}!/`, walk)
+      await walkZip(e.fsPath, e.path, '', `${rel}${e.name}!/`, walk)
     }
   }
 }
@@ -243,7 +330,8 @@ async function walkFsLevel(level: DirEntry[], rel: string, walk: FlatWalk): Prom
  * filesystem walk is skipped like an unreadable subdirectory.
  */
 async function walkZip(
-  zipPath: string,
+  zipFsPath: string,
+  zipLibPath: string,
   prefix: string,
   namePrefix: string,
   walk: FlatWalk,
@@ -251,12 +339,12 @@ async function walkZip(
 ): Promise<DirEntry[]> {
   let zipStat, zipEntries
   try {
-    zipStat = await stat(zipPath)
-    zipEntries = await listZipEntries(zipPath)
+    zipStat = await stat(zipFsPath)
+    zipEntries = await listZipEntries(zipFsPath)
   } catch (err) {
     if (!root) return [] // unreadable/corrupt zip: skipped like an unreadable subdirectory
     if (err instanceof ZipError) throw err
-    throw new ListingError(404, `cannot read zip: ${zipPath}`)
+    throw new ListingError(404, `cannot read zip: ${zipLibPath}`)
   }
   const norm = prefix === '' ? '' : prefix.endsWith('/') ? prefix : `${prefix}/`
   if (root && norm !== '') {
@@ -294,7 +382,7 @@ async function walkZip(
     if (format === undefined) continue
     walk.models.push({
       name: `${namePrefix}${rest}`,
-      path: joinVPath(zipPath, e.name),
+      path: joinVPath(zipLibPath, e.name),
       kind: 'model',
       format,
       size: e.size,
@@ -304,7 +392,7 @@ async function walkZip(
   for (const d of interior) {
     walk.dirs.push({
       name: `${namePrefix}${d}`,
-      path: joinVPath(zipPath, `${norm}${d}`),
+      path: joinVPath(zipLibPath, `${norm}${d}`),
       kind: 'dir',
       size: 0,
       mtime: zipStat.mtimeMs,
@@ -313,7 +401,7 @@ async function walkZip(
   return sortEntries(
     [...dirs].map((d) => ({
       name: d,
-      path: joinVPath(zipPath, `${norm}${d}`),
+      path: joinVPath(zipLibPath, `${norm}${d}`),
       kind: 'dir' as const,
       size: 0,
       mtime: zipStat.mtimeMs,
@@ -359,7 +447,8 @@ function envLimit(name: string, fallback: number): number {
  * it. The client's "the search ran out" message depends on that.
  */
 export async function listFlat(
-  vpath: string,
+  library: Library,
+  libPath: string,
   query?: string,
   opts: { folderMatching?: boolean } = {},
 ): Promise<DirListing> {
@@ -368,8 +457,9 @@ export async function listFlat(
   // Default on: an absent parameter is the shipped predicate, so an old client
   // and a hand-written URL both get what they got before the option existed.
   const folderMatching = opts.folderMatching !== false
-  const { fsPath, entry } = parseVPath(vpath)
-  if (!isAbsolute(fsPath)) throw new ListingError(400, 'path must be absolute')
+  const { fsPath, entry } = await library.resolve(libPath)
+  const realTop = library.realTop()
+  const libHalf = libHalfOf(libPath)
   const walk: FlatWalk = {
     // A search affords a far larger walk than a browse (D5): the flat view
     // must render everything it walks as tiles, while a search discards
@@ -386,24 +476,24 @@ export async function listFlat(
   let containers: DirEntry[]
   if (entry === undefined) {
     const s = await stat(fsPath).catch(() => null)
-    if (s === null) throw new ListingError(404, `no such path: ${fsPath}`)
+    if (s === null) throw new ListingError(404, `no such path: ${libPath}`)
     if (s.isDirectory()) {
       // The root level is the request's baseline work — the listing a nested
       // browse would do anyway — so it is not charged to the walk budget.
-      const level = await listFsDir(fsPath)
+      const level = await listFsDir(fsPath, libHalf, realTop)
       containers = level.filter((e) => e.kind !== 'model')
       walk.visited.add(await realpath(fsPath).catch(() => fsPath))
-      await walkFsLevel(level, '', walk)
+      await walkFsLevel(level, '', walk, realTop)
     } else if (/\.zip$/i.test(fsPath)) {
-      containers = await walkZip(fsPath, '', '', walk, true)
+      containers = await walkZip(fsPath, libHalf, '', '', walk, true)
     } else {
-      throw new ListingError(400, `not a directory or zip: ${fsPath}`)
+      throw new ListingError(400, `not a directory or zip: ${libPath}`)
     }
   } else {
     // Inside an archive the containers are its immediate *directories*: a
     // nested zip file is not enterable, so offering it as a tile would hand
     // the user a link that 400s on click.
-    containers = await walkZip(fsPath, entry, '', walk, true)
+    containers = await walkZip(fsPath, libHalf, entry, '', walk, true)
   }
 
   const cap = envLimit('MODEL_BROWSER_FLAT_CAP', 500)
@@ -453,19 +543,31 @@ export async function listFlat(
     walk.truncated = true
     walk.models.length = cap
   }
-  const listing: DirListing = { path: vpath, entries: [...containers, ...walk.models] }
+  const listing: DirListing = { path: libPath, entries: wire([...containers, ...walk.models]) }
   if (walk.truncated) listing.truncated = true
   return listing
 }
 
-/** Subdirectory completions for a partial path (path-bar autocomplete). */
-export async function complete(prefix: string): Promise<string[]> {
-  if (!isAbsolute(prefix)) return []
-  const dir = prefix.endsWith('/') ? prefix : dirname(prefix)
-  const base = prefix.endsWith('/') ? '' : basename(prefix)
+/**
+ * Subdirectory completions for a partial library path (path-bar autocomplete).
+ * In and out are library paths; a prefix that is not one, or that resolves
+ * outside the library, completes to nothing rather than to a refusal — a path
+ * bar is typed one character at a time, and most of those characters name
+ * nothing yet.
+ */
+export async function complete(library: Library, prefix: string): Promise<string[]> {
+  if (!prefix.startsWith('/')) return []
+  const dirLibPath = prefix.endsWith('/') ? prefix : posix.dirname(prefix)
+  const base = prefix.endsWith('/') ? '' : posix.basename(prefix)
+  let fsDir
+  try {
+    fsDir = (await library.resolve(dirLibPath)).fsPath
+  } catch {
+    return []
+  }
   let names
   try {
-    names = await readdir(dir, { withFileTypes: true })
+    names = await readdir(fsDir, { withFileTypes: true })
   } catch {
     return []
   }
@@ -473,10 +575,13 @@ export async function complete(prefix: string): Promise<string[]> {
     .filter(
       (d) =>
         d.isDirectory() &&
+        // The marker is invisible everywhere, and a dot-prefix would otherwise
+        // be the one spelling that revealed it.
+        d.name !== MARKER_DIR &&
         d.name.startsWith(base) &&
         (base.startsWith('.') || !d.name.startsWith('.')),
     )
-    .map((d) => `${join(dir, d.name)}/`)
+    .map((d) => `${posix.join(dirLibPath, d.name)}/`)
     .sort()
     .slice(0, 20)
 }

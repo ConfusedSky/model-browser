@@ -2,11 +2,24 @@
 // unchanged on Node for a future Electron main/sidecar.
 import { ThumbCache } from './cache'
 import { createApp } from './app'
+import { ZipTempStore, createLauncher } from './launch'
+import { createLibrary } from './library'
 
 const cache = new ThumbCache()
-void cache.maintain()
+const library = createLibrary()
+// The resolved library, named once at start: the root is a viewpoint and the
+// top is found by walking up from it, so which tree is open is not something a
+// reader can infer from the configuration alone (D1, and R1's warning).
+void library.state().then((s) => {
+  if (s.state === 'ready') {
+    console.log(`library ${s.id} at ${s.top}`)
+    // The startup sweep resolves every cached path through the library, so it
+    // has nothing to say until there is one.
+    void cache.maintain()
+  } else console.log(`library: ${s.state}`)
+})
 
-const app = createApp(cache)
+const app = createApp(cache, createLauncher(), new ZipTempStore(), library)
 
 export default {
   port: 3177,

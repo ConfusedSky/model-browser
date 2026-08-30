@@ -1,12 +1,13 @@
 import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
-import { isAbsolute, relative, resolve as resolvePath } from 'node:path'
+import { relative, resolve as resolvePath } from 'node:path'
 import { Readable } from 'node:stream'
 import { Hono } from 'hono'
 import type { LightingMode, OrbitAxis, ThumbPutRequest } from '../../shared/types'
 import { ThumbCache } from './cache'
 import { guard } from './guard'
 import { LaunchError, type Launcher, ZipTempStore, createLauncher } from './launch'
+import { LibraryError, type Library, createLibrary } from './library'
 import { ListingError, complete, listDir, listFlat } from './listing'
 import {
   IndexError,
@@ -17,7 +18,7 @@ import {
   scopeWithin,
   similar as indexSimilar,
 } from './semantic'
-import { VPathError, parseVPath } from './vpath'
+import { VPathError } from './vpath'
 import { ZipError, extractEntry } from './zip'
 
 const ORBIT_AXES: readonly OrbitAxis[] = ['x', '-x', 'y', '-y', 'z', '-z']
@@ -67,12 +68,56 @@ export function createApp(
   // can inject its own store (its own root) so it never litters the real
   // tmpdir (4.5) — additive and trailing, like `cache` and `launcher` above.
   zipTemp: ZipTempStore = new ZipTempStore(),
+  // The only translator between a request's path and a filesystem path
+  // (library-root D3). Injected like the three above so a test drives its own
+  // tree rather than the machine's configured library.
+  library: Library = createLibrary(),
 ): Hono {
   const app = new Hono()
 
   app.use('/api/*', guard)
 
+  /**
+   * The library's state, and — while it is not `ready` — the answer every path
+   * route gives instead of a listing (D4). 503 with a state envelope is the
+   * shape `indexErrorReply` already gives the client for an absent index: "the
+   * thing is not there" is a state the UI renders, not a fault.
+   *
+   * The exceptions are the routes that are about the *app* rather than about a
+   * path: the state itself, the machine's application registry, and the index's
+   * availability. Re-asked per request, because `missing` is re-evaluated each
+   * time — a volume mounted after start needs no restart.
+   *
+   * The last two entries are **temporary**. `/api/semantic` and
+   * `/api/semantic/similar` are path routes and belong behind this gate; they
+   * are exempt only until task 4.1 makes `scopeWithin`/`hitsToEntries` take
+   * library paths, because until then they still take absolute ones. Remove
+   * both entries there.
+   */
+  const UNGATED = new Set([
+    '/api/library',
+    '/api/apps',
+    '/api/semantic/status',
+    '/api/semantic',
+    '/api/semantic/similar',
+  ])
+  app.use('/api/*', async (c, next) => {
+    if (UNGATED.has(c.req.path)) return next()
+    const s = await library.state()
+    if (s.state === 'ready') return next()
+    if (s.state === 'missing') {
+      return c.json(
+        { error: `the library at ${s.root} is not present`, state: s.state, root: s.root },
+        503,
+      )
+    }
+    return c.json({ error: 'no library root is configured', state: s.state }, 503)
+  })
+
+  app.get('/api/library', async (c) => c.json(await library.state()))
+
   app.onError((err, c) => {
+    if (err instanceof LibraryError) return c.json({ error: err.message }, err.status)
     if (err instanceof ListingError) return c.json({ error: err.message }, err.status === 404 ? 404 : 400)
     if (err instanceof VPathError) return c.json({ error: err.message }, 400)
     if (err instanceof ZipError) return c.json({ error: err.message }, 422)
@@ -88,15 +133,14 @@ export function createApp(
     if (!blankQ && !flat) return c.json({ error: 'q requires flat=true' }, 400)
     // Additive and default-on: absent means the shipped predicate.
     const folderMatching = c.req.query('folders') !== 'false'
-    if (flat) return c.json(await listFlat(path, q, { folderMatching }))
-    return c.json(await listDir(path))
+    if (flat) return c.json(await listFlat(library, path, q, { folderMatching }))
+    return c.json(await listDir(library, path))
   })
 
   app.get('/api/file', async (c) => {
     const path = c.req.query('path')
     if (path === undefined || path === '') return c.json({ error: 'path is required' }, 400)
-    const { fsPath, entry } = parseVPath(path)
-    if (!isAbsolute(fsPath)) return c.json({ error: 'path must be absolute' }, 400)
+    const { fsPath, entry } = await library.resolve(path)
 
     // octet-stream + nosniff make ORB dependably block no-cors embeds, which
     // carry no Origin and so pass the guard's origin check.
@@ -110,31 +154,32 @@ export function createApp(
       return c.body(new Uint8Array(bytes), 200, headers)
     }
     const s = await stat(fsPath).catch(() => null)
-    if (s === null || !s.isFile()) return c.json({ error: `no such file: ${fsPath}` }, 404)
+    if (s === null || !s.isFile()) return c.json({ error: `no such file: ${path}` }, 404)
     const stream = Readable.toWeb(createReadStream(fsPath)) as ReadableStream
     return c.body(stream, 200, { ...headers, 'content-length': String(s.size) })
   })
 
   /**
    * The one path pipeline both launch endpoints share: validated exactly as
-   * `/api/file` validates (absolute, `parseVPath`, nested zips rejected,
+   * `/api/file` validates (resolved through the library, nested zips rejected,
    * existence), zip entries temp-extracted, and the result **always absolute**
    * — a relative path breaks applications that resolve it against a running
-   * instance's working directory (app-launch L5/L7).
+   * instance's working directory (app-launch L5/L7). A path the library
+   * refuses throws a `LibraryError` that `onError` renders, the same refusal
+   * every other route gives.
    */
   type Resolved =
     | { ok: true; file: string }
     | { ok: false; body: { error: string }; status: 400 | 404 }
 
   async function resolveEntryFile(path: string): Promise<Resolved> {
-    const { fsPath, entry } = parseVPath(path)
-    if (!isAbsolute(fsPath)) return { ok: false, body: { error: 'path must be absolute' }, status: 400 }
+    const { fsPath, entry } = await library.resolve(path)
     if (entry !== undefined && /\.zip$/i.test(entry)) {
       return { ok: false, body: { error: 'nested zips are unsupported' }, status: 400 }
     }
     const s = await stat(fsPath).catch(() => null)
     if (s === null || !s.isFile()) {
-      return { ok: false, body: { error: `no such file: ${fsPath}` }, status: 404 }
+      return { ok: false, body: { error: `no such file: ${path}` }, status: 404 }
     }
     if (entry !== undefined) {
       return { ok: true, file: await zipTemp.fileFor(path, fsPath, entry) }
@@ -395,7 +440,7 @@ export function createApp(
 
   app.get('/api/complete', async (c) => {
     const prefix = c.req.query('prefix') ?? ''
-    return c.json(await complete(prefix))
+    return c.json(await complete(library, prefix))
   })
 
   app.get('/api/thumb', async (c) => {
@@ -404,6 +449,10 @@ export function createApp(
     if (path === undefined || Number.isNaN(mtime)) {
       return c.json({ error: 'path and mtime are required' }, 400)
     }
+    // Validated, not translated: the cache keys on the library path itself, so
+    // what the library decides here is only whether this path is one the server
+    // will speak about at all.
+    await library.resolve(path)
     return c.json(await cache.get(path, mtime))
   })
 
@@ -412,6 +461,9 @@ export function createApp(
     if (typeof body.path !== 'string' || typeof body.mtime !== 'number') {
       return c.json({ error: 'path and mtime are required' }, 400)
     }
+    // Before any write: a cache entry for a path this server would not serve is
+    // a write the request had no standing to ask for.
+    await library.resolve(body.path)
     // `null` is the discard, not a bad axis: absence keeps, a value sets, null
     // clears (entry-context-menu D7). Only a value is worth validating.
     if (body.axis !== undefined && body.axis !== null && !ORBIT_AXES.includes(body.axis)) {
