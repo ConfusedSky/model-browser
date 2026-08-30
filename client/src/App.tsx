@@ -273,9 +273,11 @@ export default function App() {
 
   // The search/view state, whole (design R1): the question asserted, the one in
   // flight, the phase, the answer, the failure, the index, the drafts. Boot
-  // view (url-navigation D4): a URL carrying `path` wins over the localStorage
-  // last-path; a bare URL keeps the last-path behavior and the first landing
-  // seeds the URL via replaceState.
+  // view (url-navigation D4, library D2/D7): the URL alone names it — a `path`
+  // it carries, and the library's top when it carries none. Where the last
+  // session ended is recorded (`pushRecent`) and read only by the path bar's
+  // recents; it is never a boot source. The first landing seeds the URL via
+  // replaceState.
   const [state, rawDispatch] = useReducer(reducer, undefined, () =>
     initialState(resolveView(parseUrl())),
   )
@@ -1030,9 +1032,10 @@ export default function App() {
     commit({ type: 'submit' })
   }
 
-  // Boot (url-navigation D4): one restore of the view the URL and the last-path
-  // resolved to. It lands as a restoration, so the resolved view is seeded via
-  // replaceState — pushed entries start with the user's first real navigation.
+  // Boot (url-navigation D4): one restore of the view the URL resolved to —
+  // `/` when it named no path (library D2/D7), never a stored last path. It
+  // lands as a restoration, so the resolved view is seeded via replaceState —
+  // pushed entries start with the user's first real navigation.
   // A meaning link fetches nothing here: the corpus decision reads the
   // availability probe from state, and until it answers the answer is `wait` —
   // rendering the ordinary listing meanwhile would flatten the whole volume for

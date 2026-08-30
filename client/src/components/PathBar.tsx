@@ -23,6 +23,20 @@ export default function PathBar({ path, api, onNavigate }: Props) {
     if (!editing.current) setValue(path)
   }, [path])
 
+  // A keystroke buys 150ms of waiting, and the bar is in the header for as long
+  // as the app, so what ends it inside that window is the app's own teardown —
+  // an HMR swap, a test unmounting its root. Left to fire, the callback
+  // completes for a component nobody renders, against an `api` whose owner is
+  // gone: the `.catch` below guards a *rejected* promise, so a call that
+  // returns nothing throws `.then` of undefined right here, where nothing
+  // catches it (pathBarDebounce.test.tsx).
+  useEffect(
+    () => () => {
+      if (debounce.current !== null) clearTimeout(debounce.current)
+    },
+    [],
+  )
+
   function refreshSuggestions(input: string): void {
     if (debounce.current !== null) clearTimeout(debounce.current)
     debounce.current = setTimeout(() => {

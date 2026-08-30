@@ -24,4 +24,10 @@
   vitest otherwise stubs every CSS import, `?raw` included, to an empty string
 - The harness stubs `URL` for object URLs, so `history.back()` throws "URL is not a
   constructor" — play the browser instead: `replaceState` then dispatch `PopStateEvent`
-  (urlLightbox.test.tsx). `mountApp` resets the URL; use `mountAppAtCurrentUrl` for deep links
+  (urlLightbox.test.tsx)
+- `mountApp(bootPath, listing)` does not clear the URL — it *writes* one,
+  `/?path=<bootPath>` via `replaceState` (the parameter was `lastPath` before library-root):
+  the URL is now the only way to open anywhere but the library's top, so a test that wants
+  a boot elsewhere gets it through that parameter. `mountAppAtCurrentUrl(url, listing)` is
+  the deep-link entry — it replaces the whole URL, `'/'` included, which is how the boot
+  with no path named is asserted
