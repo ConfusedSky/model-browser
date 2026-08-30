@@ -57,7 +57,9 @@ How the corrected listing reaches the client is deliberately left to apply: the 
 
 ### D6: A cache that disagrees with the disk loses
 
-Nothing is served from the snapshot that revalidation has contradicted, and a revalidation failure (volume unmounted, permissions changed) invalidates rather than persists. The library lives on removable media; a snapshot outliving its volume must not become a listing of files that are not there.
+Nothing is served from the snapshot that revalidation has contradicted, and a revalidation that cannot be completed against a root that is *there* — present but unreadable, permissions changed — invalidates rather than persists.
+
+An unmounted volume is not that case, and rebasing on `library-root` (2026-08-29) is what separates the two. A snapshot is keyed by the library's identity plus the walked root's library path and lives under `<cache>/<library-id>/`, so it is not addressed by mount point at all: the same library mounted somewhere else is a **hit**, not a miss. And a volume that is gone is the library's `missing` state, which `library` requires be answered before any listing is attempted — so revalidation never runs against it, and the snapshot is neither served nor discarded. The hazard this decision exists to prevent, a snapshot outliving its volume and becoming a listing of files that are not there, is stopped by that state; invalidating on an absent volume was the pre-library way of stopping it and would now throw away a snapshot that is still correct.
 
 ## Risks / Trade-offs
 

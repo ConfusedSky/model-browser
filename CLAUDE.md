@@ -7,10 +7,16 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
 ## Commands
 
 - `bun run dev` - start server + client together. The server needs a library root:
-  `MODEL_BROWSER_ROOT=<dir>` or `root` in `~/.config/model-browser/config.json`; without one
-  every path route answers 503 `{state:'unconfigured'}`. Paths on the wire and in URLs are
+  `MODEL_BROWSER_ROOT=<dir>` or `root` in `~/.config/model-browser/config.json`, whose path
+  `MODEL_BROWSER_CONFIG` overrides; without one every path route answers 503
+  `{state:'unconfigured'}`. Read **once at server start** — no route re-reads the file, so
+  restart after editing it (the `launch.json` rule). Paths on the wire and in URLs are
   library-relative (`/` is the library top); the server writes
-  `<library>/.model-browser/library.json` on first start
+  `<library>/.model-browser/library.json` on first start — but the marker found *above* the
+  root wins and the walk runs unbounded to `/`, so a stray `.model-browser/library.json` in
+  `$HOME` (left by an earlier root choice) makes your home directory the library and widens
+  confinement to all of it. The startup line `library <id> at <top>` names the top actually
+  resolved — read it
 - Semantic search needs a second server, not started by `bun run dev` (its collection root
   must lie inside the library, or the index covers nothing):
   `cd ~/Documents/tests/mini-classify && .venv/bin/python serve_api.py --cache-dir embed-cache2 --port 8077`
@@ -140,11 +146,18 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
     tracked — do not go looking for it. Drive E2E against a leaf directory of the real
     library instead, e.g.
     `~/Documents/tests/test-models/miniatures/original/Locked_Chest_3040102`
-    (one STL, `case_meshmixed.stl`). A case the old set covered deliberately — flat-faced
+    (one STL, `case_meshmixed.stl`). Since `library-root` a model is addressed as a **root
+    plus a library path**, never a filesystem path: run with
+    `MODEL_BROWSER_ROOT=~/Documents/tests/test-models` and browse
+    `/miniatures/original/Locked_Chest_3040102`, or root the library at the kit itself and
+    browse `/`. A case the old set covered deliberately — flat-faced
     for acne/AO, large-flat, organic — has to be picked out of the library by hand now
-  - Thumbnail cache: `~/.cache/model-browser/<hash>.{png,json}`; the .json sidecar carries
-    `{path, mtime, lighting, rig, posed}` — grep it to map fixtures to hashes or verify a
-    RIG_VERSION sweep; `rm -rf` the dir to force re-renders during visual tuning
+  - Thumbnail cache: `~/.cache/model-browser/<library-id>/<sha256(library path)>.{png,json}`.
+    The .json sidecar's `path` is the **library** path (`/Kit/x.stl`), not the filesystem one,
+    so map a fixture by its library path — hashing its `/run/media/…` path finds nothing.
+    Alongside it: `{mtime, lighting, rig, posed}` — grep those to verify a RIG_VERSION sweep.
+    `rm -rf` the id directory (or the whole cache dir) to force re-renders during visual
+    tuning
   - Orbit/lightbox E2E persists path-keyed cameras — tile thumbnails later re-render from
     the new angles; that is not a pixel regression. The pointerup also queues a full
     thumbnail re-render (persist), so wait ~5s before frame-time measurements

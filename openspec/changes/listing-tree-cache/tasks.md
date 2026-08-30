@@ -16,7 +16,9 @@
 
 - [ ] 2.1 A metadata cache module beside `server/src/cache.ts`, following its patterns: same `~/.cache/model-browser` root and `MODEL_BROWSER_CACHE` override, same size accounting and `maintain()` sweep, one env knob per limit through a validating helper (`envLimit`'s existing contract — a malformed value must not silently unbound anything)
 - [ ] 2.2 Snapshot shape: entries keyed by walked root, holding name/kind/size/mtime, plus per-directory freshness state; versioned on disk so a format change invalidates rather than mis-parses
-- [ ] 2.3 Keyed on the root path, so the same library at another mountpoint misses rather than hits (D6)
+- [ ] 2.3 Keyed on the library's identity plus the walked root's **library path**, under
+      `<cache>/<library-id>/`, so the same library at another mountpoint is a hit and two
+      libraries with the same layout never share a snapshot (D6)
 
 ## 3. Archive directory cache (the largest measured win)
 
@@ -28,7 +30,11 @@
 - [ ] 4.1 `listFlat` serves from the snapshot when one exists for the root; a miss walks and populates. The snapshot is keyed by **root alone** — not by `q`, not by the search options — and filtering runs over it exactly as it runs over a live walk (D1)
 - [ ] 4.1a Only a **complete** traversal is persisted: a walk that stopped against its step budget populates nothing, or a partial tree is stored as though whole and is permanently wrong (D1). Test that a budget-truncated walk leaves no snapshot behind, and that the next unbudgeted request traverses
 - [ ] 4.2 Incremental revalidation: one `stat` per directory, re-reading only those whose freshness signal moved (D4). Never a background full re-walk — that reintroduces the cold cost off-screen (D5)
-- [ ] 4.3 Revalidation failure invalidates; an unreadable or unmounted root fails as it does today rather than serving cached entries (D6)
+- [ ] 4.3 A revalidation that cannot be completed against a root that is **present** — an
+      unreadable directory, permissions changed — invalidates rather than serving cached
+      entries. A root that is not present at all never reaches revalidation: it is the
+      library's `missing` state, answered before any listing, which neither serves the
+      snapshot nor discards it (D6)
 
 ## 5. Freshness on the wire
 
@@ -37,7 +43,7 @@
 
 ## 6. Tests
 
-- [ ] 6.1 Server: cached and walked responses are entry-for-entry identical on an unchanged tree (including ordering and truncation); one cached tree serves several different queries and both settings of the folder-matching option without re-traversing (instrument the walk, do not infer from timing); a second walk opens no archives; adding, removing, and renaming a model is picked up; an unreadable root invalidates rather than serving; a different mountpoint for the same tree is a miss; the on-disk format version invalidates a stale snapshot
+- [ ] 6.1 Server: cached and walked responses are entry-for-entry identical on an unchanged tree (including ordering and truncation); one cached tree serves several different queries and both settings of the folder-matching option without re-traversing (instrument the walk, do not infer from timing); a second walk opens no archives; adding, removing, and renaming a model is picked up; a present-but-unreadable root invalidates rather than serving; the same tree reached at a different mountpoint under the same library is a **hit**; an unmounted library answers `missing` and leaves the snapshot in place; the on-disk format version invalidates a stale snapshot
 - [ ] 6.2 Client: a stale-marked listing renders immediately with the refreshing affordance and reconciles on the follow-up; an unmarked listing shows no affordance; a superseded reconciliation is discarded by latest-wins
 
 ## 7. Verification

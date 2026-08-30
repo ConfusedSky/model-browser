@@ -57,7 +57,7 @@ Three facts follow, and together they decide the design.
 
 ## What Changes
 
-- **A persistent crawl snapshot on disk**, beside the existing thumbnail cache in `~/.cache/model-browser`: the walked tree — entry names, kinds, sizes, mtimes — keyed by root, survives restarts, and serves flat listings and deep searches without touching the filesystem.
+- **A persistent crawl snapshot on disk**, in the library's own thumbnail-cache directory (`~/.cache/model-browser/<library-id>/`, per `library-root`): the walked tree — entry names, kinds, sizes, mtimes — keyed by the library's identity plus the walked root's library path, survives restarts *and remounts*, and serves flat listings and deep searches without touching the filesystem.
 - **Zip central directories cached against the archive's mtime**, so a walk re-reads an archive only when the archive itself changed. This is the single largest measured win and it is invisible to any OS-level caching.
 - **Incremental revalidation by directory mtime**: one `stat` per directory rather than per entry, and only changed directories are re-read. A directory's mtime moves on add/remove/rename and not on content edits — the exact granularity a name index needs.
 - **A freshness contract in the response**: a listing served from the snapshot says so, so the client can show results immediately and reconcile when revalidation finishes, rather than the UI silently presenting stale data as current.

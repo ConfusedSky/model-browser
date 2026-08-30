@@ -119,8 +119,14 @@ path would collapse it onto its target. `realpath` serves the confinement test a
 visited set only.
 
 *Alternative:* string-prefix check on the joined path without `realpath` — cheaper, and
-defeated by a symlink. Rejected; one `realpath` per request is lstat per component and
-measured as noise even on the spinning volume.
+defeated by a symlink. Rejected — but on the security property, not on a measurement: **the
+cost was never measured.** What is known is its shape, not its size. It is one `realpath`
+per request (an lstat per path component), plus one per directory the walk descends — which
+`walkFsLevel` already paid before this change, for its visited set — plus one per *symlinked*
+entry, since per-entry confinement is gated on `dirent.isSymbolicLink()` (task 2.1). A
+non-symlink entry costs nothing. The run that would settle it is a cold flat walk of the
+library with and without the change: `vm.drop_caches`, then `time` on
+`/api/dir?path=/&flat=true`, on the spinning volume where the cold case actually hurts.
 
 ### D4: Configuration, and the states a library can be in
 
@@ -166,12 +172,27 @@ changed on remount is an orphan this change does not reclaim, and says so. The m
 preserves the PNG's mtime (the LRU clock).
 mini-classify's `migrate_cache_keys.py` is the precedent for "re-key from the recorded path".
 
+One consequence of that re-keying is stated rather than fixed: the migration canonicalises by
+`realpath`, and listings deliberately do not (D3 — an in-library symlink alias keeps its own
+route). So legacy entries recorded for `/top/sub/a.stl` and for `/top/link/a.stl`, where
+`link` is a symlink to `sub`, both compute the library path `/sub/a.stl`. The first claims the
+key; the second finds it claimed and is dropped, its camera with it. And the alias route
+`/link/a.stl` — which listings still emit — has no cache entry under its own name, so it is a
+permanent miss until something writes one. Both follow from the two rules being deliberately
+different, and the alternative (keying the migration by the recorded path uncanonicalised)
+would fail the remount case this change exists for. The cost is one duplicate camera per
+aliased pair, once.
+
 *Alternative:* copy rather than move, for rollback. Rejected — it doubles a 2 GB-capped
 directory to protect a rollback path nobody has asked for, and the loss on rollback is
 pixels; cameras would have to be re-keyed back, which the same migration does in reverse.
 
 Why XDG and not `<library>/.model-browser/thumbs/`: notes item 2 weighed both. Writes on the
-spinning exFAT volume are sub-millisecond without fsync (measured, `write_probe.py`), so speed
+spinning exFAT volume are sub-millisecond without fsync — measured 2026-08-28, 100 writes per
+case; the numbers and the conditions they were taken under are in `docs/web-demo-notes.md`
+item 2, which is where they can be read rather than retyped. The probe script itself lived in
+that session's scratchpad and is **not preserved**, so re-running it means writing it again
+from the conditions recorded there. Speed, in any case,
 is not the reason; read-only volumes, a clean library, backup and sync tools not churning on
 PNGs, and exFAT's lack of a journal are. Cache-in-library as a per-library opt-in is a later
 option, not a default.
@@ -200,11 +221,25 @@ bar's existing error line: one line, two tones, no new surface.
 ## Risks / Trade-offs
 
 - [R1: a root chosen *above* an existing library makes a new library that encloses it; the
-  inner one's cache is orphaned (regenerable; its cameras are not)] → Not policed in this
-  change: finding a marker below the root is a walk. The server logs the library top it
-  resolved at start, and any `library.json` a listing or walk passes with a different id is
-  reported once as a warning. Refusal, or migration by prefixing keys, is a follow-up if it
-  ever happens.
+  inner one's cache is orphaned (regenerable; its cameras are not)] → **Not policed, and not
+  detected either.** `findMarker` only walks *up*; finding a marker below the root would be a
+  walk of the whole tree. The one mitigation that exists is announcement rather than
+  detection: `index.ts` logs `library <id> at <top>` once at start, and `GET /api/library`
+  reports `top`, so the top actually in force is visible to anyone who looks. There is
+  deliberately no "a listing passed a foreign `library.json`" warning — such a warning could
+  not fire even if it were written, because `listFsDir` skips every dot-entry, so
+  `.model-browser` is never enumerated by a listing or a walk at all. Refusal at
+  configuration time (a bounded downward probe), or migration by prefixing keys, is a
+  follow-up (task 1.8) if this ever happens.
+- [The marker walk is unbounded upward: a stray marker above the root captures the whole tree
+  it sits in] → `findMarker` climbs from the root to the filesystem root with no stop
+  condition, and the *first* marker it meets wins. A `.model-browser/library.json` left in
+  `$HOME` by an earlier root choice therefore makes `$HOME` the library top for a root
+  anywhere beneath it: every path is re-based on the home directory and confinement widens to
+  that entire tree, silently, since nothing distinguishes a stray marker from a deliberate
+  one. The startup line names the top that was resolved, which is the only signal today.
+  Bounding the walk at a mount boundary, or surfacing the resolved top in the UI rather than
+  only in the log, is task 1.9.
 - [Writing the marker is the first write beside the models; a user may object to it, and
   a read-only volume cannot take it] → Stated in `platform-surface.md`; `unmarked` degrades to
   today's behaviour rather than failing; the folder is dot-prefixed and listings already
@@ -221,8 +256,10 @@ bar's existing error line: one line, two tones, no new surface.
   the migration itself must tolerate a legacy sidecar whose PNG is already gone: re-key the
   sidecar (cameras travel), then remove it. Idempotent by construction.
 - [`realpath` on every request on cold removable media] → One call per request, lstat per
-  path component; the walk already does this per directory. Measured as noise against a
-  32 s cold walk. Per-*entry* confinement (task 2.1) is not one call — a flat walk is
+  path component; the walk already does this per directory. **Not measured** — the 32 s cold
+  walk this would have been compared against is `listing-tree-cache`'s figure for a volume
+  that has not been attached since 2026-08-19, and no before/after run was made here. D3
+  names the run that would settle it. Per-*entry* confinement (task 2.1) is not one call — a flat walk is
   budgeted at 20,000 entries (browse) or 200,000 (search) — so it is gated on
   `dirent.isSymbolicLink()`: `listFsDir` already has the dirent from `readdir(…,
   { withFileTypes: true })`, and a non-symlink entry can only escape through an ancestor the descent has already confined. The flag is reliable: Node resolves `DT_UNKNOWN` dirents with an `lstat` before reporting `isSymbolicLink()`, so the gate never sees an unknown type.

@@ -29,7 +29,11 @@ The exploration behind this is recorded in `docs/web-demo-notes.md` (item 2).
   listing with a state that says so, never with an empty directory. Picking a subfolder of an
   existing library opens there without changing the library; picking a folder with no marker
   above it makes that folder a new library and writes the marker. Picking a folder *above* an
-  existing library is refused, naming the library it would swallow.
+  existing library is **not** policed (design R1): the marker walk only goes up, so the
+  enclosed library is never seen and a second marker is written over it. The only thing the
+  app offers against that is visibility — the startup line `library <id> at <top>` and `top`
+  in `GET /api/library` name the top actually resolved. A refusal is recorded as a follow-up
+  (task 1.8), not built here.
 - **Paths outside the library are unreachable.** Every filesystem path the server resolves
   from a request — listings, file bytes, thumbnails, completion, zip entries — SHALL resolve
   (through symlinks) to a location under the library top, or be refused. Escapes by `..` and

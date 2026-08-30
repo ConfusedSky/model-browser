@@ -54,6 +54,22 @@
       destructive case). Whether `state()` should re-stat the top per request so the UI
       shows `missing` mid-session is a later refinement: one `stat` per request against a
       clearer message; decide with a measurement on the removable volume
+- [ ] 1.8 Follow-up recorded in the fix round (2026-08-29): a root chosen *above* an existing
+      library is **not** refused and not warned about (design R1). The marker walk only goes
+      up, so the enclosed library is never seen; the enclosing marker is written over it and
+      the inner library's cache is orphaned, cameras included. The only signal is the startup
+      line and `/api/library`'s `top`. Build either a bounded downward probe at configuration
+      time (refuse, naming the library it would swallow) or migration by prefixing keys — and
+      note that a "listing passed a foreign `library.json`" warning is not an option:
+      `listFsDir` skips every dot-entry, so `.model-browser` is never enumerated
+- [ ] 1.9 Follow-up recorded in the fix round (2026-08-29): `findMarker` walks from the root
+      to the filesystem root unbounded, and the first marker wins. A stray
+      `.model-browser/library.json` above the root — one left in `$HOME` by an earlier root
+      choice — silently becomes the library top, re-basing every path and widening
+      confinement to that whole tree, with nothing to distinguish it from a deliberate
+      marker. Bound the walk at a mount boundary (compare `stat().dev` against the root's, or
+      stop at the mount point), or surface the resolved top in the UI so a wrong one is
+      visible without reading the server log
 
 ## 2. Server: every path is a library path (D2, D3)
 
@@ -91,6 +107,13 @@
       escaping symlink omits it; completion within and outside; `/api/file` on a vpath
       whose archive is outside the library is refused
  — done 2026-08-29 (B1, `cca3d4b` → `e1fb0a0` on main; api 34 / flat 49 / open 21 migrated to library paths, 14 new in `library-paths.test.ts`; the symlink gate and the 503 gate falsified; merged server suite 242 passed ×3)
+- [x] 2.5 A request's path was echoed back and used as a cache key **as the client spelled
+      it**, not as `resolve` canonicalises it, so `/Kit/./x.stl` and `/Kit//x.stl` named the
+      same file under different keys and came back in the response under the caller's
+      spelling — done in the fix round, 2026-08-29: requests are canonicalised before they
+      are echoed or keyed. The code change is a parallel worker's and was not yet on `main`
+      when this line was written; reconcile the commit reference at merge
+
 ## 3. Server: cache per library, migrated once (D5)
 
 - [x] 3.1 `ThumbCache`: constructed with the base dir and the library; files live under
@@ -113,6 +136,14 @@
       interrupted migration (PNG moved, old sidecar still present) converges on the next
       start; the sweep does not delete while `missing`
  — done 2026-08-29 (B2, `aa9eadd`, cherry-picked; 11 new cache tests, 23 total; the ready guard, the live top-stat guard and mtime preservation each falsified; merged server suite 222 passed). `index.ts` still constructs `ThumbCache` without the library until B1 lands — wired by the coordinator at that merge
+- [ ] 3.4 Follow-up recorded in the fix round (2026-08-29): `maintain()` races `put()`.
+      `maintain` reads each sidecar, then in its size-cap pass deletes the PNG and rewrites
+      the entry from the `Meta` it read earlier — so a `put` landing in between has its PNG
+      deleted and its camera reverted to the pre-read value. Pre-existing, but the window is
+      wider now that `maintain` also runs the migration and the legacy sweep before it
+      reaches that pass. Fix by re-reading the sidecar immediately before the rewrite, or by
+      merging into the current one rather than writing back a snapshot
+
 ## 4. Server: the index maps through its root (D6)
 
 - [x] 4.0 Remove the two temporary allow-list entries B1 left in `app.ts`'s library gate
@@ -184,7 +215,20 @@
       reached by a different path is a miss" inverts under a library identity; its
       unmounted-volume scenario becomes the `missing` state) and *Walked trees are cached
       across restarts* ("share the storage location … of the existing thumbnail cache" is
-      now per-library); keying is `id` + library path under `<base>/<id>/` — done 2026-08-29 (coordinator): delta requirements *Walked trees…* and *The filesystem is authoritative* rewritten to library-id keying and the `missing` state (new scenario "A remount keeps the snapshot"), design risk bullet and Context corrected, tasks header added; `openspec validate` clean and both archives dry-run in order
+      now per-library); keying is `id` + library path under `<base>/<id>/` — done in two passes.
+      **2026-08-29 (coordinator):** the delta spec — *Walked trees…* and *The filesystem is
+      authoritative* rewritten to library-id keying and the `missing` state, new scenario
+      "A remount keeps the snapshot" — plus design Context, the removable-volume risk bullet
+      and a tasks header. **Finished 2026-08-29 (fix round, W3):** that tick claimed the
+      change was rebased while four of its assertions still said the opposite — design D6's
+      own body (the decision 2.3/4.3/6.1 cite by number), tasks 2.3 ("misses rather than
+      hits"), 4.3 ("an unreadable or unmounted root fails as it does today") and 6.1 ("a
+      different mountpoint … is a miss"), and the proposal's "beside the existing thumbnail
+      cache … keyed by root". All five rewritten to the landed truth: snapshots keyed by
+      library id + the root's library path under `<cache>/<library-id>/`, a remount is a
+      hit, an absent volume is the `missing` state (answered before any listing, neither
+      serving nor discarding the snapshot), and only a *present but unreadable* root
+      invalidates. `openspec validate` clean on both; both archives dry-run in order
 - [ ] 6.4 Live verification against the real library: set `MODEL_BROWSER_ROOT`, confirm
       the marker is written, the legacy cache directory drains into `<id>/` with camera
       sidecars intact (count before/after), a tile with a saved orientation opens with

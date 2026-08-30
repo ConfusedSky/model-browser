@@ -24,9 +24,15 @@ contracts and placeholder rules: `openspec/changes/open-in-slicer/design.md` (L2
 - **GUI session environment**: the server must carry `DISPLAY`/`WAYLAND_DISPLAY` and a
   session `PATH` to launch GUI apps (app-launch design L8). Windows/macOS spawn GUI
   processes without an equivalent requirement.
-- **Paths**: `isAbsolute` checks and the `foo.zip!/entry` virtual-path separator are
-  exercised only against POSIX paths (`server/src/vpath.ts`); Windows drive letters
-  and separators are untested against them.
+- **Paths**: paths on the wire are *library* paths — `/`-rooted and POSIX-spelled — confined
+  in `server/src/library.ts`'s `resolve`, which `realpath`s the join and requires the result
+  to be the library's real top or to start with it plus a separator. The `isAbsolute` checks
+  that used to guard the routes no longer exist anywhere. The POSIX assumption moved rather
+  than went away: `library.ts` mixes the wire grammar (`posix.normalize`, `posix.sep`) with
+  the *platform* separator — `toLibPath`'s `relative(...).split(sep).join(posix.sep)` and
+  `resolve`'s `realTop + sep` — and the `foo.zip!/entry` virtual-path separator
+  (`server/src/vpath.ts`) is POSIX-spelled too. All of it is exercised only against POSIX
+  paths; Windows drive letters and separators are untested against them.
 - **User dirs**: thumbnail cache at `~/.cache/model-browser/<library-id>/` (the pre-library flat
   layout beside it is migrated once, then existence-swept), launch config at
   `~/.config/model-browser/launch.json` and the library root in
