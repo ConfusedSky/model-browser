@@ -42,11 +42,11 @@ async function libraryError(state: string): Promise<Error> {
 afterEach(() => unmountApp())
 
 describe('the library states render instead of a grid', () => {
-  // These two mount with the harness's LANDING listing, deliberately: in life
+  // These three mount with the harness's LANDING listing, deliberately: in life
   // the routes all 503 and there would be no result to draw anyway, so a test
   // that also withheld the entries could not tell the state gate from an empty
   // answer. Here the entries are present and the state alone is what keeps them
-  // off the screen — remove the gate in App's `<main>` and both fail on
+  // off the screen — remove the gate in App's `<main>` and all three fail on
   // `grid()`. The 503 path has its own case below.
   it('missing names the configured root and shows nothing below', async () => {
     library.mockResolvedValue({ state: 'missing', root: '/run/media/masa/STL Library' })
@@ -69,6 +69,27 @@ describe('the library states render instead of a grid', () => {
 
     expect(headerLine()).toBe(
       'No library configured — set MODEL_BROWSER_ROOT or root in config.json',
+    )
+    expect(grid()).toBeNull()
+    expect(tiles()).toEqual([])
+    expect(skeleton()).toBeNull()
+  })
+
+  it('nested names the library the root would have enclosed', async () => {
+    // The root was pointed one folder above a library that already exists. The
+    // server writes nothing and serves nothing, so the line has to say where
+    // to point instead — the whole remedy, since the id and cameras that would
+    // be orphaned are not recoverable by hand.
+    library.mockResolvedValue({
+      state: 'nested',
+      root: '/run/media/masa',
+      library: '/run/media/masa/STL Library',
+    })
+    await mountApp('/', AT_ROOT)
+    await settle()
+
+    expect(headerLine()).toBe(
+      'This root contains a library at /run/media/masa/STL Library. Point the root at it, or at a folder inside it.',
     )
     expect(grid()).toBeNull()
     expect(tiles()).toEqual([])

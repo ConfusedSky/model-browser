@@ -13,9 +13,13 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   restart after editing it (the `launch.json` rule). Paths on the wire and in URLs are
   library-relative (`/` is the library top); the server writes
   `<library>/.model-browser/library.json` on first start — but the marker found *above* the
-  root wins and the walk runs unbounded to `/`, so a stray `.model-browser/library.json` in
-  `$HOME` (left by an earlier root choice) makes your home directory the library and widens
-  confinement to all of it. The startup line `library <id> at <top>` names the top actually
+  root wins. The walk now stops at a mount boundary (same `st_dev`), so a stray marker on
+  another volume is not adopted; a stray `.model-browser/library.json` in `$HOME` (left by an
+  earlier root choice) still captures a root that is **on the same filesystem**, making your
+  home directory the library and widening confinement to all of it. Symptom: the app opens on
+  your home folders instead of your kits. A root that *encloses* a library is refused
+  instead — state `nested`, nothing written — but only within the probe's bounds (4 levels
+  down, 500 directories). The startup line `library <id> at <top>` names the top actually
   resolved — read it
 - Semantic search needs a second server, not started by `bun run dev` (its collection root
   must lie inside the library, or the index covers nothing):

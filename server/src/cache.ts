@@ -200,12 +200,13 @@ export class ThumbCache {
   async maintain(): Promise<void> {
     if (this.library !== undefined) {
       if ((await this.library.state()).state !== 'ready') return
-      // `state()` caches `ready` on purpose (D4): a library does not stop being
-      // itself, which is the right answer for a route. The sweep is the one
-      // caller it is wrong for — a volume unplugged mid-session still reads
-      // `ready`, every `resolve` then lands on a path that no longer stats, and
-      // a single sweep takes the whole library's cache, cameras included. So
-      // the sweep asks the filesystem instead of the cached answer.
+      // Belt and braces, and redundant since library-root 1.7: `state()` now
+      // stats the top itself, so a volume unplugged mid-session already answers
+      // `missing` above. Kept because of what it guards — a `ready` read
+      // against an absent top makes every `resolve` land on a path that no
+      // longer stats, and a single sweep then takes the whole library's cache,
+      // cameras included. The stat costs microseconds once per sweep; being
+      // wrong here costs the cameras.
       if ((await stat(this.library.realTop()).catch(() => null)) === null) return
       if (!this.migrated) {
         this.migrated = true

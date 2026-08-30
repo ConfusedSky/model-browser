@@ -7,14 +7,17 @@
  * A library is a directory tree whose top carries
  * `.model-browser/library.json` — `{ "id": "<uuid>", "version": 1 }`. The
  * configured *root* is only where the app opens inside that tree: the library
- * is found by walking **up** from the root until a marker appears, so
- * re-picking a deeper folder is a change of viewpoint and not of namespace
- * (D1). Every path the app then handles is relative to the top, written with a
+ * is found by walking **up** from the root — as far as the mount it sits on —
+ * until a marker appears, so re-picking a deeper folder is a change of
+ * viewpoint and not of namespace (D1). Where that walk finds nothing, a bounded
+ * probe *down* refuses a root that would enclose an existing library (R1).
+ * Every path the app then handles is relative to the top, written with a
  * leading slash, so the top is `/` (D2).
  */
 
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
+import type { Dirent } from 'node:fs'
+import { mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, posix, relative, sep } from 'node:path'
 import type { LibraryState } from '../../shared/types'
 import { joinVPath, parseVPath } from './vpath'
@@ -94,9 +97,11 @@ export interface Resolved {
 
 export interface Library {
   /**
-   * The current state. `missing` is re-evaluated on every call, so a volume
-   * mounted after start needs no restart; `ready` is cached — a library does
-   * not stop being itself (D4).
+   * The current state. Every not-ready state is re-evaluated on each call, so a
+   * volume mounted after start needs no restart. A `ready` library keeps its
+   * identity — the marker is not re-read — but its top is stat'd per call, so a
+   * volume unplugged *mid-session* answers `missing` rather than 404-ing every
+   * path (D4).
    */
   state(): Promise<LibraryState>
   /** Re-evaluate config and marker from scratch, whatever the current state. */
@@ -139,31 +144,126 @@ async function configuredRoot(env: NodeJS.ProcessEnv): Promise<string | undefine
 }
 
 /**
- * The first marker at or above `start`, walking to the filesystem root.
+ * The marker's id if `dir` carries one, else undefined — the one validity rule,
+ * shared by the upward walk and the downward probe.
  *
  * A marker is a JSON *object* carrying a non-empty string `id`; unknown fields
  * are ignored, so a later version may add them. Anything else — unreadable,
  * malformed, an `id` that is not a string, or an empty one, which is no
- * identifier and would name a cache directory of `''` — is not a marker, and
- * the walk continues past it rather than adopting it.
+ * identifier and would name a cache directory of `''` — is not a marker, and a
+ * caller passes over it rather than adopting it.
  */
-async function findMarker(start: string): Promise<{ top: string; id: string } | undefined> {
+async function markerIdAt(dir: string): Promise<string | undefined> {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(await readFile(join(dir, MARKER_DIR, MARKER_FILE), 'utf8'))
+  } catch {
+    return undefined
+  }
+  if (typeof parsed !== 'object' || parsed === null) return undefined
+  const id = (parsed as Record<string, unknown>).id
+  return typeof id === 'string' && id !== '' ? id : undefined
+}
+
+/** The device of a directory — what bounds the upward walk at a mount. */
+async function deviceOf(dir: string): Promise<number> {
+  return (await stat(dir)).dev
+}
+
+/**
+ * The first marker at or above `start`, stopping at the mount `start` sits on.
+ *
+ * The walk climbs only while the parent is on the same device: a marker on
+ * another filesystem is never adopted (D1). Unbounded, it made a stray
+ * `.model-browser/library.json` in `$HOME` the top for any root beneath it,
+ * re-basing every path and widening confinement to that whole tree. A parent
+ * that cannot be stat'd ends the walk for the same reason — an ancestor this
+ * process cannot see is not one it should adopt.
+ *
+ * `devOf` is injected so a test can place a boundary without mounting anything.
+ *
+ * @internal exported for tests
+ */
+export async function findMarker(
+  start: string,
+  devOf: (dir: string) => Promise<number> = deviceOf,
+): Promise<{ top: string; id: string } | undefined> {
   let dir = start
+  let startDev: number
+  try {
+    startDev = await devOf(start)
+  } catch {
+    // The root was stat'd as a directory a moment ago; if it cannot be stat'd
+    // now there is nothing to walk from.
+    return undefined
+  }
   for (;;) {
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(await readFile(join(dir, MARKER_DIR, MARKER_FILE), 'utf8'))
-    } catch {
-      parsed = undefined
-    }
-    if (typeof parsed === 'object' && parsed !== null) {
-      const id = (parsed as Record<string, unknown>).id
-      if (typeof id === 'string' && id !== '') return { top: dir, id }
-    }
+    const id = await markerIdAt(dir)
+    if (id !== undefined) return { top: dir, id }
     const parent = dirname(dir)
     if (parent === dir) return undefined
+    let parentDev: number
+    try {
+      parentDev = await devOf(parent)
+    } catch {
+      return undefined
+    }
+    if (parentDev !== startDev) return undefined
     dir = parent
   }
+}
+
+/**
+ * Bounds on the downward probe below a root with no marker above it (R1).
+ *
+ * The depth bound is where the mistake actually lives: a root pointed one or
+ * two folders above a drive's library is the case worth catching, and a library
+ * buried five levels under a deliberately chosen root is not a mistake anyone
+ * makes by accident. The read budget is what keeps a root pointed at a wide
+ * tree from paying for a full descent — and it is paid on every `state()` call
+ * while the state is not ready, not once at start. Both are best-effort by
+ * design: running out is "not found", and the root becomes a library, which is
+ * what happened before the probe existed.
+ */
+const PROBE_MAX_DEPTH = 4
+const PROBE_MAX_DIRS = 500
+
+/**
+ * The shallowest library top beneath `start`, within the bounds above.
+ *
+ * Breadth-first, so a library at depth 1 is found before one at depth 3 — the
+ * shallower is the one the root would enclose most of. Only `readdir`s count
+ * against the budget: reading a marker is one open of a known name.
+ */
+async function findNestedLibrary(start: string): Promise<string | undefined> {
+  const queue: { dir: string; depth: number }[] = [{ dir: start, depth: 0 }]
+  let read = 0
+  // The queue is appended to while it is walked, which an array iterator
+  // follows — it re-reads the length each step, so a directory pushed below
+  // gets its turn after everything already queued. That ordering *is* the
+  // breadth-first guarantee this function's callers rely on.
+  for (const { dir, depth } of queue) {
+    // `start` itself has already been tested by the upward walk.
+    if (depth > 0 && (await markerIdAt(dir)) !== undefined) return dir
+    if (depth === PROBE_MAX_DEPTH) continue
+    if (read >= PROBE_MAX_DIRS) return undefined
+    read++
+    let entries: Dirent[]
+    try {
+      entries = await readdir(dir, { withFileTypes: true })
+    } catch {
+      // Unreadable is not a library; the rest of the level still gets its turn.
+      continue
+    }
+    for (const e of entries) {
+      // Dot-entries are skipped — the marker is opened by name above, never
+      // enumerated — and a symlink's dirent is not `isDirectory()`, so the
+      // probe never descends out of the tree it was pointed at.
+      if (e.name.startsWith('.') || !e.isDirectory()) continue
+      queue.push({ dir: join(dir, e.name), depth: depth + 1 })
+    }
+  }
+  return undefined
 }
 
 /** Writes a fresh marker at `top`, or reports that the volume would not take one. */
@@ -190,7 +290,14 @@ function toLibPath(realTop: string, real: string): string | undefined {
 }
 
 export function createLibrary(env: NodeJS.ProcessEnv = process.env): Library {
-  let ready: Ready | undefined
+  /**
+   * What a successful evaluation settled on: the library, and the root string
+   * that was configured to find it. The root is kept verbatim because it is
+   * what a later `missing` has to name — the state the top's own stat produces
+   * once the volume goes away, when the configured spelling is the only thing
+   * the user can act on.
+   */
+  let settled: { ready: Ready; root: string } | undefined
 
   async function evaluate(): Promise<LibraryState> {
     const root = await configuredRoot(env)
@@ -205,37 +312,73 @@ export function createLibrary(env: NodeJS.ProcessEnv = process.env): Library {
     const found = await findMarker(realRoot)
     if (found !== undefined) {
       // The root is a viewpoint inside the marked tree, not the tree.
-      ready = {
-        state: 'ready',
-        id: found.id,
-        top: found.top,
-        root: toLibPath(found.top, realRoot) ?? '/',
+      settled = {
+        ready: {
+          state: 'ready',
+          id: found.id,
+          top: found.top,
+          root: toLibPath(found.top, realRoot) ?? '/',
+        },
+        root,
       }
-      return ready
+      return settled.ready
     }
-    // No marker above it: the root becomes a library, if the volume will say so.
+    // Nothing above it — so look *below* before claiming the root. A root
+    // chosen above an existing library would otherwise write a marker over it:
+    // the inner library's cache is orphaned, its cameras with it, and the only
+    // signal is a line in the log (R1). The probe is bounded and runs only on
+    // this branch, so a library that is already marked pays nothing for it.
+    const nested = await findNestedLibrary(realRoot)
+    if (nested !== undefined) return { state: 'nested', root, library: nested }
+    // No library either way: the root becomes one, if the volume will say so.
     const written = await writeMarker(realRoot)
-    ready =
-      written === undefined
-        ? { state: 'ready', id: hashedId(realRoot), top: realRoot, root: '/', unmarked: true }
-        : { state: 'ready', id: written, top: realRoot, root: '/' }
-    return ready
+    settled = {
+      ready:
+        written === undefined
+          ? { state: 'ready', id: hashedId(realRoot), top: realRoot, root: '/', unmarked: true }
+          : { state: 'ready', id: written, top: realRoot, root: '/' },
+      root,
+    }
+    return settled.ready
   }
 
   function requireReady(): Ready {
-    if (ready === undefined) throw new Error('the library is not ready')
-    return ready
+    if (settled === undefined) throw new Error('the library is not ready')
+    return settled.ready
   }
 
   return {
     async state() {
-      // `ready` is cached; the other two states are a question about the
-      // filesystem right now, and are asked again every time.
-      return ready ?? (await evaluate())
+      const current = settled
+      // Not settled yet: every not-ready state is a question about the
+      // filesystem right now, and is asked again every time.
+      if (current === undefined) return evaluate()
+      // Settled, but the tree it named can still go away under a running
+      // server. One `stat` per request buys the difference between "the
+      // library is not present" and a 404 on every path in it.
+      //
+      // Measured on the removable volume this library lives on, warm (the top
+      // is in the dentry cache after the first call, which is the state every
+      // request after the first finds it in): `os.stat` ×1000 against the
+      // mounted top /run/media/masa/STLLibrary took 1.72 ms in total — ~1.7 µs
+      // a call — and 2.17 ms against a path that is not there. W1's run,
+      // 2026-08-29; the coordinator's run the same day read 2.03 ms for the
+      // first of those. Either way one stat per request is free beside the
+      // `realpath` the same request already pays (D3). Re-run:
+      //   python3 -c "import os,time; p='/run/media/masa/STLLibrary'; os.stat(p); \
+      //     t=time.perf_counter(); [os.stat(p) for _ in range(1000)]; \
+      //     print((time.perf_counter()-t)*1e3, 'ms')"
+      const top = await stat(current.ready.top).catch(() => null)
+      if (top !== null && top.isDirectory()) return current.ready
+      // The cached `ready` is deliberately *not* discarded: the same tree
+      // returning at the same place is the same library, and `realTop()`/`id()`
+      // keep answering meanwhile — the cache's own sweep guard reads them to
+      // decide it must not run (`ThumbCache.maintain`).
+      return { state: 'missing', root: current.root }
     },
 
     async refresh() {
-      ready = undefined
+      settled = undefined
       return evaluate()
     },
 

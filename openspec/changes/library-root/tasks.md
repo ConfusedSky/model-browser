@@ -47,29 +47,57 @@
       filesystem path, a symlink whose target is outside; follows a symlink whose target
       is inside; a vpath's archive half is confined and its entry half untouched
  — done 2026-08-29 (Stage A, `e8a4339`, cherry-picked; 21 tests in `library.test.ts`, confinement and marker-walk falsified; merged server suite 211 passed)
-- [ ] 1.7 Follow-up recorded at B2's check-in (2026-08-29): `Library.state()` caches `ready`
+- [x] 1.7 Follow-up recorded at B2's check-in (2026-08-29): `Library.state()` caches `ready`
       (D4), so a volume unmounted *mid-session* keeps answering `ready` — routes 404 every
       path instead of reporting `missing`, and the thumbnail sweep would have judged every
       entry deleted. The sweep now stats the top before running (3.1, cache-side, the
       destructive case). Whether `state()` should re-stat the top per request so the UI
       shows `missing` mid-session is a later refinement: one `stat` per request against a
-      clearer message; decide with a measurement on the removable volume
-- [ ] 1.8 Follow-up recorded in the fix round (2026-08-29): a root chosen *above* an existing
+      clearer message; decide with a measurement on the removable volume — done 2026-08-29
+      (W1): the measurement settled it — 1000 warm `stat`s of the mounted top
+      /run/media/masa/STLLibrary took 1.72 ms, ~1.7 µs each (W1's run; the coordinator's
+      read 2.03 ms), so `state()` now stats the top per call and answers `missing` without
+      discarding the cached `ready`; the sweep re-runs from the comment beside the call in
+      `createLibrary`'s `state`. Test: `library.test.ts` "reports a ready library whose top
+      went away mid-session as missing, and takes it back unchanged" — falsified by removing
+      the stat. `ThumbCache.maintain`'s guard is kept, its comment now saying it is belt and
+      braces. `semantic.test.ts`'s stat-count bound absorbed the fixed two stats a request
+      now pays and asserts the per-hit slope beside them
+- [x] 1.8 Follow-up recorded in the fix round (2026-08-29): a root chosen *above* an existing
       library is **not** refused and not warned about (design R1). The marker walk only goes
       up, so the enclosed library is never seen; the enclosing marker is written over it and
       the inner library's cache is orphaned, cameras included. The only signal is the startup
       line and `/api/library`'s `top`. Build either a bounded downward probe at configuration
       time (refuse, naming the library it would swallow) or migration by prefixing keys — and
       note that a "listing passed a foreign `library.json`" warning is not an option:
-      `listFsDir` skips every dot-entry, so `.model-browser` is never enumerated
-- [ ] 1.9 Follow-up recorded in the fix round (2026-08-29): `findMarker` walks from the root
+      `listFsDir` skips every dot-entry, so `.model-browser` is never enumerated — done
+      2026-08-29 (W1): the bounded downward probe, on the no-marker-above branch only and
+      before `writeMarker`. Breadth-first, ≤ 4 levels below the root, ≤ 500 directories read,
+      dot-entries skipped, `isDirectory()` dirents only so no symlink is followed; found → the
+      new state `nested {root, library}`, no marker written, `ready` left undefined, 503 from
+      the gate, and the client line "This root contains a library at …". Tests:
+      `library.test.ts` "is refused, naming the library it would have enclosed, and writes
+      nothing" / "names the shallowest library below the root" / "reaches four levels down but
+      not five" / "gives up on a tree too wide to search rather than reading it all" (600
+      siblings — deterministic: reaching any depth-2 directory needs 601 reads in every
+      order), and `client/test/libraryState.test.tsx` "nested names the library the root would
+      have enclosed". Falsified by skipping the probe (4 fail), by raising the depth bound to
+      5, by raising the read budget to 5000, and client-side by dropping the message branch
+- [x] 1.9 Follow-up recorded in the fix round (2026-08-29): `findMarker` walks from the root
       to the filesystem root unbounded, and the first marker wins. A stray
       `.model-browser/library.json` above the root — one left in `$HOME` by an earlier root
       choice — silently becomes the library top, re-basing every path and widening
       confinement to that whole tree, with nothing to distinguish it from a deliberate
       marker. Bound the walk at a mount boundary (compare `stat().dev` against the root's, or
       stop at the mount point), or surface the resolved top in the UI so a wrong one is
-      visible without reading the server log
+      visible without reading the server log — done 2026-08-29 (W1): the walk climbs only
+      while the parent's `st_dev` matches the start's, and stops at a parent it cannot stat.
+      `findMarker` is exported with a defaulted `devOf` so a test can place a boundary without
+      mounting anything. Test: `library.test.ts` "does not adopt a marker across a device
+      change, and still takes one below it" — falsified by dropping the device comparison. The
+      accepted caveat (btrfs subvolumes carry their own `st_dev`) is in D1, and what is still
+      undetected — a stray marker on the *same* filesystem, and how it shows without the log —
+      is in R1; the repo CLAUDE.md bullet and `docs/platform-surface.md` match
 
 ## 2. Server: every path is a library path (D2, D3)
 

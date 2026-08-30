@@ -228,16 +228,25 @@ describe('semantic query', () => {
   })
 
   it('stats once per returned hit — the bound that lets the two caches disagree', async () => {
-    stubIndex(READY, {
-      ...result,
-      results: [hit('dragon.stl'), hit('dragon.stl'), hit('dragon.stl')],
-    })
-    stats.n = 0
-    await post({ text: 'dragon' })
+    const cost = async (hits: number): Promise<number> => {
+      stubIndex(READY, { ...result, results: Array.from({ length: hits }, () => hit('dragon.stl')) })
+      stats.n = 0
+      await post({ text: 'dragon' })
+      return stats.n
+    }
+
     // Cost tracks the result count, never the size of the tree. Asserted
     // rather than asserted-about: this bound is the whole reason a query needs
     // no walk, and the previous version of this test could not fail.
-    expect(stats.n).toBe(3)
+    //
+    // Measured as a slope *and* an intercept because a request now pays a
+    // couple of stats that are not the query's: since library-root 1.7
+    // `library.state()` stats the library's top, and this route asks for the
+    // state twice — the gate, then `probeStatus`. Two constants, whatever the
+    // result count; three hits still cost exactly three stats more than none.
+    expect(await cost(0)).toBe(2)
+    expect(await cost(3)).toBe(5)
+    expect((await cost(3)) - (await cost(1))).toBe(2)
   })
 
   it('a hit cannot name a file outside the collection', async () => {

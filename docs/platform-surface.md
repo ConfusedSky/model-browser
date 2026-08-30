@@ -41,9 +41,17 @@ contracts and placeholder rules: `openspec/changes/open-in-slicer/design.md` (L2
   differ.
 - **The library marker** (`library-root` D1): `<library>/.model-browser/library.json` is the
   first file this app writes beside the models — a generated id at the library's top, found
-  by walking up from the configured root. A volume that refuses the write (read-only media)
-  runs `unmarked`: the id falls back to a hash of the top's real path, so a remount is a
-  different library and its cache does not follow. Listings never show the marker directory.
+  by walking up from the configured root. The walk stops at a **mount boundary**, compared as
+  `stat().dev` on POSIX: a marker on another filesystem is never adopted. Filesystems that
+  hand out per-subtree device numbers read as mounts here — btrfs subvolumes do, so a library
+  top above a subvolume boundary is not found from a root inside it (the root becomes its own
+  library; degraded, not broken). Windows/macOS are unverified: `st_dev` is per-volume on
+  macOS, and Node reports a synthesised device number on Windows — a per-OS check before
+  either is claimed. Where the walk finds nothing, a bounded probe **down** (4 levels, 500
+  directories) refuses a root that encloses an existing library rather than writing a marker
+  over it. A volume that refuses the write (read-only media) runs `unmarked`: the id falls
+  back to a hash of the top's real path, so a remount is a different library and its cache
+  does not follow. Listings never show the marker directory.
 - **Content types**: the fixed extension→mime table (app-launch L6) is
   platform-neutral, but anything that would *consume* those mimes is registry-specific
   per the table above.

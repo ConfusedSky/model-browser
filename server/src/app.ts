@@ -100,6 +100,19 @@ export function createApp(
         503,
       )
     }
+    if (s.state === 'nested') {
+      // The root encloses a library rather than being one (R1). Both paths are
+      // named because the remedy is to point the root at the second.
+      return c.json(
+        {
+          error: `the root ${s.root} contains a library at ${s.library}`,
+          state: s.state,
+          root: s.root,
+          library: s.library,
+        },
+        503,
+      )
+    }
     return c.json({ error: 'no library root is configured', state: s.state }, 503)
   })
 

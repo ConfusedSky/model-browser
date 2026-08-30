@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -10,9 +11,9 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { LibraryError, createLibrary } from '../src/library'
+import { LibraryError, createLibrary, findMarker } from '../src/library'
 
 const cleanups: string[] = []
 
@@ -200,6 +201,142 @@ describe('library configuration', () => {
     // Still cached until asked to look again.
     expect(library.id()).toBe('first-id')
     expect(await library.refresh()).toEqual({ state: 'ready', id: 'second-id', top: second, root: '/' })
+  })
+
+  it('reports a ready library whose top went away mid-session as missing, and takes it back unchanged', async () => {
+    const tmp = tempTree()
+    const top = join(tmp, 'vol')
+    mkdirSync(top)
+    markerAt(top, 'unplugged-id')
+    // Configured with a spelling of its own, to pin that `missing` names the
+    // root the *user* wrote rather than the resolved top the server found.
+    const configured = `${top}${sep}`
+    const library = libraryAt(configured)
+    expect(await library.state()).toEqual({ state: 'ready', id: 'unplugged-id', top, root: '/' })
+
+    // The volume is unplugged under a running server. Without the per-request
+    // stat this still reads `ready` and every path route 404s instead.
+    rmSync(top, { recursive: true, force: true })
+    expect(await library.state()).toEqual({ state: 'missing', root: configured })
+    // The cached `ready` is kept: `ThumbCache.maintain`'s guard reads both of
+    // these to decide the sweep must not run against an absent volume.
+    expect(library.realTop()).toBe(top)
+    expect(library.id()).toBe('unplugged-id')
+
+    // The same tree at the same place is the same library — the marker is not
+    // read again, so an id could not come back even if it wanted to.
+    mkdirSync(top)
+    expect(await library.state()).toEqual({ state: 'ready', id: 'unplugged-id', top, root: '/' })
+  })
+})
+
+describe('the marker walk stops at a mount boundary', () => {
+  it('does not adopt a marker across a device change, and still takes one below it', async () => {
+    const tmp = tempTree()
+    const boundary = join(tmp, 'vol')
+    const start = join(boundary, 'kits', 'a')
+    mkdirSync(start, { recursive: true })
+    // `<tmp>/vol` and everything under it stands for the removable volume;
+    // `<tmp>` and above for the filesystem it is mounted on. Injected rather
+    // than mounted, because a test cannot mount anything.
+    const devOf = async (dir: string): Promise<number> =>
+      dir === boundary || dir.startsWith(boundary + sep) ? 1 : 2
+
+    // The `$HOME` case: a marker left above the mount by an earlier root
+    // choice. Unbounded, this became the top and widened confinement to it.
+    markerAt(tmp, 'across-the-mount')
+    expect(await findMarker(start, devOf)).toBeUndefined()
+
+    // One on the volume itself is still the library, from the same start.
+    markerAt(boundary, 'this-side')
+    expect(await findMarker(start, devOf)).toEqual({ top: boundary, id: 'this-side' })
+  })
+})
+
+describe('a root above an existing library', () => {
+  it('is refused, naming the library it would have enclosed, and writes nothing', async () => {
+    const tmp = tempTree()
+    const root = join(tmp, 'drive')
+    const inner = join(root, 'STL Library')
+    mkdirSync(join(inner, 'kits'), { recursive: true })
+    markerAt(inner, 'the-inner-library')
+    const library = libraryAt(root)
+
+    expect(await library.state()).toEqual({ state: 'nested', root, library: inner })
+    // Nothing written: the inner library's marker — and so its cache and its
+    // cameras — is what the root would have orphaned.
+    expect(existsSync(join(root, '.model-browser'))).toBe(false)
+    // And nothing serves: the routes answer the state instead.
+    expect(() => library.realTop()).toThrow()
+
+    // The remedy the message names: point the root at the library itself.
+    expect(await libraryAt(inner).state()).toEqual({
+      state: 'ready',
+      id: 'the-inner-library',
+      top: inner,
+      root: '/',
+    })
+  })
+
+  it('names the shallowest library below the root', async () => {
+    const tmp = tempTree()
+    const root = join(tmp, 'drive')
+    const shallow = join(root, 'near')
+    const deep = join(root, 'far', 'a', 'b')
+    mkdirSync(shallow, { recursive: true })
+    mkdirSync(deep, { recursive: true })
+    markerAt(shallow, 'near-id')
+    markerAt(deep, 'far-id')
+
+    // Breadth-first: depth decides, not the order the filesystem lists in.
+    expect(await libraryAt(root).state()).toEqual({ state: 'nested', root, library: shallow })
+  })
+
+  it('reaches four levels down but not five', async () => {
+    const four = join(tempTree(), 'drive')
+    const atFour = join(four, 'a', 'b', 'c', 'd')
+    mkdirSync(atFour, { recursive: true })
+    markerAt(atFour, 'just-in-reach')
+    expect(await libraryAt(four).state()).toEqual({ state: 'nested', root: four, library: atFour })
+
+    const five = join(tempTree(), 'drive')
+    const atFive = join(five, 'a', 'b', 'c', 'd', 'e')
+    mkdirSync(atFive, { recursive: true })
+    markerAt(atFive, 'out-of-reach')
+    // Best-effort by design (R1): out of the probe's reach is not found, and
+    // the root becomes a library of its own, exactly as before the probe.
+    expect(await libraryAt(five).state()).toEqual({
+      state: 'ready',
+      id: expect.any(String),
+      top: five,
+      root: '/',
+    })
+    expect(existsSync(join(five, '.model-browser', 'library.json'))).toBe(true)
+  })
+
+  it('gives up on a tree too wide to search rather than reading it all', async () => {
+    // Breadth-first, so no directory at depth 2 is opened until every one at
+    // depth 1 has been read. 600 of them is past the 500-directory budget
+    // whatever order the filesystem hands them back in — this test does not
+    // depend on where `kit-599` lands in that order.
+    const wide = join(tempTree(), 'drive')
+    for (let i = 0; i < 600; i++) mkdirSync(join(wide, `kit-${i}`), { recursive: true })
+    markerAt(join(wide, 'kit-599', 'inner'), 'past-the-budget')
+    expect(await libraryAt(wide).state()).toEqual({
+      state: 'ready',
+      id: expect.any(String),
+      top: wide,
+      root: '/',
+    })
+
+    // The control, and what makes the first half about the *budget* rather
+    // than about depth: the same marker at the same depth, in a tree the
+    // budget covers, is found.
+    const narrow = join(tempTree(), 'drive')
+    for (let i = 0; i < 3; i++) mkdirSync(join(narrow, `kit-${i}`), { recursive: true })
+    const inner = join(narrow, 'kit-2', 'inner')
+    markerAt(inner, 'within-the-budget')
+    expect(await libraryAt(narrow).state()).toEqual({ state: 'nested', root: narrow, library: inner })
   })
 })
 

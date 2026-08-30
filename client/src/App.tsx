@@ -243,13 +243,17 @@ function resolveView(url: UrlView): View {
  *
  * `missing` names the configured root because mounting it is the remedy and it
  * takes seconds; `unconfigured` names the two places a root is set, because
- * there is nothing to mount and the fix is a line of configuration. Both are
- * *states*, not failures — hence one line in the header's existing slot and an
- * empty grid, rather than an error surface of their own (design D4/D7).
+ * there is nothing to mount and the fix is a line of configuration; `nested`
+ * names the library the root would have swallowed, because pointing at that
+ * path is the remedy. All are *states*, not failures — hence one line in the
+ * header's existing slot and an empty grid, rather than an error surface of
+ * their own (design D4/D7).
  */
 const LIBRARY_UNCONFIGURED =
   'No library configured — set MODEL_BROWSER_ROOT or root in config.json'
 const libraryMissingText = (root: string): string => `The library at ${root} is not present`
+const libraryNestedText = (library: string): string =>
+  `This root contains a library at ${library}. Point the root at it, or at a folder inside it.`
 
 export default function App() {
   const api = useMemo(() => new HttpApiClient(), [])
@@ -596,7 +600,9 @@ export default function App() {
       ? null
       : libraryState.state === 'unconfigured'
         ? LIBRARY_UNCONFIGURED
-        : libraryMissingText(libraryState.root)
+        : libraryState.state === 'nested'
+          ? libraryNestedText(libraryState.library)
+          : libraryMissingText(libraryState.root)
 
   const showSkeleton = useDelayedFlag(busy(state), SKELETON_DELAY_MS)
   const { thumbs, setThumb, setPlaceholder, discardThumbFraming } = useThumbnails(

@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: A library is a tree with an identity
-A library SHALL be a directory tree whose top is marked by `.model-browser/library.json` carrying a generated identifier. The server SHALL locate the library by walking upward from the configured root until a marker is found; the first marker found SHALL define the library, and the root SHALL be a location inside it. When no marker exists at or above the root, the root SHALL become a new library and the marker SHALL be written there. The marker directory SHALL be the home of every file this app keeps inside a library, and listings SHALL never show it.
+A library SHALL be a directory tree whose top is marked by `.model-browser/library.json` carrying a generated identifier. The server SHALL locate the library by walking upward from the configured root until a marker is found, stopping before it would leave the filesystem the root sits on; the first marker found SHALL define the library, and the root SHALL be a location inside it. When no marker exists at or above the root, the root SHALL become a new library and the marker SHALL be written there. The marker directory SHALL be the home of every file this app keeps inside a library, and listings SHALL never show it.
 
 #### Scenario: A subfolder of a library is picked as the root
 - **WHEN** the root is set to a folder beneath an existing marker
@@ -10,6 +10,10 @@ A library SHALL be a directory tree whose top is marked by `.model-browser/libra
 #### Scenario: A folder with no marker above it becomes a library
 - **WHEN** the root is set to a folder with no marker at or above it
 - **THEN** a marker with a fresh identifier is written at that folder and it is the library's top
+
+#### Scenario: A marker on another filesystem is not adopted
+- **WHEN** a marker sits above the root but on a different filesystem from it — one left in a home directory by an earlier root choice, above a mounted volume
+- **THEN** it is not the library: the walk stops at the mount, and the root is served under whatever the volume itself says
 
 #### Scenario: The marker is invisible
 - **WHEN** the library's top is listed
@@ -54,7 +58,7 @@ Every filesystem location the server derives from a request path SHALL resolve, 
 - **THEN** it is listed and served like any other entry
 
 ### Requirement: The root is configured, and its absence is a state
-The root SHALL be read from the `MODEL_BROWSER_ROOT` environment variable, else from `root` in the app's configuration file (`config.json` under the XDG config home — `~/.config/model-browser/` by default — location overridable by `MODEL_BROWSER_CONFIG`), at server start. The server SHALL start whether or not a root is configured. The library's state SHALL be reported on request as one of: `ready` (identifier, top and root known), `unconfigured` (no root given), `missing` (the configured root is not present or is not a directory), or `unmarked` (no marker exists above the root and one could not be written; the identifier falls back to a hash of the root's resolved location and the library behaves as though its location were its identity). While the state is `unconfigured` or `missing`, every path route SHALL answer with that state rather than with an empty listing, and the UI SHALL show it — naming the configured root when it is missing, since mounting it is the remedy.
+The root SHALL be read from the `MODEL_BROWSER_ROOT` environment variable, else from `root` in the app's configuration file (`config.json` under the XDG config home — `~/.config/model-browser/` by default — location overridable by `MODEL_BROWSER_CONFIG`), at server start. The server SHALL start whether or not a root is configured. The library's state SHALL be reported on request as one of: `ready` (identifier, top and root known), `unconfigured` (no root given), `missing` (the configured root is not present or is not a directory, whether at start or once the volume goes away under a running server), `nested` (the root encloses a library that already exists), or `unmarked` (no marker exists above or below the root and one could not be written; the identifier falls back to a hash of the root's resolved location and the library behaves as though its location were its identity). While the state is not `ready`, every path route SHALL answer with that state rather than with an empty listing, and the UI SHALL show it — naming the configured root when it is missing, since mounting it is the remedy, and naming the enclosed library when the root is nested, since pointing at it is the remedy.
 
 #### Scenario: No root configured
 - **WHEN** the server starts with neither the environment variable nor a configured root
@@ -63,6 +67,14 @@ The root SHALL be read from the `MODEL_BROWSER_ROOT` environment variable, else 
 #### Scenario: The volume is not mounted
 - **WHEN** the configured root does not exist when a listing is requested
 - **THEN** the response reports `missing` with the configured root, and the UI shows that the library at that location is not present
+
+#### Scenario: The volume is unplugged mid-session
+- **WHEN** the library was serving and its top stops being present under the running server
+- **THEN** every path route reports `missing` with the configured root, rather than reporting that each path in it is not found; and when the same tree returns at the same location it is the same library again, with its identifier and its cache intact
+
+#### Scenario: A root above an existing library
+- **WHEN** the configured root has no marker at or above it but encloses one within reach of a bounded search below it
+- **THEN** the root is refused as `nested`, naming that library's location; no marker is written; and nothing is served until the root is repointed at it or inside it
 
 #### Scenario: A read-only library
 - **WHEN** no marker exists above the root and the marker cannot be written

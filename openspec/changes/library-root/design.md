@@ -66,6 +66,22 @@ file in the tree rather than a registry on the machine: the library moves betwee
 and mount points; the machine does not travel with it. The marker is the first thing this
 app writes beside the models — `docs/platform-surface.md` says so.
 
+The upward walk stops at a **mount boundary** (task 1.9): it climbs only while the parent
+directory's `st_dev` equals the starting directory's, so a marker on another filesystem is
+never adopted. A parent that cannot be `stat`ed ends the walk for the same reason — an
+ancestor this process cannot see is not one it should claim. What this buys is the `$HOME`
+case: a `.model-browser/library.json` left in a home directory by an earlier root choice no
+longer captures a root on a mounted volume beneath it. `findMarker` takes its `devOf` as a
+defaulted parameter so a test can place a boundary without mounting anything.
+
+*Accepted caveat:* a btrfs subvolume reports its own `st_dev`, so the bound reads a subvolume
+edge as a mount. A library whose top lies *above* a subvolume boundary is therefore not found
+from a root inside that subvolume: the root becomes its own library instead of joining the
+one above. Degraded, not broken — a new id, a cache that does not inherit the outer one's
+thumbnails, and everything else works — and the alternative (reading `/proc/mounts`, or no
+bound at all) trades a rare inconvenience for the silent `$HOME` capture above. The same
+reading applies to any filesystem that hands out per-subtree device numbers.
+
 *Alternatives:* volume UUID + mount-relative path as the identity (no write; platform-specific,
 another `platform-surface.md` row, and fails when a library is copied to another volume);
 absolute root path as identity (today; fails on remount). Both rejected.
@@ -151,13 +167,28 @@ The server always starts. What it answers depends on the library's state, report
 |---|---|---|
 | `ready` | marker found or written; `id`, `top`, `root` known | normally |
 | `unconfigured` | no root in env or config | 503 `{ state }` |
-| `missing` | root configured, not present or not a directory — the volume is not mounted | 503 `{ state, root }` |
-| `unmarked` | no marker above the root and it could not be written (read-only volume); the id falls back to `sha256(real top)` and the library behaves as today: a remount is a different library | normally, with `unmarked: true` in the state |
+| `missing` | root configured, not present or not a directory — the volume is not mounted, at start or since | 503 `{ state, root }` |
+| `nested` | the root has no marker at or above it but encloses one (task 1.8): claiming it would write a marker over an existing library | 503 `{ state, root, library }` |
+| `unmarked` | no marker above the root, none below it, and it could not be written (read-only volume); the id falls back to `sha256(real top)` and the library behaves as today: a remount is a different library | normally, with `unmarked: true` in the state |
 
 503 with a state envelope is the shape `indexErrorReply` already gives the client for an
 absent index — "the thing is not there" is a state the UI renders, not a fault. The client
-shows `unconfigured` and `missing` in the path bar's error line, with the configured root
-named in the second, since mounting the drive is the fix and takes seconds.
+shows each not-ready state in the path bar's error line: the configured root for `missing`,
+since mounting the drive is the fix and takes seconds, and the enclosed library's location
+for `nested`, since repointing at it is the fix and nothing else will do.
+
+`ready` is cached — a library does not stop being itself — but the top is `stat`ed on every
+`state()` call, so a volume unplugged *mid-session* answers `missing` instead of 404-ing
+every path in a library that is no longer there (task 1.7). The cached `ready` is kept
+across that: the same tree returning at the same place is the same library, `realTop()` and
+`id()` keep answering meanwhile — `ThumbCache.maintain`'s own guard reads them to decide the
+sweep must not run — and the marker is never re-read, so an identity cannot change under a
+running server. The stat is affordable at the granularity of a request: on the removable
+volume this library lives on, 1000 warm `stat`s of the top took 1.72 ms (~1.7 µs each; W1's
+run, 2026-08-29, the sweep re-runnable from the comment beside the call in `createLibrary`'s
+`state`), against the `realpath` per request that D3 already pays. Its one visible cost is
+a fixed two stats per request in `semantic.test.ts`'s stat-count bound, which now asserts
+the per-hit slope beside the constant.
 
 ### D5: Cache directory per library, key per library path, migrated once
 
@@ -229,25 +260,37 @@ bar's existing error line: one line, two tones, no new surface.
 ## Risks / Trade-offs
 
 - [R1: a root chosen *above* an existing library makes a new library that encloses it; the
-  inner one's cache is orphaned (regenerable; its cameras are not)] → **Not policed, and not
-  detected either.** `findMarker` only walks *up*; finding a marker below the root would be a
-  walk of the whole tree. The one mitigation that exists is announcement rather than
-  detection: `index.ts` logs `library <id> at <top>` once at start, and `GET /api/library`
-  reports `top`, so the top actually in force is visible to anyone who looks. There is
-  deliberately no "a listing passed a foreign `library.json`" warning — such a warning could
-  not fire even if it were written, because `listFsDir` skips every dot-entry, so
-  `.model-browser` is never enumerated by a listing or a walk at all. Refusal at
-  configuration time (a bounded downward probe), or migration by prefixing keys, is a
-  follow-up (task 1.8) if this ever happens.
-- [The marker walk is unbounded upward: a stray marker above the root captures the whole tree
-  it sits in] → `findMarker` climbs from the root to the filesystem root with no stop
-  condition, and the *first* marker it meets wins. A `.model-browser/library.json` left in
-  `$HOME` by an earlier root choice therefore makes `$HOME` the library top for a root
-  anywhere beneath it: every path is re-based on the home directory and confinement widens to
-  that entire tree, silently, since nothing distinguishes a stray marker from a deliberate
-  one. The startup line names the top that was resolved, which is the only signal today.
-  Bounding the walk at a mount boundary, or surfacing the resolved top in the UI rather than
-  only in the log, is task 1.9.
+  inner one's cache is orphaned (regenerable; its cameras are not)] → **Detected within
+  bounds, and refused where it is detected** (task 1.8). Only where the upward walk found
+  nothing — a marked library never pays for this — the root is probed *downward* for
+  `.model-browser/library.json` before any marker is written: breadth-first so the shallowest
+  library wins, at most 4 levels below the root and at most 500 directories read, descending
+  only real subdirectories (`readdir(…, { withFileTypes: true })`, `isDirectory()`, so no
+  symlink is followed) and skipping dot-entries, the marker itself being opened by name.
+  Found → the state is `nested`, naming the library's filesystem path, nothing is written,
+  and every path route answers 503 with it; the UI says where to point the root instead.
+  What is **still not detected**: a library deeper than 4 levels, or one behind a tree too
+  wide for the 500-directory budget — the probe is best-effort, and running out is "not
+  found", exactly the behaviour that existed before it. Both bounds are what keep a root
+  pointed at a wide slow volume from paying for a full descent at every evaluation, which
+  matters because a not-ready state is re-evaluated per request. There is still deliberately
+  no "a listing passed a foreign `library.json`" warning — such a warning could not fire even
+  if it were written, because `listFsDir` skips every dot-entry, so `.model-browser` is never
+  enumerated by a listing or a walk at all.
+- [A stray marker above the root captures the tree it sits in] → Bounded at the mount (task
+  1.9, D1): the walk climbs only within the filesystem the root sits on, which closes the
+  `$HOME`-marker-above-a-mounted-volume case that motivated it. **What remains** is a stray
+  marker on the *same* filesystem as the root — a `.model-browser/library.json` left in
+  `$HOME` above a root that is itself under `$HOME`. That still captures: every path is
+  re-based on the home directory and confinement widens to that tree. It is not invisible
+  without the server log, though — the wrong top is what the app *shows*. The boot view is
+  the library's top (D2/D7: `resolveView` opens at `/` and consults no last path), so a
+  captured library opens on a listing of the home directory's folders where the kits should
+  be, and every copied path and lightbox path detail expands against that top
+  (`libraryTop` in `App`). `GET /api/library` states it outright: `top` is the home
+  directory, and `root` — the configured root as a library path — is not `/`, though no
+  surface renders that field today. `index.ts` still logs `library <id> at <top>` once at
+  start for anyone reading the terminal.
 - [Writing the marker is the first write beside the models; a user may object to it, and
   a read-only volume cannot take it] → Stated in `platform-surface.md`; `unmarked` degrades to
   today's behaviour rather than failing; the folder is dot-prefixed and listings already

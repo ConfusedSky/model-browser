@@ -146,7 +146,8 @@ export class HttpError extends Error {
     message: string,
     /**
      * The library state a path route reports while it cannot serve (library
-     * R4): `'unconfigured'` or `'missing'`, absent on every other failure.
+     * R4): `'unconfigured'`, `'missing'` or `'nested'`, absent on every other
+     * failure.
      *
      * Carried, not interpreted. It says only *that* the library is why this
      * failed — the sentence the user reads, and the root a `missing` names, come

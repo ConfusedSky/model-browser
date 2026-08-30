@@ -336,3 +336,16 @@ export type LibraryState =
       /** The configured root's filesystem path, verbatim, so the UI can name it. */
       root: string
     }
+  | {
+      state: 'nested'
+      /** The configured root's filesystem path, verbatim, so the UI can name it. */
+      root: string
+      /**
+       * The **filesystem** path of a library top found *beneath* the root.
+       * Claiming the root would have written a marker enclosing this one and
+       * orphaned its cache, cameras included, so nothing was written and the
+       * root serves nothing until it is repointed at this path or inside it
+       * (D1/R1).
+       */
+      library: string
+    }
