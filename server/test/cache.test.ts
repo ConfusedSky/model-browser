@@ -1,8 +1,23 @@
-import { existsSync, mkdtempSync, readdirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+  unlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ThumbCache } from '../src/cache'
+import { type Library, createLibrary } from '../src/library'
 import { makeFixtures } from './helpers'
 
 const cleanups: string[] = []
@@ -18,6 +33,50 @@ afterEach(() => {
 })
 
 const CAM = { az: 1, el: 0, distR: 2, target: [0, 0, 0] as [number, number, number] }
+const CAM2 = { az: 2, el: 1, distR: 3, target: [1, 0, 0] as [number, number, number] }
+
+const CAP = 2 * 1024 ** 3
+const PNG_A = Buffer.from('png-a')
+const PNG_B = Buffer.from('png-b')
+/** The one model every library tree below holds, by its library path. */
+const LIB = '/kits/a/x.stl'
+
+function tempDir(prefix: string): string {
+  // Every comparison here is against a real path (the library resolves through
+  // realpath, and /tmp could be a symlink tomorrow), so the name is real from
+  // the start.
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)))
+  cleanups.push(dir)
+  return dir
+}
+
+/**
+ * A library rooted at `dir`, with HOME and the XDG config home pointed at a
+ * temp directory of its own so no config on this machine is read.
+ */
+function libraryFor(dir: string): Library {
+  const home = tempDir('mb-home-')
+  return createLibrary({ MODEL_BROWSER_ROOT: dir, HOME: home, XDG_CONFIG_HOME: home })
+}
+
+/**
+ * A marked library tree holding one model at `LIB`. The top is a subdirectory
+ * of the temp dir, not the temp dir itself, so a test can rename it away and
+ * back to play an unmounted volume.
+ */
+function makeLibraryTree(id: string): { top: string; model: string } {
+  const top = join(tempDir('mb-lib-'), 'top')
+  mkdirSync(join(top, 'kits', 'a'), { recursive: true })
+  mkdirSync(join(top, '.model-browser'), { recursive: true })
+  writeFileSync(join(top, '.model-browser', 'library.json'), JSON.stringify({ id, version: 1 }))
+  const model = join(top, 'kits', 'a', 'x.stl')
+  writeFileSync(model, 'model bytes')
+  return { top, model }
+}
+
+const jsons = (dir: string): string[] => readdirSync(dir).filter((f) => f.endsWith('.json'))
+const onlyFile = (dir: string, ext: string): string =>
+  join(dir, readdirSync(dir).find((f) => f.endsWith(ext)) as string)
 
 describe('ThumbCache maintenance', () => {
   it('a new mtime replaces the png in place (no superseded accumulation)', async () => {
@@ -235,5 +294,213 @@ describe('ThumbCache maintenance', () => {
     const cache = new ThumbCache(join(tmpdir(), 'mb-does-not-exist'))
     await expect(cache.maintain()).resolves.toBeUndefined()
     expect(existsSync(cache.dir)).toBe(false)
+  })
+})
+
+describe('ThumbCache under a library', () => {
+  it('serves a cached thumbnail after a remount moves the tree', async () => {
+    const base = tempDir('mb-cache-')
+    const lib = makeLibraryTree('lib-remount')
+    const cache = new ThumbCache(base, CAP, 32, libraryFor(lib.top))
+    await cache.put(LIB, { mtime: 1, png: PNG_A, camera: CAM, axis: '-z' })
+
+    // The volume comes back somewhere else, marker and all: a different mount
+    // point, the same library, the same library path for the same file.
+    const elsewhere = join(tempDir('mb-mount-'), 'top')
+    cpSync(lib.top, elsewhere, { recursive: true })
+    const remounted = new ThumbCache(base, CAP, 32, libraryFor(elsewhere))
+
+    const res = await remounted.get(LIB, 1)
+    expect(res.status).toBe('hit')
+    expect(Buffer.from(res.png as string, 'base64')).toEqual(PNG_A)
+    expect(res.camera).toEqual(CAM)
+    expect(res.axis).toBe('-z')
+  })
+
+  it('gives two libraries with one layout and one mtime their own pngs and cameras', async () => {
+    const base = tempDir('mb-cache-')
+    const one = new ThumbCache(base, CAP, 32, libraryFor(makeLibraryTree('lib-one').top))
+    const two = new ThumbCache(base, CAP, 32, libraryFor(makeLibraryTree('lib-two').top))
+    await one.put(LIB, { mtime: 7, png: PNG_A, camera: CAM })
+    await two.put(LIB, { mtime: 7, png: PNG_B, camera: CAM2 })
+
+    const resOne = await one.get(LIB, 7)
+    const resTwo = await two.get(LIB, 7)
+    expect(Buffer.from(resOne.png as string, 'base64')).toEqual(PNG_A)
+    expect(Buffer.from(resTwo.png as string, 'base64')).toEqual(PNG_B)
+    expect(resOne.camera).toEqual(CAM)
+    expect(resTwo.camera).toEqual(CAM2)
+  })
+
+  it('migrates a legacy entry under the top, camera and axis intact, png mtime preserved', async () => {
+    const base = tempDir('mb-cache-')
+    const lib = makeLibraryTree('lib-migrate')
+    const legacy = new ThumbCache(base) // no library: yesterday's flat layout
+    await legacy.put(lib.model, { mtime: 3, png: PNG_A, camera: CAM, axis: '-x', lighting: 'camera', rig: 4 })
+    // A clock old enough that a copy — or a touch — could not be mistaken for it.
+    const then = new Date(Date.now() - 3_600_000)
+    utimesSync(onlyFile(base, '.png'), then, then)
+    const wasLastRead = statSync(onlyFile(base, '.png')).mtimeMs
+
+    const cache = new ThumbCache(base, CAP, 32, libraryFor(lib.top))
+    await cache.maintain()
+
+    // Read the clock before any get: a hit touches the png, which *is* the clock.
+    const idDir = join(base, 'lib-migrate')
+    expect(Math.abs(statSync(onlyFile(idDir, '.png')).mtimeMs - wasLastRead)).toBeLessThan(1)
+    expect(jsons(base)).toHaveLength(0) // nothing left flat
+
+    const res = await cache.get(LIB, 3)
+    expect(res.status).toBe('hit')
+    expect(Buffer.from(res.png as string, 'base64')).toEqual(PNG_A)
+    expect(res.camera).toEqual(CAM)
+    expect(res.axis).toBe('-x')
+    expect(res.lighting).toBe('camera')
+    expect(res.rig).toBe(4)
+  })
+
+  it('migrates a legacy virtual path, re-rooting the archive and leaving the entry name alone', async () => {
+    const base = tempDir('mb-cache-')
+    const lib = makeLibraryTree('lib-vpath')
+    const zip = join(lib.top, 'kits', 'parts.zip')
+    writeFileSync(zip, 'stands in for an archive: only its existence is ever tested')
+    const legacy = new ThumbCache(base)
+    await legacy.put(`${zip}!/lid.stl`, { mtime: 2, png: PNG_B, camera: CAM })
+
+    const cache = new ThumbCache(base, CAP, 32, libraryFor(lib.top))
+    await cache.maintain()
+
+    const sidecar = JSON.parse(readFileSync(onlyFile(join(base, 'lib-vpath'), '.json'), 'utf8')) as { path: string }
+    expect(sidecar.path).toBe('/kits/parts.zip!/lid.stl')
+    const res = await cache.get('/kits/parts.zip!/lid.stl', 2)
+    expect(res.status).toBe('hit')
+    expect(res.camera).toEqual(CAM)
+  })
+
+  it('leaves a legacy entry recorded outside the library where it is', async () => {
+    const base = tempDir('mb-cache-')
+    const lib = makeLibraryTree('lib-outside')
+    const stranger = join(tempDir('mb-other-'), 'y.stl')
+    writeFileSync(stranger, 'y')
+    const legacy = new ThumbCache(base)
+    await legacy.put(stranger, { mtime: 1, png: PNG_B, camera: CAM })
+    const before = jsons(base)
+
+    const cache = new ThumbCache(base, CAP, 32, libraryFor(lib.top))
+    await cache.maintain()
+
+    expect(jsons(base)).toEqual(before)
+    expect(existsSync(join(base, 'lib-outside'))).toBe(false) // nothing was claimed
+    expect((await legacy.get(stranger, 1)).status).toBe('hit')
+  })
+
+  it('converges when an earlier migration moved the png but never removed the old sidecar', async () => {
+    const base = tempDir('mb-cache-')
+    const lib = makeLibraryTree('lib-interrupted')
+    const legacy = new ThumbCache(base)
+    await legacy.put(lib.model, { mtime: 5, png: PNG_A, camera: CAM, axis: 'z' })
+    const oldSidecarPath = onlyFile(base, '.json')
+    const oldSidecar = readFileSync(oldSidecarPath)
+
+    // Run it through, then rewind to the half-done state the design describes:
+    // pixels under the new key, no new sidecar, the old sidecar still present.
+    await new ThumbCache(base, CAP, 32, libraryFor(lib.top)).maintain()
+    const idDir = join(base, 'lib-interrupted')
+    unlinkSync(onlyFile(idDir, '.json'))
+    writeFileSync(oldSidecarPath, oldSidecar)
+
+    const resumed = new ThumbCache(base, CAP, 32, libraryFor(lib.top))
+    await resumed.maintain()
+
+    const res = await resumed.get(LIB, 5)
+    expect(res.status).toBe('hit') // the already-moved pixels are found again
+    expect(res.camera).toEqual(CAM) // …and the camera travelled with the sidecar
+    expect(res.axis).toBe('z')
+    expect(jsons(base)).toHaveLength(0)
+  })
+
+  it('moves nothing on a second migration', async () => {
+    const base = tempDir('mb-cache-')
+    const lib = makeLibraryTree('lib-idempotent')
+    await new ThumbCache(base).put(lib.model, { mtime: 1, png: PNG_A, camera: CAM })
+
+    const cache = new ThumbCache(base, CAP, 32, libraryFor(lib.top))
+    await cache.maintain()
+    expect(await cache.migrate()).toEqual({ moved: 0, left: 0 })
+    expect((await cache.get(LIB, 1)).status).toBe('hit')
+  })
+
+  it('sweeps nothing while the library is missing', async () => {
+    const base = tempDir('mb-cache-')
+    const lib = makeLibraryTree('lib-unmounted')
+    const cache = new ThumbCache(base, CAP, 32, libraryFor(lib.top))
+    await cache.put(LIB, { mtime: 1, png: PNG_A, camera: CAM })
+    const idDir = join(base, 'lib-unmounted')
+    const before = readdirSync(idDir).sort()
+
+    // The volume goes away. A library evaluated while it is gone reads
+    // `missing`, and an unmounted volume is not a deleted library.
+    const away = `${lib.top}-unmounted`
+    renameSync(lib.top, away)
+    await new ThumbCache(base, CAP, 32, libraryFor(lib.top)).maintain()
+    expect(readdirSync(idDir).sort()).toEqual(before)
+    renameSync(away, lib.top)
+
+    const res = await new ThumbCache(base, CAP, 32, libraryFor(lib.top)).get(LIB, 1)
+    expect(res.status).toBe('hit')
+    expect(res.camera).toEqual(CAM)
+  })
+
+  it('sweeps nothing when the volume vanishes under a library it already resolved', async () => {
+    const base = tempDir('mb-cache-')
+    const lib = makeLibraryTree('lib-vanished')
+    // One library object, resolved before the volume goes. `state()` caches
+    // `ready` by design (D4), so only the filesystem can still say it is gone —
+    // and this is the case that would cost the whole cache, not just a restart.
+    const cache = new ThumbCache(base, CAP, 32, libraryFor(lib.top))
+    await cache.put(LIB, { mtime: 1, png: PNG_A, camera: CAM, axis: 'z' })
+    const idDir = join(base, 'lib-vanished')
+    const before = readdirSync(idDir).sort()
+
+    const away = `${lib.top}-unplugged`
+    renameSync(lib.top, away)
+    await cache.maintain()
+    expect(readdirSync(idDir).sort()).toEqual(before)
+    renameSync(away, lib.top)
+
+    const res = await cache.get(LIB, 1)
+    expect(res.status).toBe('hit')
+    expect(res.camera).toEqual(CAM)
+    expect(res.axis).toBe('z')
+  })
+
+  it('sweeps a legacy entry whose file is gone out of the flat directory', async () => {
+    const base = tempDir('mb-cache-')
+    const lib = makeLibraryTree('lib-legacy-sweep')
+    const doomed = join(tempDir('mb-other-'), 'doomed.stl')
+    writeFileSync(doomed, 'x')
+    await new ThumbCache(base).put(doomed, { mtime: 1, png: PNG_A, camera: CAM })
+    unlinkSync(doomed)
+
+    await new ThumbCache(base, CAP, 32, libraryFor(lib.top)).maintain()
+
+    // Nobody claimed it and nothing else will ever read it: sidecar and png go.
+    expect(readdirSync(base)).toHaveLength(0)
+  })
+
+  it('sweeps an entry out of the library directory when its file no longer resolves', async () => {
+    const base = tempDir('mb-cache-')
+    const lib = makeLibraryTree('lib-gone')
+    const cache = new ThumbCache(base, CAP, 32, libraryFor(lib.top))
+    await cache.put(LIB, { mtime: 1, png: PNG_A, camera: CAM, axis: 'z' })
+    unlinkSync(lib.model)
+
+    await cache.maintain()
+
+    const res = await cache.get(LIB, 1)
+    expect(res.status).toBe('miss')
+    expect(res.camera).toBeUndefined()
+    expect(res.axis).toBeUndefined()
+    expect(readdirSync(join(base, 'lib-gone'))).toHaveLength(0)
   })
 })
