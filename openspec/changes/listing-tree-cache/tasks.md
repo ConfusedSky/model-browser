@@ -15,7 +15,7 @@
 ## 2. Cache store
 
 - [ ] 2.1 A metadata cache module beside `server/src/cache.ts`, following its patterns: same `~/.cache/model-browser` root and `MODEL_BROWSER_CACHE` override, same size accounting and `maintain()` sweep, one env knob per limit through a validating helper (`envLimit`'s existing contract — a malformed value must not silently unbound anything)
-- [ ] 2.2 Snapshot shape: entries keyed by walked root, holding name/kind/size/mtime, plus per-directory freshness state; versioned on disk so a format change invalidates rather than mis-parses
+- [ ] 2.2 Snapshot shape: entries keyed by library id plus the walked root's library path, holding name/kind/size/mtime, plus per-directory freshness state; versioned on disk so a format change invalidates rather than mis-parses
 - [ ] 2.3 Keyed on the library's identity plus the walked root's **library path**, under
       `<cache>/<library-id>/`, so the same library at another mountpoint is a hit and two
       libraries with the same layout never share a snapshot (D6)
@@ -27,7 +27,7 @@
 
 ## 4. Walk integration and revalidation
 
-- [ ] 4.1 `listFlat` serves from the snapshot when one exists for the root; a miss walks and populates. The snapshot is keyed by **root alone** — not by `q`, not by the search options — and filtering runs over it exactly as it runs over a live walk (D1)
+- [ ] 4.1 `listFlat` serves from the snapshot when one exists for the root; a miss walks and populates. The snapshot is keyed by the **root alone** (its library path under the library's id) — not by `q`, not by the search options — and filtering runs over it exactly as it runs over a live walk (D1)
 - [ ] 4.1a Only a **complete** traversal is persisted: a walk that stopped against its step budget populates nothing, or a partial tree is stored as though whole and is permanently wrong (D1). Test that a budget-truncated walk leaves no snapshot behind, and that the next unbudgeted request traverses
 - [ ] 4.2 Incremental revalidation: one `stat` per directory, re-reading only those whose freshness signal moved (D4). Never a background full re-walk — that reintroduces the cold cost off-screen (D5)
 - [ ] 4.3 A revalidation that cannot be completed against a root that is **present** — an

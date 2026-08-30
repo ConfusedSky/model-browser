@@ -138,11 +138,12 @@ The exploration behind this is recorded in `docs/web-demo-notes.md` (item 2).
 
 - `listing-tree-cache` keys its snapshots on the root path and inherits `ThumbCache`'s
   directory; after this change both are per-library (id + relative path). Its *spec delta*
-  collides, not only its design: *The filesystem is authoritative* requires "the same library
-  reached by a different path is a miss rather than a hit" and has an unmounted-volume
-  scenario that fails as an unreadable path, and *Walked trees are cached across restarts*
-  shares "the storage location" of the thumbnail cache. This change lands first; that
-  change's delta and design must be rewritten against it before it is applied.
+  collided, not only its design: *The filesystem is authoritative* required "the same library
+  reached by a different path is a miss rather than a hit" and had an unmounted-volume
+  scenario that failed as an unreadable path, and *Walked trees are cached across restarts*
+  shared "the storage location" of the thumbnail cache. This change landed first and that
+  change's delta, design, proposal and tasks were rewritten against it (task 6.3, 2026-08-29)
+  before it is applied.
 - `search-cancellation` and `thumbnail-sweep-priority` carry `path` through their listing and
   sweep paths; they are unaffected by the *meaning* of a path but touch the same functions.
   Land this change first, or rebase theirs onto it.
