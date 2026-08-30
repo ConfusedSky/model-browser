@@ -190,7 +190,32 @@
       lands mid-sweep while still clearing the png". Both falsified against the old
       write-back (`expected 'stale' to be 'hit'`; the camera read back as `CAM`, not `CAM2`);
       server suite 264 passed (10 files). The window between the re-read and the `rm` remains, is
-      commented in `maintain` and stated in design.md's Risks
+      commented in `maintain` and stated in design.md's Risks.
+      **Corrected 2026-08-30 (R-B), two review findings.** (F2) The guard skipped only when
+      `fresh.mtime !== m.meta.mtime`, so the *common* re-render — an orbit persist, a rig,
+      lighting or pose bump, all of which write new pixels at the **same** model mtime — was
+      evicted anyway: armed with `put(a, { mtime: 1, png: PNG_NEW, rig: 2 })`, `get(a, 1)`
+      came back `miss`. The pass now re-reads the sidecar (`fresh === null` → skip) and then
+      stats the PNG, skipping when it is gone or its `mtimeMs`/`size` differ from the
+      snapshot's — any write *or* read-bump since makes both the LRU ordering and the byte
+      count stale — so `total -= m.pngSize` only ever subtracts a size just verified. New
+      cell: "spares a mid-sweep re-render that writes new pixels at the same model mtime".
+      (F3) `InterposingCache` fires on the victim's *second* `readMeta`, so against a
+      `maintain` that reads each sidecar once the trigger fell to the cell's own post-sweep
+      `get` and the put landed *after* the sweep: "keeps a camera-only put…" passed with the
+      fix removed, and only the trailing `b` assertion failed the other cell. `arm` now
+      resets a public `fired` flag that the hook sets, and all three cells assert
+      `expect(cache.fired).toBe(true)` immediately after `await cache.maintain()`, before any
+      `get`. Re-falsified two ways, each of which fails all three cells. Form (a), re-read
+      and stat kept but the skips short-circuited and the snapshot written back
+      (`{ ...m.meta, mtime: undefined }`) — `fired` stays true, and the content assertions
+      fail: `expect(res.status).toBe('hit')` → `expected 'stale' to be 'hit'` in both png
+      cells, `expect(res.camera).toEqual(CAM2)` → received `{ az: 1, el: +0, distR: 2, … }`
+      in the camera-only cell. Form (b), the re-read and the stat removed entirely so
+      `maintain` reads each sidecar once — all three fail at `expect(cache.fired).toBe(true)`
+      → `expected false to be true`. The earlier "both falsified" claim above was against
+      form (a) only; under form (b) the camera-only cell passed. Server suite 268 passed, 3 skipped
+      (10 files)
 
 ## 4. Server: the index maps through its root (D6)
 

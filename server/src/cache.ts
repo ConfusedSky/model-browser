@@ -243,17 +243,26 @@ export class ThumbCache {
       if (total <= this.sizeCap) break
       if (m.pngSize === 0) continue
       // A `put` can land between the snapshot above and this eviction: writing
-      // the snapshot back would delete its fresh PNG and revert its camera. So
-      // re-read the sidecar here. A vanished entry, or one whose mtime moved
-      // (only a `put` writes a new mtime, and only with new pixels), is not the
-      // entry this pass measured — leave it alone and count nothing against the
-      // cap. Otherwise evict from the re-read, so a camera written meanwhile
-      // survives even though the mtime did not move.
+      // the snapshot back would delete its fresh PNG and revert its camera. The
+      // invariant this eviction needs is that the snapshot's LRU facts about
+      // *this PNG* are still current — not that the model's mtime is unchanged.
+      // The common re-render leaves that mtime alone: an orbit persist, a rig,
+      // lighting or pose bump writes new pixels for a model that did not change,
+      // so `put` stores the same `mtime` it stored before. So re-read the
+      // sidecar (a vanished entry is not ours to evict) and then stat the PNG:
+      // gone, or an `mtimeMs` or `size` other than the snapshot measured, means
+      // some write or read-bump landed since — the ordering that elected this
+      // victim and the byte count that would be subtracted are both stale.
+      // Leave it alone and count nothing against the cap. Otherwise the size is
+      // the verified one, and evicting from the re-read lets a camera written
+      // meanwhile survive.
       const fresh = await this.readMeta(dir, m.key)
-      if (fresh === null || fresh.mtime !== m.meta.mtime) continue
+      if (fresh === null) continue
+      const png = await stat(this.pngFile(dir, m.key)).catch(() => null)
+      if (png === null || png.mtimeMs !== m.lastRead || png.size !== m.pngSize) continue
       // The window that remains is accepted, and unclosable without locking: a
-      // `put` landing after that re-read still loses its PNG below, and a
-      // camera it wrote is overwritten by the one the re-read carries.
+      // `put` landing after that stat still loses its PNG below, and a camera it
+      // wrote is overwritten by the one the re-read carries.
       await rm(this.pngFile(dir, m.key), { force: true })
       await this.writeMeta(dir, m.key, { ...fresh, mtime: undefined })
       total -= m.pngSize

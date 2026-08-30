@@ -82,17 +82,30 @@ const onlyFile = (dir: string, ext: string): string =>
 class InterposingCache extends ThumbCache {
   private armed: { key: string; run: () => Promise<void> } | null = null
   private reads = 0
+  /**
+   * Did the armed `run` actually fire? Every cell must assert this
+   * **immediately after `maintain()` and before any `get`**, because the trigger
+   * counts reads of the key rather than the caller making them: a `maintain`
+   * that reads each sidecar only once — the pass this whole window exists to
+   * defend, before it re-read anything — leaves the second read to the cell's
+   * own post-sweep `get`, and the put then lands *after* the sweep, where every
+   * assertion about the fresh png and camera passes for the wrong reason. Both
+   * cells here did exactly that against the unfixed pass.
+   */
+  fired = false
 
   /** Run `run` after the snapshot has read `path`'s sidecar, before the re-read. */
   arm(path: string, run: () => Promise<void>): void {
     this.armed = { key: createHash('sha256').update(path).digest('hex'), run }
     this.reads = 0
+    this.fired = false
   }
 
   protected override async readMeta(dir: string, key: string) {
     if (this.armed !== null && key === this.armed.key && ++this.reads === 2) {
       const { run } = this.armed
       this.armed = null // exactly once — `run`'s own put reads this sidecar too
+      this.fired = true
       await run()
     }
     return super.readMeta(dir, key)
@@ -277,9 +290,11 @@ describe('ThumbCache maintenance', () => {
   /**
    * The size cap evicts from a snapshot of every sidecar taken at the top of
    * `maintain`. A `put` landing after that snapshot used to have its PNG
-   * deleted and its camera reverted to the snapshot; the pass re-reads the
-   * sidecar immediately before evicting. Both cells drive that window through
-   * `InterposingCache`.
+   * deleted and its camera reverted to the snapshot; the pass now re-reads the
+   * sidecar and re-stats the PNG immediately before evicting. The three cells
+   * below drive that window through `InterposingCache`, and each asserts
+   * `cache.fired` before it reads anything back — see the field's own comment
+   * for what passes vacuously otherwise.
    */
   it('spares an entry a mid-sweep put re-rendered, png and camera both', async () => {
     const dir = tempDir('mb-cache-')
@@ -296,6 +311,7 @@ describe('ThumbCache maintenance', () => {
     await cache.get(b, 1) // a is now the least-recently-read: the eviction victim
     cache.arm(a, () => cache.put(a, { mtime: 2, png: PNG_NEW, camera: CAM2 }))
     await cache.maintain()
+    expect(cache.fired).toBe(true) // the put landed *inside* the pass, not after it
 
     const res = await cache.get(a, 2)
     expect(res.status).toBe('hit') // the png written mid-sweep is still there…
@@ -322,10 +338,47 @@ describe('ThumbCache maintenance', () => {
     // candidate, and the eviction must write back the camera it now holds.
     cache.arm(a, () => cache.put(a, { mtime: 1, camera: CAM2 }))
     await cache.maintain()
+    expect(cache.fired).toBe(true) // the put landed *inside* the pass, not after it
 
     const res = await cache.get(a, 1)
     expect(res.status).toBe('stale') // png evicted and mtime cleared, as the cap requires
     expect(res.camera).toEqual(CAM2) // the mid-sweep camera, not the snapshot's CAM
+  })
+
+  /**
+   * The mtime in a sidecar is the *model's*, and the re-renders that actually
+   * race the sweep leave it alone: an orbit persist, a RIG_VERSION bump, a pose
+   * recipe change all write new pixels for a file nobody edited. So "the mtime
+   * did not move" says nothing about whether the PNG the snapshot measured is
+   * still the PNG on disk — which is why the pass stats the PNG rather than
+   * comparing mtimes.
+   */
+  it('spares a mid-sweep re-render that writes new pixels at the same model mtime', async () => {
+    const dir = tempDir('mb-cache-')
+    const cache = new InterposingCache(dir, 10)
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const a = join(fx.dir, 'loose.stl')
+    const b = fx.zipPath
+    const tick = () => new Promise((r) => setTimeout(r, 5))
+    await cache.put(a, { mtime: 1, png: Buffer.from('aaaaaaaa'), camera: CAM, rig: 1 })
+    await tick()
+    await cache.put(b, { mtime: 1, png: Buffer.from('bbbbbbbb'), camera: CAM })
+    await tick()
+    await cache.get(b, 1) // a is now the least-recently-read: the eviction victim
+    // Same model, same mtime, new pixels under a new rig — the shape of every
+    // re-render the running app queues.
+    cache.arm(a, () => cache.put(a, { mtime: 1, png: PNG_NEW, camera: CAM2, rig: 2 }))
+    await cache.maintain()
+    expect(cache.fired).toBe(true) // the put landed *inside* the pass, not after it
+
+    const res = await cache.get(a, 1)
+    expect(res.status).toBe('hit') // the png written mid-sweep is still there…
+    expect(Buffer.from(res.png as string, 'base64')).toEqual(PNG_NEW) // …and it is the new one
+    expect(res.rig).toBe(2) // the label the new pixels came with
+    expect(res.camera).toEqual(CAM2)
+    // Skipped, not counted: the cap still had to be met, so b paid instead.
+    expect((await cache.get(b, 1)).status).toBe('stale')
   })
 
   it('a cap it cannot parse falls back to the default instead of evicting everything', async () => {
