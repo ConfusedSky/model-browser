@@ -38,8 +38,8 @@ Every path the server accepts or emits — listings, file bytes, thumbnails, cam
 Every filesystem location the server derives from a request path SHALL resolve, through symlinks, to the library's top or a location beneath it, or the request SHALL be refused without naming any filesystem detail. `..` components SHALL be normalised before resolution and SHALL NOT escape. Any entry — file, archive or directory — that resolves outside the library SHALL be omitted from listings and skipped by walks: never named, fetched, thumbnailed, or, for an archive, enumerated. A path under the library's top that does not exist SHALL be reported as not found, distinct from a refusal, and confinement SHALL be decided for such a path on the nearest existing ancestor of its filesystem half; an archive entry that does not exist inside an existing archive is the archive layer's not-found, not a confinement decision.
 
 #### Scenario: Dot-dot cannot escape
-- **WHEN** a request path contains `..` components that would resolve above the library's top
-- **THEN** the request is refused and nothing outside the library is read
+- **WHEN** a request path contains `..` components that would climb above the library's top
+- **THEN** they fold against the top — the path resolves under the library like any other, is not found unless the library holds it, and nothing outside the library is read
 
 #### Scenario: A symlink out of the library is refused
 - **WHEN** a path inside the library is a symlink whose target lies outside it

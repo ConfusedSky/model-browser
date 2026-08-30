@@ -55,7 +55,8 @@ untouched, and nothing here bumps `RIG_VERSION` — no pixel changes.
 library's top. The server discovers the library by walking *up* from the configured root
 until it finds a marker; the first one found is the library, and the root is simply where
 the app opens inside it. No marker anywhere above → the root becomes a new library and the
-marker is written there.
+marker is written there. A marker whose `id` is not a non-empty string is not a marker (the
+walk continues): an empty id would name a cache directory `''`.
 
 Why a marker rather than the root path: the root is what a picker chooses, and a picker
 chooses freely (the future Electron dialog). Keying anything on the picked folder means
@@ -94,8 +95,15 @@ shortest.
 3. `realpath` the result and require the real path to equal the library's real top or
    start with it plus a separator.
 
-Step 3 is the confinement: a `..` that survived normalisation, or a symlink inside the library
-pointing outside, both resolve to a real path outside the top and are refused. The real top
+Step 3 is the confinement: a symlink inside the library pointing outside resolves to a real
+path outside the top and is refused. A `..` never survives normalisation on a `/`-rooted
+path — `posix.normalize('/a/../../etc')` is `/etc`, which joins *under* the top — so a
+climbing path is contained by folding, not refused: it resolves like any other library path
+and is not found unless the library holds it (adjudicated at Stage A's check-in, 2026-08-29:
+the property is containment, the sibling clause wants not-found distinct from refusal, and
+a separate climb-counting check would be a second rule for a case the first already
+covers). The only 400s the resolver emits are a path that does not begin with `/` and a
+realpath escape. The real top
 is computed once at library resolution and compared by string, the same test `scopeWithin`
 already performs. A refusal is a 400 naming no filesystem detail ("path outside the
 library"), the shape `path must be absolute` has today.
