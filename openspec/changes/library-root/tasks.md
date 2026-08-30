@@ -228,12 +228,24 @@
       hit, an absent volume is the `missing` state (answered before any listing, neither
       serving nor discarding the snapshot), and only a *present but unreadable* root
       invalidates. `openspec validate` clean on both; both archives dry-run in order
-- [ ] 6.4 Live verification against the real library: set `MODEL_BROWSER_ROOT`, confirm
+- [x] 6.4 Live verification against the real library: set `MODEL_BROWSER_ROOT`, confirm
       the marker is written, the legacy cache directory drains into `<id>/` with camera
       sidecars intact (count before/after), a tile with a saved orientation opens with
       it, a deep link from before the change fails with the plain error, and
       `bun run test` / `bun run typecheck` are clean across workspaces
       — partly verified 2026-08-29 (coordinator) against the demo corpus and a **copy** of the real cache (`MODEL_BROWSER_CACHE` pointed at the copy; the user's cache untouched): marker written at `deduplicated/.model-browser/library.json`; 799 of 1,799 legacy sidecars — every one recorded under that tree, cameras 32 of 32 — re-keyed under `<id>/` with PNGs, the 1,000 recorded under other trees left; a migrated camera entry served on `/api/thumb` as a **hit** with PNG and camera at the listing's exact mtime; suites clean. Remaining: the real library (`STLLibrary`, not mounted today), the user's own cache (it migrates on the dev server's first start with `MODEL_BROWSER_ROOT`), and a browser check that a tile with a saved orientation opens with it
+      — completed 2026-08-29 (coordinator) against the real library (`STLLibrary`, id
+      `97ecc020…`, dev server started with `MODEL_BROWSER_ROOT`): marker present; the user had
+      cleared the legacy cache before the change, so the drain had no real-library entries to
+      move — a side instance on 3178 rooted at the real library over a copy of the pre-change
+      cache left its 1,000 legacy sidecars (all recorded under `/home/masa/Documents`, another
+      library) and both `<id>/` directories byte-for-byte identical (file lists diffed);
+      `/api/thumb` for `…/32mm_JuvenileProtoOsteotron1_Base.stl` answered `hit` with
+      `camera {az -1.63, el 0.64}` and `axis z`, pressing the tile mounted the overlay canvas
+      over the tile showing the same frame, and the lightbox opened with the Z axis pill lit
+      and the base at that view (`.playwright-mcp/64-*.png`); the sidecar's content and mtime
+      were unchanged after two press-and-release cycles; the old absolute deep link 404s
+      (verified earlier the same day); server 262, client 515, typecheck clean
 - [x] 6.5 Live verification of confinement: with the dev server on the library,
       `curl` `/api/dir?path=/../` and `/api/file?path=/etc/passwd`-shaped requests are
       refused with no filesystem detail in the body; a symlink planted inside the
