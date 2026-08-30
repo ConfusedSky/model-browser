@@ -106,7 +106,11 @@ hold. `parseUrl` reads a blank `path` — `?path=`, or a bare `?path`, both of w
 `URLSearchParams.get` answers with `''` rather than `null` — as the root, the same reading a
 blank `q` or `similar` already gets; an empty path in a hand-edited URL names the library
 top rather than a state of its own. That is what retires the `''` landing and its guards
-(follow-up 5.7).
+(follow-up 5.7). Blank is the only spelling the client normalises: `?path=//` and
+`?path=/kit/` are carried verbatim into `view.path`, the path bar and the address bar, while
+the server answers them canonicalised (`canonicalLibPath`) — so `goUp` from `/kit/` reaches
+`/kit` rather than `/`. Pre-existing and cosmetic: every entry a listing returns is already
+canonical, so the spelling never propagates past the one hand-edited URL. Recorded, not fixed.
 
 ### D3: One resolver, every route
 
@@ -331,7 +335,12 @@ bar's existing error line: one line, two tones, no new surface.
   `{...fresh, mtime: undefined}` from the re-read, so a camera-only `put` in the same window
   survives too. What remains is the window between that stat and the `rm`, accepted rather
   than closed: closing it needs a lock, and losing a PNG there costs pixels the next
-  sweep-triggering render regenerates.
+  sweep-triggering render regenerates. One more hole is accepted on the same terms: a `put`
+  that rewrites the PNG at the same byte count *and* a timestamp the filesystem cannot tell
+  from the snapshot's. Unreachable on the default cache location (0 identical consecutive
+  `st_mtime_ns` in 200 back-to-back writes on ext4, second review 2026-08-30); reachable only
+  with `MODEL_BROWSER_CACHE` on a coarse-timestamp filesystem (exFAT 10 ms, FAT32 2 s) and
+  an identically sized replacement, and it too costs pixels, not cameras.
 - [`realpath` on every request on cold removable media] → One call per request, lstat per
   path component; the walk already does this per directory. **Not measured** — the 32 s cold
   walk this would have been compared against is `listing-tree-cache`'s figure for a volume
