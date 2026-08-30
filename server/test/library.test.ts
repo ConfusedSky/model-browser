@@ -223,10 +223,61 @@ describe('library configuration', () => {
     expect(library.realTop()).toBe(top)
     expect(library.id()).toBe('unplugged-id')
 
-    // The same tree at the same place is the same library — the marker is not
-    // read again, so an id could not come back even if it wanted to.
+    // The same marker at the same place is the same library: the cached
+    // identity is kept and nothing is re-evaluated.
+    //
+    // The fixture used to recreate the top *empty* — the `rmSync` above took
+    // the marker with it — and assert the id survived that. That was the
+    // pre-F7 behaviour it was asserting: a bare directory arriving at the mount
+    // point inheriting the identity of the tree that left. A remount brings the
+    // tree back marker and all, which is what this now writes; the empty case
+    // is a different library, asserted in the test below.
     mkdirSync(top)
+    markerAt(top, 'unplugged-id')
     expect(await library.state()).toEqual({ state: 'ready', id: 'unplugged-id', top, root: '/' })
+    expect(library.id()).toBe('unplugged-id')
+  })
+
+  it('takes a different tree at the same mount point as a different library', async () => {
+    const tmp = tempTree()
+    const top = join(tmp, 'vol')
+    mkdirSync(top)
+    markerAt(top, 'first-drive')
+    const library = libraryAt(top)
+    expect(await library.state()).toEqual({ state: 'ready', id: 'first-drive', top, root: '/' })
+
+    // One drive is unplugged and a second automounts at the same path — the
+    // same session, the same mount point, a different library. Keeping the
+    // cached identity would serve the second drive out of the first's cache
+    // directory, and `ThumbCache.maintain` would then sweep every path the
+    // second does not have, cameras included (F7).
+    rmSync(top, { recursive: true, force: true })
+    expect(await library.state()).toEqual({ state: 'missing', root: top })
+    mkdirSync(top)
+    markerAt(top, 'second-drive')
+    expect(await library.state()).toEqual({ state: 'ready', id: 'second-drive', top, root: '/' })
+    expect(library.id()).toBe('second-drive')
+  })
+
+  it('takes a bare directory at the mount point as a new library rather than the one that left', async () => {
+    const tmp = tempTree()
+    const top = join(tmp, 'vol')
+    mkdirSync(top)
+    markerAt(top, 'the-drive')
+    const library = libraryAt(top)
+    await library.state()
+
+    rmSync(top, { recursive: true, force: true })
+    expect(await library.state()).toEqual({ state: 'missing', root: top })
+    // No marker: an unmarked directory that happens to sit where the library
+    // used to is not that library. It becomes one of its own, with its own id.
+    mkdirSync(top)
+    const state = await library.state()
+    expect(state).toEqual({ state: 'ready', id: expect.any(String), top, root: '/' })
+    expect(state.state === 'ready' && state.id).not.toBe('the-drive')
+    expect(JSON.parse(readFileSync(join(top, '.model-browser', 'library.json'), 'utf8')).id).toBe(
+      state.state === 'ready' ? state.id : undefined,
+    )
   })
 })
 
@@ -250,6 +301,22 @@ describe('the marker walk stops at a mount boundary', () => {
     // One on the volume itself is still the library, from the same start.
     markerAt(boundary, 'this-side')
     expect(await findMarker(start, devOf)).toEqual({ top: boundary, id: 'this-side' })
+  })
+
+  it('throws rather than reporting no marker when it cannot see its own start', async () => {
+    const start = join(tempTree(), 'vol')
+    mkdirSync(start)
+    markerAt(start, 'still-there')
+    // The volume goes away between `evaluate`'s stat of the root and this walk
+    // — the window the two calls do not share. Answered as "no marker", the
+    // caller settles: nothing is written, the id becomes a hash of the path,
+    // and it is kept for the process's life, so the volume returning with
+    // `still-there` is served under the hash instead (F6).
+    const devOf = async (dir: string): Promise<number> => {
+      if (dir === start) throw new Error('ENOENT')
+      return 1
+    }
+    await expect(findMarker(start, devOf)).rejects.toThrow()
   })
 })
 
@@ -337,6 +404,32 @@ describe('a root above an existing library', () => {
     const inner = join(narrow, 'kit-2', 'inner')
     markerAt(inner, 'within-the-budget')
     expect(await libraryAt(narrow).state()).toEqual({ state: 'nested', root: narrow, library: inner })
+  })
+
+  it('checks every directory the budget already paid to enumerate, wherever it was listed', async () => {
+    // The budget bounds `readdir`s, not marker checks. All 600 of these were
+    // enumerated by the root's single `readdir` — already paid for — and a
+    // marker check is one open of a known name, so each is checked whatever
+    // the budget's state.
+    //
+    // Before the fix, running out of budget *returned* instead of draining the
+    // queue, so the siblings listed after the 500th were never checked and the
+    // answer depended on the order the filesystem listed them in: on this
+    // machine's /tmp `kit-599` lists at index 555, and this root came back
+    // `ready` with a marker written over a library at depth 1. Both ends of the
+    // listing are asserted so no order can make this pass by luck.
+    for (const marked of ['kit-599', 'kit-0']) {
+      const wide = join(tempTree(), 'drive')
+      for (let i = 0; i < 600; i++) mkdirSync(join(wide, `kit-${i}`), { recursive: true })
+      const enclosed = join(wide, marked)
+      markerAt(enclosed, `marked-at-${marked}`)
+      expect(await libraryAt(wide).state()).toEqual({
+        state: 'nested',
+        root: wide,
+        library: enclosed,
+      })
+      expect(existsSync(join(wide, '.model-browser'))).toBe(false)
+    }
   })
 })
 

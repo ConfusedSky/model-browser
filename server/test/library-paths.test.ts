@@ -255,6 +255,40 @@ describe('the states in which there is no library', () => {
     }
   })
 
+  it('gates a root that encloses a library, naming both paths, and writes nothing', async () => {
+    // The third not-ready state (R1): the root has no marker at or above it but
+    // a bounded probe finds one below. Both paths are in the envelope because
+    // the remedy is to point the root at the second.
+    const enclosing = realTempDir('mb-nested-')
+    const inner = join(enclosing, 'STL Library')
+    mkdirSync(join(inner, '.model-browser'), { recursive: true })
+    writeFileSync(
+      join(inner, '.model-browser', 'library.json'),
+      JSON.stringify({ id: 'the-enclosed-library', version: 1 }),
+    )
+    const cache = realTempDir('mb-nested-cache-')
+    const app = createApp(new ThumbCache(cache), undefined, undefined, libraryFor(enclosing))
+
+    const res = await app.request('/api/dir?path=/', { headers: LOOPBACK })
+    expect(res.status).toBe(503)
+    expect(await res.json()).toEqual({
+      error: `the root ${enclosing} contains a library at ${inner}`,
+      state: 'nested',
+      root: enclosing,
+      library: inner,
+    })
+
+    // `/api/library` is never gated and reports the same state.
+    const state = await app.request('/api/library', { headers: LOOPBACK })
+    expect(state.status).toBe(200)
+    expect(await state.json()).toEqual({ state: 'nested', root: enclosing, library: inner })
+
+    // Nothing written over the library the root would have enclosed.
+    expect(existsSync(join(enclosing, '.model-browser'))).toBe(false)
+    rmSync(enclosing, { recursive: true, force: true })
+    rmSync(cache, { recursive: true, force: true })
+  })
+
   it('serves the library as soon as the directory appears, without a restart', async () => {
     mkdirSync(absent, { recursive: true })
     writeFileSync(join(absent, 'arrived.stl'), stlBytes(6))

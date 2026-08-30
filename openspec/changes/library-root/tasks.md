@@ -62,7 +62,19 @@
       went away mid-session as missing, and takes it back unchanged" — falsified by removing
       the stat. `ThumbCache.maintain`'s guard is kept, its comment now saying it is belt and
       braces. `semantic.test.ts`'s stat-count bound absorbed the fixed two stats a request
-      now pays and asserts the per-hit slope beside them
+      now pays and asserts the per-hit slope beside them. 2026-08-30 (R-A): the aggregate
+      review's F7 — `state()` re-admitted *any* directory that appeared at the top's path
+      after a `missing`, so two drives automounting at the same mount point in one session
+      shared the first's id and `maintain` would sweep every path the second lacks, cameras
+      included. The marker is now re-read once on that one transition (`unmarked` exempt, its
+      id being path-derived) and a differing or absent id re-evaluates from scratch. Tests:
+      `library.test.ts` "takes a different tree at the same mount point as a different
+      library" / "takes a bare directory at the mount point as a new library rather than the
+      one that left", both falsified by disabling the transition check. The original
+      1.7 test recreated the top *empty* and asserted the id survived — which was the pre-F7
+      behaviour, not a property worth keeping — so its fixture was corrected to restore the
+      marker (a remount brings the tree back marker and all) and its comment rewritten to the
+      property that now holds.
 - [x] 1.8 Follow-up recorded in the fix round (2026-08-29): a root chosen *above* an existing
       library is **not** refused and not warned about (design R1). The marker walk only goes
       up, so the enclosed library is never seen; the enclosing marker is written over it and
@@ -83,6 +95,21 @@
       order), and `client/test/libraryState.test.tsx` "nested names the library the root would
       have enclosed". Falsified by skipping the probe (4 fail), by raising the depth bound to
       5, by raising the read budget to 5000, and client-side by dropping the message branch.
+      2026-08-30 (R-A): the aggregate review's F1 — the budget check `return`ed from the
+      dequeue loop, so once 500 `readdir`s were spent the directories those reads had already
+      enumerated were never marker-checked, and whether a nested library was found came down
+      to the order the filesystem listed entries in (600 siblings, marker in the one listed
+      last → `ready`, a marker written over that library at depth 1). Exhausting the budget
+      now `continue`s: nothing further is enqueued, so the loop drains what was paid for.
+      Test: `library.test.ts` "checks every directory the budget already paid to enumerate,
+      wherever it was listed" (600 siblings, the marker at depth 1 in `kit-599` and again in
+      `kit-0`), falsified by restoring the `return undefined`; the existing "gives up on a
+      tree too wide to search rather than reading it all" still gives up at depth 2. The
+      `PROBE_*` doc comment, design R1 and the repo CLAUDE.md bullet now say the budget bounds
+      directories *read*. Coverage added the same day: `library-paths.test.ts` "gates a root
+      that encloses a library, naming both paths, and writes nothing" — the gate's `nested`
+      503 body and `/api/library` had no server test, falsified by disabling the gate's
+      `nested` branch
       Narrowed 2026-08-30 (R-C): 75a677a widened App's `fail` handler to re-probe on any
       `HttpError.state`, but `errorOf` copies the `state` of *any* 503 body and an index
       route sends the **index's** state, so every meaning query against an unavailable index
@@ -109,7 +136,17 @@
       change, and still takes one below it" — falsified by dropping the device comparison. The
       accepted caveat (btrfs subvolumes carry their own `st_dev`) is in D1, and what is still
       undetected — a stray marker on the *same* filesystem, and how it shows without the log —
-      is in R1; the repo CLAUDE.md bullet and `docs/platform-surface.md` match
+      is in R1; the repo CLAUDE.md bullet and `docs/platform-surface.md` match. 2026-08-30
+      (R-A): the aggregate review's F6 — `findMarker` returned "no marker" when it could not
+      stat its own start, which is what the volume vanishing between `evaluate`'s stat of the
+      root and the walk looks like; `evaluate` then *settled* `ready, unmarked` on a hash of
+      the root's path for the process's life, and the volume returning with its real marker
+      was served under the hash. It now throws, `evaluate` catches it (together with the
+      `realpath` one statement earlier, in the identical window — catching only `findMarker`
+      left that ENOENT escaping `state()` as a 500) and answers `missing` without settling.
+      Test: `library.test.ts` "throws rather than reporting no marker when it cannot see its
+      own start", a `devOf` that rejects for the start, falsified by restoring the
+      `return undefined`
 
 ## 2. Server: every path is a library path (D2, D3)
 

@@ -99,9 +99,11 @@ export interface Library {
   /**
    * The current state. Every not-ready state is re-evaluated on each call, so a
    * volume mounted after start needs no restart. A `ready` library keeps its
-   * identity — the marker is not re-read — but its top is stat'd per call, so a
-   * volume unplugged *mid-session* answers `missing` rather than 404-ing every
-   * path (D4).
+   * identity, and its top is stat'd per call, so a volume unplugged
+   * *mid-session* answers `missing` rather than 404-ing every path (D4). The
+   * marker is re-read on exactly one transition — the top present again after
+   * an absence — so a *different* tree arriving at the same mount point is a
+   * different library rather than an inheritor of this one's identity.
    */
   state(): Promise<LibraryState>
   /** Re-evaluate config and marker from scratch, whatever the current state. */
@@ -180,6 +182,10 @@ async function deviceOf(dir: string): Promise<number> {
  * that cannot be stat'd ends the walk for the same reason — an ancestor this
  * process cannot see is not one it should adopt.
  *
+ * Undefined means "no marker to adopt". A start that cannot be stat'd at all is
+ * not that answer and **throws** — the volume went away mid-evaluation, and the
+ * caller must not settle an identity on it.
+ *
  * `devOf` is injected so a test can place a boundary without mounting anything.
  *
  * @internal exported for tests
@@ -193,9 +199,12 @@ export async function findMarker(
   try {
     startDev = await devOf(start)
   } catch {
-    // The root was stat'd as a directory a moment ago; if it cannot be stat'd
-    // now there is nothing to walk from.
-    return undefined
+    // "Cannot see the start" is not "no marker here", and reporting it as one
+    // would be settled on: the caller would write no marker, hash the root's
+    // path for an identity and keep it for the process's life, so the volume
+    // coming back with its real marker would be served under the hash (F6).
+    // Thrown instead, and caught by `evaluate` as the `missing` this is.
+    throw new Error('the library root cannot be read')
   }
   for (;;) {
     const id = await markerIdAt(dir)
@@ -219,11 +228,15 @@ export async function findMarker(
  * The depth bound is where the mistake actually lives: a root pointed one or
  * two folders above a drive's library is the case worth catching, and a library
  * buried five levels under a deliberately chosen root is not a mistake anyone
- * makes by accident. The read budget is what keeps a root pointed at a wide
- * tree from paying for a full descent — and it is paid on every `state()` call
- * while the state is not ready, not once at start. Both are best-effort by
- * design: running out is "not found", and the root becomes a library, which is
- * what happened before the probe existed.
+ * makes by accident. The read budget bounds the directories *read* — the
+ * `readdir`s, which is what keeps a root pointed at a wide tree from paying for
+ * a full descent — and it is paid on every `state()` call while the state is
+ * not ready, not once at start. It does not bound the directories *checked*:
+ * every directory a paid-for `readdir` enumerated has its marker opened, so
+ * whether a library is found never depends on where the filesystem happened to
+ * list it. Both bounds are best-effort by design: running out is "not found",
+ * and the root becomes a library, which is what happened before the probe
+ * existed.
  */
 const PROBE_MAX_DEPTH = 4
 const PROBE_MAX_DIRS = 500
@@ -246,7 +259,15 @@ async function findNestedLibrary(start: string): Promise<string | undefined> {
     // `start` itself has already been tested by the upward walk.
     if (depth > 0 && (await markerIdAt(dir)) !== undefined) return dir
     if (depth === PROBE_MAX_DEPTH) continue
-    if (read >= PROBE_MAX_DIRS) return undefined
+    // Exhausting the budget stops *reading*, not the loop. The queue still
+    // holds directories an already-paid `readdir` enumerated, and returning
+    // here left them unchecked — which made the answer depend on the order the
+    // filesystem listed entries in: a root with 600 siblings and the marker in
+    // the one listed last read `ready` and had a marker written over that
+    // library, at depth 1. Nothing more is enqueued once the budget is gone, so
+    // the loop drains what was paid for and ends: the marker opens are bounded
+    // by the entries those `readdir`s enumerated.
+    if (read >= PROBE_MAX_DIRS) continue
     read++
     let entries: Dirent[]
     try {
@@ -299,6 +320,14 @@ export function createLibrary(env: NodeJS.ProcessEnv = process.env): Library {
    */
   let settled: { ready: Ready; root: string } | undefined
 
+  /**
+   * Whether the last thing `state()` said about a settled library was that its
+   * top was gone. It is the transition — not the absence — that has to be
+   * caught: while the top is simply present, nothing can have been swapped
+   * underneath it without passing through this flag first.
+   */
+  let wasMissing = false
+
   async function evaluate(): Promise<LibraryState> {
     const root = await configuredRoot(env)
     if (root === undefined) return { state: 'unconfigured' }
@@ -308,8 +337,22 @@ export function createLibrary(env: NodeJS.ProcessEnv = process.env): Library {
       // Not present at all — the usual shape of an unmounted volume.
       return { state: 'missing', root }
     }
-    const realRoot = await realpath(root)
-    const found = await findMarker(realRoot)
+    // The volume can go away between the `stat` above and this walk — an
+    // unmount is not atomic with respect to this function, and both calls below
+    // fail in that window. Neither may be read as "nothing found": that branch
+    // *settles*, hashing the root's path for an identity and keeping it for the
+    // process's life, so the volume returning with its real marker would be
+    // served under the hash (F6). `realpath` is inside the same catch because
+    // it sits one statement earlier in the identical window — catching only
+    // `findMarker` would leave its ENOENT escaping `state()` as a 500.
+    let realRoot: string
+    let found: { top: string; id: string } | undefined
+    try {
+      realRoot = await realpath(root)
+      found = await findMarker(realRoot)
+    } catch {
+      return { state: 'missing', root }
+    }
     if (found !== undefined) {
       // The root is a viewpoint inside the marked tree, not the tree.
       settled = {
@@ -369,16 +412,40 @@ export function createLibrary(env: NodeJS.ProcessEnv = process.env): Library {
       //     t=time.perf_counter(); [os.stat(p) for _ in range(1000)]; \
       //     print((time.perf_counter()-t)*1e3, 'ms')"
       const top = await stat(current.ready.top).catch(() => null)
-      if (top !== null && top.isDirectory()) return current.ready
-      // The cached `ready` is deliberately *not* discarded: the same tree
-      // returning at the same place is the same library, and `realTop()`/`id()`
-      // keep answering meanwhile — the cache's own sweep guard reads them to
-      // decide it must not run (`ThumbCache.maintain`).
-      return { state: 'missing', root: current.root }
+      if (top === null || !top.isDirectory()) {
+        // The cached `ready` is deliberately *not* discarded: the same tree
+        // returning at the same place is the same library, and
+        // `realTop()`/`id()` keep answering meanwhile — the cache's own sweep
+        // guard reads them to decide it must not run (`ThumbCache.maintain`).
+        wasMissing = true
+        return { state: 'missing', root: current.root }
+      }
+      // Present again after an absence — the one moment a *different* tree can
+      // have arrived at the same path. Two drives that automount at the same
+      // mount point in one session would otherwise both be served under the
+      // first one's identity, and `maintain` would then sweep every path the
+      // second does not have, cameras included (F7). So the marker is re-read
+      // exactly here, once per absence, and a library that is not the one that
+      // went away is evaluated from scratch. An `unmarked` library is exempt:
+      // its identity is derived from the path, so the path is the whole test.
+      if (wasMissing) {
+        wasMissing = false
+        if (current.ready.unmarked !== true) {
+          // Absent counts as different: a bare directory appearing at the mount
+          // point is a new tree, not the marked one that left.
+          const id = await markerIdAt(current.ready.top)
+          if (id !== current.ready.id) {
+            settled = undefined
+            return evaluate()
+          }
+        }
+      }
+      return current.ready
     },
 
     async refresh() {
       settled = undefined
+      wasMissing = false
       return evaluate()
     },
 

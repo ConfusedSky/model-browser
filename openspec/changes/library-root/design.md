@@ -182,8 +182,15 @@ for `nested`, since repointing at it is the fix and nothing else will do.
 every path in a library that is no longer there (task 1.7). The cached `ready` is kept
 across that: the same tree returning at the same place is the same library, `realTop()` and
 `id()` keep answering meanwhile — `ThumbCache.maintain`'s own guard reads them to decide the
-sweep must not run — and the marker is never re-read, so an identity cannot change under a
-running server. The stat is affordable at the granularity of a request: on the removable
+sweep must not run. What makes it *the same tree* is checked rather than assumed: on the one
+transition that can hide a swap — the top being present again after `state()` has answered
+`missing` — the marker is re-read once and a library whose id differs, or which has no marker
+at all, is evaluated from scratch. Two drives that automount at the same mount point in one
+session are otherwise both served under the first one's identity, out of the first one's
+cache directory, and `maintain` then sweeps every path the second does not have, cameras
+included. An `unmarked` library is exempt: its id is derived from the path, so the path is
+the whole test. Outside that transition the marker is never re-read, so an identity cannot
+change under a running server. The stat is affordable at the granularity of a request: on the removable
 volume this library lives on, 1000 warm `stat`s of the top took 1.72 ms (~1.7 µs each; W1's
 run, 2026-08-29, the sweep re-runnable from the comment beside the call in `createLibrary`'s
 `state`), against the `realpath` per request that D3 already pays. Its one visible cost is
@@ -264,13 +271,17 @@ bar's existing error line: one line, two tones, no new surface.
   bounds, and refused where it is detected** (task 1.8). Only where the upward walk found
   nothing — a marked library never pays for this — the root is probed *downward* for
   `.model-browser/library.json` before any marker is written: breadth-first so the shallowest
-  library wins, at most 4 levels below the root and at most 500 directories read, descending
-  only real subdirectories (`readdir(…, { withFileTypes: true })`, `isDirectory()`, so no
+  library wins, at most 4 levels below the root and at most 500 directories *read* —
+  the budget bounds `readdir`s, never marker checks: every directory a paid-for `readdir`
+  enumerated has its marker opened, so what is found can never depend on the order the
+  filesystem listed entries in (an earlier version abandoned the queue when the budget ran
+  out, and a root with 600 siblings whose marked one was listed last was claimed) —
+  descending only real subdirectories (`readdir(…, { withFileTypes: true })`, `isDirectory()`, so no
   symlink is followed) and skipping dot-entries, the marker itself being opened by name.
   Found → the state is `nested`, naming the library's filesystem path, nothing is written,
   and every path route answers 503 with it; the UI says where to point the root instead.
-  What is **still not detected**: a library deeper than 4 levels, or one behind a tree too
-  wide for the 500-directory budget — the probe is best-effort, and running out is "not
+  What is **still not detected**: a library deeper than 4 levels, or one under a directory
+  the 500-`readdir` budget never reached — the probe is best-effort, and running out is "not
   found", exactly the behaviour that existed before it. Both bounds are what keep a root
   pointed at a wide slow volume from paying for a full descent at every evaluation, which
   matters because a not-ready state is re-evaluated per request. There is still deliberately

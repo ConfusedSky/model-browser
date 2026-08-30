@@ -19,7 +19,8 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   home directory the library and widening confinement to all of it. Symptom: the app opens on
   your home folders instead of your kits. A root that *encloses* a library is refused
   instead — state `nested`, nothing written — but only within the probe's bounds (4 levels
-  down, 500 directories). The startup line `library <id> at <top>` names the top actually
+  down, 500 directories *read* — the budget bounds `readdir`s, and every directory one of
+  them enumerated is marker-checked, so listing order never decides the answer). The startup line `library <id> at <top>` names the top actually
   resolved — read it
 - Semantic search needs a second server, not started by `bun run dev` (its collection root
   must lie inside the library, or the index covers nothing):
