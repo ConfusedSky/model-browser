@@ -1,5 +1,10 @@
 # Tasks — listing-tree-cache
 
+> Rebased on `library-root` (landed 2026-08-29): every path is a library path, the thumbnail
+> cache is per library under `<cache>/<library-id>/`, and an unmounted volume is the `missing`
+> state answered before any listing. Snapshot keys are the library id plus the root's library
+> path; the delta and design were rewritten to match — re-read both before starting.
+
 > Ordering: after `search-matches-folder-names` (its container collection changes what the walk gathers). This caches **the tree the walk gathers, not a walk's filtered output** — the distinction is the whole design: `q` and the search options are filters applied over the snapshot, so they are not part of its key, and a toggle re-filters rather than re-walking. Independent of `search-options` for the same reason. Re-read `listing.ts` against main before starting (parallel sessions).
 
 ## 1. Validate the freshness signal before building on it

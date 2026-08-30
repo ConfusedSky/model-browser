@@ -2,7 +2,7 @@
 
 ## Context
 
-`listFlat` (server/src/listing.ts) walks a root on every request: `readdir` per directory, one `stat` per entry (charged against the step budget), and for each archive a central-directory read via `zip.ts`. Nothing is retained between requests. `ThumbCache` (server/src/cache.ts) already owns a size-capped directory under `~/.cache/model-browser` with a `maintain()` sweep and a `MODEL_BROWSER_CACHE` override — the precedent for anything else this app persists.
+`listFlat` (server/src/listing.ts) walks a root on every request: `readdir` per directory, one `stat` per entry (charged against the step budget), and for each archive a central-directory read via `zip.ts`. Nothing is retained between requests. `ThumbCache` (server/src/cache.ts) already owns a size-capped directory under `~/.cache/model-browser/<library-id>/` (per library since `library-root`, keyed by library path) with a `maintain()` sweep and a `MODEL_BROWSER_CACHE` override — the precedent for anything else this app persists.
 
 The measurements in the proposal were taken with `vm.drop_caches` between runs, on a 10,614-entry library (2,318 directories, 409 zips) on spinning exfat and an 18,705-entry library on ext4 SSD.
 
@@ -62,7 +62,7 @@ Nothing is served from the snapshot that revalidation has contradicted, and a re
 ## Risks / Trade-offs
 
 - [The snapshot goes stale in ways mtime cannot see — a file edited in place, a same-name replacement within the mtime granularity] → names are what this indexes, and a replaced file keeps its name; the thumbnail cache already keys on `path + mtime` independently, so a stale entry produces a re-render rather than a wrong image.
-- [Removable volume mounted at a different path] → the cache keys on the root path, so a remount elsewhere is a cache miss, not a wrong answer. Wasteful, correct.
+- [Removable volume mounted at a different path] → rebased on `library-root` (2026-08-29): the cache keys on the library's identity plus the root's library path and lives under `<cache>/<library-id>/`, so a remount elsewhere is a hit; an unmounted volume is the library's `missing` state, answered before any listing, and neither serves nor discards the snapshot. (Before the rebase this bullet read the opposite — a remount was a miss — which `library-root` made false.)
 - [Cache size on a very large library] → entries are metadata; the measured 18,705-entry library is trivial next to a 2 GB thumbnail budget. It shares that budget and eviction sweep, so growth is bounded by an existing mechanism rather than a new one.
 - [exfat directory mtime unreliable] → D4's stated risk, with the readdir-fingerprint fallback; must be tested on the real volume before the design is trusted.
 - [An abandoned crawl now has value, which argues against cancelling it] → real tension with `search-cancellation`; the resolution recorded in both is to cancel the *response*, not the crawl — the user stops waiting, the work still lands in the cache.

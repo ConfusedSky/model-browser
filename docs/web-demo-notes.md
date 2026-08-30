@@ -91,7 +91,8 @@ own origin"; only its body hardcodes loopback.
    sqlite only if a library outgrows load-at-start — it won't at hundreds of
    kits. Price accepted: a kit copied out of the library carries no metadata.
 2. **Path model — decided: a library root as a first-class parameter, paths
-   root-relative everywhere** (Masa; Electron later repoints it with a file
+   root-relative everywhere** *(implemented as `library-root`, 2026-08-29; the change's
+   design supersedes this item)* (Masa; Electron later repoints it with a file
    dialog). Not a demo mode: it fixes remount orphaning locally — thumb cache
    key is `sha256(absolute path)` and the sidecar stores that path, so a moved
    mount point orphans every thumbnail *and camera*; `listing-tree-cache`

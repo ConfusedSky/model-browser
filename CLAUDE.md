@@ -6,8 +6,13 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
 
 ## Commands
 
-- `bun run dev` - start server + client together
-- Semantic search needs a second server, not started by `bun run dev`:
+- `bun run dev` - start server + client together. The server needs a library root:
+  `MODEL_BROWSER_ROOT=<dir>` or `root` in `~/.config/model-browser/config.json`; without one
+  every path route answers 503 `{state:'unconfigured'}`. Paths on the wire and in URLs are
+  library-relative (`/` is the library top); the server writes
+  `<library>/.model-browser/library.json` on first start
+- Semantic search needs a second server, not started by `bun run dev` (its collection root
+  must lie inside the library, or the index covers nothing):
   `cd ~/Documents/tests/mini-classify && .venv/bin/python serve_api.py --cache-dir embed-cache2 --port 8077`
   — it answers `/status` at once with `ready:false` and 503s queries for ~16s
   while SigLIP loads, so a connection refusal means not started, not warming

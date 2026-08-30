@@ -3,7 +3,7 @@
 ## ADDED Requirements
 
 ### Requirement: Walked trees are cached across restarts
-The server SHALL persist what a recursive walk discovers — entry names, kinds, sizes, and modification times, keyed by the walked root — to durable storage that survives process restarts, and SHALL answer subsequent flat listings and deep searches for that root from it rather than re-walking the filesystem. The cached content SHALL be metadata only; model bytes are not cached by this capability. What is cached SHALL be the traversed tree itself, independent of any query or option applied to it, so that one cached tree serves every query and every option setting against that root; a query or option SHALL be applied over the cached tree rather than forming part of what identifies it. Only a traversal that examined the whole tree SHALL be cached: a traversal that stopped early — against a work limit or otherwise — SHALL NOT be stored, since a partial tree kept as though whole is indistinguishable from a complete one. The cache SHALL share the storage location, size budget, and maintenance sweep of the existing thumbnail cache rather than introducing a second policy. What a listing *contains* — its entries, ordering, caps, and truncation reporting — SHALL be unchanged by whether it was served from cache or from a walk.
+The server SHALL persist what a recursive walk discovers — entry names, kinds, sizes, and modification times, keyed by the library's identity and the walked root's library path (see `library`) — to durable storage that survives process restarts, and SHALL answer subsequent flat listings and deep searches for that root from it rather than re-walking the filesystem. The cached content SHALL be metadata only; model bytes are not cached by this capability. What is cached SHALL be the traversed tree itself, independent of any query or option applied to it, so that one cached tree serves every query and every option setting against that root; a query or option SHALL be applied over the cached tree rather than forming part of what identifies it. Only a traversal that examined the whole tree SHALL be cached: a traversal that stopped early — against a work limit or otherwise — SHALL NOT be stored, since a partial tree kept as though whole is indistinguishable from a complete one. The cache SHALL share the storage location, size budget, and maintenance sweep of the existing thumbnail cache — the per-library directory `<cache>/<library-id>/` — rather than introducing a second policy, so a snapshot follows its library to another mount point as the thumbnails do. What a listing *contains* — its entries, ordering, caps, and truncation reporting — SHALL be unchanged by whether it was served from cache or from a walk.
 
 #### Scenario: A cold search costs what a warm one costs
 - **WHEN** the user searches a large library for the first time after starting the app, having previously walked that root
@@ -55,11 +55,15 @@ A listing served from the cache SHALL be marked as such in the response, so the 
 - **THEN** it carries no staleness marker
 
 ### Requirement: The filesystem is authoritative
-Cached content SHALL never be served once revalidation has contradicted it, and a revalidation that cannot be completed — an unreadable or unmounted root — SHALL invalidate the affected cache rather than continue serving from it. The cache SHALL be keyed such that the same library reached by a different path is a miss rather than a hit.
+Cached content SHALL never be served once revalidation has contradicted it, and a revalidation that cannot be completed — an unreadable root — SHALL invalidate the affected cache rather than continue serving from it. A library whose volume is not present is the `missing` state `library` defines, answered before any listing is attempted; it SHALL NOT be read as a contradiction of the cache, so a snapshot survives an unmount. The cache SHALL be keyed by the library's identity, so the same library reached by a different mount point is a hit, and two libraries with the same layout never share a snapshot.
 
 #### Scenario: An unmounted volume does not list
 - **WHEN** the library's volume is disconnected and a previously cached root is requested
-- **THEN** the request fails as an unreadable path rather than returning a listing of files that are not present
+- **THEN** the request answers the library's `missing` state rather than a listing of files that are not present, and the snapshot is neither served nor discarded
+
+#### Scenario: A remount keeps the snapshot
+- **WHEN** the library is mounted at a different filesystem location and the root repointed to it
+- **THEN** the first search after the remount is served from the snapshot cached under the library's identity
 
 #### Scenario: A stale entry never outlives its contradiction
 - **WHEN** revalidation finds an entry no longer on disk

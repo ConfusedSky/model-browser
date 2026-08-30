@@ -171,26 +171,27 @@
 
 ## 6. Docs, ordering, verification
 
-- [ ] 6.1 `docs/platform-surface.md`: user-dirs bullet gains `config.json` and
+- [x] 6.1 `docs/platform-surface.md`: user-dirs bullet gains `config.json` and
       `~/.cache/model-browser/<id>/`; a new bullet states that the marker is the first
       file this app writes beside the models, and what `unmarked` means on a read-only
-      volume
-- [ ] 6.2 `CLAUDE.md`: the dev-instance line names `MODEL_BROWSER_ROOT`; `directory-browsing`'s
+      volume — done 2026-08-29 (coordinator)
+- [x] 6.2 `CLAUDE.md`: the dev-instance line names `MODEL_BROWSER_ROOT`; `directory-browsing`'s
       guard rationale ("reads and serves arbitrary local paths") becomes "the user's model library" — a one-phrase truth fix in the delta (*API restricted to the app's own origin*, every scenario carried) and in `guard.ts`'s docstring; the guard itself is unchanged, the demo's public-origin change rewrites it later; the semantic
       line notes the index root must lie inside the library; `docs/web-demo-notes.md`
-      item 2 points here as superseded
-- [ ] 6.3 `listing-tree-cache`: rewrite its **delta spec** and design before it is applied —
+      item 2 points here as superseded — done 2026-08-29 (coordinator; `guard.ts` docstring and the delta both say "the user's model library")
+- [x] 6.3 `listing-tree-cache`: rewrite its **delta spec** and design before it is applied —
       `specs/listing-cache/spec.md` *The filesystem is authoritative* ("the same library
       reached by a different path is a miss" inverts under a library identity; its
       unmounted-volume scenario becomes the `missing` state) and *Walked trees are cached
       across restarts* ("share the storage location … of the existing thumbnail cache" is
-      now per-library); keying is `id` + library path under `<base>/<id>/`
+      now per-library); keying is `id` + library path under `<base>/<id>/` — done 2026-08-29 (coordinator): delta requirements *Walked trees…* and *The filesystem is authoritative* rewritten to library-id keying and the `missing` state (new scenario "A remount keeps the snapshot"), design risk bullet and Context corrected, tasks header added; `openspec validate` clean and both archives dry-run in order
 - [ ] 6.4 Live verification against the real library: set `MODEL_BROWSER_ROOT`, confirm
       the marker is written, the legacy cache directory drains into `<id>/` with camera
       sidecars intact (count before/after), a tile with a saved orientation opens with
       it, a deep link from before the change fails with the plain error, and
       `bun run test` / `bun run typecheck` are clean across workspaces
-- [ ] 6.5 Live verification of confinement: with the dev server on the library,
+      — partly verified 2026-08-29 (coordinator) against the demo corpus and a **copy** of the real cache (`MODEL_BROWSER_CACHE` pointed at the copy; the user's cache untouched): marker written at `deduplicated/.model-browser/library.json`; 799 of 1,799 legacy sidecars — every one recorded under that tree, cameras 32 of 32 — re-keyed under `<id>/` with PNGs, the 1,000 recorded under other trees left; a migrated camera entry served on `/api/thumb` as a **hit** with PNG and camera at the listing's exact mtime; suites clean. Remaining: the real library (`STLLibrary`, not mounted today), the user's own cache (it migrates on the dev server's first start with `MODEL_BROWSER_ROOT`), and a browser check that a tile with a saved orientation opens with it
+- [x] 6.5 Live verification of confinement: with the dev server on the library,
       `curl` `/api/dir?path=/../` and `/api/file?path=/etc/passwd`-shaped requests are
       refused with no filesystem detail in the body; a symlink planted inside the
-      library pointing at `/tmp` is skipped by a flat walk and refused by `/api/dir`
+      library pointing at `/tmp` is skipped by a flat walk and refused by `/api/dir` — done 2026-08-29 (coordinator, side instance on :3178 rooted at the demo corpus `deduplicated/`): `/api/dir?path=/..` → 200 listing of the top (folds, per the adjudication), `/../../etc` and `/etc/passwd` → 404 naming only the library path, `../` → 400 `path must be a library path`, `/api/complete?prefix=/.` → `[]`; a planted `zz_escape → /tmp` symlink was absent from the nested listing and the flat walk and `/api/dir?path=/zz_escape` → 400 `path outside the library`; symlink removed after

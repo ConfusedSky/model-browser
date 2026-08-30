@@ -27,9 +27,17 @@ contracts and placeholder rules: `openspec/changes/open-in-slicer/design.md` (L2
 - **Paths**: `isAbsolute` checks and the `foo.zip!/entry` virtual-path separator are
   exercised only against POSIX paths (`server/src/vpath.ts`); Windows drive letters
   and separators are untested against them.
-- **User dirs**: thumbnail cache at `~/.cache/model-browser/` and launch config at
-  `~/.config/model-browser/launch.json` are XDG-shaped; Windows (`%LOCALAPPDATA%`) and
-  macOS (`~/Library/Caches`, `~/Library/Application Support`) differ.
+- **User dirs**: thumbnail cache at `~/.cache/model-browser/<library-id>/` (the pre-library flat
+  layout beside it is migrated once, then existence-swept), launch config at
+  `~/.config/model-browser/launch.json` and the library root in
+  `~/.config/model-browser/config.json` (`MODEL_BROWSER_ROOT` overrides it) are XDG-shaped;
+  Windows (`%LOCALAPPDATA%`) and macOS (`~/Library/Caches`, `~/Library/Application Support`)
+  differ.
+- **The library marker** (`library-root` D1): `<library>/.model-browser/library.json` is the
+  first file this app writes beside the models — a generated id at the library's top, found
+  by walking up from the configured root. A volume that refuses the write (read-only media)
+  runs `unmarked`: the id falls back to a hash of the top's real path, so a remount is a
+  different library and its cache does not follow. Listings never show the marker directory.
 - **Content types**: the fixed extension→mime table (app-launch L6) is
   platform-neutral, but anything that would *consume* those mimes is registry-specific
   per the table above.

@@ -6,7 +6,7 @@ const LOOPBACK_HOST = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/
 /**
  * Same-origin guard for every /api/* route. Localhost binding alone is not a
  * threat model: any open web page can fetch a localhost port, and this server
- * reads arbitrary local paths as the user.
+ * reads the user's model library as the user.
  *
  * - Non-loopback `Origin` → refused. Absent Origin is allowed (curl, tests,
  *   same-origin GETs); DNS rebinding without an Origin is caught by the Host
