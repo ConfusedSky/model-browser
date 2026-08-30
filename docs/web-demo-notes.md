@@ -37,10 +37,11 @@ sequence):
    preference, budget tune-then-freeze)
 6. `folder-contact-sheets` — the decided row; per-tile bounded peek, zips excluded
 
-Not drafted: the override store / credits (item 1 — waits on nothing but has no proposal
-yet), the demo split itself (confinement is now free; guard, read-only thumbs, launcher
-off, chat tab hidden, static serving, bake, credits page), pose-for-every-model (other
-session), and the remaining open items 3–7.
+Not drafted — tracked as the change `web-demo-backlog` (2026-08-29, one task line each):
+the override store / credits (item 1), pose-for-every-model (was the other session's),
+the demo split itself (confinement is now free; guard, read-only thumbs, launcher off,
+chat tab hidden, static serving, bake, credits page), the decisions in items 3–6, and the
+go-live gates below.
 
 ## The inversion at the center
 
@@ -209,7 +210,10 @@ own origin"; only its body hardcodes loopback.
 5. **Names.** Rename folders at corpus build (re-embed — needed anyway) or
    display-name from the store (near-free if #1 is sidecars; ids stay in paths).
 6. **Domain.** On the critical path for TLS and the configured-origin guard.
-7. **Which session owns the proposal.** Other session's sequence:
+7. **Which session owns the proposal.** **Resolved 2026-08-29 (Masa): this session
+   — the other session closed; it also owned pose-for-every-model, now this
+   session's too. The ordered tail is `web-demo-backlog` §1.** Other session's sequence
+   was:
    pose-for-every-model → library-root-confinement → web-demo-deployment. This
    session adds: library-root (item 2, supersedes its confinement change),
    remove-axis-lighting, AO-as-recipe-dimension + re-targeted refresh change,
