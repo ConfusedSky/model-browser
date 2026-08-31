@@ -2119,7 +2119,7 @@ export default function App() {
             title="Search this folder and everything below it by name — files and folders"
             className="rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-500 disabled:opacity-40"
           >
-            Deep
+            Search
           </button>
           <button
             type="button"

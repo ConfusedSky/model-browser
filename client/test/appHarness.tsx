@@ -225,9 +225,9 @@ export function aoPill(): HTMLButtonElement {
   return container.querySelector<HTMLButtonElement>('button[title^="Ambient occlusion"]')!
 }
 export function deepButton(): HTMLButtonElement {
-  return Array.from(container.querySelectorAll<HTMLButtonElement>('header button')).find(
-    (b) => b.textContent === 'Deep',
-  )!
+  // By title, not label, like `aoPill` above: the label is copy ("Deep" became
+  // "Search") and a copy tweak must not read as the control disappearing.
+  return container.querySelector<HTMLButtonElement>('button[title^="Search this folder"]')!
 }
 
 async function mount(initial: DirListing): Promise<void> {
