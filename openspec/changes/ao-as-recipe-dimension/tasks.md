@@ -122,6 +122,41 @@
       when a render is written at a newer mtime", which asserts both limbs (one PNG left
       after the newer write; two still there after re-writing at the same mtime)
 
+- [x] 1.7 The gap the orientation rule left open: on an **unowned** entry — no camera and
+      no axis — there is no shared orientation for both renders to be drawn under, so each
+      is drawn at "the pose if one was applied, else the default" and a pixels-only PUT
+      whose applied-pose record differs from the sibling's leaves the two at two
+      orientations. Nothing acted on it: the labels recorded the difference and the
+      pixels-only path "touches the other render never". Fix: in `ThumbCache.put`, a PUT
+      that carries pixels, leaves the entry unowned after its own merge, and was not
+      already handled by `supersedes` or `moved`, compares `opts.posed` (absent = unposed)
+      against the sibling's stored `posed` and invalidates the sibling on a difference —
+      `clearRecipe`, exactly as `moved` does. Owned entries are exempt. Design D2's
+      addendum carries the rationale and the accepted ping-pong bound
+      <br>2026-08-31 (SIB-1): found live by the user — 24 pairs in the real cache, the
+      occluded render `posed: 2` from meaning searches, the unoccluded sibling unposed
+      from plain-listing sweeps. `put` now hoists the merged `camera`/`axis` out of the
+      `meta` literal (they were computed inline there) so the unowned test can be asked
+      before the sidecar is built, and the new guard sits after the `moved` branch with
+      the found case, the exemption and the ping-pong bound in its comment. Tests: five
+      new cells in cache.test.ts's "ThumbCache occlusion renders" — "invalidates the
+      sibling when an unowned entry draws its two renders at different poses", "…the other
+      way round too, when the pose arrives second", "leaves the sibling alone when both
+      renders of an unowned entry record the same pose", "exempts an owned entry: the
+      stored orientation is what both its renders are drawn under" (camera absent from the
+      PUT, camera re-sent within tolerance, and an axis-only entry) and "does not fire on a
+      pixel-less write — the orientation rule owns those" (which writes the pre-rule
+      sidecar by hand, since `put` is now what prevents such a pair being created). Server
+      suite 300 → 305 passing, nothing pre-existing touched. Falsified one mutation at a
+      time, each reverted and the suite re-run green: neutering the pose comparison fails
+      exactly cells 1 and 2 ("expected 2 to be undefined"); dropping the unowned guard
+      fails exactly the owned-exemption cell ("expected undefined to be 2"); dropping the
+      `opts.png !== undefined` guard fails exactly the pixel-less cell (same message);
+      firing regardless of the records fails the equal-records cell and 1.4's pixel-less
+      discard cell. Companion, not this code: the coordinator's one-shot heal of the 24
+      existing pairs, which clears the posed render's labels in the live cache so they
+      re-render at the orientation now in force
+
 ## 2. Client: render and look up under the preference (D4)
 
 - [x] 2.1 `three/renderer.ts` `renderThumbnail(object, state, axis, ao = true)` passes `ao`

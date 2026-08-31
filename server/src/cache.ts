@@ -258,7 +258,10 @@ export class ThumbCache {
    * are when the write carries no pixels: there is then no drawn render, and no
    * labels of its own to apply either, so any this PUT declared go with the
    * rest. A write carrying only pixels and labels touches the other render
-   * never, which is what makes toggling the preference back a lookup.
+   * never — which is what makes toggling the preference back a lookup — save
+   * for the one exception the unowned-pose rule below states: an entry holding
+   * no orientation has no shared angle for both renders to be drawn under, so
+   * the applied-pose record takes that role and a difference in it is a move.
    */
   async put(path: string, opts: { mtime: number; png?: Buffer; camera?: CameraState | null; axis?: OrbitAxis | null; lighting?: LightingMode; rig?: number; posed?: number; ao?: boolean }): Promise<void> {
     const dir = await this.entryDir()
@@ -292,18 +295,55 @@ export class ThumbCache {
       if (opts.png === undefined) mine = clearRecipe(mine)
     }
 
+    // Three states per field: a value sets it, silence keeps what was there,
+    // `null` discards it. Silence cannot mean discard — every PNG write omits
+    // both — and a written default is not a discard either: it is an
+    // orientation of the user's own, and it suppresses the index that would
+    // otherwise frame the model well (entry-context-menu D7).
+    const camera = opts.camera === null ? undefined : (opts.camera ?? prev?.camera)
+    const axis = opts.axis === null ? undefined : (opts.axis ?? prev?.axis)
+
+    // An entry left *unowned* by this write's own merge — no camera and no axis
+    // — has no stored orientation for both renders to be drawn under. Each is
+    // instead drawn at "the pose if one was applied, else the default", so the
+    // applied-pose record is what says which of those two a render shows: the
+    // written render's is `opts.posed` (absent = unposed), the sibling's is its
+    // stored `posed`, and a difference between them is a difference in the
+    // orientation actually drawn — the same fact `cameraMoved` detects for an
+    // owned entry. The sibling's pixels are then at an angle this entry no
+    // longer draws, so it is invalidated exactly as `moved` invalidates it.
+    // An owned entry is exempt: both its renders are drawn under the stored
+    // orientation and `posed` merely rides along. `supersedes` and `moved` run
+    // first and win — they have already emptied the sibling's labels.
+    //
+    // Found live 2026-08-31: 24 pairs in the real cache whose occluded render
+    // had been drawn under an index pose from a meaning search (`posed: 2`)
+    // while the unoccluded sibling was later drawn unposed by a plain-listing
+    // sweep — a pixels-only PUT, which by design "touches the other render
+    // never". The labels recorded the difference and nothing acted on it.
+    //
+    // The ping-pong this admits is bounded and accepted: a posed PUT beside an
+    // unposed sibling invalidates it, the sibling's later unposed re-render
+    // invalidates back once, and it converges as soon as two consecutive PUTs
+    // agree on the pose.
+    if (
+      opts.png !== undefined &&
+      !supersedes &&
+      !moved &&
+      camera === undefined &&
+      axis === undefined &&
+      mine.posed !== theirs.posed
+    ) {
+      theirs = clearRecipe(theirs)
+    }
+
     const occluded = ao ? mine : theirs
     const unoccluded = ao ? theirs : mine
     const meta: Meta = {
       path,
       ...occluded,
-      // Three states per field: a value sets it, silence keeps what was there,
-      // `null` discards it. Silence cannot mean discard — every PNG write omits
-      // both — and a written default is not a discard either: it is an
-      // orientation of the user's own, and it suppresses the index that would
-      // otherwise frame the model well (entry-context-menu D7).
-      camera: opts.camera === null ? undefined : (opts.camera ?? prev?.camera),
-      axis: opts.axis === null ? undefined : (opts.axis ?? prev?.axis),
+      camera,
+      axis,
       // Omitted rather than written empty, so an entry that has never held an
       // unoccluded render keeps exactly the sidecar shape it had before this
       // change — the whole of the "no migration" claim (D1).

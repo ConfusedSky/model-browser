@@ -85,6 +85,31 @@ five orders of headroom. The probe lands as a **test beside the constant** (task
 asserting max round-trip drift ≪ `CAMERA_EPSILON`, so the number is re-runnable where it is
 used rather than quoted from a session that is gone.
 
+**Addendum (2026-08-31): an entry with no orientation is held together by its pose record
+instead.** Found live by the user in the real cache: 24 pairs whose occluded render had been
+drawn under an index pose (`posed: 2`, from a past meaning search) while the unoccluded
+sibling was later drawn *unposed* at the default by a plain-listing sweep. Both are
+pixels-only PUTs, which the rule above deliberately lets touch the other render never — so
+the sidecars recorded the difference in `posed` and nothing acted on it, and the pair sat at
+two orientations. The rule this adds: when a PUT carries pixels and the entry is **unowned**
+after that write's own merge — `camera` and `axis` both undefined — the written render's
+applied-pose record (`opts.posed`, absent meaning unposed) is compared against the sibling's
+stored one, and a difference invalidates the sibling exactly as `moved` does (`clearRecipe`:
+labels go, `mtime` and pixels stay). The justification is the one already in this decision:
+both renders of an unowned model are drawn at "the pose if applied, else the default", so
+the applied-pose record *is* which orientation a render shows, and a difference in it is the
+same fact `cameraMoved` detects for an owned model — the sibling's pixels are at an angle
+this entry no longer draws. An owned entry (a camera or an axis stored) is **exempt**: both
+its renders are drawn under the stored orientation and `posed` merely rides along, so a
+difference there says nothing about the pixels. `supersedes` and `moved` run first and win —
+they have already emptied the sibling's labels, and there is nothing left to clear.
+
+The ping-pong this admits is bounded and accepted: a posed PUT beside an unposed sibling
+invalidates that sibling, the sibling's later unposed re-render invalidates back once, and
+it converges as soon as two consecutive PUTs agree on the pose. Each round costs one lazy
+re-render of pixels the client was already showing meanwhile, which is the same cost every
+other limb of this rule carries.
+
 **Invalidate by clearing labels, not `mtime`.** A `stale` response carries no pixels
 (`ThumbCache.get` returns labels and camera only when `mtime` mismatches), so clearing the
 sibling's `mtime` would produce exactly the pixel-less answer that makes "shown until its

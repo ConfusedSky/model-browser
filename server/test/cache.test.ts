@@ -897,6 +897,165 @@ describe('ThumbCache occlusion renders', () => {
     expect(other.lighting).toBe('camera')
   })
 
+  it('invalidates the sibling when an unowned entry draws its two renders at different poses', async () => {
+    // The live case, 2026-08-31: the occluded render was drawn under an index
+    // pose from a meaning search, and the unoccluded sibling later drawn
+    // unposed by a plain-listing sweep — a pixels-only PUT, which touches the
+    // other render never. With no camera and no axis there is no stored
+    // orientation to draw both under, so the pose record *is* the orientation.
+    const cache = tempCache()
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const path = join(fx.dir, 'loose.stl')
+    await cache.put(path, { mtime: 1, png: PNG_A, rig: 2, lighting: 'camera', posed: 2 })
+
+    await cache.put(path, { mtime: 1, png: PNG_B, ao: false, rig: 2, lighting: 'camera' })
+
+    const written = await cache.get(path, 1, false)
+    expect(written.status).toBe('hit') // the render that drew keeps its own labels
+    expect(written.rig).toBe(2)
+    expect(written.posed).toBeUndefined()
+
+    const sibling = await cache.get(path, 1, true)
+    expect(sibling.status).toBe('hit') // mtime and pixels stay, so the tile never blanks
+    expect(Buffer.from(sibling.png as string, 'base64')).toEqual(PNG_A)
+    expect(sibling.rig).toBeUndefined()
+    expect(sibling.lighting).toBeUndefined()
+    expect(sibling.posed).toBeUndefined()
+  })
+
+  it('invalidates the sibling the other way round too, when the pose arrives second', async () => {
+    // The mirror: the plain listing drew first, and a meaning search then drew
+    // the other render under a pose. Same difference, same invalidation.
+    const cache = tempCache()
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const path = join(fx.dir, 'loose.stl')
+    await cache.put(path, { mtime: 1, png: PNG_B, ao: false, rig: 2, lighting: 'camera' })
+
+    await cache.put(path, { mtime: 1, png: PNG_A, rig: 2, lighting: 'camera', posed: 2 })
+
+    const written = await cache.get(path, 1, true)
+    expect(written.status).toBe('hit')
+    expect(written.rig).toBe(2)
+    expect(written.posed).toBe(2)
+
+    const sibling = await cache.get(path, 1, false)
+    expect(sibling.status).toBe('hit')
+    expect(Buffer.from(sibling.png as string, 'base64')).toEqual(PNG_B)
+    expect(sibling.rig).toBeUndefined()
+    expect(sibling.lighting).toBeUndefined()
+    expect(sibling.posed).toBeUndefined()
+  })
+
+  it('leaves the sibling alone when both renders of an unowned entry record the same pose', async () => {
+    const cache = tempCache()
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+
+    // Both unposed — the ordinary pair of plain-listing renders, and the case
+    // "toggling back is a lookup" is about.
+    const plain = join(fx.dir, 'loose.stl')
+    await cache.put(plain, { mtime: 1, png: PNG_A, rig: 2, lighting: 'camera' })
+    await cache.put(plain, { mtime: 1, png: PNG_B, ao: false, rig: 3, lighting: 'camera' })
+    let sibling = await cache.get(plain, 1, true)
+    expect(sibling.status).toBe('hit')
+    expect(sibling.rig).toBe(2)
+    expect(sibling.lighting).toBe('camera')
+
+    // Both under the same pose — a model rendered twice from the same search.
+    const posed = join(fx.dir, 'posed.stl')
+    writeFileSync(posed, 'x')
+    await cache.put(posed, { mtime: 1, png: PNG_A, rig: 2, lighting: 'camera', posed: 2 })
+    await cache.put(posed, { mtime: 1, png: PNG_B, ao: false, rig: 3, lighting: 'camera', posed: 2 })
+    sibling = await cache.get(posed, 1, true)
+    expect(sibling.status).toBe('hit')
+    expect(sibling.rig).toBe(2)
+    expect(sibling.posed).toBe(2)
+  })
+
+  it('exempts an owned entry: the stored orientation is what both its renders are drawn under', async () => {
+    // With a camera stored, both renders are drawn under it whatever the pose
+    // record says — `posed` merely rides along — so a difference in it is not
+    // a difference in the orientation drawn, and nothing is invalidated.
+    const cache = tempCache()
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const path = join(fx.dir, 'loose.stl')
+    await cache.put(path, { mtime: 1, png: PNG_A, camera: CAM, rig: 2, lighting: 'camera', posed: 2 })
+    await cache.put(path, { mtime: 1, png: PNG_B, ao: false, rig: 3, lighting: 'camera', posed: 2 })
+
+    // A pixels-only re-render of the unoccluded side, unposed, no camera sent.
+    await cache.put(path, { mtime: 1, png: PNG_NEW, ao: false, rig: 3, lighting: 'camera' })
+    let sibling = await cache.get(path, 1, true)
+    expect(sibling.status).toBe('hit')
+    expect(sibling.rig).toBe(2)
+    expect(sibling.lighting).toBe('camera')
+    expect(sibling.posed).toBe(2)
+
+    // …and the same with the stored camera re-sent within tolerance, which is
+    // what every unmoved lightbox close does.
+    await cache.put(path, {
+      mtime: 1,
+      png: PNG_NEW,
+      ao: false,
+      camera: { ...CAM, az: CAM.az + 1e-12 },
+      rig: 3,
+      lighting: 'camera',
+    })
+    sibling = await cache.get(path, 1, true)
+    expect(sibling.status).toBe('hit')
+    expect(sibling.rig).toBe(2)
+    expect(sibling.posed).toBe(2)
+
+    // An axis alone owns the entry too: it is an orientation the entry holds.
+    const axed = join(fx.dir, 'axed.stl')
+    writeFileSync(axed, 'x')
+    await cache.put(axed, { mtime: 1, png: PNG_A, axis: 'z', rig: 2, posed: 2 })
+    await cache.put(axed, { mtime: 1, png: PNG_B, ao: false, rig: 3 })
+    sibling = await cache.get(axed, 1, true)
+    expect(sibling.status).toBe('hit')
+    expect(sibling.rig).toBe(2)
+    expect(sibling.posed).toBe(2)
+  })
+
+  it('does not fire on a pixel-less write — the orientation rule owns those', async () => {
+    const cache = tempCache()
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const path = join(fx.dir, 'loose.stl')
+    const key = createHash('sha256').update(path).digest('hex')
+    // A pair of exactly the shape the live cache held in 24 places before this
+    // rule: unowned, the occluded render posed, the unoccluded one not. It is
+    // written as a sidecar because `put` is now the thing that prevents such a
+    // pair being created — the pair predates the rule, as those 24 did.
+    writeFileSync(
+      join(cache.dir, `${key}.json`),
+      JSON.stringify({
+        path,
+        mtime: 1,
+        lighting: 'camera',
+        rig: 2,
+        posed: 2,
+        noao: { mtime: 1, lighting: 'camera', rig: 2 },
+      }),
+    )
+    writeFileSync(join(cache.dir, `${key}.png`), PNG_A)
+    writeFileSync(join(cache.dir, `${key}.noao.png`), PNG_B)
+
+    // A labels-only PUT on the unoccluded render. The two pose records still
+    // differ, but no pixels were written — there is no newly drawn render
+    // whose orientation could disagree with the sibling's. Pixel-less writes
+    // are the `moved` rule's alone, and this one moved nothing.
+    await cache.put(path, { mtime: 1, ao: false, rig: 5 })
+
+    const sibling = await cache.get(path, 1, true)
+    expect(sibling.status).toBe('hit')
+    expect(sibling.rig).toBe(2)
+    expect(sibling.lighting).toBe('camera')
+    expect(sibling.posed).toBe(2)
+  })
+
   it('clears both renders on a pixel-less discard of a camera the entry held, and nothing when it held none', async () => {
     const cache = tempCache()
     const fx = makeFixtures()
