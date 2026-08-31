@@ -175,8 +175,22 @@
       files), server 282 passed / 3 skipped (the index-contract gate), both typechecks
       clean; the lighting grep (with `setLightingMode` added) and a `rigQuaternion` grep
       over `client/src` both return nothing
-- [ ] 4.5 Live verification: open the app on a directory whose cache is fully camera-lit
+- [x] 4.5 Live verification: open the app on a directory whose cache is fully camera-lit
       (this machine) and confirm zero PUTs on visit (network panel); plant one sidecar
       with `"lighting":"axis"` and confirm exactly that tile re-renders and re-uploads
       once, keeping its camera; orbit an ±X-spindle model in the lightbox and change its
       axis — no lighting snap
+      — done 2026-08-31 (coordinator), dev instance on the real library, PUTs counted by an
+      in-page fetch recorder: (1) `/Warhammer/little-dnaborrowers-kit…` fully cached (38/38
+      sidecars, all `camera`/rig 6) — 38 GETs, **0 PUTs**; the first visit had 23 PUTs, all
+      cache *misses* from the recently cleared cache, not staleness. (2) planted
+      `"lighting":"axis"` into `Xenomorph head.stl`'s sidecar (the one with a saved camera):
+      reload issued exactly one PUT, for that path, `lighting:"camera"` with **no camera
+      field** in the body; the sidecar afterwards carries `camera` and the original
+      `az 1.1799…`/`el −0.2290…` exactly; a further reload was 38 GETs / 0 PUTs. (3)
+      `Trickster_Quiver.stl` (stored axis `-x`, X pill + flip lit): X→Y in the lightbox —
+      frames at ~110 ms and ~240 ms into the tween show the lit side staying with the
+      viewer, rims on their screen sides, no snap (`.playwright-mcp/45b-*.png`; a first
+      attempt hit `Trickster_Quiver (Supported).stl`, a y-spindle model, where clicking Y
+      is a no-op — discarded). The model's sidecar+PNG were restored from a backup after,
+      since an axis change persists a new default framing
