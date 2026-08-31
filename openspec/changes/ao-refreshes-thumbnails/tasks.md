@@ -131,6 +131,10 @@
       resolution at the check-in, in preference to machinery that detects a non-leak ("a preview
       the state guard refuses is still owned, and released with the entry"). Each of the four
       cells was falsified against its own fix reverted
+      <br>2026-08-31 (coordinator): the sibling RVW-1 flagged — the render-tail catch
+      blanking a displayed image when a miss's render fails — fixed the same day in the same
+      F3 shape; cell "a render that fails after a miss keeps the image the tile is showing",
+      falsified (`expected undefined to be 'blob:mint0'`); commit `c9da9bc`
 - [x] 2.3 A preference change cancels the in-flight sweep's queued renders as a navigation
       does — unlike an entries change, which cancels only the entries that left (2.1). Note what cancellation does **not** cover: the load effect renders and
       `await api.putThumb(...)` before the `if (!alive)` check that follows, and `queue.ts`'s
