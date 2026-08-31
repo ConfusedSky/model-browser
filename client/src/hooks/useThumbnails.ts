@@ -7,6 +7,7 @@ import type { MeshLru } from '../three/lru'
 import { cameraForPose, POSE_VERSION } from '../three/pose'
 import type { RenderQueue } from '../three/queue'
 import { RIG_VERSION, renderThumbnail, THUMB_LIGHTING } from '../three/renderer'
+import { aoEnabled } from '../viewer/aoToggle'
 
 export interface ThumbState {
   status: 'loading' | 'ready' | 'error'
@@ -133,7 +134,18 @@ export function useThumbnails(
         lookupLimit(async () => {
           if (!alive) return
           try {
-            const cached = await api.getThumb(entry.path, entry.mtime)
+            // The occlusion recipe this entry is looked up, rendered and filed
+            // under — read once, here, so the request and the write that
+            // answers it cannot name two different renders (D4/D4a). A toggle
+            // mid-load lands on the *next* load, which is the whole point of
+            // reading per render rather than per mount.
+            //
+            // `ao-refreshes-thumbnails` 1.1 replaces this read with a value
+            // passed down from App.tsx, so the pill's own state drives the
+            // effect's re-run. Not pre-implemented here: this change is the
+            // dimension, that one is the refresh.
+            const ao = aoEnabled()
+            const cached = await api.getThumb(entry.path, entry.mtime, ao)
             if (!alive) {
               // The lookup already minted an object URL for a tile that no
               // longer exists — release it rather than leak the decoded PNG.
@@ -220,7 +232,7 @@ export function useThumbnails(
                       : null
                   const camera = cached.camera ?? posed?.camera ?? DEFAULT_CAMERA
                   const axis = cached.axis ?? posed?.axis ?? 'y'
-                  const png = await renderThumbnail(object, camera, axis)
+                  const png = await renderThumbnail(object, camera, axis, ao)
                   await api.putThumb({
                     path: entry.path,
                     mtime: entry.mtime,
@@ -228,6 +240,9 @@ export function useThumbnails(
                     lighting: THUMB_LIGHTING,
                     rig: RIG_VERSION,
                     posed: posed !== null ? POSE_VERSION : undefined,
+                    // The same reading the lookup used, not a fresh one: these
+                    // pixels are what that answer asked for.
+                    ao,
                   })
                   if (!alive) return dropStale()
                   setThumb(entry.path, {

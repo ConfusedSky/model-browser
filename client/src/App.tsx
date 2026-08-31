@@ -1689,9 +1689,19 @@ export default function App() {
       if (entry === undefined) return
       try {
         // Capture before the await: a rapid axis change mid-snapshot must not
-        // pair this PNG with newer values in one PUT.
+        // pair this PNG with newer values in one PUT. The occlusion preference
+        // is captured here for the same reason and one worse: two independent
+        // readings would let a toggle between them file occluded pixels under
+        // the unoccluded slot with matching labels — a wrong-recipe hit that
+        // nothing invalidates, because both readings looked correct where they
+        // stood (D4a). One value renders and files.
+        //
+        // The store, not the pill's React state of the same name above: the
+        // store is what every other render path reads, and `persist` must not
+        // be the one site whose recipe comes from a re-render's snapshot of it.
         const { state, axis } = session
-        const png = await session.snapshot()
+        const ao = aoEnabled()
+        const png = await session.snapshot(ao)
         const url = URL.createObjectURL(png)
         // Decode before applying, so when this promise resolves the tile's
         // <img> swap cannot paint a half-decoded frame — the orbit overlay
@@ -1729,6 +1739,8 @@ export default function App() {
             // and labelling *that* would claim a pose these pixels never had.
             // The caller says so when the two come apart.
             posed: (opts.posed ?? opts.camera === false) ? POSE_VERSION : undefined,
+            // The captured reading, not a second one — see above.
+            ao,
           }),
         ])
         setThumb(entry.path, {
@@ -2156,11 +2168,13 @@ export default function App() {
           was built around is gone with the retired spindle-aligned rig — one
           orientation leaves nothing to choose — and the container outlived it. */}
       <div className="fixed bottom-3 left-3 z-50 flex items-center gap-1 rounded-full border border-zinc-700 bg-zinc-900/90 p-1 text-xs">
-        {/* Ambient occlusion on/off, live view only — a per-profile performance preference */}
+        {/* Ambient occlusion on/off — a per-profile performance preference the
+            live view and thumbnails both follow, so handoff is seamless either
+            way (ao-as-recipe-dimension) */}
         <button
           type="button"
           aria-pressed={ao}
-          title="Ambient occlusion in the live view — turn off to speed up orbiting on weaker GPUs; thumbnails keep the shipped recipe"
+          title="Ambient occlusion — turn off to speed up orbiting on weaker GPUs; thumbnails follow this setting and are cached under each"
           onClick={() => {
             setAoEnabled(!ao)
             setAoState(!ao)

@@ -91,10 +91,12 @@ export interface RenderChain {
    * is shared: the previous caller left its own scene and its own fit behind.
    *
    * `ao` skips the GTAO pass for this render (composers skip disabled
-   * passes; RenderPass → OutputPass still swap the same way). Only the live
-   * view ever passes false — the user's AO preference (viewer/aoToggle.ts) —
-   * while `renderThumbnail` never sets it, so the default keeps thumbnails on
-   * the shipped recipe and the cache never sees the preference.
+   * passes; RenderPass → OutputPass still swap the same way). Both paths pass
+   * the user's AO preference (viewer/aoToggle.ts): the live view reads it per
+   * frame, and `renderThumbnail` takes it as an argument, so a tile and the
+   * overlay that opens over it are drawn under the same recipe
+   * (`ao-as-recipe-dimension` D4). The default is the occluded recipe — the
+   * one every render was before occlusion became a key dimension.
    */
   render(scene: THREE.Scene, camera: THREE.PerspectiveCamera, bounds: Bounds, ao?: boolean): void
 }
@@ -360,11 +362,19 @@ export function unstage(
 /**
  * Render a model to a 512×512 transparent PNG through the thumbnail
  * post-process chain on the shared renderer (never the visible canvas).
+ *
+ * `ao` is the occlusion recipe these pixels are drawn under — the caller's
+ * reading of the AO preference, never read here: this function is called from
+ * four sites and each one must file its pixels under the value it also sent to
+ * the cache, so the read belongs to the caller that PUTs (D4/D4a). The default
+ * is the occluded recipe, which is what every thumbnail was before occlusion
+ * became a dimension of the key.
  */
 export function renderThumbnail(
   object: THREE.Object3D,
   state: CameraState = DEFAULT_CAMERA,
   axis: OrbitAxis = 'y',
+  ao = true,
 ): Promise<Blob> {
   const r = getRenderer()
   const lit = makeScene()
@@ -384,7 +394,7 @@ export function renderThumbnail(
   const prevTarget = r.getRenderTarget()
   const pixels = new Uint8Array(THUMB_SIZE * THUMB_SIZE * 4)
   try {
-    chain.render(scene, camera, bounds)
+    chain.render(scene, camera, bounds, ao)
     // `OutputPass` leaves `needsSwap` at the `Pass` default, so the composer
     // swaps after it: the finished frame is in `readBuffer`, not writeBuffer
     // (D1). Those pixels are already sRGB — OutputPass converted them (D2).

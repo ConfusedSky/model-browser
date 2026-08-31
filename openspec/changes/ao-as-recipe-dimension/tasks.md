@@ -79,7 +79,7 @@
       fails exactly 1.6's cell ("expected [ …(2) ] to deeply equal [ Array(1) ]");
       writing `noao: undefined` on eviction — reading (b) of the 1.2 ambiguity — fails
       exactly the eviction cell ("expected undefined to be 3")
-- [ ] 1.5 `CAMERA_EPSILON` lives in `shared/` (both workspaces import `shared/types`; the server cannot import `client/src/three/camera.ts`, which needs `three`), with the probe in `client/test/camera.test.ts`: `applyState` → `captureState` round trip, y-frame, bounds pivoted to the origin, 200k random states at each of radius 0.01, 1 and 137 with `target` drawn within the bounding sphere, asserting the maximum per-component drift is at least four orders below the constant (design D2's measurement, made re-runnable)
+- [x] 1.5 `CAMERA_EPSILON` lives in `shared/` (both workspaces import `shared/types`; the server cannot import `client/src/three/camera.ts`, which needs `three`), with the probe in `client/test/camera.test.ts`: `applyState` → `captureState` round trip, y-frame, bounds pivoted to the origin, 200k random states at each of radius 0.01, 1 and 137 with `target` drawn within the bounding sphere, asserting the maximum per-component drift is at least four orders below the constant (design D2's measurement, made re-runnable)
       <br>2026-08-31 (AOD-A): **shared constant done, probe is the client half's — left
       unticked deliberately.** `CAMERA_EPSILON = 1e-9` is exported from `shared/types.ts`
       beside `CameraState`, carrying the D2 measurement (the fourth reviewer's re-run,
@@ -87,6 +87,29 @@
       that re-runs it. That file does not exist yet — the comment says the probe is added
       by the client half, so the pointer is not read as a dangling citation. Tick this
       line when the probe lands
+      <br>2026-08-31 (AOD-B): probe landed, line ticked. `client/test/camera.test.ts`'s
+      "camera round-trip drift (the measurement behind CAMERA_EPSILON)" — two cells: the
+      600k-state sweep (200k each at radius 0.01, 1, 137; `applyState` → `captureState`,
+      y-frame, bounds pivoted to the origin, `target` filled through the unit ball by
+      cube-root radius, `distR` across `ViewerSession`'s own [1.1, 20] dolly clamp, `az`
+      wrapped through the `atan2` branch cut) and `DEFAULT_CAMERA`'s own trip, the state
+      every unmoved close re-sends. Seeded LCG (`0x5eed`), so the sweep is the same sweep
+      every run — a moved number means the camera math moved. **Measured max per-component
+      drift 2.1538e-14, worst at radius 1** (AOD-B's run, 2026-08-31, recorded in the
+      cell's own comment); the assertion is `CAMERA_EPSILON / 1e4` = 1e-13, so ~4.6× over
+      the measurement and ~46000× under the constant. Runs in 0.4 s. Two guards against a
+      probe that stops probing: `worst > 0` (a collapsed generator or an identity
+      `captureState` would read exactly zero and pass the bound) and the radius that
+      produced the worst case being one of the three swept.
+      <br>Two corrections to the note above, neither material to the constant: (a)
+      `client/test/camera.test.ts` **already existed** — what did not exist was the probe
+      in it; (b) this sweep measures **2.2e-14** where `CAMERA_EPSILON`'s doc comment
+      quotes **7.1e-15** from the fourth reviewer's 2026-08-28 run. Same order, same
+      conclusion, five orders of headroom either way; the gap is the sweeps differing
+      (`applyState` rather than `statePosition`, the full dolly clamp, the ball-filled
+      target). The test comment records both numbers and why they differ. Left for the
+      coordinator: whether the doc comment in `shared/types.ts` should quote the probe's
+      own figure — this worker was scoped out of `shared/`
 - [x] 1.6 A PNG PUT at a newer mtime deletes the sibling's superseded PNG (and clears its labels' `mtime`), so no render holds pixels of a file that changed; test it
       <br>2026-08-31 (AOD-A): `put`'s `supersedes` — `opts.png !== undefined &&
       theirs.mtime !== undefined && opts.mtime > theirs.mtime` — `rm`s the sibling's PNG
@@ -101,11 +124,34 @@
 
 ## 2. Client: render and look up under the preference (D4)
 
-- [ ] 2.1 `three/renderer.ts` `renderThumbnail(object, state, axis, ao = true)` passes `ao`
+- [x] 2.1 `three/renderer.ts` `renderThumbnail(object, state, axis, ao = true)` passes `ao`
       to `getThumbChain().render(...)`
-- [ ] 2.2 `api/client.ts`: `getThumb(path, mtime, ao)` sends `&ao=on|off`; `putThumb`
-      carries `ao`; `ThumbResult`/`ThumbSave` gain the field
-- [ ] 2.3 `hooks/useThumbnails.ts`: read `aoEnabled()` once per entry's load (superseded by
+      <br>2026-08-31 (AOD-B): the argument is the caller's reading, never a read of its
+      own — `renderThumbnail` is called from four sites and each must file its pixels
+      under the value it also sent to the cache, so the doc comment says the read belongs
+      to the caller that PUTs. `RenderChain.render`'s own comment ("Only the live view
+      ever passes false … the cache never sees the preference") asserted the retired
+      contract and was rewritten with it. Test: composer.test.ts's "both paths render
+      under the same occlusion preference", which reads the GTAO pass's `enabled` off the
+      real chain rather than trusting a mocked `renderThumbnail`
+- [x] 2.2 `api/client.ts`: `getThumb(path, mtime, ao)` sends `&ao=off` when off — and
+      **nothing** when on, so the on-request stays byte-identical to every request this
+      client sent before renders were keyed by occlusion; `putThumb` carries `ao`;
+      `ThumbSave` gains the field. `ThumbResult` deliberately does **not**: the wire
+      carries no echo — the answer is the requested render's (D2), and the merged server's
+      `ThumbGetResponse` has no `ao` member. The line as first written said both types
+      gained it; corrected here after a coordinator ruling, 2026-08-31 (AOD-B), so it does
+      not read as unimplemented
+      <br>2026-08-31 (AOD-B): `ThumbResult` carries a comment saying why the field is
+      absent — an empty field invites a later reader to populate it from the wrong source,
+      and echoing the caller's own argument back would make a second source of truth about
+      which render an answer describes. Tests: apiClient.test.ts "getThumb names the
+      unoccluded render, and only then" (the off URL verbatim; explicitly-on and
+      defaulted-on both byte-identical to the pre-change URL) and "putThumb declares which
+      render its pixels are" (`false` survives `JSON.stringify` as a value, not as an
+      absent field — absence means occluded, so a dropped `false` would file unoccluded
+      pixels over the shipped render)
+- [x] 2.3 `hooks/useThumbnails.ts`: read `aoEnabled()` once per entry's load (superseded by
       `ao-refreshes-thumbnails` 1.1, which passes the value from `App.tsx` instead — do not
       restore the internal read when re-reading this line later); request,
       render and PUT under it. The hit test is unchanged — the server answered for the
@@ -114,16 +160,94 @@
       and label it already captures there), passes it into `viewer/session.ts`
       `snapshot(ao)` — which hands it to `renderThumbnail`, not the live chain, the site a
       grep for `aoEnabled` misses — and declares the same value on its PUT; `resetFramingLive` (the fifth `putThumb` site: `null` discard, no PNG) declares `ao` as well
-- [ ] 2.3a Copy that asserts the old contract goes: the pill's `title` in `App.tsx`
+      <br>2026-08-31 (AOD-B): all five sites. `useThumbnails`' load effect reads once at
+      the head of the lookup job and carries that one value through `getThumb`,
+      `renderThumbnail` and the PUT; the hit test is untouched, since the server answered
+      for the render that was asked for. The read carries the comment 2.3 asks for —
+      `ao-refreshes-thumbnails` 1.1 replaces it with a value from `App.tsx`, not
+      pre-implemented here. Both `entryActions` re-render commands read **after** the
+      `queue.whenResumed()` gate, for the reason the cache lookup already sits there: the
+      pill is in the corner and stays pressable while a lightbox holds the queue
+      suspended, so a toggle made there is already in the value. `refreshThumbnail`'s
+      lookup passes `ao` too, which also decides whose LRU clock the read bumps — the
+      render about to be rewritten, not its sibling. `resetFramingLive` declares it with a
+      comment saying it names the request and nothing else: with no PNG there is no
+      written render, and a pixel-less orientation discard invalidates both anyway.
+      `ViewerSession.snapshot(ao = true)` takes the value and never reads the store —
+      the one place `render` and `snapshot` deliberately differ. `persist` captures it
+      beside `state`/`axis` before the await and uses the same value for `snapshot(ao)`
+      and the PUT; it reads the **store**, not the pill's React state of the same name,
+      so it is not the one site whose recipe comes from a re-render's snapshot
+- [x] 2.3a Copy that asserts the old contract goes: the pill's `title` in `App.tsx`
       ("thumbnails keep the shipped recipe") and `viewer/aoToggle.ts`'s module docstring
       ("thumbnails always render the shipped recipe … never see the preference")
-- [ ] 2.4 Client tests: with the preference off, the request carries `ao=off`, the render
+      <br>2026-08-31 (AOD-B): both found verbatim and rewritten to the new truth rather
+      than deleted — the title now says thumbnails follow the setting and are cached under
+      each, and the docstring says every path that draws a model consults it, occlusion
+      being a dimension of the key rather than a label on it (so the "no bump, no sweep"
+      property the old sentence was defending is stated as still holding). The docstring
+      was fixed, not rewritten, since `adaptive-ao-default` 1.2 cites it. Two further
+      pieces of the same copy, both approved by the coordinator: `App.tsx`'s JSX comment
+      one line above the pill ("Ambient occlusion on/off, **live view only**"), which
+      would have contradicted the corrected title beside it, and `RenderChain.render`'s
+      doc comment in `three/renderer.ts` (ticked under 2.1), which said in so many words
+      that the cache never sees the preference
+- [x] 2.4 Client tests: with the preference off, the request carries `ao=off`, the render
       is called with `ao=false`, and the PUT declares `ao:false`; with it on, all three say
       on and the request is byte-identical to before this change; a miss carrying a
       camera renders under that camera; the orbit overlay opened over an unoccluded
       thumbnail renders unoccluded (handoff parity — assert the chain's `ao` on both
       paths); an orbit released with the preference off snapshots through `renderThumbnail`
       with `ao=false` and PUTs `ao:false`; after that PUT the other render reads as a hit with cleared labels
+      <br>2026-08-31 (AOD-B): eleven cells across four files; client suite 511 → 523
+      passing, `bun run typecheck` clean.
+      <br>`thumbnailQueue.test.tsx`, "the sweep follows the occlusion preference" —
+      "with the preference off, the lookup, the render and the PUT all name the unoccluded
+      render", "with the preference on, all three name the occluded render", and "a first
+      look at the unoccluded render of an oriented model draws under the stored camera"
+      (the enumerated *miss carrying a camera*, written as the `stale`-with-camera the
+      server actually answers for a never-written render of an oriented entry — and it
+      also pins that the PUT sends pixels only, which is what keeps it from invalidating
+      the sibling just toggled away from).
+      <br>`apiClient.test.ts` — the two cells named under 2.2. Byte-identity of the
+      on-request lives here rather than in the hook's file: the hook can only say which
+      render it asked for; the URL is the ApiClient's contract.
+      <br>`composer.test.ts`, "both paths render under the same occlusion preference" —
+      handoff parity asserted on the **chains**, not on the callers: over the file's
+      existing fake `WebGLRenderer` the real chains are built, so the GTAO pass's own
+      `enabled` answers "was this render occluded". Three cells: off (tile and overlay
+      both unoccluded), on (both occluded — the shipped recipe unchanged), and "a
+      session's snapshot draws under the value handed to it, never a read of its own",
+      which is asserted with the store set the *other* way — the only way to tell a passed
+      value from a fresh read.
+      <br>`persistPut.test.tsx`, "the persist PUT names one occlusion render" — "an orbit
+      released with the preference off snapshots and files the unoccluded render"
+      (`snapshot` receives `false`, the PUT declares `ao:false`, **and carries the camera
+      and axis**) and "reads the preference once: a toggle mid-snapshot cannot split the
+      pixels from their slot", which moves the preference from inside the stubbed
+      `snapshot` — i.e. during the await `persist` holds across — and requires the PUT to
+      still carry the captured value.
+      <br>**The enumerated "after that PUT the other render reads as a hit with cleared
+      labels" is deliberately not faked here.** It is a server behaviour and is asserted
+      in `server/test/cache.test.ts` (1.4's cells); a mocked `ApiClient` could only
+      round-trip whatever this file told it to, so the client cell asserts the half the
+      client is responsible for — the PUT carries the camera *and* `ao:false`, which is
+      what makes the invalidation the server's to perform. Said in the cell's own comment,
+      not only here.
+      <br>Falsified one mutation at a time, each reverted and re-run green:
+      `renderThumbnail` hardcoding `chain.render(…, true)` fails exactly the two
+      composer cells that assert an unoccluded render ("expected true to be false"); a
+      `persist` that reads `aoEnabled()` a second time for its PUT fails exactly the
+      single-read cell ("expected true to be false"); dropping the `&ao=off` append fails
+      exactly the apiClient off-cell ("expected 'spy' to be called with arguments: [
+      Array(1) ]"); `useThumbnails` reading a hardcoded `true` instead of the preference
+      fails both off-cells in the sweep's describe ("expected 'spy' to be called with
+      arguments: [ '/models/m0.stl', 1, false ]").
+      <br>Pre-existing cells updated, not rewritten, where the new field widened an
+      exact-match assertion: nine `renderThumbnail` positional assertions and one
+      `getThumb` assertion in `thumbnailCommands.test.ts`, and the two whole-body
+      `putThumb` assertions in `viewerPanelActions.test.tsx` (`ao: true`, with the
+      comment saying it only names the request there)
 
 ## 3. Docs and verification
 

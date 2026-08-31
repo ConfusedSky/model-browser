@@ -7,8 +7,10 @@ import type { DirEntry } from '../../shared/types'
 import type { ApiClient } from '../src/api/client'
 import { useThumbnails } from '../src/hooks/useThumbnails'
 import type { MeshLru } from '../src/three/lru'
+import { DEFAULT_CAMERA } from '../src/three/camera'
 import { RenderQueue } from '../src/three/queue'
 import { renderThumbnail, RIG_VERSION, THUMB_LIGHTING } from '../src/three/renderer'
+import { setAoEnabled } from '../src/viewer/aoToggle'
 
 // The hook only reaches the renderer through renderThumbnail — fake it.
 vi.mock('../src/three/renderer', async (importOriginal) => ({
@@ -73,6 +75,10 @@ function statuses(): string[] {
 }
 
 beforeEach(() => {
+  // aoToggle holds its value in a module closure, so localStorage.clear() does
+  // not reset it and files inherit each other's setting (client/test/CLAUDE.md).
+  // Every case below states the preference it runs under; this is the default.
+  setAoEnabled(true)
   vi.stubGlobal('URL', {
     ...URL,
     createObjectURL: vi.fn(() => 'blob:mock'),
@@ -338,5 +344,72 @@ describe('thumbnail cache lookups vs the render queue', () => {
     await settle()
 
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:orphan')
+  })
+})
+
+describe('the sweep follows the occlusion preference', () => {
+  const CAM = { az: 1, el: 0.25, distR: 3, target: [0, 0, 0] as [number, number, number] }
+
+  it('with the preference off, the lookup, the render and the PUT all name the unoccluded render', async () => {
+    setAoEnabled(false)
+    const api = {
+      getThumb: vi.fn().mockResolvedValue({ status: 'miss' }),
+      putThumb: vi.fn().mockResolvedValue(undefined),
+    } as unknown as ApiClient
+    const obj = {} as THREE.Object3D
+    const lru = { acquire: vi.fn().mockResolvedValue(obj) } as unknown as MeshLru<THREE.Object3D>
+
+    await render(<Harness entries={models(1)} api={api} lru={lru} queue={new RenderQueue(2)} />)
+    await settle()
+
+    expect(api.getThumb).toHaveBeenCalledWith('/models/m0.stl', 1, false)
+    expect(vi.mocked(renderThumbnail)).toHaveBeenCalledWith(obj, DEFAULT_CAMERA, 'y', false)
+    expect(vi.mocked(api.putThumb).mock.calls[0]![0].ao).toBe(false)
+  })
+
+  it('with the preference on, all three name the occluded render', async () => {
+    const api = {
+      getThumb: vi.fn().mockResolvedValue({ status: 'miss' }),
+      putThumb: vi.fn().mockResolvedValue(undefined),
+    } as unknown as ApiClient
+    const obj = {} as THREE.Object3D
+    const lru = { acquire: vi.fn().mockResolvedValue(obj) } as unknown as MeshLru<THREE.Object3D>
+
+    await render(<Harness entries={models(1)} api={api} lru={lru} queue={new RenderQueue(2)} />)
+    await settle()
+
+    expect(api.getThumb).toHaveBeenCalledWith('/models/m0.stl', 1, true)
+    expect(vi.mocked(renderThumbnail)).toHaveBeenCalledWith(obj, DEFAULT_CAMERA, 'y', true)
+    expect(vi.mocked(api.putThumb).mock.calls[0]![0].ao).toBe(true)
+    // That the on-request is *byte-identical* to the one this client sent
+    // before renders were keyed by occlusion is the ApiClient's contract, not
+    // the hook's — pinned in apiClient.test.ts, which sees the URL. Here the
+    // hook can only say which render it asked for.
+  })
+
+  it('a first look at the unoccluded render of an oriented model draws under the stored camera', async () => {
+    // The server answers a never-written render of an entry that holds an
+    // orientation as `stale` *with* the camera (D2), so the tile the user gets
+    // after toggling is their own view — not a re-framed default. The hit test
+    // is unchanged: this answer is about the render that was asked for.
+    setAoEnabled(false)
+    const api = {
+      getThumb: vi.fn().mockResolvedValue({ status: 'stale', camera: CAM, axis: '-z' }),
+      putThumb: vi.fn().mockResolvedValue(undefined),
+    } as unknown as ApiClient
+    const obj = {} as THREE.Object3D
+    const lru = { acquire: vi.fn().mockResolvedValue(obj) } as unknown as MeshLru<THREE.Object3D>
+
+    await render(<Harness entries={models(1)} api={api} lru={lru} queue={new RenderQueue(2)} />)
+    await settle()
+
+    expect(vi.mocked(renderThumbnail)).toHaveBeenCalledWith(obj, CAM, '-z', false)
+    const put = vi.mocked(api.putThumb).mock.calls[0]![0]
+    expect(put.ao).toBe(false)
+    // Pixels only — the orientation was already the entry's and is preserved
+    // by omission, which is also what keeps this PUT from invalidating the
+    // occluded sibling it was just toggled away from.
+    expect(put.camera).toBeUndefined()
+    expect(put.axis).toBeUndefined()
   })
 })

@@ -120,7 +120,7 @@ describe('re-render thumbnail', () => {
     run('reRenderThumbnail', h.host)
     await flush()
 
-    expect(renderThumbnail).toHaveBeenCalledWith(MESH, CAM, '-x')
+    expect(renderThumbnail).toHaveBeenCalledWith(MESH, CAM, '-x', true)
     const put = h.putThumb.mock.calls[0]![0] as Record<string, unknown>
     expect(put.path).toBe(HERO.path)
     expect(put.mtime).toBe(HERO.mtime)
@@ -151,7 +151,7 @@ describe('re-render thumbnail', () => {
     run('reRenderThumbnail', h.host)
     await flush()
 
-    expect(renderThumbnail).toHaveBeenCalledWith(MESH, resolved.camera, resolved.axis)
+    expect(renderThumbnail).toHaveBeenCalledWith(MESH, resolved.camera, resolved.axis, true)
     const put = h.putThumb.mock.calls[0]![0] as Record<string, unknown>
     expect(put.posed).toBe(POSE_VERSION)
     // Still nothing of the user's: a re-classification still governs this model.
@@ -168,7 +168,7 @@ describe('re-render thumbnail', () => {
       run('reRenderThumbnail', h.host)
       await flush()
 
-      expect(renderThumbnail).toHaveBeenCalledWith(MESH, DEFAULT_CAMERA, '-z')
+      expect(renderThumbnail).toHaveBeenCalledWith(MESH, DEFAULT_CAMERA, '-z', true)
       const put = h.putThumb.mock.calls[0]![0] as Record<string, unknown>
       expect(put.axis).toBeUndefined() // keep, never discard
       expect(put.posed).toBeUndefined() // the pose was withheld, so was its label
@@ -186,7 +186,7 @@ describe('reset framing', () => {
 
     // Rendered as an untouched model is rendered: the index's orientation
     // entire, rather than the default about the axis it used to have.
-    expect(renderThumbnail).toHaveBeenCalledWith(MESH, resolved.camera, resolved.axis)
+    expect(renderThumbnail).toHaveBeenCalledWith(MESH, resolved.camera, resolved.axis, true)
     const put = h.putThumb.mock.calls[0]![0] as Record<string, unknown>
     expect(put.camera).toBeNull() // null discards; undefined would keep
     expect(put.axis).toBeNull()
@@ -226,7 +226,7 @@ describe('reset framing', () => {
       await flush()
 
       // Framed by default about the axis the user established.
-      expect(renderThumbnail).toHaveBeenCalledWith(MESH, DEFAULT_CAMERA, '-x')
+      expect(renderThumbnail).toHaveBeenCalledWith(MESH, DEFAULT_CAMERA, '-x', true)
       const put = h.putThumb.mock.calls[0]![0] as Record<string, unknown>
       expect(put.camera).toBeNull()
       expect(put.axis).toBeUndefined() // kept
@@ -245,7 +245,7 @@ describe('reset framing', () => {
     run('resetFraming', h.host)
     await flush()
 
-    expect(renderThumbnail).toHaveBeenCalledWith(MESH, resolved.camera, resolved.axis)
+    expect(renderThumbnail).toHaveBeenCalledWith(MESH, resolved.camera, resolved.axis, true)
     const put = h.putThumb.mock.calls[0]![0] as Record<string, unknown>
     expect(put.axis).toBeNull()
     expect(put.posed).toBe(POSE_VERSION)
@@ -266,7 +266,7 @@ describe('set orbit axis', () => {
     expect(h.getThumb).not.toHaveBeenCalled()
     // The default about the new spindle — which is what an ordinary visit
     // resolves to for a model with an axis and no camera.
-    expect(renderThumbnail).toHaveBeenCalledWith(MESH, DEFAULT_CAMERA, 'z')
+    expect(renderThumbnail).toHaveBeenCalledWith(MESH, DEFAULT_CAMERA, 'z', true)
 
     const put = h.putThumb.mock.calls[0]![0] as Record<string, unknown>
     expect(put.path).toBe(HERO.path)
@@ -397,8 +397,10 @@ describe('both commands', () => {
     const h = harness({ status: 'hit', camera: CAM, axis: '-x' })
     run('reRenderThumbnail', h.host)
     await flush()
-    expect(h.getThumb).toHaveBeenCalledWith(HERO.path, HERO.mtime)
-    expect(renderThumbnail).toHaveBeenCalledWith(MESH, CAM, '-x')
+    // The lookup names the render it is about to rewrite, so its LRU clock is
+    // the one bumped and its answer is the one the PUT replaces.
+    expect(h.getThumb).toHaveBeenCalledWith(HERO.path, HERO.mtime, true)
+    expect(renderThumbnail).toHaveBeenCalledWith(MESH, CAM, '-x', true)
   })
 
   it('say so when the render fails, and leave the tile showing what it had', async () => {
@@ -519,7 +521,7 @@ describe('what the next visit makes of the pixels', () => {
     setOrbitAxis(HERO, host, '-z', 'y')
     await flush()
     expect(renderThumbnail).toHaveBeenCalledTimes(1)
-    expect(renderThumbnail).toHaveBeenCalledWith(MESH, DEFAULT_CAMERA, '-z')
+    expect(renderThumbnail).toHaveBeenCalledWith(MESH, DEFAULT_CAMERA, '-z', true)
 
     // Now the grid arrives at this model the ordinary way.
     const el = document.createElement('div')

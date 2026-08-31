@@ -48,7 +48,15 @@ vi.mock('../src/three/renderer', async (importOriginal) => ({
 // on mount lets this file pin App's persist PUT payload alone. What it passes
 // as options is a test's to choose — `{camera: false}` is the one close
 // ViewerLayer makes that way: a posed view the user never touched.
-const opts = vi.hoisted(() => ({ persist: undefined as { camera?: boolean } | undefined }))
+const opts = vi.hoisted(() => ({
+  persist: undefined as { camera?: boolean } | undefined,
+  // What the stub session's `snapshot` was handed — the value `persist`
+  // captured before its await, which must also be the one on the PUT.
+  snapshotAo: undefined as boolean | undefined,
+  /** Run inside `snapshot`, i.e. during the await `persist` holds across. A
+   *  test uses it to move the preference under a persist in flight. */
+  duringSnapshot: undefined as (() => void) | undefined,
+}))
 const SETTLED = { az: 1, el: 0.2, distR: 2, target: [0, 0, 0] as [number, number, number] }
 vi.mock('../src/viewer/ViewerLayer', () => ({
   default: ({
@@ -61,7 +69,11 @@ vi.mock('../src/viewer/ViewerLayer', () => ({
         {
           state: SETTLED,
           axis: '-z',
-          snapshot: () => Promise.resolve(new Blob(['png'])),
+          snapshot: (ao?: boolean) => {
+            opts.snapshotAo = ao
+            opts.duringSnapshot?.()
+            return Promise.resolve(new Blob(['png']))
+          },
         } as unknown as ViewerSession,
         opts.persist,
       )
@@ -75,6 +87,7 @@ vi.mock('../src/viewer/ViewerLayer', () => ({
 const { default: App } = await import('../src/App')
 const { RIG_VERSION, THUMB_LIGHTING } = await import('../src/three/renderer')
 const { POSE_VERSION } = await import('../src/three/pose')
+const { setAoEnabled } = await import('../src/viewer/aoToggle')
 
 const MODEL = {
   name: 'm.stl',
@@ -93,6 +106,12 @@ const settle = () => act(() => new Promise((r) => setTimeout(r, 30)))
 
 beforeEach(async () => {
   opts.persist = undefined
+  opts.snapshotAo = undefined
+  opts.duringSnapshot = undefined
+  // A module closure, so localStorage.clear() in afterEach does not reset it
+  // (client/test/CLAUDE.md). Mounted under the shipped default; the cases that
+  // want it off say so before opening the viewer.
+  setAoEnabled(true)
   // The boot path, through the URL: `resolveView` opens at the library's top
   // (design D2/D7) and reads no last path, so this is what puts the app in
   // /models the way the storage seed used to.
@@ -166,5 +185,53 @@ describe('orbit-release persist PUT', () => {
     expect(save.camera).toBeUndefined()
     expect(save.axis).toBeUndefined()
     expect(save.posed).toBe(POSE_VERSION)
+  })
+})
+
+describe('the persist PUT names one occlusion render', () => {
+  /** Open the viewer on the one tile, which is what runs the stubbed persist. */
+  async function release(): Promise<void> {
+    const tile = container.querySelector<HTMLButtonElement>('[data-model-tile]')!
+    await act(async () => {
+      tile.dispatchEvent(
+        new PointerEvent('pointerdown', { button: 0, bubbles: true, clientX: 10, clientY: 10 }),
+      )
+    })
+    await settle()
+  }
+
+  it('an orbit released with the preference off snapshots and files the unoccluded render', async () => {
+    setAoEnabled(false)
+    await release()
+
+    // The snapshot goes through `renderThumbnail`, not the live chain, so
+    // without the argument these pixels would be occluded whatever the pill
+    // says — the standing mismatch this change closes (D4a). That the
+    // argument reaches the chain is composer.test.ts's cell.
+    expect(opts.snapshotAo).toBe(false)
+    const save = putThumb.mock.calls[0]![0] as Record<string, unknown>
+    expect(save.ao).toBe(false)
+    // The camera travels with it, which is what makes the *other* render's
+    // labels stale server-side. That invalidation is the server's rule and is
+    // asserted in server/test/cache.test.ts — a mocked ApiClient here could
+    // only round-trip whatever this file told it to, so this cell pins the
+    // half the client is actually responsible for: the PUT carries both.
+    expect(save.camera).toEqual(SETTLED)
+    expect(save.axis).toBe('-z')
+    expect(save.png).toBeInstanceOf(Blob)
+  })
+
+  it('reads the preference once: a toggle mid-snapshot cannot split the pixels from their slot', async () => {
+    // Two independent reads — one for the render, one for the PUT — would file
+    // unoccluded pixels under the occluded slot with matching labels here: a
+    // wrong-recipe hit nothing invalidates, because both readings were correct
+    // where they stood (D4a). The capture before the await is what forbids it.
+    setAoEnabled(false)
+    opts.duringSnapshot = () => setAoEnabled(true)
+    await release()
+
+    expect(opts.snapshotAo).toBe(false)
+    const save = putThumb.mock.calls[0]![0] as Record<string, unknown>
+    expect(save.ao).toBe(false) // the captured value, not the one now in force
   })
 })

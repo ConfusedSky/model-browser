@@ -642,6 +642,10 @@ describe('resetFramingLive', () => {
       mtime: ENTRY.mtime,
       camera: null,
       axis: null, // half a pose is not a pose
+      // Declared on every PUT now, this one included — though with no pixels
+      // it only names the request: a pixel-less orientation discard
+      // invalidates both renders whichever it names (ao-as-recipe-dimension).
+      ao: true,
     })
     const resolved = cameraForPose(POSE, DEFAULT_CAMERA)!
     expect(h.view.reframe).toHaveBeenCalledWith(resolved.camera, resolved.axis, true)
@@ -659,6 +663,7 @@ describe('resetFramingLive', () => {
       mtime: ENTRY.mtime,
       camera: null,
       axis: undefined, // absence keeps; there is nothing better to fall back to
+      ao: true,
     })
     expect(h.view.reframe).toHaveBeenCalledWith(DEFAULT_CAMERA, 'y', false)
     await flush()

@@ -13,6 +13,12 @@ import type {
   ThumbStatus,
 } from '../../../shared/types'
 
+/**
+ * One render's answer. There is no `ao` field, deliberately: the request names
+ * the render and the response describes that one, so the wire carries no echo
+ * to parse (`ao-as-recipe-dimension` D2). `camera` and `axis` are the entry's,
+ * shared by both renders; everything else below is the requested render's.
+ */
 export interface ThumbResult {
   status: ThumbStatus
   camera?: CameraState
@@ -40,6 +46,13 @@ export interface ThumbSave {
   lighting?: LightingMode
   rig?: number
   posed?: number
+  /**
+   * Which render these pixels and labels are: `true` the occluded one, `false`
+   * the unoccluded sibling. Absent means occluded — what every PUT meant
+   * before occlusion became a key dimension. Callers that render pass the same
+   * value they rendered under, never a second reading of the preference (D4a).
+   */
+  ao?: boolean
 }
 
 /**
@@ -113,7 +126,12 @@ export interface ApiClient {
     pool?: SemanticTuning['pool'],
     signal?: AbortSignal,
   ): Promise<SimilarListing>
-  getThumb(path: string, mtime: number): Promise<ThumbResult>
+  /**
+   * The cached thumbnail for one render of `path`. `ao` names which — occluded
+   * by default, which is what a request with no `ao` has always meant and what
+   * the server still reads an absent parameter as.
+   */
+  getThumb(path: string, mtime: number, ao?: boolean): Promise<ThumbResult>
   putThumb(save: ThumbSave): Promise<void>
   /**
    * What the platform registry reports for the model types this app handles,
@@ -281,9 +299,12 @@ export class HttpApiClient implements ApiClient {
     return res.arrayBuffer()
   }
 
-  async getThumb(path: string, mtime: number): Promise<ThumbResult> {
+  async getThumb(path: string, mtime: number, ao = true): Promise<ThumbResult> {
+    // Appended only when off: absent already means the occluded render, so an
+    // occlusion-on request is byte-identical to every request this client sent
+    // before renders were keyed by occlusion (D2).
     const res = await this.fetchFn(
-      `/api/thumb?path=${encodeURIComponent(path)}&mtime=${mtime}`,
+      `/api/thumb?path=${encodeURIComponent(path)}&mtime=${mtime}${ao ? '' : '&ao=off'}`,
     )
     const body = await jsonOrThrow<ThumbGetResponse>(res)
     return {
@@ -336,6 +357,7 @@ export class HttpApiClient implements ApiClient {
         lighting: save.lighting,
         rig: save.rig,
         posed: save.posed,
+        ao: save.ao,
       }),
     })
     if (!res.ok) throw await errorOf(res)

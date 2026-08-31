@@ -30,8 +30,14 @@ vi.mock('three', async (importOriginal) => {
 const { getLiveChain, getRenderer, getThumbChain, makeScene, renderThumbnail, stageModel, THUMB_SIZE } =
   await import('../src/three/renderer')
 const { ViewerSession } = await import('../src/viewer/session')
+const { setAoEnabled } = await import('../src/viewer/aoToggle')
 
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  vi.restoreAllMocks()
+  // aoToggle keeps its value in a module closure, so it outlives a test
+  // (client/test/CLAUDE.md). Back to the shipped default for whatever runs next.
+  setAoEnabled(true)
+})
 
 /** A cube whose bounding-sphere radius is exactly `radius`. */
 function makeMesh(radius = 1): THREE.Mesh {
@@ -220,5 +226,73 @@ describe('GTAO fit', () => {
     const first = fitFor(1).ao.gtaoMaterial.uniforms.radius!.value
     const second = fitFor(50).ao.gtaoMaterial.uniforms.radius!.value
     expect(second).not.toBeCloseTo(first, 6)
+  })
+})
+
+// Handoff parity, asserted where it is actually decided: the `ao` flag the two
+// chains receive. Every other test in this change works against a mocked
+// `renderThumbnail` and can only say what the *callers* passed; here the
+// chains are real (over the fake WebGLRenderer above), so the GTAO pass's own
+// `enabled` is the answer to "was this render occluded".
+describe('both paths render under the same occlusion preference', () => {
+  /** The GTAO pass of a chain — the only thing `ao` actually moves. */
+  function aoPassOf(chain: { composer: { passes: unknown[] } }): GTAOPass {
+    return chain.composer.passes[1] as GTAOPass
+  }
+
+  /** Drive the live view once and report whether its chain occluded it. */
+  function liveOccluded(session: InstanceType<typeof ViewerSession>): boolean {
+    const live = getLiveChain(200, 200)
+    vi.spyOn(live.composer, 'render').mockImplementation(() => {})
+    session.render(200, 200)
+    return aoPassOf(live).enabled
+  }
+
+  /** Draw a thumbnail once and report whether its chain occluded it. The PNG
+   *  encode throws in happy-dom, well after the chain render this reads. */
+  function thumbOccluded(draw: () => unknown): boolean {
+    const chain = getThumbChain()
+    vi.spyOn(chain.composer, 'render').mockImplementation(() => {})
+    expect(draw).toThrow('2d context unavailable')
+    return aoPassOf(chain).enabled
+  }
+
+  it('with the preference off, the tile and the overlay over it are both unoccluded', () => {
+    setAoEnabled(false)
+    const session = new ViewerSession(makeMesh())
+    try {
+      // The thumbnail the tile shows: rendered under the caller's reading.
+      expect(thumbOccluded(() => renderThumbnail(makeMesh(), undefined, 'y', false))).toBe(false)
+      // The overlay that opens over it: the live chain reads the same store.
+      expect(liveOccluded(session)).toBe(false)
+    } finally {
+      session.close()
+    }
+  })
+
+  it('with the preference on, both are occluded — the shipped recipe, unchanged', () => {
+    const session = new ViewerSession(makeMesh())
+    try {
+      expect(thumbOccluded(() => renderThumbnail(makeMesh()))).toBe(true)
+      expect(liveOccluded(session)).toBe(true)
+    } finally {
+      session.close()
+    }
+  })
+
+  it("a session's snapshot draws under the value handed to it, never a read of its own", () => {
+    // The site a grep for `aoEnabled` misses: `snapshot` goes through
+    // `renderThumbnail`, not the live chain, and takes the preference as an
+    // argument so `persist` can capture it once and use the same value for the
+    // pixels and the slot they are filed under (D4a). Asserted against the
+    // store set the *other* way, which is the only way to tell a passed value
+    // from a fresh read.
+    setAoEnabled(true)
+    const session = new ViewerSession(makeMesh())
+    try {
+      expect(thumbOccluded(() => session.snapshot(false))).toBe(false)
+    } finally {
+      session.close()
+    }
   })
 })

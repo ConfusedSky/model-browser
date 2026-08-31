@@ -283,9 +283,19 @@ export class ViewerSession {
     return Promise.resolve()
   }
 
-  /** 512×512 PNG of the rest state. */
-  snapshot(): Promise<Blob> {
-    return renderThumbnail(this.object, this.state, this._axis)
+  /**
+   * 512×512 PNG of the rest state.
+   *
+   * `ao` is the caller's, never this session's own `aoEnabled()` read — the
+   * one place `render` and `snapshot` deliberately differ. `App.tsx`'s
+   * `persist` captures the preference beside `state` and `axis` before its
+   * await and hands the same value to this and to its PUT, so the pixels and
+   * the slot they are filed under cannot come from two readings a toggle
+   * happened to fall between (D4a). Occluded by default: what every snapshot
+   * was before occlusion became a key dimension.
+   */
+  snapshot(ao = true): Promise<Blob> {
+    return renderThumbnail(this.object, this.state, this._axis, ao)
   }
 
   close(): void {

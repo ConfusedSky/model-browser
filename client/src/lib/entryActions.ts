@@ -46,6 +46,7 @@ import type { MeshLru } from '../three/lru'
 import { cameraForPose, POSE_VERSION } from '../three/pose'
 import type { RenderQueue } from '../three/queue'
 import { RIG_VERSION, renderThumbnail, THUMB_LIGHTING } from '../three/renderer'
+import { aoEnabled } from '../viewer/aoToggle'
 
 /** One id per command. The closed list is the menu's budget (D6). */
 export type CommandId =
@@ -370,7 +371,15 @@ function refreshThumbnail(
       // after the gate, so a lightbox that persisted a new camera on its way
       // out is already in it. One lookup holding a render slot is not the 500
       // the sweep's own limiter exists to keep out of them.
-      const cached = await host.api.getThumb(entry.path, entry.mtime)
+      // The occlusion recipe this press looks up, draws and files under — one
+      // reading for all three, so the lookup, the pixels and the PUT cannot
+      // name two different renders (D4/D4a). Read after the gate for the same
+      // reason the lookup is: the pill sits in the corner and stays pressable
+      // while a lightbox holds the queue suspended, so a toggle made there is
+      // already in it. It also decides which render's LRU clock the lookup
+      // bumps — the one about to be rewritten, not its sibling.
+      const ao = aoEnabled()
+      const cached = await host.api.getThumb(entry.path, entry.mtime, ao)
       // A hit mints an object URL; this read wanted the orientation, not the
       // old pixels.
       if (cached.pngUrl !== undefined) URL.revokeObjectURL(cached.pngUrl)
@@ -404,11 +413,13 @@ function refreshThumbnail(
 
       const object = await host.lru.acquire(entry.path)
       await host.queue.whenResumed()
-      const png = await renderThumbnail(object, camera, axis)
+      const png = await renderThumbnail(object, camera, axis, ao)
       await host.api.putThumb({
         path: entry.path,
         mtime: entry.mtime,
         png,
+        // The reading the lookup and the render already used.
+        ao,
         // Pixels and the labels that say what drew them — never a viewpoint on
         // re-render: a pose orients the model without becoming its stored
         // camera (semantic-search), so a re-classification still governs it.
@@ -502,6 +513,13 @@ export function resetFramingLive(
       // and this write does not touch them.
       camera: null,
       axis: framing.posed ? null : undefined,
+      // Declared for completeness, and it decides nothing here: with no PNG
+      // and no labels there is no "written render" for the value to select.
+      // The discard is the entry's — `ThumbCache.put` invalidates *both*
+      // renders on a pixel-less orientation change (D2), so which one this
+      // names cannot change the outcome. It names the render the user is
+      // looking at, which is the truthful answer to "which one is this".
+      ao: aoEnabled(),
     })
     .then(
       // The tile's own copy, not only the server's: App opens the lightbox at
@@ -646,7 +664,10 @@ export function setOrbitAxis(
       // The default about the new spindle — which is what an ordinary visit
       // resolves to for a model that has an axis and no camera
       // (`useThumbnails`' camera/axis fallbacks), so the tile and the next sweep agree.
-      const png = await renderThumbnail(object, DEFAULT_CAMERA, axis)
+      // One reading, here, for the pixels and the PUT that files them
+      // (D4/D4a) — after the gate, like the other re-render command's.
+      const ao = aoEnabled()
+      const png = await renderThumbnail(object, DEFAULT_CAMERA, axis, ao)
       await host.api.putThumb({
         path: entry.path,
         mtime: entry.mtime,
@@ -655,6 +676,7 @@ export function setOrbitAxis(
         axis,
         lighting: THUMB_LIGHTING,
         rig: RIG_VERSION,
+        ao,
       })
       // The session's own copy, not only the server's: App opens the lightbox at
       // what this map holds, so a cache-only write would open the model about

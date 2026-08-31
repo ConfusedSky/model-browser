@@ -90,6 +90,31 @@ describe('HttpApiClient contract', () => {
     expect(res).toEqual({ status: 'hit', camera: CAM, axis: '-z', lighting: 'camera', rig: 2, pngUrl: 'blob:mock' })
   })
 
+  // The whole point of appending `ao` only when it is off: an occlusion-on
+  // request must be the same bytes it was before renders were keyed by
+  // occlusion, so an old cache and an old server answer it unchanged (D2).
+  // The cell above pins the on-request; this one pins the off-request beside
+  // it, and the two together are what "only when off" means.
+  it('getThumb names the unoccluded render, and only then', async () => {
+    // A fresh Response per call: one instance cannot be read three times.
+    const fetchFn = vi.fn(() => Promise.resolve(jsonResponse({ status: 'miss' })))
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
+
+    await api.getThumb('/m.stl', 42, false)
+    expect(fetchFn).toHaveBeenCalledWith(
+      `/api/thumb?path=${encodeURIComponent('/m.stl')}&mtime=42&ao=off`,
+    )
+
+    // Explicitly on, and defaulted on: neither may add a parameter.
+    await api.getThumb('/m.stl', 42, true)
+    await api.getThumb('/m.stl', 42)
+    const urls = fetchFn.mock.calls.slice(1).map((c) => (c as unknown[])[0])
+    expect(urls).toEqual([
+      `/api/thumb?path=${encodeURIComponent('/m.stl')}&mtime=42`,
+      `/api/thumb?path=${encodeURIComponent('/m.stl')}&mtime=42`,
+    ])
+  })
+
   it('getThumb on miss has no pngUrl', async () => {
     const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ status: 'miss' }))
     const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
@@ -122,6 +147,26 @@ describe('HttpApiClient contract', () => {
       lighting: 'camera',
       rig: 2,
     })
+  })
+
+  it('putThumb declares which render its pixels are', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ ok: true }))
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
+    await api.putThumb({
+      path: '/m.stl',
+      mtime: 42,
+      png: new Blob(['raw-png']),
+      lighting: 'camera',
+      rig: 2,
+      ao: false,
+    })
+    const [, init] = fetchFn.mock.calls[0] as [string, RequestInit]
+    const body = JSON.parse(init.body as string) as Record<string, unknown>
+    // `false` has to survive serialisation as a value, not vanish the way an
+    // absent field does — absent means occluded, so a dropped `false` would
+    // file unoccluded pixels over the shipped render.
+    expect(body.ao).toBe(false)
+    expect(Object.hasOwn(body, 'ao')).toBe(true)
   })
 
   it('fetchModel returns raw bytes', async () => {
