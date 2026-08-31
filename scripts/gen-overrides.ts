@@ -130,7 +130,10 @@ export async function generateOverrides(opts: GenerateOptions): Promise<Generate
   // Textual containment, decided before a single byte is read or written. Not a
   // `realpath` test: the check has to hold for a kit directory that does not
   // exist yet, and `resolve` is what collapses the `..` this refuses.
-  if (kitsDir !== top && !kitsDir.startsWith(top + sep)) {
+  // `top + sep` would double the separator when the top IS the root, refusing
+  // every legitimate kit directory under it.
+  const topPrefix = top.endsWith(sep) ? top : top + sep
+  if (kitsDir !== top && !kitsDir.startsWith(topPrefix)) {
     throw new Error(`the kit directory must be the library top or beneath it: ${kitsDir} is not under ${top}`)
   }
 
@@ -142,6 +145,7 @@ export async function generateOverrides(opts: GenerateOptions): Promise<Generate
 
   const file = await readStore(top)
   const missing: string[] = []
+  const seen = new Set<string>()
   let read = 0
   let written = 0
 
@@ -156,7 +160,26 @@ export async function generateOverrides(opts: GenerateOptions): Promise<Generate
       continue
     }
     const rel = relative(top, dir)
+    // The containment check above guards the kit *directory*; a stem carrying
+    // `..` (or an absolute path) escapes through `join` per key and would write
+    // a key the loader silently normalises into a plausible wrong path —
+    // exactly what the check exists to refuse, so it is applied to the derived
+    // key too. A metadata stem is corpus data, and corpus data does not get to
+    // name things outside the corpus.
+    if (rel === '..' || rel.startsWith(`..${sep}`) || rel.startsWith(sep)) {
+      report(`  stem escapes the top and was skipped: ${stem}`)
+      missing.push(stem)
+      continue
+    }
     const key = rel === '' ? '/' : `/${rel.split(sep).join('/')}`
+    // A duplicate stem in the metadata is one key, counted once — the reported
+    // count is what the credits-page gate consumes, and it must mean keys. (A
+    // key already in the FILE is fine — that is what a rerun looks like.)
+    if (seen.has(key)) {
+      report(`  duplicate stem, key already written this run: ${stem}`)
+      continue
+    }
+    seen.add(key)
     // Merge, never replace: a `pose` written by later tooling, and any field or
     // key this generator does not own, survives a rerun.
     const entry: OverrideEntry = { ...file.entries[key] }

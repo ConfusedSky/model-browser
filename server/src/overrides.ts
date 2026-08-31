@@ -137,10 +137,37 @@ export async function loadOverrides(
       report(`overrides: ${file}: ignoring key ${JSON.stringify(raw)} — ${spelled.error}`)
       continue
     }
+    // Fields the app will render are validated to be strings, and a bad one is
+    // dropped and reported while the rest of the entry is kept — the format
+    // anticipates hand and third-party writers (D6), and an object where a
+    // string belongs would otherwise ride `displayName` onto the wire and be
+    // handed to React as a child, unmounting the grid. Dropping the field, not
+    // the entry, is the loader's usual posture: a broken piece must not take
+    // the rest of a kit's metadata with it, and must not be silent either (D1).
+    const entry = { ...(value as OverrideEntry) }
+    if (entry.name !== undefined && typeof entry.name !== 'string') {
+      report(`overrides: ${file}: key ${JSON.stringify(raw)} — dropping non-string name`)
+      delete entry.name
+    }
+    if (entry.credits !== undefined) {
+      if (typeof entry.credits !== 'object' || entry.credits === null || Array.isArray(entry.credits)) {
+        report(`overrides: ${file}: key ${JSON.stringify(raw)} — dropping non-object credits`)
+        delete entry.credits
+      } else {
+        for (const field of ['author', 'authorUrl', 'license', 'sourceUrl'] as const) {
+          const held = entry.credits[field]
+          if (held !== undefined && typeof held !== 'string') {
+            report(`overrides: ${file}: key ${JSON.stringify(raw)} — dropping non-string credits.${field}`)
+            entry.credits = { ...entry.credits }
+            delete entry.credits[field]
+          }
+        }
+      }
+    }
     // Two spellings that canonicalise to one key are one key, and the last one
     // read wins. Deliberately unreported: nothing is lost that the file did not
     // already say twice, and a line about it would be noise on every load.
-    store.set(spelled.key, value as OverrideEntry)
+    store.set(spelled.key, entry)
   }
   return store
 }
@@ -197,6 +224,10 @@ function ancestorKeys(libPath: string): string[] {
  *
  * Inherited, a kit's name would label the kit tile *and* all thirty models
  * beneath it identically — the generator writes one `name` per kit directory.
+ *
+ * Throws `VPathError` on a nested-zip lookup (`a.zip!/b.zip!/…`), like every
+ * path API here; unreachable through the routes, which run `canonicalLibPath`
+ * first and 400 on the same error.
  */
 export function resolveOverrides(store: OverrideStore, libPath: string): ResolvedOverrides {
   const keys = ancestorKeys(libPath)

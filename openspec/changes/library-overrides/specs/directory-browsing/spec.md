@@ -15,8 +15,12 @@ name labels the kit's own tile and nothing beneath it. Tiles SHALL render the
 display name in place of the file-derived label wherever one is carried, in
 every listing shape — a browse, a flat or deep-search listing, and a folder
 tile's preview entries alike — while the entry's real name SHALL remain in the
-tile's title and accessible name, and SHALL remain what find, deep search and
-the flat filter match: display names are display only. An entry with no stored
+tile's own title and accessible name, and SHALL remain what find, deep search
+and the flat filter match: display names are display only. A folder tile's
+preview cell is the one exception by construction: it has no visible label, so
+its title IS its label surface and SHALL carry the display name where one is
+stored (falling back to the entry's real name, unchanged) — the enclosing
+tile's title still carries the real name. An entry with no stored
 name SHALL be labelled exactly as before, and a library with no store SHALL
 list and label identically to today.
 

@@ -110,6 +110,35 @@ describe('loading the store', () => {
     expect(problems[0]).toContain('not an object')
   })
 
+  it('drops a wrong-typed field, reports it, and keeps the rest of the entry', async () => {
+    // A hand or third-party writer (D6) putting an object where a string
+    // belongs must not ride `displayName` onto the wire and be handed to React
+    // as a child — that unmounts the grid, which is "taking the library down"
+    // one layer up (found by the post-merge review). The field drops, the
+    // entry's other fields survive.
+    const { store, problems } = await loadWith(
+      v1({ '/kit': { name: { a: 1 }, credits: CREDITS } }),
+    )
+    expect(resolveOverrides(store, '/kit')).toEqual({ credits: CREDITS })
+    expect(problems).toHaveLength(1)
+    expect(problems[0]).toContain('non-string name')
+  })
+
+  it('drops a wrong-typed credits field, keeping the string ones', async () => {
+    const { store, problems } = await loadWith(
+      v1({ '/kit': { credits: { author: 'Valandar', sourceUrl: 42 } } }),
+    )
+    expect(resolveOverrides(store, '/kit')).toEqual({ credits: { author: 'Valandar' } })
+    expect(problems).toHaveLength(1)
+    expect(problems[0]).toContain('non-string credits.sourceUrl')
+  })
+
+  it('drops credits that are not an object at all', async () => {
+    const { store, problems } = await loadWith(v1({ '/kit': { name: 'Kit', credits: 'CC-BY' } }))
+    expect(resolveOverrides(store, '/kit')).toEqual({ name: 'Kit' })
+    expect(problems[0]).toContain('non-object credits')
+  })
+
   it('canonicalises a key spelled with a trailing slash, and lookups match it', async () => {
     // `/kit/` is the natural hand-edit spelling for a directory and would match
     // nothing at all unless the loader canonicalises it.

@@ -7,6 +7,15 @@
 
 > Ordering: after `search-matches-folder-names` (its container collection changes what the walk gathers). This caches **the tree the walk gathers, not a walk's filtered output** — the distinction is the whole design: `q` and the search options are filters applied over the snapshot, so they are not part of its key, and a toggle re-filters rather than re-walking. Independent of `search-options` for the same reason. Re-read `listing.ts` against main before starting (parallel sessions).
 
+> **Landed since this was drafted, and load-bearing here** (`library-overrides`, 2026-08-31):
+> `applyDisplayNames` in `app.ts` **mutates emitted `DirEntry`s in place**, setting
+> `displayName` from the per-library override store, and only ever sets — it never clears.
+> Safe today because every listing mints fresh entries; a snapshot that hands out cached
+> `DirEntry` objects would bake the first request's names in and keep them across a store
+> removal or a library repoint, breaking that change's "no store → byte-identical labels"
+> requirement. Serve **copies** from the snapshot (or make the name pass copy-on-write)
+> and add the cell: repoint/remove the store, re-list, labels revert.
+
 ## 1. Validate the freshness signal before building on it
 
 - [ ] 1.1 **Do this first — D4 rests on it.** Measure directory-mtime behavior on the real **exfat** volume (`/run/media/masa/Files and S`): add, remove, and rename entries in a directory and confirm its mtime moves in each case, at what granularity, and whether it survives unmount/remount. exfat timestamps are coarser than ext4's and driver-dependent

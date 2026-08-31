@@ -57,8 +57,9 @@ reopen it.
 
 - `model-viewer`: ADDs one requirement — the panel's credits section for an
   entry that resolves attribution. (Written while three changes MODIFIED other
-  `model-viewer` requirements — all three have since archived — so this delta
-  is ADD-only under a new title; no collision at archive.)
+  `model-viewer` requirements — two have since archived; `adaptive-ao-default`
+  is still active but ADDs only, under a distinct title — so this delta is
+  ADD-only under a new title; no collision at archive.)
 - `directory-browsing`: ADDs one requirement — entries carry and tiles render
   the store's display name for their exact key. (`search-cancellation` ADDs a
   differently-titled requirement to the same capability while active; no

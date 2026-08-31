@@ -81,9 +81,10 @@ resolved identity (id + top). The mechanism is a compare, not a hook —
 `Library` exposes no event on `settled` (its six members are `state`,
 `refresh`, `realTop`, `id`, `resolve`, `libPathOf`), and adding one would
 break the proposal's "`library.ts` untouched". The store holder keeps
-`{identity, store}` and, on each `/api/overrides`, compares the identity
-against `state()`'s ready answer — already computed per request by the gate
-middleware — reloading on mismatch. `index.ts`'s existing
+`{identity, store}` and, on each request that consults the store —
+`/api/overrides`, and since D7 every `/api/dir` and `/api/peek` — compares the
+identity against its own `state()` call (a second stat beside the gate's,
+~1.7 µs warm per `library.ts`'s measurement), reloading on mismatch. `index.ts`'s existing
 `void library.state().then(...)` also loads eagerly when the library is ready
 at start, which is what puts the malformed-store report beside the startup
 line; a library that resolves later loads on the first overrides request, and
@@ -238,7 +239,10 @@ a hit attaches an optional `displayName` to the `DirEntry`. This does not
 reopen D3's rejection of folding overrides into `/api/dir`: what D3 rejected
 was per-entry *resolution* (the ancestor walk, all fields) to serve a panel
 that shows one entry; an exact-key get for one field costs what the `size`
-field costs. The peek endpoint returns ordinary listing entries, so sheet
+field costs. The pass mutates the emitted entries in place and only ever
+sets — safe while every listing mints fresh objects, and a hazard the moment
+one is cached: `listing-tree-cache`'s tasks now carry the serve-copies rule
+(found by the post-merge review). The peek endpoint returns ordinary listing entries, so sheet
 labels come along for free.
 
 The consumer: a tile whose entry carries `displayName` renders it as the

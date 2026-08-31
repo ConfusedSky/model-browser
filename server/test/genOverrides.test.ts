@@ -192,4 +192,31 @@ describe('gen-overrides', () => {
     await generateOverrides({ top, metadata, report: (m) => lines.push(m) })
     expect(lines.some((l) => l.includes('restart it to pick this up'))).toBe(true)
   })
+
+  it('refuses a stem that escapes the top, and writes no key for it', async () => {
+    // The containment check guards the kit *directory*; a `..` stem escapes
+    // through `join` per key and would write a key the loader normalises into
+    // a plausible wrong path (found by the post-merge review). The escaping
+    // directory genuinely exists here, so only the key guard stands between
+    // the stem and the store.
+    const { top, metadata } = fixture()
+    mkdirSync(join(top, '..', 'outside-gen'), { recursive: true })
+    writeFileSync(
+      metadata,
+      JSON.stringify([{ thing_id: 1, stem: '../outside-gen', name: 'Escaped', files: [] }]),
+    )
+    const lines: string[] = []
+    const result = await generateOverrides({ top, metadata, report: (m) => lines.push(m) })
+    expect(result.written).toBe(0)
+    expect(Object.keys((await readStore(top)).entries)).toEqual([])
+    expect(lines.some((l) => l.includes('escapes the top'))).toBe(true)
+  })
+
+  it('counts a duplicated stem once — the count means keys', async () => {
+    const { top, metadata } = fixture()
+    writeFileSync(metadata, JSON.stringify([KITS[0], KITS[0]]))
+    const result = await generateOverrides({ top, metadata, report: () => undefined })
+    expect(result.written).toBe(1)
+    expect(result.read).toBe(2)
+  })
 })

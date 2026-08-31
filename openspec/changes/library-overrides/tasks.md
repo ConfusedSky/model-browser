@@ -3,8 +3,9 @@
 > Ordering: after `library-root` (archived 2026-08-30 — keys are library paths, the file
 > lives beside the marker in `MARKER_DIR`). Independent of the AO chain and of
 > `folder-contact-sheets`. The `model-viewer` delta is ADD-only because
-> `remove-axis-lighting`, `ao-as-recipe-dimension` and `adaptive-ao-default` MODIFY that
-> capability while active — re-read their deltas before archiving this one.
+> other changes were MODIFYing that capability when it was written (two have archived;
+> `adaptive-ao-default` remains active, ADD-only, distinct title) — re-read any still
+> active before archiving this one.
 > `pose-for-every-model` (drafted and applied the same day, in parallel) and the
 > demo-mode change build on this store; the `pose` field is reserved by name here and
 > typed there. Re-read `library.ts`, `vpath.ts`, `app.ts`, `ViewerLayer.tsx` and
