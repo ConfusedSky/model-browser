@@ -99,6 +99,20 @@ interface EntrySlot {
   url: string | undefined
 }
 
+/**
+ * Stop this slot's work without touching what its tile is showing.
+ *
+ * Module-level rather than local to the sweep effect because `setThumb` retires
+ * too: a state that answers for a tile has to stop everything older that could
+ * still answer for it, and that rule is not the sweep's alone.
+ */
+function retire(slot: EntrySlot): void {
+  slot.generation++
+  const cancels = slot.cancels
+  slot.cancels = []
+  for (const cancel of cancels) cancel()
+}
+
 function sameVec3(a: [number, number, number], b: [number, number, number]): boolean {
   return a[0] === b[0] && a[1] === b[1] && a[2] === b[2]
 }
@@ -154,14 +168,35 @@ export function useThumbnails(
   const slotsRef = useRef<Map<string, EntrySlot>>(new Map())
 
   const setThumb = useCallback((path: string, state: ThumbState) => {
+    const slot = slotsRef.current.get(path)
+    // No slot is no entry, and a write for an entry the listing no longer has
+    // is stale by definition. The outside writers (`App`'s `persist`,
+    // `entryActions`' commands) are not registered on any slot's cancels, so
+    // one of them can still be working on a path a navigation already removed.
+    // Accepting that write would strand both halves of it: the `thumbs` entry
+    // it creates is deleted by nothing (the removal loop walks slots) and the
+    // URL it carries is revoked by nothing (disposal walks slots too). Release
+    // what it minted and leave the state alone.
+    if (slot === undefined) {
+      if (state.url !== undefined) URL.revokeObjectURL(state.url)
+      return
+    }
     // Revoke the URL this state displaces, whoever minted it — the hook's own
     // renders and the two outside writers alike. Safe against the tile's <img>
     // still pointing at it for one commit: the image is already decoded.
-    const slot = slotsRef.current.get(path)
-    if (slot !== undefined) {
-      if (slot.url !== undefined && slot.url !== state.url) URL.revokeObjectURL(slot.url)
-      slot.url = state.url
-    }
+    if (slot.url !== undefined && slot.url !== state.url) URL.revokeObjectURL(slot.url)
+    slot.url = state.url
+    // This state is the tile's answer now, so nothing older may still answer
+    // for it. An outside write does not go through the sweep and so retires
+    // nothing by itself: a tail queued behind a suspended queue — rendering at
+    // the camera *its* lookup captured — would otherwise land afterwards,
+    // replace the newer image, revoke its URL, and pair old-angle pixels with
+    // the fresh camera in the cache, a wrong-picture hit nothing invalidates.
+    // Retiring here fails that tail's `alive()` before its PUT and before it
+    // paints. Safe for the hook's own writers by construction: every internal
+    // `setThumb` is the last act of its pass, and the one handle this runs
+    // ahead of them — `dropStale` — is idempotent.
+    retire(slot)
     setThumbs((prev) => {
       const next = new Map(prev)
       next.set(path, state)
@@ -195,14 +230,38 @@ export function useThumbnails(
 
   /** Placeholder hook for the LRU loader (embedded 3MF previews). */
   const setPlaceholder = useCallback((path: string, url: string) => {
+    // Ownership is decided here, outside the updater, mirroring `setThumb`'s
+    // shape — slot first, then a pure map write. An updater is a function React
+    // may replay, so it must be a pure function of `prev`; assigning `slot.url`
+    // inside one also let an interleave write the preview into state without it
+    // ever joining ownership (the slot had taken a URL already), which is a
+    // decoded PNG nothing releases.
+    const slot = slotsRef.current.get(path)
+    // Not this hook's to show: the entry left, or the tile already owns an
+    // image. The LRU loader mints the preview and keeps no handle of its own
+    // (`App`'s `MeshLru` factory), so returning without revoking leaks it.
+    if (slot === undefined || slot.url !== undefined) {
+      URL.revokeObjectURL(url)
+      return
+    }
+    // Joins the slot's ownership like any other displayed URL, so the render
+    // that replaces this preview revokes it instead of leaking a decoded PNG
+    // per embedded thumbnail.
+    slot.url = url
     setThumbs((prev) => {
+      // The state guard stays here — a stale decision must not overwrite a
+      // landed render — and it can still refuse what the slot just accepted: a
+      // tile sitting in a bare `{status:'error'}` owns no URL, so the check
+      // above passes where this one does not. The slot is then left owning a
+      // URL its tile never displayed, and that is deliberate: ownership is
+      // exactly what every release path walks, so the preview is still revoked
+      // by the next displacing `setThumb`, by the reconciler's removal loop,
+      // and by the unmount disposal. Detecting the case would cost either an
+      // impure updater or a second, staler copy of `thumbs` outside it — both
+      // worse than a URL that is owned but unshown for as long as a tile stays
+      // in error.
       const cur = prev.get(path)
       if (cur === undefined || cur.status !== 'loading' || cur.url !== undefined) return prev
-      // Joins the slot's ownership like any other displayed URL, so the render
-      // that replaces this preview revokes it instead of leaking a decoded PNG
-      // per embedded thumbnail.
-      const slot = slotsRef.current.get(path)
-      if (slot !== undefined && slot.url === undefined) slot.url = url
       const next = new Map(prev)
       next.set(path, { ...cur, url })
       return next
@@ -215,14 +274,6 @@ export function useThumbnails(
     const wanted = new Map(models.map((e) => [e.path, e]))
     const removed: string[] = []
     const added: string[] = []
-
-    /** Stop this slot's work without touching what its tile is showing. */
-    function retire(slot: EntrySlot): void {
-      slot.generation++
-      const cancels = slot.cancels
-      slot.cancels = []
-      for (const cancel of cancels) cancel()
-    }
 
     function start(entry: DirEntry, slot: EntrySlot): void {
       const generation = slot.generation
@@ -382,7 +433,15 @@ export function useThumbnails(
               }),
             )
           } catch {
-            if (alive()) setThumb(entry.path, { status: 'error' })
+            // Carrying the URL the slot already owns, not a bare error: the
+            // requirement keeps each existing image until its replacement
+            // exists, and a failed *lookup* produced no replacement. Written
+            // bare, this would displace the slot's URL and revoke it — a
+            // toggle whose lookup 500s would blank every tile it touched over
+            // pixels that are still perfectly good. `slot.url === state.url`
+            // makes this a non-revoking write; `alive()` is what says the slot
+            // is still this entry's.
+            if (alive()) setThumb(entry.path, { status: 'error', url: slot.url })
           }
         }),
       )

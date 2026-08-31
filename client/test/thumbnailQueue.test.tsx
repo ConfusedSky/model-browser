@@ -1092,4 +1092,156 @@ describe('the sweep reconciles its entries instead of resetting them', () => {
     expect(statuses()).toEqual(['ready'])
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview')
   })
+
+  // ── The aggregate review's four findings (2026-08-31) ─────────────────────
+  // The reconciler landed with `setThumb` joining a URL to ownership only where
+  // a slot existed, and retiring nothing. These four are the repro scenarios.
+
+  it('a setThumb for an entry the listing dropped is released, not filed', async () => {
+    // F1: an `entryActions` command is on no slot's cancel list, so it can
+    // finish after a navigation removed its entry. Filed, its `thumbs` entry
+    // would be deleted by nothing and its URL revoked by nothing — the removal
+    // loop and the disposal both walk slots.
+    const api = fakeCache(() => freshHit())
+    const lru = mesh()
+
+    await render(
+      <Harness entries={[one('/models/a.stl')]} api={api} lru={lru} queue={new RenderQueue(2)} ao />,
+    )
+    await settle()
+    const shown = lastThumbs.get('/models/a.stl')!.url!
+
+    await rerender(<Harness entries={[]} api={api} lru={lru} queue={new RenderQueue(2)} ao />)
+    await settle()
+    expect(lastThumbs.size).toBe(0)
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith(shown)
+
+    await act(async () => {
+      lastSetThumb!('/models/a.stl', { status: 'ready', url: 'blob:late' })
+    })
+
+    expect(lastThumbs.size).toBe(0) // no ghost
+    expect(lastThumbs.has('/models/a.stl')).toBe(false)
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:late')
+  })
+
+  it('an outside setThumb retires the tail that would have landed on top of it', async () => {
+    // F2: the persist shape — `App` writes the lightbox's closing render into
+    // the map while the sweep's own tail is still parked behind a suspended
+    // queue. That tail renders at the camera *its* lookup captured, so letting
+    // it land would replace the newer image, revoke its URL, and pair
+    // old-angle pixels with the fresh camera in the cache.
+    const api = fakeCache(() => ({ status: 'miss' }))
+    const lru = mesh()
+    const queue = new RenderQueue(2)
+    queue.suspend()
+
+    await render(
+      <Harness entries={[one('/models/a.stl')]} api={api} lru={lru} queue={queue} ao />,
+    )
+    await settle()
+    expect(statuses()).toEqual(['loading']) // the tail is queued, not run
+
+    await act(async () => {
+      lastSetThumb!('/models/a.stl', {
+        status: 'ready',
+        url: 'blob:persisted',
+        camera: CAM,
+        axis: '-z',
+      })
+    })
+
+    await act(async () => {
+      queue.resume()
+    })
+    await settle()
+
+    expect(lastThumbs.get('/models/a.stl')).toEqual({
+      status: 'ready',
+      url: 'blob:persisted',
+      camera: CAM,
+      axis: '-z',
+    })
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith('blob:persisted')
+    expect(vi.mocked(renderThumbnail)).not.toHaveBeenCalled() // never painted
+    expect(api.putThumb).not.toHaveBeenCalled() // and never filed
+  })
+
+  it('a lookup that fails mid-toggle keeps the image the tile is showing', async () => {
+    // F3: the lookup's own catch used to write a bare `{status:'error'}`,
+    // which displaces the slot's URL and so revokes it — against "keep each
+    // existing image until its replacement exists", and a failed lookup
+    // produced no replacement.
+    const lru = mesh()
+    const api = {
+      getThumb: vi.fn((_p: string, _m: number, ao: boolean) =>
+        ao ? Promise.resolve(freshHit()) : Promise.reject(new Error('cache offline')),
+      ),
+      putThumb: vi.fn().mockResolvedValue(undefined),
+    } as unknown as ApiClient
+
+    await render(
+      <Harness entries={[one('/models/a.stl')]} api={api} lru={lru} queue={new RenderQueue(2)} ao />,
+    )
+    await settle()
+    const shown = lastThumbs.get('/models/a.stl')!.url!
+    expect(statuses()).toEqual(['ready'])
+
+    await rerender(
+      <Harness
+        entries={[one('/models/a.stl')]}
+        api={api}
+        lru={lru}
+        queue={new RenderQueue(2)}
+        ao={false}
+      />,
+    )
+    await settle()
+
+    const after = lastThumbs.get('/models/a.stl')!
+    expect(after.status).toBe('error')
+    expect(after.url).toBe(shown)
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(shown)
+    expect(liveUrls()).toBe(1)
+  })
+
+  it('a preview the state guard refuses is still owned, and released with the entry', async () => {
+    // F4: the slot read and assignment moved out of the `setThumbs` updater,
+    // which React may replay. The two views can still disagree in one place —
+    // a bare `{status:'error'}` tile owns no URL, so the slot check passes
+    // where the state guard refuses — and that is left alone deliberately: the
+    // slot keeps the URL unshown but *owned*, which is what every release path
+    // walks.
+    const api = fakeCache(() => ({ status: 'miss' }))
+    const lru = mesh()
+    vi.mocked(renderThumbnail).mockImplementationOnce(() => Promise.reject(new Error('no webgl')))
+
+    await render(
+      <Harness entries={[one('/models/a.stl')]} api={api} lru={lru} queue={new RenderQueue(2)} ao />,
+    )
+    await settle()
+    expect(statuses()).toEqual(['error'])
+    expect(lastThumbs.get('/models/a.stl')!.url).toBeUndefined()
+
+    await act(async () => {
+      lastSetPlaceholder!('/models/a.stl', 'blob:refused')
+    })
+    // Refused for display — the tile keeps its error — and not revoked here…
+    expect(lastThumbs.get('/models/a.stl')!.url).toBeUndefined()
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith('blob:refused')
+
+    // …because the slot owns it, and the removal loop is one of the three
+    // paths that release what a slot owns.
+    await rerender(<Harness entries={[]} api={api} lru={lru} queue={new RenderQueue(2)} ao />)
+    await settle()
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:refused')
+
+    // A preview for a path with no slot at all is released on the spot: the
+    // LRU loader hands the URL over and keeps no handle of its own.
+    await act(async () => {
+      lastSetPlaceholder!('/models/a.stl', 'blob:orphan')
+    })
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:orphan')
+    expect(lastThumbs.has('/models/a.stl')).toBe(false)
+  })
 })

@@ -106,6 +106,31 @@
       (approved at the same check-in): `setPlaceholder`'s embedded-3MF preview URL joins the
       slot's ownership too — nothing revoked it before, one decoded PNG per previewed model.
       Asserted by "an embedded preview is released when the render that replaces it lands"
+      <br>2026-08-31 (RVW-1): An aggregate review of the landed reconciler found four defects in
+      this accounting; all four are fixed here and each has its own cell in
+      `thumbnailQueue.test.tsx`, in the reconciler describe. **F1** — `setThumb` joined a URL to
+      ownership only where a slot existed, so an `entryActions` job completing after a
+      navigation wrote a `thumbs` entry the removal loop never deletes carrying a URL the
+      disposal never revokes; a slotless write now revokes and returns ("a setThumb for an entry
+      the listing dropped is released, not filed"). **F2** — an outside `setThumb` retired
+      nothing, so a sweep tail parked behind a suspended queue landed on top of it: it replaced
+      the newer image, revoked its URL, and paired old-angle pixels with the fresh camera in the
+      cache. `setThumb` now retires the slot; safe for the hook's own writers because every
+      internal `setThumb` is the last act of its pass ("an outside setThumb retires the tail that
+      would have landed on top of it"). **F3** — the lookup's `catch` wrote a bare
+      `{status:'error'}`, which displaced and so revoked the image the tile was showing, against
+      D3's "keep each existing image until its replacement exists"; it now carries the slot's own
+      URL, which `setThumb`'s `slot.url !== state.url` guard makes a non-revoking write ("a lookup
+      that fails mid-toggle keeps the image the tile is showing"). `Grid` still draws the warning
+      rather than the image for an `error` state — the URL is no longer lost, so showing it is a
+      later call, not this one's. **F4** — `setPlaceholder` mutated the slot inside the
+      `setThumbs` updater, which React may replay; the slot read and assignment are hoisted out,
+      and a preview the slot cannot take is revoked rather than leaked. Where the hoisted slot
+      check passes and the state guard still refuses (a bare-error tile), the slot keeps the URL
+      unshown but owned — the three release paths all walk ownership — which is the coordinator's
+      resolution at the check-in, in preference to machinery that detects a non-leak ("a preview
+      the state guard refuses is still owned, and released with the entry"). Each of the four
+      cells was falsified against its own fix reverted
 - [x] 2.3 A preference change cancels the in-flight sweep's queued renders as a navigation
       does — unlike an entries change, which cancels only the entries that left (2.1). Note what cancellation does **not** cover: the load effect renders and
       `await api.putThumb(...)` before the `if (!alive)` check that follows, and `queue.ts`'s
