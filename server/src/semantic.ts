@@ -81,8 +81,14 @@ async function probe(base: string): Promise<IndexAvailability> {
     return { state: 'absent' }
   }
   const common = {
-    collectionRoot: raw.collection_root,
-    covers: raw.covers,
+    // Absence normalised at the boundary: the index reports a root it does not
+    // have as JSON `null` (a failed load answers every volume field null), and
+    // a null crossing into `string | undefined` land passed every `===
+    // undefined` guard and walked as far as `libPathOf(null)` before crashing
+    // — which took every peek down with it once peeks probed the index
+    // (posedFirstPeek). `??` makes the wire's "no root" the type's.
+    collectionRoot: raw.collection_root ?? undefined,
+    covers: raw.covers ?? undefined,
     elapsed: raw.elapsed,
     // The index's own words, preferred to any composed here (D4). Reason and
     // hint are separate fields upstream; joined so a caller renders one string.

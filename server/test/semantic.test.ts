@@ -512,3 +512,46 @@ describe('a collection outside the library', () => {
     expect(body.scores).toEqual({})
   })
 })
+
+// The status the index actually answers when its cache is unusable: `ready:
+// false` with every root it lacks spelled as JSON `null`, `collection_root`
+// included. A null there is not `undefined`, so before the boundary
+// normalised it (`probe`'s `??`), it passed every `=== undefined` guard and
+// crashed `libPathOf(null)` — and once peeks probed the index
+// (`posedFirstPeek`), that took every contact sheet down with it, live.
+describe('an index answering null roots', () => {
+  const CACHE_UNUSABLE = {
+    ready: false,
+    elapsed: 275.0,
+    loaded_at: null,
+    collection_root: null,
+    covers: null,
+    volume: { present: null, root: null, missing: null },
+    failure: {
+      reason: 'no cached embeddings found — run classify_stls.py first',
+      hint: null,
+      kind: 'CacheUnusable',
+    },
+  }
+
+  it('reports a state, never a 500, from the status route', async () => {
+    stubIndex(CACHE_UNUSABLE)
+    const res = await app.request('/api/semantic/status', { headers: LOOPBACK })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { state: string; collectionRoot?: unknown }
+    // 275s past start is past WEDGED_AFTER_S — the state is a diagnosis, not
+    // the point here; the point is that it answered at all.
+    expect(body.state).toBe('wedged')
+    expect(body.collectionRoot).toBeUndefined()
+  })
+
+  it('leaves the peek the plain walk it always was', async () => {
+    stubIndex(CACHE_UNUSABLE)
+    const res = await app.request(`/api/peek?path=${encodeURIComponent('/kits')}`, {
+      headers: LOOPBACK,
+    })
+    expect(res.status).toBe(200)
+    const entries = (await res.json()) as { name: string }[]
+    expect(entries.map((e) => e.name)).toEqual(['a.stl'])
+  })
+})
