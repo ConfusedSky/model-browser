@@ -65,18 +65,26 @@
 
 ## 4. Specs, docs, verification
 
-- [ ] 4.1 Archive dry run per CLAUDE.md on a fresh copy, **after** `library-root` has
+- [x] 4.1 Archive dry run per CLAUDE.md on a fresh copy, **after** `library-root` has
       archived on that copy: the two RENAMED + MODIFIED pairs (`model-thumbnails`,
       `model-viewer`), the *Shadowed model display* MODIFIED (five scenario titles) and the
       `url-navigation` MODIFIED must apply cleanly
+      — done 2026-08-31 (coordinator), on main *after* library-root's real archive
+      (`7a872c7`): `openspec archive remove-axis-lighting --yes` on a fresh copy reports
+      `+ 0, ~ 4, - 0, → 2` and archives cleanly; the `url-navigation` delta's anchors were
+      re-checked against the archived requirement whitespace-collapsed — the only phrase
+      absent from the delta is "lighting mode", which is what it deletes, so no
+      re-derivation was needed
 - [ ] 4.1a `adaptive-ao-default` edits the same corner-pill block in `App.tsx` — whichever
       lands second re-reads it (shared-file ordering, CLAUDE.md)
 - [ ] 4.2 `ao-refreshes-thumbnails`: open an `opsx:update` on it (separate session or
       after this) re-targeting its trigger to the AO toggle and rewriting its
       `model-thumbnails` delta under *Recipe-labelled thumbnails*; until then it must not
       be applied
-- [ ] 4.3 `docs/web-demo-notes.md` item 9 points here as decided-and-drafted; the "hide the
+- [x] 4.3 `docs/web-demo-notes.md` item 9 points here as decided-and-drafted; the "hide the
       lighting menu" row is closed
+      — done 2026-08-31 (coordinator): item 9's heading and the Decided-table row both name
+      `remove-axis-lighting` as implemented/closed
 - [ ] 4.4 `bun run test` / `bun run typecheck` clean across workspaces; `rg
       "getLightingMode|LIGHTING_MODES|lighting-mode"` over `client/src` returns nothing
 - [ ] 4.5 Live verification: open the app on a directory whose cache is fully camera-lit

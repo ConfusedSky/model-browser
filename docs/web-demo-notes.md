@@ -65,7 +65,7 @@ own origin"; only its body hardcodes loopback.
 | CPU-only index, fp32, US-located, 4–8 GB | Masa | see Measurements; GPU warmed is tens of ms, CPU 0.3–0.6 s judged acceptable (<1 s) |
 | Folder tiles get a 2×2 contact sheet — **a main-app change, before the split** | Masa | today `Grid.tsx` renders a dir as 📁 + name; the demo root is 297 of them |
 | Credits/provenance shown in the lightbox info panel | Masa | plus a generated credits page for CC-BY |
-| ~~Lighting menu hidden in demo mode~~ → **axis lighting mode removed from the main app; camera is the only mode; the pill goes** | Masa | the hide was only ever to stop visitors picking axis. Item 9 has the grounding (every sidecar says `camera`, 0 `axis` — 1,758 at this session's count, 1,792 at later reviewers' runs the same day; axis's motivating bug has no counterpart in camera mode) |
+| ~~Lighting menu hidden in demo mode~~ → **axis lighting mode removed from the main app; camera is the only mode; the pill goes** (implemented: `remove-axis-lighting`, applied 2026-08-31 — row closed) | Masa | the hide was only ever to stop visitors picking axis. Item 9 has the grounding (every sidecar says `camera`, 0 `axis` — 1,758 at this session's count, 1,792 at later reviewers' runs the same day; axis's motivating bug has no counterpart in camera mode) |
 | **SSAO stays a user option** (pill kept), default chosen adaptively by sampling frames; both AO variants baked for the demo | Masa | item 8 has the design: AO becomes a thumbnail recipe dimension, cache keyed by recipe |
 | **`ao-refreshes-thumbnails` (formerly `lighting-refreshes-thumbnails`) is re-targeted, not retired**: its trigger becomes the AO pill | Masa | the mechanism — a toggle re-runs the staleness sweep in place, tiles keep their image while the replacement renders (§2, rewritten in review as a per-entry reconciler), the `poseStale` rule stated and asserted (§2b — the bug it named was already fixed in `28289d1`) — carries over; on the demo the sweep finds the other baked variant, so toggling is instant. Prerequisite: AO as a recipe dimension (item 8). Rename/`opsx:update` the change rather than start a new one |
 | Chat **tab** hidden in demo mode | Masa | the side panel keeps its search-options tab |
@@ -266,7 +266,7 @@ own origin"; only its body hardcodes loopback.
    `ao-refreshes-thumbnails` (same files, same pattern). No
    `RIG_VERSION` bump — each recipe is unchanged; the set grows.
 
-9. **Remove the axis/camera lighting pill from the main app** — **decided (B), remove axis mode** (Masa: "camera almost always looks better"; the demo hide was only to keep visitors off axis). Grounded: of 1,758 thumbnail sidecars
+9. **Remove the axis/camera lighting pill from the main app** — **decided (B), remove axis mode; implemented as `remove-axis-lighting`, applied 2026-08-31** (Masa: "camera almost always looks better"; the demo hide was only to keep visitors off axis). Grounded: of 1,758 thumbnail sidecars
    in `~/.cache/model-browser`, **every one says `camera`, 0 say `axis`** (1,758 at this session's count; 1,792 at the second reviewer's run the same day) — this
    machine has run camera mode throughout — while `lighting.ts` has
    `DEFAULT_MODE = 'axis'`, so every fresh profile (every demo visitor) gets
