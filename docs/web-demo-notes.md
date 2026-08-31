@@ -95,6 +95,9 @@ own origin"; only its body hardcodes loopback.
    `miniatures.json`. "Search by author" is trivial in memory once loaded, so
    sqlite only if a library outgrows load-at-start — it won't at hundreds of
    kits. Price accepted: a kit copied out of the library carries no metadata.
+   **Implemented 2026-08-31 as `library-overrides`** (store + resolution +
+   `/api/overrides` + display names on tiles + the lightbox credits block +
+   the generator; the demo store is generated — 288 kits, see its tasks 3.3).
 2. **Path model — decided: a library root as a first-class parameter, paths
    root-relative everywhere** *(implemented as `library-root`, 2026-08-29; the change's
    design supersedes this item)* (Masa; Electron later repoints it with a file

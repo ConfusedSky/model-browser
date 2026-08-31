@@ -5,7 +5,7 @@
 > `folder-contact-sheets`. The `model-viewer` delta is ADD-only because
 > `remove-axis-lighting`, `ao-as-recipe-dimension` and `adaptive-ao-default` MODIFY that
 > capability while active — re-read their deltas before archiving this one.
-> `pose-for-every-model` (planned, `web-demo-backlog` 1.2 — not yet drafted) and the
+> `pose-for-every-model` (drafted and applied the same day, in parallel) and the
 > demo-mode change build on this store; the `pose` field is reserved by name here and
 > typed there. Re-read `library.ts`, `vpath.ts`, `app.ts`, `ViewerLayer.tsx` and
 > `client/test/appHarness.tsx` against main before starting. The display-name
@@ -80,9 +80,9 @@
 
 ## 2. Client: the credits block and the tile names
 
-- [ ] 2.1 `api/client.ts` `overrides(path)` on `ApiClient` and `HttpApiClient` — the
+- [x] 2.1 `api/client.ts` `overrides(path)` on `ApiClient` and `HttpApiClient` — the
       resolved fields, `jsonOrThrow`
-- [ ] 2.2 The lightbox panel (`ViewerLayer.tsx`): an attribution block — author (an
+- [x] 2.2 The lightbox panel (`ViewerLayer.tsx`): an attribution block — author (an
       `<a>` when `authorUrl` is stored, plain text otherwise), license, source link —
       rendered only when the viewed entry resolved credits, **among the metadata `<dl>`
       and before the action strip** (the main spec's "describes before it offers" rule;
@@ -90,13 +90,13 @@
       state, no error state: absent and failed render identically, and the block may
       appear after the panel does. The read follows the viewer subject on the panel's
       existing ignore-on-stale idiom (the `getThumb` effect's `alive` flag)
-- [ ] 2.3 Client tests: harness gains an `overrides` mock (default `{}` — every
+- [x] 2.3 Client tests: harness gains an `overrides` mock (default `{}` — every
       pre-existing test then renders no block; cleared per mount like `getThumb`);
       credited model shows author/license/source with the right hrefs, positioned before
       the action strip; uncredited model and failed read render identically (no block,
       viewer unaffected); a late answer after the subject changed does not render; the
       request goes through `ApiClient` (no raw fetch)
-- [ ] 2.4 Tiles render `displayName` (D7): `Grid.tsx` labels a tile with
+- [x] 2.4 Tiles render `displayName` (D7): `Grid.tsx` labels a tile with
       `entry.displayName ?? baseName(entry.name)` — dir, zip and model tiles alike —
       while the **tile's own** `title` and accessible name keep the real name (two
       same-named parts are told apart by the file name, and the disk is grepped by it).
@@ -145,14 +145,26 @@
 
 ## 4. Verification
 
-- [ ] 4.1 `bun run test` / `bun run typecheck` clean (vitest from the workspace dirs)
-- [ ] 4.2 Live: lightbox on a demo-corpus model shows its kit's author, license and
+- [x] 4.1 `bun run test` / `bun run typecheck` clean (vitest from the workspace dirs)
+      — 2026-08-31 on merged main: client 595 (53 files), server 412 | 3 skipped, both
+      typechecks exit 0. One pre-existing flake noted, not this change's: open.test.ts's
+      chooser-abort cell fails ~1-in-3 under full-suite load, passes isolated
+- [x] 4.2 Live: lightbox on a demo-corpus model shows its kit's author, license and
       source link among the metadata; the demo root's 297 kit tiles show their
       `miniatures.json` titles instead of stems, and find still matches stems; a model of the real library (no store) shows no
       block and no gap where one would be; `/api/overrides` on the demo root answers
       from memory (network panel: one small request per lightbox open, none on browse)
-- [ ] 4.3 `docs/web-demo-notes.md`: item 1 points at this change as its implementation
+      — run 2026-08-31, Playwright on a clustered-hq-rooted instance: all 288 kit tiles
+      wear their stored titles (label "Player Character Pack 03", `title` and aria keep
+      the stem — the conditional aria-label live); a lightbox on CatfolkRogue.stl drew
+      author Valandar (linked, `_blank`), the CC-BY license and `thingiverse.com` →
+      thing:3750572, credits inherited from the kit key; browsing issued **0** overrides
+      requests, the lightbox open exactly **1**. Real library (no store): 0 `displayName`
+      fields on 73 entries and `/api/overrides` answers `{}` — the wire is byte-identical,
+      the DOM identity pinned by the unit cells
+- [x] 4.3 `docs/web-demo-notes.md`: item 1 points at this change as its implementation
       (`web-demo-backlog` 1.1 already ticks — done at drafting, 2026-08-31)
+      — done 2026-08-31 with the applied note on the item
 - [ ] 4.4 After archive: hand-write the new capability's `## Purpose` in
       `openspec/specs/library-overrides/spec.md` (archiving does not generate one —
       `library`'s was hand-authored) and check what the delta preambles left in both
