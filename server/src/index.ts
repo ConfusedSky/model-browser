@@ -4,24 +4,34 @@ import { ThumbCache } from './cache'
 import { createApp } from './app'
 import { ZipTempStore, createLauncher } from './launch'
 import { createLibrary } from './library'
+import { createOverrideHolder } from './overrides'
 
 const library = createLibrary()
 // Positional to keep the three existing parameters' defaults; the library is
 // what files entries under `<cache>/<id>/` and gates the sweep (D5).
 const cache = new ThumbCache(undefined, undefined, undefined, library)
+// Built here rather than left to `createApp`'s default so the eager load below
+// can use it: a malformed store then reports beside the startup line rather
+// than on whichever request happened to ask first (library-overrides D1).
+const overrides = createOverrideHolder(library)
 // The resolved library, named once at start: the root is a viewpoint and the
 // top is found by walking up from it, so which tree is open is not something a
 // reader can infer from the configuration alone (D1, and R1's warning).
 void library.state().then((s) => {
   if (s.state === 'ready') {
     console.log(`library ${s.id} at ${s.top}`)
+    // The store is read once per resolved library, so reading it here is the
+    // whole of the work — and it is where a broken store gets to complain while
+    // someone is still looking at the startup output. A library that resolves
+    // later loads, and reports, on the first request that asks.
+    void overrides.store()
     // The startup sweep resolves every cached path through the library, so it
     // has nothing to say until there is one.
     void cache.maintain()
   } else console.log(`library: ${s.state}`)
 })
 
-const app = createApp(cache, createLauncher(), new ZipTempStore(), library)
+const app = createApp(cache, createLauncher(), new ZipTempStore(), library, overrides)
 
 export default {
   port: 3177,

@@ -16,6 +16,12 @@ import { LaunchError, type Launcher, ZipTempStore, createLauncher } from './laun
 import { LibraryError, type Library, canonicalLibPath, createLibrary } from './library'
 import { ListingError, PEEK_MAX_FINDS, complete, listDir, listFlat, peek } from './listing'
 import {
+  type OverrideHolder,
+  applyDisplayNames,
+  createOverrideHolder,
+  resolveOverrides,
+} from './overrides'
+import {
   IndexError,
   hitsToEntries,
   indexStatus,
@@ -148,6 +154,12 @@ export function createApp(
   // (library-root D3). Injected like the three above so a test drives its own
   // tree rather than the machine's configured library.
   library: Library = createLibrary(),
+  // The library's override store, held per resolved library rather than per
+  // process (library-overrides D1). Injected like the four above, and defaulted
+  // off `library` so the two can never disagree about which tree they are
+  // talking about; `index.ts` passes its own so the eager load's report lands
+  // beside the startup line.
+  overrides: OverrideHolder = createOverrideHolder(library),
 ): Hono {
   const app = new Hono()
 
@@ -223,8 +235,39 @@ export function createApp(
     // taken in verbatim (`//kit`, `/kit/.`) would be handed straight back and
     // carried forward.
     const libPath = canonicalLibPath(path)
-    if (flat) return c.json(await listFlat(library, libPath, q, { folderMatching }))
-    return c.json(await listDir(library, libPath))
+    // Stored display names ride the listing rather than being asked for per
+    // tile: a grid is hundreds of tiles, and an exact-key Map get costs what
+    // the `size` field costs (library-overrides D7). Both return paths get it —
+    // the flat/deep-search listing is a listing shape like any other.
+    if (flat) {
+      const listing = await listFlat(library, libPath, q, { folderMatching })
+      applyDisplayNames(listing.entries, await overrides.store())
+      return c.json(listing)
+    }
+    const listing = await listDir(library, libPath)
+    applyDisplayNames(listing.entries, await overrides.store())
+    return c.json(listing)
+  })
+
+  /**
+   * One entry's effective overrides — the field-wise merge over its ancestor
+   * keys, or `{}` where nothing resolves (D3).
+   *
+   * Asked per viewed entry, not folded into `/api/dir`: listings are the hot
+   * path, and resolving all fields for hundreds of entries per request to serve
+   * a panel that shows one is the trade `folder-contact-sheets` already refused
+   * for previews. The answer is a memory lookup server-side.
+   *
+   * A path route on the established pattern — canonicalised like `/api/dir` and
+   * `/api/peek`, resolved through the library so a refused path is refused here
+   * too, and gated by the not-ready envelope middleware with no code of its own.
+   */
+  app.get('/api/overrides', async (c) => {
+    const path = c.req.query('path')
+    if (path === undefined || path === '') return c.json({ error: 'path is required' }, 400)
+    const libPath = canonicalLibPath(path)
+    await library.resolve(libPath)
+    return c.json(resolveOverrides(await overrides.store(), libPath))
   })
 
   /**
@@ -255,7 +298,13 @@ export function createApp(
     // Canonicalised first, for the reason `/api/dir` gives: the paths that come
     // back are the ones the client asks for next.
     const libPath = canonicalLibPath(path)
-    return c.json(await posedFirstPeek(library, libPath, n))
+    // A peek's answer is ordinary listing entries, so sheet labels come along
+    // from the same seam the browse uses (library-overrides D7) — applied to
+    // the posed-first ranking's output, since the ranking reorders entries and
+    // never renames them.
+    const entries = await posedFirstPeek(library, libPath, n)
+    applyDisplayNames(entries, await overrides.store())
+    return c.json(entries)
   })
 
   app.get('/api/file', async (c) => {

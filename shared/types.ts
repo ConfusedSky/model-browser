@@ -10,6 +10,14 @@ export interface DirEntry {
   size: number
   /** mtime (ms). For zip entries this is the containing zip's mtime. */
   mtime: number
+  /**
+   * The name the library's override store holds for this exact path, when it
+   * holds one. Display only: tiles label themselves with it while `name` stays
+   * the title, the accessible name, and what find, deep search and the flat
+   * filter match (library-overrides D7). Absent for every entry the store does
+   * not name, and for every library that has no store.
+   */
+  displayName?: string
 }
 
 export interface DirListing {
@@ -17,6 +25,53 @@ export interface DirListing {
   entries: DirEntry[]
   /** Flat listings only: models were dropped by the return cap or walk budget. */
   truncated?: boolean
+}
+
+/**
+ * Attribution for an entry, as the library's override store holds it. Every
+ * field is optional: the corpus metadata this is generated from does not always
+ * carry all four, and a partial credit is still a true one.
+ */
+export interface OverrideCredits {
+  author?: string
+  authorUrl?: string
+  license?: string
+  sourceUrl?: string
+}
+
+/**
+ * What one key in `.model-browser/overrides.json` may hold (library-overrides
+ * D1/D6). Unknown fields are preserved by writers and ignored by resolution, so
+ * the format grows additively *within* `version: 1`.
+ */
+export interface OverrideEntry {
+  /** A display name for the thing at this exact key. Never inherited (D2/D7). */
+  name?: string
+  credits?: OverrideCredits
+  /**
+   * Stored orientation, **reserved by name only**. Deliberately `unknown` and
+   * not `IndexPose`: the stored pose's concrete shape belongs to
+   * `pose-for-every-model`, and pinning the index's shape here would prejudge
+   * it. Reserving the name now is documentation of the file format's contract
+   * — nothing this change writes or reads depends on it (D6).
+   */
+  pose?: unknown
+}
+
+/**
+ * An entry's effective overrides — what `GET /api/overrides` answers, `{}` where
+ * nothing resolves.
+ *
+ * The same field set as `OverrideEntry` by construction rather than by
+ * coincidence: the resolution is a field-wise merge over the entry's ancestor
+ * keys, so every field it can produce is a field some key held. Named
+ * separately because the two are free to diverge — a stored-only field, or a
+ * resolved-only one, changes exactly one of them.
+ */
+export interface ResolvedOverrides {
+  name?: string
+  credits?: OverrideCredits
+  pose?: unknown
 }
 
 /**

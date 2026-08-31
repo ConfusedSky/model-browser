@@ -1,0 +1,214 @@
+/**
+ * Generate a library's override store from the corpus metadata
+ * (`metadata/miniatures.json`) — the demo's CC-BY credits, and each kit's real
+ * title (library-overrides D5).
+ *
+ *   bun run scripts/gen-overrides.ts --top <library-top> --metadata <file> [--kits <dir>]
+ *
+ * Node APIs only, though scripts here may use Bun: the core below is exported
+ * and exercised by `server/test/genOverrides.test.ts`, whose tsconfig types are
+ * Node's. It runs under `bun run` unchanged.
+ *
+ * The kit folders and the library top are two different things, so both are
+ * taken. The corpus lays kits out as `<root>/miniatures/<variant>/<stem>/`, so
+ * "`/` + stem" is a valid key only when the library top *is* the variant
+ * directory; every key is `/` plus the top-relative path of `<kitsDir>/<stem>`.
+ * A kit directory outside the top is refused before anything is written —
+ * outside, `relative()` yields `..`-keys that normalise into plausible wrong
+ * spellings rather than errors.
+ *
+ * Only top-level `stem` values name kit folders. The nested `files[].stem`
+ * entries are file stems, and there are 2,801 of them.
+ */
+
+import { readFile, stat } from 'node:fs/promises'
+import { join, relative, resolve, sep } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { MARKER_DIR } from '../server/src/library'
+import { STORE_FILE, type OverridesFile, writeOverrides } from '../server/src/overrides'
+import type { OverrideCredits, OverrideEntry } from '../shared/types'
+
+/** One kit as `miniatures.json` carries it. Everything else is ignored. */
+interface Kit {
+  stem?: unknown
+  name?: unknown
+  author?: unknown
+  author_url?: unknown
+  license?: unknown
+  source_url?: unknown
+}
+
+export interface GenerateOptions {
+  /** The library top — what every generated key is relative to. */
+  top: string
+  /** Where the kit folders live. Defaults to the top; must be it or beneath it. */
+  kitsDir?: string
+  /** Path to `miniatures.json`. */
+  metadata: string
+  /** Where progress and misses go. Defaults to stdout. */
+  report?: (message: string) => void
+}
+
+export interface GenerateResult {
+  /** Kits carrying a usable top-level `stem` in the metadata. */
+  read: number
+  /** Keys written — kits whose folder exists under the kit directory. */
+  written: number
+  /** Stems naming no directory under the kit directory, in metadata order. */
+  missing: string[]
+  /** The store that was written. */
+  file: string
+}
+
+function str(value: unknown): string | undefined {
+  return typeof value === 'string' && value !== '' ? value : undefined
+}
+
+/** The four attribution fields, or undefined when the kit carries none of them. */
+function creditsOf(kit: Kit): OverrideCredits | undefined {
+  const credits: OverrideCredits = {}
+  const author = str(kit.author)
+  const authorUrl = str(kit.author_url)
+  const license = str(kit.license)
+  const sourceUrl = str(kit.source_url)
+  if (author !== undefined) credits.author = author
+  if (authorUrl !== undefined) credits.authorUrl = authorUrl
+  if (license !== undefined) credits.license = license
+  if (sourceUrl !== undefined) credits.sourceUrl = sourceUrl
+  return Object.keys(credits).length === 0 ? undefined : credits
+}
+
+/**
+ * The existing store, read as **raw JSON** rather than through
+ * `loadOverrides`.
+ *
+ * Deliberate, and the two readers have opposite jobs: the loader's is to
+ * protect resolution, so it drops keys it cannot spell and empties a file whose
+ * version it does not know — and merging through it would delete exactly the
+ * data this generator is required to preserve. The generator's job is to
+ * replace the fields it owns and keep everything else, so it must see the file
+ * as written.
+ *
+ * A file that is present but unusable is **refused**, never overwritten: a
+ * store this build cannot merge into is a store whose contents it would destroy
+ * by rewriting. Absent is simply a fresh store.
+ */
+async function readStore(top: string): Promise<OverridesFile> {
+  const path = join(top, MARKER_DIR, STORE_FILE)
+  let text: string
+  try {
+    text = await readFile(path, 'utf8')
+  } catch {
+    return { version: 1, entries: {} }
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    throw new Error(`${path} exists but is not valid JSON — fix or remove it before generating`)
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`${path} exists but is not an object — fix or remove it before generating`)
+  }
+  const file = parsed as OverridesFile
+  if (file.version !== 1) {
+    throw new Error(
+      `${path} carries version ${JSON.stringify(file.version)}, which this generator cannot merge into`,
+    )
+  }
+  if (file.entries === undefined) file.entries = {}
+  if (typeof file.entries !== 'object' || file.entries === null || Array.isArray(file.entries)) {
+    throw new Error(`${path} has a non-object "entries" — fix or remove it before generating`)
+  }
+  return file
+}
+
+export async function generateOverrides(opts: GenerateOptions): Promise<GenerateResult> {
+  const report = opts.report ?? ((m: string) => console.log(m))
+  const top = resolve(opts.top)
+  const kitsDir = opts.kitsDir === undefined ? top : resolve(opts.kitsDir)
+  // Textual containment, decided before a single byte is read or written. Not a
+  // `realpath` test: the check has to hold for a kit directory that does not
+  // exist yet, and `resolve` is what collapses the `..` this refuses.
+  if (kitsDir !== top && !kitsDir.startsWith(top + sep)) {
+    throw new Error(`the kit directory must be the library top or beneath it: ${kitsDir} is not under ${top}`)
+  }
+
+  const parsed: unknown = JSON.parse(await readFile(opts.metadata, 'utf8'))
+  if (!Array.isArray(parsed)) {
+    throw new Error(`${opts.metadata} is not an array of kits`)
+  }
+  const kits = parsed as Kit[]
+
+  const file = await readStore(top)
+  const missing: string[] = []
+  let read = 0
+  let written = 0
+
+  for (const kit of kits) {
+    const stem = str(kit.stem)
+    if (stem === undefined) continue
+    read++
+    const dir = join(kitsDir, stem)
+    const s = await stat(dir).catch(() => null)
+    if (s === null || !s.isDirectory()) {
+      missing.push(stem)
+      continue
+    }
+    const rel = relative(top, dir)
+    const key = rel === '' ? '/' : `/${rel.split(sep).join('/')}`
+    // Merge, never replace: a `pose` written by later tooling, and any field or
+    // key this generator does not own, survives a rerun.
+    const entry: OverrideEntry = { ...file.entries[key] }
+    const name = str(kit.name)
+    if (name === undefined) delete entry.name
+    else entry.name = name
+    const credits = creditsOf(kit)
+    if (credits === undefined) delete entry.credits
+    else entry.credits = credits
+    file.entries[key] = entry
+    written++
+  }
+
+  await writeOverrides(top, file)
+
+  const storePath = join(top, MARKER_DIR, STORE_FILE)
+  report(`wrote ${written} keys from ${read} kits read into ${storePath}`)
+  report(`keys are relative to ${top}; kit folders were looked for under ${kitsDir}`)
+  for (const stem of missing) report(`  no directory for stem: ${stem}`)
+  if (missing.length > 0) report(`${missing.length} stems named no directory and were skipped`)
+  // The same rule every config file here has. The store is read once per
+  // resolved library, so a running server keeps answering from what it loaded.
+  report('the server reads this file once per resolved library — restart it to pick this up')
+
+  return { read, written, missing, file: storePath }
+}
+
+const USAGE =
+  'usage: bun run scripts/gen-overrides.ts --top <library-top> --metadata <miniatures.json> [--kits <dir>]'
+
+function parseArgs(argv: string[]): GenerateOptions {
+  const values: Record<string, string> = {}
+  for (let i = 0; i < argv.length; i += 2) {
+    const flag = argv[i]
+    const value = argv[i + 1]
+    if (flag === undefined || !flag.startsWith('--') || value === undefined) {
+      throw new Error(USAGE)
+    }
+    values[flag.slice(2)] = value
+  }
+  const top = values.top
+  const metadata = values.metadata
+  if (top === undefined || metadata === undefined) throw new Error(USAGE)
+  return { top, metadata, kitsDir: values.kits }
+}
+
+// Run only when invoked directly, so the core above can be imported by the
+// suite. `import.meta.main` would be shorter but is not in the Node types this
+// workspace typechecks against.
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  generateOverrides(parseArgs(process.argv.slice(2))).catch((err: unknown) => {
+    console.error(err instanceof Error ? err.message : String(err))
+    process.exitCode = 1
+  })
+}
