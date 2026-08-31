@@ -66,7 +66,7 @@ own origin"; only its body hardcodes loopback.
 | Port the server (container/VM), don't bake to static | corpus NOTES + both sessions | bake was weighed: D1's `ApiClient` seam would host a static client, `similar` is image×image dot products the browser could do, but text→embedding needs the SigLIP text tower (hundreds of MB) — one endpoint at minimum |
 | Always-on VM, not cold-start serverless | Masa | 16 s SigLIP load + `wedged` UI is the wrong first impression |
 | CPU-only index, fp32, US-located, 4–8 GB | Masa | see Measurements; GPU warmed is tens of ms, CPU 0.3–0.6 s judged acceptable (<1 s) |
-| Folder tiles get a 2×2 contact sheet — **a main-app change, before the split** | Masa | today `Grid.tsx` renders a dir as 📁 + name; the demo root is 297 of them |
+| Folder tiles get a 2×2 contact sheet — **a main-app change, before the split** (applied in part 2026-08-31: `folder-contact-sheets` — server peek + tiles landed; its D3 no-reset piece and live checks wait on `ao-refreshes-thumbnails`, see its tasks.md header note) | Masa | `Grid.tsx` now draws sheets from `GET /api/peek` per visible tile; until the reconciler lands, a peek landing resets the grid to spinners (known, accepted) |
 | Credits/provenance shown in the lightbox info panel | Masa | plus a generated credits page for CC-BY |
 | ~~Lighting menu hidden in demo mode~~ → **axis lighting mode removed from the main app; camera is the only mode; the pill goes** (implemented: `remove-axis-lighting`, applied 2026-08-31 — row closed) | Masa | the hide was only ever to stop visitors picking axis. Item 9 has the grounding (every sidecar says `camera`, 0 `axis` — 1,758 at this session's count, 1,792 at later reviewers' runs the same day; axis's motivating bug has no counterpart in camera mode) |
 | **SSAO stays a user option** (pill kept), default chosen adaptively by sampling frames; both AO variants baked for the demo | Masa | item 8 has the design: AO becomes a thumbnail recipe dimension, cache keyed by recipe |
@@ -210,7 +210,10 @@ own origin"; only its body hardcodes loopback.
    drag-to-orbit in *their* localStorage, or freeze curated framings?
 4. **Landing.** Kit tiles with contact sheets — is that the whole first screen,
    or also a sentence for a recruiter (what this is, what to try) — banner,
-   About link beside credits, or nothing?
+   About link beside credits, or nothing? (Sheets exist as of 2026-08-31 —
+   `folder-contact-sheets`, partially applied — so the tiles half is real;
+   whether the root should open in flat view instead of, or as well as, sheets
+   is still its own question, unclosed by that change.)
 5. **Names.** Rename folders at corpus build (re-embed — needed anyway) or
    display-name from the store (near-free if #1 is sidecars; ids stay in paths).
 6. **Domain.** On the critical path for TLS and the configured-origin guard.

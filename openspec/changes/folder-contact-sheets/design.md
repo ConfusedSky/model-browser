@@ -40,6 +40,14 @@ to what is looked at, which is the same argument `thumbnail-sweep-priority` make
 renders. One `IntersectionObserver` on the grid, observing folder tiles, with a small
 in-memory map per listing; a re-mounted tile (scrolled away and back) reuses the map.
 
+"Per listing" is `entries` identity, not `state.result` identity (decided at review,
+2026-08-31): the reducer's `patch` spreads `state.result` on every fetchless view change —
+a lightbox open, a kind option — while deliberately preserving `entries` identity, which is
+the identity `useThumbnails` already keys on and only a landing replaces (R5). Keyed on
+`state.result`, every landed sheet would be wiped and every peek re-issued on each lightbox
+open. The same `entries` reference serves as the stale-landing generation token: a peek that
+lands after the listing changed is dropped, never written into the new listing's map.
+
 ### D2: A bounded depth-first walk, models first at each level
 
 The peek walks the folder with `listFsDir`: models at this level in sorted order, then each
