@@ -2,23 +2,111 @@ import { createHash } from 'node:crypto'
 import { mkdir, readFile, readdir, realpath, rename, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, sep } from 'node:path'
-import type { CameraState, LightingMode, OrbitAxis, ThumbGetResponse } from '../../shared/types'
+import { CAMERA_EPSILON, type CameraState, type LightingMode, type OrbitAxis, type ThumbGetResponse } from '../../shared/types'
 import { type Library, LibraryError } from './library'
 import { VPathError, joinVPath, parseVPath } from './vpath'
 
-interface Meta {
-  path: string
+/**
+ * Everything a sidecar records about *one* render's pixels. Both renders of an
+ * entry carry the same four fields; only where they are written differs (D1).
+ */
+interface RenderLabels {
   /** mtime the PNG was rendered against; undefined when only camera is stored. */
   mtime?: number
-  camera?: CameraState
-  /** Orbit spindle axis; undefined reads as 'y' (pre-axis entries). */
-  axis?: OrbitAxis
   /** Lighting mode the PNG was rendered with; stored and echoed, never interpreted. */
   lighting?: LightingMode
   /** Pixel-recipe (rig) version the PNG was rendered with; stored and echoed, never interpreted. */
   rig?: number
   /** Pose recipe version the PNG was rendered under; same contract as `rig`. */
   posed?: number
+}
+
+/**
+ * One entry, up to two renders (`ao-as-recipe-dimension` D1). The occluded
+ * render keeps the shape every sidecar has always had — its labels at the top
+ * level, its pixels in `<key>.png` — because it is the render every existing
+ * cache already holds, and making it a member of a symmetric map would have
+ * cost a migration of every one of them. The unoccluded render is named for
+ * what it lacks: `<key>.noao.png`, labels under `noao`. A sidecar written
+ * before this change simply has no `noao`, which is exactly what "no
+ * unoccluded render is cached" means.
+ *
+ * `camera` and `axis` sit outside both: the orientation belongs to the model,
+ * not to a recipe, and both renders are always drawn under it.
+ */
+interface Meta extends RenderLabels {
+  path: string
+  camera?: CameraState
+  /** Orbit spindle axis; undefined reads as 'y' (pre-axis entries). */
+  axis?: OrbitAxis
+  /** The unoccluded sibling's labels; absent when it is not cached. */
+  noao?: RenderLabels
+}
+
+/**
+ * Is this write moving the shared orientation, rather than re-stating it?
+ *
+ * Absence keeps and cannot move anything. A `null` discards, which moves the
+ * orientation only if there was one to discard. A value that arrives where the
+ * entry held none is a change by definition — there is nothing to compare it
+ * against, and design D2 takes the once-per-model cost of that deliberately.
+ *
+ * Otherwise it is a tolerance, not equality: `persist` re-captures and re-sends
+ * the camera on every lightbox close, through a round trip that is not
+ * bit-exact, so equality would read every close of an oriented model as a move
+ * (see `CAMERA_EPSILON` for the measurement).
+ */
+function cameraMoved(next: CameraState | null | undefined, prev: CameraState | undefined): boolean {
+  if (next === undefined) return false
+  if (next === null) return prev !== undefined
+  if (prev === undefined) return true
+  return (
+    Math.abs(next.az - prev.az) > CAMERA_EPSILON ||
+    Math.abs(next.el - prev.el) > CAMERA_EPSILON ||
+    Math.abs(next.distR - prev.distR) > CAMERA_EPSILON ||
+    Math.abs(next.target[0] - prev.target[0]) > CAMERA_EPSILON ||
+    Math.abs(next.target[1] - prev.target[1]) > CAMERA_EPSILON ||
+    Math.abs(next.target[2] - prev.target[2]) > CAMERA_EPSILON
+  )
+}
+
+/** The same question for the axis, which is an enum and compares by equality. */
+function axisMoved(next: OrbitAxis | null | undefined, prev: OrbitAxis | undefined): boolean {
+  if (next === undefined) return false
+  if (next === null) return prev !== undefined
+  return next !== prev
+}
+
+/**
+ * Invalidation (D2): the render's recipe labels go, its `mtime` and its pixels
+ * stay. Clearing the `mtime` instead would make it answer `stale`, which
+ * carries no pixels — and the tile would blank until its replacement rendered.
+ * Kept as a hit whose labels fail the client's recipe check, it is shown at the
+ * old orientation for exactly as long as it takes to draw the new one.
+ */
+function clearRecipe(labels: RenderLabels): RenderLabels {
+  return { mtime: labels.mtime }
+}
+
+/**
+ * The four label fields and nothing else. The occluded render's live at the top
+ * level of a `Meta` beside `path`, `camera` and `axis`, so reading them as a
+ * `RenderLabels` has to *pick* rather than alias: the sibling's copy is written
+ * back into `noao`, and spreading a whole `Meta` in there would file the
+ * entry's path and camera inside its own sidecar.
+ */
+function renderLabels(from: RenderLabels | null | undefined): RenderLabels {
+  if (from === null || from === undefined) return {}
+  return { mtime: from.mtime, lighting: from.lighting, rig: from.rig, posed: from.posed }
+}
+
+function hasLabels(labels: RenderLabels): boolean {
+  return (
+    labels.mtime !== undefined ||
+    labels.lighting !== undefined ||
+    labels.rig !== undefined ||
+    labels.posed !== undefined
+  )
 }
 
 const DEFAULT_CAP = 2 * 1024 ** 3
@@ -88,8 +176,9 @@ export class ThumbCache {
     return join(dir, `${key}.json`)
   }
 
-  private pngFile(dir: string, key: string): string {
-    return join(dir, `${key}.png`)
+  /** The occluded render's file is the historical one; the sibling is suffixed. */
+  private pngFile(dir: string, key: string, ao = true): string {
+    return join(dir, ao ? `${key}.png` : `${key}.noao.png`)
   }
 
   /**
@@ -111,11 +200,22 @@ export class ThumbCache {
   }
 
 
-  async get(path: string, mtime: number): Promise<ThumbGetResponse> {
+  /**
+   * Read one render of an entry. `ao` names which — the occluded render by
+   * default, which is what every caller meant before renders were keyed by
+   * occlusion and what every pre-existing entry holds.
+   *
+   * The status is that render's alone: its pixels, its labels, its `mtime`.
+   * The camera and axis are the entry's and come back on every status, because
+   * a client told `stale` or `miss` for one render still has to draw it at the
+   * orientation the other one is already drawn at.
+   */
+  async get(path: string, mtime: number, ao = true): Promise<ThumbGetResponse> {
     const dir = await this.entryDir()
     const key = this.key(path)
     const meta = await this.readMeta(dir, key)
     if (meta === null) return { status: 'miss' }
+    const labels: RenderLabels = (ao ? meta : meta.noao) ?? {}
     // Not defaulted here: the *absence* of a stored axis is information a
     // client needs. Defaulting it to 'y' made "nothing stored" indistinguishable
     // from "stored as y", so a model whose thumbnail was rendered at an
@@ -123,32 +223,80 @@ export class ThumbCache {
     // the viewer abandoned the pose the moment it opened. Every caller already
     // applies its own default.
     const axis = meta.axis
-    const lighting = meta.lighting
-    const rig = meta.rig
-    const posed = meta.posed
-    if (meta.mtime !== mtime) return { status: meta.camera !== undefined || meta.mtime !== undefined ? 'stale' : 'miss', camera: meta.camera, axis, lighting, rig, posed }
+    const lighting = labels.lighting
+    const rig = labels.rig
+    const posed = labels.posed
+    // Per render, but with the entry's camera: this render was written before,
+    // or the model has an orientation stored, and either way the client has
+    // something to re-render from. An axis alone is not enough — an entry
+    // holding only an axis is still a miss, as it was before renders split.
+    if (labels.mtime !== mtime) return { status: meta.camera !== undefined || labels.mtime !== undefined ? 'stale' : 'miss', camera: meta.camera, axis, lighting, rig, posed }
     let png
     try {
-      png = await readFile(this.pngFile(dir, key))
+      png = await readFile(this.pngFile(dir, key, ao))
     } catch {
       return { status: 'stale', camera: meta.camera, axis, lighting, rig, posed }
     }
     // LRU clock for size-cap eviction is the png file's mtime. Bumping it via
     // utimes (instead of rewriting the meta json) keeps reads race-free
     // against the sweep: it cannot resurrect a removed entry and cannot be
-    // caught mid-write by the sweep's meta parse.
+    // caught mid-write by the sweep's meta parse. Each render carries its own
+    // clock, so reading one never defends the other from the cap (D3).
     const now = new Date()
-    await utimes(this.pngFile(dir, key), now, now).catch(() => {})
+    await utimes(this.pngFile(dir, key, ao), now, now).catch(() => {})
     return { status: 'hit', camera: meta.camera, axis, lighting, rig, posed, png: png.toString('base64') }
   }
 
-  async put(path: string, opts: { mtime: number; png?: Buffer; camera?: CameraState | null; axis?: OrbitAxis | null; lighting?: LightingMode; rig?: number; posed?: number }): Promise<void> {
+  /**
+   * Write one render of an entry — `opts.ao` names which, occluded by default.
+   * The pixels and labels land on that render; the camera and axis are the
+   * entry's and are written whichever render carried them.
+   *
+   * Because the orientation is shared and both renders are always drawn under
+   * it, a write that *moves* it leaves the render it did not draw at an angle
+   * the entry no longer claims — so that render is invalidated (D2), and both
+   * are when the write carries no pixels: there is then no drawn render, and no
+   * labels of its own to apply either, so any this PUT declared go with the
+   * rest. A write carrying only pixels and labels touches the other render
+   * never, which is what makes toggling the preference back a lookup.
+   */
+  async put(path: string, opts: { mtime: number; png?: Buffer; camera?: CameraState | null; axis?: OrbitAxis | null; lighting?: LightingMode; rig?: number; posed?: number; ao?: boolean }): Promise<void> {
     const dir = await this.entryDir()
     const key = this.key(path)
+    const ao = opts.ao ?? true
     const prev = await this.readMeta(dir, key)
+    const prevMine = renderLabels(ao ? prev : prev?.noao)
+    const prevTheirs = renderLabels(ao ? prev?.noao : prev)
+
+    let mine: RenderLabels = {
+      mtime: opts.png !== undefined ? opts.mtime : prevMine.mtime,
+      // Like mtime, lighting and rig describe the pixels: a PUT replacing the
+      // PNG without declaring them must not keep old labels on new pixels.
+      lighting: opts.png !== undefined ? opts.lighting : (opts.lighting ?? prevMine.lighting),
+      rig: opts.png !== undefined ? opts.rig : (opts.rig ?? prevMine.rig),
+      posed: opts.png !== undefined ? opts.posed : (opts.posed ?? prevMine.posed),
+    }
+    let theirs: RenderLabels = prevTheirs
+
+    // The model itself changed under both renders, so the sibling's pixels are
+    // of a file that is gone. Strictly newer, not merely different: an equal
+    // mtime is the ordinary case of drawing the second render of the same file,
+    // and a written mtime *older* than the sibling's makes this write the stale
+    // one — deleting the sibling's newer pixels then would be backwards.
+    const supersedes = opts.png !== undefined && theirs.mtime !== undefined && opts.mtime > theirs.mtime
+    if (supersedes) theirs = {}
+
+    const moved = cameraMoved(opts.camera, prev?.camera) || axisMoved(opts.axis, prev?.axis)
+    if (moved) {
+      theirs = clearRecipe(theirs)
+      if (opts.png === undefined) mine = clearRecipe(mine)
+    }
+
+    const occluded = ao ? mine : theirs
+    const unoccluded = ao ? theirs : mine
     const meta: Meta = {
       path,
-      mtime: opts.png !== undefined ? opts.mtime : prev?.mtime,
+      ...occluded,
       // Three states per field: a value sets it, silence keeps what was there,
       // `null` discards it. Silence cannot mean discard — every PNG write omits
       // both — and a written default is not a discard either: it is an
@@ -156,17 +304,17 @@ export class ThumbCache {
       // otherwise frame the model well (entry-context-menu D7).
       camera: opts.camera === null ? undefined : (opts.camera ?? prev?.camera),
       axis: opts.axis === null ? undefined : (opts.axis ?? prev?.axis),
-      // Like mtime, lighting and rig describe the pixels: a PUT replacing the
-      // PNG without declaring them must not keep old labels on new pixels.
-      lighting: opts.png !== undefined ? opts.lighting : (opts.lighting ?? prev?.lighting),
-      rig: opts.png !== undefined ? opts.rig : (opts.rig ?? prev?.rig),
-      posed: opts.png !== undefined ? opts.posed : (opts.posed ?? prev?.posed),
+      // Omitted rather than written empty, so an entry that has never held an
+      // unoccluded render keeps exactly the sidecar shape it had before this
+      // change — the whole of the "no migration" claim (D1).
+      noao: hasLabels(unoccluded) ? unoccluded : undefined,
     }
     if (opts.png !== undefined) {
       await mkdir(dir, { recursive: true })
-      // Superseded-mtime PNG is inherently replaced: one PNG per path hash.
-      await writeFile(this.pngFile(dir, key), opts.png)
+      // Superseded-mtime PNG is inherently replaced: one PNG per render per key.
+      await writeFile(this.pngFile(dir, key, ao), opts.png)
     }
+    if (supersedes) await rm(this.pngFile(dir, key, !ao), { force: true })
     await this.writeMeta(dir, key, meta)
     if (opts.png !== undefined && ++this.writesSinceMaintain >= this.maintainEvery) {
       this.writesSinceMaintain = 0
@@ -221,7 +369,11 @@ export class ThumbCache {
     } catch {
       return
     }
-    const metas: { key: string; meta: Meta; pngSize: number; lastRead: number }[] = []
+    // One row per *render*, not per entry (D3): the two PNGs of a model are
+    // independent LRU candidates, so an unoccluded render nobody has looked at
+    // since is evicted while the occluded one read this morning stays. The
+    // existence sweep is still per entry — one model, one existence.
+    const metas: { key: string; ao: boolean; meta: Meta; pngSize: number; lastRead: number }[] = []
     for (const f of files) {
       if (!f.endsWith('.json')) continue
       const key = f.slice(0, -'.json'.length)
@@ -229,11 +381,15 @@ export class ThumbCache {
       if (meta === null) continue
       if (!(await this.sourceExists(meta.path))) {
         await rm(this.metaFile(dir, key), { force: true })
-        await rm(this.pngFile(dir, key), { force: true })
+        await rm(this.pngFile(dir, key, true), { force: true })
+        await rm(this.pngFile(dir, key, false), { force: true })
         continue
       }
-      const pngStat = await stat(this.pngFile(dir, key)).catch(() => null)
-      metas.push({ key, meta, pngSize: pngStat?.size ?? 0, lastRead: pngStat?.mtimeMs ?? 0 })
+      for (const ao of [true, false]) {
+        const pngStat = await stat(this.pngFile(dir, key, ao)).catch(() => null)
+        if (pngStat === null) continue // that render is not cached: nothing to evict
+        metas.push({ key, ao, meta, pngSize: pngStat.size, lastRead: pngStat.mtimeMs })
+      }
     }
 
     let total = metas.reduce((sum, m) => sum + m.pngSize, 0)
@@ -258,13 +414,21 @@ export class ThumbCache {
       // meanwhile survive.
       const fresh = await this.readMeta(dir, m.key)
       if (fresh === null) continue
-      const png = await stat(this.pngFile(dir, m.key)).catch(() => null)
+      const png = await stat(this.pngFile(dir, m.key, m.ao)).catch(() => null)
       if (png === null || png.mtimeMs !== m.lastRead || png.size !== m.pngSize) continue
       // The window that remains is accepted, and unclosable without locking: a
       // `put` landing after that stat still loses its PNG below, and a camera it
       // wrote is overwritten by the one the re-read carries.
-      await rm(this.pngFile(dir, m.key), { force: true })
-      await this.writeMeta(dir, m.key, { ...fresh, mtime: undefined })
+      await rm(this.pngFile(dir, m.key, m.ao), { force: true })
+      // Only this render's `mtime`, and only this render's: the labels stay and
+      // ride the stale read — they say what recipe the evicted pixels were
+      // under, which is what the client asks a stale answer for — and the other
+      // render is untouched, cap candidate on its own clock or not.
+      await this.writeMeta(
+        dir,
+        m.key,
+        m.ao ? { ...fresh, mtime: undefined } : { ...fresh, noao: { ...renderLabels(fresh.noao), mtime: undefined } },
+      )
       total -= m.pngSize
     }
   }
@@ -327,7 +491,8 @@ export class ThumbCache {
         if ((await stat(dirname(source)).catch(() => null)) === null) continue
       }
       await rm(this.metaFile(this.dir, key), { force: true })
-      await rm(this.pngFile(this.dir, key), { force: true })
+      await rm(this.pngFile(this.dir, key, true), { force: true })
+      await rm(this.pngFile(this.dir, key, false), { force: true })
     }
   }
 
@@ -393,10 +558,17 @@ export class ThumbCache {
         // included, so the flat directory keeps no pixels that no sidecar
         // describes and the legacy sweep would never reach.
         await rm(this.metaFile(this.dir, key), { force: true })
-        await rm(this.pngFile(this.dir, key), { force: true })
+        await rm(this.pngFile(this.dir, key, true), { force: true })
+        await rm(this.pngFile(this.dir, key, false), { force: true })
         continue
       }
-      await rename(this.pngFile(this.dir, key), this.pngFile(target, newKey)).catch(() => {})
+      // Every file of the key moves, sibling included. A flat entry cannot
+      // *have* an unoccluded render — that file is born after this change,
+      // under a per-library key — so the second rename always misses; it is
+      // here so the migration can never be the thing that drops one, rather
+      // than because anything is expected to be found.
+      await rename(this.pngFile(this.dir, key, true), this.pngFile(target, newKey, true)).catch(() => {})
+      await rename(this.pngFile(this.dir, key, false), this.pngFile(target, newKey, false)).catch(() => {})
       await this.writeMeta(target, newKey, { ...meta, path: libPath })
       await rm(this.metaFile(this.dir, key), { force: true })
       moved++

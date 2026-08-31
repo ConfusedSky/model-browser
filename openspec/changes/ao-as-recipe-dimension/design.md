@@ -103,8 +103,12 @@ would hold stale pixels until next rendered.
 `maintain` already sizes and sorts PNG files by their mtime (the LRU clock, bumped by
 `utimes` on read). Both files join that list individually: an unoccluded render nobody has
 looked at since is evicted before an occluded one read yesterday, and evicting one clears
-only its labels (the top-level `mtime`, or `noao`). The existence sweep still removes the
-whole entry — both PNGs and the sidecar — when the source is gone.
+only that render's `mtime` — the top-level one, or `noao.mtime`. Its recipe labels stay and
+ride the stale read, exactly as the occluded render's have since eviction existed: they say
+what recipe the evicted pixels were under, which is what a client asks a stale answer for.
+The other render is untouched either way, a cap candidate on its own clock or not. The
+existence sweep still removes the whole entry — both PNGs and the sidecar — when the source
+is gone.
 
 ### D4: Thumbnails read the preference at render time, not at module load
 

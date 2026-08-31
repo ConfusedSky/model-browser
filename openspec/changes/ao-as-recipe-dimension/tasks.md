@@ -13,7 +13,7 @@
 
 ## 1. Server: the sibling render (D1, D2, D3)
 
-- [ ] 1.1 `ThumbCache`: `get(path, mtime, ao)` — `ao` selects `<key>.png` + top-level
+- [x] 1.1 `ThumbCache`: `get(path, mtime, ao)` — `ao` selects `<key>.png` + top-level
       labels or `<key>.noao.png` + the sidecar's `noao` labels; status is for that render;
       `camera`/`axis` returned on every status. `put(path, { ao, png, … })` writes the
       selected render and its labels, and **invalidates the render it did not write — both renders when the PUT carries no
@@ -22,12 +22,39 @@
       PUT carrying only a PNG and labels, or a camera within tolerance, leaves the other
       render alone. Per-render status: hit (pixels present at the requested mtime), stale
       (written before, or the entry holds an orientation), miss
-- [ ] 1.2 `maintain`: list both PNG files per sidecar as separate LRU candidates; evicting
-      `<key>.png` clears the top-level `mtime`, evicting `<key>.noao.png` clears `noao`;
+      <br>2026-08-31 (AOD-A): `Meta` now extends a `RenderLabels` (`mtime`, `lighting`,
+      `rig`, `posed`) it shares with a new optional `noao` field, so an entry that has
+      never held an unoccluded render serialises to exactly the sidecar it did before —
+      pinned by cache.test.ts "serves an entry written before the split as the occluded
+      render…", which asserts `'noao' in sidecar` is false. `pngFile` takes the render;
+      `get`/`put` take `ao` defaulting to true. `cameraMoved`/`axisMoved` decide the
+      orientation question and `clearRecipe` is the invalidation. Statuses in `get` read
+      the entry's `camera` beside the *render's* `mtime`, so an axis-only entry stays a
+      miss. Tests: the twelve cells of cache.test.ts's "ThumbCache occlusion renders"
+- [x] 1.2 `maintain`: list both PNG files per sidecar as separate LRU candidates; evicting
+      `<key>.png` clears the top-level `mtime` and evicting `<key>.noao.png` clears
+      `noao.mtime`, each keeping its own recipe labels to ride the stale read (D3);
       the existence sweep removes the sidecar and both PNGs
-- [ ] 1.3 `app.ts`: `GET /api/thumb` reads `ao` (`on`/`off`, absent = `on`, anything else
+      <br>2026-08-31 (AOD-A): `maintain`'s candidate list is one row per *render* —
+      `{key, ao, …}` — stat'ing both `pngFile(dir, key, ao)`s, so the two PNGs of a model
+      sort into the LRU independently. The existing stat-based eviction guard (re-read the
+      sidecar, re-stat the PNG, skip on any drift) is applied per file, unchanged in
+      substance. Existence sweep and `sweepLegacy` `rm` both PNGs; `migrate` renames both.
+      Tests: cache.test.ts "evicts the render nobody has looked at and leaves the other a
+      hit" (real `maintain` at a 10-byte cap, not a hand unlink — asserts the evicted
+      sibling is `stale` echoing `rig: 3` and `lighting: 'camera'`, the occluded render
+      still a hit with `rig: 2`, one PNG left) and "sweeps sidecar and both renders
+      together when the model is gone" (3 files before, 0 after)
+- [x] 1.3 `app.ts`: `GET /api/thumb` reads `ao` (`on`/`off`, absent = `on`, anything else
       400); `PUT /api/thumb` reads `body.ao` (boolean, absent = `true`, non-boolean 400)
-- [ ] 1.4 Server tests (`cache.test.ts`, `api.test.ts`): a pre-existing entry reads as the
+      <br>2026-08-31 (AOD-A): both refuse in the route's existing invalid-field shape
+      (`{ error: 'invalid ao: …' }`, 400), beside the axis/lighting/rig validators. The
+      PUT check is `typeof body.ao !== 'boolean'` rather than a truthiness read, because
+      `false` is a value the route must act on — a string `'off'` read as truthy would
+      file unoccluded pixels over the shipped render. Tests: api.test.ts "the occlusion
+      dimension" — "rejects an `ao` query that is neither on nor off" and "rejects a
+      non-boolean `ao` on a put", both asserting the error body verbatim
+- [x] 1.4 Server tests (`cache.test.ts`, `api.test.ts`): a pre-existing entry reads as the
       occluded render with `ao` absent and with `ao=on`; `ao=off` on it is a miss with no camera stored and `stale` with one, carrying camera and axis either way; a PUT with `ao:false` writes the sibling and leaves the occluded
       labels untouched; both hit afterwards; eviction takes the older-read sibling first
       and leaves the other a hit; the existence sweep removes all three files; a
@@ -35,8 +62,42 @@
       written render's alone; a PNG-only PUT, and a PUT re-sending the stored camera
       perturbed by 1e-12, leave the other render a hit with labels intact; a `null` discard with no PNG clears both renders' labels when the entry held a camera, and changes nothing when it held none; after an orbit-release PUT under `off`, a GET
       under `on` is a hit carrying the new camera, its pixels, and no `rig`; a first request of the unoccluded render with a camera stored is `stale` with the camera; a **first-ever** camera on an entry with both renders cached clears the other render's labels
+      <br>2026-08-31 (AOD-A): twelve cells in cache.test.ts's "ThumbCache occlusion
+      renders" and six in api.test.ts's "the occlusion dimension"; server suite 282 → 300
+      passing, nothing pre-existing touched. Every enumerated case has a cell, plus two
+      the list did not name: "treats a first-ever axis, and a different axis, as a change
+      too" (the axis limb of the rule, including that re-sending the *same* axis moves
+      nothing) and "serves the invalidated render its own old pixels and the new camera,
+      so the tile never blanks" (why invalidation clears labels rather than `mtime` — it
+      asserts the stale-render's own PNG still comes back beside the new camera). The
+      eviction cell reads its labels back through a real `maintain` at a 10-byte cap, so
+      it discriminates the ruling on 1.2 rather than passing under either reading.
+      Falsified, one mutation at a time, each reverted and the suite re-run green:
+      neutering the `if (moved)` invalidation fails 5 cells ("expected 2 to be
+      undefined"); replacing the `CAMERA_EPSILON` comparisons with `!==` fails exactly
+      the tolerance cell ("expected undefined to be 2"); dropping the supersede `rm`
+      fails exactly 1.6's cell ("expected [ …(2) ] to deeply equal [ Array(1) ]");
+      writing `noao: undefined` on eviction — reading (b) of the 1.2 ambiguity — fails
+      exactly the eviction cell ("expected undefined to be 3")
 - [ ] 1.5 `CAMERA_EPSILON` lives in `shared/` (both workspaces import `shared/types`; the server cannot import `client/src/three/camera.ts`, which needs `three`), with the probe in `client/test/camera.test.ts`: `applyState` → `captureState` round trip, y-frame, bounds pivoted to the origin, 200k random states at each of radius 0.01, 1 and 137 with `target` drawn within the bounding sphere, asserting the maximum per-component drift is at least four orders below the constant (design D2's measurement, made re-runnable)
-- [ ] 1.6 A PNG PUT at a newer mtime deletes the sibling's superseded PNG (and clears its labels' `mtime`), so no render holds pixels of a file that changed; test it
+      <br>2026-08-31 (AOD-A): **shared constant done, probe is the client half's — left
+      unticked deliberately.** `CAMERA_EPSILON = 1e-9` is exported from `shared/types.ts`
+      beside `CameraState`, carrying the D2 measurement (the fourth reviewer's re-run,
+      2026-08-28) in its doc comment and naming `client/test/camera.test.ts` as the probe
+      that re-runs it. That file does not exist yet — the comment says the probe is added
+      by the client half, so the pointer is not read as a dangling citation. Tick this
+      line when the probe lands
+- [x] 1.6 A PNG PUT at a newer mtime deletes the sibling's superseded PNG (and clears its labels' `mtime`), so no render holds pixels of a file that changed; test it
+      <br>2026-08-31 (AOD-A): `put`'s `supersedes` — `opts.png !== undefined &&
+      theirs.mtime !== undefined && opts.mtime > theirs.mtime` — `rm`s the sibling's PNG
+      and empties its labels wholesale (mtime included), so the sibling reads as a miss
+      rather than a hit on pixels of a file that is gone. Strictly newer, not merely
+      different, and the comment beside it says why: an *equal* mtime is the ordinary
+      case of drawing the second render of the same file, and a written mtime *older*
+      than the sibling's makes this write the stale one — deleting the sibling's newer
+      pixels there would be backwards. Test: cache.test.ts "deletes the sibling's pixels
+      when a render is written at a newer mtime", which asserts both limbs (one PNG left
+      after the newer write; two still there after re-writing at the same mtime)
 
 ## 2. Client: render and look up under the preference (D4)
 

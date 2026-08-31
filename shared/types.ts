@@ -39,6 +39,29 @@ export interface CameraState {
   target: [number, number, number]
 }
 
+/**
+ * How far two `CameraState`s may differ per component and still be the same
+ * orientation. Every component is unit-free in the same sense — `az`/`el` in
+ * radians, `distR` in bounding-sphere radii, `target` in radii too — so one
+ * tolerance covers all of them and the drift it absorbs is scale-independent.
+ *
+ * It exists because a camera survives a round trip that is not bit-exact: a
+ * lightbox close re-captures the orientation through az/el → cartesian →
+ * `asin`/`atan2` → az/el and PUTs the result whether or not the user moved
+ * anything. Under value equality every close of an oriented model would read
+ * as a moved camera and invalidate its sibling render (`ThumbCache.put`).
+ * Measured over that round trip (y-frame, bounds pivoted to the origin, 200k
+ * random states at each of radius 0.01, 1 and 137; the fourth reviewer's
+ * re-run, 2026-08-28): `DEFAULT_CAMERA` drifts by 1.1e-16 and the maximum
+ * per-component drift is 7.1e-15 — five orders below this constant.
+ *
+ * That measurement is a probe, not a quotation: `client/test/camera.test.ts`
+ * re-runs the sweep and asserts the maximum drift stays far below this value.
+ * The probe is added by the client half of `ao-as-recipe-dimension`; the
+ * server half lands the constant alone.
+ */
+export const CAMERA_EPSILON = 1e-9
+
 export type ThumbStatus = 'hit' | 'stale' | 'miss'
 
 /**
@@ -54,6 +77,13 @@ export type ThumbStatus = 'hit' | 'stale' | 'miss'
  */
 export type LightingMode = 'axis' | 'camera'
 
+/**
+ * The answer for **one** render of an entry — the occluded one, or the
+ * unoccluded sibling, whichever the request named (`ao`). `status`, `png` and
+ * the recipe labels below all describe that render. `camera` and `axis` are
+ * the entry's own, shared by both renders, so they come back whichever render
+ * was asked for and whatever its status is.
+ */
 export interface ThumbGetResponse {
   status: ThumbStatus
   camera?: CameraState
@@ -102,6 +132,14 @@ export interface ThumbPutRequest {
   rig?: number
   /** Pose recipe version the PNG was rendered under; absent when unposed. */
   posed?: number
+  /**
+   * Which render these pixels and labels are: `true` — or absent — the
+   * occluded one, `false` the unoccluded sibling. Absent means occluded
+   * because that is what every PUT was before renders were keyed by
+   * occlusion: an old client never rendered an unoccluded thumbnail, so it
+   * can only ever have meant this one.
+   */
+  ao?: boolean
 }
 
 /**

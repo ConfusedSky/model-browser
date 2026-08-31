@@ -508,9 +508,16 @@ export function createApp(
     // what the library decides here is only whether this path is one the server
     // will speak about at all. Canonical, though — the key *is* the string, and
     // `/kit/../kit/a.stl` must not be a second entry beside `/kit/a.stl`.
+    // Which render is wanted. Absent is `on`: that is what every request meant
+    // before renders were keyed by occlusion, so a client from before this
+    // change reads exactly what it always read (ao-as-recipe-dimension D2).
+    const aoParam = c.req.query('ao')
+    if (aoParam !== undefined && aoParam !== 'on' && aoParam !== 'off') {
+      return c.json({ error: `invalid ao: ${aoParam}` }, 400)
+    }
     const libPath = canonicalLibPath(path)
     await library.resolve(libPath)
-    return c.json(await cache.get(libPath, mtime))
+    return c.json(await cache.get(libPath, mtime, aoParam !== 'off'))
   })
 
   app.put('/api/thumb', async (c) => {
@@ -534,6 +541,13 @@ export function createApp(
     if (body.rig !== undefined && typeof body.rig !== 'number') {
       return c.json({ error: `invalid rig: ${String(body.rig)}` }, 400)
     }
+    // Absent is the occluded render, for the reason the GET says: an old client
+    // never rendered an unoccluded thumbnail, so an absent `ao` can only ever
+    // have meant this one. Anything but a boolean is a client bug, not a
+    // default — refused in the shape every other invalid field uses.
+    if (body.ao !== undefined && typeof body.ao !== 'boolean') {
+      return c.json({ error: `invalid ao: ${String(body.ao)}` }, 400)
+    }
     await cache.put(libPath, {
       mtime: body.mtime,
       png: body.png !== undefined ? Buffer.from(body.png, 'base64') : undefined,
@@ -542,6 +556,7 @@ export function createApp(
       lighting: body.lighting,
       rig: body.rig,
       posed: body.posed,
+      ao: body.ao,
     })
     return c.json({ ok: true })
   })

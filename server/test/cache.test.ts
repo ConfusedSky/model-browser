@@ -687,3 +687,322 @@ describe('ThumbCache under a library', () => {
     expect(readdirSync(join(base, 'lib-gone'))).toHaveLength(0)
   })
 })
+
+/**
+ * Two renders per model, one orientation between them (`ao-as-recipe-dimension`
+ * D1–D3). The occluded render is `<key>.png` with its labels at the top level of
+ * the sidecar — exactly the entry every existing cache holds — and the
+ * unoccluded one is `<key>.noao.png` with its labels under `noao`.
+ */
+describe('ThumbCache occlusion renders', () => {
+  const pngsOf = (dir: string): string[] =>
+    readdirSync(dir)
+      .filter((f) => f.endsWith('.png'))
+      .sort()
+
+  it('serves an entry written before the split as the occluded render, under `ao` absent and true alike', async () => {
+    const cache = tempCache()
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const path = join(fx.dir, 'loose.stl')
+    await cache.put(path, { mtime: 1, png: PNG_A, rig: 2, lighting: 'camera' })
+
+    // No `ao` argument at all — every caller before this change — and `true`
+    // must answer identically, and identically to what they answered before.
+    for (const res of [await cache.get(path, 1), await cache.get(path, 1, true)]) {
+      expect(res.status).toBe('hit')
+      expect(Buffer.from(res.png as string, 'base64')).toEqual(PNG_A)
+      expect(res.rig).toBe(2)
+    }
+    // …and the sidecar it wrote is the old shape: no `noao` key at all, which
+    // is the whole of the no-migration claim (D1).
+    const sidecar = JSON.parse(readFileSync(onlyFile(cache.dir, '.json'), 'utf8')) as Record<string, unknown>
+    expect('noao' in sidecar).toBe(false)
+    expect(pngsOf(cache.dir)).toHaveLength(1)
+  })
+
+  it('reads the unoccluded render of an occluded-only entry as a miss, or stale once a camera is held', async () => {
+    const cache = tempCache()
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const path = join(fx.dir, 'loose.stl')
+    // No camera: nothing is stored about this render, and nothing about this
+    // model's orientation either, so there is nothing to answer with.
+    await cache.put(path, { mtime: 1, png: PNG_A, axis: '-z', rig: 2 })
+    let res = await cache.get(path, 1, false)
+    expect(res.status).toBe('miss') // an axis alone is not an orientation to re-render from
+    expect(res.axis).toBe('-z') // …but it is still the entry's, and still carried
+    expect(res.rig).toBeUndefined() // the occluded render's label is not this render's
+
+    // With a camera stored, the first read of the unoccluded render is stale:
+    // the client draws it at the orientation the occluded one already has.
+    await cache.put(path, { mtime: 1, camera: CAM })
+    res = await cache.get(path, 1, false)
+    expect(res.status).toBe('stale')
+    expect(res.camera).toEqual(CAM)
+    expect(res.axis).toBe('-z')
+    expect(res.png).toBeUndefined()
+    // The occluded render is untouched by either read.
+    expect((await cache.get(path, 1, true)).status).toBe('hit')
+  })
+
+  it('writes the sibling render without disturbing the occluded one, and both then hit', async () => {
+    const cache = tempCache()
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const path = join(fx.dir, 'loose.stl')
+    await cache.put(path, { mtime: 1, png: PNG_A, camera: CAM, axis: 'z', rig: 2, lighting: 'camera' })
+    // The ordinary render PUT of the other setting: pixels and labels, no
+    // camera. It must leave the occluded render exactly as it was, or
+    // "toggling back is a lookup" is unreachable.
+    await cache.put(path, { mtime: 1, png: PNG_B, ao: false, rig: 3, lighting: 'camera' })
+
+    const occ = await cache.get(path, 1, true)
+    expect(occ.status).toBe('hit')
+    expect(Buffer.from(occ.png as string, 'base64')).toEqual(PNG_A)
+    expect(occ.rig).toBe(2) // its own label, not the sibling's
+
+    const no = await cache.get(path, 1, false)
+    expect(no.status).toBe('hit')
+    expect(Buffer.from(no.png as string, 'base64')).toEqual(PNG_B)
+    expect(no.rig).toBe(3)
+    // Shared, and returned on a read of either.
+    expect(no.camera).toEqual(CAM)
+    expect(no.axis).toBe('z')
+
+    // Two files, named as D1 fixes them.
+    const key = createHash('sha256').update(path).digest('hex')
+    expect(pngsOf(cache.dir)).toEqual([`${key}.noao.png`, `${key}.png`])
+  })
+
+  it('carries a camera beyond tolerance to the other render as cleared labels, and leaves the written one alone', async () => {
+    const cache = tempCache()
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const path = join(fx.dir, 'loose.stl')
+    await cache.put(path, { mtime: 1, png: PNG_A, camera: CAM, rig: 2, lighting: 'camera' })
+    await cache.put(path, { mtime: 1, png: PNG_B, ao: false, rig: 3, lighting: 'camera' })
+
+    // An orbit under the unoccluded setting: new pixels for this render, a new
+    // camera for the model, and the occluded render is now drawn at an angle
+    // the entry no longer claims.
+    await cache.put(path, { mtime: 1, png: PNG_NEW, ao: false, camera: CAM2, rig: 3, lighting: 'camera' })
+
+    const written = await cache.get(path, 1, false)
+    expect(written.status).toBe('hit')
+    expect(written.rig).toBe(3) // the render that moved keeps its own labels
+    expect(written.lighting).toBe('camera')
+    expect(written.camera).toEqual(CAM2)
+
+    const other = await cache.get(path, 1, true)
+    expect(other.status).toBe('hit') // a hit, never a pixel-less stale (D2)
+    expect(other.rig).toBeUndefined()
+    expect(other.lighting).toBeUndefined()
+    expect(other.posed).toBeUndefined()
+  })
+
+  it('serves the invalidated render its own old pixels and the new camera, so the tile never blanks', async () => {
+    // The reason invalidation clears labels rather than `mtime`: the client
+    // reads a hit whose recipe fails its check, shows those pixels, and
+    // replaces them at the new orientation. Clearing `mtime` would answer
+    // `stale`, which carries nothing to show meanwhile.
+    const cache = tempCache()
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const path = join(fx.dir, 'loose.stl')
+    await cache.put(path, { mtime: 1, png: PNG_A, camera: CAM, rig: 2, lighting: 'camera' })
+    await cache.put(path, { mtime: 1, png: PNG_B, ao: false, rig: 2, lighting: 'camera' })
+
+    await cache.put(path, { mtime: 1, png: PNG_NEW, ao: false, camera: CAM2, rig: 2, lighting: 'camera' })
+
+    const res = await cache.get(path, 1, true)
+    expect(res.status).toBe('hit')
+    expect(Buffer.from(res.png as string, 'base64')).toEqual(PNG_A) // its own pixels, still served
+    expect(res.camera).toEqual(CAM2) // …at the camera it must be re-rendered under
+    expect(res.rig).toBeUndefined() // …and the cleared label is what tells the client to
+  })
+
+  it('treats a first-ever camera as a change, on an entry that holds both renders', async () => {
+    // Nothing to compare it against, so it invalidates. The cost is stated in
+    // D2 and accepted: once per model, and only when both renders exist.
+    const cache = tempCache()
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const path = join(fx.dir, 'loose.stl')
+    await cache.put(path, { mtime: 1, png: PNG_A, rig: 2, lighting: 'camera' })
+    await cache.put(path, { mtime: 1, png: PNG_B, ao: false, rig: 2, lighting: 'camera' })
+    expect((await cache.get(path, 1, false)).rig).toBe(2)
+
+    await cache.put(path, { mtime: 1, png: PNG_NEW, camera: CAM, rig: 2, lighting: 'camera' })
+
+    const other = await cache.get(path, 1, false)
+    expect(other.status).toBe('hit')
+    expect(Buffer.from(other.png as string, 'base64')).toEqual(PNG_B)
+    expect(other.rig).toBeUndefined()
+    expect(other.camera).toEqual(CAM)
+  })
+
+  it('treats a first-ever axis, and a different axis, as a change too', async () => {
+    const cache = tempCache()
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const path = join(fx.dir, 'loose.stl')
+    await cache.put(path, { mtime: 1, png: PNG_A, camera: CAM, rig: 2 })
+    await cache.put(path, { mtime: 1, png: PNG_B, ao: false, rig: 2 })
+
+    // The first axis the entry has held.
+    await cache.put(path, { mtime: 1, png: PNG_NEW, camera: CAM, axis: 'z', rig: 2 })
+    expect((await cache.get(path, 1, false)).rig).toBeUndefined()
+
+    // Re-label the sibling, then send that same axis again: an enum equal to
+    // the stored one has moved nothing.
+    await cache.put(path, { mtime: 1, png: PNG_B, ao: false, rig: 4 })
+    await cache.put(path, { mtime: 1, png: PNG_NEW, camera: CAM, axis: 'z', rig: 2 })
+    expect((await cache.get(path, 1, false)).rig).toBe(4)
+
+    // A different one has.
+    await cache.put(path, { mtime: 1, png: PNG_NEW, camera: CAM, axis: '-x', rig: 2 })
+    expect((await cache.get(path, 1, false)).rig).toBeUndefined()
+  })
+
+  it('leaves the other render alone for a pixel-only write, and for a camera re-sent within tolerance', async () => {
+    const cache = tempCache()
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const path = join(fx.dir, 'loose.stl')
+    await cache.put(path, { mtime: 1, png: PNG_A, camera: CAM, axis: 'z', rig: 2, lighting: 'camera' })
+    await cache.put(path, { mtime: 1, png: PNG_B, ao: false, rig: 3, lighting: 'camera' })
+
+    // Pixels and labels, no camera — `useThumbnails`' tail.
+    await cache.put(path, { mtime: 1, png: PNG_NEW, ao: false, rig: 5, lighting: 'camera' })
+    let other = await cache.get(path, 1, true)
+    expect(other.status).toBe('hit')
+    expect(other.rig).toBe(2)
+    expect(other.lighting).toBe('camera')
+
+    // A lightbox close nobody orbited: `persist` re-captures the camera through
+    // a round trip that is not bit-exact and re-sends it. 1e-12 is three orders
+    // above the largest drift measured and three below CAMERA_EPSILON.
+    await cache.put(path, {
+      mtime: 1,
+      png: PNG_NEW,
+      ao: false,
+      camera: { ...CAM, az: CAM.az + 1e-12, target: [CAM.target[0] + 1e-12, CAM.target[1], CAM.target[2]] },
+      rig: 5,
+      lighting: 'camera',
+    })
+    other = await cache.get(path, 1, true)
+    expect(other.status).toBe('hit')
+    expect(other.rig).toBe(2) // untouched: the camera did not move
+    expect(other.lighting).toBe('camera')
+  })
+
+  it('clears both renders on a pixel-less discard of a camera the entry held, and nothing when it held none', async () => {
+    const cache = tempCache()
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const path = join(fx.dir, 'loose.stl')
+    await cache.put(path, { mtime: 1, png: PNG_A, camera: CAM, rig: 2, lighting: 'camera' })
+    await cache.put(path, { mtime: 1, png: PNG_B, ao: false, rig: 3, lighting: 'camera' })
+
+    // `resetFramingLive`: no pixels, so there is no written render to spare.
+    await cache.put(path, { mtime: 1, camera: null })
+
+    for (const ao of [true, false]) {
+      const res = await cache.get(path, 1, ao)
+      expect(res.status).toBe('hit') // pixels kept, both of them
+      expect(res.rig).toBeUndefined()
+      expect(res.lighting).toBeUndefined()
+      expect(res.camera).toBeUndefined()
+    }
+
+    // A second entry that never held a camera: discarding nothing changes
+    // nothing, and neither render is invalidated.
+    const other = join(fx.dir, 'other.stl')
+    writeFileSync(other, 'x')
+    await cache.put(other, { mtime: 1, png: PNG_A, rig: 2 })
+    await cache.put(other, { mtime: 1, png: PNG_B, ao: false, rig: 3 })
+    await cache.put(other, { mtime: 1, camera: null })
+    expect((await cache.get(other, 1, true)).rig).toBe(2)
+    expect((await cache.get(other, 1, false)).rig).toBe(3)
+  })
+
+  it("deletes the sibling's pixels when a render is written at a newer mtime", async () => {
+    // The model changed under both renders: the sibling holds pixels of a file
+    // that is gone, and would keep them until something rendered it again.
+    const cache = tempCache()
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const path = join(fx.dir, 'loose.stl')
+    const key = createHash('sha256').update(path).digest('hex')
+    await cache.put(path, { mtime: 1, png: PNG_A, rig: 2, lighting: 'camera' })
+    await cache.put(path, { mtime: 1, png: PNG_B, ao: false, rig: 2, lighting: 'camera' })
+    expect(pngsOf(cache.dir)).toHaveLength(2)
+
+    await cache.put(path, { mtime: 2, png: PNG_NEW, rig: 2, lighting: 'camera' })
+
+    expect(pngsOf(cache.dir)).toEqual([`${key}.png`]) // the sibling's file is gone
+    const superseded = await cache.get(path, 2, false)
+    expect(superseded.status).toBe('miss') // no mtime, no labels, no camera to be stale from
+    expect(superseded.rig).toBeUndefined()
+    const written = await cache.get(path, 2, true)
+    expect(written.status).toBe('hit')
+    expect(Buffer.from(written.png as string, 'base64')).toEqual(PNG_NEW)
+
+    // Re-writing at the same mtime is the ordinary case and takes nothing: the
+    // second render of one file is not a supersede.
+    await cache.put(path, { mtime: 2, png: PNG_B, ao: false, rig: 2 })
+    await cache.put(path, { mtime: 2, png: PNG_A, rig: 2 })
+    expect(pngsOf(cache.dir)).toHaveLength(2)
+    expect((await cache.get(path, 2, false)).status).toBe('hit')
+  })
+
+  it('evicts the render nobody has looked at and leaves the other a hit', async () => {
+    const cache = tempCache(10) // tiny cap: any two pngs exceed it
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const path = join(fx.dir, 'loose.stl')
+    const tick = () => new Promise((r) => setTimeout(r, 5))
+    await cache.put(path, { mtime: 1, png: Buffer.from('aaaaaaaa'), camera: CAM, rig: 2, lighting: 'camera' })
+    await tick()
+    await cache.put(path, { mtime: 1, png: Buffer.from('bbbbbbbb'), ao: false, rig: 3, lighting: 'camera' })
+    await tick()
+    await cache.get(path, 1, true) // the occluded render is now the more recently read
+
+    await cache.maintain()
+
+    // The two renders of one model are separate cap candidates, so the cap is
+    // met by taking one of them and not the entry.
+    const evicted = await cache.get(path, 1, false)
+    expect(evicted.status).toBe('stale')
+    // Its labels survive the eviction and ride the stale read, exactly as the
+    // occluded render's do — they say what recipe the evicted pixels were
+    // under, which is what a client asks a stale answer for.
+    expect(evicted.rig).toBe(3)
+    expect(evicted.lighting).toBe('camera')
+    expect(evicted.camera).toEqual(CAM) // …and the orientation is spared, as ever
+
+    const kept = await cache.get(path, 1, true)
+    expect(kept.status).toBe('hit')
+    expect(kept.rig).toBe(2)
+    expect(pngsOf(cache.dir)).toHaveLength(1)
+  })
+
+  it('sweeps sidecar and both renders together when the model is gone', async () => {
+    const cache = tempCache()
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const doomed = join(fx.dir, 'doomed.stl')
+    writeFileSync(doomed, 'x')
+    await cache.put(doomed, { mtime: 1, png: PNG_A, camera: CAM, axis: 'z' })
+    await cache.put(doomed, { mtime: 1, png: PNG_B, ao: false })
+    expect(readdirSync(cache.dir)).toHaveLength(3) // sidecar + two renders
+
+    unlinkSync(doomed)
+    await cache.maintain()
+
+    expect(readdirSync(cache.dir)).toHaveLength(0) // one model, one existence
+    expect((await cache.get(doomed, 1, true)).status).toBe('miss')
+    expect((await cache.get(doomed, 1, false)).status).toBe('miss')
+  })
+})

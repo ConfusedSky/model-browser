@@ -442,6 +442,97 @@ describe('thumbnail cache API', () => {
     expect(body.png).toBe(png)
     expect(body.camera).toEqual(camera)
   })
+
+  /**
+   * `ao` on the wire (`ao-as-recipe-dimension` D2). Absent means `on` on both
+   * verbs, so a client from before this change reads and writes exactly what it
+   * always did — which is what makes "no migration" true of the protocol as
+   * well as of the files.
+   */
+  describe('the occlusion dimension', () => {
+    const noAo = '/pre-existing.stl'
+    const png2 = Buffer.from('other-fake-png-bytes').toString('base64')
+
+    it('reads an entry written without `ao` as the occluded render, under `ao` absent and `ao=on`', async () => {
+      const put = await app.request('/api/thumb', {
+        method: 'PUT',
+        headers: { ...LOOPBACK, 'content-type': 'application/json' },
+        body: JSON.stringify({ path: noAo, mtime: 111, png, camera, axis: '-z', rig: 4, lighting: 'camera' }),
+      })
+      expect(put.status).toBe(200)
+
+      for (const q of ['', '&ao=on']) {
+        const body = (await (await get(`/api/thumb?path=${encodeURIComponent(noAo)}&mtime=111${q}`)).json()) as ThumbGetResponse
+        expect(body.status).toBe('hit')
+        expect(body.png).toBe(png)
+        expect(body.rig).toBe(4)
+        expect(body.camera).toEqual(camera)
+      }
+    })
+
+    it('reads its unoccluded render as stale, carrying the shared camera and axis', async () => {
+      const res = await get(`/api/thumb?path=${encodeURIComponent(noAo)}&mtime=111&ao=off`)
+      const body = (await res.json()) as ThumbGetResponse
+      expect(body.status).toBe('stale') // the entry holds a camera, so not a miss
+      expect(body.png).toBeUndefined()
+      expect(body.rig).toBeUndefined() // the occluded render's label is not this one's
+      expect(body.camera).toEqual(camera) // shared, and carried whatever the status
+      expect(body.axis).toBe('-z')
+    })
+
+    it('reads the unoccluded render of an entry with no orientation as a miss', async () => {
+      const bare = '/bare.stl'
+      await app.request('/api/thumb', {
+        method: 'PUT',
+        headers: { ...LOOPBACK, 'content-type': 'application/json' },
+        body: JSON.stringify({ path: bare, mtime: 111, png, rig: 4 }),
+      })
+      const body = (await (await get(`/api/thumb?path=${encodeURIComponent(bare)}&mtime=111&ao=off`)).json()) as ThumbGetResponse
+      expect(body.status).toBe('miss')
+      expect(body.camera).toBeUndefined()
+    })
+
+    it('writes the sibling render on `ao:false` and leaves the occluded labels alone', async () => {
+      const put = await app.request('/api/thumb', {
+        method: 'PUT',
+        headers: { ...LOOPBACK, 'content-type': 'application/json' },
+        body: JSON.stringify({ path: noAo, mtime: 111, png: png2, ao: false, rig: 7, lighting: 'camera' }),
+      })
+      expect(put.status).toBe(200)
+
+      const off = (await (await get(`/api/thumb?path=${encodeURIComponent(noAo)}&mtime=111&ao=off`)).json()) as ThumbGetResponse
+      expect(off.status).toBe('hit')
+      expect(off.png).toBe(png2)
+      expect(off.rig).toBe(7)
+      expect(off.camera).toEqual(camera)
+
+      // No camera on that write, so the occluded render is untouched: toggling
+      // the preference back is a lookup, not a re-render.
+      const on = (await (await get(`/api/thumb?path=${encodeURIComponent(noAo)}&mtime=111&ao=on`)).json()) as ThumbGetResponse
+      expect(on.status).toBe('hit')
+      expect(on.png).toBe(png)
+      expect(on.rig).toBe(4)
+    })
+
+    it('rejects an `ao` query that is neither on nor off', async () => {
+      const res = await get(`/api/thumb?path=${encodeURIComponent(noAo)}&mtime=111&ao=maybe`)
+      expect(res.status).toBe(400)
+      expect(await res.json()).toEqual({ error: 'invalid ao: maybe' })
+    })
+
+    it('rejects a non-boolean `ao` on a put', async () => {
+      // `false` is a value the route must act on, so this cannot be a
+      // truthiness test: a string 'off' would read as *occluded* and file
+      // unoccluded pixels over the shipped render.
+      const put = await app.request('/api/thumb', {
+        method: 'PUT',
+        headers: { ...LOOPBACK, 'content-type': 'application/json' },
+        body: JSON.stringify({ path: noAo, mtime: 111, png, ao: 'off' }),
+      })
+      expect(put.status).toBe(400)
+      expect(await put.json()).toEqual({ error: 'invalid ao: off' })
+    })
+  })
 })
 
 /**
