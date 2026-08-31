@@ -161,10 +161,20 @@
       re-derivation was needed
 - [ ] 4.1a `adaptive-ao-default` edits the same corner-pill block in `App.tsx` — whichever
       lands second re-reads it (shared-file ordering, CLAUDE.md)
-- [ ] 4.2 `ao-refreshes-thumbnails`: open an `opsx:update` on it (separate session or
+- [x] 4.2 `ao-refreshes-thumbnails`: open an `opsx:update` on it (separate session or
       after this) re-targeting its trigger to the AO toggle and rewriting its
       `model-thumbnails` delta under *Recipe-labelled thumbnails*; until then it must not
       be applied
+      — done 2026-08-31 (coordinator, /opsx:update): the re-target had been written at
+      drafting time; the update verified it against the implemented reality instead of
+      rewriting. Its `model-thumbnails` delta MODIFIES *Recipe-labelled thumbnails*
+      carrying this change's five scenario titles; the ordered archive dry run
+      (remove-axis-lighting → ao-as-recipe-dimension → ao-refreshes-thumbnails, one fresh
+      copy) archives all three cleanly; and its design's code citations are verbatim-true
+      on main `752ebba` (the `THUMB_LIGHTING` hit test, the `[entries, api, lru, queue,
+      setThumb]` dependency list, `thumbnailQueue`'s four-argument Harness, `App.tsx`'s
+      `ao` state). No artifact needed an edit; it may now be applied after
+      `ao-as-recipe-dimension`
 - [x] 4.3 `docs/web-demo-notes.md` item 9 points here as decided-and-drafted; the "hide the
       lighting menu" row is closed
       — done 2026-08-31 (coordinator): item 9's heading and the Decided-table row both name
