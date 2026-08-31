@@ -10,7 +10,12 @@
 ### Requirement: The panel credits the model's source
 When the viewed entry resolves credits from the library's override store, the
 lightbox side panel SHALL show an attribution block: the author (linked to the
-author URL when one is stored), the license, and a link to the source. When the
+author URL when one is stored), the license, and a link to the source. The
+block SHALL sit among the model's metadata, before the panel's actions — the
+existing "describes before it offers" rule, which appending after the action
+strip would break. Because credits arrive from a read rather than from the
+directory entry, the block MAY appear after the panel is first shown; no
+placeholder and no loading state SHALL stand in for it meanwhile. When the
 entry resolves no credits — no store, no covering key, or the overrides read
 failed — the panel SHALL show no attribution block and no placeholder for it:
 attribution is displayed where it exists, never advertised as missing. The
@@ -19,7 +24,7 @@ its answer ignored once the subject has moved on.
 
 #### Scenario: A credited model
 - **WHEN** the lightbox opens on a model beneath a kit whose key holds credits
-- **THEN** the panel shows the author, license and source link for that kit
+- **THEN** the panel shows the author, license and source link for that kit, among the metadata and before the actions
 
 #### Scenario: An uncredited model
 - **WHEN** the lightbox opens on a model no key covers

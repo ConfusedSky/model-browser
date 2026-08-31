@@ -6,8 +6,8 @@ Three consumers need per-entry metadata the filesystem cannot carry: attribution
 (the demo corpus is CC-BY — displayed credit is a license term, and the corpus's
 provenance already exists in `metadata/miniatures.json`), display names (folder
 names in the library are build ids like `Player_Character_Pack_03_3750572`), and
-a stored pose per model (`pose-for-every-model`, the next change in the demo
-sequence, reads it). Today the only per-path store is the thumbnail cache's
+a stored pose per model (`pose-for-every-model` — planned as `web-demo-backlog`
+1.2, not yet drafted — reads it). Today the only per-path store is the thumbnail cache's
 sidecar, which is bounded and **evicts** — provenance cannot live in a cache.
 The shape was decided in the 2026-08-28 exploration and recorded in
 `web-demo-backlog` design D2; this change drafts from that decision and does not
@@ -17,9 +17,11 @@ reopen it.
 
 - One `<library>/.model-browser/overrides.json` beside the library marker: keyed
   by library path, directory keys applying to their whole subtree by longest
-  prefix, file keys overriding; loaded once at server start; written atomically
-  (temp + rename). Fields per key: credits (author, author URL, license, source
-  URL), display name, pose.
+  prefix, more specific keys overriding **per field** (design D2 — this change's
+  refinement of the recorded "files overriding"); loaded once per resolved
+  library and held until the library re-resolves; written atomically
+  (temp + rename + fsync). Fields per key: credits (author, author URL, license,
+  source URL), display name, pose.
 - The server resolves an entry's effective overrides (longest-prefix merge) and
   serves them; the resolution is this change's server work, the file format its
   contract.

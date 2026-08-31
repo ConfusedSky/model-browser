@@ -44,7 +44,7 @@ written at corpus build and rarely after.
 
 ## Decisions
 
-### D1: One JSON file, read once at server start
+### D1: One JSON file, read once per resolved library
 
 `<library>/.model-browser/overrides.json`, sibling of `library.json`:
 
@@ -61,13 +61,30 @@ written at corpus build and rarely after.
   } }
 ```
 
-Read once when the library resolves, like `config.json` and `launch.json` are
-read once at server start — the same restart-after-editing rule, stated in the
-spec so the generator's docs can repeat it. A missing file is an empty store. A
-file that does not parse is reported on the startup line and treated as empty:
-a broken overrides file must not take the library down (browsing owes it
-nothing), but it must not be silent either — the one consumer surface (credits
-silently absent) is exactly where a swallowed error would hide forever.
+Read once **per resolved library**, not per process. "At start" is undefined
+here: a library can be `unconfigured` or `missing` at start and resolve `ready`
+later (`Library.state()` re-evaluates a not-ready state per request — its own
+doc says a volume mounted after start needs no restart), and the library's
+*identity* can change mid-process — `refresh()` drops `settled`, and `compute()`'s
+returned-volume branch re-reads the marker and re-evaluates when the id differs.
+A store cached per-process would then keep serving library A's credits for
+library B's paths — and displayed attribution is a CC-BY license term, so
+wrong-library credits are a compliance defect, not staleness. So: the store
+loads when the library first resolves `ready`, is held keyed to the resolved
+identity (id + top), and is dropped and reloaded wherever the library drops
+`settled`. Within one resolved library the file is read once — the same
+restart-after-editing rule `launch.json` has (`loadLaunchConfig` is read at
+startup; `config.json` is the weaker precedent, re-read while the library is
+unsettled) — stated in the spec so the generator's docs can repeat it.
+
+A missing file is an empty store. A file that does not parse, or whose
+`version` is unknown, is reported when the load happens — beside the
+`library <id> at <top>` line when the library resolves at start, on its own
+line when it resolves later — and treated as empty: a broken overrides file
+must not take the library down (browsing owes it nothing), but it must not be
+silent either — the one consumer surface (credits silently absent) is exactly
+where a swallowed error would hide forever, and an unknown *version* silently
+dropping 297 kits' credits would be that same hole.
 
 The directory is already invisible end to end (`listFsDir`'s dot-skip,
 `complete`'s `MARKER_DIR` exclusion, `resolve`'s refusal), so the store needs no
@@ -77,23 +94,42 @@ new hiding.
 
 An entry's effective overrides merge every key on its path — `/`, each ancestor
 directory, then the entry's own key — **per field**, nearest key winning per
-field. Wholesale nearest-key-wins was rejected: the pose writer will write file
-keys carrying only `pose`, and wholesale, every posed model would silently lose
-its kit's credits. Field-wise is also what makes the generator (directory keys)
-and the pose writer (file keys) composable without either knowing the other
-exists.
+field. This narrows web-demo-backlog D2's recorded wording ("files overriding")
+rather than reopening it: wholesale nearest-key-wins was rejected because the
+pose writer will write file keys carrying only `pose`, and wholesale, every
+posed model would silently lose its kit's credits. Field-wise is also what
+makes the generator (directory keys) and the pose writer (file keys) composable
+without either knowing the other exists.
 
-Zip interiors need no special case: keys and lookups are both library paths, so
-an entry `a.zip!/x.stl` inherits from `/`, its directories, and `/kit/a.zip` by
-plain prefix rules. The spec states prefix boundaries are path segments
-(`/kit` covers `/kit/x.stl`, not `/kit2/x.stl`).
+The ancestor walk follows the vpath grammar, not a naive `split('/')`:
+`parseVPath` splits a virtual path on the first `!/` (`SEP` in
+`server/src/vpath.ts`), so `'/kit/a.zip!/x.stl'.split('/')` yields the segment
+`a.zip!` and would never produce the key `/kit/a.zip`. The rule is
+parse-then-walk: split the lookup into its filesystem half and entry half;
+ancestors are `/`, each directory of the filesystem half, the archive file's
+own path (`/kit/a.zip`), and then — when there is an entry half — each interior
+directory (`/kit/a.zip!/parts`, …) down to the full key; nearest wins per
+field. Prefix boundaries within each half are path segments (`/kit` covers
+`/kit/x.stl`, not `/kit2/x.stl`). The archive *file's* key is the one key for
+the archive and its interior root — a `!/`-suffixed key spelling is not valid,
+so there is no second "zip root" key to disagree with it.
+
+Keys must be canonical: `canonicalLibPath` normalises only the filesystem half
+and drops trailing slashes, so a key written `/kit/` — the natural hand-edit
+spelling for a directory — would never match any lookup, silently. The loader
+canonicalises every key it reads and reports any it cannot; the root key's
+spelling is `/`, and the walk special-cases it (splitting `/` yields no
+segments).
 
 ### D3: A read route, asked per viewed entry
 
 `GET /api/overrides?path` answers the resolved fields for one entry (empty
-object when nothing resolves). A path route like the rest: canonicalised
-(`canonicalLibPath`), resolved through the library (a refused path is refused
-here too), gated by the not-ready envelope middleware for free.
+object when nothing resolves). A path route on the established pattern:
+`path` required (400 without it), canonicalised with `canonicalLibPath` the way
+`/api/dir`, `/api/peek` and `resolveEntryFile` do (not "like every route" —
+`/api/file` resolves raw and is the exception, not the pattern), resolved
+through the library (a refused path is refused here too), gated by the
+not-ready envelope middleware for free.
 
 Rejected: folding overrides into `/api/dir` entries. Listings are the hot path
 (`folder-contact-sheets` exists to keep them lean) and would pay resolution for
@@ -109,30 +145,52 @@ must not gain a spinner for metadata most libraries do not have, and a failed
 overrides read renders the same as no credits (the demo is where credits
 matter, and there the store is generated and the read is local memory).
 Fetched through `ApiClient.overrides(path)` when the viewer subject changes,
-aborted/ignored on close like the panel's other per-subject reads.
+its answer dropped when the subject has moved on — the ignore-on-stale idiom of
+the panel's existing per-subject read (`ViewerLayer`'s `getThumb` effect with
+its `alive` flag), not an `AbortController`.
 
 ### D5: The generator merges; it does not own the file
 
 `scripts/gen-overrides.ts` (run with `bun run`, corpus side): reads
-`metadata/miniatures.json`, maps each kit's `stem` to the directory key
-`/<stem>`, writes `name` and `credits` from `name`/`author`/`author_url`/
-`license`/`source_url`. It **merges into** an existing file — read, replace only
-the fields it owns (`name`, `credits`) on the keys it generates, keep everything
-else (a `pose` written by later tooling survives a rerun) — and writes
-atomically: temp + rename + fsync, the durable pattern the exFAT measurement
-priced at ~40 ms (rare writes; cheap). A `stem` that names no directory under
-the given root is reported and skipped, and the run says how many keys it wrote
+`metadata/miniatures.json` and writes `name` and `credits` from each kit's
+top-level `name`/`author`/`author_url`/`license`/`source_url`. **Only top-level
+`stem` values name kit folders** — the nested `files[].stem` entries (2,801 of
+them) are file stems, not directories, and must not become keys.
+
+The kit folders and the library top are two different things and the generator
+takes both: the corpus lays kits out as `<root>/miniatures/<variant>/<stem>/`
+(three variants — `clustered-hq` is the shipped one, per the notes), so "`/` +
+stem" is only a valid key when the library top *is* the variant directory. The
+generator takes the library top and the kits directory (defaulting to the top
+itself) and derives each key as `/` + the top-relative path of
+`<kitsDir>/<stem>` — so rooting the demo at `…/miniatures/clustered-hq` gives
+keys `/<stem>`, while a top above the variants gives
+`/miniatures/clustered-hq/<stem>`. A top above the variants also means one
+metadata entry maps to three on-disk copies; the generator writes keys only
+under the kits directory it was given and says so.
+
+It **merges into** an existing file — read, replace only the fields it owns
+(`name`, `credits`) on the keys it generates, keep everything else (a `pose`
+written by later tooling survives a rerun) — and writes atomically and durably:
+temp + rename + fsync. The fsync price is known: ~40/~50 ms median/p90 on the
+spinning exFAT volume, 0.5 ms on SSD (the 2026-08-28 session's `write_probe.py`
+run, recorded in `docs/web-demo-notes.md` Measurements — its run, not re-run
+here). Rare writes; cheap. A `stem` that names no directory under the kits
+directory is reported and skipped, and the run says how many keys it wrote
 against how many kits it read — the credits gate (`web-demo-backlog` 3.2) needs
 that count to mean something.
 
 ### D6: Types in `shared/`
 
-The resolved-fields shape (and the pose field's type, which is the index's pose
-shape `IndexPose` is *not* — the stored pose is whatever `pose-for-every-model`
-defines, so here it is an opaque `unknown` field reserved by name) live in
-`shared/types.ts` like every other wire type. Reserving the field name now is
-deliberate: the file format is this change's contract, and a later change
-renaming the field would invalidate generated stores.
+The resolved-fields shape lives in `shared/types.ts` like every other wire
+type. The pose field is declared as an opaque `unknown` reserved by name — not
+as `IndexPose`, because the stored pose's concrete shape is
+`pose-for-every-model`'s to define, and pinning the index's shape here would
+prejudge it. Reserving the *name* now is documentation of the file format's
+contract, nothing more: the generator never writes poses and the merge
+preserves unknown fields, so no generated store depends on the name — but a
+third-party or future writer will, and the format doc is where they will read
+it.
 
 ## Risks / Trade-offs
 
@@ -144,9 +202,12 @@ renaming the field would invalidate generated stores.
 - [`stem` drift between `miniatures.json` and the corpus folders] → the
   generator verifies each key against the filesystem and reports misses rather
   than writing dead keys.
-- [The store grows fields this change did not plan] → `version: 1` in the file;
-  unknown fields on an entry are preserved by the generator's merge and ignored
-  by resolution, so additive evolution needs no migration.
+- [The store grows fields this change did not plan] → additive evolution
+  happens **within** `version: 1`: unknown fields on an entry are preserved by
+  the generator's merge and ignored by resolution, so new fields need no
+  migration and no version bump. Bumping `version` is a deliberate format
+  break — an older reader treats it as unreadable *and reports it* (D1), so a
+  bump can never silently drop a corpus's credits.
 
 ## Migration Plan
 
