@@ -15,7 +15,10 @@
       lightbox credits panel that reads it; generation of the demo's entries from
       `metadata/miniatures.json`. Hard ordering: after `library-root` (keys are library
       paths, the file lives beside the marker)
-- [ ] 1.2 pose-for-every-model — was the other session's; now owned here. Every tile is
+- [x] 1.2 *(drafted 2026-08-31 as `pose-for-every-model` — proposal, design, two deltas
+      (listing-wide pose supply; contact sheets prefer posed models, Masa's 2026-08-31 ask),
+      tasks incl. the cross-repo `/poses` endpoint; validates and archive-dry-runs clean;
+      the line below is the original)* pose-for-every-model — was the other session's; now owned here. Every tile is
       posed from the index (or the store's pose field) whether or not a search carried a
       pose — today `wantsPose = poses[path] !== undefined` gates it. Must land before any
       bake, or the bake produces un-posed tiles corpus-wide (verified in the notes).
