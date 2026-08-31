@@ -1205,6 +1205,46 @@ describe('the sweep reconciles its entries instead of resetting them', () => {
     expect(liveUrls()).toBe(1)
   })
 
+  it('a render that fails after a miss keeps the image the tile is showing', async () => {
+    // The sibling of the F3 cell above, flagged in its review: when the
+    // lookup answers a miss (no staleUrl to fall back on) and the *render*
+    // then fails, the tail's catch wrote the same bare `{status:'error'}` and
+    // blanked the image a previous pass had put on the tile.
+    const lru = mesh()
+    // The initial pass is a pure hit and never renders; the toggle's miss is
+    // the first render call, and it dies.
+    vi.mocked(renderThumbnail).mockRejectedValue(new Error('render died'))
+    const api = {
+      getThumb: vi.fn((_p: string, _m: number, ao: boolean) =>
+        Promise.resolve(ao ? freshHit() : { status: 'miss' }),
+      ),
+      putThumb: vi.fn().mockResolvedValue(undefined),
+    } as unknown as ApiClient
+
+    await render(
+      <Harness entries={[one('/models/a.stl')]} api={api} lru={lru} queue={new RenderQueue(2)} ao />,
+    )
+    await settle()
+    const shown = lastThumbs.get('/models/a.stl')!.url!
+    expect(statuses()).toEqual(['ready'])
+
+    await rerender(
+      <Harness
+        entries={[one('/models/a.stl')]}
+        api={api}
+        lru={lru}
+        queue={new RenderQueue(2)}
+        ao={false}
+      />,
+    )
+    await settle()
+
+    const after = lastThumbs.get('/models/a.stl')!
+    expect(after.status).toBe('error')
+    expect(after.url).toBe(shown)
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(shown)
+  })
+
   it('a preview the state guard refuses is still owned, and released with the entry', async () => {
     // F4: the slot read and assignment moved out of the `setThumbs` updater,
     // which React may replay. The two views can still disagree in one place —

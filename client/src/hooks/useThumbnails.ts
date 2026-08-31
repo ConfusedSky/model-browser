@@ -425,7 +425,13 @@ export function useThumbnails(
                       axis: cached.axis,
                     })
                   } else if (alive()) {
-                    setThumb(entry.path, { status: 'error' })
+                    // The same rule as the lookup catch above (F3): carry the
+                    // URL the slot already owns, so a render that fails after a
+                    // miss — no staleUrl to fall back on — does not blank an
+                    // image a previous pass put on this tile. The review that
+                    // pinned the lookup catch flagged this branch as its
+                    // sibling; the setThumb guard makes the write non-revoking.
+                    setThumb(entry.path, { status: 'error', url: slot.url })
                   } else {
                     dropStale()
                   }
