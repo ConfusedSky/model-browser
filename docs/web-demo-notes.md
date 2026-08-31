@@ -39,7 +39,7 @@ sequence):
    (applied the same day) flips the static default to off instead (Masa: shipping
    outranks adapting; cheap now that thumbnails follow the preference, which is what
    retired option (a)'s handoff objection). Re-derive before applying
-6. `folder-contact-sheets` — the decided row; per-tile bounded peek, zips excluded
+6. `folder-contact-sheets` — **archived 2026-08-31** — the decided row; per-tile bounded peek, zips excluded
 
 Not drafted — tracked as the change `web-demo-backlog` (2026-08-29, one task line each):
 the override store / credits (item 1), pose-for-every-model (was the other session's),
