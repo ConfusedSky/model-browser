@@ -490,7 +490,10 @@ describe('what the next visit makes of the pixels', () => {
     // inside the component would re-run the sweep on every render.
     const entries = [HERO]
     const Probe = (): null => {
-      useThumbnails(entries, api as ApiClient, lru, queue, poses)
+      // The occlusion preference is the hook's own parameter since
+      // `ao-refreshes-thumbnails`; `true` is what the action above rendered
+      // under (asserted on renderThumbnail), so the grid asks for that render.
+      useThumbnails(entries, api as ApiClient, lru, queue, true, poses)
       return null
     }
     await act(async () => root.render(createElement(Probe)))
@@ -530,7 +533,7 @@ describe('what the next visit makes of the pixels', () => {
     const entries = [HERO]
     const states: (Record<string, unknown> | undefined)[] = []
     const Probe = (): null => {
-      const { thumbs } = useThumbnails(entries, api as ApiClient, lru, queue, poses)
+      const { thumbs } = useThumbnails(entries, api as ApiClient, lru, queue, true, poses)
       states.push(thumbs.get(HERO.path) as Record<string, unknown> | undefined)
       return null
     }

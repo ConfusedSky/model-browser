@@ -201,6 +201,14 @@ export async function openFind(): Promise<void> {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true }))
   })
 }
+/**
+ * The corner occlusion pill. Selected by its title, not by `aria-pressed`:
+ * `flatButton()` claims the first `[aria-pressed]` in the container, and this
+ * one carries the attribute too.
+ */
+export function aoPill(): HTMLButtonElement {
+  return container.querySelector<HTMLButtonElement>('button[title^="Ambient occlusion"]')!
+}
 export function deepButton(): HTMLButtonElement {
   return Array.from(container.querySelectorAll<HTMLButtonElement>('header button')).find(
     (b) => b.textContent === 'Deep',

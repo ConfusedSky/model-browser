@@ -102,9 +102,11 @@ const MARK_MS = 1800
 const ACTION_TEXT_MS = 2500
 
 /**
- * Stable empties for "nothing has landed yet". `useThumbnails` resets every
- * thumb to `loading` whenever the entries array changes identity (D2), so a
- * fresh `[]` per render would restart every lookup on every keystroke.
+ * Stable empties for "nothing has landed yet". `useThumbnails` no longer resets
+ * every thumb on an `entries` identity change — it reconciles the new array
+ * against the per-entry work it already holds, keeping what is displayed — but
+ * that reconciliation still runs, so a fresh `[]` per render would walk it on
+ * every keystroke for an answer that never changes.
  */
 const NO_ENTRIES: DirEntry[] = []
 const NO_POSES: Record<string, IndexPose> = {}
@@ -578,9 +580,11 @@ export default function App() {
     [scores, anchor?.path],
   )
   // The anchor needs a thumbnail like any tile, so it goes to useThumbnails —
-  // memoized because that effect resets the whole thumb map to `loading` on any
-  // `entries` identity change (D2), and a fresh array per render would do it on
-  // every keystroke.
+  // memoized because that effect reconciles its per-entry state against
+  // `entries` on any identity change (D2), and a fresh array per render would
+  // pay that walk on every keystroke. The walk is all it would cost now: since
+  // `ao-refreshes-thumbnails` a re-run keeps every surviving tile's image and
+  // touches only what arrived or left.
   const thumbEntries = useMemo(
     () => (anchor === undefined ? entries : [anchor, ...entries]),
     [entries, anchor],
@@ -630,6 +634,10 @@ export default function App() {
     api,
     lru,
     queue,
+    // The pill's own state, not a second read of `aoToggle`'s store: this is
+    // what makes a press (or, after `adaptive-ao-default`, an automatic
+    // decision) re-run the sweep over the grid already on screen.
+    ao,
     poses,
   )
   placeholderRef.current = setPlaceholder

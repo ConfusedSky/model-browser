@@ -3,8 +3,14 @@
 // there, and the reporting that makes an empty grid attributable.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { MAX_RESULT_COUNT, type DirListing, type SemanticListing } from '../../shared/types'
 import {
+  MAX_RESULT_COUNT,
+  type DirListing,
+  type IndexPose,
+  type SemanticListing,
+} from '../../shared/types'
+import {
+  aoPill,
   click,
   container,
   dir,
@@ -27,8 +33,10 @@ import {
   unmountApp,
 } from './appHarness'
 import { setSearchMode, setSearchTuning, TUNING_DEFAULTS } from '../src/lib/searchOptions'
-import { POSE_VERSION } from '../src/three/pose'
+import { DEFAULT_CAMERA } from '../src/three/camera'
+import { cameraForPose, POSE_VERSION } from '../src/three/pose'
 import { RIG_VERSION, THUMB_LIGHTING } from '../src/three/renderer'
+import { setAoEnabled } from '../src/viewer/aoToggle'
 
 vi.mock('../src/api/client', async () => (await import('./appHarness')).apiClientModule())
 vi.mock('../src/three/renderer', async (importOriginal) =>
@@ -68,6 +76,16 @@ const MEANING: SemanticListing = {
   capped: false,
 }
 
+/** The index's opinion about `hero.stl` — one copy, shared by every pose case
+ *  below, since the occlusion cells must compute the camera it implies. */
+const POSE: IndexPose = {
+  up: [0, 1, 0],
+  azimuth_zero: [1, 0, 0],
+  source: 'siglip',
+  confidence: 0.9,
+  front: { view: 5, azimuth_deg: 225, elevation_deg: 20 },
+}
+
 function modeButton(name: string): HTMLButtonElement | undefined {
   return Array.from(container.querySelectorAll<HTMLButtonElement>('aside button')).find(
     (b) => b.textContent?.trim().toLowerCase() === name,
@@ -81,6 +99,14 @@ function searchTab(): HTMLButtonElement {
 
 beforeEach(() => {
   localStorage.clear()
+  // `aoToggle` holds its value in a module closure, so a cell that presses the
+  // pill leaves it pressed for every later file (client/test/CLAUDE.md).
+  setAoEnabled(true)
+  // `mountApp` only *clears* the shared `getThumb`, so an implementation one
+  // cell installs outlives it — and this file now has a cell that answers per
+  // occlusion setting. Reset to the harness default instead.
+  getThumb.mockReset()
+  getThumb.mockResolvedValue({ status: 'miss' })
   setSearchMode('name')
   setSearchTuning({ ...TUNING_DEFAULTS })
 })
@@ -453,13 +479,6 @@ describe('meaning search', () => {
   it('tiles render at the index’s pose when nothing is cached', async () => {
     // The grid is where models are looked at, so an orientation that reached
     // only the viewer reached almost nobody.
-    const POSE = {
-      up: [0, 1, 0] as [number, number, number],
-      azimuth_zero: [1, 0, 0] as [number, number, number],
-      source: 'siglip',
-      confidence: 0.9,
-      front: { view: 5, azimuth_deg: 225, elevation_deg: 20 },
-    }
     indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models', covers: ['stl'] })
     semanticSearch.mockResolvedValue({
       ...MEANING,
@@ -533,13 +552,6 @@ describe('meaning search', () => {
     // because path+mtime still match, and the orientation appears only after
     // opening each model, when the lightbox's close persists a posed snapshot.
     // The pose is an input to the pixels that the key does not carry.
-    const POSE = {
-      up: [0, 1, 0] as [number, number, number],
-      azimuth_zero: [1, 0, 0] as [number, number, number],
-      source: 'siglip',
-      confidence: 0.9,
-      front: { view: 5, azimuth_deg: 225, elevation_deg: 20 },
-    }
     indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models', covers: ['stl'] })
     semanticSearch.mockResolvedValue({
       ...MEANING,
@@ -574,13 +586,6 @@ describe('meaning search', () => {
     // nothing when a camera is stored (the user's orientation wins), so it PUT
     // the pixels back unlabelled — and every visit to a meaning view rendered
     // and re-uploaded the identical picture.
-    const POSE = {
-      up: [0, 1, 0] as [number, number, number],
-      azimuth_zero: [1, 0, 0] as [number, number, number],
-      source: 'siglip',
-      confidence: 0.9,
-      front: { view: 5, azimuth_deg: 225, elevation_deg: 20 },
-    }
     indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models', covers: ['stl'] })
     semanticSearch.mockResolvedValue({
       ...MEANING,
@@ -608,6 +613,100 @@ describe('meaning search', () => {
 
     expect(renderThumbnail).not.toHaveBeenCalled()
     expect(putThumb).not.toHaveBeenCalled()
+  })
+
+  it('a thumbnail the user already aimed survives a preference change too', async () => {
+    // 2b.2 — the applied-only rule under the second trigger. The visit case is
+    // above; a toggle sends every displayed tile through the same tail, so this
+    // is where a regression in the predicate would first show. The render count
+    // is the assertion: the output looks identical either way.
+    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models', covers: ['stl'] })
+    semanticSearch.mockResolvedValue({
+      ...MEANING,
+      entries: [model('Kits/hero.stl')],
+      poses: { '/models/Kits/hero.stl': POSE },
+    })
+    // Both variants cached, and both carrying the user's own orientation — so
+    // the toggle is a lookup and nothing else.
+    getThumb.mockResolvedValue({
+      status: 'hit',
+      pngUrl: 'blob:mine',
+      lighting: THUMB_LIGHTING,
+      rig: RIG_VERSION,
+      camera: { az: 1, el: 0.2, distR: 2, target: [0, 0, 0] },
+      axis: 'y',
+      posed: undefined,
+    })
+    await mountApp('/models', NESTED)
+    await settle()
+    await click(searchTab())
+    await click(modeButton('meaning')!)
+    await type(searchInput(), 'hero')
+    await pressEnter(searchInput())
+    await settle()
+    expect(renderThumbnail).not.toHaveBeenCalled()
+    const looked = getThumb.mock.calls.length
+
+    await click(aoPill())
+    await settle()
+
+    // The grid answered the pill — a second lookup, naming the other render…
+    expect(getThumb.mock.calls.length).toBeGreaterThan(looked)
+    expect(getThumb.mock.calls.at(-1)).toEqual(['/models/Kits/hero.stl', 1, false])
+    // …and nothing was drawn or uploaded, because the source would not be
+    // applied to a model the user has oriented.
+    expect(renderThumbnail).not.toHaveBeenCalled()
+    expect(putThumb).not.toHaveBeenCalled()
+  })
+
+  it('a posed thumbnail comes back from a toggle at its pose, not at the default', async () => {
+    // 3.2b. The tail resolves orientation from the *absence* of a stored camera
+    // and axis, so a toggle is where every index orientation on screen could
+    // quietly revert to the three-quarter default.
+    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models', covers: ['stl'] })
+    semanticSearch.mockResolvedValue({
+      ...MEANING,
+      entries: [model('Kits/hero.stl')],
+      poses: { '/models/Kits/hero.stl': POSE },
+    })
+    // The occluded render exists and is already posed; the unoccluded one has
+    // never been drawn — the ordinary state on the first toggle.
+    getThumb.mockImplementation((_p: string, _m: number, ao: boolean) =>
+      Promise.resolve(
+        ao
+          ? {
+              status: 'hit',
+              pngUrl: 'blob:posed',
+              lighting: THUMB_LIGHTING,
+              rig: RIG_VERSION,
+              posed: POSE_VERSION,
+            }
+          : { status: 'miss' },
+      ),
+    )
+    await mountApp('/models', NESTED)
+    await settle()
+    await click(searchTab())
+    await click(modeButton('meaning')!)
+    await type(searchInput(), 'hero')
+    await pressEnter(searchInput())
+    await settle()
+    expect(renderThumbnail).not.toHaveBeenCalled() // the posed render was a hit
+
+    await click(aoPill())
+    await settle()
+
+    const posed = cameraForPose(POSE, DEFAULT_CAMERA)!
+    // The guard that stops this cell passing on a default-framed render.
+    expect(posed.camera).not.toEqual(DEFAULT_CAMERA)
+    expect(renderThumbnail).toHaveBeenCalledTimes(1)
+    expect(renderThumbnail).toHaveBeenCalledWith(expect.anything(), posed.camera, posed.axis, false)
+    // And it re-declares the mapping version, or the next sweep reads these
+    // posed pixels as stale and draws them again for ever.
+    const put = putThumb.mock.calls.at(-1)?.[0]
+    expect(put?.posed).toBe(POSE_VERSION)
+    expect(put?.ao).toBe(false)
+    expect(put?.camera).toBeUndefined() // the index's opinion is not the user's
   })
 
   it('a typed parameter is one query at the end, never one per keystroke', async () => {
