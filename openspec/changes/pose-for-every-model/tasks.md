@@ -8,14 +8,17 @@
 
 ## 1. mini-classify: the poses call
 
-- [ ] 1.1 `POST /poses` — `{ paths: [...] }` → `{ poses: { <path>: pose | null } }`, a pure
+- [x] 1.1 `POST /poses` — `{ paths: [...] }` → `{ poses: { <path>: pose | null } }`, a pure
       pose-cache lookup; 503 while warming like `/query`; bounded request size, refusing
       an oversized batch in the surface's own error shape
-- [ ] 1.2 `docs/api/surface.md` gains the call beside the other four, with the "no GPU, no
+      — done 2026-08-31 (P1, mini-classify `f074334`): `post_poses` in `src/api.py` over a new `Collection.row_of` — total on any string, lexical (absolute spelling as walked, root-relative parts under the root as recorded *and* as resolved), zero syscalls for a 1024-path batch (asserted with the repo's syscall budget helper); `POSES_MAX = 1024` enforced by the pydantic schema (422, the surface's own shape); `_live()` warming gate shared (503). Unknown paths answer `null` under their own key
+- [x] 1.2 `docs/api/surface.md` gains the call beside the other four, with the "no GPU, no
       lock" statement and why (store lookup)
-- [ ] 1.3 Tests per that repo's conventions; if anything is measured, an eval script and a
+      — done 2026-08-31 (P1): `docs/api/surface.md` gains `### POST /poses` beside the other four, the `/status` warming sentence and the GPU-lock bullet name it as outside the lock (a store lookup); README's route count and 503 sentence updated
+- [x] 1.3 Tests per that repo's conventions; if anything is measured, an eval script and a
       learnings entry per its CLAUDE.md
 
+      — done 2026-08-31 (P1): `tests/test_api.py` (pose block equals a real hit's; absolute and root-relative; five unaddressable paths → null; mixed batch; 1025 → 422 pinning `POSES_MAX`; warming harness) and `tests/test_collection.py` (`row_of` by hit path/rel path, symlink-walked spelling, six spellings, six unaddressables, the zero-syscall budget); each assertion checked against a deliberate break. Suite `700 passed, 1 skipped`. Nothing measured, so no eval script and no learnings entry — stated per that repo's rule
 ## 2. Server: the proxy and the peek ranking
 
 - [x] 2.1 `server/src/semantic.ts`: `posesForDir(library, dirPath)` — list the directory's
