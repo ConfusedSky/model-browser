@@ -84,7 +84,15 @@ for a preview model as for a tile. Both the cache, the queue, the LRU and the re
 shared, which is what makes `ao-as-recipe-dimension` and `ao-refreshes-thumbnails` apply
 to previews with no code of their own.
 
-### D4: Four cells, filled in order, icon for none
+### D4: Four cells, filled in order, icon for none — inside folder chrome
+
+A sheet sits inside folder chrome — a tab and a same-colored body panel
+(`amber-400/40`, hand-tuned live 2026-08-31) — because a tile whose image area is
+model pixels no longer reads as a folder: a one-preview sheet is pixel-identical
+to a model tile, and the name row is too small to carry the distinction alone.
+The chrome, not a badge over the pixels, is what says "container" — the images
+are *inside* the folder, the way every desktop draws it. Tiles with nothing to
+show keep the plain icon, chrome-free.
 
 A 2×2 CSS grid inside the tile's image area; previews fill cells in peek order. One → a
 single full-size image (not one quadrant and three blanks); two → side by side; three →

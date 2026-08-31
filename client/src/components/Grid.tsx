@@ -407,9 +407,21 @@ const Tile = memo(function Tile({
       >
         {/* The sheet takes the icon's place only once there is something to
             show — no preview, none yet, a peek that failed and a zip all land
-            on the icon, so a tile never blanks while its peek is in flight. */}
+            on the icon, so a tile never blanks while its peek is in flight.
+
+            The sheet sits inside folder chrome — a tab and a framed body — so
+            the tile still reads as a folder at scanning distance: a one-preview
+            sheet is otherwise pixel-identical to a model tile, and the name row
+            is too small to carry the distinction alone. The chrome, not a badge
+            over the pixels, is what says "container": the images are *inside*
+            the folder, the way every desktop draws it. */}
         {preview !== undefined && preview.length > 0 ? (
-          <ContactSheet preview={preview} thumbs={previewThumbs} />
+          <div className="flex min-h-0 w-full flex-1 flex-col px-1 pt-1">
+            <div className="h-2.5 w-1/2 shrink-0 rounded-t-md bg-amber-400/40" />
+            <div className="flex min-h-0 w-full flex-1 rounded-b-md rounded-tr-md bg-amber-400/40 p-1">
+              <ContactSheet preview={preview} thumbs={previewThumbs} />
+            </div>
+          </div>
         ) : (
           <span className="text-4xl">{entry.kind === 'dir' ? '📁' : '🗜️'}</span>
         )}
