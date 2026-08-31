@@ -225,8 +225,17 @@
       and `session.ts` are all untouched. The whole diff is `App.tsx` (the hook call and two
       comments), `useThumbnails.ts`, and four client test files. This change alters when a
       lookup is requested, never what is drawn
-- [ ] 4.3 Manual: on a real listing, press the pill and watch the grid converge without
+- [x] 4.3 Manual: on a real listing, press the pill and watch the grid converge without
       navigating; press it back mid-pass and confirm it settles under the second choice;
       press it a third time and confirm zero renders (both variants cached). The cache
       lives at `~/.cache/model-browser/<id>/<hash>.{png,noao.png,json}` — the sibling file
       appearing is what to look for
+      — done 2026-08-31 (coordinator), dev instance on the real library, in-page fetch
+      recorder over `/Warhammer/angry-dinosaur…` (41 models, occluded-only cached): pill
+      off → 41 `ao=off` lookups and 41 `ao:false` PUTs converged in place, URL unchanged,
+      displayed image count never dropped (5 spinners present at press time were the
+      initial visit's still-loading tiles). The mid-pass case occurred naturally: those 5
+      tiles' outgoing occluded renders were retired without landing — the toggle back on
+      answered 41 lookups with exactly 5 PUTs, the 5 whose first-pass work was suppressed.
+      Third press (off again): 41 lookups, 0 PUTs — both variants cached. Sibling
+      `.noao.png` files confirmed on disk in the earlier 3.4 pass (38/38 pairs)
