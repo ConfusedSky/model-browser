@@ -193,7 +193,12 @@ export function useThumbnails(
     // replace the newer image, revoke its URL, and pair old-angle pixels with
     // the fresh camera in the cache, a wrong-picture hit nothing invalidates.
     // Retiring here fails that tail's `alive()` before its PUT and before it
-    // paints. Safe for the hook's own writers by construction: every internal
+    // paints — for a tail still queued or between awaits. One residue remains
+    // (the class tasks.md 2.3 records for preference changes): a tail that
+    // passed its pre-PUT check before this write lands still files its PUT —
+    // cancellation cannot reach an in-flight await — so old-angle pixels can
+    // land in the cache after the newer camera write; the paint is still
+    // suppressed, and the mismatched render heals on its next camera write. Safe for the hook's own writers by construction: every internal
     // `setThumb` is the last act of its pass, and the one handle this runs
     // ahead of them — `dropStale` — is idempotent.
     retire(slot)

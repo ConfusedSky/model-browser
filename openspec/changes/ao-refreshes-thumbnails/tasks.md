@@ -135,6 +135,16 @@
       blanking a displayed image when a miss's render fails — fixed the same day in the same
       F3 shape; cell "a render that fails after a miss keeps the image the tile is showing",
       falsified (`expected undefined to be 'blob:mint0'`); commit `c9da9bc`
+      <br>2026-08-31 (third review, coordinator): four more findings applied — the cache's
+      concurrent-put comment asserted a false boundary and now states the real cost (a
+      self-consistent reverted camera, and resurrected sibling labels pairing new pixels with
+      the old camera; heals only on a later camera write); the retire comment now names the
+      in-flight-PUT residue it cannot close (2.3's class); the sibling cell's render mock is
+      `mockRejectedValueOnce` so it cannot poison later cells; and `App.tsx`'s `onLoadError`
+      — the bare-error writer the round walked past — keeps the tile's image like the two
+      hook catches (FND-2). Open, recorded: no test pins the in-flight-PUT residue or the
+      `onLoadError` wiring; both are one-line closures over twice-falsified shapes, accepted
+      as prose-recorded gaps rather than new harness machinery
 - [x] 2.3 A preference change cancels the in-flight sweep's queued renders as a navigation
       does — unlike an entries change, which cancels only the entries that left (2.1). Note what cancellation does **not** cover: the load effect renders and
       `await api.putThumb(...)` before the `if (!alive)` check that follows, and `queue.ts`'s

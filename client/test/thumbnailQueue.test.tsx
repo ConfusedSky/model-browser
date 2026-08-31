@@ -1213,7 +1213,7 @@ describe('the sweep reconciles its entries instead of resetting them', () => {
     const lru = mesh()
     // The initial pass is a pure hit and never renders; the toggle's miss is
     // the first render call, and it dies.
-    vi.mocked(renderThumbnail).mockRejectedValue(new Error('render died'))
+    vi.mocked(renderThumbnail).mockRejectedValueOnce(new Error('render died'))
     const api = {
       getThumb: vi.fn((_p: string, _m: number, ao: boolean) =>
         Promise.resolve(ao ? freshHit() : { status: 'miss' }),

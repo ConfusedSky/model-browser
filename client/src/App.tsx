@@ -2235,7 +2235,13 @@ export default function App() {
           onCloseIntent={onViewerCloseIntent}
           onDismiss={closeViewer}
           onPersist={persist}
-          onLoadError={() => setThumb(viewer.entry.path, { status: 'error' })}
+          onLoadError={() =>
+            // Non-revoking, like the hook's own catches (third review FND-2):
+            // a failed mesh load produced no replacement, so the tile keeps the
+            // thumbnail it was showing behind the error state instead of having
+            // it displaced and revoked.
+            setThumb(viewer.entry.path, { status: 'error', url: thumbs.get(viewer.entry.path)?.url })
+          }
           onEntryMenu={onViewerEntryMenu}
           menuOpen={menuOpenRef}
           panelCommands={panelCommands}

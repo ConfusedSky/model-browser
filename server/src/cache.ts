@@ -270,9 +270,14 @@ export class ThumbCache {
     // Read-modify-write with awaits between the read and the write: two
     // concurrent puts for one path (one per render, plausible around a toggle
     // plus a command) can each merge against the same `prev`, and the loser's
-    // labels land from a stale read. Accepted on the eviction guard's terms —
-    // the cost is one wrong-labelled render that the next visit re-renders,
-    // never a wrong picture served as fresh — and unclosable without locking.
+    // sidecar half lands from a stale read. Accepted, and unclosable without
+    // locking — but the cost is worse than one wrong-labelled render (third
+    // review, 2026-08-31): the stale merge can revert the winner's camera to
+    // a self-consistent pre-move state nothing re-renders, and can resurrect
+    // sibling labels a camera move had just cleared, pairing the winner's
+    // new-angle PNG with the old camera as a fresh-looking hit. Only a later
+    // camera write heals those. The window is one request round-trip wide and
+    // needs a toggle racing a close on one model; recorded, not defended.
     const prev = await this.readMeta(dir, key)
     const prevMine = renderLabels(ao ? prev : prev?.noao)
     const prevTheirs = renderLabels(ao ? prev?.noao : prev)
