@@ -99,6 +99,31 @@ describe('HttpApiClient contract', () => {
     await expect(api.listDir('/a.zip!/b.zip')).rejects.toBeInstanceOf(HttpError)
   })
 
+  it('overrides asks the route for one path, encoded, and throws like its siblings', async () => {
+    // The client half of `library-overrides` D3. Encoding is the whole risk on
+    // this one: a kit folder is named from a corpus title and the demo's own
+    // keys carry spaces and `&`, which unescaped would truncate the query the
+    // way `listDir`'s `q` would. No second parameter and no signal — the panel
+    // ignores a stale answer rather than aborting it (D4).
+    const credits = { author: 'Valandar', license: 'CC-BY' }
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ name: 'Pack 03', credits }))
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
+    expect(await api.overrides('/Player & Pack 03/hero.stl')).toEqual({
+      name: 'Pack 03',
+      credits,
+    })
+    expect(fetchFn).toHaveBeenCalledWith(
+      `/api/overrides?path=${encodeURIComponent('/Player & Pack 03/hero.stl')}`,
+    )
+
+    // `jsonOrThrow`, not a swallowed failure: the *panel* renders a failed read
+    // as an uncredited model, but that is the panel's rule and it can only make
+    // it if the client tells it. A resolving stub here would hide the day this
+    // route starts 503ing behind an unconfigured library.
+    fetchFn.mockResolvedValue(jsonResponse({ error: 'path is required' }, 400))
+    await expect(api.overrides('/x.stl')).rejects.toBeInstanceOf(HttpError)
+  })
+
   it('getThumb decodes base64 png to an object URL and passes camera and axis through', async () => {
     const png = btoa('png-bytes')
     const fetchFn = vi

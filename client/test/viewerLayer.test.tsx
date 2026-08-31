@@ -39,6 +39,11 @@ function makeProps(mode: 'orbit' | 'lightbox') {
     ao: true,
     api: {
       getThumb: vi.fn().mockRejectedValue(new Error('offline')),
+      // The panel reads the entry's overrides when it opens (library-overrides
+      // 2.2). Answering "nothing resolves" keeps these cases about the model
+      // that never loaded: no credits block, and the panel they assert on
+      // exactly as it was.
+      overrides: vi.fn().mockResolvedValue({}),
     } as unknown as ApiClient,
     lru: {
       acquire: vi.fn().mockRejectedValue(new HttpError(404, 'no such file: /models/gone.stl')),

@@ -60,7 +60,14 @@ function makeProps() {
       score: undefined as IndexScore | undefined,
       scoreScale: null as ScoreScale | null,
       ao: true,
-      api: { getThumb: vi.fn().mockResolvedValue({ status: 'miss' }) } as unknown as ApiClient,
+      // `overrides` beside `getThumb`: the panel reads the entry's overrides
+      // when it opens in lightbox mode (library-overrides 2.2), and "nothing
+      // resolves" is what a library with no store answers — so these cases keep
+      // the panel they were written against.
+      api: {
+        getThumb: vi.fn().mockResolvedValue({ status: 'miss' }),
+        overrides: vi.fn().mockResolvedValue({}),
+      } as unknown as ApiClient,
       lru: { acquire: vi.fn().mockResolvedValue(mesh) } as unknown as MeshLru<THREE.Object3D>,
       tracker: new GestureTracker(),
       onPromote: vi.fn(),
@@ -208,6 +215,7 @@ describe('an index pose survives into the live session', () => {
       viewer: { ...props.viewer, mode: 'lightbox' as const },
       api: {
         getThumb: vi.fn().mockResolvedValue({ status: 'hit', posed: 2 }),
+        overrides: vi.fn().mockResolvedValue({}),
       } as unknown as ApiClient,
       pose: {
         up: [0, 1, 0] as [number, number, number],

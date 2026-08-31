@@ -7,6 +7,7 @@ import type {
   IndexPose,
   IndexScore,
   OrbitAxis,
+  OverrideCredits,
 } from '../../../shared/types'
 import type { ApiClient } from '../api/client'
 import { MENU_ITEM_CLASS } from '../components/EntryMenu'
@@ -159,6 +160,52 @@ interface Props {
 export const PERSIST_HOLD_MS = 1500
 
 /**
+ * How a stored URL is drawn: its host, with `www.` dropped.
+ *
+ * The panel is `--lb-panel` (18rem) wide and a corpus source URL runs ~45
+ * characters (`https://www.thingiverse.com/thing:3750572`), which spelled out
+ * wraps to three lines and becomes the loudest thing in a column of one-line
+ * rows. The whole URL rides the link's `title`, and the `href` is of course the
+ * stored string itself — this is what the reader sees, not where they go.
+ *
+ * A stored URL is corpus data and need not parse. Anything `new URL` refuses is
+ * drawn verbatim rather than dropped: a string the reader can still read beats a
+ * row that silently is not there, and attribution is the one thing here that
+ * must not go quiet on a malformed field.
+ */
+export function hostLabel(url: string): string {
+  try {
+    return new URL(url).host.replace(/^www\./, '')
+  } catch {
+    return url
+  }
+}
+
+/**
+ * The panel's only links, and the app's first: `_blank` because the lightbox is
+ * a live session over a loaded mesh, and following a credit in place would tear
+ * the whole app down to visit a model page. `rel="noreferrer"` implies
+ * `noopener`, so one word covers both.
+ */
+const CREDIT_LINK_CLASS = 'break-all text-sky-400 hover:underline'
+
+/**
+ * The credits worth drawing, or `null` — so the state's non-null case means
+ * "there is a row here", and the panel needs no second opinion at render time.
+ *
+ * `authorUrl` alone is deliberately not enough: it is where a name points, not
+ * a name, and a link labelled with nobody credits nobody.
+ */
+function renderableCredits(credits: OverrideCredits | undefined): OverrideCredits | null {
+  if (credits === undefined) return null
+  const some =
+    credits.author !== undefined ||
+    credits.license !== undefined ||
+    credits.sourceUrl !== undefined
+  return some ? credits : null
+}
+
+/**
  * The single live-canvas layer: in 'orbit' mode it overlays the pressed tile;
  * in 'lightbox' mode it is a modal with full orbit/zoom, focus-trapped.
  */
@@ -195,6 +242,15 @@ export default function ViewerLayer({
   /** The panel's brief failure report — the surface half of the shared copy
    *  command's failure path (task 1.2/1.3). */
   const [copyError, setCopyError] = useState<string | null>(null)
+  /**
+   * What the library's override store credits this entry to, or `null` for
+   * every way of having nothing to show — no store, no covering key, a read
+   * that failed, or a `credits` holding no field worth a row. One state for all
+   * of them, because the panel draws them identically by requirement: absent
+   * and failed are the same picture, and no placeholder stands in for either
+   * (`library-overrides` D4).
+   */
+  const [credits, setCredits] = useState<OverrideCredits | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasHostRef = useRef<HTMLDivElement>(null)
   /**
@@ -315,6 +371,40 @@ export default function ViewerLayer({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewer.entry.path, lru])
+
+  // The credits, followed to the viewer's subject on the ignore-on-stale idiom
+  // of the read above — an `alive` flag, never an AbortController (D4): the
+  // answer is a memory lookup server-side, so there is nothing running worth
+  // stopping, and what matters is only that a departed subject's answer is not
+  // drawn for the one that replaced it.
+  //
+  // Cleared on the way in, before anything is asked: the component survives a
+  // subject change (a held dismissal keeps it mounted), so without this the
+  // previous model's attribution would sit under the new model's name for as
+  // long as the new read takes — and would stay there forever if the new entry
+  // resolves nothing at all, which is the common case.
+  //
+  // Asked only in lightbox mode, which is the only mode with a panel to draw it
+  // in: an orbit press-drag-release then costs no request at all, and a lightbox
+  // open costs exactly one. Failure is caught into the same `null` as absence —
+  // no error state, by requirement.
+  useEffect(() => {
+    let alive = true
+    const forget = (): void => {
+      alive = false
+    }
+    setCredits(null)
+    if (viewer.mode !== 'lightbox') return forget
+    api
+      .overrides(viewer.entry.path)
+      .then((resolved) => {
+        if (alive) setCredits(renderableCredits(resolved.credits))
+      })
+      .catch(() => {
+        if (alive) setCredits(null)
+      })
+    return forget
+  }, [viewer.entry.path, viewer.mode, api])
 
   // Attach the shared canvas and render whenever session/mode/size changes —
   // and on an AO toggle, so the switch is visible without a drag.
@@ -812,6 +902,66 @@ export default function ViewerLayer({
                   <dt className="text-zinc-500">{Z_LABEL}</dt>
                   <dd className="tabular-nums text-zinc-300">{formatZ(score.z)}</dd>
                 </div>
+              </>
+            )}
+            {/* Attribution, among the metadata and before the action strip for
+                the same "describes before it offers" reason the score rows are
+                here — and as rows of this same `<dl>`, which is what "among the
+                metadata" means when the metadata is a description list. Drawn
+                only where the store credits something: nothing announces that a
+                model has no author, because most libraries have no store at all
+                and a panel that said so would say it forever
+                (`library-overrides` D4).
+
+                A row per field the store actually holds, so a partial credit
+                draws as the part it is rather than as a blank next to a label —
+                the corpus metadata does not always carry all four. */}
+            {credits !== null && (
+              <>
+                {credits.author !== undefined && (
+                  <div data-credit="author" className="flex justify-between gap-2">
+                    <dt className="text-zinc-500">author</dt>
+                    <dd className="min-w-0 text-right text-zinc-300">
+                      {credits.authorUrl !== undefined ? (
+                        <a
+                          href={credits.authorUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={credits.authorUrl}
+                          className={CREDIT_LINK_CLASS}
+                        >
+                          {credits.author}
+                        </a>
+                      ) : (
+                        <span className="break-all">{credits.author}</span>
+                      )}
+                    </dd>
+                  </div>
+                )}
+                {credits.license !== undefined && (
+                  <div data-credit="license" className="flex justify-between gap-2">
+                    <dt className="text-zinc-500">license</dt>
+                    <dd className="min-w-0 break-words text-right text-zinc-300">
+                      {credits.license}
+                    </dd>
+                  </div>
+                )}
+                {credits.sourceUrl !== undefined && (
+                  <div data-credit="source" className="flex justify-between gap-2">
+                    <dt className="text-zinc-500">source</dt>
+                    <dd className="min-w-0 text-right text-zinc-300">
+                      <a
+                        href={credits.sourceUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={credits.sourceUrl}
+                        className={CREDIT_LINK_CLASS}
+                      >
+                        {hostLabel(credits.sourceUrl)}
+                      </a>
+                    </dd>
+                  </div>
+                )}
               </>
             )}
           </dl>

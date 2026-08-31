@@ -11,6 +11,7 @@ import type {
   SimilarListing,
   LightingMode,
   OrbitAxis,
+  ResolvedOverrides,
   ThumbGetResponse,
   ThumbStatus,
 } from '../../../shared/types'
@@ -92,6 +93,18 @@ export interface ApiClient {
    */
   peek(path: string, n?: number): Promise<DirEntry[]>
   fetchModel(path: string): Promise<ArrayBuffer>
+  /**
+   * One entry's effective overrides — the field-wise merge over its ancestor
+   * keys, `{}` where nothing resolves (`library-overrides` D3). Asked per viewed
+   * entry, which is why it takes a path and answers one entry's fields: the
+   * lightbox shows one model, and resolving hundreds per listing to serve it is
+   * the trade the route exists to refuse.
+   *
+   * **No `AbortSignal`**, like `peek` beside it and unlike `listDir`: the panel's
+   * rule for a superseded read is ignore-on-stale, not abort (D4), and the
+   * answer is a memory lookup server-side — there is nothing running to stop.
+   */
+  overrides(path: string): Promise<ResolvedOverrides>
   /** Availability of the semantic index — cheap, cached server-side (D4). */
   indexAvailability(opts?: { fresh?: boolean }): Promise<IndexAvailability>
   /**
@@ -344,6 +357,11 @@ export class HttpApiClient implements ApiClient {
     const count = n !== undefined ? `&n=${n}` : ''
     const res = await this.fetchFn(`/api/peek?path=${encodeURIComponent(path)}${count}`)
     return jsonOrThrow<DirEntry[]>(res)
+  }
+
+  async overrides(path: string): Promise<ResolvedOverrides> {
+    const res = await this.fetchFn(`/api/overrides?path=${encodeURIComponent(path)}`)
+    return jsonOrThrow<ResolvedOverrides>(res)
   }
 
   async fetchModel(path: string): Promise<ArrayBuffer> {

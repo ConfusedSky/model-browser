@@ -28,6 +28,12 @@ export const putThumb = vi.fn().mockResolvedValue(undefined)
 // nothing in it — no sheet — so every test written before previews existed sees
 // the icon grid it was written against.
 export const peek = vi.fn().mockResolvedValue([])
+// One entry's resolved overrides (library-overrides). Shared and cleared per
+// mount like peek, so a test can both count the reads a lightbox issued and
+// choose what a model is credited to. The default is the answer for a library
+// with no store — nothing resolves — so every test written before overrides
+// existed renders the panel it was written against, with no credits block.
+export const overrides = vi.fn().mockResolvedValue({})
 // Shared for the same reason getThumb is: a test needs to choose what the LRU
 // loader is handed — an embedded-3MF preview arrives from these bytes, on the
 // way past, before anything is parsed. The default is the one-facet STL below,
@@ -110,6 +116,7 @@ export function apiClientModule(): Record<string, unknown> {
       complete = vi.fn().mockResolvedValue([])
       fetchModel = fetchModel
       peek = peek
+      overrides = overrides
       getThumb = getThumb
       putThumb = putThumb
       indexAvailability = indexAvailability
@@ -250,6 +257,9 @@ async function mount(initial: DirListing): Promise<void> {
   // Cleared before the render for `peek`'s reason: the wave count a test reads
   // is the one this mount's landings provoked and nothing left over.
   semanticPoses.mockClear()
+  // Cleared beside `peek` and for the same reason: "one lightbox open, one
+  // overrides read" counts what this mount provoked and nothing left over.
+  overrides.mockClear()
   fetchModel.mockClear()
   // Cleared before the render, so the count a test reads afterwards is the
   // session's own one reading of the registry and nothing left over — which is
@@ -321,6 +331,10 @@ export async function unmountApp(): Promise<void> {
   // starts from an index with no orientation to offer.
   semanticPoses.mockReset()
   semanticPoses.mockResolvedValue({ poses: {} })
+  // Same rule as `peek`'s: a test that credited a model, or made the read fail,
+  // hands the next file back a library with no store.
+  overrides.mockReset()
+  overrides.mockResolvedValue({})
   fetchModel.mockImplementation(() => Promise.resolve(tinyStl()))
   renderThumbnail.mockClear()
   renderThumbnail.mockImplementation(() => Promise.resolve(new Blob()))

@@ -266,7 +266,14 @@ function ContactSheet({
         <div
           key={entry.path}
           data-preview-cell={entry.path}
-          title={entry.name}
+          // A cell has no visible label — this title is the only name it shows,
+          // so it is the cell's label and takes the stored one where the store
+          // holds it (`library-overrides` D7). The folder tile's own title, up
+          // on the button, keeps the real name; these are two different title
+          // roles. The fallback is `entry.name` and not `baseName(entry.name)`:
+          // an entry the store does not name must be titled exactly as it was
+          // before this capability existed.
+          title={entry.displayName ?? entry.name}
           className={`flex min-h-0 items-center justify-center overflow-hidden rounded${
             // The odd one out of three, given the full width below the pair.
             preview.length === 3 && i === 2 ? ' col-span-2' : ''
@@ -392,6 +399,21 @@ const Tile = memo(function Tile({
         type="button"
         data-entry-tile={entry.path}
         title={entry.name}
+        // Named explicitly only where a stored name is drawn below, and absent
+        // otherwise. This button has no aria-label of its own, so its accessible
+        // name is computed from its contents — which means a stored name would
+        // silently *become* the accessible name, and the requirement is that the
+        // real name stays there (`library-overrides` D7: the file name is what
+        // tells two same-named parts apart and what the user greps their disk
+        // for). Set unconditionally it would also change what a deep-search
+        // folder tile announces today, from `Beta` to `Alpha/Beta`, so absence
+        // is what keeps a library with no store byte-identical.
+        //
+        // This does put the visible label and the accessible name deliberately
+        // out of step (WCAG 2.5.3 "Label in Name") on exactly the tiles a store
+        // names. That is the spec's own trade, made knowingly: the real name is
+        // the one a reader can act on outside this app.
+        aria-label={entry.displayName !== undefined ? entry.name : undefined}
         className={base + markClass + anchorClass}
         onClick={() => onEnter(entry)}
         onContextMenu={(e) => {
@@ -427,8 +449,15 @@ const Tile = memo(function Tile({
         )}
         {/* Labeled by its own name like a model tile is: a deep-search container
             carries a relative path, and truncating that to fit shows the head of
-            the path rather than the folder the user searched for. Path in title. */}
-        <span className="w-full truncate text-center text-xs">{baseName(entry.name)}</span>
+            the path rather than the folder the user searched for. Path in title.
+
+            The store's name displaces that label where it holds one — this is
+            the tile the demo's kit names land on. Display only: the title above,
+            the accessible name above, and every matcher go on reading
+            `entry.name` (D7). */}
+        <span className="w-full truncate text-center text-xs">
+          {entry.displayName ?? baseName(entry.name)}
+        </span>
       </button>
     )
   }
@@ -502,8 +531,15 @@ const Tile = memo(function Tile({
         </span>
       )}
       {/* Flat-view names carry the relative path (`dir/foo.stl`, `a.zip!/b.stl`) — the
-          tile shows just the file name; the path is in the title and aria-label. */}
-      <span className="w-full truncate text-center text-xs">{baseName(entry.name)}</span>
+          tile shows just the file name; the path is in the title and aria-label.
+
+          A stored name displaces it where one is carried, exactly as on the
+          container tile above. Nothing else moves: this button already states
+          the real name in `aria-label`, so the accessible name needs no help
+          here the way the container's does (D7). */}
+      <span className="w-full truncate text-center text-xs">
+        {entry.displayName ?? baseName(entry.name)}
+      </span>
     </button>
   )
 }, tilePropsEqual)
