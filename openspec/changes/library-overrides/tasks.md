@@ -120,13 +120,22 @@
       a `pose` on a generated key leaves the pose; a missing `stem` is reported, not
       written; a kit directory below the top produces top-relative keys; a kit
       directory outside the top is refused before anything is written
-- [ ] 3.3 Run it against the shipped demo corpus: library top **and** kit directory at
+- [x] 3.3 Run it against the shipped demo corpus: library top **and** kit directory at
       `~/Documents/tests/test-models/miniatures/clustered-hq` (the shipped variant —
       `test-models` itself holds three copies of every stem under
       `miniatures/{original,deduplicated,clustered-hq}` and is the wrong top for the
       demo), expecting keys `/<stem>` for the 297 kits; record the written/read counts
       here beside the run date. This produces the store `web-demo-backlog` gate 3.2's
       credits page will read
+      — run 2026-08-31 (coordinator): **wrote 288 keys from 297 kits read**, 9 stems
+      named no directory and were skipped. The 9 are corpus truth, not drift: the
+      shipped variant holds exactly 288 kit folders (verified by count), and every
+      missing stem exists under `miniatures/original/` — kits dropped from
+      `clustered-hq` at build (a paint rack among them, consistent with the notes'
+      non-model drops). So "297 kits" describes the *metadata*; the shipped variant is
+      288, which is the number gate 3.2's credits page should expect. Store verified on
+      disk: `version: 1`, 288 entries, sample key `/Player_Character_Pack_03_3750572`
+      carrying name + full credits
 
 ## 4. Verification
 
