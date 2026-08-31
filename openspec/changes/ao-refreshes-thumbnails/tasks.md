@@ -141,14 +141,23 @@
       add the toggle case — a model with a stored camera and a pose, on a meaning grid,
       across a preference change, is a lookup and no render and no PUT beyond the variant
       switch itself. Assert the render count, since the output looks identical either way
-- [ ] 2b.3 Land the requirement: the *Recipe-labelled thumbnails* MODIFY states
+- [x] 2b.3 Land the requirement: the *Recipe-labelled thumbnails* MODIFY states
       the orientation-source label and the applied-only staleness rule, which nothing in
       `openspec/specs/` described before — the label is shipped code with no requirement
       behind it, and `entry-context-menu`'s entry-actions requirement already leans on it
       ("SHALL record which recipe produced those pixels")
-- [ ] 2b.4 Note for the reviewer of this change: the predicate is not touched here; the
+      — done 2026-08-31 (coordinator): the delta's MODIFIED body carries both (the
+      orientation-source mapping-version record and "only where the source would actually
+      be applied"), with the two scenarios ("A model with its own orientation is not made
+      stale by a pose", "An image that predates the source's current mapping is
+      re-rendered"); verified against the archived main-spec text in the /opsx:update pass
+      and by the ordered archive dry run the same day
+- [x] 2b.4 Note for the reviewer of this change: the predicate is not touched here; the
       section exists because a second trigger is where a regression in it would first
       show, and because the rule belongs in the spec beside the staleness rule it refines
+      — standing note, confirmed 2026-08-31 (coordinator): ART-1's diff leaves `poseStale`'s
+      three clauses byte-identical to main; only `wantsPose` now reads the generation's
+      captured pose
 
 ## 3. Tests
 
