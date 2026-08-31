@@ -8,7 +8,10 @@
 > `pose-for-every-model` (planned, `web-demo-backlog` 1.2 — not yet drafted) and the
 > demo-mode change build on this store; the `pose` field is reserved by name here and
 > typed there. Re-read `library.ts`, `vpath.ts`, `app.ts`, `ViewerLayer.tsx` and
-> `client/test/appHarness.tsx` against main before starting.
+> `client/test/appHarness.tsx` against main before starting. The display-name
+> consumer was folded in when backlog 2.3 was decided (display from the store, Masa
+> 2026-08-31) — it adds a `directory-browsing` delta (ADD-only beside
+> `search-cancellation`'s, no title overlap) and tasks 1.6/2.4.
 
 ## 1. Server: the store
 
@@ -19,7 +22,8 @@
       additionally strips a trailing slash from a key's entry half and rejects+reports
       an empty entry half (`…!/`), the forbidden zip-root spelling; unspellable keys
       reported),
-      `resolveOverrides(store, libPath)` doing the field-wise merge over the
+      `resolveOverrides(store, libPath)` doing the field-wise merge — `name`
+      excepted: it never inherits and resolves from the exact key alone (D2/D7) — over the
       **parse-then-walk** ancestor list (split on the first `!/` per `parseVPath`'s
       grammar; ancestors are `/`, the filesystem half's directories, the archive file's
       path, then the entry half's interior directories — a naive `split('/')` yields
@@ -65,8 +69,16 @@
       refuses, 400s a missing path, and gives the 503 envelope unconfigured;
       `writeOverrides` leaves either the old file or the new one behind a simulated
       failure, never a torn one
+- [ ] 1.6 Display names ride the listing (D7): at emission, each entry's exact library
+      path is looked up in the loaded store — a Map get, no prefix walk — and a hit
+      attaches `displayName` to the wire `DirEntry` (optional field, `shared/types.ts`).
+      Applies to every listing shape from one seam so browse, flat/deep search and
+      `/api/peek` all carry it; a library with no store emits byte-identical listings.
+      Server tests: a named directory's entry carries `displayName` in a browse, a flat
+      listing and a peek answer; a model beneath it does not (exact key, not prefix);
+      no store → no field on any entry
 
-## 2. Client: the credits block
+## 2. Client: the credits block and the tile names
 
 - [ ] 2.1 `api/client.ts` `overrides(path)` on `ApiClient` and `HttpApiClient` — the
       resolved fields, `jsonOrThrow`
@@ -84,6 +96,15 @@
       the action strip; uncredited model and failed read render identically (no block,
       viewer unaffected); a late answer after the subject changed does not render; the
       request goes through `ApiClient` (no raw fetch)
+- [ ] 2.4 Tiles render `displayName` (D7): `Grid.tsx` labels a tile with
+      `entry.displayName ?? baseName(entry.name)` — dir, zip and model tiles alike, sheet
+      preview cells' titles included — while `title` and the accessible name keep the real
+      name (two same-named parts are told apart by the file name, and the disk is grepped
+      by it). Find, deep search and the flat filter keep matching real names — display
+      only (2.3's deciding question). Client tests: a named kit tile shows the stored name
+      with the real name in `title`; an unnamed model beneath it keeps its file-derived
+      label; the find filter matches the real name and not the stored one; no
+      `displayName` → labels byte-identical to today
 
 ## 3. The generator
 
@@ -111,7 +132,8 @@
 
 - [ ] 4.1 `bun run test` / `bun run typecheck` clean (vitest from the workspace dirs)
 - [ ] 4.2 Live: lightbox on a demo-corpus model shows its kit's author, license and
-      source link among the metadata; a model of the real library (no store) shows no
+      source link among the metadata; the demo root's 297 kit tiles show their
+      `miniatures.json` titles instead of stems, and find still matches stems; a model of the real library (no store) shows no
       block and no gap where one would be; `/api/overrides` on the demo root answers
       from memory (network panel: one small request per lightbox open, none on browse)
 - [ ] 4.3 `docs/web-demo-notes.md`: item 1 points at this change as its implementation

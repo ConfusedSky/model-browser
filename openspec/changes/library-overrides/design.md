@@ -29,16 +29,20 @@ written at corpus build and rarely after.
   lifetime, atomic write helper.
 - A per-entry read the client can ask (`ApiClient`, never raw fetch — D1 of the
   Electron seam).
-- The lightbox credits block — the one UI consumer here.
+- Two UI consumers: the lightbox credits block, and tiles rendering the
+  stored display name (folded in with backlog 2.3's decision — D7).
 - The generator from `metadata/miniatures.json`, rerunnable without clobbering
   fields it does not own.
 
 **Non-Goals**
 
-- No consumer for `name` (that was `web-demo-backlog` 2.3's call — decided
-  after this draft, 2026-08-31: display names from the store, so the consumer
-  is a known follow-up rather than an open question) and none for `pose`
-  (`pose-for-every-model`). Fields ship, consumers wait.
+- No consumer for `pose` (`pose-for-every-model`); the field ships, its
+  consumer waits. The `name` consumer, first deferred to `web-demo-backlog`
+  2.3, was folded in when 2.3 was decided (display from the store, Masa
+  2026-08-31) — see D7.
+- No search or filter by display name (2.3's deciding question was "display
+  only, or search by it?" and display-only is what closed it): find, deep
+  search and the flat filter keep matching real names.
 - No runtime write API and no editing UI. The only writer is the generator.
 - No search-by-author surface. In-memory search is trivial *later*; nothing here
   depends on it.
@@ -111,6 +115,14 @@ pose writer will write file keys carrying only `pose`, and wholesale, every
 posed model would silently lose its kit's credits. Field-wise is also what
 makes the generator (directory keys) and the pose writer (file keys) composable
 without either knowing the other exists.
+
+**`name` is the one field that does not inherit** (added with the 2.3 fold-in,
+D7): a display name names the thing at its own key, so it resolves from the
+entry's exact key alone. Inherited, a kit's name would label the kit tile *and*
+all thirty models beneath it identically — the generator writes one `name` per
+kit directory, and prefix inheritance would turn that into thirty wrong labels
+the moment tiles render names. Credits inherit (attribution genuinely covers
+the subtree); names do not.
 
 The ancestor walk follows the vpath grammar, not a naive `split('/')`:
 `parseVPath` splits a virtual path on the first `!/` (`SEP` in
@@ -214,6 +226,27 @@ contract, nothing more: the generator never writes poses and the merge
 preserves unknown fields, so no generated store depends on the name — but a
 third-party or future writer will, and the format doc is where they will read
 it.
+
+### D7: Display names ride the listing, exact key, display only
+
+Tiles render the stored name, and a grid is hundreds of tiles — so names
+cannot come from `GET /api/overrides` (one request per tile is exactly the
+chattiness D1 rejects for peeks' *renders*, and worse, since every tile needs
+one). They ride the listing instead: at emission, each entry's **exact** key
+is looked up in the in-memory store — a Map get, no I/O, no prefix walk — and
+a hit attaches an optional `displayName` to the `DirEntry`. This does not
+reopen D3's rejection of folding overrides into `/api/dir`: what D3 rejected
+was per-entry *resolution* (the ancestor walk, all fields) to serve a panel
+that shows one entry; an exact-key get for one field costs what the `size`
+field costs. The peek endpoint returns ordinary listing entries, so sheet
+labels come along for free.
+
+The consumer: a tile whose entry carries `displayName` renders it as the
+label, keeps the real name in `title` (and the accessible name — the file name
+is what disambiguates two same-named parts, and what the user greps their disk
+for), and the find filter, deep search and flat matching are untouched —
+display only, which is what decided 2.3. The lightbox panel names the model
+from the same entry, so it follows without its own rule.
 
 ## Risks / Trade-offs
 

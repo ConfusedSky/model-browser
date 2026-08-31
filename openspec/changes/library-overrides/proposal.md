@@ -32,10 +32,15 @@ reopen it.
   `metadata/miniatures.json` (297 kits: `author`, `author_url`, `license`,
   `source_url`, `name` per kit) — run at corpus build, rerunnable, output
   regenerable.
-- Display names and poses are **fields only** here: the store carries them, and
-  their consumers land separately — display names hang on `web-demo-backlog`
-  decision 2.3 (rename at build vs display from store), poses on
-  `pose-for-every-model`. Storing them now is what makes both follow-ups small.
+- Display names are consumed here too (backlog 2.3, decided 2026-08-31:
+  display from the store): a listing entry whose **exact** key holds a name
+  carries it as an optional `displayName`, and tiles render it in place of the
+  file-derived label — display only, so find/search still match real names,
+  and the real name stays in the tile's title. Exact key, never inherited: a
+  kit's name labels the kit tile, not every model beneath it (design D7).
+- Poses stay a **field only**: the store carries them, the consumer lands with
+  `pose-for-every-model`. Storing the field now is what keeps that follow-up
+  small.
 - Deliberately not sqlite: "search by author" is trivial in memory once loaded;
   sqlite only if a library outgrows load-at-start, which hundreds of kits do not
   (D2, closed).
@@ -51,10 +56,13 @@ reopen it.
 ### Modified Capabilities
 
 - `model-viewer`: ADDs one requirement — the panel's credits section for an
-  entry that resolves attribution. (Three active changes MODIFY other
-  `model-viewer` requirements — `remove-axis-lighting`,
-  `ao-as-recipe-dimension`, `adaptive-ao-default` — so this delta is ADD-only
-  under a new title; no collision at archive.)
+  entry that resolves attribution. (Written while three changes MODIFIED other
+  `model-viewer` requirements — all three have since archived — so this delta
+  is ADD-only under a new title; no collision at archive.)
+- `directory-browsing`: ADDs one requirement — entries carry and tiles render
+  the store's display name for their exact key. (`search-cancellation` ADDs a
+  differently-titled requirement to the same capability while active; no
+  overlap.)
 
 ## Impact
 
@@ -62,7 +70,10 @@ reopen it.
   route; `library.ts` untouched except that the store lives in the directory
   `MARKER_DIR` already names and is invisible to listings the way the marker is.
 - Client: `ApiClient` gains the overrides read; the lightbox panel
-  (`ViewerLayer.tsx`) renders the credits block.
+  (`ViewerLayer.tsx`) renders the credits block; tiles (`Grid.tsx`) render
+  `displayName` where an entry carries one.
+- Wire: `DirEntry` gains an optional `displayName`, attached at listing
+  emission from the in-memory store by exact key.
 - Scripts: the generator (corpus side, reads `metadata/miniatures.json`).
 - Ordering: after `library-root` (archived 2026-08-30 — keys are library paths,
   the file lives beside the marker). Independent of the AO chain and of

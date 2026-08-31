@@ -64,7 +64,9 @@ of its own.)
 
 ### Requirement: Field-wise longest-prefix resolution
 An entry's effective overrides SHALL merge the store's keys on the entry's
-path per field, the nearest key winning each field independently. The ancestor
+path per field, the nearest key winning each field independently — except
+`name`, which SHALL NOT inherit: a display name names the thing at its own
+key, not its subtree, and resolves from the entry's exact key alone. The ancestor
 walk SHALL follow the virtual-path grammar: a lookup splits into its
 filesystem half and its archive-entry half on the first `!/`; the ancestors
 are the root key `/`, then each ancestor directory of the filesystem half,
@@ -83,8 +85,12 @@ the loader.
 - **THEN** `/kit/sub/x.stl` resolves the kit's credits
 
 #### Scenario: A file key overrides per field only
-- **WHEN** `/kit` holds credits and a name, and `/kit/x.stl` holds only a pose
-- **THEN** `/kit/x.stl` resolves the kit's credits and name together with its own pose
+- **WHEN** `/kit` holds credits, and `/kit/x.stl` holds only a pose
+- **THEN** `/kit/x.stl` resolves the kit's credits together with its own pose
+
+#### Scenario: A name does not inherit
+- **WHEN** `/kit` holds a name and credits, and `/kit/x.stl` holds nothing
+- **THEN** `/kit/x.stl` resolves the kit's credits and no name — the name labels the kit alone
 
 #### Scenario: Segment boundaries
 - **WHEN** `/kit` holds credits and the library holds `/kit2/y.stl`
@@ -95,8 +101,8 @@ the loader.
 - **THEN** `/kit/a.zip!/parts/x.stl` resolves them, through the ancestors `/`, `/kit`, `/kit/a.zip`
 
 #### Scenario: A key inside an archive
-- **WHEN** `/kit/a.zip!/parts` holds a name and `/kit/a.zip` holds credits
-- **THEN** `/kit/a.zip!/parts/x.stl` resolves the interior key's name and the archive key's credits
+- **WHEN** `/kit/a.zip!/parts` and `/kit/a.zip` both hold credits
+- **THEN** `/kit/a.zip!/parts/x.stl` resolves the interior key's credits — the nearer key wins
 
 ### Requirement: Resolved overrides are served per entry
 The server SHALL answer an entry's resolved overrides for a requested library
