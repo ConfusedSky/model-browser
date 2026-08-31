@@ -86,7 +86,7 @@
       re-render sheets
       — done: `tilePropsEqual`, shallow-over-keys with one exemption (`previewThumbs`,
       elementwise by identity — `setThumb` reuses untouched per-path state objects)
-- [ ] 2.4 Client tests: a tile requests no peek until visible, then exactly one; 0/1/3/4
+- [x] 2.4 Client tests: a tile requests no peek until visible, then exactly one; 0/1/3/4
       previews render the D4 layouts; the icon shows while the peek is in flight and when the peek request fails (503 envelope, network error); a preview
       model that is also a tile shares one `thumbs` entry (one render, two images); a peek
       landing does **not** reset any tile or sheet cell already shown (assert every
