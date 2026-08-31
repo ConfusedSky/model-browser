@@ -5,6 +5,7 @@ import type {
   DirListing,
   IndexAvailability,
   LibraryState,
+  PosesResponse,
   SemanticListing,
   SemanticTuning,
   SimilarListing,
@@ -93,6 +94,27 @@ export interface ApiClient {
   fetchModel(path: string): Promise<ArrayBuffer>
   /** Availability of the semantic index — cheap, cached server-side (D4). */
   indexAvailability(opts?: { fresh?: boolean }): Promise<IndexAvailability>
+  /**
+   * The index's orientation for each model directly inside `dirPath`, keyed by
+   * library path — the listing's second wave (pose-for-every-model D2/D3). A
+   * plain listing carries no poses and waits for none; this is how they reach
+   * it afterwards.
+   *
+   * Answers `{}` where the index is absent, warming, or does not cover the
+   * location, and does not distinguish those from "the index holds no
+   * orientation for anything here": every one of them is *no poses*, which
+   * costs the listing nothing (the delta's own words). A rejection means the
+   * same to the caller — the wave is silent, and the listing stays as it is.
+   *
+   * The directory's own models, so a *flat* listing's deeper entries simply
+   * have no pose here: the answer is a subset of the grid, never a wrong one.
+   *
+   * **No `AbortSignal`**, like `peek` and unlike `listDir`: the answer is
+   * bounded by one directory's model count, and a superseded wave is dropped on
+   * arrival by the landing it names (the reducer's `listingPoses`) rather than
+   * stopped in flight.
+   */
+  semanticPoses(dirPath: string): Promise<PosesResponse>
   /**
    * What state the library is in (library R4). Always answers — this is the one
    * route that has something to say while the library is `unconfigured` or
@@ -265,6 +287,11 @@ export class HttpApiClient implements ApiClient {
     const q = opts?.fresh === true ? '?fresh=true' : ''
     const res = await this.fetchFn(`/api/semantic/status${q}`)
     return jsonOrThrow<IndexAvailability>(res)
+  }
+
+  async semanticPoses(dirPath: string): Promise<PosesResponse> {
+    const res = await this.fetchFn(`/api/semantic/poses?path=${encodeURIComponent(dirPath)}`)
+    return jsonOrThrow<PosesResponse>(res)
   }
 
   async library(): Promise<LibraryState> {

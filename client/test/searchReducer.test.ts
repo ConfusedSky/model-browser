@@ -31,6 +31,15 @@ const PREFS: Prefs = {
   tuning: { ...TUNING_DEFAULTS },
 }
 
+/** The index's opinion about one model — what a wave carries (D3). */
+const POSE: IndexPose = {
+  up: [0, 1, 0],
+  azimuth_zero: [1, 0, 0],
+  source: 'siglip',
+  confidence: 0.9,
+  front: { view: 5, azimuth_deg: 225, elevation_deg: 20 },
+}
+
 const READY: IndexAvailability = { state: 'ready' }
 const WARMING: IndexAvailability = { state: 'warming', elapsed: 3 }
 
@@ -976,6 +985,54 @@ describe('acceptance: one rule for every answer', () => {
     expect(landed.result?.forView.kinds).toBe('models')
     expect(landed.view.kinds).toBe('models')
     expect(byKind(landed).map((e) => e.name)).toEqual(['a.stl'])
+  })
+
+  it('the pose wave is kept only for the landing that fired it', () => {
+    // The second wave (pose-for-every-model D3). There is no request left to
+    // compare a wave against — the landing cleared it — so the answer carries
+    // the asking event it was landed under and the wave names the same one.
+    const poses: Record<string, IndexPose> = { '/lib/a.stl': POSE }
+    const landed = land(reducer(start(), { type: 'navigate', path: '/lib', prefs: PREFS }), {
+      entries: [entry('a.stl')],
+    })
+    const id = landed.result!.id
+    expect(id).toBe(landed.lastId)
+
+    // A wave for the answer on screen fills the slot — by reference, never a
+    // copy: the thumbnail sweep re-runs on this value's identity, so rebuilding
+    // it here would walk the whole grid for a value that did not change.
+    const waved = reducer(landed, { type: 'listingPoses', id, poses })
+    expect(waved.listingPoses).toBe(poses)
+
+    // A wave for any other asking event says nothing at all. This is the drop
+    // that matters after a navigation: the paths a stale wave names may well be
+    // on screen again, and it is still not this listing's answer.
+    expect(reducer(waved, { type: 'listingPoses', id: id + 1, poses: {} })).toBe(waved)
+    expect(reducer(landed, { type: 'listingPoses', id: id - 1, poses })).toBe(landed)
+    // Nor before anything has landed.
+    expect(reducer(start(), { type: 'listingPoses', id: 1, poses }).listingPoses).toBeNull()
+  })
+
+  it('a landing drops the poses the last one was given, and a patch keeps them', () => {
+    // `entries` are replaced wholesale by a landing and only by a landing (R5),
+    // so that is the moment a map keyed by the paths of a listing the user has
+    // left stops describing anything. A fetchless patch replaces nothing, so it
+    // must not disturb the map — and must not rebuild it either, for the
+    // identity reason above.
+    const poses: Record<string, IndexPose> = { '/lib/a.stl': POSE }
+    let s = land(reducer(start(), { type: 'navigate', path: '/lib', prefs: PREFS }), {
+      entries: [entry('a.stl')],
+    })
+    s = reducer(s, { type: 'listingPoses', id: s.result!.id, poses })
+    expect(s.listingPoses).toBe(poses)
+
+    expect(reducer(s, { type: 'modelOpen', path: '/lib/a.stl' }).listingPoses).toBe(poses)
+    expect(reducer(s, { type: 'setKinds', kinds: 'models' }).listingPoses).toBe(poses)
+
+    const elsewhere = land(reducer(s, { type: 'navigate', path: '/lib/kit', prefs: PREFS }), {
+      entries: [entry('a.stl')],
+    })
+    expect(elsewhere.listingPoses).toBeNull()
   })
 
   it('a fetchless patch after the landing reaches the answer it stands beside', () => {

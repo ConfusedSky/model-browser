@@ -72,6 +72,26 @@ describe('HttpApiClient contract', () => {
     })
   })
 
+  it('semanticPoses asks about one directory, escaped', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ poses: {} }))
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
+    // No second argument and no signal: the wave is one bounded question about
+    // the directory the client is already looking at, and a superseded one is
+    // dropped on arrival rather than stopped in flight.
+    await expect(api.semanticPoses('/my models/kit')).resolves.toEqual({ poses: {} })
+    expect(fetchFn).toHaveBeenCalledWith(
+      `/api/semantic/poses?path=${encodeURIComponent('/my models/kit')}`,
+    )
+  })
+
+  it('semanticPoses raises the server failure rather than swallowing it', async () => {
+    // Silence is `App`'s decision, not the client's: the wire reports, and the
+    // wave's caller is the one that says nothing about it.
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ error: 'no such directory' }, 404))
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
+    await expect(api.semanticPoses('/gone')).rejects.toThrow('no such directory')
+  })
+
   it('throws HttpError with the server message on failure', async () => {
     const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ error: 'nested zips are unsupported' }, 400))
     const api = new HttpApiClient(fetchFn as unknown as typeof fetch)

@@ -38,6 +38,23 @@ changed; `wantsPose`/`poseStale`/`POSE_VERSION` are untouched. First arrival re-
 each unowned cached tile once per visited variant — the same lazy convergence as every
 recipe change, and the sibling-pose rule keeps the two occlusion renders coherent.
 
+**2026-08-31, found while implementing §3:** the reconciler's *rule* was built for this
+and its *trigger* was not. `useThumbnails`' sweep effect did not depend on `poses` — a
+recorded decision (1.2a, in the tail comment of that effect) taken on the premise that
+poses only ever arrive *with* entries, which is the premise this change ends. A wave
+changes the map alone, so nothing re-ran the sweep, the by-value compare was never
+reached, and the wave was inert until the next landing; the delta's *A pose wave does not
+reset the grid* scenario, which is explicitly about an answer arriving after the tiles are
+displayed, could not have held. The trigger is now `poses` in that dependency list. It is
+safe for the reason 1.2a's fear no longer applies: a re-run is a reconciliation, not a
+reset — it keeps every image, every slot and everything in flight, and touches only what
+arrived, left, or changed by value. What bounds it is reference stability rather than
+absence, so `App` derives `poses` as a *stored* reference in every branch (a landing's own
+map, the wave's slot, or the `NO_POSES` constant) and the reducer stores the wave's map
+without copying it. The alternative — leaving the hook alone and handing it a fresh
+`entries` array when the map changed — was rejected: it tells the effect the listing
+changed when it did not, and reads as a redundant copy to the next person to touch it.
+
 ### D4: The peek stops at four posed models, inside the bound it already has
 
 The walk today stops at four models found or the entry bound. It now stops at four

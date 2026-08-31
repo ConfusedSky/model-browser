@@ -24,6 +24,11 @@ vi.mock('../src/api/client', () => ({
     // renders — nothing about the persist path depends on the state.
     library = vi.fn().mockResolvedValue({ state: 'ready', id: 'test', top: '/lib', root: '/' })
     semanticSearch = vi.fn()
+    // The pose wave a landed listing fires (pose-for-every-model D3). An index
+    // with no orientation to offer, like `indexAvailability`'s absent one above:
+    // nothing about the persist path depends on a pose, but the call has to
+    // exist or the wave throws where the grid is being drawn.
+    semanticPoses = vi.fn().mockResolvedValue({ poses: {} })
     // The session's one registry reading, which App does on mount: a machine
     // with nothing associated and no chooser, so nothing about the persist
     // path changes here.

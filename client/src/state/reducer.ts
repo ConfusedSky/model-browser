@@ -107,6 +107,15 @@ export interface Result extends Landed {
   forView: View
   source: Source
   truncated: boolean
+  /**
+   * The asking event this answers — `Inflight.id`, kept past the landing that
+   * cleared the request. `accepts` can compare a *response* against the
+   * question in flight; a second wave about an answer already on screen has no
+   * request left to compare against, so the answer carries its own identity
+   * instead (pose-for-every-model D3). Monotonic per ask, so two landings never
+   * share one and a wave cannot be taken for the wrong listing's.
+   */
+  id: number
 }
 
 export interface Failure {
@@ -132,6 +141,23 @@ export interface SearchState {
   failure: Failure | null
   index: IndexAvailability | null
   drafts: { queryText: string }
+  /**
+   * The poses a *plain* listing's second wave supplied (pose-for-every-model
+   * D3), or null where none has landed for the answer on screen.
+   *
+   * Beside `result` rather than inside it, because it is not part of the answer
+   * the server gave: `result` is replaced wholesale and never spread (R5), and
+   * a meaning landing's own riding poses live on it. `App` reads the two in
+   * precedence order — the answer's own first — so this slot only ever speaks
+   * for a listing that arrived without any.
+   *
+   * Cleared by every landing, which is the moment `entries` are replaced (R5):
+   * a map keyed by the paths of a listing the user has left must not apply to
+   * the next one's. Not cleared at `navigate`, deliberately — the old listing
+   * is still on screen until its successor lands, and dropping its poses there
+   * would un-pose every tile of a grid that is about to be replaced anyway.
+   */
+  listingPoses: Record<string, IndexPose> | null
   /** Monotonic asking-event counter. */
   lastId: number
 }
@@ -186,6 +212,12 @@ export type Action =
   | { type: 'modelClose' }
   /** A landed listing does not contain the model the URL named (R7's bridge 4). */
   | { type: 'modelDrop' }
+  /**
+   * The poses a plain listing's second wave answered with (pose-for-every-model
+   * D3). `id` is the landing this wave was fired for — `Result.id` — and is
+   * what drops one that answers about a view the user has left.
+   */
+  | { type: 'listingPoses'; id: number; poses: Record<string, IndexPose> }
 
 export function initialState(view: View, index: IndexAvailability | null = null): SearchState {
   return {
@@ -196,6 +228,7 @@ export function initialState(view: View, index: IndexAvailability | null = null)
     failure: null,
     index,
     drafts: { queryText: view.subject.kind === 'query' ? view.subject.text : '' },
+    listingPoses: null,
     lastId: 0,
   }
 }
@@ -547,6 +580,7 @@ export function reducer(state: SearchState, action: Action): SearchState {
         // it lands with.
         forView: f.view,
         source: f.source,
+        id: f.id,
         entries: action.landed.entries,
         truncated: action.landed.truncated === true,
         scope: action.landed.scope,
@@ -560,11 +594,13 @@ export function reducer(state: SearchState, action: Action): SearchState {
       // A stand-in renders without renaming the view: the URL still names the
       // meaning search, the deferral still waits, and the grid shows the
       // location's own contents meanwhile.
-      if (f.standIn === true) return { ...state, inflight: null, failure: null, result }
+      if (f.standIn === true) {
+        return { ...state, inflight: null, failure: null, result, listingPoses: null }
+      }
       // `phase` is deliberately untouched: leaving a deferral is the job of the
       // transition that asked something else, and a landing that quietly tidied
       // the phase would hide a cancel path that forgot to.
-      return { ...state, view: f.view, inflight: null, failure: null, result }
+      return { ...state, view: f.view, inflight: null, failure: null, result, listingPoses: null }
     }
 
     case 'failure': {
@@ -605,5 +641,19 @@ export function reducer(state: SearchState, action: Action): SearchState {
 
     case 'modelDrop':
       return patch(state, { model: null })
+
+    case 'listingPoses': {
+      // The wave belongs to the answer that fired it, and to no other: `id` is
+      // the asking event the landing recorded, so a wave that comes back about
+      // a view the user has left finds a different one and says nothing. The
+      // same rule `accepts` applies to a response, asked of the answer rather
+      // than of the request, because by now there is no request left (D3).
+      //
+      // The map is stored by reference and never rebuilt here: the sweep that
+      // reads it re-runs on its identity, and a copy per action would walk the
+      // whole grid for a value that did not change.
+      if (state.result === null || state.result.id !== action.id) return state
+      return { ...state, listingPoses: action.poses }
+    }
   }
 }

@@ -78,6 +78,27 @@ export function pendingRequest(
 }
 
 /**
+ * The plain listing that is *answered* and on screen, if the answer is one: the
+ * asking event it landed under and the directory it was asked about.
+ *
+ * What the pose wave is fired for and dropped by (pose-for-every-model D3).
+ * `null` for a meaning or similarity answer, whose hits carried their own poses
+ * — asking again would spend a request to be told what the landing already
+ * said. Derived from `requestOf`, like `pendingRequest` above, so "is this a
+ * plain listing" is the same question here as it is at the fetch layer rather
+ * than a second reading of the view's fields.
+ *
+ * A *stand-in* listing counts: it is a real listing on screen, and its tiles
+ * want their orientations while the deferred search waits.
+ */
+export function landedListing(state: SearchState): { id: number; path: string } | null {
+  const r = state.result
+  if (r === null) return null
+  const req = requestOf(r.forView)
+  return req.kind === 'listing' ? { id: r.id, path: req.path } : null
+}
+
+/**
  * The landed entries the kind option leaves. It restricts *name* search results
  * only, which is the same gate `serializeView` applies — the option is read
  * only when the subject is a query, under the mode that reads it — and it has

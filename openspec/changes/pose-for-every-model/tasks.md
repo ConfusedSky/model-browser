@@ -67,15 +67,65 @@
 
 ## 3. Client: the second wave
 
-- [ ] 3.1 `api/client.ts`: `semanticPoses(dirPath)`; `App.tsx`: after a plain listing lands,
+- [x] 3.1 `api/client.ts`: `semanticPoses(dirPath)`; `App.tsx`: after a plain listing lands,
       fetch and merge into the `poses` state the reducer already holds (meaning/similar
       landings keep their riding poses; no double fetch); latest-listing-wins, stale waves
       dropped like stale listings
-- [ ] 3.2 Client tests: a wave over a displayed grid re-renders only unposed-drawn tiles,
+      <br>2026-08-31: `semanticPoses` on `ApiClient`/`HttpApiClient` (no signal, `peek`'s
+      rule — `apiClient.test.ts` "semanticPoses asks about one directory, escaped" and
+      "…raises the server failure rather than swallowing it"). The reducer gains
+      `SearchState.listingPoses` and a `listingPoses` action; `Result` gains `id`, the
+      asking event the landing answered, because a wave arrives when there is no request
+      left for `accepts` to compare against. `App` derives
+      `poses = state.result?.poses ?? state.listingPoses ?? NO_POSES` and fires the wave
+      from an effect keyed on `landedListing` (`state/selectors.ts` — null for a meaning or
+      similarity answer, so those are never re-asked) plus the library's readiness. Every
+      landing clears the slot. **Check-in finding, adjudicated by main:** the reconciler's
+      trigger was missing — `useThumbnails`' sweep effect did not depend on `poses` (1.2a),
+      so a wave that changes the map alone re-ran nothing and was inert. `poses` joins that
+      dependency list; design.md D3 carries the dated paragraph
+- [x] 3.2 Client tests: a wave over a displayed grid re-renders only unposed-drawn tiles,
       images kept (the reconciler cells' shape); index down → no requests loop, no state
       churn; a wave landing after navigation is dropped; falsify the merge
-- [ ] 3.3 The lightbox: `pose={poses[...]}` now resolves on plain listings too — assert the
+      <br>2026-08-31: `client/test/poseWave.test.tsx` (8 cells, App-mounted through
+      `appHarness`, whose ApiClient mock gains `semanticPoses` defaulting to `{poses:{}}`):
+      "re-renders the tiles the index spoke about and keeps every image meanwhile" (a
+      deferred `fetchModel` holds the re-render open so the kept images are read *during*
+      it; the stored-camera and already-`posed` tiles draw nothing new), "an index with
+      nothing to say costs the listing nothing, and is asked once", "a wave that fails says
+      nothing at all", "waits for the library, and does not give up on it", "asks nothing at
+      all while the library is not there", "a meaning answer is not asked again", "is
+      dropped when it answers about a view the user has left" (away *and back*, so the
+      stale wave's keys really are on screen). Reducer: `searchReducer.test.ts` "the pose
+      wave is kept only for the landing that fired it" and "a landing drops the poses the
+      last one was given, and a patch keeps them". Reconciler: `thumbnailQueue.test.tsx` "a
+      pose arriving over an unchanged listing re-looks-up only what it named" — the same
+      `entries` array by identity, which is the wave's own case and the cell 1.2a's premise
+      would have failed; the two neighbouring pose cells' comments are corrected where they
+      said a landing was "the only thing that re-runs this effect".
+      <br>Falsified, each against the suite and then restored: **`poses` out of the sweep's
+      dependency list** → 1 fail, "expected \"spy\" to be called 3 times, but got 2 times";
+      **the reducer's `state.result.id !== action.id` check removed** → 2 fail, the App cell
+      reporting "expected [ '/models/hero.stl', …(2) ] to deeply equal []" and the reducer
+      cell "expected { view: … } to be { view: … } // Object.is equality"; **`landedListing`
+      widened to every answer** → 1 fail, "expected \"spy\" to be called 1 times, but got 2
+      times" (the meaning cell); **the library gate dropped** → 2 fail, "expected \"spy\" to
+      not be called at all, but actually been called 1 times".
+      <br>The by-value falsification **cannot fail, and that is the finding**: making the
+      merge copy fresh pose objects (a deep clone in the `listingPoses` case) left all 51
+      files and 575 behavioural cells green and failed only the two direct reference-identity
+      assertions above. The reconciler compares poses by value, so a copied map is
+      undetectable through lookups, renders or images — reference stability is a cost
+      property, not a correctness one, which is why it is pinned by asserting the reference
+      itself (`expect(waved.listingPoses).toBe(poses)`) rather than through behaviour
+- [x] 3.3 The lightbox: `pose={poses[...]}` now resolves on plain listings too — assert the
       handoff parity cell still holds with a wave-supplied pose
+      <br>2026-08-31: `poseWave.test.tsx` "hands the viewer the orientation a plain listing
+      was given" — a deep-linked lightbox over a plain listing's tile, asserting the layer
+      is handed the wave's pose and no camera or axis, which is the same advisory handoff
+      `orbitHandoff.test.tsx`'s "an index pose survives into the live session" and "an index
+      pose is advisory" pin at the component. Those cells take the pose as a prop and cannot
+      see where it came from, so the variant that can is this App-level one
 
 ## 4. Verification
 

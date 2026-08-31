@@ -511,15 +511,27 @@ export function useThumbnails(
         return next
       })
     }
-    // `poses` is deliberately absent (1.2a): a pose arriving after a tile's
-    // pixels is handled *inside* a pass, by `poseStale` against POSE_VERSION,
-    // and re-running the whole sweep whenever a meaning search lands its poses
-    // is the "consistency fix" that would undo this. Surviving entries still
-    // see a new pose — the reconciler above compares it by value, and a landing
-    // replaces `entries` and `poses` together. `RIG_VERSION` is absent for D2's
-    // reason: it changes with a build, not with a gesture, and nothing on
-    // screen is waiting on it.
-  }, [entries, api, lru, queue, setThumb, ao])
+    // `poses` is a dependency since `pose-for-every-model`, and the sentence it
+    // replaces (1.2a's "deliberately absent") was true only while poses arrived
+    // *with* entries. A plain listing's second wave (D3) changes this map and
+    // nothing else, so without the dependency this effect never re-runs, the
+    // by-value compare above is never reached, and the wave is inert — every
+    // tile keeps the un-posed picture it was drawn with until the next landing.
+    //
+    // 1.2a's two reasons are both spent. Its premise — a landing replaces
+    // `entries` and `poses` together — is what this change ends. Its fear was
+    // that a re-run meant a reset; the reconciliation above ended that
+    // separately (a re-run keeps every image, every slot and everything in
+    // flight, and touches only what arrived, left or changed by value). A pose
+    // arriving after a tile's pixels is still handled *inside* a pass, by
+    // `poseStale` against POSE_VERSION — this only gets the pass started.
+    //
+    // What keeps it from churning is reference stability, not absence: `App`'s
+    // map is a landing's own, the slot the wave filled, or the `NO_POSES`
+    // constant, each set once and never rebuilt per render. `RIG_VERSION` is
+    // still absent for D2's reason: it changes with a build, not with a
+    // gesture, and nothing on screen is waiting on it.
+  }, [entries, api, lru, queue, setThumb, ao, poses])
 
   // Only an unmount disposes. Separate from the sweep effect on purpose: that
   // one must have no cleanup at all, or React would tear every entry down

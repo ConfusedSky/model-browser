@@ -66,6 +66,13 @@ export const openWith = vi.fn().mockResolvedValue(undefined)
 // default so a test that does not opt in fails loudly rather than silently
 // resolving `undefined`.
 export const similar = vi.fn()
+// The pose wave a plain listing fires once it has landed (pose-for-every-model
+// D3). Unlike `similar` it has a default, and the default is the answer an
+// index that is not running gives — no poses — so every test written before the
+// wave existed sees the grid it was written against and counts no extra
+// requests it did not ask for. Shared and cleared per mount like `peek`, so
+// "one request per landing" is countable.
+export const semanticPoses = vi.fn().mockResolvedValue({ poses: {} })
 
 /** A minimal valid binary STL (one facet) — enough for parseModel to build a real mesh. */
 export function tinyStl(): ArrayBuffer {
@@ -108,6 +115,7 @@ export function apiClientModule(): Record<string, unknown> {
       indexAvailability = indexAvailability
       library = library
       semanticSearch = semanticSearch
+      semanticPoses = semanticPoses
       similar = similar
       apps = apps
       open = openApp
@@ -239,6 +247,9 @@ async function mount(initial: DirListing): Promise<void> {
   // Cleared before the render like the two above, so "this tile issued exactly
   // one peek" counts what this mount provoked and nothing left over.
   peek.mockClear()
+  // Cleared before the render for `peek`'s reason: the wave count a test reads
+  // is the one this mount's landings provoked and nothing left over.
+  semanticPoses.mockClear()
   fetchModel.mockClear()
   // Cleared before the render, so the count a test reads afterwards is the
   // session's own one reading of the registry and nothing left over — which is
@@ -306,6 +317,10 @@ export async function unmountApp(): Promise<void> {
   // here, so the next file starts from the folder that previews nothing and the
   // model that loads as a one-facet STL.
   peek.mockResolvedValue([])
+  // Same rule as `peek`'s: what a test chose is undone here, so the next file
+  // starts from an index with no orientation to offer.
+  semanticPoses.mockReset()
+  semanticPoses.mockResolvedValue({ poses: {} })
   fetchModel.mockImplementation(() => Promise.resolve(tinyStl()))
   renderThumbnail.mockClear()
   renderThumbnail.mockImplementation(() => Promise.resolve(new Blob()))

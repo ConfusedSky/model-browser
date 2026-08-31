@@ -860,9 +860,11 @@ describe('the sweep reconciles its entries instead of resetting them', () => {
     const before = lastThumbs.get('/models/a.stl')!.url!
     renderLog = []
 
-    // A landing replaces `entries` and `poses` together — which is the only
-    // thing that re-runs this effect, `poses` being deliberately out of its
-    // dependency list. Same path, same mtime: the entry survives.
+    // A landing replaces `entries` and `poses` together. Same path, same mtime:
+    // the entry survives, so this is the reconciler's by-value compare and not
+    // an addition. (Since `pose-for-every-model` the map alone re-runs the
+    // effect too — the cell below this pair drives that, which is the wave's
+    // case; here both move, which is a landing's.)
     await rerender(
       <Harness
         entries={[one('/models/a.stl')]}
@@ -883,8 +885,10 @@ describe('the sweep reconciles its entries instead of resetting them', () => {
   })
 
   it('an identical pose under a rebuilt map issues nothing', async () => {
-    // The other half of by-value: `poses` is a fresh object on every landing,
-    // so reference comparison would re-look-up every tile on every one.
+    // The other half of by-value: `poses` is a fresh object on every landing —
+    // and, since `pose-for-every-model`, on every wave — and the map's identity
+    // is now what re-runs the sweep, so reference comparison of the poses
+    // *inside* it would re-look-up every tile on every one.
     const api = fakeCache(() => freshHit({ posed: POSE_VERSION }))
     const lru = mesh()
     const queue = new RenderQueue(2)
@@ -917,6 +921,53 @@ describe('the sweep reconciles its entries instead of resetting them', () => {
 
     expect(api.getThumb).toHaveBeenCalledTimes(1)
     expect(vi.mocked(renderThumbnail)).not.toHaveBeenCalled()
+  })
+
+  it('a pose arriving over an unchanged listing re-looks-up only what it named', async () => {
+    // The wave (`pose-for-every-model` D3), which is the case 1.2a did not
+    // foresee: the poses map changes and `entries` does not — the SAME array,
+    // by identity, because no landing happened. Without `poses` in the sweep's
+    // dependency list this effect never re-runs at all and the wave is inert;
+    // with it, the by-value walk above touches the one entry the index spoke
+    // about and leaves the other exactly as it is.
+    const api = fakeCache(() => freshHit({ posed: POSE_VERSION }))
+    const lru = mesh()
+    const queue = new RenderQueue(2)
+    // Held in a const and passed to both renders: a fresh array would make this
+    // cell a landing again and it would pass with `poses` out of the deps.
+    const entries = [one('/models/a.stl'), one('/models/b.stl')]
+
+    await render(
+      <Harness entries={entries} api={api} lru={lru} queue={queue} ao poses={{}} />,
+    )
+    await settle()
+    expect(api.getThumb).toHaveBeenCalledTimes(2)
+    const bBefore = lastThumbs.get('/models/b.stl')!.url!
+    renderLog = []
+
+    await rerender(
+      <Harness
+        entries={entries}
+        api={api}
+        lru={lru}
+        queue={queue}
+        ao
+        poses={{ '/models/a.stl': POSE }}
+      />,
+    )
+    await settle()
+
+    // One more lookup, and it is a's.
+    expect(api.getThumb).toHaveBeenCalledTimes(3)
+    expect(api.getThumb).toHaveBeenLastCalledWith('/models/a.stl', 1, true)
+    // Every commit in between shows both tiles with an image: the wave does not
+    // reset the grid (the delta's *A pose wave does not reset the grid*).
+    for (const commit of renderLog) {
+      for (const cell of commit) expect(cell.startsWith('ready:blob:')).toBe(true)
+    }
+    // The tile the index said nothing about was not touched at all.
+    expect(lastThumbs.get('/models/b.stl')!.url).toBe(bBefore)
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(bBefore)
   })
 
   it('a loading entry whose pose changes is restarted once', async () => {

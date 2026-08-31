@@ -70,6 +70,7 @@ import {
   controls,
   dest,
   labelInputs,
+  landedListing,
   liveView,
   noticeKinds,
   pendingRequest,
@@ -549,7 +550,18 @@ export default function App() {
   const scope = state.result?.scope ?? null
   const truncated = state.result?.truncated === true
   const entries = state.result?.entries ?? NO_ENTRIES
-  const poses = state.result?.poses ?? NO_POSES
+  /**
+   * The index's orientations for what is on screen — the answer's own where it
+   * had any, else the second wave's (pose-for-every-model D3).
+   *
+   * In that order and not merged: only a meaning or similarity answer carries
+   * riding poses, and only a plain listing gets a wave, so the two are never
+   * both populated. **A stored reference in every branch** — a landing's map,
+   * the slot the wave filled, or the `NO_POSES` constant — because the
+   * thumbnail sweep re-runs on this value's identity: an object built here per
+   * render would walk the whole grid on every keystroke.
+   */
+  const poses = state.result?.poses ?? state.listingPoses ?? NO_POSES
   // What the index scored each tile at, and which scale those numbers are on.
   // The scale is read off the answer's own question — `label` is the view this
   // result answers — so a tile can only ever be labelled as the thing that
@@ -958,6 +970,41 @@ export default function App() {
     return () => controller.abort()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestId])
+
+  /**
+   * The second wave: a plain listing's poses, asked for once the listing has
+   * landed (pose-for-every-model D3).
+   *
+   * Its own request and not part of the listing's, so the listing stays
+   * index-independent — the capability's *the index's absence costs the listing
+   * nothing* — and a meaning or similarity answer is skipped entirely because
+   * its hits carried their poses (`landedListing` is null for those).
+   *
+   * Keyed on the landing's asking-event id and the directory it answered for,
+   * so it fires exactly once per plain landing: setting the slot changes
+   * neither, so an index answering `{}` leaves an empty map and no retry. The
+   * library's readiness is a dependency rather than a bare guard, because a
+   * boot listing can land before the probe answers — the wave then goes out
+   * when the library is known rather than never — and it is read as a boolean
+   * so a re-probe that changed nothing cannot re-fire it.
+   *
+   * **Failure is silence.** No abort either: the answer is dropped on arrival
+   * by the landing it names (the reducer's `listingPoses`), which is the one
+   * place that knows which listing is on screen, and an abort here would be a
+   * second, weaker copy of that rule — one that has to be re-armed at exactly
+   * the moment the first already decides correctly.
+   */
+  const wave = landedListing(state)
+  const waveId = wave?.id ?? null
+  const wavePath = wave?.path ?? null
+  const libraryReady = libraryState?.state === 'ready'
+  useEffect(() => {
+    if (waveId === null || wavePath === null || !libraryReady) return
+    void api.semanticPoses(wavePath).then(
+      (res) => dispatch({ type: 'listingPoses', id: waveId, poses: res.poses }),
+      () => {},
+    )
+  }, [waveId, wavePath, libraryReady, api, dispatch])
 
   const navigate = useCallback(
     (path: string) => {
