@@ -26,11 +26,17 @@ library's. An absent file SHALL behave as an empty store; a file that fails to
 parse or carries an unknown version SHALL be reported when the load happens
 and treated as empty rather than failing the library. The loader SHALL
 canonicalise every key it reads and report any key it cannot; the root key is
-spelled `/`. Every writer of the file SHALL write atomically and durably
+spelled `/`. Canonicalisation covers only the filesystem half, so the loader
+SHALL additionally strip a trailing slash from a key's entry half (or report
+the key) — zip listings commonly spell directory entries `parts/`, and an
+unstripped `/kit/a.zip!/parts/` would silently never match the walk's
+`/kit/a.zip!/parts` — and SHALL reject and report a key whose entry half is
+empty (`…!/`), the store's forbidden zip-root spelling. Every writer of the file SHALL write atomically and durably
 (write-temp, rename, fsync), so a torn write can never replace a valid store
 with half of one. (The store's directory is the marker directory, which the
-`library` capability already keeps out of listings; completion and resolution
-exclude it in code today — this requirement adds no reachability of its own.)
+`library` capability already keeps out of listings — the capability where any
+wider invisibility promise would belong; this requirement adds no reachability
+of its own.)
 
 #### Scenario: Absent store
 - **WHEN** a library has no `overrides.json`
@@ -52,18 +58,25 @@ exclude it in code today — this requirement adds no reachability of its own.)
 - **WHEN** the store holds a key spelled `/kit/` or another spelling canonicalisation changes
 - **THEN** the loader canonicalises it (or reports the key it cannot), and lookups match it
 
+#### Scenario: An archive-interior key with a trailing slash
+- **WHEN** the store holds a key spelled `/kit/a.zip!/parts/`
+- **THEN** the loader stores it as `/kit/a.zip!/parts` (or reports it), and lookups beneath that interior directory match it
+
 ### Requirement: Field-wise longest-prefix resolution
 An entry's effective overrides SHALL merge the store's keys on the entry's
 path per field, the nearest key winning each field independently. The ancestor
 walk SHALL follow the virtual-path grammar: a lookup splits into its
 filesystem half and its archive-entry half on the first `!/`; the ancestors
-are the root key `/`, each ancestor directory of the filesystem half, the
-archive file's own path when the lookup is inside one, and then each interior
-directory of the entry half down to the entry's own key. Prefix boundaries
-within each half SHALL be path segments: `/kit` covers `/kit/x.stl` and not
-`/kit2/x.stl`. The archive file's key SHALL be the one key for the archive and
-its interior root — a `!/`-suffixed key is not a valid spelling and is
-reported by the loader like any other uncanonical key.
+are the root key `/`, then each ancestor directory of the filesystem half,
+then — when the lookup has no entry half — the lookup's own key, or — when it
+has one — the archive file's own path followed by each interior directory of
+the entry half and finally the entry's own key. A lookup whose entry half is
+empty (the zip-root spelling `…!/`) SHALL resolve exactly as the archive
+file's own path does. Prefix boundaries within each half SHALL be path
+segments: `/kit` covers `/kit/x.stl` and not `/kit2/x.stl`. The archive
+file's key SHALL be the one key for the archive and its interior root — a
+`!/`-suffixed key is a spelling this store forbids, rejected and reported by
+the loader.
 
 #### Scenario: A kit's credits reach its files
 - **WHEN** `/kit` holds credits and `/kit/sub/x.stl` holds none
@@ -108,7 +121,11 @@ is not ready. The client SHALL reach it only through its API client.
 ### Requirement: Credits are generated from the corpus metadata
 A generator SHALL populate a library's override store from
 `metadata/miniatures.json`, taking the library top and the kit directory
-(defaulting to the top): for each kit's top-level `stem`, the directory key is
+(defaulting to the top). The kit directory SHALL be the library top or a
+directory beneath it; any other kit directory SHALL be refused before anything
+is written — outside the top, `relative()` yields `..`-keys that normalise
+into plausible-but-wrong spellings rather than errors. For each kit's
+top-level `stem`, the directory key is
 `/` plus the top-relative path of the kit's folder under the kit directory,
 and it receives the kit's display name and credits (author, author URL,
 license, source URL). Only top-level `stem` values SHALL become keys — the
@@ -121,8 +138,12 @@ skipped, and the run SHALL report how many keys it wrote against how many kits
 it read.
 
 #### Scenario: Fresh generation
-- **WHEN** the generator runs against a kit directory with no existing store
+- **WHEN** the generator runs against a library whose top has no existing store
 - **THEN** every kit whose folder exists gets a key with its name and credits, and the counts are reported
+
+#### Scenario: A kit directory outside the top is refused
+- **WHEN** the generator is given a kit directory that is not the top or beneath it
+- **THEN** it refuses before writing anything
 
 #### Scenario: Keys are top-relative
 - **WHEN** the library top is above the kit directory (kits at `<top>/miniatures/clustered-hq/<stem>`)

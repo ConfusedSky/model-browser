@@ -45,8 +45,8 @@ reopen it.
 ### New Capabilities
 
 - `library-overrides`: the store — file location and format, longest-prefix
-  resolution, load-at-start lifetime, atomic writes, the entry-overrides answer
-  the server gives, and the corpus generator.
+  resolution, per-resolved-library load lifetime, atomic writes, the
+  entry-overrides answer the server gives, and the corpus generator.
 
 ### Modified Capabilities
 

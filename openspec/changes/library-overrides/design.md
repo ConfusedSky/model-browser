@@ -15,8 +15,8 @@ wire path a library path, and made that directory invisible — dot-prefixed
 entries are skipped by `listFsDir`, `complete` excludes `MARKER_DIR` by name,
 and the resolver refuses paths whose first segment is `MARKER_DIR` (the guard in
 `resolve`). The corpus metadata (`metadata/miniatures.json`, 297 kits) carries
-`stem` (the kit's folder name), `name`, `author`, `author_url`, `license`,
-`source_url` per kit. The lightbox panel (`ViewerLayer.tsx`) already has an
+`stem` (top-level: the kit's folder name relative to a variant directory — see
+D5), `name`, `author`, `author_url`, `license`, `source_url` per kit. The lightbox panel (`ViewerLayer.tsx`) already has an
 info/actions column per viewed entry. The exFAT measurements (notes, 2026-08-28)
 put temp+rename+fsync at ~40 ms on the spinning volume — trivial for a store
 written at corpus build and rarely after.
@@ -25,8 +25,8 @@ written at corpus build and rarely after.
 
 **Goals**
 
-- The store: format, longest-prefix resolution, load-at-start lifetime, atomic
-  write helper.
+- The store: format, longest-prefix resolution, per-resolved-library load
+  lifetime, atomic write helper.
 - A per-entry read the client can ask (`ApiClient`, never raw fetch — D1 of the
   Electron seam).
 - The lightbox credits block — the one UI consumer here.
@@ -70,9 +70,18 @@ returned-volume branch re-reads the marker and re-evaluates when the id differs.
 A store cached per-process would then keep serving library A's credits for
 library B's paths — and displayed attribution is a CC-BY license term, so
 wrong-library credits are a compliance defect, not staleness. So: the store
-loads when the library first resolves `ready`, is held keyed to the resolved
-identity (id + top), and is dropped and reloaded wherever the library drops
-`settled`. Within one resolved library the file is read once — the same
+loads when the library first resolves `ready` and is held keyed to the
+resolved identity (id + top). The mechanism is a compare, not a hook —
+`Library` exposes no event on `settled` (its six members are `state`,
+`refresh`, `realTop`, `id`, `resolve`, `libPathOf`), and adding one would
+break the proposal's "`library.ts` untouched". The store holder keeps
+`{identity, store}` and, on each `/api/overrides`, compares the identity
+against `state()`'s ready answer — already computed per request by the gate
+middleware — reloading on mismatch. `index.ts`'s existing
+`void library.state().then(...)` also loads eagerly when the library is ready
+at start, which is what puts the malformed-store report beside the startup
+line; a library that resolves later loads on the first overrides request, and
+the report prints then. Within one resolved library the file is read once — the same
 restart-after-editing rule `launch.json` has (`loadLaunchConfig` is read at
 startup; `config.json` is the weaker precedent, re-read while the library is
 unsettled) — stated in the spec so the generator's docs can repeat it.
@@ -149,6 +158,16 @@ its answer dropped when the subject has moved on — the ignore-on-stale idiom o
 the panel's existing per-subject read (`ViewerLayer`'s `getThumb` effect with
 its `alive` flag), not an `AbortController`.
 
+One tension left deliberately unmodified: the main spec's "Lightbox expanded
+view" says the panel's content "comes from the directory entry … so it SHALL
+be shown from the moment the lightbox opens", and credits arrive from a read.
+The delta carves the exception in its own ADDed requirement (the block may
+appear late, no placeholder) rather than MODIFYing that sentence: no active
+change touches "Lightbox expanded view", so a MODIFIED block would not
+collide — but it would have to carry all eleven of that requirement's
+scenarios forward exactly, the archive failure mode the workflow warns about,
+for one sentence of scoping. The carve-out is the cheaper true statement.
+
 ### D5: The generator merges; it does not own the file
 
 `scripts/gen-overrides.ts` (run with `bun run`, corpus side): reads
@@ -162,7 +181,9 @@ takes both: the corpus lays kits out as `<root>/miniatures/<variant>/<stem>/`
 (three variants — `clustered-hq` is the shipped one, per the notes), so "`/` +
 stem" is only a valid key when the library top *is* the variant directory. The
 generator takes the library top and the kits directory (defaulting to the top
-itself) and derives each key as `/` + the top-relative path of
+itself; refused unless it is the top or beneath it — outside, `relative()`
+yields `..`-keys that normalise into plausible wrong spellings, not errors)
+and derives each key as `/` + the top-relative path of
 `<kitsDir>/<stem>` — so rooting the demo at `…/miniatures/clustered-hq` gives
 keys `/<stem>`, while a top above the variants gives
 `/miniatures/clustered-hq/<stem>`. A top above the variants also means one
