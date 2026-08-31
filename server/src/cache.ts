@@ -267,6 +267,12 @@ export class ThumbCache {
     const dir = await this.entryDir()
     const key = this.key(path)
     const ao = opts.ao ?? true
+    // Read-modify-write with awaits between the read and the write: two
+    // concurrent puts for one path (one per render, plausible around a toggle
+    // plus a command) can each merge against the same `prev`, and the loser's
+    // labels land from a stale read. Accepted on the eviction guard's terms —
+    // the cost is one wrong-labelled render that the next visit re-renders,
+    // never a wrong picture served as fresh — and unclosable without locking.
     const prev = await this.readMeta(dir, key)
     const prevMine = renderLabels(ao ? prev : prev?.noao)
     const prevTheirs = renderLabels(ao ? prev?.noao : prev)
@@ -458,7 +464,10 @@ export class ThumbCache {
       if (png === null || png.mtimeMs !== m.lastRead || png.size !== m.pngSize) continue
       // The window that remains is accepted, and unclosable without locking: a
       // `put` landing after that stat still loses its PNG below, and a camera it
-      // wrote is overwritten by the one the re-read carries.
+      // wrote is overwritten by the one the re-read carries. That includes a
+      // put for the *sibling* render in the same window — the write-back below
+      // carries the whole re-read sidecar, so the sibling's fresh labels are
+      // reverted to the re-read's copy alongside; one re-render heals it.
       await rm(this.pngFile(dir, m.key, m.ao), { force: true })
       // Only this render's `mtime`, and only this render's: the labels stay and
       // ride the stale read — they say what recipe the evicted pixels were
