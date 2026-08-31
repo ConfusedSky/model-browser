@@ -176,49 +176,16 @@ When the mesh for an orbit overlay or lightbox fails to load — the file no lon
 - **WHEN** a tile was marked errored and the user re-enters the directory after the failure cause is resolved
 - **THEN** the thumbnail pipeline runs again and the tile returns to its normal rendering
 
-### Requirement: Spindle-aligned lighting with camera-relative option
-The light rig SHALL be oriented per lighting mode rather than fixed to world +Y. In `axis` mode (the default) the rig's up SHALL be the model's spindle axis, oriented by the spindle's turntable frame so the result is deterministic for all six spindles; the base rig (hemisphere, key, and fill) SHALL keep its historical parameters and, under the default `y` spindle, its historical orientation. In `camera` mode the rig SHALL be fixed in camera space (headlight): the lit side follows the viewer as the model orbits. The mode SHALL be a global client-side setting persisted across sessions (localStorage), defaulting to `axis`, switchable via an experimental control; light colors, intensities, and relative geometry SHALL NOT change between modes — only orientation. Both the orbit overlay and the lightbox SHALL honor the active mode, and in `axis` mode the lightbox axis-change animation SHALL rotate the rig smoothly in step with the camera tween (with a drag cancelling the tween snapping the rig with the camera).
-
-The rig SHALL additionally carry two colored rim accents — red at rig-space −X, blue at +X, placed slightly behind the subject and tuned as perceptually balanced accents (raw intensities may differ to compensate for the base lighting's cool tint) — present in both modes. Because they are part of the rig, they SHALL follow its orientation everywhere the rig does: in `camera` mode rig space is camera space, so the red accent stays at screen-left and the blue at screen-right while the model orbits; in `axis` mode both accents are fixed in the spindle frame — deterministic directions the model turns through, with no claim about which screen side they land on — and during the axis tween they rotate with the rig.
-
-#### Scenario: Overridden-axis model is lit from its top
-- **WHEN** a model whose spindle is ±X or ±Z is viewed in `axis` mode
-- **THEN** it is lit as if from above relative to its spindle (key light and hemisphere sky aligned to the spindle), not from world +Y
-
-#### Scenario: Default axis keeps historical lighting
-- **WHEN** a model with the default `y` spindle is viewed in `axis` mode
-- **THEN** the hemisphere, key, and fill lights light it exactly as the historical world-fixed rig did, with only the rim accents added
-
-#### Scenario: Camera mode keeps the lit side facing the viewer
-- **WHEN** the user orbits a model in `camera` mode
-- **THEN** the shading relative to the screen stays constant (the same side of the model stays lit) instead of the model rotating through fixed light
-
-#### Scenario: Rim accents follow the screen in camera mode
-- **WHEN** the user orbits a model in `camera` mode
-- **THEN** the red accent remains on the screen-left edge and the blue accent on the screen-right edge throughout the orbit
-
-#### Scenario: Rim accents stay with the model in axis mode
-- **WHEN** the user orbits a model in `axis` mode
-- **THEN** the accents stay fixed in the spindle frame — the reddened and blued sides of the model turn with it rather than sticking to the screen
-
-#### Scenario: Mode persists across sessions
-- **WHEN** the user switches lighting mode and reloads the app
-- **THEN** the chosen mode is still active
-
-#### Scenario: Axis change animates the lighting
-- **WHEN** the user changes a model's orbit axis in the lightbox while in `axis` mode
-- **THEN** the rig — rim accents included — rotates smoothly with the camera animation to the new spindle orientation, with no lighting snap
-
 ### Requirement: Shadowed model display
-Models SHALL be rendered with shadow mapping from the key light: the model SHALL shadow itself, and SHALL cast a soft contact shadow onto an invisible floor plane that renders nothing but received shadow (composing over the transparent background). The floor SHALL lie perpendicular to the model's spindle axis at the model's lowest extent along it, fixed in the spindle frame — it SHALL NOT follow the lighting rig's per-mode orientation — and SHALL snap to the new spindle when the orbit axis changes. Shadow direction SHALL come from the key light and therefore inherit the active lighting-mode semantics: fixed in the spindle frame in `axis` mode, following the viewer in `camera` mode. Only the key light casts; the hemisphere, fill, and rim lights SHALL NOT. The shadow fit (light distance, shadow frustum, bias) SHALL scale with the model's bounds so models of any physical size shadow equivalently, and shadows SHALL appear identically in the orbit overlay, the lightbox, and thumbnails. Scene composition SHALL place the model's bounds center at the scene origin; because camera state is bounds-relative, this SHALL NOT alter persisted camera state or the rendered framing.
+Models SHALL be rendered with shadow mapping from the key light: the model SHALL shadow itself, and SHALL cast a soft contact shadow onto an invisible floor plane that renders nothing but received shadow (composing over the transparent background). The floor SHALL lie perpendicular to the model's spindle axis at the model's lowest extent along it, fixed in the spindle frame — it SHALL NOT follow the lighting rig's orientation — and SHALL snap to the new spindle when the orbit axis changes. Shadow direction SHALL come from the key light and therefore follow the viewer, since the rig is fixed in camera space. Only the key light casts; the hemisphere, fill, and rim lights SHALL NOT. The shadow fit (light distance, shadow frustum, bias) SHALL scale with the model's bounds so models of any physical size shadow equivalently, and shadows SHALL appear identically in the orbit overlay, the lightbox, and thumbnails. Scene composition SHALL place the model's bounds center at the scene origin; because camera state is bounds-relative, this SHALL NOT alter persisted camera state or the rendered framing.
 
 #### Scenario: Model is grounded by a contact shadow
 - **WHEN** a model is thumbnailed or viewed in the overlay or lightbox
 - **THEN** a soft shadow appears beneath it on an otherwise invisible plane at its lowest extent along the spindle, and concavities on the model itself are darkened by self-shadowing
 
 #### Scenario: Shadows follow the lighting mode
-- **WHEN** the user orbits a model in `camera` mode
-- **THEN** the shadow sweeps the floor in step with the camera-locked key light, while in `axis` mode the shadow stays fixed in the spindle frame as the model turns
+- **WHEN** the user orbits a model
+- **THEN** the shadow sweeps the floor in step with the camera-locked key light, while the floor itself stays fixed in the spindle frame
 
 #### Scenario: Floor follows an axis change
 - **WHEN** the user changes a model's orbit axis in the lightbox
@@ -233,10 +200,10 @@ Models SHALL be rendered with shadow mapping from the key light: the model SHALL
 - **THEN** the shadowing in the live view is indistinguishable from the thumbnail at handoff, preserving the no-shift guarantee
 
 ### Requirement: Ambient-occlusion shading
-Models SHALL be rendered with screen-space ambient occlusion that darkens crevices, recesses, and contact regions, applied identically in the orbit overlay, the lightbox, and thumbnails. The effect SHALL run as a post-process chain on the app's single shared renderer — introducing no additional WebGL context — and the thumbnail path SHALL produce its PNG from the post-processed output, under the color-pipeline parity and transparency that `model-thumbnails` already requires of it. Occlusion parameters SHALL scale with the model's bounds so models of any physical size receive equivalent depth-cueing. Occlusion SHALL affect only model pixels, in coverage as well as in color: silhouette edges over the transparent background SHALL NOT acquire dark halos, background pixels SHALL stay fully transparent, and model-interior pixels SHALL stay fully opaque. The effect applies in both lighting modes and is on by default; the viewer SHALL offer a toggle that disables occlusion in the live view only — a performance preference for weaker GPUs, persisted per browser profile — while thumbnails SHALL always render with occlusion, so the cache and the pixel-recipe version never depend on the preference.
+Models SHALL be rendered with screen-space ambient occlusion that darkens crevices, recesses, and contact regions, applied identically in the orbit overlay, the lightbox, and thumbnails. The effect SHALL run as a post-process chain on the app's single shared renderer — introducing no additional WebGL context — and the thumbnail path SHALL produce its PNG from the post-processed output, under the color-pipeline parity and transparency that `model-thumbnails` already requires of it. Occlusion parameters SHALL scale with the model's bounds so models of any physical size receive equivalent depth-cueing. Occlusion SHALL affect only model pixels, in coverage as well as in color: silhouette edges over the transparent background SHALL NOT acquire dark halos, background pixels SHALL stay fully transparent, and model-interior pixels SHALL stay fully opaque. The effect is on by default; the viewer SHALL offer a toggle that disables occlusion — a performance preference for weaker GPUs, persisted per browser profile. Thumbnails SHALL follow that preference: a tile SHALL be rendered and looked up under the occlusion setting the live view would use at handoff, so that handoff is seamless whether occlusion is on or off, and a render under either setting SHALL be cached as its own thumbnail (see `model-thumbnails`, *A thumbnail exists per occlusion recipe*). Neither setting's pixels SHALL change because the other exists; the pixel-recipe version is bumped only when a recipe changes.
 
 #### Scenario: Crevices read at thumbnail size
-- **WHEN** a model with recesses or fine surface detail is thumbnailed
+- **WHEN** a model with recesses or fine surface detail is thumbnailed with occlusion on
 - **THEN** its cavities and seams are visibly darkened relative to a flat-shaded render, at both thumbnail and lightbox scale
 
 #### Scenario: Still exactly one WebGL context
@@ -244,8 +211,8 @@ Models SHALL be rendered with screen-space ambient occlusion that darkens crevic
 - **THEN** at most one WebGL context exists, shared by the post-process chain, the overlay, and the queue
 
 #### Scenario: Handoff stays seamless
-- **WHEN** an orbit overlay opens over a tile whose thumbnail was rendered with ambient occlusion
-- **THEN** the live view's occlusion and brightness are indistinguishable from the static thumbnail at the moment of handoff
+- **WHEN** an orbit overlay opens over a tile, with occlusion on or off
+- **THEN** the live view's occlusion and brightness are indistinguishable from the static thumbnail at the moment of handoff, because both were rendered under the same setting
 
 #### Scenario: Clean silhouettes over the transparent background
 - **WHEN** a thumbnail PNG rendered with ambient occlusion is composited over the app background
@@ -257,7 +224,7 @@ Models SHALL be rendered with screen-space ambient occlusion that darkens crevic
 
 #### Scenario: Toggling occlusion off for performance
 - **WHEN** the user turns the occlusion toggle off, orbits with it off, and reloads the app in the same browser profile
-- **THEN** the live view renders without occlusion (and faster) across sessions until toggled back on, while tile thumbnails — cached or newly rendered — keep their occluded shipped look throughout
+- **THEN** the live view renders without occlusion (and faster) across sessions until toggled back on, and tiles visited meanwhile show unoccluded thumbnails that match it at handoff, while the occluded renders already cached are kept for when it is toggled back
 
 #### Scenario: Size-independent occlusion
 - **WHEN** a very small and a very large model with similar shapes are each rendered
@@ -285,4 +252,37 @@ When parsing an STL model, the client SHALL derive shading normals from triangle
 #### Scenario: Cached thumbnails refresh to the corrected shading
 - **WHEN** a model was thumbnailed under the previous recipe and its tile is next displayed
 - **THEN** the thumbnail re-renders once under the bumped pixel-recipe version and is cached thereafter
+
+### Requirement: Camera-fixed lighting rig
+The light rig SHALL be fixed in camera space (headlight): the lit side follows the viewer as the model orbits, in the orbit overlay, the lightbox, and thumbnails alike, whatever the model's spindle axis. The base rig (hemisphere, key, and fill) SHALL keep its historical parameters; light colors, intensities, and relative geometry SHALL NOT vary with the view — only the rig's orientation follows the camera. There SHALL be no lighting-mode setting: nothing about lighting is chosen, stored, or shown per profile. During the lightbox axis-change animation the rig SHALL follow the camera through the tween, so lighting stays continuous with no snap.
+
+The rig SHALL additionally carry two colored rim accents — red at rig-space −X, blue at +X, placed slightly behind the subject and tuned as perceptually balanced accents (raw intensities may differ to compensate for the base lighting's cool tint). Because rig space is camera space, the red accent SHALL stay at screen-left and the blue at screen-right while the model orbits.
+
+#### Scenario: Overridden-axis model is lit from its top
+- **WHEN** a model whose spindle is ±X or ±Z is viewed
+- **THEN** it is lit from the viewer's side exactly as a `y`-spindle model is — never from a fixed world direction, and never from the side because of its spindle
+
+#### Scenario: Default axis keeps historical lighting
+- **WHEN** a model with the default `y` spindle is viewed
+- **THEN** the hemisphere, key, fill and rim accents carry their historical parameters, oriented to the camera
+
+#### Scenario: Camera mode keeps the lit side facing the viewer
+- **WHEN** the user orbits a model
+- **THEN** the shading relative to the screen stays constant (the same side of the model stays lit) instead of the model rotating through fixed light
+
+#### Scenario: Rim accents follow the screen in camera mode
+- **WHEN** the user orbits a model
+- **THEN** the red accent remains on the screen-left edge and the blue accent on the screen-right edge throughout the orbit
+
+#### Scenario: Rim accents stay with the model in axis mode
+- **WHEN** the user looks for a lighting arrangement in which the accents turn with the model
+- **THEN** none exists: the accents are screen-fixed in every view, because the rig has one orientation
+
+#### Scenario: Mode persists across sessions
+- **WHEN** the user reloads the app in any browser profile
+- **THEN** lighting is camera-fixed with nothing stored or read for it, and no lighting control is offered
+
+#### Scenario: Axis change animates the lighting
+- **WHEN** the user changes a model's orbit axis in the lightbox
+- **THEN** the rig — rim accents included — follows the camera through the animation, with no lighting snap
 

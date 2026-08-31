@@ -159,8 +159,12 @@
       re-checked against the archived requirement whitespace-collapsed — the only phrase
       absent from the delta is "lighting mode", which is what it deletes, so no
       re-derivation was needed
-- [ ] 4.1a `adaptive-ao-default` edits the same corner-pill block in `App.tsx` — whichever
+- [x] 4.1a `adaptive-ao-default` edits the same corner-pill block in `App.tsx` — whichever
       lands second re-reads it (shared-file ordering, CLAUDE.md)
+      — closed at archive 2026-08-31 (coordinator): this change landed first, so the
+      obligation is the survivor's, and `adaptive-ao-default`'s own tasks header already
+      carries it ("Re-read `aoToggle.ts`, `ViewerLayer.tsx`, `renderSize.ts`, `App.tsx`
+      against main before starting"). Nothing is lost by archiving this note
 - [x] 4.2 `ao-refreshes-thumbnails`: open an `opsx:update` on it (separate session or
       after this) re-targeting its trigger to the AO toggle and rewriting its
       `model-thumbnails` delta under *Recipe-labelled thumbnails*; until then it must not

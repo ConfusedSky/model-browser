@@ -122,22 +122,97 @@ When a 3MF package contains an embedded thumbnail image, the client SHALL displa
 - **WHEN** a 3MF file containing `/Metadata/thumbnail.png` is listed without a cached thumbnail
 - **THEN** the embedded image is shown immediately and later replaced by the app's own render
 
-### Requirement: Lighting-mode-aware thumbnails
-Thumbnails SHALL be rendered with the same lighting mode and rig orientation the live view would use at handoff: in `axis` mode the rig oriented to the model's spindle frame, in `camera` mode the rig fixed in the rest camera's frame. The server SHALL store, alongside each PNG, the lighting mode and the rig version it was rendered with, and SHALL return both on reads; it stores and echoes the values without interpreting them. Like the PNG's mtime, both values describe the pixels: a PUT that replaces the PNG without declaring them SHALL clear the stored values rather than keep stale labels, while a PUT that does not replace the PNG SHALL leave the stored values in place unless it declares them. Both values SHALL be returned on stale reads as well as hits. The client SHALL treat a cache hit whose stored lighting mode differs from the active mode, or whose stored rig version differs from the client's current rig version — including entries where either value is absent (pre-lighting or pre-rim cache entries) — as needing re-render: the PNG is replaced through the normal render queue while camera state and axis are preserved.
+### Requirement: Recipe-labelled thumbnails
+Thumbnails SHALL be rendered with the rig fixed in the rest camera's frame — the orientation the live view uses at handoff. The server SHALL store, alongside each PNG, every recipe input that decides its pixels but is not carried by the cache key — the lighting label, the rig version, and where an orientation source framed the render, which version of that source's mapping was used — and SHALL return them on reads; it stores and echoes the values without interpreting them. Like the PNG's mtime, all of these values describe the pixels: a PUT that replaces the PNG without declaring them SHALL clear the stored values rather than keep stale labels, while a PUT that does not replace the PNG SHALL leave the stored values in place unless it declares them. All of them SHALL be returned on stale reads as well as hits. The lighting label SHALL have one producible value, the camera-fixed rig; the server SHALL refuse a PUT declaring any other, while continuing to read and echo labels stored before this. The client SHALL treat a cache hit whose stored lighting label is not the producible one, or whose stored rig version differs from the client's current rig version — including entries where either value is absent — as needing re-render: the PNG is replaced through the normal render queue while camera state and axis are preserved. A hit SHALL likewise need re-render when an orientation source would frame that model and the stored image was not produced under the source's current mapping — but only where the source **would actually be applied**, which is to say the model has no orientation of its own. A model the user has oriented is a hit whatever the source holds for it, since its pixels do not depend on the source; treating it as stale renders and re-uploads an image identical to the one already cached, on every visit, forever. A render made under an orientation source SHALL record the mapping version it used, so a later change to that mapping is detectable and the image is not mistaken for one drawn without a source. The lookup and this test SHALL be applied to the thumbnails already displayed when the effective ambient-occlusion preference changes — whether by the user's toggle or by an automatic decision — not only to those a subsequent visit rebuilds: a control that changes how models are drawn SHALL answer on the listing in front of the user, showing a render already cached under the new setting at once and rendering only what is not. A change of rig version SHALL remain lazy, taken on the next visit, since it accompanies a new build rather than a user's gesture and nothing on screen is waiting on it. Refreshing this way SHALL reuse the same lookup, the same staleness test and the same render queue a visit uses, SHALL preserve camera state and axis, and SHALL keep each existing image until its replacement exists, so the grid does not empty while it works. The same SHALL hold when the set of entries changes while some remain — an entry being the same path at the same mtime: remaining entries keep their state and images, and work in flight for them continues rather than restarting; only added entries start loading; removed entries are dropped and their work cancelled; a remaining entry whose orientation-source opinion changed in value SHALL be re-evaluated without losing its image, and one whose opinion is unchanged SHALL issue nothing. A change of the occlusion preference, by contrast, cancels the in-flight pass whole.
 
 #### Scenario: Thumbnail matches live lighting for an overridden axis
-- **WHEN** a model with a ±X/±Z spindle has its thumbnail rendered in `axis` mode and the user then presses the tile
-- **THEN** the live overlay shows the same lighting as the thumbnail with no brightness shift at handoff
+- **WHEN** a model with a ±X/±Z spindle has its thumbnail rendered and the user then presses the tile
+- **THEN** the live overlay shows the same camera-fixed lighting as the thumbnail with no brightness shift at handoff
 
 #### Scenario: Mode switch invalidates only the pixels
-- **WHEN** the user switches lighting mode and revisits a directory with thumbnails rendered under the other mode
-- **THEN** those thumbnails re-render under the active mode via the render queue, keeping their saved camera orientation and axis
+- **WHEN** a directory is visited whose cache entries carry the retired spindle-aligned lighting label
+- **THEN** their PNGs are re-rendered under the camera-fixed rig via the render queue, keeping their saved camera orientation and axis, and subsequent visits are cache hits again
 
 #### Scenario: Legacy cache entries are upgraded lazily
-- **WHEN** a directory is visited whose cache entries predate lighting-mode storage
-- **THEN** their PNGs are re-rendered under the active mode on that visit and subsequent visits are cache hits again
+- **WHEN** a directory is visited whose cache entries predate label storage
+- **THEN** their PNGs are re-rendered on that visit and subsequent visits are cache hits again
 
 #### Scenario: A rig revision refreshes stale thumbnails once
 - **WHEN** the app ships a new rig version and a directory is visited whose cache entries carry the old version or none
 - **THEN** their PNGs are re-rendered under the current rig via the render queue — camera state and axis preserved — and subsequent visits are cache hits again
+
+#### Scenario: A camera-lit cache needs nothing
+- **WHEN** every entry in a directory's cache carries the camera-fixed label and the current rig version
+- **THEN** the visit is entirely cache hits: no render and no upload
+
+#### Scenario: Switching occlusion answers on the grid in front of you
+- **WHEN** the occlusion preference changes while a listing of thumbnails rendered under the other setting is on screen
+- **THEN** those thumbnails switch to the new setting's render without the user navigating away and returning — from the cache where one exists, rendered where not — each keeping its camera and axis and its previous image until the replacement is ready
+
+#### Scenario: Adding entries does not reset the ones already shown
+- **WHEN** entries are added to a listing whose thumbnails are on screen
+- **THEN** the entries already shown keep their images and issue no new lookup, and only the added entries start loading
+
+#### Scenario: A peek lands mid-pass
+- **WHEN** entries are added while some of those already listed are still loading
+- **THEN** the loading ones finish without restarting, and only the added ones begin
+
+#### Scenario: Switching back before the first pass finishes
+- **WHEN** the preference changes twice in quick succession
+- **THEN** the grid settles under the setting chosen last, without the first pass's renders landing on top of it
+
+#### Scenario: A model with its own orientation is not made stale by a pose
+- **WHEN** a model the user has oriented is displayed in a view where an orientation source also holds a pose for it
+- **THEN** its cached thumbnail is a hit and is neither re-rendered nor re-uploaded, since the source would not be applied to it and its pixels therefore do not depend on the source
+
+#### Scenario: An image that predates the source's current mapping is re-rendered
+- **WHEN** a model the source would frame is displayed, and its cached thumbnail was drawn under an earlier version of the source's mapping or before the source had any opinion about it at all
+- **THEN** the thumbnail is re-rendered under the current mapping and records the version it used — a missing record and an outdated one are the same case, since neither says the pixels were drawn under the mapping in force
+
+### Requirement: A thumbnail exists per occlusion recipe
+A model's cache entry SHALL hold up to two renders — with ambient occlusion and without — each keyed by the path and mtime that *Server-side thumbnail persistence* defines plus the occlusion setting it was rendered under — the occlusion setting is a dimension of that key, not a second key — and each carrying its own recipe labels. A thumbnail read SHALL name the occlusion setting it wants and SHALL receive that render's status, pixels and labels; a read naming no setting SHALL be served the occluded render. A thumbnail write SHALL name the setting its pixels were rendered under; a write naming none SHALL be stored as the occluded render. Camera state and orbit axis SHALL be shared by both renders of an entry and SHALL be returned on a read of either, whatever its status. Because the orientation is shared, a write that changes it SHALL invalidate the render it did not write — and, when it carries no pixels, both renders. A change is a camera the entry did not hold, or one differing from the stored camera by more than a fixed tolerance held as a named constant (a re-captured camera drifts in its last digits on every lightbox close and is not a change); an axis the entry did not hold, or one that differs from the stored axis; or a discard of one the entry held. Invalidation SHALL clear the render's recipe labels while keeping its pixels and mtime — notwithstanding *Recipe-labelled thumbnails*'s rule that a write not replacing a PNG leaves its labels alone — so that the render reads as a hit needing re-render under that requirement's label rule: its pixels are still served, and it is re-rendered at the new orientation rather than served at the old one. A write that carries only pixels and recipe labels SHALL NOT touch the other render: both renders are always drawn under the stored orientation, so pixels alone cannot desynchronise them, and toggling between settings stays a lookup — except on an entry that holds no orientation at all, neither camera nor axis after the write, where there is no stored orientation for both renders to be drawn under: each is drawn at the pose if one was applied and at the default otherwise, so a written render whose applied-pose record differs from the other render's SHALL invalidate that other render in the same way a changed orientation does. An entry that holds an orientation is exempt, its applied-pose record being a label its renders are not drawn by. A read's status SHALL be decided per render: a hit when that render's pixels are present at the requested mtime; stale when that render was written before or the entry holds a camera (the predicate the cache applies today, per render); a miss otherwise. When a write carries pixels at a newer mtime, the other render's pixels are superseded too and SHALL be deleted, as *Bounded, self-maintaining cache* requires of superseded thumbnails. Each render SHALL be evicted by the size cap on its own least-recently-read clock, leaving the other in place; the existence sweep SHALL remove the entry whole. Renders cached before this requirement SHALL be served as the occluded render without migration.
+
+#### Scenario: Toggling back is a lookup
+- **WHEN** a directory's thumbnails have been rendered under both settings and the user switches the preference
+- **THEN** the next visit under either setting is served from the cache with no render and no upload
+
+#### Scenario: The other render is not a hit, and keeps its orientation
+- **WHEN** a model has an occluded thumbnail and a saved camera, and its unoccluded thumbnail is requested for the first time
+- **THEN** the response is not a hit — stale, since the entry holds a camera — and carries the saved camera and axis, and the client renders the unoccluded thumbnail under that orientation
+
+#### Scenario: Orbiting under one setting invalidates the other render
+- **WHEN** a model with both renders cached is orbited and released with the preference off, and the preference is then turned on
+- **THEN** the occluded render reads as a hit whose recipe labels are cleared and whose pixels are still served, and the client re-renders it at the new orientation rather than keeping it at the old one
+
+#### Scenario: A pixel-only write leaves the other render alone
+- **WHEN** a model's unoccluded render is written for the first time while its occluded render is cached, with no change to its camera or axis
+- **THEN** the occluded render is still a hit
+
+#### Scenario: A pose applied to one render is an orientation the other does not show
+- **WHEN** a render of a model with no stored orientation is written with an applied-pose record differing from its sibling's
+- **THEN** the sibling's recipe labels are cleared so it re-renders lazily at the orientation now in force, keeping its pixels meanwhile
+
+#### Scenario: A discard invalidates both ways
+- **WHEN** a model's stored orientation is discarded by a write that carries no pixels
+- **THEN** both renders' recipe labels are cleared; each is re-rendered when next viewed, at the orientation the model now has
+
+#### Scenario: An unmoved close invalidates nothing
+- **WHEN** a model that already holds a camera, with both renders cached, is opened in the lightbox and closed without being orbited
+- **THEN** the camera the close persists is within tolerance of the stored one and the other render is still a hit
+
+#### Scenario: A snapshot follows the preference
+- **WHEN** an orbit is released or the lightbox closed with the preference off
+- **THEN** the thumbnail persisted from that view is the unoccluded render, matching the overlay the user was looking at
+
+#### Scenario: A pre-existing cache is the occluded render
+- **WHEN** the server starts over a cache written before renders were keyed by occlusion
+- **THEN** every entry is served as the occluded render exactly as before, and nothing re-renders for a user whose preference is on
+
+#### Scenario: Renders are evicted independently
+- **WHEN** the cache exceeds its cap and a model's unoccluded render was read longer ago than its occluded one
+- **THEN** the unoccluded render is evicted first and the occluded one remains a hit
+
+#### Scenario: One entry, one existence
+- **WHEN** a model with both renders cached is deleted and the cache is swept
+- **THEN** both renders and the entry's camera and axis are removed together
 

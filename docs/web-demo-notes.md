@@ -30,9 +30,9 @@ sequence):
 1. `library-root` — **archived 2026-08-30** (`openspec/changes/archive/2026-08-30-library-root`;
    the capability is `openspec/specs/library/`) — item 2, decided form: library identity +
    marker, `/` = library top, confinement, per-library cache under XDG, one-time re-key
-2. `remove-axis-lighting` — item 9
-3. `ao-as-recipe-dimension` — item 8's two-render cache (sibling file, no migration)
-4. `ao-refreshes-thumbnails` — the re-targeted `lighting-refreshes-thumbnails` (directory
+2. `remove-axis-lighting` — **archived 2026-08-31** — item 9
+3. `ao-as-recipe-dimension` — **archived 2026-08-31** — item 8's two-render cache (sibling file, no migration)
+4. `ao-refreshes-thumbnails` — **archived 2026-08-31** — the re-targeted `lighting-refreshes-thumbnails` (directory
    renamed with `git mv`; §2b kept, §2 rewritten in review into a ref-held incremental reconciler)
 5. `adaptive-ao-default` — item 8's frame sampling (lightbox-measured, three-state
    preference, budget tune-then-freeze)
