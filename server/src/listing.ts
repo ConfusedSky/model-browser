@@ -311,6 +311,18 @@ export async function listDir(library: Library, libPath: string): Promise<DirLis
 const PEEK_BUDGET = 64
 
 /**
+ * The most models one peek's walk can possibly find: every model it keeps cost
+ * it a walk step, so the entry bound above caps the finds too.
+ *
+ * Exported because the pose-ranked peek asks for exactly this many — that is
+ * how "walk to the entry bound rather than stopping at four" is spelled without
+ * a second stop rule inside `peekLevel` (`pose-for-every-model` D4). It is also
+ * what keeps that peek's single `/poses` request far under the index's
+ * thousand-path bound, whatever the folder held.
+ */
+export const PEEK_MAX_FINDS = PEEK_BUDGET
+
+/**
  * One level of a peek: this level's models in order, then its subdirectories in
  * order, depth-first, until `n` models are found or the walk runs out of
  * budget.

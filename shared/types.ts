@@ -301,6 +301,27 @@ export interface SimilarListing {
   anchor?: DirEntry
 }
 
+/**
+ * The index's orientations for one plain listing's models — the same fact a
+ * search hit carries as a rider on `SemanticListing.poses` and `SimilarListing.
+ * poses`, supplied for a whole directory instead of for a result set
+ * (`pose-for-every-model` D2). Poses reach a searching client on its hits;
+ * this is how they reach a *browsing* one, so the same model is oriented the
+ * same way on a meaning grid and on the listing it lives in.
+ *
+ * Keyed by library path, like every `poses` map in this file, and holding only
+ * the models the index has an orientation for: a missing key is "no pose", and
+ * an index that is absent, warming, or does not cover the browsed location
+ * answers `{}` rather than failing — the listing itself never depends on it.
+ *
+ * Its own request, never a field on `DirListing`: a listing must cost nothing
+ * when the index is down, and a pose arriving as a second wave is what the
+ * thumbnail sweep's reconciler is built for (D3).
+ */
+export interface PosesResponse {
+  poses: Record<string, IndexPose>
+}
+
 /** Availability of the semantic index, read from the wire (semantic-search D4). */
 export type IndexState = 'ready' | 'warming' | 'wedged' | 'volume-gone' | 'absent'
 

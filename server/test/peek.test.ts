@@ -123,11 +123,26 @@ const app = createApp(new ThumbCache(cacheDir), undefined, undefined, libraryFor
 
 // Settle the library before any cell reverses `readdir` — its own marker walk
 // reads directories too, and a cell must only ever change what the peek sees.
+//
+// The index is held **absent** for the whole file (`pose-for-every-model` D4):
+// a peek now asks it which of its finds are posed, and a suite about the walk
+// must not answer differently on a machine that happens to be running one. It
+// is also the state the requirement pins hardest — index silent, and the
+// selection is exactly what it was before poses existed — so every cell below
+// doubles as an assertion of that identity. The ranked path has its own suite
+// (`poses.test.ts`), which asserts byte-identity against `peek()` directly.
 beforeAll(async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(() => {
+      throw new TypeError('fetch failed')
+    }),
+  )
   expect((await app.request('/api/library', { headers: LOOPBACK })).status).toBe(200)
 })
 
 afterAll(() => {
+  vi.unstubAllGlobals()
   rd.reverse = false
   rmSync(libTop, { recursive: true, force: true })
   rmSync(outsideFs, { recursive: true, force: true })

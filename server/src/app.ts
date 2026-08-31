@@ -3,17 +3,25 @@ import { stat } from 'node:fs/promises'
 import { relative, resolve as resolvePath } from 'node:path'
 import { Readable } from 'node:stream'
 import { Hono } from 'hono'
-import type { LightingMode, OrbitAxis, ThumbPutRequest } from '../../shared/types'
+import type {
+  DirEntry,
+  LightingMode,
+  OrbitAxis,
+  PosesResponse,
+  ThumbPutRequest,
+} from '../../shared/types'
 import { ThumbCache } from './cache'
 import { guard } from './guard'
 import { LaunchError, type Launcher, ZipTempStore, createLauncher } from './launch'
 import { LibraryError, type Library, canonicalLibPath, createLibrary } from './library'
-import { ListingError, complete, listDir, listFlat, peek } from './listing'
+import { ListingError, PEEK_MAX_FINDS, complete, listDir, listFlat, peek } from './listing'
 import {
   IndexError,
   hitsToEntries,
   indexStatus,
   modelEntryAt,
+  posesForDir,
+  posesForPaths,
   probeStatus,
   query as indexQuery,
   scopeWithin,
@@ -81,6 +89,51 @@ function indexErrorReply(err: IndexError): {
  */
 function unreachable(value: never): never {
   throw new Error(`unhandled case: ${JSON.stringify(value)}`)
+}
+
+/**
+ * The models a contact sheet draws, preferring the ones the index holds an
+ * orientation for (`pose-for-every-model` D4). Posed finds in walk order, then
+ * unposed finds in walk order, cut to `n`.
+ *
+ * Posedness cannot be known mid-walk without asking per level, so the walk is
+ * not asked to know it: it runs exactly as it always did, but to the **entry
+ * bound** instead of to `n` — `PEEK_MAX_FINDS` is the most models that bound
+ * can yield — and one `/poses` batch over everything it found decides the
+ * ranking afterwards. One round trip per peek, never a per-level chain: the
+ * entry bound caps the finds at 64, so the batch is a single request whatever
+ * the folder held, and the peek's worst case grows by exactly that one call.
+ *
+ * **When the index is not answering, this is today's code path, untouched.**
+ * The probe comes first precisely so that an absent, warming or non-covering
+ * index costs the peek nothing at all — not even the wider walk — and the sheet
+ * is the walk's first `n` models byte for byte, which is what the requirement's
+ * determinism clause promises when the index is silent. The probe itself is the
+ * cached one every semantic route reads (`probeStatus`), so it is not a request
+ * per tile.
+ *
+ * Ranking is applied whatever the walk found, not only when it found more than
+ * `n`: "prefer posed" is about the cells the user sees, and a sheet of three
+ * whose posed model sat last would otherwise contradict the sheet of five
+ * beside it.
+ */
+async function posedFirstPeek(library: Library, libPath: string, n: number): Promise<DirEntry[]> {
+  const { status, collectionRootFs } = await probeStatus(library)
+  if (status.state !== 'ready' || collectionRootFs === undefined) {
+    return peek(library, libPath, n)
+  }
+  const finds = await peek(library, libPath, PEEK_MAX_FINDS)
+  if (finds.length === 0) return finds
+  const poses = await posesForPaths(
+    library,
+    finds.map((e) => e.path),
+    collectionRootFs,
+  )
+  const posed = finds.filter((e) => poses[e.path] !== undefined)
+  // A stable partition, not a sort: both halves keep the walk's order, so the
+  // answer is a function of the walk and the index's reply and of nothing else.
+  const unposed = finds.filter((e) => poses[e.path] === undefined)
+  return [...posed, ...unposed].slice(0, n)
 }
 
 export function createApp(
@@ -183,6 +236,9 @@ export function createApp(
    *
    * A path route like the rest, so the not-ready gate above answers it with the
    * state envelope and nothing here has to.
+   *
+   * Which models it shows is `posedFirstPeek`'s: the walk is the same walk, and
+   * the index only reorders and cuts what it found.
    */
   app.get('/api/peek', async (c) => {
     const path = c.req.query('path')
@@ -199,7 +255,7 @@ export function createApp(
     // Canonicalised first, for the reason `/api/dir` gives: the paths that come
     // back are the ones the client asks for next.
     const libPath = canonicalLibPath(path)
-    return c.json(await peek(library, libPath, n))
+    return c.json(await posedFirstPeek(library, libPath, n))
   })
 
   app.get('/api/file', async (c) => {
@@ -340,6 +396,33 @@ export function createApp(
   app.get('/api/semantic/status', async (c) => {
     const s = await indexStatus(library, { fresh: c.req.query('fresh') === 'true' })
     return c.json(s)
+  })
+
+  /**
+   * The index's orientations for one directory's models (D2) — what a search
+   * hands the client on its hits, for a plain listing that has none.
+   *
+   * A **path** route, not an availability one: gated by the library like
+   * `/api/dir`, canonicalised the same way and answering the same 400 and 404
+   * for the same reasons, because a client asking about a directory that is not
+   * there has made the same mistake whichever route it made it on. Only the
+   * *index's* absence is silent — that answers `{}`, never a status, so the
+   * listing this rides behind cannot be made to fail by a service it is
+   * deliberately independent of.
+   *
+   * A GET with the path in the query, unlike the two scoring routes' POSTs:
+   * there is no phrase or tuning here, only the directory the client is already
+   * looking at.
+   */
+  app.get('/api/semantic/poses', async (c) => {
+    const path = c.req.query('path')
+    if (path === undefined || path === '') return c.json({ error: 'path is required' }, 400)
+    // Canonicalised for `/api/dir`'s reason: this answer is keyed by the paths
+    // the client asks about next, and a spelling taken in verbatim (`//kit`,
+    // `/kit/.`) would key it under names no tile carries.
+    const libPath = canonicalLibPath(path)
+    const body: PosesResponse = { poses: await posesForDir(library, libPath) }
+    return c.json(body)
   })
 
   /**

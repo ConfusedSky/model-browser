@@ -9,7 +9,7 @@ import type {
   SemanticTuning,
 } from '../../shared/types'
 import { type Library, LibraryError } from './library'
-import { modelFormat } from './listing'
+import { listDir, modelFormat } from './listing'
 
 /**
  * Client for the semantic index — a separate service (`mini-classify`), started
@@ -511,4 +511,138 @@ export async function hitsToEntries(
     }),
   )
   return { entries: settled.filter((e) => e !== null), poses, scores }
+}
+
+/**
+ * The most paths one `/poses` request may carry — the index's own bound on the
+ * call (`pose-for-every-model` §1.1). A larger set is chunked rather than
+ * refused here: this server decides what it wants poses for, and a directory
+ * holding more than a thousand models is a listing, not a malformed request.
+ *
+ * A peek can never reach it — its finds are bounded by `PEEK_MAX_FINDS` (64),
+ * which is why a contact sheet is one request whatever it walked.
+ */
+const POSES_MAX = 1024
+
+/** The `/poses` answer: one entry per path asked about, `null` where the index
+ *  holds the model but has no orientation for it. */
+interface PosesAnswer {
+  poses?: Record<string, IndexPose | null>
+}
+
+/**
+ * Poses for real filesystem paths, as the index speaks them. A pure pose-cache
+ * lookup upstream — no embedding and no GPU — so the cost is the round trip and
+ * nothing else, and a set past the bound costs one more of those rather than a
+ * second traversal here.
+ */
+async function askPoses(paths: readonly string[]): Promise<Record<string, IndexPose | null>> {
+  const out: Record<string, IndexPose | null> = {}
+  for (let i = 0; i < paths.length; i += POSES_MAX) {
+    const answer = (await askIndex('/poses', {
+      paths: paths.slice(i, i + POSES_MAX),
+    })) as PosesAnswer
+    Object.assign(out, answer.poses ?? {})
+  }
+  return out
+}
+
+/**
+ * The index's orientation for models this server already knows about, keyed by
+ * the **library path** each was named by — the key `hitsToEntries` hands back
+ * and the one the client looks a tile up under (D2).
+ *
+ * Confined per path exactly as a hit is, through the call the scoring routes
+ * already make: `scopeWithin` refuses a virtual path (nothing inside an archive
+ * is embedded, D7), a path the library will not resolve, and a path resolving
+ * outside the collection — so a model that is a symlink out of the library is
+ * dropped, never an error and never asked about. Confinement is a property of
+ * each path, so one bad one costs the others nothing.
+ *
+ * Two library paths can resolve to one real path (an in-library alias) and the
+ * index knows only the target, so the pose it answers with is given to both:
+ * the join is a map from real path to every library path that named it, rather
+ * than a pair of parallel arrays.
+ *
+ * Every `IndexError` is swallowed into an empty answer — availability states
+ * and refusals alike. A pose is advisory, the tile renders at its default
+ * framing without one, and no surface that asks for poses may fail because the
+ * index did; that is the whole of D2's "a listing must stay index-independent".
+ *
+ * The per-path `realpath` of the collection root inside `scopeWithin` is
+ * deliberate duplication of one page-cached syscall per model: sharing the
+ * translator with the scoring routes is worth more than saving it, and the
+ * round trip below dominates either way.
+ */
+export async function posesForPaths(
+  library: Library,
+  libPaths: readonly string[],
+  collectionRoot: string,
+): Promise<Record<string, IndexPose>> {
+  const poses: Record<string, IndexPose> = {}
+  if (libPaths.length === 0) return poses
+  // Resolved in parallel, joined in the caller's order: what goes on the wire
+  // must not depend on which `realpath` happened to finish first.
+  const reals = await Promise.all(libPaths.map((p) => scopeWithin(library, p, collectionRoot)))
+  const byReal = new Map<string, string[]>()
+  libPaths.forEach((libPath, i) => {
+    const real = reals[i]
+    if (real === undefined || real === null) return
+    const named = byReal.get(real)
+    if (named === undefined) byReal.set(real, [libPath])
+    else named.push(libPath)
+  })
+  if (byReal.size === 0) return poses
+  let answered: Record<string, IndexPose | null>
+  try {
+    answered = await askPoses([...byReal.keys()])
+  } catch (err) {
+    if (err instanceof IndexError) return poses
+    throw err
+  }
+  for (const [real, named] of byReal) {
+    const pose = answered[real]
+    // Absent and null are one fact — the index holds no orientation for this
+    // model — and the key is left out rather than set to null: `poses[path]`
+    // reads as "no pose" either way, and a present-but-null key would make
+    // "has a pose" two tests everywhere it is asked.
+    if (pose === undefined || pose === null) continue
+    for (const libPath of named) poses[libPath] = pose
+  }
+  return poses
+}
+
+/**
+ * Every pose the index holds for one directory's models, keyed by library path
+ * (D2) — the listing-wide supply of the fact a search hit carries as a rider.
+ *
+ * The directory is listed through `listDir`, the machinery `/api/dir` itself
+ * answers with, so the models asked about are exactly the models the client is
+ * showing and there is no second walk to drift from it. That listing happens
+ * **before** the index is consulted, deliberately: a path that is missing, or
+ * is a file rather than a directory, must answer 404/400 whether or not the
+ * index is up, and probing first would make this route's path semantics depend
+ * on another process's availability. The cost of that ordering is one `readdir`
+ * of a directory the client has just listed — page-cached — when the index
+ * turns out to have nothing to say.
+ *
+ * An index that is absent, warming, wedged or volume-gone, or whose collection
+ * does not cover this location, answers `{}` — the same answers a search gets,
+ * which the client reads as "no poses", leaving every tile exactly as it
+ * renders today. Read through `probeStatus`, so this route and the scoring
+ * routes cannot disagree about which state the index is in.
+ */
+export async function posesForDir(
+  library: Library,
+  dirPath: string,
+  opts: { fresh?: boolean } = {},
+): Promise<Record<string, IndexPose>> {
+  const listing = await listDir(library, dirPath)
+  const { status, collectionRootFs } = await probeStatus(library, opts)
+  if (status.state !== 'ready' || collectionRootFs === undefined) return {}
+  return posesForPaths(
+    library,
+    listing.entries.filter((e) => e.kind === 'model').map((e) => e.path),
+    collectionRootFs,
+  )
 }
