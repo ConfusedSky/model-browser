@@ -8,7 +8,7 @@ import { ThumbCache } from './cache'
 import { guard } from './guard'
 import { LaunchError, type Launcher, ZipTempStore, createLauncher } from './launch'
 import { LibraryError, type Library, canonicalLibPath, createLibrary } from './library'
-import { ListingError, complete, listDir, listFlat } from './listing'
+import { ListingError, complete, listDir, listFlat, peek } from './listing'
 import {
   IndexError,
   hitsToEntries,
@@ -31,6 +31,10 @@ const ORBIT_AXES: readonly OrbitAxis[] = ['x', '-x', 'y', '-y', 'z', '-z']
  * included; only writes are narrowed.
  */
 const PRODUCIBLE_LIGHTING: LightingMode = 'camera'
+
+/** Cells in a folder tile's contact sheet, and the most one may ever ask for (D4). */
+const PEEK_DEFAULT = 4
+const PEEK_MAX = 8
 
 /**
  * How an `IndexError` reaches the client — one mapping, shared by both scoring
@@ -168,6 +172,34 @@ export function createApp(
     const libPath = canonicalLibPath(path)
     if (flat) return c.json(await listFlat(library, libPath, q, { folderMatching }))
     return c.json(await listDir(library, libPath))
+  })
+
+  /**
+   * The models a folder tile draws in its contact sheet (D1): a bounded
+   * depth-first look inside one directory, asked for per tile as the tile comes
+   * on screen. Deliberately not a field on every `DirEntry` — a listing would
+   * then pay a peek per subdirectory up front, on the cold path, for folders
+   * that may never be scrolled to.
+   *
+   * A path route like the rest, so the not-ready gate above answers it with the
+   * state envelope and nothing here has to.
+   */
+  app.get('/api/peek', async (c) => {
+    const path = c.req.query('path')
+    if (path === undefined || path === '') return c.json({ error: 'path is required' }, 400)
+    const raw = c.req.query('n')
+    let n = PEEK_DEFAULT
+    if (raw !== undefined) {
+      const asked = Number(raw)
+      if (!Number.isInteger(asked) || asked < 1) return c.json({ error: `invalid n: ${raw}` }, 400)
+      // Capped rather than refused: the ceiling is this server's own opinion
+      // about what a sheet can show, not a malformed request to report back.
+      n = Math.min(asked, PEEK_MAX)
+    }
+    // Canonicalised first, for the reason `/api/dir` gives: the paths that come
+    // back are the ones the client asks for next.
+    const libPath = canonicalLibPath(path)
+    return c.json(await peek(library, libPath, n))
   })
 
   app.get('/api/file', async (c) => {

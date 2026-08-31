@@ -101,6 +101,17 @@ async function listFsDir(
   } catch {
     throw new ListingError(404, `cannot read directory: ${browseLibPath}`)
   }
+  // Code-point order, fixed here rather than left as whatever the filesystem
+  // listed (D2). The loop below charges a walk step per entry and breaks at the
+  // budget, so an over-budget level keeps the entries `readdir` happened to
+  // return first — and that order differs between runtimes and volumes, which
+  // would make a bounded walk cut differently on two machines holding the same
+  // library. Deliberately not `sortEntries`' `localeCompare`: ICU collation is
+  // locale-dependent and cannot promise the same cut either. `sortEntries` still
+  // runs on the way out, so the *display* order is unchanged; this only fixes
+  // which entries a bound keeps, for the peek and for `listFlat`'s truncation
+  // alike.
+  names.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
   const entries: FsEntry[] = []
   for (const d of names) {
     if (d.name.startsWith('.')) continue
@@ -290,6 +301,109 @@ export async function listDir(library: Library, libPath: string): Promise<DirLis
   }
   await requireArchive(fsPath, libPath)
   return { path: libPath, entries: await listZipDir(fsPath, libHalf, entry) }
+}
+
+/**
+ * How many entries a folder tile's preview may examine. A module constant, not
+ * an environment knob (D2): a preview is a glance, not a search, and a knob
+ * would let one machine's contact sheet disagree with another's.
+ */
+const PEEK_BUDGET = 64
+
+/**
+ * One level of a peek: this level's models in order, then its subdirectories in
+ * order, depth-first, until `n` models are found or the walk runs out of
+ * budget.
+ *
+ * Not `walkFsLevel`, which takes a level in kind order — dirs first — and so
+ * would reach a subfolder's models before the level's own. Its confinement and
+ * cycle guards are replicated here because this recurses over `listFsDir`
+ * directly: a subdirectory whose real path leaves the library is neither
+ * previewed nor descended into, and a directory already entered under another
+ * name is not entered twice.
+ */
+async function peekLevel(
+  level: FsEntry[],
+  realTop: string,
+  walk: FlatWalk,
+  found: FsEntry[],
+  n: number,
+): Promise<void> {
+  for (const e of level) {
+    if (found.length >= n) return
+    if (e.kind === 'model') found.push(e)
+  }
+  for (const e of level) {
+    if (found.length >= n || walk.truncated) return
+    // Archives met on the way are skipped, never entered (Non-Goals): a
+    // preview must not pay a central-directory read per tile.
+    if (e.kind !== 'dir') continue
+    const real = await realpath(e.fsPath).catch(() => null)
+    if (real === null || !within(realTop, real)) continue
+    if (walk.visited.has(real)) continue
+    walk.visited.add(real)
+    let sub
+    try {
+      sub = await listFsDir(e.fsPath, e.path, realTop, walk)
+    } catch {
+      continue // unreadable subdirectory: skipped, only an unreadable root fails
+    }
+    await peekLevel(sub, realTop, walk, found, n)
+  }
+}
+
+/**
+ * Up to `n` models found inside a directory — the contact sheet a folder tile
+ * draws (D2). Its own request, never merged into a listing: a listing that
+ * computed previews would pay one peek per subdirectory up front, on the cold
+ * path, for folders the user may never scroll to (D1).
+ *
+ * Bounded and brief, so it carries **no cancellation token** and runs to
+ * completion when the tile that asked has scrolled away — stated in the
+ * requirement, so `search-cancellation`'s rule about abandoned traversals does
+ * not reach it.
+ *
+ * A `walk` is passed down into `listFsDir` for `takeStep` alone: without one a
+ * single wide folder reads and stats its whole level before the bound is
+ * consulted, and the bound would say nothing about the case it exists for. The
+ * walk's `models` and `dirs` stay empty — what a peek keeps is `found`, in the
+ * order it found it, rather than the sorted-and-renamed collection `listFlat`
+ * builds.
+ */
+export async function peek(library: Library, libPath: string, n: number): Promise<DirEntry[]> {
+  const { fsPath, entry } = await library.resolve(libPath)
+  // Neither an archive nor anything inside one is previewed (Non-Goals), and
+  // both answer empty rather than refusing: the client then renders "nothing to
+  // preview" the same way whatever the tile turned out to be.
+  if (entry !== undefined) return []
+  const realTop = library.realTop()
+  const s = await stat(fsPath).catch(() => null)
+  if (s === null) throw new ListingError(404, `no such path: ${libPath}`)
+  if (!s.isDirectory()) {
+    // Stat'd first, so a *directory* named `x.zip` is walked like any other —
+    // the same order `listDir` takes, and the reason it is navigable at all.
+    if (/\.zip$/i.test(fsPath)) return []
+    // 400, not 404, on the distinction `requireArchive` draws: the path is
+    // there, it is simply not a thing that has an inside. A 404 here would
+    // claim a file the client can see in its own listing does not exist.
+    throw new ListingError(400, `not a directory: ${libPath}`)
+  }
+  const walk: FlatWalk = {
+    budget: PEEK_BUDGET,
+    visited: new Set(),
+    models: [],
+    dirs: [],
+    truncated: false,
+  }
+  // The root is visited before anything below it is, or a symlink pointing back
+  // at it re-enters the level the peek started from.
+  walk.visited.add(await realpath(fsPath).catch(() => fsPath))
+  const found: FsEntry[] = []
+  // Uncaught, unlike the recursion's: an unreadable *root* is the 404 `listDir`
+  // gives, while an unreadable subdirectory is skipped.
+  const level = await listFsDir(fsPath, libHalfOf(libPath), realTop, walk)
+  await peekLevel(level, realTop, walk, found, n)
+  return wire(found)
 }
 
 async function walkFsLevel(
