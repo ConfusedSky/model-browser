@@ -1,6 +1,7 @@
 import type {
   AppsReport,
   CameraState,
+  DirEntry,
   DirListing,
   IndexAvailability,
   LibraryState,
@@ -73,6 +74,22 @@ export interface ApiClient {
     signal?: AbortSignal,
   ): Promise<DirListing>
   complete(prefix: string): Promise<string[]>
+  /**
+   * The first few models found inside `path`, for the folder tile's contact
+   * sheet (folder-contact-sheets D1). Ordinary listing entries, so their
+   * thumbnails are produced by the one pipeline every other entry goes through;
+   * `n` defaults to 4 server-side and is capped at 8 there. A zip path answers
+   * `[]` rather than an error, so the caller treats "nothing to preview"
+   * uniformly.
+   *
+   * **No `AbortSignal`**, unlike `listDir` beside it: a peek is bounded by
+   * construction — a fixed entry budget, not a walk of the tree — so a tile that
+   * has scrolled away leaves a request that finishes cheaply rather than one
+   * worth the machinery to stop. The requirement states this ("being bounded —
+   * run to completion rather than stopped when its tile has scrolled away"), so
+   * `search-cancellation`'s rule about abandoned traversals does not reach it.
+   */
+  peek(path: string, n?: number): Promise<DirEntry[]>
   fetchModel(path: string): Promise<ArrayBuffer>
   /** Availability of the semantic index — cheap, cached server-side (D4). */
   indexAvailability(opts?: { fresh?: boolean }): Promise<IndexAvailability>
@@ -291,6 +308,15 @@ export class HttpApiClient implements ApiClient {
   async complete(prefix: string): Promise<string[]> {
     const res = await this.fetchFn(`/api/complete?prefix=${encodeURIComponent(prefix)}`)
     return jsonOrThrow<string[]>(res)
+  }
+
+  async peek(path: string, n?: number): Promise<DirEntry[]> {
+    // Sent only when the caller names one: absence already means the server's
+    // own default (4), so an ordinary sheet's request carries no `n` at all —
+    // the same rule `folders` and the tuning fields follow.
+    const count = n !== undefined ? `&n=${n}` : ''
+    const res = await this.fetchFn(`/api/peek?path=${encodeURIComponent(path)}${count}`)
+    return jsonOrThrow<DirEntry[]>(res)
   }
 
   async fetchModel(path: string): Promise<ArrayBuffer> {

@@ -111,6 +111,16 @@ const ACTION_TEXT_MS = 2500
 const NO_ENTRIES: DirEntry[] = []
 const NO_POSES: Record<string, IndexPose> = {}
 const NO_SCORES: Record<string, IndexScore> = {}
+/**
+ * No folder has been previewed yet. One module-level map rather than a fresh
+ * one per clear, so clearing an already-empty map is a `useState` bail-out
+ * instead of a render — and, because it is shared, **never written to**: every
+ * landing builds a new Map rather than mutating what it was handed.
+ */
+const NO_PREVIEWS: ReadonlyMap<string, DirEntry[]> = new Map()
+/** A folder with nothing to preview — an empty peek, or one that failed. One
+ *  array for both, so a tile that draws the icon draws it from a stable value. */
+const NO_PREVIEW: DirEntry[] = []
 /** "Nothing is deferred", as a subject, so the banner branches on one union
  *  rather than on a null *and* a kind. */
 const NO_SUBJECT: Subject = { kind: 'none' }
@@ -579,16 +589,115 @@ export default function App() {
       path === anchor?.path ? undefined : scores[path],
     [scores, anchor?.path],
   )
+  /**
+   * What each folder tile on screen previews: the models a peek found inside
+   * it, keyed by the folder's path (folder-contact-sheets D1). Rendered — the
+   * sheet is drawn from it — so it is state, not a ref.
+   *
+   * A path is in the map exactly once its peek has answered, **including when
+   * it answered with nothing and when it failed**, both of which store the
+   * empty list: the tile then draws its icon and the failure is not retried
+   * within this listing, which is what "requested once per listing" and "the
+   * rest of the grid is unaffected" mean together.
+   */
+  const [previews, setPreviews] = useState<ReadonlyMap<string, DirEntry[]>>(NO_PREVIEWS)
+  /**
+   * Peeks that have been asked for and have not answered. A ref and not state
+   * because nothing renders it: a tile that is in flight has no map entry, so
+   * it is already drawing its icon, and re-rendering the grid as each request
+   * departs would buy a repaint per folder for no visible change.
+   */
+  const inFlightPeeks = useRef<Set<string>>(new Set())
+  /**
+   * The two values `requestPeek` must read at the moment it runs rather than at
+   * the moment it was built — the same trick `placeholderRef` uses above, and
+   * for the same reason: the callback is handed to `Grid` by identity, so it
+   * cannot close over this render's map or this render's listing.
+   */
+  const previewsRef = useRef(previews)
+  previewsRef.current = previews
+  const listingRef = useRef(entries)
+  listingRef.current = entries
+  /**
+   * Ask for one folder's preview, at most once per listing.
+   *
+   * No abort and no retry: the request is bounded server-side, so an abandoned
+   * one costs less than the machinery to stop it (`peek`'s docstring), and a
+   * failure is recorded as "nothing to preview" rather than surfaced — a folder
+   * tile that could not be peeked is a tile with an icon, not an error the user
+   * is asked to do something about.
+   */
+  const requestPeek = useCallback(
+    (path: string) => {
+      if (previewsRef.current.has(path) || inFlightPeeks.current.has(path)) return
+      inFlightPeeks.current.add(path)
+      // The listing this answer will belong to, captured before the await. A
+      // peek outlives the tile that asked for it by design, so it can land
+      // after the grid has moved on — and an answer about the folder the user
+      // has left must not become an entry in the map the new listing is drawn
+      // from.
+      const asked = listingRef.current
+      const land = (found: DirEntry[]): void => {
+        inFlightPeeks.current.delete(path)
+        if (listingRef.current !== asked) return
+        setPreviews((prev) => {
+          const next = new Map(prev)
+          next.set(path, found)
+          return next
+        })
+      }
+      void api.peek(path).then(land, () => land(NO_PREVIEW))
+    },
+    [api],
+  )
+  /**
+   * One listing, one set of previews (D1). A tile scrolled away and back inside
+   * the same listing reuses what the map holds and asks for nothing.
+   *
+   * Keyed on `entries` and deliberately **not** on `state.result`: `patch`
+   * (state/reducer.ts) spreads the result on every fetchless view change — a
+   * kind option, a lightbox opening — while preserving `entries` identity, so
+   * keying on the result would throw away every landed sheet and re-issue every
+   * peek each time the user opened a model. `entries` is replaced wholesale by
+   * a landing and only by a landing (R5), which is exactly "a different listing
+   * is on screen" — navigation and search landings alike — and it is the same
+   * identity `useThumbnails` resets on.
+   */
+  useEffect(() => {
+    inFlightPeeks.current.clear()
+    setPreviews(NO_PREVIEWS)
+  }, [entries])
   // The anchor needs a thumbnail like any tile, so it goes to useThumbnails —
   // memoized because that effect reconciles its per-entry state against
   // `entries` on any identity change (D2), and a fresh array per render would
   // pay that walk on every keystroke. The walk is all it would cost now: since
   // `ao-refreshes-thumbnails` a re-run keeps every surviving tile's image and
   // touches only what arrived or left.
-  const thumbEntries = useMemo(
-    () => (anchor === undefined ? entries : [anchor, ...entries]),
-    [entries, anchor],
-  )
+  //
+  // Preview models are appended to that same list rather than given a pipeline
+  // of their own (folder-contact-sheets D3): a sheet cell is an ordinary
+  // thumbnail, so it shares the cache entry, the queue, the LRU and the recipe
+  // with the tile the same model has elsewhere. Deduplicated by path — in a
+  // flat listing a previewed model is often also a tile, and the anchor counts
+  // as present too — so the shared model is looked up once and both images are
+  // drawn from the one entry.
+  const thumbEntries = useMemo(() => {
+    const base = anchor === undefined ? entries : [anchor, ...entries]
+    if (previews.size === 0) return base
+    const seen = new Set(base.map((e) => e.path))
+    const extra: DirEntry[] = []
+    for (const found of previews.values()) {
+      for (const entry of found) {
+        if (seen.has(entry.path)) continue
+        seen.add(entry.path)
+        extra.push(entry)
+      }
+    }
+    // Identity preserved when a peek added nothing new, which spares the grid
+    // even the reconcile walk for a sheet drawn entirely from tiles it already
+    // has.
+    return extra.length === 0 ? base : [...base, ...extra]
+  }, [entries, anchor, previews])
   // The subject a deferral is holding — a phrase or a model, and the banner
   // says a different sentence for each. Read off `view` rather than the answer,
   // like the projection: while a stand-in listing is on screen the *answer* is
@@ -2149,6 +2258,8 @@ export default function App() {
                   anchorPath={anchor?.path}
                   scoreFor={scoreFor}
                   scoreScale={scoreScale}
+                  previews={previews}
+                  onPeek={requestPeek}
                 />
               ) : null}
               {emptyNotice}

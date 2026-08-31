@@ -22,6 +22,20 @@ export const getThumb = vi.fn().mockResolvedValue({ status: 'miss' })
 // Shared so lightbox tests can assert the close path persisted (settle →
 // snapshot → putThumb); cleared per mount like getThumb.
 export const putThumb = vi.fn().mockResolvedValue(undefined)
+// A folder tile's contact sheet (folder-contact-sheets). Shared and cleared per
+// mount like getThumb, so a test can both count the requests a grid issued and
+// choose what a folder previews. The default is the answer for a folder with
+// nothing in it — no sheet — so every test written before previews existed sees
+// the icon grid it was written against.
+export const peek = vi.fn().mockResolvedValue([])
+// Shared for the same reason getThumb is: a test needs to choose what the LRU
+// loader is handed — an embedded-3MF preview arrives from these bytes, on the
+// way past, before anything is parsed. The default is the one-facet STL below,
+// restored in unmountApp so a test that swaps it cannot leak into the next.
+// The path is declared though the default ignores it: it is what a test
+// overriding this switches on, and an argument-less default would type the mock
+// as taking none.
+export const fetchModel = vi.fn((_path: string) => Promise.resolve(tinyStl()))
 // The semantic index is a separate service; the default is the state most
 // machines are in — not running — so a test opts *into* it existing.
 export const indexAvailability = vi.fn().mockResolvedValue({ state: 'absent' })
@@ -87,7 +101,8 @@ export function apiClientModule(): Record<string, unknown> {
     HttpApiClient: class {
       listDir = listDir
       complete = vi.fn().mockResolvedValue([])
-      fetchModel = vi.fn().mockImplementation(() => Promise.resolve(tinyStl()))
+      fetchModel = fetchModel
+      peek = peek
       getThumb = getThumb
       putThumb = putThumb
       indexAvailability = indexAvailability
@@ -221,6 +236,10 @@ async function mount(initial: DirListing): Promise<void> {
   listDir.mockResolvedValue(initial)
   getThumb.mockClear()
   putThumb.mockClear()
+  // Cleared before the render like the two above, so "this tile issued exactly
+  // one peek" counts what this mount provoked and nothing left over.
+  peek.mockClear()
+  fetchModel.mockClear()
   // Cleared before the render, so the count a test reads afterwards is the
   // session's own one reading of the registry and nothing left over — which is
   // exactly the count "raising a menu fires no fetch" is measured against.
@@ -283,7 +302,13 @@ export async function unmountApp(): Promise<void> {
   openWith.mockResolvedValue(undefined)
   semanticSearch.mockReset()
   similar.mockReset()
+  // Same rule as the index's and the library's: what a test chose is undone
+  // here, so the next file starts from the folder that previews nothing and the
+  // model that loads as a one-facet STL.
+  peek.mockResolvedValue([])
+  fetchModel.mockImplementation(() => Promise.resolve(tinyStl()))
   renderThumbnail.mockClear()
+  renderThumbnail.mockImplementation(() => Promise.resolve(new Blob()))
   await act(async () => {
     root?.unmount()
   })
