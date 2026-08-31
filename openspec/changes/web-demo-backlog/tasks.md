@@ -8,7 +8,9 @@
 
 ## 1. Changes to draft (in this order, after the drafted main-app sequence)
 
-- [ ] 1.1 `library-overrides` — the per-library override/metadata store (notes item 1,
+- [x] 1.1 *(drafted 2026-08-31 as `library-overrides` — proposal, design, specs, tasks
+      complete; ADD-only `model-viewer` delta beside the three active AO changes)*
+      `library-overrides` — the per-library override/metadata store (notes item 1,
       decided shape in design D2): credits per kit, display names, a pose field; the
       lightbox credits panel that reads it; generation of the demo's entries from
       `metadata/miniatures.json`. Hard ordering: after `library-root` (keys are library
