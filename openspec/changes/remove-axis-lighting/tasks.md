@@ -169,8 +169,12 @@
       lighting menu" row is closed
       — done 2026-08-31 (coordinator): item 9's heading and the Decided-table row both name
       `remove-axis-lighting` as implemented/closed
-- [ ] 4.4 `bun run test` / `bun run typecheck` clean across workspaces; `rg
+- [x] 4.4 `bun run test` / `bun run typecheck` clean across workspaces; `rg
       "getLightingMode|LIGHTING_MODES|lighting-mode"` over `client/src` returns nothing
+      — done 2026-08-31 (coordinator) on merged main `5475f23`: client 511 passed (49
+      files), server 282 passed / 3 skipped (the index-contract gate), both typechecks
+      clean; the lighting grep (with `setLightingMode` added) and a `rigQuaternion` grep
+      over `client/src` both return nothing
 - [ ] 4.5 Live verification: open the app on a directory whose cache is fully camera-lit
       (this machine) and confirm zero PUTs on visit (network panel); plant one sidecar
       with `"lighting":"axis"` and confirm exactly that tile re-renders and re-uploads
