@@ -100,6 +100,15 @@
       uncancelled — both falsified against the reconciler's survivor-keep (`useThumbnails`'
       ao/pose `continue` disabled → the lookup slice picks up pre-existing paths; the
       in-flight cell counts 2 where 1 is promised). Earlier pass and its notes below.
+      Post-merge review (opus, whole-branch) added two cells: the two-preview layout
+      (the spec's "one, two or three" had 2 untested) and a superseded peek clearing its
+      successor's in-flight marker — a real once-per-listing hole in `requestPeek`'s
+      `land` (marker deleted before the generation check), fixed by reordering and
+      falsified by reverting the reorder (3 calls where 2 are promised). That review
+      also pinned, on the record: the D3 cells' DOM-node assertions catch a *reset*
+      (element type flips to a spinner and back), not a survivor-keep regression — the
+      lookup slice is the falsifier for that, so a future reader must not lean on the
+      node check alone.
       (13 cells; suite 536 green). The no-reset assertions are the deferred D3 family
       (header note) — the file's own header says the omission is a decision, and no cell
       asserts either direction. Falsified: the once-per-listing guard (removed → the
@@ -151,4 +160,5 @@
       figure `search-cancellation` records (~150 ms per 64-entry peek) than these medians
 - [x] 3.5 `docs/web-demo-notes.md`: the contact-sheet row points here; item 4 (landing)
       notes that sheets exist and flat-view-at-root is still its own question
-      — done 2026-08-31; updated after the rebase: the row now says applied except 3.4
+      — done 2026-08-31; updated after the rebase and again after 3.4: the row now says
+      every task closed

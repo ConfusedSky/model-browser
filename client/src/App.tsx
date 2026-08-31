@@ -638,8 +638,14 @@ export default function App() {
       // from.
       const asked = listingRef.current
       const land = (found: DirEntry[]): void => {
-        inFlightPeeks.current.delete(path)
+        // Generation first, delete second: the marker is keyed by path alone,
+        // and a listing change may have re-issued this folder's peek — a
+        // superseded answer deleting the marker would strip the successor's
+        // once-per-listing guard while it is still in flight. The superseded
+        // request's own marker is already gone (the clearing effect wiped the
+        // set), so returning early leaks nothing.
         if (listingRef.current !== asked) return
+        inFlightPeeks.current.delete(path)
         setPreviews((prev) => {
           const next = new Map(prev)
           next.set(path, found)

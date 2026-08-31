@@ -184,6 +184,18 @@ describe('folder contact sheets', () => {
     expect(hasIcon('/models/a')).toBe(false)
   })
 
+  it('draws two previews side by side', async () => {
+    peek.mockResolvedValue(found(2))
+    await mountApp('/models', ONE_FOLDER)
+    await intersect(dirTile('/models/a'))
+
+    const two = cells('/models/a')
+    expect(two).toHaveLength(2)
+    expect(sheet('/models/a')!.className).toContain('grid-cols-2')
+    // One row of two — neither spans, no empty cell (D4).
+    expect(two.every((c) => !c.className.includes('col-span-2'))).toBe(true)
+  })
+
   it('draws three previews as two above one', async () => {
     peek.mockResolvedValue(found(3))
     await mountApp('/models', ONE_FOLDER)
@@ -384,6 +396,49 @@ describe('folder contact sheets', () => {
     expect(peek).toHaveBeenCalledTimes(2)
     expect(cells('/models/a')).toHaveLength(3)
   })
+
+  it("a superseded peek cannot clear its successor's in-flight marker", async () => {
+    // The marker set is keyed by path alone, so an old listing's answer
+    // arriving while the new listing's request for the same folder is in
+    // flight must not delete the marker that guards it — the generation check
+    // runs before the delete. Found in review; the failure is a duplicate
+    // request on the next re-report, not wrong data.
+    let answer1!: (entries: DirEntry[]) => void
+    let answer2!: (entries: DirEntry[]) => void
+    peek
+      .mockReturnValueOnce(new Promise<DirEntry[]>((resolve) => (answer1 = resolve)))
+      .mockReturnValueOnce(new Promise<DirEntry[]>((resolve) => (answer2 = resolve)))
+    const FLAT: DirListing = {
+      path: '/models',
+      entries: [dir('a'), model('a/deep.stl')],
+      truncated: true,
+    }
+    await mountApp('/models', ONE_FOLDER)
+    listDir.mockImplementation((_p: string, opts?: { flat?: boolean }) =>
+      Promise.resolve(opts?.flat === true ? FLAT : ONE_FOLDER),
+    )
+    await intersect(dirTile('/models/a')) // peek #1, listing L1, held open
+    await click(flatButton()) // L2 lands; the clearing effect wipes the marker set
+    await settle()
+    await intersect(dirTile('/models/a')) // peek #2, listing L2, held open
+    expect(peek).toHaveBeenCalledTimes(2)
+
+    // L1's answer arrives while #2 is still in flight.
+    await act(async () => answer1([model('a/stale.stl')]))
+    await settle()
+
+    // A re-report of the tile (the find filter rebuilds the observer) must be
+    // stopped by #2's marker — a third request means the stale landing
+    // stripped it.
+    await awayAndBack()
+    await intersect(dirTile('/models/a'))
+    expect(peek).toHaveBeenCalledTimes(2)
+
+    // #2 answers normally and the sheet appears.
+    await act(async () => answer2(found(2)))
+    await settle()
+    expect(cells('/models/a')).toHaveLength(2)
+  })
 })
 
 // The deferred D3 family (folder-contact-sheets 2.4), written once
@@ -445,14 +500,9 @@ describe('a peek landing resets nothing (D3)', () => {
     // b.stl's render never resolves inside this cell: the tile is mid-flight
     // when the peek lands, which is exactly the state a reset would tear down
     // and restart.
-    let release!: (png: Blob) => void
     const releases: ((png: Blob) => void)[] = []
     renderThumbnail.mockImplementation(
-      () =>
-        new Promise<Blob>((resolve) => {
-          release = resolve
-          releases.push(resolve)
-        }),
+      () => new Promise<Blob>((resolve) => releases.push(resolve)),
     )
     await mountApp('/models', TWO_FOLDERS)
     await settle()
@@ -469,7 +519,6 @@ describe('a peek landing resets nothing (D3)', () => {
     // Release every held render; the mid-flight tile completes normally.
     await act(async () => {
       for (const r of releases) r(new Blob())
-      void release
     })
     await settle()
     expect(container.querySelector('[data-model-tile="/models/b.stl"] img')).not.toBeNull()
