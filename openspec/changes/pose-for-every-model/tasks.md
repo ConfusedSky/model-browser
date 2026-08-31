@@ -129,8 +129,12 @@
 
 ## 4. Verification
 
-- [ ] 4.1 `bun run test` / `bun run typecheck` both repos' suites; `openspec validate`;
+- [x] 4.1 `bun run test` / `bun run typecheck` both repos' suites; `openspec validate`;
       ordered archive dry run
+      — done 2026-08-31 (coordinator): mini-classify `700 passed, 1 skipped` (P1's run, its
+      own pytest command); here on merged main `0b06099` client 51 files / server 412 passed
+      (+3 index-contract skips), typecheck clean, validate clean, archive dry run clean at
+      drafting (`f72f93f`) and re-run below at close
 - [ ] 4.2 Live: a plain listing of unowned models stands them up within one queue pass,
       images kept meanwhile; contact sheets over a mixed folder show posed models first;
       index stopped → listings and peeks behave exactly as today
