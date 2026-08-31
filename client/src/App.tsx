@@ -661,7 +661,7 @@ export default function App() {
    * peek each time the user opened a model. `entries` is replaced wholesale by
    * a landing and only by a landing (R5), which is exactly "a different listing
    * is on screen" — navigation and search landings alike — and it is the same
-   * identity `useThumbnails` resets on.
+   * identity `useThumbnails` reconciles on.
    */
   useEffect(() => {
     inFlightPeeks.current.clear()

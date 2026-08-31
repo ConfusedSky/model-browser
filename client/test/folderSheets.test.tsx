@@ -4,12 +4,10 @@
 // is asked for, what a sheet draws, and what one listing's map is allowed to
 // carry into the next.
 //
-// Deliberately NOT asserted here: what a landing peek does to tiles that were
-// already on screen. `useThumbnails`' load effect still resets every entry to
-// `loading` when the entries array changes identity, so a peek that adds
-// entries visibly restarts the grid. That is known, accepted for now, and owned
-// by `ao-refreshes-thumbnails`' incremental sweep (design D3) — an assertion
-// either way would pin behaviour this change does not get to decide.
+// The no-reset family ("a peek landing resets nothing") was deferred until
+// `ao-refreshes-thumbnails`' reconciler existed — asserting it against the old
+// resetting sweep would have pinned behaviour this change did not own. The
+// reconciler landed 2026-08-31; the last describe block below is that family.
 import { act } from 'react'
 import { zipSync } from 'fflate'
 import * as THREE from 'three'
@@ -385,5 +383,95 @@ describe('folder contact sheets', () => {
     await intersect(dirTile('/models/a'))
     expect(peek).toHaveBeenCalledTimes(2)
     expect(cells('/models/a')).toHaveLength(3)
+  })
+})
+
+// The deferred D3 family (folder-contact-sheets 2.4), written once
+// `ao-refreshes-thumbnails`' reconciler landed: a peek landing grows
+// `thumbEntries`, and the reconciler must start work for the added paths only,
+// leaving every pre-existing tile and sheet cell untouched. DOM *node*
+// identity is the sharp assertion — a reset unmounts the `<img>` and mints a
+// new one even if the same picture comes back, so a preserved node is proof
+// the state was never torn down.
+describe('a peek landing resets nothing (D3)', () => {
+  const TWO_FOLDERS: DirListing = {
+    path: '/models',
+    entries: [dir('a'), dir('c'), model('b.stl')],
+  }
+  const peekByPath = () =>
+    peek.mockImplementation((path: string) =>
+      Promise.resolve(
+        path === '/models/a'
+          ? [model('a/one.stl')]
+          : path === '/models/c'
+            ? [model('c/two.stl')]
+            : [],
+      ),
+    )
+
+  it('keeps every shown tile and sheet cell, and looks up only the added paths', async () => {
+    peekByPath()
+    await mountApp('/models', TWO_FOLDERS)
+    await intersect(dirTile('/models/a'))
+    await settle()
+
+    // Everything on screen has landed: the model tile and a's sheet cell.
+    const bImg = container.querySelector('[data-model-tile="/models/b.stl"] img')
+    const aCellImg = cells('/models/a')[0]!.querySelector('img')
+    expect(bImg).not.toBeNull()
+    expect(aCellImg).not.toBeNull()
+    const lookupsBefore = getThumb.mock.calls.length
+    const rendersBefore = renderThumbnail.mock.calls.length
+
+    // The second folder's peek lands and grows thumbEntries.
+    await intersect(dirTile('/models/c'))
+    await settle()
+
+    // Only the added path issued a lookup and a render — nothing pre-existing
+    // was re-evaluated.
+    expect(getThumb.mock.calls.slice(lookupsBefore).map((c) => c[0])).toEqual([
+      '/models/c/two.stl',
+    ])
+    expect(renderThumbnail.mock.calls.length).toBe(rendersBefore + 1)
+
+    // And nothing pre-existing was torn down: the same DOM nodes stand.
+    expect(container.querySelector('[data-model-tile="/models/b.stl"] img')).toBe(bImg)
+    expect(cells('/models/a')[0]!.querySelector('img')).toBe(aCellImg)
+    expect(cells('/models/c')[0]!.querySelector('img')).not.toBeNull()
+  })
+
+  it('leaves an in-flight render running rather than restarting it', async () => {
+    peekByPath()
+    // b.stl's render never resolves inside this cell: the tile is mid-flight
+    // when the peek lands, which is exactly the state a reset would tear down
+    // and restart.
+    let release!: (png: Blob) => void
+    const releases: ((png: Blob) => void)[] = []
+    renderThumbnail.mockImplementation(
+      () =>
+        new Promise<Blob>((resolve) => {
+          release = resolve
+          releases.push(resolve)
+        }),
+    )
+    await mountApp('/models', TWO_FOLDERS)
+    await settle()
+    const bLookups = () => getThumb.mock.calls.filter((c) => c[0] === '/models/b.stl').length
+    expect(bLookups()).toBe(1)
+
+    await intersect(dirTile('/models/a'))
+    await settle()
+
+    // The peek landed and b.stl is still the one in-flight job it was — not
+    // cancelled, not re-looked-up, not restarted.
+    expect(bLookups()).toBe(1)
+
+    // Release every held render; the mid-flight tile completes normally.
+    await act(async () => {
+      for (const r of releases) r(new Blob())
+      void release
+    })
+    await settle()
+    expect(container.querySelector('[data-model-tile="/models/b.stl"] img')).not.toBeNull()
   })
 })
