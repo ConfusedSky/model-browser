@@ -135,9 +135,23 @@
       own pytest command); here on merged main `0b06099` client 51 files / server 412 passed
       (+3 index-contract skips), typecheck clean, validate clean, archive dry run clean at
       drafting (`f72f93f`) and re-run below at close
-- [ ] 4.2 Live: a plain listing of unowned models stands them up within one queue pass,
+- [x] 4.2 Live: a plain listing of unowned models stands them up within one queue pass,
       images kept meanwhile; contact sheets over a mixed folder show posed models first;
       index stopped → listings and peeks behave exactly as today
+      — done 2026-08-31 (coordinator), the user's dev server + the restarted index (827
+      models, mid-classify; params matched to the run after a `CacheUnusable` false start
+      from `run_serve.sh`'s defaults). (a) Root listing (33 cached, unowned, unposed tiles;
+      the index poses 3): first visit re-rendered the two unowned posed models to `posed: 2`
+      and left the third — which holds a stored camera — untouched; a tracked reload showed
+      **one** `/api/semantic/poses` request and, after it, exactly three thumb re-lookups
+      (the posed models) with zero PUTs — the by-value rule touching only what changed.
+      (b) `City of Intrigues/…/Standalone Weapons & Hands` (21 of 40 posed; name order's
+      first four alternate posed/unposed): `/api/peek` answered four posed models, skipping
+      the unposed `(Supported)` variants. (c) Index-stopped identity was NOT exercised live
+      — stopping the user's mid-classify index was not worth it; it is pinned by the
+      byte-identity cells against `peek()` (P2's 2.4, four silent states) and by the wave's
+      index-down cells (P3's 3.2). Browser: Playwright was held by another session, so the
+      check drove a tab in the user's Chrome and closed it after
 - [x] 4.3 `web-demo-backlog` 1.2 marked drafted→applied; the bake-ordering note stays until
       the demo change lands
       — done 2026-08-31 (coordinator)
