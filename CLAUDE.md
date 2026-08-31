@@ -30,9 +30,14 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   line `library <id> at <top>` names the top actually resolved — read it
 - Semantic search needs a second server, not started by `bun run dev` (its collection root
   must lie inside the library, or the index covers nothing):
-  `cd ~/Documents/tests/mini-classify && .venv/bin/python serve_api.py --cache-dir embed-cache2 --port 8077`
-  — it answers `/status` at once with `ready:false` and 503s queries for ~16s
-  while SigLIP loads, so a connection refusal means not started, not warming
+  `cd <mini-classify checkout> && .venv/bin/python serve_api.py --cache-dir <cache> --port 8077`
+  — the checkout location and which embedding cache holds which collection are
+  machine-specific, so they live outside the repo; ask the running server's `/status`
+  which cache and root it loaded rather than assuming. It answers `/status` at once with
+  `ready:false` and 503s queries for ~16s while SigLIP loads, so a connection refusal
+  means not started, not warming — and a server that *stays* `ready:false` with a
+  `CacheUnusable` failure was started against a cache with no embeddings, which is a
+  wrong `--cache-dir`, not a warming delay
 - `bun run test` / `bun run typecheck` - vitest + tsc across workspaces
 - Launch config (open-in-slicer): `~/.config/model-browser/launch.json`, path
   overridable via `MODEL_BROWSER_LAUNCH_CONFIG` — argv-array templates for the four
