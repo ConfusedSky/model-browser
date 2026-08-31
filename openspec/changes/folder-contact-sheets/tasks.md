@@ -137,12 +137,18 @@
       new recipe; all 67 landed cell images stayed images throughout (zero spinners — the
       reconciler's carry). Flat view at the demo root: five cell/tile pairs sharing a
       path, every pair one identical blob URL
-- [ ] 3.4 Cold-media check on the real library (unmount/remount to drop the page cache): time
+- [x] 3.4 Cold-media check on the real library (unmount/remount to drop the page cache): time
       to first sheet on a folder-of-kits root, recorded in this file beside the number of
       peeks issued
-      — needs the USB volume physically remounted, so it is Masa's hands, not a session's:
-      remount, browse a folder-of-kits root, note time-to-first-sheet and the peek count
-      from the network panel here
+      — run 2026-08-31 (this session's Playwright run, immediately after Masa remounted
+      the STLLibrary volume): root `/` (26 kit folders), **first sheet at 543 ms** from
+      navigation, first cell *image* at ~2.1 s (thumbnail lookups ride the SSD cache, not
+      the volume); **12 peeks** for the tiles visible at first paint, median 33 ms,
+      max 62 ms; the listing itself 21 ms. Caveat the number honestly carries: the
+      server's own library resolve touched the marker (and possibly the root's dentries)
+      between the remount and the measurement, so "cold" is the tree below the root, not
+      every inode on the path — a fully cold worst case sits nearer the 2.4 ms/entry
+      figure `search-cancellation` records (~150 ms per 64-entry peek) than these medians
 - [x] 3.5 `docs/web-demo-notes.md`: the contact-sheet row points here; item 4 (landing)
       notes that sheets exist and flat-view-at-root is still its own question
       — done 2026-08-31; updated after the rebase: the row now says applied except 3.4
