@@ -245,8 +245,12 @@ The consumer: a tile whose entry carries `displayName` renders it as the
 label, keeps the real name in `title` (and the accessible name — the file name
 is what disambiguates two same-named parts, and what the user greps their disk
 for), and the find filter, deep search and flat matching are untouched —
-display only, which is what decided 2.3. The lightbox panel names the model
-from the same entry, so it follows without its own rule.
+display only, which is what decided 2.3. The lightbox panel's name line is
+deliberately unchanged (settled at the client half's pre-flight): it names the
+model from `entry.name` directly, generated names sit on kit directories
+rather than models, and the deltas ask nothing of it — if model-level names
+ever matter there, the entry already carries `displayName` and the change is
+one expression.
 
 The semantic routes are deliberately outside the seam (decided at the server
 half's pre-flight, 2026-08-31): `hitsToEntries` mints its own `DirEntry`s for

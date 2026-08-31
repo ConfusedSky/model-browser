@@ -97,10 +97,16 @@
       viewer unaffected); a late answer after the subject changed does not render; the
       request goes through `ApiClient` (no raw fetch)
 - [ ] 2.4 Tiles render `displayName` (D7): `Grid.tsx` labels a tile with
-      `entry.displayName ?? baseName(entry.name)` — dir, zip and model tiles alike, sheet
-      preview cells' titles included — while `title` and the accessible name keep the real
-      name (two same-named parts are told apart by the file name, and the disk is grepped
-      by it). Find, deep search and the flat filter keep matching real names — display
+      `entry.displayName ?? baseName(entry.name)` — dir, zip and model tiles alike —
+      while the **tile's own** `title` and accessible name keep the real name (two
+      same-named parts are told apart by the file name, and the disk is grepped by it).
+      A sheet preview cell has no visible label, so its `title` IS its label surface and
+      takes the display name (fallback `entry.name`, unchanged — byte-identity binds);
+      the two title roles are different, which the earlier wording conflated (settled at
+      the client pre-flight). Note the dir/zip tile's accessible name derives from its
+      contents today, so rendering a display name needs a conditional `aria-label`
+      carrying the real name — present only when a display name is, keeping store-less
+      libraries byte-identical (the pre-flight's catch). Find, deep search and the flat filter keep matching real names — display
       only (2.3's deciding question). Client tests: a named kit tile shows the stored name
       with the real name in `title`; an unnamed model beneath it keeps its file-derived
       label; the find filter matches the real name and not the stored one; no
