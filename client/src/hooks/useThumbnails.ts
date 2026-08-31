@@ -6,8 +6,7 @@ import { DEFAULT_CAMERA } from '../three/camera'
 import type { MeshLru } from '../three/lru'
 import { cameraForPose, POSE_VERSION } from '../three/pose'
 import type { RenderQueue } from '../three/queue'
-import { RIG_VERSION, renderThumbnail } from '../three/renderer'
-import { getLightingMode } from '../viewer/lighting'
+import { RIG_VERSION, renderThumbnail, THUMB_LIGHTING } from '../three/renderer'
 
 export interface ThumbState {
   status: 'loading' | 'ready' | 'error'
@@ -163,7 +162,7 @@ export function useThumbnails(
             if (
               cached.status === 'hit' &&
               cached.pngUrl !== undefined &&
-              cached.lighting === getLightingMode() &&
+              cached.lighting === THUMB_LIGHTING &&
               cached.rig === RIG_VERSION &&
               !poseStale
             ) {
@@ -175,8 +174,8 @@ export function useThumbnails(
               })
               return
             }
-            // A hit lit under another mode (or none — pre-lighting entry) is
-            // stale pixels over good camera state: re-render, but keep the old
+            // A hit carrying the retired spindle-aligned label (or none — a
+            // pre-lighting entry) is stale pixels over good camera state: re-render, but keep the old
             // PNG until the replacement exists — a failed tail falls back to
             // it rather than degrading a previously fine tile to an error.
             let staleUrl = cached.pngUrl
@@ -221,13 +220,12 @@ export function useThumbnails(
                       : null
                   const camera = cached.camera ?? posed?.camera ?? DEFAULT_CAMERA
                   const axis = cached.axis ?? posed?.axis ?? 'y'
-                  const lighting = getLightingMode() // the mode this render uses
                   const png = await renderThumbnail(object, camera, axis)
                   await api.putThumb({
                     path: entry.path,
                     mtime: entry.mtime,
                     png,
-                    lighting,
+                    lighting: THUMB_LIGHTING,
                     rig: RIG_VERSION,
                     posed: posed !== null ? POSE_VERSION : undefined,
                   })

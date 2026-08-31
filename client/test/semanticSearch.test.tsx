@@ -28,7 +28,7 @@ import {
 } from './appHarness'
 import { setSearchMode, setSearchTuning, TUNING_DEFAULTS } from '../src/lib/searchOptions'
 import { POSE_VERSION } from '../src/three/pose'
-import { RIG_VERSION } from '../src/three/renderer'
+import { RIG_VERSION, THUMB_LIGHTING } from '../src/three/renderer'
 
 vi.mock('../src/api/client', async () => (await import('./appHarness')).apiClientModule())
 vi.mock('../src/three/renderer', async (importOriginal) =>
@@ -546,11 +546,13 @@ describe('meaning search', () => {
       entries: [model('Kits/hero.stl')],
       poses: { '/models/Kits/hero.stl': POSE },
     })
-    // A cached thumbnail from before: current lighting and rig, no pose.
+    // A cached thumbnail from before: the producible lighting label and the
+    // current rig, no pose. The label must be the constant — mocking the
+    // retired 'axis' here would make this a re-render test asserting a hit.
     getThumb.mockResolvedValue({
       status: 'hit',
       pngUrl: 'blob:old',
-      lighting: 'axis',
+      lighting: THUMB_LIGHTING,
       rig: RIG_VERSION,
       posed: undefined,
     })
@@ -588,7 +590,7 @@ describe('meaning search', () => {
     getThumb.mockResolvedValue({
       status: 'hit',
       pngUrl: 'blob:mine',
-      lighting: 'axis',
+      lighting: THUMB_LIGHTING,
       rig: RIG_VERSION,
       // The user's own orientation, from an earlier orbit — and no pose label,
       // because these pixels were never posed.

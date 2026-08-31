@@ -33,8 +33,7 @@ import {
 import { AXIS_DIVIDER_CLASS, axisPillClass, flipPillClass } from '../src/lib/entryActions'
 import { DEFAULT_CAMERA } from '../src/three/camera'
 import { POSE_VERSION } from '../src/three/pose'
-import { RIG_VERSION } from '../src/three/renderer'
-import { getLightingMode } from '../src/viewer/lighting'
+import { RIG_VERSION, THUMB_LIGHTING } from '../src/three/renderer'
 
 vi.mock('../src/api/client', async () => (await import('./appHarness')).apiClientModule())
 vi.mock('../src/three/renderer', async (importOriginal) =>
@@ -141,7 +140,7 @@ function stored(axis?: OrbitAxis): void {
     pngUrl: 'blob:stored',
     camera: CAM,
     axis,
-    lighting: getLightingMode(),
+    lighting: THUMB_LIGHTING,
     rig: RIG_VERSION,
   })
 }
@@ -344,7 +343,7 @@ describe('picking a spindle', () => {
     const put = lastPut()!
     expect(put.axis).toBe('-z')
     expect(put.camera).toBeNull() // discarded, never a written default
-    expect(put.lighting).toBe(getLightingMode())
+    expect(put.lighting).toBe(THUMB_LIGHTING)
     expect(put.rig).toBe(RIG_VERSION)
     expect(put.posed).toBeUndefined()
   })
@@ -434,7 +433,7 @@ describe('picking a spindle', () => {
     getThumb.mockResolvedValue({
       status: 'hit',
       pngUrl: 'blob:stored',
-      lighting: getLightingMode(),
+      lighting: THUMB_LIGHTING,
       rig: RIG_VERSION,
       posed: POSE_VERSION, // already drawn at the pose: the sweep leaves it alone
     })

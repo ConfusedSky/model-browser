@@ -6,7 +6,6 @@ import type {
   DirEntry,
   IndexPose,
   IndexScore,
-  LightingMode,
   OrbitAxis,
 } from '../../../shared/types'
 import type { ApiClient } from '../api/client'
@@ -63,9 +62,8 @@ interface Props {
   /** Which scale `score` is on — the same derivation the tile reads, so the two
    *  surfaces cannot report the number under different names (D7). */
   scoreScale: ScoreScale | null
-  /** Active lighting mode — a prop (not read from the store) so toggling repaints the live view. */
-  lighting: LightingMode
-  /** Ambient occlusion on/off — a prop for the same reason as `lighting`. */
+  /** Ambient occlusion on/off — a prop (not read from the store) so toggling
+   *  repaints the live view. */
   ao: boolean
   api: ApiClient
   lru: MeshLru<THREE.Object3D>
@@ -171,7 +169,6 @@ export default function ViewerLayer({
   pose,
   score,
   scoreScale,
-  lighting,
   ao,
   api,
   lru,
@@ -320,7 +317,7 @@ export default function ViewerLayer({
   }, [viewer.entry.path, lru])
 
   // Attach the shared canvas and render whenever session/mode/size changes —
-  // and on a lighting-mode or AO toggle, so the switch is visible without a drag.
+  // and on an AO toggle, so the switch is visible without a drag.
   useEffect(() => {
     if (session === null) return
     const host = canvasHostRef.current
@@ -335,7 +332,7 @@ export default function ViewerLayer({
       if (canvas.parentElement === host) host.removeChild(canvas)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, viewer.mode, lighting, ao])
+  }, [session, viewer.mode, ao])
 
   function renderNow(): void {
     const s = sessionRef.current

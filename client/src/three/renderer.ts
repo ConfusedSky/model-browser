@@ -3,9 +3,8 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
-import type { CameraState, OrbitAxis } from '../../../shared/types'
-import { getLightingMode } from '../viewer/lighting'
-import { applyState, boundsOf, DEFAULT_CAMERA, frameFor, rigQuaternion, type Bounds } from './camera'
+import type { CameraState, LightingMode, OrbitAxis } from '../../../shared/types'
+import { applyState, boundsOf, DEFAULT_CAMERA, frameFor, type Bounds } from './camera'
 
 export const THUMB_SIZE = 512
 
@@ -18,6 +17,16 @@ export const THUMB_SIZE = 512
  * 5 = screen-space ambient occlusion, 6 = STL normals from winding.
  */
 export const RIG_VERSION = 6
+
+/**
+ * The lighting label every render writes, beside `RIG_VERSION` because it is
+ * the other recipe input the cache key does not carry. `LightingMode` is a
+ * legacy label type with one producible value: the rig is fixed in camera
+ * space and nothing chooses otherwise, so `'camera'` is all a client can write.
+ * A cached entry labelled anything else was rendered by a build that still had
+ * the retired spindle-aligned mode, and is stale (D2).
+ */
+export const THUMB_LIGHTING = 'camera' satisfies LightingMode
 
 /**
  * The app's single WebGL context (design D2/D3): one WebGLRenderer shared by
@@ -366,8 +375,10 @@ export function renderThumbnail(
   const { bounds, pivot, floor } = stageModel(lit, object, axis)
   const camera = new THREE.PerspectiveCamera(40, 1)
   applyState(camera, state, bounds, axis)
-  if (getLightingMode() === 'camera') rig.quaternion.copy(camera.quaternion)
-  else rig.quaternion.copy(rigQuaternion(axis))
+  // The rig is fixed in the rest camera's frame, unconditionally — the same
+  // orientation the live view hands off at (D1). The contact floor stays in the
+  // spindle frame, laid by stageModel: that is geometry, not lighting.
+  rig.quaternion.copy(camera.quaternion)
 
   const chain = getThumbChain()
   const prevTarget = r.getRenderTarget()

@@ -14,9 +14,15 @@
   pins the expected value; everywhere else tracks it via the spread)
 - `main button` is not "a tile" — the results header carries controls too. Use the harness's
   `tiles()` (`main .grid button`); a looser selector reports affordances as entries
-- Preference modules (`lighting.ts`, `aoToggle.ts`, `lib/searchOptions.ts`) hold state in a
+- Preference modules (`aoToggle.ts`, `lib/searchOptions.ts`) hold state in a
   module closure: `localStorage.clear()` does not reset them and tests inherit each other's
   settings. Reset via their setters in `beforeEach`, or re-import after `vi.resetModules()`
+- Lighting is no longer a preference: the rig is fixed in camera space and
+  `THUMB_LIGHTING` (three/renderer.ts, beside `RIG_VERSION`) is the one value a client can
+  write into a thumbnail's `lighting` label. Assert it through the constant, never a
+  literal — and never mock a cache hit as `lighting: 'axis'` to mean "the current mode":
+  `'axis'` is the retired label and now reads as *stale*, which silently inverts a test
+  that asserts a hit with no render into one that asserts a re-render loop it wanted absent
 - Reading a source file as text: the client workspace has no `@types/node`, so `node:fs`
   does not typecheck, and happy-dom replaces global `URL` (so `fileURLToPath(new URL(...))`
   fails "must be of scheme file"). Import it through Vite instead — `import CSS from

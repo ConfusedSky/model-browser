@@ -6,7 +6,6 @@ import type {
   IndexPose,
   IndexScore,
   LibraryState,
-  LightingMode,
   OrbitAxis,
 } from '../../shared/types'
 import { HttpApiClient, HttpError } from './api/client'
@@ -80,10 +79,9 @@ import { MeshLru } from './three/lru'
 import { disposeModel, embedded3mfThumbnail, formatOf, geometryBytes, parseModel } from './three/models'
 import { POSE_VERSION } from './three/pose'
 import { RenderQueue } from './three/queue'
-import { RIG_VERSION } from './three/renderer'
+import { RIG_VERSION, THUMB_LIGHTING } from './three/renderer'
 import ViewerLayer, { type ViewerState } from './viewer/ViewerLayer'
 import { aoEnabled, setAoEnabled } from './viewer/aoToggle'
-import { getLightingMode, LIGHTING_MODES, setLightingMode } from './viewer/lighting'
 import type { ViewerSession } from './viewer/session'
 
 /**
@@ -499,7 +497,6 @@ export default function App() {
     clearTimeout(viewerErrorTimerRef.current)
     setViewerError(null)
   }, [viewer?.entry.path])
-  const [lighting, setLightingState] = useState<LightingMode>(getLightingMode)
   // AO preference pill state (persisted per browser profile, aoToggle.ts).
   const [ao, setAoState] = useState(aoEnabled)
   const trackerRef = useRef(new GestureTracker())
@@ -1691,10 +1688,9 @@ export default function App() {
       const entry = viewer?.entry
       if (entry === undefined) return
       try {
-        // Capture before the await: a rapid axis change or lighting toggle
-        // mid-snapshot must not pair this PNG with newer values in one PUT.
+        // Capture before the await: a rapid axis change mid-snapshot must not
+        // pair this PNG with newer values in one PUT.
         const { state, axis } = session
-        const lighting = getLightingMode()
         const png = await session.snapshot()
         const url = URL.createObjectURL(png)
         // Decode before applying, so when this promise resolves the tile's
@@ -1720,7 +1716,7 @@ export default function App() {
             // index's suggestion into their sidecar.
             camera: opts.camera === false ? undefined : state,
             axis: opts.camera === false ? undefined : axis,
-            lighting,
+            lighting: THUMB_LIGHTING,
             rig: RIG_VERSION,
             // The pose is an input to these pixels the cache key does not
             // carry, exactly like `rig`. Declining the camera usually says the
@@ -2156,28 +2152,11 @@ export default function App() {
           onMode={setMode}
         />
       </div>
-      {/* Corner pill: the EXPERIMENTAL lighting-mode picker (remove those buttons
-          once a winner is chosen) plus the SHIPPED ssao preference — the container
-          outlives the lighting experiment. */}
+      {/* Corner pill: the SHIPPED ssao preference. The experimental picker it
+          was built around is gone with the retired spindle-aligned rig — one
+          orientation leaves nothing to choose — and the container outlived it. */}
       <div className="fixed bottom-3 left-3 z-50 flex items-center gap-1 rounded-full border border-zinc-700 bg-zinc-900/90 p-1 text-xs">
-        <span className="px-2 text-zinc-500">light</span>
-        {LIGHTING_MODES.map((m) => (
-          <button
-            key={m}
-            type="button"
-            onClick={() => {
-              setLightingMode(m)
-              setLightingState(m)
-            }}
-            className={`rounded-full px-2.5 py-1 ${
-              m === lighting ? 'bg-sky-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
-            {m}
-          </button>
-        ))}
         {/* Ambient occlusion on/off, live view only — a per-profile performance preference */}
-        <span className="h-4 w-px bg-zinc-700" />
         <button
           type="button"
           aria-pressed={ao}
@@ -2225,7 +2204,6 @@ export default function App() {
           // came to be missing here in the first place.
           score={scoreFor(viewer.entry.path)}
           scoreScale={scoreScale}
-          lighting={lighting}
           ao={ao}
           api={api}
           lru={lru}

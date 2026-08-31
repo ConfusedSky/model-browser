@@ -45,8 +45,7 @@ import { DEFAULT_CAMERA } from '../three/camera'
 import type { MeshLru } from '../three/lru'
 import { cameraForPose, POSE_VERSION } from '../three/pose'
 import type { RenderQueue } from '../three/queue'
-import { RIG_VERSION, renderThumbnail } from '../three/renderer'
-import { getLightingMode } from '../viewer/lighting'
+import { RIG_VERSION, renderThumbnail, THUMB_LIGHTING } from '../three/renderer'
 
 /** One id per command. The closed list is the menu's budget (D6). */
 export type CommandId =
@@ -403,7 +402,6 @@ function refreshThumbnail(
       // when the stored axis goes with it.
       const dropAxis = discardFraming && posed
 
-      const lighting = getLightingMode() // the mode this render uses
       const object = await host.lru.acquire(entry.path)
       await host.queue.whenResumed()
       const png = await renderThumbnail(object, camera, axis)
@@ -421,7 +419,7 @@ function refreshThumbnail(
         // fails the hit test forever and re-renders the tile on every visit.
         camera: discardFraming ? null : undefined,
         axis: dropAxis ? null : undefined,
-        lighting,
+        lighting: THUMB_LIGHTING,
         rig: RIG_VERSION,
         posed: posed ? POSE_VERSION : undefined,
       })
@@ -643,14 +641,11 @@ export function setOrbitAxis(
       // alone cannot stop a job that has already started (queue.ts's waiters gate), and
       // there is one WebGLRenderer app-wide (architecture D2/D3).
       await host.queue.whenResumed()
-      const lighting = getLightingMode() // the mode this render uses
       const object = await host.lru.acquire(entry.path)
       await host.queue.whenResumed()
       // The default about the new spindle — which is what an ordinary visit
       // resolves to for a model that has an axis and no camera
       // (`useThumbnails`' camera/axis fallbacks), so the tile and the next sweep agree.
-      // `renderThumbnail` also hands the axis to the rig, so axis-mode lighting
-      // follows the new spindle rather than the old one.
       const png = await renderThumbnail(object, DEFAULT_CAMERA, axis)
       await host.api.putThumb({
         path: entry.path,
@@ -658,7 +653,7 @@ export function setOrbitAxis(
         png,
         camera: null,
         axis,
-        lighting,
+        lighting: THUMB_LIGHTING,
         rig: RIG_VERSION,
       })
       // The session's own copy, not only the server's: App opens the lightbox at

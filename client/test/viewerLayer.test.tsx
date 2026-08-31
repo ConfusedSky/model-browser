@@ -36,7 +36,6 @@ function makeProps(mode: 'orbit' | 'lightbox') {
     pose: undefined,
     score: undefined as IndexScore | undefined,
     scoreScale: null as ScoreScale | null,
-    lighting: 'axis' as const,
     ao: true,
     api: {
       getThumb: vi.fn().mockRejectedValue(new Error('offline')),

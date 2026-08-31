@@ -81,7 +81,7 @@ describe('AO toggle', () => {
     session.close()
   })
 
-  it('persists the preference per profile, like the lighting mode', () => {
+  it('persists the preference per profile', () => {
     setAoEnabled(false)
     expect(localStorage.getItem('model-browser:ao-enabled')).toBe('off')
     setAoEnabled(true)

@@ -27,8 +27,7 @@ import {
 } from '../src/lib/entryActions'
 import { DEFAULT_CAMERA } from '../src/three/camera'
 import { cameraForPose } from '../src/three/pose'
-import { RIG_VERSION } from '../src/three/renderer'
-import { getLightingMode } from '../src/viewer/lighting'
+import { RIG_VERSION, THUMB_LIGHTING } from '../src/three/renderer'
 import {
   apps,
   click,
@@ -492,7 +491,7 @@ describe('reset framing from the panel', () => {
       camera: STORED,
       axis: 'y',
       pngUrl: 'blob:stored',
-      lighting: getLightingMode(),
+      lighting: THUMB_LIGHTING,
       rig: RIG_VERSION,
     })
     await mountAppAtCurrentUrl('/?path=%2Fmodels&model=%2Fmodels%2FAlpha%2Ffound.stl', NESTED)

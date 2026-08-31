@@ -73,7 +73,7 @@ vi.mock('../src/viewer/ViewerLayer', () => ({
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 const { default: App } = await import('../src/App')
-const { RIG_VERSION } = await import('../src/three/renderer')
+const { RIG_VERSION, THUMB_LIGHTING } = await import('../src/three/renderer')
 const { POSE_VERSION } = await import('../src/three/pose')
 
 const MODEL = {
@@ -102,7 +102,7 @@ beforeEach(async () => {
   listDir.mockReset()
   listDir.mockResolvedValue(LISTING)
   getThumb.mockReset()
-  getThumb.mockResolvedValue({ status: 'hit', pngUrl: 'blob:t', lighting: 'axis', rig: RIG_VERSION })
+  getThumb.mockResolvedValue({ status: 'hit', pngUrl: 'blob:t', lighting: THUMB_LIGHTING, rig: RIG_VERSION })
   putThumb.mockReset()
   putThumb.mockResolvedValue(undefined)
   container = document.createElement('div')
@@ -141,7 +141,7 @@ describe('orbit-release persist PUT', () => {
     expect(save.png).toBeInstanceOf(Blob)
     expect(save.camera).toEqual(SETTLED)
     expect(save.axis).toBe('-z')
-    expect(save.lighting).toBe('axis')
+    expect(save.lighting).toBe(THUMB_LIGHTING)
     expect(save.rig).toBe(RIG_VERSION)
     expect(save.posed).toBeUndefined()
   })

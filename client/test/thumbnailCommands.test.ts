@@ -27,8 +27,7 @@ import {
 import { DEFAULT_CAMERA } from '../src/three/camera'
 import { cameraForPose, POSE_VERSION } from '../src/three/pose'
 import { RenderQueue } from '../src/three/queue'
-import { RIG_VERSION } from '../src/three/renderer'
-import { getLightingMode, setLightingMode } from '../src/viewer/lighting'
+import { RIG_VERSION, THUMB_LIGHTING } from '../src/three/renderer'
 
 // The command reaches the shared renderer only through `renderThumbnail`.
 // Spread the real module so RIG_VERSION arrives real — a literal here would go
@@ -113,7 +112,6 @@ const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
 beforeEach(() => {
   renderThumbnail.mockClear()
   // A module-closure preference: it does not reset between files.
-  setLightingMode('axis')
 })
 
 describe('re-render thumbnail', () => {
@@ -133,7 +131,7 @@ describe('re-render thumbnail', () => {
     // But the pixels' own labels are not optional. cache.ts clears every label
     // a PNG-bearing PUT omits, so an unlabelled write would fail the hit test
     // forever and re-render this tile on every single visit.
-    expect(put.lighting).toBe(getLightingMode())
+    expect(put.lighting).toBe(THUMB_LIGHTING)
     expect(put.rig).toBe(RIG_VERSION)
     expect(put.posed).toBeUndefined() // nothing was posed
     expect(h.setThumb).toHaveBeenCalledWith(HERO.path, {
@@ -194,7 +192,7 @@ describe('reset framing', () => {
     expect(put.axis).toBeNull()
     expect(put.posed).toBe(POSE_VERSION)
     expect(put.rig).toBe(RIG_VERSION)
-    expect(put.lighting).toBe(getLightingMode())
+    expect(put.lighting).toBe(THUMB_LIGHTING)
     // The session's own copy, so the lightbox opens where the tile now shows.
     expect(h.setThumb).toHaveBeenCalledWith(HERO.path, {
       status: 'ready',
@@ -281,7 +279,7 @@ describe('set orbit axis', () => {
     // The labels that describe these pixels — and no `posed`: a stored axis
     // takes the model out of pose framing altogether, which is what choosing
     // an axis means.
-    expect(put.lighting).toBe(getLightingMode())
+    expect(put.lighting).toBe(THUMB_LIGHTING)
     expect(put.rig).toBe(RIG_VERSION)
     expect(put.posed).toBeUndefined()
     // The session's own copy, so the lightbox opens about the new spindle now.

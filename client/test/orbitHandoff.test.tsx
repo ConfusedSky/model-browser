@@ -59,7 +59,6 @@ function makeProps() {
       pose: undefined as IndexPose | undefined,
       score: undefined as IndexScore | undefined,
       scoreScale: null as ScoreScale | null,
-      lighting: 'axis' as const,
       ao: true,
       api: { getThumb: vi.fn().mockResolvedValue({ status: 'miss' }) } as unknown as ApiClient,
       lru: { acquire: vi.fn().mockResolvedValue(mesh) } as unknown as MeshLru<THREE.Object3D>,

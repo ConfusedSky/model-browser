@@ -30,8 +30,7 @@ import {
 } from './appHarness'
 import { DEFAULT_CAMERA } from '../src/three/camera'
 import { cameraForPose } from '../src/three/pose'
-import { RIG_VERSION } from '../src/three/renderer'
-import { getLightingMode } from '../src/viewer/lighting'
+import { RIG_VERSION, THUMB_LIGHTING } from '../src/three/renderer'
 
 vi.mock('../src/api/client', async () => (await import('./appHarness')).apiClientModule())
 vi.mock('../src/three/renderer', async (importOriginal) =>
@@ -143,7 +142,7 @@ describe('reset framing moves where the lightbox opens the model', () => {
       pngUrl: 'blob:stored',
       camera: CAM,
       axis: '-x',
-      lighting: getLightingMode(),
+      lighting: THUMB_LIGHTING,
       rig: RIG_VERSION,
     })
     await mountApp('/models', NESTED)
@@ -182,7 +181,7 @@ describe('the index’s orientation reaches the command', () => {
       poses: { '/models/Kits/neighbour.stl': POSE },
     })
     listDir.mockResolvedValue(NESTED)
-    getThumb.mockResolvedValue({ status: 'hit', pngUrl: 'blob:s', camera: CAM, axis: '-x', lighting: getLightingMode(), rig: RIG_VERSION })
+    getThumb.mockResolvedValue({ status: 'hit', pngUrl: 'blob:s', camera: CAM, axis: '-x', lighting: THUMB_LIGHTING, rig: RIG_VERSION })
     await mountAppAtCurrentUrl(`/?path=/models&similar=${encodeURIComponent(hero)}`, NESTED)
     await settle()
     expect(tiles()).toHaveLength(1)
