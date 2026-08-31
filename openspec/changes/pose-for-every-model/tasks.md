@@ -138,5 +138,6 @@
 - [ ] 4.2 Live: a plain listing of unowned models stands them up within one queue pass,
       images kept meanwhile; contact sheets over a mixed folder show posed models first;
       index stopped → listings and peeks behave exactly as today
-- [ ] 4.3 `web-demo-backlog` 1.2 marked drafted→applied; the bake-ordering note stays until
+- [x] 4.3 `web-demo-backlog` 1.2 marked drafted→applied; the bake-ordering note stays until
       the demo change lands
+      — done 2026-08-31 (coordinator)

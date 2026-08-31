@@ -15,7 +15,9 @@
       lightbox credits panel that reads it; generation of the demo's entries from
       `metadata/miniatures.json`. Hard ordering: after `library-root` (keys are library
       paths, the file lives beside the marker)
-- [x] 1.2 *(drafted 2026-08-31 as `pose-for-every-model` — proposal, design, two deltas
+- [x] 1.2 *(drafted and applied 2026-08-31 as `pose-for-every-model` — three workers: the
+      mini-classify `/poses` call (`f074334` there), the server proxy + posed-first peek, and
+      the client wave; live check and archive pending the index restart — proposal, design, two deltas
       (listing-wide pose supply; contact sheets prefer posed models, Masa's 2026-08-31 ask),
       tasks incl. the cross-repo `/poses` endpoint; validates and archive-dry-runs clean;
       the line below is the original)* pose-for-every-model — was the other session's; now owned here. Every tile is
