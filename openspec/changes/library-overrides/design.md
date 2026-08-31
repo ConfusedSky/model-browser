@@ -248,6 +248,14 @@ for), and the find filter, deep search and flat matching are untouched —
 display only, which is what decided 2.3. The lightbox panel names the model
 from the same entry, so it follows without its own rule.
 
+The semantic routes are deliberately outside the seam (decided at the server
+half's pre-flight, 2026-08-31): `hitsToEntries` mints its own `DirEntry`s for
+`/api/semantic` and `/api/semantic/similar`, but the delta names its listing
+shapes on purpose — browse, flat/deep search, peek — and hits are models while
+generated names are kit-level, so a semantic result would almost never carry
+one. If model-level names ever matter there, extending `applyDisplayNames`
+over those two routes is a two-line follow-up, not a redesign.
+
 ## Risks / Trade-offs
 
 - [Read-once staleness: the generator runs while a server is up] → the same
