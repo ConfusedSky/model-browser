@@ -42,8 +42,15 @@ export interface CameraState {
 export type ThumbStatus = 'hit' | 'stale' | 'miss'
 
 /**
- * How the light rig is oriented: 'axis' aligns it to the model's spindle,
- * 'camera' fixes it in camera space (headlight). Global client setting.
+ * The lighting label a thumbnail carries — a legacy label type with one
+ * producible value.
+ *
+ * `remove-axis-lighting` retired the spindle-aligned rig: every render writes
+ * `'camera'` and the server refuses a PUT declaring anything else. `'axis'`
+ * stays in the union because entries written before that change must remain
+ * readable and echoed — the cache stores and echoes the label without
+ * interpreting it, and a stored `'axis'` is how a client knows those pixels
+ * are stale. It is never written anew.
  */
 export type LightingMode = 'axis' | 'camera'
 

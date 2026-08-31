@@ -23,7 +23,14 @@ import { VPathError } from './vpath'
 import { ZipError, extractEntry } from './zip'
 
 const ORBIT_AXES: readonly OrbitAxis[] = ['x', '-x', 'y', '-y', 'z', '-z']
-const LIGHTING_MODES: readonly LightingMode[] = ['axis', 'camera']
+/**
+ * The one lighting label a client can produce. Not a list: `remove-axis-lighting`
+ * left `LightingMode` a two-value union so entries written under the retired
+ * spindle-aligned rig stay readable, and a `LIGHTING_MODES` array would say the
+ * server still accepts both. A GET echoes whatever the cache holds, `'axis'`
+ * included; only writes are narrowed.
+ */
+const PRODUCIBLE_LIGHTING: LightingMode = 'camera'
 
 /**
  * How an `IndexError` reaches the client — one mapping, shared by both scoring
@@ -521,7 +528,7 @@ export function createApp(
     if (body.axis !== undefined && body.axis !== null && !ORBIT_AXES.includes(body.axis)) {
       return c.json({ error: `invalid axis: ${String(body.axis)}` }, 400)
     }
-    if (body.lighting !== undefined && !LIGHTING_MODES.includes(body.lighting)) {
+    if (body.lighting !== undefined && body.lighting !== PRODUCIBLE_LIGHTING) {
       return c.json({ error: `invalid lighting: ${String(body.lighting)}` }, 400)
     }
     if (body.rig !== undefined && typeof body.rig !== 'number') {

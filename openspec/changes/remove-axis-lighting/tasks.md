@@ -36,9 +36,16 @@
       the PUT writes it. `lib/entryActions.ts`: both re-render commands write the constant.
       `App.tsx` `persist` (the orbit-release / lightbox-close snapshot PUT) writes it too —
       the fifth read site, the one a grep for `getLightingMode` finds last
-- [ ] 2.3 `shared/types.ts`: `LightingMode` documented as a legacy label type — `'axis'` is
+- [x] 2.3 `shared/types.ts`: `LightingMode` documented as a legacy label type — `'axis'` is
       readable from old entries, never written. `server/src/app.ts`: `LIGHTING_MODES`
       becomes the single producible value; a PUT declaring `axis` is a 400
+      — done 2026-08-31 (RAL-S): `LightingMode` keeps `'axis' | 'camera'` with the doc
+      comment naming this change; `LIGHTING_MODES` is now the scalar `PRODUCIBLE_LIGHTING`
+      (`'camera'`) and the PUT compares against it. Covered by `api.test.ts` "refuses a put
+      declaring the retired axis lighting label" (400 + `{error:'invalid lighting: axis'}`),
+      "put stores the lighting mode and get serves it back" (the accepted side), and
+      "echoes a stored axis label on hits and on stale reads". Falsified by reverting the
+      narrowing: the refusal test failed `expected 200 to be 400`
 - [ ] 2.4 Tests: server `api.test.ts` — PUT with `axis` refused, PUT with `camera`
       accepted, a stored `axis` entry is still echoed on GET. Client
       `thumbnailQueue`/`persistPut`/`thumbnailCommands`/`thumbnailActions` — the label
@@ -50,6 +57,12 @@
       aimed is left alone, pose or no pose" mocks `lighting: 'axis'` and asserts a hit),
       `orbitAxisMenu.test.tsx`, `apiClient.test.ts`, `server/test/cache.test.ts` — and
       `client/test/CLAUDE.md`'s lighting note
+      — server half done 2026-08-31 (RAL-S): `api.test.ts` gained the axis refusal (status
+      and error body) and the stored-`axis` echo on both a hit and a stale read, camera and
+      axis preserved. `server/test/cache.test.ts` needed no edit: it has **no** `'axis'`
+      lighting occurrence — both of its lighting fixtures already use `'camera'`, and
+      neither is a "current mode" stand-in that this change would invert. Box left open for
+      the client half (RAL-C)
 
 ## 3. The pill and the prop (D1, D4)
 

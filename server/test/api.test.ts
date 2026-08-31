@@ -314,6 +314,8 @@ describe('thumbnail cache API', () => {
   })
 
   it('put stores the lighting mode and get serves it back', async () => {
+    // 'camera' is the one label a client can produce (remove-axis-lighting D2);
+    // this is the accepted side of the refusal two tests below.
     const put = await app.request('/api/thumb', {
       method: 'PUT',
       headers: { ...LOOPBACK, 'content-type': 'application/json' },
@@ -331,6 +333,52 @@ describe('thumbnail cache API', () => {
       body: JSON.stringify({ path, mtime: 111, lighting: 'disco' }),
     })
     expect(put.status).toBe(400)
+  })
+
+  it('refuses a put declaring the retired axis lighting label', async () => {
+    // `LightingMode` still admits 'axis' so old entries stay readable, so the
+    // type alone does not stop a client writing one. The route is where the
+    // "one producible value" rule lives (remove-axis-lighting D2), and it
+    // refuses with the same shape every other invalid field uses.
+    const put = await app.request('/api/thumb', {
+      method: 'PUT',
+      headers: { ...LOOPBACK, 'content-type': 'application/json' },
+      body: JSON.stringify({ path, mtime: 111, png, lighting: 'axis' }),
+    })
+    expect(put.status).toBe(400)
+    expect(await put.json()).toEqual({ error: 'invalid lighting: axis' })
+  })
+
+  it('echoes a stored axis label on hits and on stale reads', async () => {
+    // Written through the cache, not the route: the route no longer has a way
+    // to produce this entry, and it is precisely the entry a machine whose
+    // cache predates remove-axis-lighting still holds. The server stores and
+    // echoes the label without interpreting it — deciding it is stale is the
+    // client's job, and it cannot make that call on a label it never sees.
+    const legacy = '/legacy-axis.stl'
+    await cache.put(legacy, {
+      mtime: 111,
+      png: Buffer.from('fake-png-bytes'),
+      camera,
+      axis: '-z',
+      lighting: 'axis',
+    })
+
+    const hit = (await (
+      await get(`/api/thumb?path=${encodeURIComponent(legacy)}&mtime=111`)
+    ).json()) as ThumbGetResponse
+    expect(hit.status).toBe('hit')
+    expect(hit.lighting).toBe('axis')
+    expect(hit.png).toBe(png)
+
+    const stale = (await (
+      await get(`/api/thumb?path=${encodeURIComponent(legacy)}&mtime=222`)
+    ).json()) as ThumbGetResponse
+    expect(stale.status).toBe('stale')
+    expect(stale.lighting).toBe('axis')
+    // Camera and axis survive the staleness, so the re-render can keep them.
+    expect(stale.camera).toEqual(camera)
+    expect(stale.axis).toBe('-z')
   })
 
   it('put stores the rig version and get serves it back', async () => {
