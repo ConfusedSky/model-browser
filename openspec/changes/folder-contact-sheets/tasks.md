@@ -11,16 +11,16 @@
 
 > No `RIG_VERSION` bump — no new render, four existing ones in a CSS grid.
 
-> **Partial application, 2026-08-31 (Masa's call):** the hard ordering above is knowingly
-> broken for everything except D3. `ao-refreshes-thumbnails` (0/24) and
-> `ao-as-recipe-dimension`'s client half were unlanded, and nothing here is *textually*
-> unmergeable against them — this change never edits `useThumbnails.ts`, only feeds it —
-> so §1, 2.1's mechanics, 2.2, 2.3 and the non-D3 parts of 2.4 were applied now. Deferred
-> until `ao-refreshes-thumbnails`' reconciler lands: 2.4's no-reset-across-a-peek-landing
-> assertions (either direction — no such test exists yet, on purpose), 3.3, and the live
-> checks 3.2/3.4. Until then a peek landing visibly resets the grid to spinners
-> (`useThumbnails`' load effect resets every tile on an entries identity change) — a known,
-> accepted defect, not a regression to hunt.
+> **Partial application, 2026-08-31 (Masa's call), closed the same day:** the hard
+> ordering above was knowingly broken for everything except D3 while
+> `ao-refreshes-thumbnails` was unlanded — nothing here edits `useThumbnails.ts`, only
+> feeds it, so §1, 2.1's mechanics, 2.2, 2.3 and the non-D3 parts of 2.4 were applied
+> first, with a peek landing visibly resetting the grid as a known accepted defect.
+> The reconciler landed later that day; this branch rebased onto it (one conflict, the
+> `thumbEntries` memo comment — reconciler wording kept, previews-append body kept), the
+> deferred D3 assertions were written and falsified against the reconciler's
+> survivor-keep, and 3.2/3.3 were run live. Only 3.4 (cold-media, physical remount)
+> remains open.
 
 ## 1. Server: the peek (D2)
 
@@ -62,7 +62,8 @@
       resets nothing (D3; a second instance was tried on paper and has the same defect one
       level down, plus two wholesale rankings and an unreachable `setPlaceholder`)
       — mechanics applied 2026-08-31 (commit "Lets a folder tile show what is inside it,
-      once per listing"); the D3 clause waits on `ao-refreshes-thumbnails` (header note).
+      once per listing"); the D3 clause landed with the rebase onto
+      `ao-refreshes-thumbnails`' reconciler (header note).
       "Cleared on navigation" landed as cleared on **`entries` identity**, not
       `state.result` — see design D1's recorded decision (`patch` spreads the result on
       fetchless view changes); the same reference is the stale-landing generation token.
@@ -92,7 +93,13 @@
       pre-existing state is untouched across a peek response and only the added paths
       issue lookups); an embedded-3MF placeholder shows in a sheet cell as it would on a
       tile; the map clears on navigation
-      — all but the no-reset clause done 2026-08-31, `client/test/folderSheets.test.tsx`
+      — done 2026-08-31 in two passes, `client/test/folderSheets.test.tsx`. The no-reset
+      family landed after the rebase onto the reconciler: two cells — only added paths
+      issue lookups with every shown tile and sheet cell keeping its DOM *node* (a reset
+      would mint a new `<img>`), and an in-flight render surviving a peek landing
+      uncancelled — both falsified against the reconciler's survivor-keep (`useThumbnails`'
+      ao/pose `continue` disabled → the lookup slice picks up pre-existing paths; the
+      in-flight cell counts 2 where 1 is promised). Earlier pass and its notes below.
       (13 cells; suite 536 green). The no-reset assertions are the deferred D3 family
       (header note) — the file's own header says the omission is a decision, and no cell
       asserts either direction. Falsified: the once-per-listing guard (removed → the
@@ -112,16 +119,30 @@
 
 - [x] 3.1 `bun run test` / `bun run typecheck` clean
       — run 2026-08-31 on the merged branch (both worker commits cherry-picked onto main
-      `e14b24e`): server 326 passed | 3 skipped, client 536 passed, both typechecks exit 0
-- [ ] 3.2 Live on the demo corpus root (`clustered-hq`, 297 kits): the first screen fills
+      `e14b24e`): server 326 passed | 3 skipped, client 536 passed, both typechecks exit 0.
+      Re-run after the rebase onto the reconciler: server 331 | 3 skipped, client 564, clean
+- [x] 3.2 Live on the demo corpus root (`clustered-hq`, 297 kits): the first screen fills
       with sheets viewport-first; the listing request's timing is unchanged from before
       (network panel); scrolling issues peeks for folders as they appear and no others
-- [ ] 3.3 Live with the AO pill: toggling re-renders sheet cells along with tiles
+      — run 2026-08-31, Playwright against the worktree dev pair rooted at clustered-hq:
+      297 dir tiles, 12 peeks on first paint (the tiles visible at first paint; tiles grow
+      as sheets fill), one `/api/dir` at 35 ms, peeks ~11 ms; scrolling the `main`
+      scroller (the window does not scroll — a `window.scrollBy` probe measured a no-op
+      before the real one) by 1600 px issued exactly 10 new peeks, every one for a
+      then-visible folder, sheets 12 → 22
+- [x] 3.3 Live with the AO pill: toggling re-renders sheet cells along with tiles
       (`ao-refreshes-thumbnails`), and a sheet cell and its model tile show identical images
+      — run 2026-08-31, same session: the toggle issued 21 `ao=off` thumb lookups
+      including the observed sheet cell's path; that cell's image was replaced under the
+      new recipe; all 67 landed cell images stayed images throughout (zero spinners — the
+      reconciler's carry). Flat view at the demo root: five cell/tile pairs sharing a
+      path, every pair one identical blob URL
 - [ ] 3.4 Cold-media check on the real library (unmount/remount to drop the page cache): time
       to first sheet on a folder-of-kits root, recorded in this file beside the number of
       peeks issued
+      — needs the USB volume physically remounted, so it is Masa's hands, not a session's:
+      remount, browse a folder-of-kits root, note time-to-first-sheet and the peek count
+      from the network panel here
 - [x] 3.5 `docs/web-demo-notes.md`: the contact-sheet row points here; item 4 (landing)
       notes that sheets exist and flat-view-at-root is still its own question
-      — done 2026-08-31; both edits say the application is partial and point at this
-      file's header note for what waits on `ao-refreshes-thumbnails`
+      — done 2026-08-31; updated after the rebase: the row now says applied except 3.4
