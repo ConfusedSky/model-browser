@@ -66,12 +66,18 @@
 
 ## 3. Docs and verification
 
-- [ ] 3.1 `CLAUDE.md` architecture line "Any change that alters thumbnail pixel output …
+- [x] 3.1 `CLAUDE.md` architecture line "Any change that alters thumbnail pixel output …
       must bump RIG_VERSION" gains: a new recipe *dimension* is a new key, not a bump
-- [ ] 3.2 `docs/web-demo-notes.md` item 8: mark the two-variant cache as drafted here; the
+      — done 2026-08-31 (coordinator)
+- [x] 3.2 `docs/web-demo-notes.md` item 8: mark the two-variant cache as drafted here; the
       demo bake runs the sweep under each preference (deployment change)
-- [ ] 3.3 Archive dry run on a fresh copy in order: `library-root`, `remove-axis-lighting`,
+      — done 2026-08-31 (coordinator): the "Design that falls out" passage names this
+      change and the per-preference bake sweep
+- [x] 3.3 Archive dry run on a fresh copy in order: `library-root`, `remove-axis-lighting`,
       this — the `model-viewer` MODIFIED must carry all seven scenario titles
+      — done 2026-08-31 (coordinator): `library-root` archived for real (`7a872c7`), so the
+      fresh-copy run was `remove-axis-lighting` → this → `ao-refreshes-thumbnails`, all
+      three archiving cleanly in order (the /opsx:update verification's run, same day)
 - [ ] 3.4 `bun run test` / `bun run typecheck` clean; live: with the pill off, visit a
       directory — every tile renders once and PUTs `ao:false`; toggle on — hits, no PUTs;
       toggle off again — hits, no PUTs; press a tile in each state — no shading change at

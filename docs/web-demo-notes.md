@@ -257,9 +257,11 @@ own origin"; only its body hardcodes loopback.
    `posed` are echoed and gated client-side. Design that falls out: **AO
    becomes a thumbnail recipe dimension like lighting** (thumbnails follow the
    preference; the "always with occlusion" clause is rewritten) and **the
-   cache key includes the recipe variant** — locally, switching keeps the
+   cache key includes the recipe variant** — drafted as `ao-as-recipe-dimension`
+   (two-render sibling cache, no migration; being implemented 2026-08-31) —
+   locally, switching keeps the
    other variant (instant switch-back, LRU-bounded); on the demo, bake both
-   AO variants at one lighting mode (~270 MB each at the observed ~120 KB/PNG;
+   AO variants (the deployment change's sweep runs once per preference) at one lighting mode (~270 MB each at the observed ~120 KB/PNG;
    1,705 cached here = 205 MB). Keyed-by-recipe would also allow the lighting
    menu to stay visible on the demo if all four variants were baked (~1.1 GB)
    — moot if item 9 removes the lighting pill. Hard ordering: after

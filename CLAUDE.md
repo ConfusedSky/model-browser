@@ -119,7 +119,9 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   rejected by design (D6)
 - Any change that alters thumbnail pixel output (rig lights, materials, tone mapping) must
   bump RIG_VERSION in client/src/three/renderer.ts — never re-declare its value in a test
-  mock (spread the real module; a literal silently masks the bump)
+  mock (spread the real module; a literal silently masks the bump). A new recipe
+  *dimension* is a new key, not a bump: adding a variant (`ao-as-recipe-dimension`'s
+  `.noao.png` sibling) changes no existing render's pixels, so old entries stay valid
 - Scene population goes through `stageModel` (three/renderer.ts) for both thumbnails and
   live sessions — it pivots the model's bounds to the origin and fits the key light found
   by name (KEY_LIGHT); a light added to makeScene without that name is silently never fitted
