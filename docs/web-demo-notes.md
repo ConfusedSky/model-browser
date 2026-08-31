@@ -216,6 +216,12 @@ own origin"; only its body hardcodes loopback.
    is still its own question, unclosed by that change.)
 5. **Names.** Rename folders at corpus build (re-embed — needed anyway) or
    display-name from the store (near-free if #1 is sidecars; ids stay in paths).
+   **Resolved 2026-08-31 (Masa): display names from the store.** Near-free now
+   that `library-overrides` is drafted with `name` a field from day one — the
+   generator already writes it from `miniatures.json`, ids stay in paths, and
+   no re-embed is forced. The consumer (tiles and the panel rendering the
+   stored name where one resolves) is a small follow-up to `library-overrides`,
+   whose Non-Goals deferred exactly this until the call was made.
 6. **Domain.** On the critical path for TLS and the configured-origin guard.
 7. **Which session owns the proposal.** **Resolved 2026-08-29 (Masa): this session
    — the other session closed; it also owned pose-for-every-model, now this

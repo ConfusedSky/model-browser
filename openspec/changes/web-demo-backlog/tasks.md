@@ -36,8 +36,11 @@
       frozen; a persisted orbit is a global edit
 - [ ] 2.2 Landing (item 4): kit tiles with contact sheets alone, or also a sentence for a
       recruiter — banner, About beside credits, or nothing
-- [ ] 2.3 Names (item 5): rename folders at corpus build (re-embed) or display names from
+- [x] 2.3 Names (item 5): rename folders at corpus build (re-embed) or display names from
       the store (near-free once 1.1 exists; ids stay in paths)
+      — **display names from the store** (Masa, 2026-08-31, recorded on the item the same
+      day). 1.1's draft carries `name` as a generated field already; the consumer is a
+      follow-up to `library-overrides`
 - [ ] 2.4 Domain (item 6): on the critical path for TLS and the configured-origin guard —
       1.3 cannot name its allowed origin without it
 - [x] 2.5 Ownership (item 7): this session owns the demo proposal and

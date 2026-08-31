@@ -35,8 +35,10 @@ written at corpus build and rarely after.
 
 **Non-Goals**
 
-- No consumer for `name` (that is `web-demo-backlog` 2.3's call) and none for
-  `pose` (`pose-for-every-model`). Fields ship, consumers wait.
+- No consumer for `name` (that was `web-demo-backlog` 2.3's call — decided
+  after this draft, 2026-08-31: display names from the store, so the consumer
+  is a known follow-up rather than an open question) and none for `pose`
+  (`pose-for-every-model`). Fields ship, consumers wait.
 - No runtime write API and no editing UI. The only writer is the generator.
 - No search-by-author surface. In-memory search is trivial *later*; nothing here
   depends on it.
