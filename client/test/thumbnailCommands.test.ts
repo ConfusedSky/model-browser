@@ -13,6 +13,7 @@
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { setAoEnabled } from '../src/viewer/aoToggle'
 import type * as THREE from 'three'
 import type { CameraState, DirEntry, IndexPose, LightingMode, OrbitAxis } from '../../shared/types'
 import type { ApiClient, ThumbSave } from '../src/api/client'
@@ -111,7 +112,11 @@ const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
 
 beforeEach(() => {
   renderThumbnail.mockClear()
-  // A module-closure preference: it does not reset between files.
+  // These cells were written under the old on-default and pin orientation and
+  // label behaviour, not the preference (`ao-default-off` flipped the unset
+  // read). Stated explicitly so the assertions keep their shape; the
+  // preference's own behaviour is the AO suites' concern.
+  setAoEnabled(true)
 })
 
 describe('re-render thumbnail', () => {

@@ -14,6 +14,7 @@
 // the posed case, which needs a landed answer carrying a pose.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { setAoEnabled } from '../src/viewer/aoToggle'
 import type { AppsReport, DirEntry, DirListing, IndexPose } from '../../shared/types'
 import { MENU_ITEM_CLASS } from '../src/components/EntryMenu'
 import {
@@ -152,6 +153,9 @@ async function openLightbox(name: string): Promise<void> {
 }
 
 beforeEach(async () => {
+  // Written under the old on-default; `ao-default-off` flipped the unset read.
+  // Pinned on so the framing/orientation assertions keep their shape.
+  setAoEnabled(true)
   // The index answers for this collection, so *find similar* is on the table.
   indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models' })
   await mountApp('/models', NESTED)

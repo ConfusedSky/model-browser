@@ -35,7 +35,10 @@ sequence):
 4. `ao-refreshes-thumbnails` — **archived 2026-08-31** — the re-targeted `lighting-refreshes-thumbnails` (directory
    renamed with `git mv`; §2b kept, §2 rewritten in review into a ref-held incremental reconciler)
 5. `adaptive-ao-default` — item 8's frame sampling (lightbox-measured, three-state
-   preference, budget tune-then-freeze)
+   preference, budget tune-then-freeze) — **deferred 2026-08-31**: `ao-default-off`
+   (applied the same day) flips the static default to off instead (Masa: shipping
+   outranks adapting; cheap now that thumbnails follow the preference, which is what
+   retired option (a)'s handoff objection). Re-derive before applying
 6. `folder-contact-sheets` — the decided row; per-tile bounded peek, zips excluded
 
 Not drafted — tracked as the change `web-demo-backlog` (2026-08-29, one task line each):

@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
-// The AO toggle: a persisted live-view preference; thumbnails never consult it.
+// The AO toggle: a persisted preference every render path consults — the live
+// view per frame, thumbnails per render via their callers (ao-as-recipe-dimension).
 import * as THREE from 'three'
 import type { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -51,8 +52,12 @@ const gtaoOf = (chain: { composer: { passes: unknown[] } }): GTAOPass =>
   chain.composer.passes[1] as GTAOPass
 
 describe('AO toggle', () => {
-  it('defaults to the shipped recipe: AO on', () => {
-    expect(aoEnabled()).toBe(true)
+  it('defaults off: a fresh profile renders unoccluded (ao-default-off)', async () => {
+    // Fresh module over empty storage — the demo visitor's first load.
+    localStorage.removeItem('model-browser:ao-enabled')
+    vi.resetModules()
+    const fresh = await import('../src/viewer/aoToggle')
+    expect(fresh.aoEnabled()).toBe(false)
   })
 
   it('render(ao: false) skips the GTAO pass; the default re-enables it', () => {
@@ -102,14 +107,18 @@ describe('AO toggle', () => {
     const again = await import('../src/viewer/aoToggle')
     expect(again.aoEnabled()).toBe(true)
 
-    // Absent key (first run) defaults on.
+    // Absent key (first run) defaults off since `ao-default-off`.
     localStorage.removeItem('model-browser:ao-enabled')
     vi.resetModules()
     const first = await import('../src/viewer/aoToggle')
-    expect(first.aoEnabled()).toBe(true)
+    expect(first.aoEnabled()).toBe(false)
   })
 
-  it('thumbnails never consult the flag: shipped recipe regardless of the preference', () => {
+  it('renderThumbnail draws the recipe its caller names — occluded when none is named', () => {
+    // Retitled with `ao-as-recipe-dimension`: thumbnails DO follow the
+    // preference now, through their callers' captured reads — what this pins
+    // is only that the bare call's default argument is the occluded recipe,
+    // whatever the store says at the moment of the render.
     const chain = getThumbChain()
     vi.spyOn(chain.composer, 'render').mockImplementation(() => {})
 

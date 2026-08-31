@@ -1,5 +1,11 @@
 # Tasks — adaptive-ao-default
 
+> **DEFERRED 2026-08-31 (`ao-default-off`): do not apply as drafted.** The static
+> default flipped to off (Masa: shipping the demo outranks adapting), which inverts this
+> change's premise — D1's "Unset SHALL behave as occlusion on until measured" and D5's
+> "nothing can be measured with it off" cannot both survive an off default. Re-derive the
+> design (measure-on-trial? flip on for capable GPUs?) before touching code.
+
 > Ordering (hard): after `ao-as-recipe-dimension` and `ao-refreshes-thumbnails` — an
 > automatic decision must reach thumbnails and the visible grid the way a press does
 > (design D6). Independent of `library-root`, `remove-axis-lighting`,

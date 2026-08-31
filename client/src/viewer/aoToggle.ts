@@ -17,7 +17,12 @@ const KEY = 'model-browser:ao-enabled'
 
 const store = stored(
   KEY,
-  (raw) => raw !== 'off',
+  // Off by default (`ao-default-off`, 2026-08-31): absent — a fresh profile,
+  // every demo visitor — and anything malformed read as off; a stored 'on' or
+  // 'off' keeps meaning what the user chose. Cheap only since
+  // `ao-as-recipe-dimension`: thumbnails follow the preference, so the old
+  // handoff-jump objection to a static off default no longer applies.
+  (raw) => raw === 'on',
   (on) => (on ? 'on' : 'off'),
 )
 let enabled: boolean = store.read()
