@@ -263,8 +263,22 @@
       — done 2026-08-31 (coordinator): `library-root` archived for real (`7a872c7`), so the
       fresh-copy run was `remove-axis-lighting` → this → `ao-refreshes-thumbnails`, all
       three archiving cleanly in order (the /opsx:update verification's run, same day)
-- [ ] 3.4 `bun run test` / `bun run typecheck` clean; live: with the pill off, visit a
+- [x] 3.4 `bun run test` / `bun run typecheck` clean; live: with the pill off, visit a
       directory — every tile renders once and PUTs `ao:false`; toggle on — hits, no PUTs;
       toggle off again — hits, no PUTs; press a tile in each state — no shading change at
       handoff; `ls ~/.cache/model-browser/<id>/` shows `<key>.png` and `<key>.noao.png`
       pairs
+      — done 2026-08-31 (coordinator), merged main `f0515f9`, dev instance on the real
+      library, PUTs counted by an in-page fetch recorder over
+      `/Warhammer/little-dnaborrowers-kit…` (38 models, occluded fully cached): pill off →
+      38 GETs all `ao=off`, 38 PUTs all `ao:false`; toggle on + reload → 38 GETs, 0 PUTs;
+      toggle off + reload → 38 `ao=off` GETs, 0 PUTs; the cache then holds 38/38
+      `.png`+`.noao.png` pairs. Handoff press: off-state tile and overlay indistinguishable
+      (`.playwright-mcp/34-off-*.png`); the first on-state capture caught D2's designed
+      transition instead — the off-press had persisted the entry's *first camera*, clearing
+      the occluded render's labels, so the tile served its old pixels while the replacement
+      rendered (sidecar read mid-flight: `noao` labels cleared, occluded PNG landing
+      seconds later) — and a re-press after it settled shows tile and overlay identical
+      under occlusion (`34-on3-*.png`). Suites: client 523, server 300 (+3 index-contract
+      skips), typecheck clean. Side effect on the library: the pressed model
+      (`AAAAAAAaaaaAAA head.stl`) now stores a camera from the test's lightbox close

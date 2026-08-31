@@ -57,8 +57,12 @@ export interface CameraState {
  *
  * That measurement is a probe, not a quotation: `client/test/camera.test.ts`
  * re-runs the sweep and asserts the maximum drift stays far below this value.
- * The probe is added by the client half of `ao-as-recipe-dimension`; the
- * server half lands the constant alone.
+ * The probe (`client/test/camera.test.ts`, "camera round-trip drift") is the
+ * figure to trust — it re-runs on every suite: seeded, 200k states at each of
+ * radius 0.01, 1 and 137, max per-component drift **2.1538e-14** (AOD-B's run,
+ * 2026-08-31; the 7.1e-15 above was an earlier sweep through `statePosition`
+ * with a narrower target distribution — same order, same conclusion). The
+ * constant keeps ~4.6e4× headroom over the measured maximum.
  */
 export const CAMERA_EPSILON = 1e-9
 
