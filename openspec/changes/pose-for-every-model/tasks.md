@@ -413,7 +413,12 @@
       `modelsUnder` tolerates the extra field unread. The n_scanned==0 refinement (render
       unposed tiles without expecting poses from a future peek) is recorded as
       available-but-declined: nothing renders that expectation today; the demo bake planner
-      is the likely first consumer
+      is the likely first consumer. Landed 2026-09-01 as mini-classify `c075498`
+      (n_scanned + covers, the anti-conflation pair pinned; suite 733; a shared
+      `RESPONSE_CAP=10000` now owns `/query`'s cap and `/under`'s limit) with `f94a7e7`
+      de-counting the route number from interfaces.md. Contract closed. No restart needed
+      on this side's account — the additive fields are unread here; the running serve only
+      needs restarting when a consumer of `n_scanned` appears
 - [x] 5.2 Server: `posedFirstPeek` asks the index first (`/under` with limit 256, short
       timeout like `/poses`), confines/maps per path, ranks posed-first, stats the chosen n
       into `DirEntry`s; `"unindexed"` or silent → today's walk path, byte-identical (the
