@@ -59,6 +59,32 @@ export interface ThumbSave {
 }
 
 /**
+ * How many paths one `POST /api/semantic/poses` may name — the route's own
+ * bound, mirrored here so a caller can hand over a listing rather than a batch
+ * (pose-for-every-model D3). The same number the server chunks by against the
+ * index's `POSES_MAX`.
+ *
+ * It has to be enforced on this side because a listing can exceed it: the 500
+ * model cap (`MODEL_BROWSER_FLAT_CAP`) is the *flat walk's*, and a plain
+ * directory listing goes through `listDir`, which caps nothing — a folder with
+ * three thousand models lands three thousand entries.
+ */
+export const POSES_MAX = 1024
+
+/**
+ * The body of `POST /api/semantic/poses`.
+ *
+ * Declared here rather than imported from `shared/types`, where its response
+ * (`PosesResponse`) lives: the server side of this route is landing in a
+ * parallel change and owns the shared request type. When it arrives this
+ * declaration is deleted and the import takes its place — there is one wire
+ * shape, not two.
+ */
+interface PosesRequest {
+  paths: string[]
+}
+
+/**
  * All frontend I/O goes through this interface — never raw fetch in
  * components. The Electron port swaps the implementation (HTTP → IPC) without
  * touching callers.
@@ -119,15 +145,40 @@ export interface ApiClient {
    * costs the listing nothing (the delta's own words). A rejection means the
    * same to the caller — the wave is silent, and the listing stays as it is.
    *
-   * The directory's own models, so a *flat* listing's deeper entries simply
-   * have no pose here: the answer is a subset of the grid, never a wrong one.
+   * The directory's own models — which is why the wave stopped using it: a
+   * flat listing's models and a name search's are drawn from a subtree, so a
+   * directory's direct children are not a subset of that grid but a different
+   * set, and an unmatched key is indistinguishable from "no orientation". The
+   * wave asks by path instead (`semanticPosesFor`), and **nothing under
+   * `client/src` calls this any more**; it is kept for a genuinely
+   * directory-shaped ask, and the server route it names is unchanged.
    *
    * **No `AbortSignal`**, like `peek` and unlike `listDir`: the answer is
-   * bounded by one directory's model count, and a superseded wave is dropped on
-   * arrival by the landing it names (the reducer's `listingPoses`) rather than
-   * stopped in flight.
+   * bounded by one directory's model count, and a superseded one is dropped on
+   * arrival by whatever asked rather than stopped in flight.
    */
   semanticPoses(dirPath: string): Promise<PosesResponse>
+  /**
+   * The index's orientation for each of the named models, keyed by library path
+   * — what a listing's wave actually asks (pose-for-every-model D3). The
+   * directory form above answers a directory's *direct children*, which is a
+   * different set from the one a listing put on screen: a flat listing's models
+   * live in subfolders and a name search's are drawn from a whole subtree, so
+   * asking about a directory would answer about tiles that are not there and
+   * say nothing about the ones that are.
+   *
+   * Answers `{}` where the index is absent, warming, or does not cover the
+   * location, exactly as the directory form does, and a path it refuses is
+   * simply missing from the answer — a missing key is "no pose".
+   *
+   * Chunked, so the caller hands over a listing and not a batch: see
+   * `POSES_MAX`.
+   *
+   * **No `AbortSignal`**, for the directory form's reason: a superseded wave is
+   * dropped on arrival by the landing it names (the reducer's `listingPoses`)
+   * rather than stopped in flight.
+   */
+  semanticPosesFor(paths: string[]): Promise<PosesResponse>
   /**
    * What state the library is in (library R4). Always answers — this is the one
    * route that has something to say while the library is `unconfigured` or
@@ -305,6 +356,28 @@ export class HttpApiClient implements ApiClient {
   async semanticPoses(dirPath: string): Promise<PosesResponse> {
     const res = await this.fetchFn(`/api/semantic/poses?path=${encodeURIComponent(dirPath)}`)
     return jsonOrThrow<PosesResponse>(res)
+  }
+
+  async semanticPosesFor(paths: string[]): Promise<PosesResponse> {
+    // Chunked rather than sliced to `POSES_MAX`. A slice would leave the tail
+    // of a large folder permanently unposed — silently, since a missing key
+    // reads as "the index has no orientation for this" — which is the exact
+    // class of un-posed tile this change exists to remove. Sequential, not
+    // parallel: an oversized listing is the rare case, and the wave is
+    // background work behind a grid that is already drawn, so it may take the
+    // extra round trips rather than open a burst of connections against a
+    // single-worker index.
+    const poses: PosesResponse['poses'] = {}
+    for (let i = 0; i < paths.length; i += POSES_MAX) {
+      const body: PosesRequest = { paths: paths.slice(i, i + POSES_MAX) }
+      const res = await this.fetchFn('/api/semantic/poses', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      Object.assign(poses, (await jsonOrThrow<PosesResponse>(res)).poses)
+    }
+    return { poses }
   }
 
   async library(): Promise<LibraryState> {

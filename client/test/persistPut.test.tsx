@@ -29,6 +29,7 @@ vi.mock('../src/api/client', () => ({
     // nothing about the persist path depends on a pose, but the call has to
     // exist or the wave throws where the grid is being drawn.
     semanticPoses = vi.fn().mockResolvedValue({ poses: {} })
+    semanticPosesFor = vi.fn().mockResolvedValue({ poses: {} })
     // The session's one registry reading, which App does on mount: a machine
     // with nothing associated and no chooser, so nothing about the persist
     // path changes here.

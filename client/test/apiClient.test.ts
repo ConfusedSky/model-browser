@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { HttpApiClient, HttpError } from '../src/api/client'
+import { HttpApiClient, HttpError, POSES_MAX } from '../src/api/client'
 
 const CAM = { az: 1, el: 0.5, distR: 2, target: [0, 0, 0] as [number, number, number] }
 
@@ -82,6 +82,49 @@ describe('HttpApiClient contract', () => {
     expect(fetchFn).toHaveBeenCalledWith(
       `/api/semantic/poses?path=${encodeURIComponent('/my models/kit')}`,
     )
+  })
+
+  it('semanticPosesFor posts the models it was handed, in one request', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ poses: { '/a/x.stl': 1 } }))
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
+    // Paths in the body, not in the URL: a listing's worth of them does not fit
+    // in a query string, and nothing about them needs escaping twice.
+    await expect(api.semanticPosesFor(['/a/x.stl', '/b/y.stl'])).resolves.toEqual({
+      poses: { '/a/x.stl': 1 },
+    })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+    expect(fetchFn).toHaveBeenCalledWith('/api/semantic/poses', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ paths: ['/a/x.stl', '/b/y.stl'] }),
+    })
+  })
+
+  it('semanticPosesFor chunks a listing past the route bound and merges the answers', async () => {
+    // A plain directory listing has no model cap — `MODEL_BROWSER_FLAT_CAP` is
+    // the flat walk's — so a folder can land more entries than one request may
+    // name. Slicing to the bound would leave the tail permanently unposed, and
+    // silently, since a missing key reads as "the index has no orientation for
+    // this": the exact un-posed tile this whole change exists to remove.
+    const paths = Array.from({ length: POSES_MAX + 1 }, (_, i) => `/models/m${i}.stl`)
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ poses: { '/models/m0.stl': 1 } }))
+      .mockResolvedValueOnce(jsonResponse({ poses: { [`/models/m${POSES_MAX}.stl`]: 2 } }))
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
+
+    await expect(api.semanticPosesFor(paths)).resolves.toEqual({
+      poses: { '/models/m0.stl': 1, [`/models/m${POSES_MAX}.stl`]: 2 },
+    })
+
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+    const sent = fetchFn.mock.calls.map(
+      (c) => (JSON.parse((c[1] as { body: string }).body) as { paths: string[] }).paths,
+    )
+    expect(sent[0]).toHaveLength(POSES_MAX)
+    expect(sent[1]).toEqual([`/models/m${POSES_MAX}.stl`])
+    // Every path asked about exactly once, in order and with none dropped.
+    expect([...sent[0]!, ...sent[1]!]).toEqual(paths)
   })
 
   it('semanticPoses raises the server failure rather than swallowing it', async () => {

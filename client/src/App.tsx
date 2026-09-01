@@ -110,6 +110,9 @@ const ACTION_TEXT_MS = 2500
  * every keystroke for an answer that never changes.
  */
 const NO_ENTRIES: DirEntry[] = []
+/** Nothing to ask the index about — the same stability rule as `NO_ENTRIES`,
+ *  for the wave effect's dependency rather than for the sweep's. */
+const NO_PATHS: string[] = []
 const NO_POSES: Record<string, IndexPose> = {}
 const NO_SCORES: Record<string, IndexScore> = {}
 /**
@@ -972,21 +975,36 @@ export default function App() {
   }, [requestId])
 
   /**
-   * The second wave: a plain listing's poses, asked for once the listing has
-   * landed (pose-for-every-model D3).
+   * The second wave: a landed listing's poses, asked for by path once the
+   * listing is on screen (pose-for-every-model D3).
    *
    * Its own request and not part of the listing's, so the listing stays
    * index-independent — the capability's *the index's absence costs the listing
    * nothing* — and a meaning or similarity answer is skipped entirely because
    * its hits carried their poses (`landedListing` is null for those).
    *
-   * Keyed on the landing's asking-event id and the directory it answered for,
-   * so it fires exactly once per plain landing: setting the slot changes
-   * neither, so an index answering `{}` leaves an empty map and no retry. The
-   * library's readiness is a dependency rather than a bare guard, because a
-   * boot listing can land before the probe answers — the wave then goes out
-   * when the library is known rather than never — and it is read as a boolean
-   * so a re-probe that changed nothing cannot re-fire it.
+   * **It asks about the models the landing put on screen, not about a
+   * directory.** All three listing shapes fire it — plain, flat, name search —
+   * and only the first has a grid that a directory's direct children describe:
+   * a flat listing of the library root shows models from subfolders, a name
+   * search shows matches from a whole subtree, and asking about the directory
+   * answered about whatever files sit directly in it — none of which are on
+   * screen — while saying nothing about the ones that are.
+   *
+   * The paths come off `result.entries` — the landing's own array — and
+   * deliberately not off `byKind`, which is a *view* over that landing: the
+   * kinds filter moves on a click with no landing behind it, so keying the wave
+   * on it would re-ask the index every time the user narrowed a name search.
+   * The entries it hides cost a map key each and no render at all.
+   *
+   * Keyed on the landing's asking-event id and those paths, so it fires exactly
+   * once per landing that landed a model: setting the slot changes neither, so
+   * an index answering `{}` leaves an empty map and no retry. A listing of
+   * folders alone asks nothing — there is nothing to ask about. The library's
+   * readiness is a dependency rather than a bare guard, because a boot listing
+   * can land before the probe answers — the wave then goes out when the library
+   * is known rather than never — and it is read as a boolean so a re-probe that
+   * changed nothing cannot re-fire it.
    *
    * **Failure is silence.** No abort either: the answer is dropped on arrival
    * by the landing it names (the reducer's `listingPoses`), which is the one
@@ -996,15 +1014,22 @@ export default function App() {
    */
   const wave = landedListing(state)
   const waveId = wave?.id ?? null
-  const wavePath = wave?.path ?? null
+  const waveEntries = wave?.entries ?? null
+  const wavePaths = useMemo(
+    () =>
+      waveEntries === null
+        ? NO_PATHS
+        : waveEntries.filter((e) => e.kind === 'model').map((e) => e.path),
+    [waveEntries],
+  )
   const libraryReady = libraryState?.state === 'ready'
   useEffect(() => {
-    if (waveId === null || wavePath === null || !libraryReady) return
-    void api.semanticPoses(wavePath).then(
+    if (waveId === null || wavePaths.length === 0 || !libraryReady) return
+    void api.semanticPosesFor(wavePaths).then(
       (res) => dispatch({ type: 'listingPoses', id: waveId, poses: res.poses }),
       () => {},
     )
-  }, [waveId, wavePath, libraryReady, api, dispatch])
+  }, [waveId, wavePaths, libraryReady, api, dispatch])
 
   const navigate = useCallback(
     (path: string) => {

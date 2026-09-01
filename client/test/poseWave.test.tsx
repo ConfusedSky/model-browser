@@ -1,16 +1,23 @@
 // @vitest-environment happy-dom
-// The pose wave through App (pose-for-every-model D3): a plain listing lands
-// carrying no orientations, asks for them in a second request, and merges the
+// The pose wave through App (pose-for-every-model D3): a listing lands carrying
+// no orientations, asks for its own models' in a second request, and merges the
 // answer into the same `poses` state a meaning landing populates — so the
 // thumbnail sweep re-evaluates the tiles already on screen, keeps their images,
 // and re-renders only the ones the index actually spoke about.
+//
+// The wave asks **by path**, about the models the landing put on screen, which
+// is what makes a flat listing and a name search work: their models are drawn
+// from a subtree, so the directory they were asked at describes a different set
+// of tiles from the ones displayed.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CameraState, DirListing, IndexPose, PosesResponse } from '../../shared/types'
 import {
+  click,
   container,
   dir,
   fetchModel,
+  flatButton,
   getThumb,
   indexAvailability,
   library,
@@ -23,7 +30,7 @@ import {
   putThumb,
   renderThumbnail,
   searchInput,
-  semanticPoses,
+  semanticPosesFor,
   semanticSearch,
   settle,
   tiles,
@@ -59,7 +66,27 @@ const AIMED = model('aimed.stl')
 const FRESH = model('fresh.stl')
 const QUIET = model('quiet.stl')
 const LISTING: DirListing = { path: '/models', entries: [HERO, AIMED, FRESH, QUIET] }
+/** What the wave asks about: the landing's models, in grid order. */
+const MODEL_PATHS = LISTING.entries.map((e) => e.path)
 const OTHER: DirListing = { path: '/other', entries: [dir('Alpha')] }
+
+/**
+ * The same four models as `LISTING`, reached the way a *flat* listing or a name
+ * search reaches them: named by relative path, living in subfolders, and not a
+ * single one of them a direct child of `/models`. A wave that described this
+ * grid by the folder it was opened at would answer about `/models`' own three
+ * files — none of which are here.
+ */
+const NESTED: DirListing = {
+  path: '/models',
+  entries: [
+    model('Kits/hero.stl'),
+    model('Kits/aimed.stl'),
+    model('Spares/fresh.stl'),
+    model('Spares/quiet.stl'),
+  ],
+}
+const NESTED_PATHS = NESTED.entries.map((e) => e.path)
 
 /** The user's own orientation, stored on `aimed.stl` from an earlier orbit. */
 const CAM: CameraState = { az: 1, el: 0.25, distR: 3, target: [0, 0, 0] }
@@ -79,6 +106,14 @@ const WAVE: PosesResponse = {
     '/models/fresh.stl': POSE,
   },
 }
+/** The same answer over `NESTED`, with `quiet` left out for the same reason. */
+const NESTED_WAVE: PosesResponse = {
+  poses: {
+    '/models/Kits/hero.stl': POSE,
+    '/models/Kits/aimed.stl': POSE,
+    '/models/Spares/fresh.stl': POSE,
+  },
+}
 
 /**
  * Every tile a cache hit, each with a URL of its own so "this image was kept"
@@ -89,12 +124,17 @@ const WAVE: PosesResponse = {
  * (`hero` — the case the wave exists for), the user's own camera (`aimed`),
  * pixels already drawn under the current pose recipe (`fresh`), and a model the
  * index says nothing about (`quiet`).
+ *
+ * Keyed on the file's own name rather than its whole path, so the same four
+ * states describe `LISTING` and `NESTED` alike — a flat listing's `hero` is the
+ * same model in the same state, reached down a folder.
  */
 function cached(path: string): Record<string, unknown> {
   const base = { status: 'hit', lighting: THUMB_LIGHTING, rig: RIG_VERSION }
-  if (path === '/models/aimed.stl') return { ...base, pngUrl: 'blob:aimed', camera: CAM }
-  if (path === '/models/fresh.stl') return { ...base, pngUrl: 'blob:fresh', posed: POSE_VERSION }
-  if (path === '/models/quiet.stl') return { ...base, pngUrl: 'blob:quiet' }
+  const name = path.slice(path.lastIndexOf('/') + 1)
+  if (name === 'aimed.stl') return { ...base, pngUrl: 'blob:aimed', camera: CAM }
+  if (name === 'fresh.stl') return { ...base, pngUrl: 'blob:fresh', posed: POSE_VERSION }
+  if (name === 'quiet.stl') return { ...base, pngUrl: 'blob:quiet' }
   return { ...base, pngUrl: 'blob:hero' }
 }
 
@@ -137,7 +177,7 @@ describe('a listing asks for its poses', () => {
     // before the index had an opinion, so its pixels are stale under a recipe
     // input the cache key does not carry — and it alone is re-rendered.
     const wave = deferred<PosesResponse>()
-    semanticPoses.mockReturnValue(wave.promise)
+    semanticPosesFor.mockReturnValue(wave.promise)
     // Held open so the re-render is still in flight when the images are read:
     // "keeps its image until the replacement exists" is a claim about the
     // window, and a render that resolves inside the same tick has none.
@@ -149,8 +189,8 @@ describe('a listing asks for its poses', () => {
     await mountApp('/models', LISTING)
     await settle()
     expect(tileImages()).toEqual(['blob:hero', 'blob:aimed', 'blob:fresh', 'blob:quiet'])
-    expect(semanticPoses).toHaveBeenCalledTimes(1)
-    expect(semanticPoses).toHaveBeenCalledWith('/models')
+    expect(semanticPosesFor).toHaveBeenCalledTimes(1)
+    expect(semanticPosesFor).toHaveBeenCalledWith(MODEL_PATHS)
     getThumb.mockClear()
 
     await act(async () => {
@@ -202,20 +242,20 @@ describe('a listing asks for its poses', () => {
     await settle()
     await settle()
 
-    expect(semanticPoses).toHaveBeenCalledTimes(1)
+    expect(semanticPosesFor).toHaveBeenCalledTimes(1)
     expect(lookedUp()).toEqual([])
     expect(renderThumbnail).not.toHaveBeenCalled()
     expect(tileImages()).toEqual(drawn)
   })
 
   it('a wave that fails says nothing at all', async () => {
-    semanticPoses.mockRejectedValue(new Error('index exploded'))
+    semanticPosesFor.mockRejectedValue(new Error('index exploded'))
     await mountApp('/models', LISTING)
     await settle()
     getThumb.mockClear()
     await settle()
 
-    expect(semanticPoses).toHaveBeenCalledTimes(1)
+    expect(semanticPosesFor).toHaveBeenCalledTimes(1)
     // The listing stays as it is, and the failure reaches no surface: the
     // index's absence costs the listing nothing, and a sentence about it would
     // be a cost.
@@ -235,15 +275,15 @@ describe('a listing asks for its poses', () => {
     library.mockReturnValue(probe.promise)
     await mountApp('/models', LISTING)
     await settle()
-    expect(semanticPoses).not.toHaveBeenCalled()
+    expect(semanticPosesFor).not.toHaveBeenCalled()
 
     await act(async () => {
       probe.resolve({ state: 'ready', id: 'test', top: '/lib', root: '/' })
     })
     await settle()
 
-    expect(semanticPoses).toHaveBeenCalledTimes(1)
-    expect(semanticPoses).toHaveBeenCalledWith('/models')
+    expect(semanticPosesFor).toHaveBeenCalledTimes(1)
+    expect(semanticPosesFor).toHaveBeenCalledWith(MODEL_PATHS)
   })
 
   it('asks nothing at all while the library is not there', async () => {
@@ -251,7 +291,7 @@ describe('a listing asks for its poses', () => {
     await mountApp('/models', LISTING)
     await settle()
     await settle()
-    expect(semanticPoses).not.toHaveBeenCalled()
+    expect(semanticPosesFor).not.toHaveBeenCalled()
   })
 
   it('a meaning answer is not asked again — its hits carried their poses', async () => {
@@ -275,14 +315,101 @@ describe('a listing asks for its poses', () => {
     await mountApp('/models', LISTING)
     await settle()
     // The boot listing's own wave, and the only one this cell may see.
-    expect(semanticPoses).toHaveBeenCalledTimes(1)
+    expect(semanticPosesFor).toHaveBeenCalledTimes(1)
 
     await type(searchInput(), 'hero')
     await pressEnter(searchInput())
     await settle()
 
     expect(semanticSearch).toHaveBeenCalled()
-    expect(semanticPoses).toHaveBeenCalledTimes(1)
+    expect(semanticPosesFor).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('every listing shape asks, not only a directory', () => {
+  it('a flat listing gets the poses of the models it actually shows', async () => {
+    // The gap this closes: the wave used to describe the grid by the folder the
+    // user opened, so a flat listing of a library root asked about the handful
+    // of files sitting at the top and was answered about none of the hundreds
+    // on screen. It asks about the entries instead — every one of which lives a
+    // folder down here.
+    const wave = deferred<PosesResponse>()
+    await mountApp('/models', LISTING)
+    await settle()
+    // After the mount, which resets `listDir` to the boot listing (the harness's
+    // rule) — a walk installed before it would be the one that got wiped.
+    listDir.mockImplementation((_p: string, opts?: { flat?: boolean }) =>
+      Promise.resolve(opts?.flat === true ? NESTED : LISTING),
+    )
+    semanticPosesFor.mockReturnValue(wave.promise)
+
+    await click(flatButton())
+    await settle()
+    expect(flatButton().getAttribute('aria-pressed')).toBe('true')
+    // The boot listing's wave, then the flat landing's — one apiece, and the
+    // second names the nested models by the paths the grid is drawn from.
+    expect(semanticPosesFor).toHaveBeenLastCalledWith(NESTED_PATHS)
+    expect(semanticPosesFor).toHaveBeenCalledTimes(2)
+    // None of those paths is a child of the directory the wave used to name,
+    // which is what makes the old request unable to answer this grid.
+    expect(NESTED_PATHS.some((path: string) => MODEL_PATHS.includes(path))).toBe(false)
+    getThumb.mockClear()
+
+    await act(async () => {
+      wave.resolve(NESTED_WAVE)
+    })
+    await settle()
+
+    // The tiles re-render: the three the index named are re-looked-up, and the
+    // one it said nothing about is not touched.
+    expect(lookedUp().sort()).toEqual([
+      '/models/Kits/aimed.stl',
+      '/models/Kits/hero.stl',
+      '/models/Spares/fresh.stl',
+    ])
+    expect(renderThumbnail).toHaveBeenCalledTimes(1)
+    const put = putThumb.mock.calls[0]![0] as Record<string, unknown>
+    expect(put.path).toBe('/models/Kits/hero.stl')
+    expect(put.posed).toBe(POSE_VERSION)
+  })
+
+  it("a name search's wave carries the matches, wherever they were found", async () => {
+    // A name search is a `listing` answer too, and its matches are drawn from a
+    // whole subtree — so the folder it was run at describes its grid no better
+    // than a flat listing's does.
+    await mountApp('/models', LISTING)
+    await settle()
+    listDir.mockResolvedValue(NESTED)
+
+    await type(searchInput(), 'stl')
+    await pressEnter(searchInput())
+    await settle()
+
+    expect(tiles()).toHaveLength(4)
+    expect(semanticPosesFor).toHaveBeenLastCalledWith(NESTED_PATHS)
+    expect(semanticPosesFor).toHaveBeenCalledTimes(2)
+  })
+
+  it('a listing of folders alone asks nothing at all', async () => {
+    // No models, nothing to ask about: an empty batch would be a round trip
+    // spent to be told `{}`.
+    await mountApp('/other', OTHER)
+    await settle()
+    await settle()
+
+    expect(tiles()).toHaveLength(1)
+    expect(semanticPosesFor).not.toHaveBeenCalled()
+  })
+
+  it('asks about the models a mixed listing holds, and about nothing else', async () => {
+    // Folders are not models and have no orientation; the wave names the
+    // entries the sweep would draw a thumbnail for and no others.
+    const mixed: DirListing = { path: '/models', entries: [dir('Alpha'), HERO, dir('Beta'), QUIET] }
+    await mountApp('/models', mixed)
+    await settle()
+
+    expect(semanticPosesFor).toHaveBeenCalledTimes(1)
+    expect(semanticPosesFor).toHaveBeenCalledWith(['/models/hero.stl', '/models/quiet.stl'])
   })
 })
 
@@ -294,7 +421,7 @@ describe('a wave belongs to the landing that fired it', () => {
     // and only the landing differs. The drop is by asking event (`Result.id`),
     // not by path, which is exactly what this asserts.
     const stale = deferred<PosesResponse>()
-    semanticPoses.mockReturnValueOnce(stale.promise)
+    semanticPosesFor.mockReturnValueOnce(stale.promise)
     await mountApp('/models', LISTING)
     await settle()
 
@@ -330,7 +457,7 @@ describe('the lightbox reads a wave-supplied pose', () => {
     // that resolved only under a meaning or similarity answer. The handoff is
     // the same one — the pose is advisory, the tile's stored camera and axis
     // are what they were — and this is the plain listing finally reaching it.
-    semanticPoses.mockResolvedValue(WAVE)
+    semanticPosesFor.mockResolvedValue(WAVE)
     await mountAppAtCurrentUrl('/?path=%2Fmodels&model=%2Fmodels%2Ffresh.stl', LISTING)
     await settle()
 

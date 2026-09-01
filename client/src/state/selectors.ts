@@ -78,8 +78,8 @@ export function pendingRequest(
 }
 
 /**
- * The plain listing that is *answered* and on screen, if the answer is one: the
- * asking event it landed under and the directory it was asked about.
+ * The listing that is *answered* and on screen, if the answer is one: the
+ * asking event it landed under and the entries it put there.
  *
  * What the pose wave is fired for and dropped by (pose-for-every-model D3).
  * `null` for a meaning or similarity answer, whose hits carried their own poses
@@ -88,14 +88,26 @@ export function pendingRequest(
  * plain listing" is the same question here as it is at the fetch layer rather
  * than a second reading of the view's fields.
  *
+ * All three listing shapes count, because `requestOf` calls all three a
+ * `listing`: a plain directory, a *flat* one, and a name search. The wave was
+ * written for the first and quietly did nothing for the other two while it
+ * asked about a directory — a flat listing's models live in subfolders and a
+ * name search's are drawn from a whole subtree, so a directory's direct
+ * children are the wrong set both times. It carries the entries instead, and
+ * they are all one case again.
+ *
+ * `entries` is the landing's own array by reference, never a copy or a
+ * filtered view: it is what makes "once per landing" expressible as a
+ * dependency. `patch` spreads `result` but carries `entries` through, so
+ * opening a lightbox does not re-fire the wave.
+ *
  * A *stand-in* listing counts: it is a real listing on screen, and its tiles
  * want their orientations while the deferred search waits.
  */
-export function landedListing(state: SearchState): { id: number; path: string } | null {
+export function landedListing(state: SearchState): { id: number; entries: DirEntry[] } | null {
   const r = state.result
   if (r === null) return null
-  const req = requestOf(r.forView)
-  return req.kind === 'listing' ? { id: r.id, path: req.path } : null
+  return requestOf(r.forView).kind === 'listing' ? { id: r.id, entries: r.entries } : null
 }
 
 /**

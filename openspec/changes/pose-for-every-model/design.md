@@ -28,6 +28,24 @@ capability's *The index's absence costs nothing*), and a second wave is what the
 reconciler is built for. Index absent, warming, or the path outside the collection →
 the same answers search gives; the client treats them all as "no poses".
 
+**2026-08-31, review:** a directory batch is the wrong *shape* for what the client
+actually needs, and D2 named the wrong set. `requestOf` calls three things a
+`listing` — a plain directory, a flat walk, and a name search — and `landedListing`
+fires the wave for all three, but only the first has a grid that a directory's direct
+children describe. A flat listing of the library top renders up to five hundred models
+gathered from subfolders and was answered about the handful of files sitting at the
+top; a name search's matches come from a whole subtree and were answered about the
+folder the search was run at. Both requests were spent, both answers were unusable,
+and neither failed: an unmatched key is indistinguishable from "the index has no
+orientation for this model", so the grid stayed un-posed exactly as it does when the
+index is down. The resolution is a **paths batch** — `POST /api/semantic/poses` with
+the models the landing put on screen, confined per path exactly as the directory form
+confines. The directory form stays for a directory-shaped ask (the peek's ranking is
+one), and the client keeps it on `ApiClient`; nothing in the client calls it any more.
+Rejected: making the wave listing-shape-aware (ask by directory for a plain listing,
+by path otherwise) — two supply paths for one fact, and the plain case is the one
+where they agree, so the second path buys nothing but a second thing to keep true.
+
 ### D3: The client merges a second wave into the state that already exists
 
 After a plain listing lands, the client asks for its poses and merges into the same
@@ -54,6 +72,20 @@ map, the wave's slot, or the `NO_POSES` constant) and the reducer stores the wav
 without copying it. The alternative — leaving the hook alone and handing it a fresh
 `entries` array when the map changed — was rejected: it tells the effect the listing
 changed when it did not, and reads as a redundant copy to the next person to touch it.
+
+**2026-08-31, review (the paths batch, D2's addendum):** the wave names
+`result.entries`' models rather than the directory the landing answered for, so all
+three listing shapes are one case. The paths come off the landing's own `entries`
+array and deliberately not off `byKind`: that selector is a *view* over the landing,
+and the kinds filter moves on a click with no landing behind it, so keying the wave on
+it would re-ask the index every time a name search was narrowed. The entries it hides
+cost a map key each and no render at all. A listing that landed no model asks nothing
+— an empty batch is a round trip spent to be told `{}`. And because a plain directory
+listing has no model cap (`MODEL_BROWSER_FLAT_CAP` bounds the *flat walk*; `listDir`
+bounds nothing), the request can exceed the route's `POSES_MAX`: `semanticPosesFor`
+chunks and merges rather than slicing, because a slice would leave the tail of a large
+folder permanently and silently un-posed — the exact defect this change exists to
+remove — while `App` still makes one call per landing.
 
 ### D4: The peek stops at four posed models, inside the bound it already has
 

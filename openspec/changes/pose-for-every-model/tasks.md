@@ -172,6 +172,26 @@
       trigger was missing — `useThumbnails`' sweep effect did not depend on `poses` (1.2a),
       so a wave that changes the map alone re-ran nothing and was inert. `poses` joins that
       dependency list; design.md D3 carries the dated paragraph
+      <br>**2026-08-31, review (F2 — the wave covers every listing shape):** the wave asked
+      `semanticPoses(dir)`, a GET of one directory's *direct children*, for every
+      `kind:'listing'` landing — and `requestOf` calls three things a listing. A flat listing
+      of the library top (up to 500 models gathered from subfolders) was answered about the
+      handful of files at the top; a name search's matches, drawn from a whole subtree, were
+      answered about the folder it was run at. Neither failed: an unmatched key is
+      indistinguishable from "no orientation", so both grids stayed un-posed. Now
+      `ApiClient.semanticPosesFor(paths)` posts the landed entries' model paths and `App`
+      fires it for all three shapes; `semanticPoses` (the directory GET) stays on
+      `ApiClient` for a directory-shaped ask and **nothing under `client/src` calls it any
+      more** — kept rather than removed, the coordinator's call. `landedListing` returns
+      `{ id, entries }`; `App` derives the model paths through a `useMemo` on that stored
+      array so the effect still fires exactly once per landing (`patch` spreads `result` but
+      carries `entries` by reference, so opening a lightbox does not re-ask). Paths come off
+      `result.entries`, not `byKind` — that filter moves on a click with no landing behind
+      it. A listing that landed no model asks nothing. `semanticPosesFor` **chunks** at
+      `POSES_MAX` (1024) and merges: `MODEL_BROWSER_FLAT_CAP`'s 500 bounds the *flat walk*
+      only, `listDir` caps nothing, and a slice would leave a large folder's tail silently
+      un-posed forever. design.md D2 and D3 carry the dated addenda; the delta's requirement
+      is reworded and gains *A flat listing stands its models up too*
 - [x] 3.2 Client tests: a wave over a displayed grid re-renders only unposed-drawn tiles,
       images kept (the reconciler cells' shape); index down → no requests loop, no state
       churn; a wave landing after navigation is dropped; falsify the merge
@@ -192,7 +212,12 @@
       would have failed; the two neighbouring pose cells' comments are corrected where they
       said a landing was "the only thing that re-runs this effect".
       <br>Falsified, each against the suite and then restored: **`poses` out of the sweep's
-      dependency list** → 1 fail, "expected \"spy\" to be called 3 times, but got 2 times";
+      dependency list** → 2 fail (re-run 2026-08-31 by the review worker on `393d61a`; the
+      recorded "1 fail" undercounted, and the message it carried was the *other* cell's):
+      `poseWave.test.tsx` "re-renders the tiles the index spoke about and keeps every image
+      meanwhile" — "expected [] to deeply equal [ '/models/aimed.stl', …(2) ]" — and
+      `thumbnailQueue.test.tsx` "a pose arriving over an unchanged listing re-looks-up only
+      what it named" — "expected \"spy\" to be called 3 times, but got 2 times";
       **the reducer's `state.result.id !== action.id` check removed** → 2 fail, the App cell
       reporting "expected [ '/models/hero.stl', …(2) ] to deeply equal []" and the reducer
       cell "expected { view: … } to be { view: … } // Object.is equality"; **`landedListing`
@@ -206,6 +231,32 @@
       undetectable through lookups, renders or images — reference stability is a cost
       property, not a correctness one, which is why it is pinned by asserting the reference
       itself (`expect(waved.listingPoses).toBe(poses)`) rather than through behaviour
+      <br>**2026-08-31, review (F2's cells):** `poseWave.test.tsx` gains a describe *every
+      listing shape asks, not only a directory* (4 cells) — "a flat listing gets the poses of
+      the models it actually shows" (the flat toggle over a `NESTED` fixture whose four
+      models all live a folder down; asserts the POST body is those paths, that none of them
+      is a path the old directory request could have named, and that resolving the wave
+      re-looks-up exactly the three the index spoke about and PUTs `hero`'s re-render),
+      "a name search's wave carries the matches, wherever they were found", "a listing of
+      folders alone asks nothing at all", "asks about the models a mixed listing holds, and
+      about nothing else". The mock the App-level cells drive is now `appHarness.tsx`'s
+      `semanticPosesFor` (default `{poses:{}}`, cleared per mount and reset per file beside
+      `semanticPoses`); `persistPut.test.tsx`'s hand-listed client gains it too.
+      `apiClient.test.ts` gains "semanticPosesFor posts the models it was handed, in one
+      request" and "semanticPosesFor chunks a listing past the route bound and merges the
+      answers" (1025 paths → two POSTs of 1024 and 1, merged, every path asked about exactly
+      once in order).
+      <br>F2 falsified two ways, each against the whole suite and then restored. **The wave
+      reverted to the directory GET** (`landedListing` handing back `path` again, `App`
+      calling `api.semanticPoses(wavePath)`) → **9 fail | 3 passed** in `poseWave.test.tsx`,
+      the flat cell verbatim: "expected last \"spy\" call to have been called with
+      [ [ '/models/Kits/hero.stl', …(3) ] ]" against a received `undefined` — nothing calls
+      `semanticPosesFor` at all. **The sharp variant**, which changes only *which paths* the
+      same call carries — `wavePaths` narrowed to the entries a directory request could have
+      answered about (`!e.name.includes('/')`) — → **2 fail | 10 passed**, exactly the flat
+      and name-search cells, both "expected last \"spy\" call to have been called with
+      [ [ '/models/Kits/hero.stl', …(3) ] ]". The plain-listing cells stay green under it,
+      which is the point: the two new shapes are what F2 buys
 - [x] 3.3 The lightbox: `pose={poses[...]}` now resolves on plain listings too — assert the
       handoff parity cell still holds with a wave-supplied pose
       <br>2026-08-31: `poseWave.test.tsx` "hands the viewer the orientation a plain listing
@@ -243,3 +294,32 @@
 - [x] 4.3 `web-demo-backlog` 1.2 marked drafted→applied; the bake-ordering note stays until
       the demo change lands
       — done 2026-08-31 (coordinator)
+
+### Review notes, 2026-08-31 (accepted as they stand)
+
+- **F6 — clearing `listingPoses` at every landing costs a few cache lookups.** Two
+  consecutive listings that share an entry (a navigation up and back, a flat toggle over
+  the same folder) drop the pose the first landing's wave supplied, so the shared entry is
+  re-looked-up when the next wave answers: **up to two extra cache lookups per shared
+  entry**, and nothing more — no render is issued (the reconciler compares by value and
+  the pose it re-learns is the one it already had) and no image is dropped (a re-run keeps
+  every tile's pixels). Accepted rather than fixed: carrying the map across landings would
+  make `listingPoses` speak for a listing it was not asked for, and the honest-state
+  property — the slot only ever holds the poses of the answer on screen — is worth more
+  than the lookups. The alternative, keying the map by landing id and keeping the last few,
+  is a cache with an eviction policy standing in for a rule that is currently one line.
+- **F8 — the server suite's recorded "3 skips" is environmental, not this change's.**
+  `indexContract.test.ts`'s describe is `skipIf(!(await reachable()))` — its three cells
+  are a contract check against the real mini-classify service, not a unit suite, and they
+  skip themselves whenever no index answers `/status` with `ready:true`. Against a
+  *partially built* index one of them, "the index's own ceiling still bites a floor-only
+  set, which is the wall notice's one state", additionally fails: the ceiling it asserts is
+  a property of how much of the collection is embedded, not of anything this change
+  touches. So "3 skipped" is the expected shape of a server run on a machine with no index
+  up, and neither the skips nor that cell's failure mid-index is evidence of a gap here.
+  Confirmed by re-running the server suite on `393d61a` (2026-08-31, review worker) *with*
+  the index up: **420 passed, 0 skipped** — the three contract cells run and pass, which is
+  the same suite the recorded "412 passed, 3 skipped" describes with the index down. (One
+  earlier run in that session reported a single failure; three later runs — two full, one
+  of `indexContract.test.ts` alone — did not reproduce it, which is the flavour of
+  environmental this note is about.)

@@ -79,6 +79,11 @@ export const similar = vi.fn()
 // requests it did not ask for. Shared and cleared per mount like `peek`, so
 // "one request per landing" is countable.
 export const semanticPoses = vi.fn().mockResolvedValue({ poses: {} })
+// What the wave actually calls: the landed models' poses by path (F2). The
+// directory form above stays on the client for a directory-shaped ask; nothing
+// in `src/` reaches for it since the wave stopped describing a grid by the
+// folder it was opened at.
+export const semanticPosesFor = vi.fn().mockResolvedValue({ poses: {} })
 
 /** A minimal valid binary STL (one facet) — enough for parseModel to build a real mesh. */
 export function tinyStl(): ArrayBuffer {
@@ -123,6 +128,7 @@ export function apiClientModule(): Record<string, unknown> {
       library = library
       semanticSearch = semanticSearch
       semanticPoses = semanticPoses
+      semanticPosesFor = semanticPosesFor
       similar = similar
       apps = apps
       open = openApp
@@ -257,6 +263,7 @@ async function mount(initial: DirListing): Promise<void> {
   // Cleared before the render for `peek`'s reason: the wave count a test reads
   // is the one this mount's landings provoked and nothing left over.
   semanticPoses.mockClear()
+  semanticPosesFor.mockClear()
   // Cleared beside `peek` and for the same reason: "one lightbox open, one
   // overrides read" counts what this mount provoked and nothing left over.
   overrides.mockClear()
@@ -331,6 +338,8 @@ export async function unmountApp(): Promise<void> {
   // starts from an index with no orientation to offer.
   semanticPoses.mockReset()
   semanticPoses.mockResolvedValue({ poses: {} })
+  semanticPosesFor.mockReset()
+  semanticPosesFor.mockResolvedValue({ poses: {} })
   // Same rule as `peek`'s: a test that credited a model, or made the read fail,
   // hands the next file back a library with no store.
   overrides.mockReset()
