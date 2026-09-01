@@ -16,4 +16,9 @@
   cell silently depends on whether a dev index is up on 8077 — a real 2s-timeout call
   inside a unit suite. `semantic.test.ts`'s `stubIndex` and the overrides peek cell are
   the patterns
+- Known once-seen flake (2026-09-01, not yet reproduced): `indexContract.test.ts`'s
+  "floors the whole collection first, then caps" hit the 5s vitest timeout against the
+  live index during a 6-way parallel stress sweep — 1 occurrence, absent from the 20
+  verification runs that followed. If it recurs, suspect live-index latency under
+  parallel load before the test's own logic; the suite skips cleanly when :8077 is down
 
