@@ -275,6 +275,22 @@ export function copyEntryPath(entry: DirEntry, host: Feedback & LibraryTop): voi
  * archive's root reveals to the archive itself (`foo.zip!/lid.stl` →
  * `foo.zip`), which is the listing that holds it. The vpath grammar already
  * addresses both — one `!/`, never nested (architecture D6).
+ *
+ * **The client's one ascent.** `reveal` reaches it through the command table
+ * and App's ↑ control (`goUp`) calls it directly; the second used to be a
+ * character-for-character copy of this body, including the `!/` handling, which
+ * is one rule with two readings. The library's top answers itself (`'/'` →
+ * `'/'`), so a caller that must not re-request what is on screen compares the
+ * answer against what it asked about — `goUp` does.
+ *
+ * The `!/` grammar is spelled several ways across the repo — `lastIndexOf` here,
+ * `indexOf` in `expandLibraryPath`, a bare `includes` where only presence
+ * matters, and the server's own split in `library.resolve`. They agree on every
+ * path the app can produce, because nesting is rejected at the door (D6) and one
+ * separator makes first and last the same one; they would part only on a nested
+ * vpath, which never gets this far. This is nonetheless the *client's* single
+ * copy of the ascent, and a second one belongs here rather than beside its
+ * caller.
  */
 export function containingFolder(path: string): string {
   const zipSep = path.lastIndexOf('!/')

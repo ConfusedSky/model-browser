@@ -58,6 +58,12 @@ const axes = (): string[] =>
 const flip = (): HTMLElement | null =>
   menu()?.querySelector<HTMLElement>('[role="menuitemcheckbox"][data-axis="flip"]') ?? null
 const dialog = (): HTMLElement | null => document.querySelector<HTMLElement>('[role="dialog"]')
+/** The panel's transient line, in whichever tone it is wearing. */
+const panelNote = (): string | null =>
+  dialog()?.querySelector('p[role="status"]')?.textContent ?? null
+/** The path bar's transient line — the surface the lightbox covers. */
+const headerNote = (): string | null =>
+  container.querySelector('header p.text-zinc-400')?.textContent ?? null
 /** Every item a model tile offers when the index is answering — the whole of
  *  D6's table, which is also what the orbit overlay offers since 6.8. */
 const WHOLE_TABLE = [
@@ -211,6 +217,36 @@ describe('the menu on a viewer surface', () => {
     const discard = putThumb.mock.calls.find((c) => c[0].camera === null)
     expect(discard).toBeDefined()
     expect(dialog()).not.toBeNull()
+  })
+
+  it('confirms a copy in the panel, not on the bar it is covering', async () => {
+    // *Copy path* is the one command on this surface that owes the user a word
+    // — entry-actions requires a brief confirmation — and it was the one that
+    // could not give one: the host's routing sat on `report` alone, so the
+    // "copied" line went to the path bar under a 70% scrim, in the far corner,
+    // behind the dialog being looked at. Success is not silent here, so the
+    // absence read as a copy that did not happen.
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    try {
+      await openLightbox()
+      await secondaryPress(dialog()!)
+      await click(item('copyPath'))
+      await settle()
+
+      // The same body as everywhere else: the filesystem path, expanded from
+      // the harness library's `/lib` top (library R2).
+      expect(writeText).toHaveBeenCalledWith('/lib/models/widget.stl')
+      expect(panelNote()).toBe('Path copied.')
+      // In the confirming tone, not the failure one — a success painted red
+      // would be the other half of this bug.
+      expect(dialog()!.querySelector('p[role="status"].text-zinc-400')).not.toBeNull()
+      expect(dialog()!.querySelector('p.text-red-400')).toBeNull()
+      // And it did not also go to the covered bar: one sentence, one surface.
+      expect(headerNote()).toBeNull()
+    } finally {
+      Reflect.deleteProperty(navigator, 'clipboard')
+    }
   })
 
   it('still offers the whole table on a tile — the filter is the surface, not the app', async () => {

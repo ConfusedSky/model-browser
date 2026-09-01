@@ -27,13 +27,14 @@ import {
   type LiveFramingView,
 } from '../src/lib/entryActions'
 import { DEFAULT_CAMERA } from '../src/three/camera'
-import { cameraForPose } from '../src/three/pose'
+import { cameraForPose, POSE_VERSION } from '../src/three/pose'
 import { RIG_VERSION, THUMB_LIGHTING } from '../src/three/renderer'
 import {
   apps,
   click,
   container,
   dir,
+  fetchModel,
   getThumb,
   indexAvailability,
   listDir,
@@ -44,9 +45,11 @@ import {
   openWith,
   putThumb,
   renderThumbnail,
+  semanticPosesFor,
   settle,
   similar,
   tiles,
+  tinyStl,
   unmountApp,
   wait,
 } from './appHarness'
@@ -86,6 +89,18 @@ const ANCHORED = {
 /** The orientation this model has stored — visibly not the default, so a view
  *  that ends up at the default can only have been re-framed. */
 const STORED = { az: 1.25, el: -0.4, distR: 4.5, target: [0, 0, 0] as [number, number, number] }
+
+/** An orientation the index can express: file-space `up` (0,-1,0) is scene +Z,
+ *  and `azimuth_zero` is perpendicular to it. Module-scope because two describes
+ *  need it — the body's posed case, and the wave-fed one that pins the label a
+ *  close writes when a discard resolves to it. */
+const POSE: IndexPose = {
+  up: [0, -1, 0],
+  azimuth_zero: [1, 0, 0],
+  source: 'test',
+  confidence: 1,
+  front: { view: 0, azimuth_deg: 40, elevation_deg: 20 },
+}
 
 /**
  * The registry as the machine reports it (the openInApps fixture's shape): a
@@ -483,7 +498,7 @@ describe('reset framing from the panel', () => {
    * Deep-linked rather than pointer-opened: this lightbox closes without
    * `history.back`, which the harness's stubbed URL cannot survive.
    */
-  async function openStoredModel(): Promise<void> {
+  async function openStoredModel(beforeMount: () => void = () => {}): Promise<void> {
     await unmountApp()
     indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models' })
     // A hit carrying the user's own orientation: the session opens at it, and
@@ -498,6 +513,9 @@ describe('reset framing from the panel', () => {
       lighting: THUMB_LIGHTING,
       rig: RIG_VERSION,
     })
+    // After the teardown that restores the stock mesh loader, before the mount
+    // that uses it — the one window in which a test can hold the load open.
+    beforeMount()
     await mountAppAtCurrentUrl('/?path=%2Fmodels&model=%2Fmodels%2FAlpha%2Ffound.stl', NESTED)
     listDir.mockResolvedValue(NESTED)
     await wait(200)
@@ -586,6 +604,168 @@ describe('reset framing from the panel', () => {
     expect(writesFor(FOUND).filter((b) => b.camera === null).length).toBe(1)
     expect(writesFor(FOUND).filter((b) => b.camera !== undefined && b.camera !== null)).toEqual([])
   })
+
+  it('discards a framing given up while the mesh was still loading', async () => {
+    // The same race one step earlier, and the one the session's own refs could
+    // not see: the panel is up over the spinner, so the press finds no session
+    // (`liveFramingView` had nothing to hand over) while the pending open has
+    // already resolved the saved camera it is going to build with. The discard
+    // that happened *before* the session existed has to reach it anyway, or the
+    // view opens at the orientation just given up and the closing persist —
+    // which reads `everManipulated` and finds a session that recorded no
+    // discard — writes it straight back.
+    let land = (): void => {}
+    const held = new Promise<ArrayBuffer>((resolve) => {
+      land = () => resolve(tinyStl())
+    })
+    await openStoredModel(() => {
+      fetchModel.mockImplementationOnce(() => held)
+    })
+    // The mesh has not arrived: this is the spinner, not the canvas.
+    expect(dialog()!.querySelector('.animate-spin')).not.toBeNull()
+    putThumb.mockClear()
+    renderThumbnail.mockClear()
+
+    await click(action('resetFraming'))
+    await settle()
+    // The store half runs with no session — the command's own rule, unchanged.
+    expect(writesFor(FOUND).filter((b) => b.camera === null).length).toBe(1)
+
+    await act(async () => {
+      land()
+      await held
+    })
+    await settle()
+
+    await click(closeButton())
+    await wait(250)
+    expect(dialog()).toBeNull()
+
+    // The session opened at what the model resolves to *after* the discard, so
+    // the pixels the close filed are the default-framed ones and no camera
+    // rides with them. A close that wrote one would have undone the press.
+    expect(writesFor(FOUND).filter((b) => b.camera !== undefined && b.camera !== null)).toEqual([])
+    expect(renderThumbnail.mock.calls.length).toBe(1)
+    const snapshot = renderThumbnail.mock.calls[0] as unknown as [unknown, typeof STORED, string]
+    expect(snapshot[1].az).toBeCloseTo(DEFAULT_CAMERA.az)
+    expect(snapshot[1].el).toBeCloseTo(DEFAULT_CAMERA.el)
+    expect(snapshot[1].distR).toBeCloseTo(DEFAULT_CAMERA.distR)
+  })
+
+  it('labels the close with the pose the discard installed, when the saved read lands after the press', async () => {
+    // The other half of the landing handler, and the only thing that pins it:
+    // the saved read writes `openedFromPoseRef` too, so a press that lands
+    // between the request and its answer has its verdict overwritten unless the
+    // handler re-asserts it — which is safe there and only there, because
+    // `Promise.all` has by then awaited the very promise that does the
+    // overwriting.
+    //
+    // The two verdicts disagree exactly here: the model HAS a usable pose (so
+    // the discard resolves to it, `posed`), while the stored answer carries an
+    // axis (so the open would not have been the index's). What the pixels are
+    // is not in doubt — the session opens at the pose either way — so the label
+    // is the whole assertion: unlabelled, the grid reads posed pixels as stale
+    // and redraws this tile on every visit.
+    let answer = (): void => {}
+    const saved = new Promise<unknown>((resolve) => {
+      answer = () =>
+        resolve({
+          status: 'hit',
+          // An axis and no camera: enough to take the open out of pose framing
+          // (`useThumbnails`' rule is that half a pose is not a pose), and not
+          // enough to stop the discard resolving to the index's.
+          axis: 'y',
+          pngUrl: 'blob:stored',
+          lighting: THUMB_LIGHTING,
+          rig: RIG_VERSION,
+        })
+    })
+    await unmountApp()
+    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models' })
+    // The wave feeds one map: the panel's `pose` prop and the command's
+    // `host.poses` are the same object, so the two verdicts below differ over
+    // the stored answer and never over the pose itself.
+    semanticPosesFor.mockResolvedValue({ poses: { [FOUND]: POSE } })
+    getThumb.mockReturnValue(saved)
+    await mountAppAtCurrentUrl('/?path=%2Fmodels&model=%2Fmodels%2FAlpha%2Ffound.stl', NESTED)
+    listDir.mockResolvedValue(NESTED)
+    await wait(200)
+    expect(dialog()).not.toBeNull()
+    // Nothing has been read back yet, so the open has resolved nothing.
+    expect(dialog()!.querySelector('.animate-spin')).not.toBeNull()
+
+    await click(action('resetFraming'))
+    await settle()
+    // The pose is what it resolved to — camera and axis handed back together.
+    expect(writesFor(FOUND).filter((b) => b.camera === null && b.axis === null).length).toBe(1)
+
+    // Only now does the saved read land, with its own opposite verdict.
+    await act(async () => {
+      answer()
+      await saved
+    })
+    await settle()
+    putThumb.mockClear()
+    renderThumbnail.mockClear()
+
+    await click(closeButton())
+    await wait(250)
+    expect(dialog()).toBeNull()
+
+    const pixels = writesFor(FOUND).filter((b) => b.png !== undefined)
+    expect(pixels.length).toBe(1)
+    expect(pixels[0]!.posed).toBe(POSE_VERSION)
+    expect(pixels[0]!.camera).toBeUndefined()
+    // And the label describes the pixels: the snapshot really was taken at the
+    // index's orientation, not at the default.
+    const resolved = cameraForPose(POSE, DEFAULT_CAMERA)!
+    const shot = renderThumbnail.mock.calls[0] as unknown as [unknown, typeof STORED, string]
+    expect(shot[1].az).toBeCloseTo(resolved.camera.az)
+    expect(shot[2]).toBe(resolved.axis)
+  })
+
+  it('does not carry a pending discard into the next model opened', async () => {
+    // The clear at the top of the session effect. A reframe recorded while one
+    // model's mesh was in flight belongs to that open; the model that replaces
+    // it must resolve its own orientation, not inherit a discard nobody made
+    // for it — which would silently reset the framing of a model the user only
+    // looked at.
+    let land = (): void => {}
+    const held = new Promise<ArrayBuffer>((resolve) => {
+      land = () => resolve(tinyStl())
+    })
+    await openStoredModel(() => {
+      fetchModel.mockImplementationOnce(() => held)
+    })
+    await click(action('resetFraming'))
+    await settle()
+
+    // Move the panel to the neighbour before the first mesh ever lands.
+    await openLightbox('Alpha/other.stl')
+    await act(async () => {
+      land()
+      await held
+    })
+    await settle()
+    putThumb.mockClear()
+
+    // Out through *reveal* rather than the ✕: this lightbox was pointer-opened,
+    // so its close runs `history.back`, which the harness's stubbed URL cannot
+    // survive. The persisting close is the same one either way — App's watcher
+    // answering a view that no longer names the model.
+    await click(action('reveal'))
+    await wait(250)
+    expect(dialog()).toBeNull()
+
+    // The neighbour opened at its own stored orientation and the close wrote it
+    // back — it was never discarded. Inheriting the pending reframe would have
+    // opened it at the default and written that instead.
+    const OTHER = '/models/Alpha/other.stl'
+    const written = writesFor(OTHER).filter((b) => b.camera !== undefined && b.camera !== null)
+    expect(written.length).toBeGreaterThan(0)
+    expect((written[0]!.camera as typeof STORED).az).toBeCloseTo(STORED.az)
+    expect((written[0]!.camera as typeof STORED).distR).toBeCloseTo(STORED.distR)
+  })
 })
 
 /**
@@ -602,15 +782,6 @@ describe('resetFramingLive', () => {
     size: 1,
     mtime: 7,
   }
-  /** Expressible: file-space `up` (0,-1,0) is scene +Z, `azimuth_zero` ⟂ it. */
-  const POSE: IndexPose = {
-    up: [0, -1, 0],
-    azimuth_zero: [1, 0, 0],
-    source: 'test',
-    confidence: 1,
-    front: { view: 0, azimuth_deg: 40, elevation_deg: 20 },
-  }
-
   interface Harness {
     host: ActionHost
     put: ReturnType<typeof vi.fn>

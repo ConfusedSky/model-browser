@@ -115,8 +115,13 @@ export class ViewerSession {
     // Never a direct renderer.render: ambient occlusion lives in the shared
     // live chain, which sizes itself to this host only when it actually
     // changed and re-points its passes at this scene every frame (D1).
-    // The AO preference is consulted here and only here — thumbnails never
-    // see it, so the cache stays on the shipped recipe.
+    // The one place this session reads the preference *itself*. Thumbnails see
+    // it too since `ao-as-recipe-dimension` — occlusion is a key dimension and
+    // a render is filed under the recipe that drew it — but they are never
+    // handed this read: `snapshot` takes the value from its caller, so the
+    // pixels and the slot cannot come from two readings a toggle fell between
+    // (D4a). A live frame has no slot to disagree with, which is why it may
+    // read the store and repaint on the spot.
     getLiveChain(width, height).render(this.scene, this.camera, this.bounds, aoEnabled())
   }
 
@@ -291,10 +296,17 @@ export class ViewerSession {
    * `persist` captures the preference beside `state` and `axis` before its
    * await and hands the same value to this and to its PUT, so the pixels and
    * the slot they are filed under cannot come from two readings a toggle
-   * happened to fall between (D4a). Occluded by default: what every snapshot
-   * was before occlusion became a key dimension.
+   * happened to fall between (D4a).
+   *
+   * **Required, and that is the point.** It defaulted to `true` — "what every
+   * snapshot was before occlusion became a key dimension" — which stopped being
+   * true when `ao-default-off` flipped the unset read, leaving a default that
+   * contradicted the shipped one. A caller that omitted it would have filed
+   * occluded pixels while the app was unoccluded, under whichever slot the PUT
+   * named. There is one caller and it has always passed the value; making the
+   * parameter required is how the next one cannot inherit the old answer.
    */
-  snapshot(ao = true): Promise<Blob> {
+  snapshot(ao: boolean): Promise<Blob> {
     return renderThumbnail(this.object, this.state, this._axis, ao)
   }
 

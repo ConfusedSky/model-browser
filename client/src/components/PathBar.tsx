@@ -17,6 +17,9 @@ export default function PathBar({ path, api, onNavigate }: Props) {
   const [suggestions, setSuggestions] = useState<string[]>([])
   const [open, setOpen] = useState(false)
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /** The blur's dismissal delay — see `onBlur`. Held for the same reason the
+   *  debounce is: a timer this component owns is a timer it has to take with it. */
+  const blurDismiss = useRef<ReturnType<typeof setTimeout> | null>(null)
   const editing = useRef(false)
 
   useEffect(() => {
@@ -30,9 +33,18 @@ export default function PathBar({ path, api, onNavigate }: Props) {
   // gone: the `.catch` below guards a *rejected* promise, so a call that
   // returns nothing throws `.then` of undefined right here, where nothing
   // catches it (pathBarDebounce.test.tsx).
+  //
+  // The blur's timer goes with it. It got missed when the debounce's cleanup
+  // landed, and it is the same shape of thing: a 150ms window this component
+  // opened, which the teardown has to close. Its own callback is only a
+  // `setOpen`, so what it leaves behind is a scheduled write into a component
+  // nobody renders and a handle held past its owner — not the debounce's crash,
+  // but the rule is "every timer this component starts, it also cancels", and a
+  // rule with an exception in it is not one anybody can apply.
   useEffect(
     () => () => {
       if (debounce.current !== null) clearTimeout(debounce.current)
+      if (blurDismiss.current !== null) clearTimeout(blurDismiss.current)
     },
     [],
   )
@@ -74,8 +86,11 @@ export default function PathBar({ path, api, onNavigate }: Props) {
         }}
         onBlur={() => {
           editing.current = false
-          // Delay so suggestion mousedown wins over blur.
-          setTimeout(() => setOpen(false), 150)
+          // Delay so suggestion mousedown wins over blur. Kept, so the unmount
+          // above can cancel it — and so a refocus-and-blur inside the window
+          // leaves one pending timer rather than two.
+          if (blurDismiss.current !== null) clearTimeout(blurDismiss.current)
+          blurDismiss.current = setTimeout(() => setOpen(false), 150)
         }}
         onChange={(e) => {
           setValue(e.target.value)

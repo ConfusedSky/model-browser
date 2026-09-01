@@ -60,6 +60,31 @@ vi.mock('../src/viewer/ViewerLayer', () => ({
     return null
   },
 }))
+/**
+ * Every action App dispatches, recorded — a transparent wrapper, so nothing
+ * else in this file changes.
+ *
+ * The one thing in the suite that can see a dispatch which changes nothing
+ * *visible*. Filing an empty wave answer moves the slot `null` → `{}`: a new
+ * `listingPoses` identity, a rebuilt `poses` memo and a reconcile walk of the
+ * whole grid — and the walk then finds no pose changed by value, so it issues
+ * no lookup and draws nothing. Renders and lookups therefore cannot tell the
+ * two behaviours apart; the dispatch is the subject.
+ */
+const dispatched = vi.hoisted(() => ({ types: [] as string[] }))
+vi.mock('../src/state/reducer', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/state/reducer')>()
+  return {
+    ...actual,
+    reducer: (
+      state: Parameters<typeof actual.reducer>[0],
+      action: Parameters<typeof actual.reducer>[1],
+    ) => {
+      dispatched.types.push(action.type)
+      return actual.reducer(state, action)
+    },
+  }
+})
 
 const HERO = model('hero.stl')
 const AIMED = model('aimed.stl')
@@ -188,6 +213,7 @@ beforeEach(() => {
   getThumb.mockImplementation((path: string) => Promise.resolve(cached(path)))
   renderThumbnail.mockClear()
   viewerProps.last = null
+  dispatched.types.length = 0
 })
 afterEach(() => unmountApp())
 
@@ -266,6 +292,30 @@ describe('a listing asks for its poses', () => {
     expect(lookedUp()).toEqual([])
     expect(renderThumbnail).not.toHaveBeenCalled()
     expect(tileImages()).toEqual(drawn)
+  })
+
+  it('does not file an empty answer at all — the preview wave’s guard, here too', async () => {
+    // The cost the cell above cannot see. `{}` names no pose for any tile, but
+    // filing it still moves the slot `null` → `{}` — a new `listingPoses`
+    // identity, a rebuilt `poses` memo, and a reconcile walk of every tile in
+    // `useThumbnails` — paid once per landing over an index that knows nothing
+    // about this folder, which is every folder outside the indexed collection.
+    // Silence is already what an empty answer means; now it also costs nothing.
+    await mountApp('/models', LISTING)
+    await settle()
+
+    expect(semanticPosesFor).toHaveBeenCalledTimes(1)
+    expect(dispatched.types).not.toContain('listingPoses')
+  })
+
+  it('does file an answer that says something — the guard is emptiness, not the wave', async () => {
+    // The control. Without it the cell above passes for a wave that never
+    // files anything at all, which would make the whole second wave inert.
+    semanticPosesFor.mockResolvedValue(WAVE)
+    await mountApp('/models', LISTING)
+    await settle()
+
+    expect(dispatched.types).toContain('listingPoses')
   })
 
   it('a wave that fails says nothing at all', async () => {

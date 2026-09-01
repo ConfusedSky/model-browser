@@ -94,4 +94,26 @@ describe('the path bar’s debounced completions', () => {
 
     expect(completions).not.toHaveBeenCalled()
   })
+
+  it('cancels the blur’s dismissal timer too', async () => {
+    // The other 150ms window this component opens, and the one the cleanup
+    // missed. Counted rather than observed: its callback is a bare `setOpen`,
+    // so what a leaked timer produces is a scheduled write into a component
+    // nobody renders — invisible until something else goes looking. The count
+    // is what makes "every timer this component starts, it also cancels"
+    // checkable rather than a claim in a comment.
+    await mountBar()
+    await act(async () => {
+      pathInput().focus()
+    })
+    await act(async () => {
+      pathInput().blur()
+    })
+    // The control: the blur really did schedule something, so the assertion
+    // below is about the cleanup and not about a window that never opened.
+    expect(vi.getTimerCount()).toBe(1)
+
+    await unmountBar()
+    expect(vi.getTimerCount()).toBe(0)
+  })
 })

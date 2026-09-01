@@ -4,6 +4,7 @@ import type { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js'
 import type { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Bounds } from '../src/three/camera'
+import type { CameraState, OrbitAxis } from '../../shared/types'
 
 // The chains are internal to the renderer module, so the seam is three itself
 // — a fake WebGLRenderer lets the real composers be built (and the real
@@ -27,15 +28,25 @@ vi.mock('three', async (importOriginal) => {
   return { ...actual, WebGLRenderer: FakeWebGLRenderer }
 })
 
-const { getLiveChain, getRenderer, getThumbChain, makeScene, renderThumbnail, stageModel, THUMB_SIZE } =
-  await import('../src/three/renderer')
+const {
+  getLiveChain,
+  getRenderer,
+  getThumbChain,
+  KEY_LIGHT,
+  makeScene,
+  renderThumbnail,
+  stageModel,
+  THUMB_SIZE,
+} = await import('../src/three/renderer')
 const { ViewerSession } = await import('../src/viewer/session')
 const { setAoEnabled } = await import('../src/viewer/aoToggle')
 
 afterEach(() => {
   vi.restoreAllMocks()
   // aoToggle keeps its value in a module closure, so it outlives a test
-  // (client/test/CLAUDE.md). Back to the shipped default for whatever runs next.
+  // (client/test/CLAUDE.md). Back to *this file's* assumption, which is on —
+  // NOT the shipped default, which `ao-default-off` made off. Written when the
+  // two were the same; kept because these cases are about the occluded chain.
   setAoEnabled(true)
 })
 
@@ -294,5 +305,68 @@ describe('both paths render under the same occlusion preference', () => {
     } finally {
       session.close()
     }
+  })
+})
+
+/**
+ * The thumbnail rig's orientation — the one input to every tile's pixels that
+ * nothing pinned. `renderThumbnail` builds its scene per call and tears it down
+ * in a `finally`, so the rig it oriented is only reachable through what it
+ * handed the chain; that is the seam these use.
+ *
+ * The class of regression this guards is exactly RIG_VERSION's: drop or disturb
+ * `rig.quaternion.copy(camera.quaternion)` and every thumbnail in the library
+ * re-lights — silently, since the cache keys on a rig number nobody would think
+ * to bump for a line that still compiles, and the tile still shows *a* render.
+ */
+describe('the thumbnail rig is fixed in the rest camera’s frame', () => {
+  const IDENTITY = new THREE.Quaternion()
+
+  /** Draw once and report the rig and camera the chain was handed. The PNG
+   *  encode throws in happy-dom, well after the render this reads. */
+  function drawn(
+    state: CameraState | undefined,
+    axis: OrbitAxis,
+  ): { rig: THREE.Object3D; camera: THREE.PerspectiveCamera } {
+    const chain = getThumbChain()
+    const seen = vi.spyOn(chain, 'render').mockImplementation(() => {})
+    expect(() => renderThumbnail(makeMesh(), state, axis, true)).toThrow('2d context unavailable')
+    const [scene, camera] = seen.mock.calls[0] as unknown as [THREE.Scene, THREE.PerspectiveCamera]
+    // The rig is the scene child that owns the key light — found by name, so
+    // this does not depend on the order `makeScene` and `stageModel` add
+    // children.
+    const rig = scene.children.find((c) => c.getObjectByName(KEY_LIGHT) !== undefined)
+    expect(rig).toBeDefined()
+    return { rig: rig!, camera }
+  }
+
+  /** A camera state that is nothing like the default, so "copied" and "left at
+   *  whatever staging set" cannot both pass. */
+  const TURNED: CameraState = { az: 2.1, el: -0.55, distR: 3, target: [0, 0, 0] }
+
+  it('copies the rest camera’s quaternion onto the rig, whatever the framing', () => {
+    const cases: [CameraState | undefined, OrbitAxis][] = [
+      [undefined, 'y'], // the default framing every un-orbited tile gets
+      [TURNED, 'y'],
+      [TURNED, 'z'],
+      [TURNED, '-x'], // a negated spindle: the rig follows the camera, not the axis
+    ]
+    for (const [state, axis] of cases) {
+      const { rig, camera } = drawn(state, axis)
+      expect(rig.quaternion.angleTo(camera.quaternion)).toBeLessThan(1e-6)
+      // The control, and it is load-bearing: a rig left at identity would pass
+      // the line above for any camera that happened to be at identity too.
+      // None of these framings is — they are all well off it.
+      expect(camera.quaternion.angleTo(IDENTITY)).toBeGreaterThan(0.1)
+    }
+  })
+
+  it('turns the rig when the framing turns, rather than fixing it to the world', () => {
+    // Two framings, two rig orientations. Without this a rig copied *once* into
+    // a module-level constant would satisfy the equality above forever.
+    const a = drawn(undefined, 'y')
+    const b = drawn(TURNED, 'y')
+    expect(a.rig.quaternion.angleTo(b.rig.quaternion)).toBeGreaterThan(0.1)
+    expect(a.camera.quaternion.angleTo(b.camera.quaternion)).toBeGreaterThan(0.1)
   })
 })

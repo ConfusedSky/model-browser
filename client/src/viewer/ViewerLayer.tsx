@@ -153,15 +153,19 @@ interface Props {
    */
   onCommand: (id: CommandId, live: LiveFramingView | null) => void
   /**
-   * A launch failure's sentence, rendered *here* rather than under the path
-   * bar. The lightbox is `fixed inset-0 z-lightbox` over that bar behind a 70% scrim,
-   * so a sentence sent there is dimmed, corner-parked and gone in 2.5s while
-   * the user is looking at the panel on the right. Success is silent by design,
-   * which makes this the only feedback a launch raised from the panel gives —
-   * the same per-surface split `copyError` already makes, App holding the
-   * sentence and the surface holding where it lands.
+   * A shared command's brief sentence, rendered *here* rather than under the
+   * path bar. The lightbox is `fixed inset-0 z-lightbox` over that bar behind a
+   * 70% scrim, so a sentence sent there is dimmed, corner-parked and gone in
+   * 2.5s while the user is looking at the panel on the right — the same
+   * per-surface split `copyError` already makes, App holding the sentence and
+   * the surface holding where it lands.
+   *
+   * Toned, because both kinds arrive here: a launch failure (a launch that
+   * *works* is silent by design, so the sentence is its only feedback) and a
+   * copy's confirmation, which entry-actions requires and which the menu raised
+   * on this surface could not previously show at all.
    */
-  actionError?: string | null
+  actionNote?: { text: string; tone: 'ok' | 'error' } | null
 }
 
 /** Longest the orbit overlay holds its dismissal waiting for the refreshed thumbnail. */
@@ -240,7 +244,7 @@ export default function ViewerLayer({
   libraryTop,
   openIn = null,
   onCommand,
-  actionError = null,
+  actionNote = null,
 }: Props) {
   const [session, setSession] = useState<ViewerSession | null>(null)
   const [sessionAxis, setSessionAxis] = useState<OrbitAxis>('y')
@@ -278,6 +282,32 @@ export default function ViewerLayer({
    * the model from ever being posed).
    */
   const framingDiscardedRef = useRef(false)
+  /**
+   * A framing reset that landed **before this session existed** — the panel and
+   * the menu are both up while the mesh loads, so the press can arrive over the
+   * spinner, when `liveFramingView` has no session to re-frame.
+   *
+   * Without this the discard would reach only the store: the effect below
+   * captured the `camera` prop (or the `getThumb` answer) *before* the press and
+   * does not re-run when the discard clears it, so the session would open at the
+   * orientation just given up, with `framingDiscardedRef` still false — and the
+   * close would read that as a decision and write it back, undoing the press.
+   *
+   * Consumed in the effect's landing handler and nowhere else, which is the
+   * ordering-safe place rather than a convenient one: `savedPromise`'s own
+   * `.then` writes `openedFromPoseRef` too, and it is only inside the
+   * `Promise.all` handler that it is *certain* to have already run — anywhere
+   * earlier the two writes race, and the saved read would win half the time.
+   *
+   * The framing itself is not recomputed here: it is the one `resetFramingLive`
+   * already resolved through `framingAfterDiscard`, handed over by `reframe`, so
+   * this component learns no second copy of D7's rule.
+   */
+  const pendingReframeRef = useRef<{
+    camera: CameraState
+    axis: OrbitAxis
+    posed: boolean
+  } | null>(null)
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   // A pointer-opened viewer mounts mid-press (orbit); a keyboard-opened one
   // mounts directly in lightbox mode with no pointer down.
@@ -336,8 +366,11 @@ export default function ViewerLayer({
     // than one the user stored — read on close, to decide what may be written.
     openedFromPoseRef.current = false
     // A new session has discarded nothing yet — a held dismissal can keep this
-    // component mounted across entries.
+    // component mounted across entries, and a reframe recorded for the open
+    // that was in flight must not be adopted by the one replacing it. The next
+    // open re-reads a cache the store half has already updated anyway.
     framingDiscardedRef.current = false
+    pendingReframeRef.current = null
     const savedPromise: Promise<{ camera?: CameraState; axis: OrbitAxis }> =
       camera !== undefined
         ? Promise.resolve({ camera, axis: axis ?? 'y' })
@@ -358,10 +391,21 @@ export default function ViewerLayer({
     void Promise.all([lru.acquire(viewer.entry.path), savedPromise])
       .then(([object, saved]) => {
         if (!alive) return
-        const s = new ViewerSession(object, saved.axis, saved.camera)
+        // A framing reset pressed while this open was in flight wins over the
+        // orientation the open resolved: `saved` is the very thing the press
+        // gave up. Read here and not earlier because `savedPromise` has now
+        // certainly settled, so this assignment to `openedFromPoseRef` is the
+        // last one rather than a racing one.
+        const discarded = pendingReframeRef.current
+        if (discarded !== null) {
+          pendingReframeRef.current = null
+          openedFromPoseRef.current = discarded.posed
+        }
+        const axisAt = discarded?.axis ?? saved.axis
+        const s = new ViewerSession(object, axisAt, discarded?.camera ?? saved.camera)
         sessionRef.current = s
         setSession(s)
-        setSessionAxis(saved.axis)
+        setSessionAxis(axisAt)
       })
       .catch((err: unknown) => {
         // Missing file / gone zip entry / parse failure: show it, don't
@@ -664,18 +708,35 @@ export default function ViewerLayer({
    * every command, not just that one: the surface reports what it has, and
    * which commands care is `entryActions`' business.
    */
-  /** The live view a framing reset moves, built fresh at each read — one
-   *  construction for the panel's presses and the menu's, so the two surfaces
-   *  cannot drift in what "live" means. */
-  function liveFramingView(): LiveFramingView | null {
+  /**
+   * The live view a framing reset moves, built fresh at each read — one
+   * construction for the panel's presses and the menu's, so the two surfaces
+   * cannot drift in what "live" means.
+   *
+   * Offered even while the mesh is still loading, when there is no session to
+   * move. That is not a pretence that one is open: the discard is a fact about
+   * the model that this component alone can carry across the pending open, and
+   * `reframe` records it for the landing handler instead of animating nothing.
+   * Returning `null` there is what let the close resurrect a discarded camera —
+   * `pendingReframeRef` says why.
+   */
+  function liveFramingView(): LiveFramingView {
     const s = sessionRef.current
-    if (s === null) return null
     return {
-      axis: s.axis,
+      // With no session, the spindle the model is stored about — the same value
+      // the session would have opened at, so what a pose-less reset keeps is
+      // the same either way.
+      axis: s?.axis ?? axis ?? 'y',
       reframe: (nextCamera, nextAxis, posed) => {
-        s.reframe(nextCamera, nextAxis)
+        if (s !== null) {
+          s.reframe(nextCamera, nextAxis)
+          runTweenLoop()
+        } else {
+          // Nothing on screen to move yet; the open in flight adopts this
+          // instead of the orientation it resolved before the press.
+          pendingReframeRef.current = { camera: nextCamera, axis: nextAxis, posed }
+        }
         setSessionAxis(nextAxis)
-        runTweenLoop()
         // The view on screen is now the index's orientation or the
         // default — either way not the user's, and the close must not
         // write it back over the discard just made.
@@ -1035,9 +1096,16 @@ export default function ViewerLayer({
               ))}
             </div>
           )}
-          {actionError !== null && (
-            <p role="status" className="text-xs text-red-400">
-              {actionError}
+          {actionNote !== null && (
+            // The header's own two tones, so one transient line reads the same
+            // wherever it lands (App's `headerMessage`).
+            <p
+              role="status"
+              className={`text-xs ${
+                actionNote.tone === 'error' ? 'text-red-400' : 'text-zinc-400'
+              }`}
+            >
+              {actionNote.text}
             </p>
           )}
         </div>

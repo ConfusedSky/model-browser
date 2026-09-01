@@ -115,8 +115,10 @@ beforeEach(async () => {
   opts.snapshotAo = undefined
   opts.duringSnapshot = undefined
   // A module closure, so localStorage.clear() in afterEach does not reset it
-  // (client/test/CLAUDE.md). Mounted under the shipped default; the cases that
-  // want it off say so before opening the viewer.
+  // (client/test/CLAUDE.md). Pinned ON — which is NOT the shipped default since
+  // `ao-default-off` flipped the unset read to off. These cases were written
+  // under the old on-default and assert about the occluded recipe; the ones
+  // that want it off say so before opening the viewer.
   setAoEnabled(true)
   // The boot path, through the URL: `resolveView` opens at the library's top
   // (design D2/D7) and reads no last path, so this is what puts the app in

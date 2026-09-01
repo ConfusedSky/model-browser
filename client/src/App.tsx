@@ -18,6 +18,7 @@ import { SKELETON_DELAY_MS, useDelayedFlag } from './hooks/useDelayedFlag'
 import { useThumbnails } from './hooks/useThumbnails'
 import {
   commandsFor,
+  containingFolder,
   DEFAULT_ORBIT_AXIS,
   LIGHTBOX_MENU_EXCLUDES,
   LIGHTBOX_PANEL_EXCLUDES,
@@ -476,20 +477,45 @@ export default function App() {
   }, [])
   /**
    * The same sentence, sent to the lightbox instead of the path bar. The
-   * lightbox covers that bar (`fixed inset-0 z-lightbox`, 70% scrim), so a failure
-   * raised from its panel is otherwise dimmed and corner-parked away from the
-   * pill that raised it — and since success is silent, it is the *only* signal
-   * a launch gives. Where the sentence lands is per-surface; the sentence
-   * itself is not, so both paths still spell it from `entryActions`.
+   * lightbox covers that bar (`fixed inset-0 z-lightbox`, 70% scrim), so a line
+   * raised from its panel or its menu is otherwise dimmed and corner-parked away
+   * from the affordance that raised it. Where the sentence lands is
+   * per-surface; the sentence itself is not, so both paths still spell it from
+   * `entryActions`.
+   *
+   * **Toned, like the header's own line, since 2026-09-01.** It carried failures
+   * only while a launch was the sole thing routed here — success there is silent
+   * by design. *Copy path* is not silent: it must confirm briefly (entry-actions
+   * R1), and raised from the lightbox's menu that confirmation went to the bar
+   * under the scrim, so the one action on this surface that owes the user a word
+   * gave none. A confirmation painted in the failure colour would be the other
+   * half of the same bug, hence the tone rather than a second cell.
    */
-  const [viewerError, setViewerError] = useState<string | null>(null)
-  const viewerErrorTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  useEffect(() => () => clearTimeout(viewerErrorTimerRef.current), [])
-  const sayInViewer = useCallback((text: string): void => {
-    clearTimeout(viewerErrorTimerRef.current)
-    setViewerError(text)
-    viewerErrorTimerRef.current = setTimeout(() => setViewerError(null), ACTION_TEXT_MS)
+  const [viewerNote, setViewerNote] = useState<{ text: string; tone: 'ok' | 'error' } | null>(null)
+  const viewerNoteTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(() => () => clearTimeout(viewerNoteTimerRef.current), [])
+  const sayInViewer = useCallback((text: string, tone: 'ok' | 'error'): void => {
+    clearTimeout(viewerNoteTimerRef.current)
+    setViewerNote({ text, tone })
+    viewerNoteTimerRef.current = setTimeout(() => setViewerNote(null), ACTION_TEXT_MS)
   }, [])
+  /**
+   * A sentence, put where the user is actually looking — the one routing rule
+   * for everything a shared command says, in either tone.
+   *
+   * Read off `viewerRef`, not the state: the action host is memoized and
+   * `viewer` changes on every open and close, so depending on the value here
+   * would rebuild the host for a reason that has nothing to do with what it
+   * holds. Only the lightbox reroutes — an orbit overlay covers one tile, not
+   * the bar, and the sentence under it is perfectly readable.
+   */
+  const sayWhereLooking = useCallback(
+    (text: string, tone: 'ok' | 'error'): void => {
+      if (viewerRef.current?.mode === 'lightbox') sayInViewer(text, tone)
+      else say(text, tone)
+    },
+    [say, sayInViewer],
+  )
 
   /**
    * Reveal's two ephemeral cells (D3/D8): the entry whose containing folder is
@@ -511,12 +537,12 @@ export default function App() {
   const tuningForRef = useRef<View | null>(null)
   useEffect(() => () => clearTimeout(tuningTimerRef.current), [])
   const [viewer, setViewer] = useState<ViewerState | null>(null)
-  // A launch failure belongs to the model that was open when it happened. Drop
-  // it on close and on a swap, or a reopen inside the 2.5s window would greet
-  // the next model with the last one's sentence.
+  // A sentence raised in the viewer belongs to the model that was open when it
+  // happened. Drop it on close and on a swap, or a reopen inside the 2.5s
+  // window would greet the next model with the last one's line.
   useEffect(() => {
-    clearTimeout(viewerErrorTimerRef.current)
-    setViewerError(null)
+    clearTimeout(viewerNoteTimerRef.current)
+    setViewerNote(null)
   }, [viewer?.entry.path])
   // AO preference pill state (persisted per browser profile, aoToggle.ts).
   const [ao, setAoState] = useState(aoEnabled)
@@ -1081,7 +1107,8 @@ export default function App() {
    *
    * Keyed on the landing's asking-event id and those paths, so it fires exactly
    * once per landing that landed a model: setting the slot changes neither, so
-   * an index answering `{}` leaves an empty map and no retry. A listing of
+   * there is no retry either way. An index answering `{}` is not even filed —
+   * see the guard below. A listing of
    * folders alone asks nothing — there is nothing to ask about. The library's
    * readiness is a dependency rather than a bare guard, because a boot listing
    * can land before the probe answers — the wave then goes out when the library
@@ -1108,7 +1135,18 @@ export default function App() {
   useEffect(() => {
     if (waveId === null || wavePaths.length === 0 || !libraryReady) return
     void api.semanticPosesFor(wavePaths).then(
-      (res) => dispatch({ type: 'listingPoses', id: waveId, poses: res.poses }),
+      (res) => {
+        // The preview wave's guard, on the wave that fires far more often. An
+        // empty answer names no pose for any tile, but filing it still moves
+        // the slot `null` → `{}`, which is a new `listingPoses` identity, a
+        // rebuilt `poses` memo and a reconcile walk of the whole grid in
+        // `useThumbnails` — paid once per landing over an index that knows
+        // nothing about this folder, which is the common case off the indexed
+        // collection. Silence is what it already means; now it also costs
+        // nothing.
+        if (Object.keys(res.poses).length === 0) return
+        dispatch({ type: 'listingPoses', id: waveId, poses: res.poses })
+      },
       () => {},
     )
   }, [waveId, wavePaths, libraryReady, api, dispatch])
@@ -1731,15 +1769,15 @@ export default function App() {
         // always an element for the lightbox to grow out of.
         if (el !== null) openLightbox(entry, el)
       },
-      confirm: () => say('Path copied.', 'ok'),
-      // Read off the ref, not the state: the host is memoized and `viewer`
-      // changes on every open and close, so depending on it here would rebuild
-      // the host for a reason that has nothing to do with what it holds. Only
-      // the lightbox reroutes — an orbit overlay covers one tile, not the bar.
-      report: (message) => {
-        if (viewerRef.current?.mode === 'lightbox') sayInViewer(message)
-        else say(message, 'error')
-      },
+      // Both halves of the host's feedback take the same route, and that is the
+      // fix: the routing used to sit on `report` alone, so a *Copy path* chosen
+      // from the lightbox's menu confirmed under the scrim — dimmed, in the far
+      // corner, behind the very dialog the user was looking at — which is a
+      // command that owes a brief confirmation (entry-actions R1) silently not
+      // giving one. The panel's own copy pill was never affected: it has its own
+      // "copied" and never reaches this host.
+      confirm: () => sayWhereLooking('Path copied.', 'ok'),
+      report: (message) => sayWhereLooking(message, 'error'),
       poses,
       // The one filesystem path the client holds, for the one command that puts
       // a path somewhere else (library R2). A string, not the client: no command
@@ -1763,8 +1801,7 @@ export default function App() {
       dispatch,
       enterEntry,
       openLightbox,
-      say,
-      sayInViewer,
+      sayWhereLooking,
       poses,
       libraryTop,
       api,
@@ -1964,18 +2001,19 @@ export default function App() {
   function goUp(): void {
     // Ascend from `dest`, not the committed path (D3): pressing ↑ twice during
     // a slow listing must reach the grandparent, not re-request the same parent.
-    const zipSep = target.lastIndexOf('!/')
-    if (zipSep !== -1) {
-      const entry = target.slice(zipSep + 2)
-      const parent = entry.includes('/')
-        ? target.slice(0, zipSep + 2) + entry.slice(0, entry.lastIndexOf('/'))
-        : target.slice(0, zipSep)
-      navigate(parent)
-      return
-    }
-    const slash = target.lastIndexOf('/')
-    if (slash > 0) navigate(target.slice(0, slash))
-    else if (target !== '/') navigate('/')
+    //
+    // The ascent itself is `containingFolder` and nothing else. This used to
+    // carry its own copy — the same four branches and the same `!/` grammar,
+    // character for character — which is two readings of one rule and the way
+    // the two would come to disagree about the same archive.
+    //
+    // `containingFolder` answers `'/'` for the library's top, where ↑ has
+    // nowhere to go; comparing against `target` is what keeps that from
+    // becoming a re-request of the listing already on screen (the control is
+    // also disabled there, so this is the second of two guards, not the only
+    // one).
+    const parent = containingFolder(target)
+    if (parent !== target) navigate(parent)
   }
 
   const persist = useCallback(
@@ -2502,7 +2540,7 @@ export default function App() {
       {viewer !== null && (
         <ViewerLayer
           viewer={viewer}
-          actionError={viewerError}
+          actionNote={viewerNote}
           camera={thumbs.get(viewer.entry.path)?.camera}
           axis={thumbs.get(viewer.entry.path)?.axis}
           pose={poses[viewer.entry.path]}
