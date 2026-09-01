@@ -361,14 +361,18 @@
 
 ## 5. The index-level peek (D5, 2026-09-01)
 
-- [ ] 5.1 mini-classify `POST /under` — `{path, limit}` → indexed models under the prefix
-      with poses, deterministic order, observable truncation; contract proposed to the
-      mini-classify session (masa-19), builder per their answer
-- [ ] 5.2 Server: `posedFirstPeek` asks the index first (`/under`, short timeout like
-      `/poses`), confines/maps per path, ranks posed-first, stats the chosen n into
-      `DirEntry`s; empty or silent → today's walk path, byte-identical (the existing
-      identity cells must keep passing unchanged); fewer than n → fill from the walk's
-      finds, deduped
+- [ ] 5.1 mini-classify `POST /under` — contract CONFIRMED with masa-19 (2026-09-01), they
+      build it: `{path, limit}` → `{status: "ok"|"unindexed", models: [{path, pose|null}],
+      matched, truncated}`; scoping via `Collection.resolve` (post-340a8f0 spellings), rel-path
+      sorted, pure store scan, 503 while warming. The walk fallback keys on `"unindexed"` or
+      index-silence — an empty `"ok"` means genuinely nothing indexed there
+- [ ] 5.2 Server: `posedFirstPeek` asks the index first (`/under` with limit 256, short
+      timeout like `/poses`), confines/maps per path, ranks posed-first, stats the chosen n
+      into `DirEntry`s; `"unindexed"` or silent → today's walk path, byte-identical (the
+      existing identity cells must keep passing unchanged); an `"ok"` answer with fewer
+      than n models → fill from the walk's finds, deduped. `matched`/`truncated` advisory:
+      a posed model past a truncated 256 cut is invisible to the sheet — recorded, accepted
+      for 4 cells
 - [ ] 5.3 Tests: index-first selection reaching past the walk budget (the Lich Lord shape:
       deep first subtree unindexed, posed models deeper); fill-from-walk; empty-answer
       fallback identity; stat failure on a chosen path drops to the next candidate
