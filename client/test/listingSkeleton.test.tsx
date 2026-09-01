@@ -61,7 +61,7 @@ describe('listing skeleton', () => {
     expect(skeleton()).toBeNull()
     // Container tiles are labeled by their own name now that a deep search can
     // return one named by a relative path; the full name stays in the title.
-    expect(tiles().map((b) => b.textContent)).toEqual(['📁b'])
+    expect(tiles().map((b) => b.textContent)).toEqual(['b'])
   })
 
   it('a newer navigation while pending wins and clears the skeleton', async () => {
@@ -79,7 +79,7 @@ describe('listing skeleton', () => {
     await settle()
 
     expect(skeleton()).toBeNull()
-    expect(tiles().map((b) => b.textContent)).toEqual(['📁a'])
+    expect(tiles().map((b) => b.textContent)).toEqual(['a'])
   })
 
   it('a superseded request landing neither dismisses nor re-triggers the skeleton', async () => {
@@ -163,6 +163,6 @@ describe('listing skeleton', () => {
 
     expect(skeleton()).toBeNull()
     expect(container.textContent).toContain('walk failed')
-    expect(tiles().map((b) => b.textContent)).toEqual(['📁a']) // prior grid restored
+    expect(tiles().map((b) => b.textContent)).toEqual(['a']) // prior grid restored
   })
 })

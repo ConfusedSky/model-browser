@@ -427,25 +427,26 @@ const Tile = memo(function Tile({
         // by mistake.
         data-dir-tile={entry.kind === 'dir' ? entry.path : undefined}
       >
-        {/* The sheet takes the icon's place only once there is something to
-            show — no preview, none yet, a peek that failed and a zip all land
-            on the icon, so a tile never blanks while its peek is in flight.
-
-            The sheet sits inside folder chrome — a tab and a framed body — so
-            the tile still reads as a folder at scanning distance: a one-preview
-            sheet is otherwise pixel-identical to a model tile, and the name row
-            is too small to carry the distinction alone. The chrome, not a badge
-            over the pixels, is what says "container": the images are *inside*
-            the folder, the way every desktop draws it. */}
-        {preview !== undefined && preview.length > 0 ? (
-          <div className="flex min-h-0 w-full flex-1 flex-col px-1 pt-1">
+        {/* The folder chrome — a tab and a framed body — IS the directory
+            tile's icon, drawn whether or not anything previews (Masa,
+            2026-08-31): the resting look and the filled look are one shape, so
+            a peek landing fills the folder rather than replacing an emoji with
+            chrome — no pop-in, and an empty folder still reads as a folder.
+            The sheet, when there is one, sits inside: the images are *inside*
+            the folder, the way every desktop draws it, which is what keeps a
+            one-preview sheet from reading as a model tile. Only zips keep the
+            emoji — they are never previewed and are not folders. */}
+        {entry.kind === 'dir' ? (
+          <div data-folder-chrome className="flex min-h-0 w-full flex-1 flex-col px-1 pt-1">
             <div className="h-2.5 w-1/2 shrink-0 rounded-t-md bg-amber-400/40" />
             <div className="flex min-h-0 w-full flex-1 rounded-b-md rounded-tr-md bg-amber-400/40 p-1">
-              <ContactSheet preview={preview} thumbs={previewThumbs} />
+              {preview !== undefined && preview.length > 0 && (
+                <ContactSheet preview={preview} thumbs={previewThumbs} />
+              )}
             </div>
           </div>
         ) : (
-          <span className="text-4xl">{entry.kind === 'dir' ? '📁' : '🗜️'}</span>
+          <span className="text-4xl">🗜️</span>
         )}
         {/* Labeled by its own name like a model tile is: a deep-search container
             carries a relative path, and truncating that to fit shows the head of

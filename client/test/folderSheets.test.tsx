@@ -104,9 +104,15 @@ function sheet(path: string): HTMLElement | null {
 function cells(path: string): HTMLElement[] {
   return Array.from(dirTile(path).querySelectorAll<HTMLElement>('[data-preview-cell]'))
 }
-/** The folder icon — what a tile with nothing to preview shows. */
+/**
+ * The empty folder — what a tile with nothing to preview shows. The folder
+ * chrome is the directory tile's icon and is ALWAYS drawn (no pop-in when a
+ * peek lands — Masa, 2026-08-31); "shows its icon" means the chrome stands
+ * with no sheet inside it.
+ */
 function hasIcon(path: string): boolean {
-  return Array.from(dirTile(path).querySelectorAll('span')).some((s) => s.textContent === '📁')
+  const tile = dirTile(path)
+  return tile.querySelector('[data-folder-chrome]') !== null && tile.querySelector('[data-preview-sheet]') === null
 }
 
 /**
@@ -171,6 +177,23 @@ describe('folder contact sheets', () => {
     expect(peek).toHaveBeenCalledTimes(1)
     // And it came back with its sheet, not with an icon.
     expect(cells('/models/a')).toHaveLength(2)
+  })
+
+  it('wears its chrome before the peek answers, and the landing fills it in place', async () => {
+    // The chrome is the directory tile's icon, not a reward for having
+    // previews: it stands from first paint, and a landing fills the same node
+    // rather than swapping an emoji for a folder — the pop-in this rule
+    // exists to stop (Masa, 2026-08-31).
+    let answer!: (entries: DirEntry[]) => void
+    peek.mockReturnValue(new Promise<DirEntry[]>((resolve) => (answer = resolve)))
+    await mountApp('/models', ONE_FOLDER)
+    const chrome = dirTile('/models/a').querySelector('[data-folder-chrome]')
+    expect(chrome).not.toBeNull()
+    await intersect(dirTile('/models/a'))
+    await act(async () => answer(found(2)))
+    await settle()
+    expect(dirTile('/models/a').querySelector('[data-folder-chrome]')).toBe(chrome)
+    expect(chrome!.querySelector('[data-preview-sheet]')).not.toBeNull()
   })
 
   it('draws one preview full size', async () => {
