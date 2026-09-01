@@ -29,6 +29,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 })
 
 import { createApp } from '../src/app'
+import { resetIndexStatus } from '../src/semantic'
 import { ThumbCache } from '../src/cache'
 import { MARKER_DIR, createLibrary } from '../src/library'
 import {
@@ -506,6 +507,17 @@ describe('display names ride the listing', () => {
   })
 
   it('labels a named entry in a peek answer', async () => {
+    // Hermetic: /api/peek probes the semantic index first (posedFirstPeek),
+    // and an unstubbed fetch here was a real 2s-timeout call to 127.0.0.1:8077
+    // whose branch depended on whether a dev index happened to be running
+    // (review round six). Refused = absent = the plain walk, deterministically.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new TypeError('fetch failed')
+      }),
+    )
+    resetIndexStatus()
     const libTop = fixtureLibrary()
     storeAt(libTop, NAMES)
     const res = await appOn(libTop).request('/api/peek?path=/kit', { headers: LOOPBACK })
