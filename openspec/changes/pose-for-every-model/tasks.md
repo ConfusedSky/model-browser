@@ -384,11 +384,21 @@
 
 ## 5. The index-level peek (D5, 2026-09-01)
 
-- [ ] 5.1 mini-classify `POST /under` — contract CONFIRMED with masa-19 (2026-09-01), they
+- [x] 5.1 mini-classify `POST /under` — contract CONFIRMED with masa-19 (2026-09-01), they
       build it: `{path, limit}` → `{status: "ok"|"unindexed", models: [{path, pose|null}],
       matched, truncated}`; scoping via `Collection.resolve` (post-340a8f0 spellings), rel-path
       sorted, pure store scan, 503 while warming. The walk fallback keys on `"unindexed"` or
       index-silence — an empty `"ok"` means genuinely nothing indexed there
+      — landed 2026-09-01 by masa-19 as mini-classify `3dde233`, suite 731; spec in its
+      docs/api/surface.md. As-landed sharpenings: an empty `"ok"` is structurally
+      impossible (zero rows under a real directory is always `"unindexed"` — pinned by
+      test), so this side's fallback keys on `"unindexed"`/silence alone and the `[]`
+      branch in `modelsUnder` is unreachable-but-harmless (it converges on the fill
+      arithmetic); paths are byte-identical to `/query` hit paths and round-trip through
+      `/poses` (pinned there); order is root-relative sorted with the sort made
+      falsifiable against Python 3.12's per-component `PurePath` ordering; limit capped at
+      10000 server-side; no GPU lock. The `_row_by_rel` last-wins note traced to a
+      no-differing-poses verdict (colliding rows share `file_identity`)
 - [x] 5.2 Server: `posedFirstPeek` asks the index first (`/under` with limit 256, short
       timeout like `/poses`), confines/maps per path, ranks posed-first, stats the chosen n
       into `DirEntry`s; `"unindexed"` or silent → today's walk path, byte-identical (the
