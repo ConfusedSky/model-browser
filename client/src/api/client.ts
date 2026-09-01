@@ -14,6 +14,7 @@ import type {
   ResolvedOverrides,
   ThumbGetResponse,
   ThumbStatus,
+  PosesRequest,
 } from '../../../shared/types'
 
 /**
@@ -71,18 +72,6 @@ export interface ThumbSave {
  */
 export const POSES_MAX = 1024
 
-/**
- * The body of `POST /api/semantic/poses`.
- *
- * Declared here rather than imported from `shared/types`, where its response
- * (`PosesResponse`) lives: the server side of this route is landing in a
- * parallel change and owns the shared request type. When it arrives this
- * declaration is deleted and the import takes its place — there is one wire
- * shape, not two.
- */
-interface PosesRequest {
-  paths: string[]
-}
 
 /**
  * All frontend I/O goes through this interface — never raw fetch in

@@ -323,3 +323,18 @@
   earlier run in that session reported a single failure; three later runs — two full, one
   of `indexContract.test.ts` alone — did not reproduce it, which is the flavour of
   environmental this note is about.)
+
+## 4. Review notes
+
+- 2026-08-31 (coordinator, review round): the index-side HIGH finding (F1 — `row_of`
+  answering `null` for every model when the classify run was invoked through a symlinked
+  root and the server started bare) was handed to the mini-classify session at Masa's
+  direction and landed there as `340a8f0` (`_parts` falls through input-relative →
+  root-relative → realpath-relative → absolute; both directions of the repro pinned; suite
+  711). Its semantics note stands for this side: `row_of` stays lexical, and the
+  realpath-first spelling `scopeWithin` sends is the one that now always hits. The
+  `run_serve.sh` false start is retired by their `c05c14d` (run params in the manifest).
+  Here: S (`39acd0f`) and C (`e2cdda6`) merged; C's local `PosesRequest` replaced by the
+  shared type at merge. Merged main: client 53 files / 602, server 439 ×3 (one run showed
+  the pre-existing `open.test.ts` abort flake S measured at 2-in-6 on untouched main),
+  typecheck and validate clean.
