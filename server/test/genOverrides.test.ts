@@ -285,8 +285,11 @@ describe('gen-overrides', () => {
   it('counts a duplicated stem once — the count means keys', async () => {
     const { top, metadata } = fixture()
     writeFileSync(metadata, JSON.stringify([KITS[0], KITS[0]]))
-    const result = await generateOverrides({ top, metadata, report: () => undefined })
+    const lines: string[] = []
+    const result = await generateOverrides({ top, metadata, report: (m) => lines.push(m) })
     expect(result.written).toBe(1)
     expect(result.read).toBe(2)
+    expect(result.duplicated).toEqual(['Player_Character_Pack_03_3750572'])
+    expect(lines.some((l) => l.includes('1 stems duplicated keys'))).toBe(true)
   })
 })

@@ -58,6 +58,8 @@ export interface GenerateResult {
   missing: string[]
   /** Stems that resolved outside the kit directory, or onto it — refused, never keyed. */
   escaped: string[]
+  /** Stems whose key another stem already wrote this run — reported, keyed once. */
+  duplicated: string[]
   /** The store that was written. */
   file: string
 }
@@ -233,11 +235,12 @@ export async function generateOverrides(opts: GenerateOptions): Promise<Generate
   for (const stem of escaped) report(`  stem escapes the kit directory and was refused: ${stem}`)
   if (escaped.length > 0) report(`${escaped.length} stems escaped the kit directory and were refused`)
   for (const stem of duplicated) report(`  duplicate stem, keyed once: ${stem}`)
+  if (duplicated.length > 0) report(`${duplicated.length} stems duplicated keys and were keyed once`)
   // The same rule every config file here has. The store is read once per
   // resolved library, so a running server keeps answering from what it loaded.
   report('the server reads this file once per resolved library — restart it to pick this up')
 
-  return { read, written, missing, escaped, file: storePath }
+  return { read, written, missing, escaped, duplicated, file: storePath }
 }
 
 const USAGE =

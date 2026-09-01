@@ -704,14 +704,6 @@ export default function App() {
     // on exactly the tiles the wave exists to fix (review round five,
     // measured). Paths that left drop; paths that stay keep their pose until
     // the listing wave confirms the same value, which merges to no change.
-    // Pruned, not reset: a preview model that survives into the new listing
-    // (walking into the folder is the common case) must not see its pose go
-    // P → undefined → P — the sweep retires and restarts the pipeline on each
-    // transition, two extra lookups per carried-over model and, if the posed
-    // render is still in flight, an unposed render plus a visible angle flip
-    // on exactly the tiles the wave exists to fix (review round five,
-    // measured). Paths that left drop; paths that stay keep their pose until
-    // the listing wave confirms the same value, which merges to no change.
     setPreviewPoses((prev) => {
       if (prev === NO_POSES) return prev
       const kept: Record<string, IndexPose> = {}
@@ -723,7 +715,10 @@ export default function App() {
           count++
         }
       }
-      return count === 0 ? NO_POSES : kept
+      // Identity-preserving when nothing was dropped, so the sweep comment's
+      // "rebuilds only when a wave actually answers" stays literally true —
+      // a listing change that keeps every pose keeps the object too.
+      return count === 0 ? NO_POSES : count === Object.keys(prev).length ? prev : kept
     })
   }, [entries])
   /**

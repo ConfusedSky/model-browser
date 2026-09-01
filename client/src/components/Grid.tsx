@@ -473,7 +473,12 @@ const Tile = memo(function Tile({
             </div>
           </div>
         ) : (
-          <span className="text-4xl">🗜️</span>
+          // role="img" + a spoken name, for the chrome's reason: a bare emoji
+          // glyph leaks into the content-derived accessible name as whatever
+          // the reader's symbol dictionary says (round six's follow-up).
+          <span role="img" aria-label="zip archive" className="text-4xl">
+            🗜️
+          </span>
         )}
         {/* Labeled by its own name like a model tile is: a deep-search container
             carries a relative path, and truncating that to fit shows the head of
