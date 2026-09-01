@@ -55,6 +55,35 @@ describe('same-origin guard', () => {
     expect(res.headers.get('content-type')).toBe('application/octet-stream')
     expect(res.headers.get('x-content-type-options')).toBe('nosniff')
   })
+
+  it('canonicalises its path like every sibling route, and says so when it misses', async () => {
+    // It was the one path route that did not, so its 404 echoed the spelling
+    // back exactly as asked: a `../` walk-and-return came back named that way,
+    // in a shape `/api/dir` and `/api/peek` would have normalised before
+    // answering. The path is not *refused* — it never was, since `resolve`
+    // normalises internally for its own confinement — it is simply answered in
+    // the app's own spelling.
+    for (const [asked, canonical] of [
+      ['//gone.stl', '/gone.stl'],
+      ['/sub/../gone.stl', '/gone.stl'],
+      ['/sub/./gone.stl', '/sub/gone.stl'],
+    ]) {
+      const res = await get(`/api/file?path=${encodeURIComponent(asked!)}`)
+      expect([asked, res.status]).toEqual([asked, 404])
+      expect(await res.json()).toEqual({ error: `no such file: ${canonical}` })
+    }
+  })
+
+  it('and the bytes it does serve are unchanged by that', async () => {
+    // The control: the same normalisations over a model that *is* there answer
+    // it, so the canonicalisation is a spelling change and not a new refusal.
+    const direct = Buffer.from(await (await get('/api/file?path=/loose.stl')).arrayBuffer())
+    for (const asked of ['//loose.stl', '/sub/../loose.stl', '/./loose.stl']) {
+      const res = await get(`/api/file?path=${encodeURIComponent(asked)}`)
+      expect([asked, res.status]).toEqual([asked, 200])
+      expect(Buffer.from(await res.arrayBuffer()).equals(direct)).toBe(true)
+    }
+  })
 })
 
 describe('GET /api/dir', () => {

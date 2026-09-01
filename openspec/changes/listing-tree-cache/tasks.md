@@ -37,6 +37,15 @@
 ## 4. Walk integration and revalidation
 
 - [ ] 4.1 `listFlat` serves from the snapshot when one exists for the root; a miss walks and populates. The snapshot is keyed by the **root alone** (its library path under the library's id) — not by `q`, not by the search options — and filtering runs over it exactly as it runs over a live walk (D1)
+      <br>**The seam 4.1a needs already exists (2026-09-01, aggregate-review worker WR-S).**
+      `server/src/listing.ts` exports `walkFlat` — `listFlat`'s body, returning
+      `{ listing, budgetExhausted, capped }` — and `listFlat` is now a one-line wrapper
+      over it. Build 4.1 on `walkFlat`, not on `listFlat`: `DirListing.truncated` is the
+      **OR** of those two flags and cannot answer 4.1a's question, so a folder walked end
+      to end whose 501st model the response cap dropped would otherwise refuse to cache
+      itself forever. `budgetExhausted` alone is the completeness fact. Cells:
+      `flat.test.ts` › "the two reasons a listing is truncated, which the wire does not
+      tell apart"
 - [ ] 4.1a Only a **complete** traversal is persisted: a walk that stopped against its step budget populates nothing, or a partial tree is stored as though whole and is permanently wrong (D1). Test that a budget-truncated walk leaves no snapshot behind, and that the next unbudgeted request traverses
 - [ ] 4.2 Incremental revalidation: one `stat` per directory, re-reading only those whose freshness signal moved (D4). Never a background full re-walk — that reintroduces the cold cost off-screen (D5)
 - [ ] 4.3 A revalidation that cannot be completed against a root that is **present** — an

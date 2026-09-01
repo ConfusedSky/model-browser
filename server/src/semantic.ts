@@ -67,6 +67,59 @@ function baseUrl(): string | null {
  */
 export type { IndexState }
 
+/**
+ * The one thing every body this module reads has to be before it is read: a
+ * non-null object.
+ *
+ * `res.json()` succeeding is not the same as an answer arriving. `null`, a
+ * bare number and a bare string are all valid JSON, and every one of them
+ * makes the very next property read — `raw.collection_root`, `answer.poses`,
+ * `raw.status` — a `TypeError` rather than an `undefined`. That throw lands
+ * outside `askIndex`'s parse `try` and outside the `IndexError` catches that
+ * are the whole of "a listing may never be made to fail by the index", so it
+ * escaped as far as a 500 on a peek and an emptied pose wave.
+ */
+function isObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null
+}
+
+/** A pose's two direction fields: three numbers, no fewer and no more. Arity is
+ *  half the check, because the client indexes them (`up[0]`, `up[1]`, `up[2]`). */
+function isVec3(v: unknown): v is [number, number, number] {
+  return Array.isArray(v) && v.length === 3 && v.every((n) => typeof n === 'number')
+}
+
+/**
+ * Whether a pose the index sent is a pose at all.
+ *
+ * `IndexPose` is another process's JSON, and until here nothing checked that it
+ * was: a string, an `up` of the wrong arity, or a member that is not a number
+ * all crossed this server untouched and reached the client, which reads
+ * `pose.up` positionally (`client/src/three/pose.ts`, `axisOf`) and orients a
+ * model by whatever it finds. One validator at the boundary, applied wherever a
+ * pose enters — hits (`hitsToEntries`), `/poses` answers (`askPoses`), `/under`
+ * models (`modelsUnder`) — so a malformed pose is "no pose" at every one of
+ * them rather than an error at any: a pose is advisory, and the tile renders at
+ * its default framing without one (D2).
+ *
+ * `front` is admitted absent as well as `null` — the client reads it through
+ * `?.` and defaults both angles — but a *present* `front` must be the shape it
+ * claims, since that is the one the angles are read out of positionally too.
+ */
+export function isIndexPose(v: unknown): v is IndexPose {
+  if (!isObject(v)) return false
+  if (!isVec3(v.up) || !isVec3(v.azimuth_zero)) return false
+  if (typeof v.source !== 'string' || typeof v.confidence !== 'number') return false
+  const front = v.front
+  if (front === null || front === undefined) return true
+  if (!isObject(front)) return false
+  return (
+    typeof front.view === 'number' &&
+    typeof front.azimuth_deg === 'number' &&
+    typeof front.elevation_deg === 'number'
+  )
+}
+
 interface RawStatus {
   // Typed as the wire actually is: the index spells "not there" as JSON null
   // (a failed load answers every root field null), so every field here admits
@@ -96,15 +149,24 @@ const TTL_MS: Record<IndexState, number> = {
 }
 
 async function probe(base: string): Promise<IndexAvailability> {
-  let raw: RawStatus
+  let parsed: unknown
   try {
     const res = await fetch(`${base}/status`, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) })
     if (!res.ok) return { state: 'absent' }
-    raw = (await res.json()) as RawStatus
+    parsed = await res.json()
   } catch {
     // Refused, unreachable, or too slow to be useful: nobody started it.
     return { state: 'absent' }
   }
+  // A 200 carrying literal `null` parses without complaint and is *not* a
+  // status: every read below (`raw.collection_root` first) throws a TypeError
+  // on it, outside the catch above and outside every `IndexError` catch in this
+  // module, so one such body took down whatever asked — `posedFirstPeek` and
+  // the pose wave included. An index that answered something other than an
+  // object has not told us what state it is in, which is the same as not
+  // answering.
+  if (!isObject(parsed)) return { state: 'absent' }
+  const raw = parsed as RawStatus
   const common = {
     // Absence normalised at the boundary: the index reports a root it does not
     // have as JSON `null` (a failed load answers every volume field null), and
@@ -361,7 +423,13 @@ export interface Hit {
   name: string
   score: number
   z: number
-  pose: IndexPose | null
+  /**
+   * `unknown`, and not `IndexPose | null`, for `RawStatus`' reason: this is
+   * another process's JSON and the declared shape was never checked. Typed as
+   * the contract read, a malformed pose type-checked its way to the client,
+   * which reads `up` positionally. `isIndexPose` is what turns it into one.
+   */
+  pose: unknown
 }
 
 export interface Scope {
@@ -447,8 +515,9 @@ async function askIndex(
     // report it as what it is rather than as availability.
     throw new IndexError('ready', message, res.status)
   }
+  let parsed: unknown
   try {
-    return await res.json()
+    parsed = await res.json()
   } catch {
     // The body is read inside a `try` for the same reason the request is, and
     // it is a *second* one because the headers arriving is not the answer: a
@@ -463,6 +532,19 @@ async function askIndex(
     resetIndexStatus()
     throw new IndexError('absent', 'the semantic index is not answering')
   }
+  // Parsing is not answering, and the gap between them is a `TypeError` waiting
+  // in every caller. A 200 whose body is literal `null` parses perfectly and
+  // then makes `answer.poses` (`askPoses`) and `raw.status` (`modelsUnder`)
+  // throw — *outside* the catch above and outside the `IndexError` catches
+  // those callers are built on, so it escaped verbatim: a 500 on the peek, an
+  // emptied pose wave. Caught here rather than at each caller so the three
+  // routes cannot come to disagree about what a body-shaped-like-nothing means,
+  // which is `askIndex`' whole reason for being one function.
+  if (!isObject(parsed)) {
+    resetIndexStatus()
+    throw new IndexError('absent', 'the semantic index is not answering')
+  }
+  return parsed
 }
 
 export async function query(
@@ -603,6 +685,17 @@ export async function modelEntryAt(
  * filesystem work a query does. A collection root the library does not hold has
  * no library path, and then no hit inside it can have one either — the answer
  * is empty rather than a set of tiles nothing in this app could address.
+ *
+ * The containment prefix is built from a **normalised** root, in the same one
+ * place, and that is not cosmetic: the root arrives as the index spelled it in
+ * `/status`, and a `serve_api.py` started with a trailing slash reports one.
+ * `resolve` puts the model at `<root>/a.stl` while the untouched string makes
+ * the prefix `<root>//`, which nothing matches — so *every* hit failed
+ * containment and a search that the index answered came back empty, with no
+ * surface reporting why. `resolve` and not `realpath`: it is a pure string
+ * normalisation, so the spelling the hits are joined onto and stat'd at stays
+ * the caller's, and the symlink question is settled where it already was — the
+ * per-hit `realpath` against the library's top just below.
  */
 export async function hitsToEntries(
   library: Library,
@@ -616,9 +709,11 @@ export async function hitsToEntries(
   const poses: Record<string, IndexPose> = {}
   const scores: Record<string, IndexScore> = {}
   const realTop = library.realTop()
+  // The one spelling of the root everything below is measured against.
+  const root = resolve(collectionRoot)
   let collectionLibPath: string
   try {
-    collectionLibPath = library.libPathOf(await realpath(collectionRoot).catch(() => collectionRoot))
+    collectionLibPath = library.libPathOf(await realpath(root).catch(() => root))
   } catch (err) {
     if (!(err instanceof LibraryError)) throw err
     return { entries: [], poses, scores }
@@ -630,8 +725,8 @@ export async function hitsToEntries(
       // a hit naming a file outside the collection. The index's absolute `path`
       // is ignored — preferring it would also undo D4's remount reasoning by
       // trusting a mount point this app resolved for itself.
-      const full = resolve(collectionRoot, h.rel_path)
-      if (full !== collectionRoot && !full.startsWith(collectionRoot + sep)) return null
+      const full = resolve(root, h.rel_path)
+      if (full !== root && !full.startsWith(root + sep)) return null
       // Inside the collection is not yet inside the library: a symlink in the
       // indexed tree resolves wherever it points, and the index followed it
       // when it embedded the file. Confined the way every other route is
@@ -646,7 +741,10 @@ export async function hitsToEntries(
       const libPath = posix.join(collectionLibPath, h.rel_path)
       const entry = await modelEntryAt(full, libPath, h.rel_path)
       if (entry === null) return null
-      if (h.pose !== null) poses[libPath] = h.pose
+      // Validated, not merely non-null: the pose rides a hit straight to the
+      // client, which reads `up` positionally, so a malformed one is dropped
+      // here and the tile renders at its default framing (`isIndexPose`).
+      if (isIndexPose(h.pose)) poses[libPath] = h.pose
       scores[libPath] = { score: h.score, z: h.z }
       return entry
     }),
@@ -655,10 +753,11 @@ export async function hitsToEntries(
 }
 
 
-/** The `/poses` answer: one entry per path asked about, `null` where the index
- *  holds the model but has no orientation for it. */
+/** The `/poses` answer, typed as the wire actually is: another process's JSON,
+ *  so the values are `unknown` until `isIndexPose` has looked at them. `null`
+ *  is the index's own spelling for "holds the model, has no orientation". */
 interface PosesAnswer {
-  poses?: Record<string, IndexPose | null>
+  poses?: Record<string, unknown> | null
 }
 
 /**
@@ -666,17 +765,54 @@ interface PosesAnswer {
  * lookup upstream — no embedding and no GPU — so the cost is the round trip and
  * nothing else, and a set past the bound costs one more of those rather than a
  * second traversal here.
+ *
+ * **Chunk by chunk, and partially tolerant** — the rule the client's
+ * `semanticPosesFor` already applies to its own chunking (`pose-for-every-model`
+ * §5.4 finding 4), mirrored here because the failure is the same one: a batch
+ * that rejects as a whole discards the poses the chunks *before* it already
+ * answered with, so one 500 in the middle leaves every model un-posed instead
+ * of the failed chunk's share of them — the silent un-posed tail the chunking
+ * exists to prevent, reached the other way round. A failed chunk contributes
+ * nothing and its paths are simply absent from the map, which is
+ * indistinguishable from "no orientation" and is what the next wave re-asks
+ * about. It throws **only when every chunk failed**, carrying the first
+ * failure, so a rejection still means "nothing arrived" to `posesForPaths`,
+ * whose failure handling is silence.
+ *
+ * Only `IndexError` is caught: those are the shapes `askIndex` classifies, and
+ * a foreign error is a fault in this server rather than an answer the index
+ * declined to give. In practice a batch here exceeds one chunk only for a
+ * directory of more than `POSES_MAX` models, so the partial case is a large
+ * folder's alone — which is exactly the folder it costs the most.
  */
 async function askPoses(paths: readonly string[]): Promise<Record<string, IndexPose | null>> {
   const out: Record<string, IndexPose | null> = {}
+  let chunks = 0
+  let failed = 0
+  let first: IndexError | null = null
   for (let i = 0; i < paths.length; i += POSES_MAX) {
-    const answer = (await askIndex(
-      '/poses',
-      { paths: paths.slice(i, i + POSES_MAX) },
-      POSES_TIMEOUT_MS,
-    )) as PosesAnswer
-    Object.assign(out, answer.poses ?? {})
+    chunks++
+    let answer: PosesAnswer
+    try {
+      answer = (await askIndex(
+        '/poses',
+        { paths: paths.slice(i, i + POSES_MAX) },
+        POSES_TIMEOUT_MS,
+      )) as PosesAnswer
+    } catch (err) {
+      if (!(err instanceof IndexError)) throw err
+      failed++
+      first ??= err
+      continue
+    }
+    // Counted rather than inferred from the output: a chunk that answered with
+    // an empty map contributes nothing too, and "everything failed" must not be
+    // reachable by an index that simply had nothing to say.
+    for (const [path, pose] of Object.entries(answer.poses ?? {})) {
+      out[path] = isIndexPose(pose) ? pose : null
+    }
   }
+  if (chunks > 0 && failed === chunks && first !== null) throw first
   return out
 }
 
@@ -844,7 +980,7 @@ export interface UnderModel {
  */
 interface RawUnder {
   status?: string | null
-  models?: readonly { path?: unknown; pose?: IndexPose | null }[] | null
+  models?: readonly { path?: unknown; pose?: unknown }[] | null
   matched?: number | null
   truncated?: boolean | null
 }
@@ -883,8 +1019,13 @@ export async function modelsUnder(
   // Anything but the one status that means "these are the models" is the walk's
   // cue — `unindexed`, and equally a status this server has never heard of.
   if (raw.status !== 'ok') return null
+  // A malformed pose is "no pose" rather than a dropped model: the path is what
+  // the peek is here for, and an unposed candidate still fills a cell — it
+  // simply sorts into the unposed half of `entriesUnder`'s partition.
   return (raw.models ?? []).flatMap((m) =>
-    typeof m.path === 'string' ? [{ path: m.path, pose: m.pose ?? null }] : [],
+    typeof m.path === 'string'
+      ? [{ path: m.path, pose: isIndexPose(m.pose) ? m.pose : null }]
+      : [],
   )
 }
 

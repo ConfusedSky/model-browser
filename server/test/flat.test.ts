@@ -2,10 +2,11 @@ import { chmodSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:f
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { zipSync } from 'fflate'
-import { afterAll, afterEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import type { DirListing } from '../../shared/types'
 import { createApp } from '../src/app'
 import { ThumbCache } from '../src/cache'
+import { walkFlat } from '../src/listing'
 import { LOOPBACK, libraryFor, realTempDir, stlBytes } from './helpers'
 
 /**
@@ -78,7 +79,10 @@ writeFileSync(
 )
 
 const cacheDir = realTempDir('mb-cache-')
-const app = createApp(new ThumbCache(cacheDir), undefined, undefined, libraryFor(libTop))
+/** The app's own library, reused by the cells that drive `walkFlat` directly —
+ *  two instances of one library would each write and re-read the same marker. */
+const library = libraryFor(libTop)
+const app = createApp(new ThumbCache(cacheDir), undefined, undefined, library)
 
 afterAll(() => {
   rmSync(libTop, { recursive: true, force: true })
@@ -249,6 +253,70 @@ describe('bounding', () => {
     const body = await flat(root)
     expect(body.entries.map((e) => e.name)).toEqual([...CONTAINERS, ...MODELS])
     expect(body.truncated).toBeUndefined()
+  })
+})
+
+describe('the two reasons a listing is truncated, which the wire does not tell apart', () => {
+  /**
+   * `truncated` on the wire is one bit for two different facts: the walk never
+   * saw the whole tree, and the answer was cut to a response cap. A client has
+   * the same thing to say either way, so the bit stays as it is — but
+   * `listing-tree-cache` does not: its 4.1a rule is that only a **complete**
+   * traversal may be persisted, since a partial tree stored as a whole one is
+   * permanently wrong. A 501-model folder walked end to end is perfectly
+   * cacheable; a 3-model folder the budget stopped inside is not, and
+   * `truncated` says `true` to both.
+   *
+   * `walkFlat` is where they are told apart, and driving it directly is the
+   * only way to see them singly — through `listFlat` (and so through
+   * `/api/dir`) the two are the same `true`.
+   */
+  // `walkFlat` resolves through the library rather than through the app, so the
+  // library has to have settled — the routes above get that from their first
+  // request.
+  beforeAll(async () => {
+    await library.state()
+  })
+
+  it('the budget stopping the walk is budget-exhaustion alone', async () => {
+    process.env.MODEL_BROWSER_FLAT_BUDGET = '2'
+    const { listing, budgetExhausted, capped } = await walkFlat(library, root)
+    expect([budgetExhausted, capped]).toEqual([true, false])
+    // …and the wire is unchanged: their OR, exactly as before the split.
+    expect(listing.truncated).toBe(true)
+  })
+
+  it('the model cap cutting the answer is capping alone — the tree was walked in full', async () => {
+    process.env.MODEL_BROWSER_FLAT_CAP = '3'
+    const { listing, budgetExhausted, capped } = await walkFlat(library, root)
+    expect([budgetExhausted, capped]).toEqual([false, true])
+    expect(listing.truncated).toBe(true)
+  })
+
+  it('the folder cap is capping too — a different bound, the same kind of fact', async () => {
+    // The second of the two response caps, and it reaches `capped` by its own
+    // assignment: a cell that only drove the model cap would leave this one
+    // free to go on setting whatever it liked.
+    process.env.MODEL_BROWSER_FOLDER_CAP = '2'
+    const { listing, budgetExhausted, capped } = await walkFlat(library, root2, 'set')
+    expect([budgetExhausted, capped]).toEqual([false, true])
+    expect(listing.truncated).toBe(true)
+  })
+
+  it('both at once still reads as one bit on the wire', async () => {
+    process.env.MODEL_BROWSER_FLAT_BUDGET = '8'
+    process.env.MODEL_BROWSER_FLAT_CAP = '1'
+    const { listing, budgetExhausted, capped } = await walkFlat(library, root)
+    expect([budgetExhausted, capped]).toEqual([true, true])
+    expect(listing.truncated).toBe(true)
+  })
+
+  it('a walk that finished inside both bounds sets neither, and no bit', async () => {
+    // The control the three above rest on: without it, flags hard-wired to
+    // `true` would pass every one of them.
+    const { listing, budgetExhausted, capped } = await walkFlat(library, root)
+    expect([budgetExhausted, capped]).toEqual([false, false])
+    expect(listing.truncated).toBeUndefined()
   })
 })
 

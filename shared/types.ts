@@ -286,10 +286,11 @@ export interface SemanticListing {
   /** Orientation per tile path, where the index has one. Advisory (D5). */
   poses: Record<string, IndexPose>
   /**
-   * What the index scored each tile at, keyed as `poses` is — by the resolved
-   * path the entry carries, so "no entry" and "no score" are one fact and a hit
-   * that no longer stats falls out of both at once
-   * (confidence-scores-on-tiles D1).
+   * What the index scored each tile at, keyed as `poses` is — by the **library
+   * path** the entry carries, so "no entry" and "no score" are one fact and a
+   * hit that no longer stats falls out of both at once
+   * (confidence-scores-on-tiles D1). It said "resolved path" until
+   * `library-root` made a library path the only kind that reaches this wire.
    *
    * Optional on the wire, and the migration rests on it: an older server that
    * does not send it leaves a newer client rendering no badges rather than
@@ -378,6 +379,15 @@ export interface PosesResponse {
 }
 
 /**
+ * The most paths one `/poses` batch may carry — the wire bound the server
+ * refuses past, and the chunk size both sides split larger sets at. One
+ * declaration for both workspaces (`CAMERA_EPSILON` precedent): the client
+ * chunked at its own copy of this number until a review flagged the drift
+ * hazard (`pose-for-every-model` §4 F4).
+ */
+export const POSES_MAX = 1024
+
+/**
  * What a client asks for poses about when naming the directory will not do:
  * the **landed entries' own paths**, so the supply above reaches the listings
  * that are not one directory's contents.
@@ -393,18 +403,9 @@ export interface PosesResponse {
  * Library paths, like every path on this wire. A path this library will not
  * resolve is dropped from the answer rather than failing the request — the same
  * silence a pose gets for a model the index has never seen, because a listing
- * may never be made to fail by the index. At most 1024 per request (the index's
- * own bound on the call); a longer listing asks more than once.
+ * may never be made to fail by the index. At most `POSES_MAX` per request (the
+ * index's own bound on the call); a longer listing asks more than once.
  */
-/**
- * The most paths one `/poses` batch may carry — the wire bound the server
- * refuses past, and the chunk size both sides split larger sets at. One
- * declaration for both workspaces (`CAMERA_EPSILON` precedent): the client
- * chunked at its own copy of this number until a review flagged the drift
- * hazard (`pose-for-every-model` §4 F4).
- */
-export const POSES_MAX = 1024
-
 export interface PosesRequest {
   paths: string[]
 }

@@ -378,7 +378,14 @@ export function createApp(
   app.get('/api/file', async (c) => {
     const path = c.req.query('path')
     if (path === undefined || path === '') return c.json({ error: 'path is required' }, 400)
-    const { fsPath, entry } = await library.resolve(path)
+    // Canonicalised like every sibling path route, and this was the one that
+    // was not. `library.resolve` normalises internally for its own confinement,
+    // so what the spelling reached was the 404 below: a miss echoed the path
+    // back exactly as asked, so `/kit/../gone.stl` came back named that way —
+    // this route answering in a spelling `/api/dir` and `/api/peek` would have
+    // rewritten before saying anything.
+    const libPath = canonicalLibPath(path)
+    const { fsPath, entry } = await library.resolve(libPath)
 
     // octet-stream + nosniff make ORB dependably block no-cors embeds, which
     // carry no Origin and so pass the guard's origin check.
@@ -392,7 +399,7 @@ export function createApp(
       return c.body(new Uint8Array(bytes), 200, headers)
     }
     const s = await stat(fsPath).catch(() => null)
-    if (s === null || !s.isFile()) return c.json({ error: `no such file: ${path}` }, 404)
+    if (s === null || !s.isFile()) return c.json({ error: `no such file: ${libPath}` }, 404)
     const stream = Readable.toWeb(createReadStream(fsPath)) as ReadableStream
     return c.body(stream, 200, { ...headers, 'content-length': String(s.size) })
   })
@@ -783,9 +790,10 @@ export function createApp(
       path: status.collectionRoot ?? '/',
       entries,
       poses,
-      // Keyed by resolved path like `poses`, so the anchor below is simply not
-      // in it: the index excludes the query model from its own ranking rather
-      // than scoring it, and there is no hit to carry a number (D1).
+      // Keyed by library path like `poses` — the only kind that reaches this
+      // wire since `library-root` — so the anchor below is simply not in it:
+      // the index excludes the query model from its own ranking rather than
+      // scoring it, and there is no hit to carry a number (D1).
       scores,
       ...(anchor !== null ? { anchor } : {}),
     })

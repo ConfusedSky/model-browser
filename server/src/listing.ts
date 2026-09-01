@@ -71,13 +71,31 @@ interface FlatWalk {
    * both assume is false.
    */
   dirs: DirEntry[]
-  truncated: boolean
+  /**
+   * The walk stopped against its step budget: what it collected is a *prefix*
+   * of the tree, and the rest was never looked at.
+   *
+   * Split from `capped` below, and the wire does not know the difference —
+   * `DirListing.truncated` is their OR and stays exactly what it was. The
+   * distinction is `listing-tree-cache`'s: its 4.1a rule is that only a
+   * **complete** traversal may be persisted, since a partial tree stored as a
+   * whole one is indistinguishable from the real thing and permanently wrong.
+   * That is a question about the walk, and only this flag answers it — a
+   * response cap says nothing about whether the tree was fully seen.
+   */
+  budgetExhausted: boolean
+  /**
+   * A response cap cut entries the walk *did* find — the model cap or the
+   * folder cap in `listFlat`. The tree may have been traversed in full; only
+   * the answer is short. Never a reason to distrust a snapshot.
+   */
+  capped: boolean
 }
 
-/** Spend one walk step; refusing (budget exhausted) marks the walk truncated. */
+/** Spend one walk step; refusing (budget exhausted) stops the walk. */
 function takeStep(walk: FlatWalk): boolean {
   if (walk.budget <= 0) {
-    walk.truncated = true
+    walk.budgetExhausted = true
     return false
   }
   walk.budget--
@@ -333,6 +351,16 @@ export const PEEK_MAX_FINDS = PEEK_BUDGET
  * directly: a subdirectory whose real path leaves the library is neither
  * previewed nor descended into, and a directory already entered under another
  * name is not entered twice.
+ *
+ * **The depth needs no cap of its own, and this has been checked.** Every level
+ * of a descending chain is a *dirent* in its parent, and `listFsDir` spends a
+ * `takeStep` on each dirent before it stats anything — so a chain costs one
+ * step per level and `PEEK_BUDGET` (64) bounds the recursion as tightly as it
+ * bounds the stats. Measured against the real module under Bun: a 500-deep
+ * chain of one-subdirectory-each, with a model at every tenth level, returns
+ * normally with `at9 … at49` — dead against the budget at depth ~50, never near
+ * a stack limit. (`PATH_MAX` is the physical backstop behind that: building the
+ * fixture failed with ENOENT at depth 836.)
  */
 async function peekLevel(
   level: FsEntry[],
@@ -346,7 +374,7 @@ async function peekLevel(
     if (e.kind === 'model') found.push(e)
   }
   for (const e of level) {
-    if (found.length >= n || walk.truncated) return
+    if (found.length >= n || walk.budgetExhausted) return
     // Archives met on the way are skipped, never entered (Non-Goals): a
     // preview must not pay a central-directory read per tile.
     if (e.kind !== 'dir') continue
@@ -405,7 +433,8 @@ export async function peek(library: Library, libPath: string, n: number): Promis
     visited: new Set(),
     models: [],
     dirs: [],
-    truncated: false,
+    budgetExhausted: false,
+    capped: false,
   }
   // The root is visited before anything below it is, or a symlink pointing back
   // at it re-enters the level the peek started from.
@@ -425,7 +454,7 @@ async function walkFsLevel(
   realTop: string,
 ): Promise<void> {
   for (const e of level) {
-    if (walk.truncated) return
+    if (walk.budgetExhausted) return
     if (e.kind === 'model') {
       walk.models.push({ ...e, name: `${rel}${e.name}` })
     } else if (e.kind === 'dir') {
@@ -508,7 +537,7 @@ async function walkZip(
   // stays the immediate level, because that is what the container tiles are.
   const interior = new Set<string>()
   for (const e of zipEntries) {
-    if (walk.truncated) break
+    if (walk.budgetExhausted) break
     if (!e.name.startsWith(norm)) continue
     const rest = e.name.slice(norm.length)
     if (rest === '') continue
@@ -573,7 +602,8 @@ function envLimit(name: string, fallback: number): number {
  * (basename, full relative path as tiebreak) — or by relative path when a query
  * is given, so each matching folder's contents stay contiguous (D3). Walk work is bounded by a
  * step budget; the response by a model cap. Either dropping models sets
- * `truncated`.
+ * `truncated` — the wire carries the OR of the two and not which one it was;
+ * `walkFlat` below is where they are told apart.
  *
  * `query`, when non-blank, narrows the walked models to those whose whole
  * root-relative name contains it case-insensitively — the query matches
@@ -597,6 +627,38 @@ export async function listFlat(
   query?: string,
   opts: { folderMatching?: boolean } = {},
 ): Promise<DirListing> {
+  return (await walkFlat(library, libPath, query, opts)).listing
+}
+
+/**
+ * What a flat listing *was*, beside the listing itself: whether the walk saw
+ * the whole tree, and whether a response cap then shortened what it found.
+ *
+ * Two facts the wire deliberately does not carry — `DirListing.truncated` is
+ * their OR, unchanged, because a client showing "the search ran out" has the
+ * same thing to say either way. Inside the server they are not one fact:
+ *
+ * - `budgetExhausted` is a property of the **traversal**. What the walk holds is
+ *   a prefix of the tree and the rest was never looked at.
+ * - `capped` is a property of the **answer**. The tree may have been walked in
+ *   full; only the reply was cut to the model cap or the folder cap.
+ *
+ * Exported, and not folded back into `listFlat`, for two callers. It is what
+ * `flat.test.ts` drives to assert each flag on its own — through `listFlat` the
+ * two are indistinguishable, both being `truncated: true` and nothing else. And
+ * it is the seam `listing-tree-cache` needs: its 4.1a rule is that only a
+ * **complete** traversal may be persisted (a partial tree stored as a whole one
+ * is permanently wrong and indistinguishable from the real thing), which is a
+ * question about the walk that `truncated` cannot answer — a 501-model folder
+ * walked end to end would refuse to cache itself forever. Please do not inline
+ * it as an unused indirection.
+ */
+export async function walkFlat(
+  library: Library,
+  libPath: string,
+  query?: string,
+  opts: { folderMatching?: boolean } = {},
+): Promise<{ listing: DirListing; budgetExhausted: boolean; capped: boolean }> {
   const q = query?.trim().toLowerCase()
   const hasQuery = q !== undefined && q !== ''
   // Default on: an absent parameter is the shipped predicate, so an old client
@@ -616,7 +678,8 @@ export async function listFlat(
     visited: new Set(),
     models: [],
     dirs: [],
-    truncated: false,
+    budgetExhausted: false,
+    capped: false,
   }
   let containers: DirEntry[]
   if (entry === undefined) {
@@ -669,7 +732,7 @@ export async function listFlat(
     // fragment matching many folders cannot spend the models' budget (D4).
     const folderCap = envLimit('MODEL_BROWSER_FOLDER_CAP', 50)
     if (containers.length > folderCap) {
-      walk.truncated = true
+      walk.capped = true
       containers.length = folderCap
     }
   }
@@ -686,12 +749,15 @@ export async function listFlat(
           baseName(a.name).localeCompare(baseName(b.name)) || a.name.localeCompare(b.name),
   )
   if (walk.models.length > cap) {
-    walk.truncated = true
+    walk.capped = true
     walk.models.length = cap
   }
   const listing: DirListing = { path: libPath, entries: wire([...containers, ...walk.models]) }
-  if (walk.truncated) listing.truncated = true
-  return listing
+  // The wire's `truncated` is the OR of the two, and is exactly what it was
+  // before they were told apart: "some models were dropped", whichever bound
+  // dropped them.
+  if (walk.budgetExhausted || walk.capped) listing.truncated = true
+  return { listing, budgetExhausted: walk.budgetExhausted, capped: walk.capped }
 }
 
 /**

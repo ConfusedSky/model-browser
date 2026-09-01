@@ -216,6 +216,32 @@ describe('semantic query', () => {
     expect(body.scope).toEqual({ path: null, status: 'partial', indexed: 2801, scanned: 3396, covers: ['stl'] })
   })
 
+  it('a hit whose pose is not a pose still becomes a tile, with no pose', async () => {
+    // A hit's pose rides straight to the client, which reads `up` positionally
+    // (`client/src/three/pose.ts`) — so it is checked here rather than trusted
+    // because the wire type says so. A malformed one costs the hit its
+    // orientation and nothing else: the tile is still a tile, still scored,
+    // still addressed, and renders at its default framing.
+    for (const pose of ['face-up', { ...hit('x.stl').pose, up: [0, 1] }, 0, []]) {
+      stubIndex(READY, { ...result, results: [{ ...hit('dragon.stl'), pose }] })
+      const body = (await (await post({ text: 'dragon' })).json()) as {
+        entries: { path: string }[]
+        poses: Record<string, unknown>
+        scores: Record<string, unknown>
+      }
+      expect(body.entries.map((e) => e.path)).toEqual(['/dragon.stl'])
+      expect(body.poses).toEqual({})
+      expect(body.scores['/dragon.stl']).toEqual({ score: 0.16, z: 3.9 })
+    }
+    // The control: the same hit with the pose it was built with. Without it a
+    // route that never forwarded a pose at all would pass the loop above.
+    stubIndex(READY, result)
+    const good = (await (await post({ text: 'dragon' })).json()) as {
+      poses: Record<string, unknown>
+    }
+    expect(good.poses['/dragon.stl']).toEqual(hit('dragon.stl').pose)
+  })
+
   it('drops a hit that no longer resolves without failing the search', async () => {
     stubIndex(READY, { ...result, results: [hit('dragon.stl'), hit('moved-away.stl')] })
     const body = (await (await post({ text: 'dragon' })).json()) as {
@@ -468,6 +494,49 @@ describe('a collection beneath the library top', () => {
     // case the index is not the one to answer.
     stubIndex(KITS, result)
     expect((await post({ text: 'dragon', path: '/' })).status).toBe(400)
+  })
+})
+
+describe('the collection root as the index spelled it, not as this server would', () => {
+  /**
+   * A root with a trailing slash. `serve_api.py --collection-root <dir>/` is an
+   * ordinary way to start it and `/status` reports back whatever it was given,
+   * so this is a spelling the wire really produces — not a hostile one.
+   *
+   * It used to empty every search. Containment was `full.startsWith(root + sep)`
+   * against the raw string: `resolve` puts the hit at `<root>/a.stl` while the
+   * prefix reads `<root>//`, which nothing can match, so every hit was dropped
+   * as "outside the collection" and a search the index had answered came back
+   * with no tiles and no error anywhere to say why.
+   */
+  const SLASHED = { ...READY, collection_root: `${join(root, 'kits')}/` }
+  const result = {
+    scope: { path: null, status: 'indexed', n_indexed: 1, n_scanned: 1, covers: ['stl'] },
+    weak: false,
+    results: [hit('a.stl')],
+  }
+
+  it('still yields its hits, addressed exactly as the un-slashed spelling does', async () => {
+    stubIndex(SLASHED, result)
+    const body = (await (await post({ text: 'dragon' })).json()) as {
+      entries: { name: string; path: string }[]
+      poses: Record<string, unknown>
+      scores: Record<string, unknown>
+    }
+    expect(body.entries.map((e) => e.path)).toEqual(['/kits/a.stl'])
+    expect(body.entries[0]!.name).toBe('a.stl')
+    // The two riders are keyed off the same join, so they go with it.
+    expect(body.poses['/kits/a.stl']).toBeDefined()
+    expect(body.scores['/kits/a.stl']).toEqual({ score: 0.16, z: 3.9 })
+  })
+
+  it('a hit that escapes the collection is still refused, slash or no slash', async () => {
+    // The normalisation must not have been a loosening: `..` out of the
+    // collection is what the containment test is there for, and it is spelled
+    // through `rel_path` because that is the only field the join trusts.
+    stubIndex(SLASHED, { ...result, results: [hit('../dragon.stl')] })
+    const body = (await (await post({ text: 'dragon' })).json()) as { entries: unknown[] }
+    expect(body.entries).toEqual([])
   })
 })
 

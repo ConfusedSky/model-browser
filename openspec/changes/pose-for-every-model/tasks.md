@@ -670,6 +670,95 @@
       collision** — `entriesUnder` names cells by `basename`, so two models with the same
       filename in different subfolders under the peeked directory read identically on the
       sheet. Both are what four cells *look* like, never what they address or render.
+      <br>**2026-09-01, this week's aggregate review — four semantic-boundary findings
+      applied (worker WR-S).** Suite `server` 459 → 485, `poses.test.ts` 67 → 83,
+      `semantic.test.ts` 34 → 37, all 14 files green (the known `open.test.ts` abort flake
+      did not appear); client 615 unchanged; `bun run typecheck` clean.
+      <br>**A1 (the escape F1 did not close) — a 200 of literal `null` still escaped as a
+      `TypeError`.** F1 above moved the *parse* inside a `try`, and `null` parses. What
+      threw was the read after it: `answer.poses` in `askPoses`, `raw.status` in
+      `modelsUnder`, `raw.collection_root` in `probe` — every one a `TypeError` on `null`,
+      outside the parse `try` and outside the `IndexError` catches that are the whole of
+      "a listing may never be made to fail by the index". So the peek 500'd and the wave
+      emptied exactly as before F1, on a body a real service can send. Fixed at the
+      boundary rather than at the three callers, which is `askIndex`' reason for being one
+      function: a new `isObject` guard after the parse takes the same
+      `IndexError('absent')` + `resetIndexStatus()` path a network failure takes — parsing
+      is not answering. `probe` reads its own body and does not go through `askIndex`, so
+      it carries the same guard and answers `absent`. Cells: `poses.test.ts` → "a 200 of
+      literal null is empty as well — parsing is not answering" (`/poses`, through the GET
+      *and* the POST), "a 200 of literal null falls back to the walk too" (`/under` →
+      the walk's own sheet, `asked` length 1 so the branch is proven taken) and "a
+      /status of literal null is an index that has not said what it is" (the probe:
+      `{state:'absent'}`, and the peek and the poses route both answer with nothing asked
+      of the index at all). New stub part: `nullBody()`, beside `malformedBody()`.
+      Falsified two ways — **the guard dropped from `askIndex`** → 2 fail, both `expected
+      500 to be 200`; **the guard dropped from `probe`** → 1 fail, `expected 500 to be
+      200`.
+      <br>**A2 — `askPoses` rejected a whole batch for one failed chunk.** The mirror of
+      finding 4 above, on the server side of the same wire: chunk *k* failing threw out of
+      the loop and discarded the poses chunks 1..k−1 had already answered with, so a
+      folder of more than `POSES_MAX` models lost *every* pose because of the models it
+      does not show. Each chunk now has its own catch, a failed chunk contributes nothing
+      and its paths are simply absent (indistinguishable from "no orientation", which the
+      next wave re-asks about), and it throws only when **every** chunk failed, carrying
+      the first failure — so a rejection still means "nothing arrived" to `posesForPaths`,
+      whose failure handling is silence. `IndexError` only; anything else propagates.
+      Fixture gains `bulk/` — `POSES_MAX + 1` distinct files, since the batch is keyed by
+      real path and 1025 aliases of one model collapse to a single chunk — and the stub
+      gains `posesFailAt`, chunk indices that answer 500. Cells: "keeps the chunks that
+      answered when one of them fails" (chunk 2 500s → the first chunk's pose survives,
+      both chunks sent, 1024 + 1 paths), "every chunk failing is an empty answer, with
+      every chunk still attempted" and the control "nothing failing answers from both
+      chunks". Falsified by reverting to all-or-nothing → **2 fail**: `expected [] to
+      deeply equal [ '/bulk/b0000.stl' ]` and `expected [ { paths: [ …(1024) ] } ] to have
+      a length of 2 but got 1`. **Honest limit:** the *throw* on total failure is not
+      observable — `posesForPaths` swallows `IndexError` into `{}`, so "throw" and "return
+      {}" look identical from every caller, and `askIndex` only ever throws `IndexError`
+      so the foreign-error rethrow is unreachable from outside too. Both are kept as the
+      contract a future caller and the client's own copy of this rule read; what the cells
+      falsify is the partial merge and the every-chunk-attempted count.
+      <br>**A3 — `hitsToEntries` measured containment against the raw `collection_root`
+      string.** `serve_api.py --collection-root <dir>/` is an ordinary way to start the
+      index and `/status` reports back what it was given. `resolve` then puts a hit at
+      `<root>/a.stl` while the prefix reads `<root>//`, which nothing matches — so every
+      hit failed containment, a search the index had answered came back with no tiles, and
+      nothing anywhere reported why. The root is normalised **once**, where the
+      containment prefix is built (`const root = resolve(collectionRoot)`), and both the
+      prefix and the per-hit `resolve` use it. `resolve` and not `realpath`: a pure string
+      normalisation, so the spelling hits are joined onto and stat'd at stays the
+      caller's, and the symlink question stays where it already was — the per-hit
+      `realpath` against `realTop` just below. Cells: `semantic.test.ts` → "the collection
+      root as the index spelled it, not as this server would" › "still yields its hits,
+      addressed exactly as the un-slashed spelling does" (entries, poses and scores all
+      under `/kits/a.stl`) and "a hit that escapes the collection is still refused, slash
+      or no slash" (a `../` `rel_path` under the slashed root → empty, so the fix was not
+      a loosening). Falsified by restoring the raw string → `expected [] to deeply equal [
+      '/kits/a.stl' ]`.
+      <br>**A4 — `IndexPose` crossed the wire unvalidated.** The declared type was taken
+      on trust at all three doors, so a string, an `up` of the wrong arity or a member
+      that is not a number reached the client untouched — and the client reads `up`
+      positionally (`client/src/three/pose.ts`, `axisOf`) and orients a model by whatever
+      it finds. One `isIndexPose` at the boundary now, applied at every door a pose enters
+      by: `hitsToEntries`' hit poses, `askPoses`' values, `modelsUnder`' models. An
+      invalid pose is **no pose** at each — never an error — since a pose is advisory and
+      the tile renders at its default framing without one (D2); under `/under` the model
+      still fills a cell, sorting into the unposed half. `Hit.pose` and `RawUnder`'s pose
+      are retyped `unknown` for `RawStatus`' reason: typed as the contract reads, a
+      malformed pose type-checked its way through. A `front` that is absent or `null` is
+      still a valid pose (the client reads it through `?.`); a *present* `front` must be
+      the shape it claims. Cells: `poses.test.ts` → "a pose is validated where it enters,
+      not trusted because it is typed" (six shapes, plus the control "a pose that is one",
+      plus "a `front` that is absent is still a pose" and "one bad pose costs only
+      itself") and, on the peek, "a pose the index sent that is not a pose is no pose,
+      never an error" (the Lich sheet still fills, `hero` demoted out of the posed half,
+      with a well-formed control asserting it leads); `semantic.test.ts` → "a hit whose
+      pose is not a pose still becomes a tile, with no pose" (four shapes, entry and score
+      unaffected, plus the control). Falsified by making `isIndexPose` accept anything
+      non-null → **8 fail**, e.g. `expected { '/mixed/c.stl': 'up is that way' } to deeply
+      equal {}` and `expected [ 'hero.stl', 'guard.stl', …(2) ] to deeply equal [
+      'guard.stl', 'hero.stl', …(2) ]`; and, for the hit door alone, by restoring `if
+      (h.pose !== null)` → `expected { '/dragon.stl': 'face-up' } to deeply equal {}`.
 - [x] 5.5 Live: the 141-tile scan re-run against the complete index; the folder-of-folders
       tiles show posed sheets; fallback proven on an uncovered path
       — baseline recorded 2026-09-01 (coordinator), complete index (3,380 models, 0

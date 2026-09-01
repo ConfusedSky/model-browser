@@ -73,6 +73,7 @@ import { LOOPBACK, libraryFor, realTempDir, stlBytes } from './helpers'
  *   only/    one.stl
  *   cover/   a.stl b.stl c.stl d.stl  s1/x.stl  s2/y.stl  s3/z.stl
  *   lich/    01-presupported/{00..79}.txt   02-kit/{guard,hero,minion,scout}.stl
+ *   bulk/    b0000.stl … b1024.stl                     (POSES_MAX + 1: two chunks)
  *   empty/
  */
 const libTop = realTempDir('mb-poses-')
@@ -153,6 +154,16 @@ LICH_KIT.forEach((n, i) => writeFileSync(join(libTop, 'lich', '02-kit', n), stlB
 mkdirSync(join(libTop, 'aka'))
 symlinkSync(join(libTop, 'lich'), join(libTop, 'aka', 'lich'))
 
+/**
+ * One model more than one `/poses` call may carry, so `askPoses` really splits
+ * — the only way the per-chunk tolerance is reachable from outside. Distinct
+ * *files*, not names: the batch is keyed by real path, and 1025 aliases of one
+ * model would collapse back to a single chunk.
+ */
+const BULK = Array.from({ length: POSES_MAX + 1 }, (_, i) => `b${String(i).padStart(4, '0')}.stl`)
+mkdirSync(join(libTop, 'bulk'))
+for (const n of BULK) writeFileSync(join(libTop, 'bulk', n), stlBytes(100))
+
 mkdirSync(join(libTop, 'empty'))
 
 const cacheDir = realTempDir('mb-poses-cache-')
@@ -211,6 +222,12 @@ interface Stub {
   /** `/status`, or `'refused'` for a connection nobody is listening on. */
   status?: unknown | 'refused'
   /**
+   * Answer `/status` with a 200 carrying literal `null`. Its own flag and not
+   * `status: null`, because `stub.status ?? READY` reads a null `status` as
+   * "unset" — the very `??` that is the point of the cell.
+   */
+  statusNull?: boolean
+  /**
    * One `/status` body per ask, in order, each with its own delay — the only way
    * to make two probes overlap *and* disagree, which is what the cache's
    * ordering is about. Past the end of the series, `status` answers as usual.
@@ -230,10 +247,29 @@ interface Stub {
   underMalformed?: boolean
   /** Answer `/under`'s *headers* at once and never finish its body. */
   underBodyStalls?: boolean
+  /** Answer `/under` 200 with a body of literal `null` — valid JSON, no answer. */
+  underNull?: boolean
   /** Which real paths have a pose. Everything else asked about answers `null`. */
   posed?: readonly string[]
+  /**
+   * Real paths the index answers with something that is *not* an `IndexPose`,
+   * whatever `badPose` holds. Applied by both `/poses` and `/under`, since a
+   * pose enters from either.
+   */
+  badPosed?: readonly string[]
+  /** What a `badPosed` path gets. Deliberately `unknown`: the point is a value
+   *  the declared type forbids and the wire does not. */
+  badPose?: unknown
   /** Answer `/poses` with this status instead of 200 (503 = still loading). */
   posesStatus?: number
+  /** Answer `/poses` 200 with a body of literal `null`. */
+  posesNull?: boolean
+  /**
+   * Which `/poses` **chunks**, by 0-based order within one `askPoses` call,
+   * answer 500 instead of 200. The only way to make one chunk of a batch fail
+   * while its siblings answer, which is what the partial merge is about.
+   */
+  posesFailAt?: readonly number[]
   /**
    * Hold `/poses` open forever, answering only the caller's abort — the only way
    * the request's own timeout is observable from out here.
@@ -293,6 +329,15 @@ const malformedBody = (): Response =>
     headers: { 'content-type': 'application/json' },
   })
 
+/**
+ * A 200 whose body is literal `null` — the case a parse guard does not catch,
+ * because `null` *is* valid JSON. Every read the callers make of it
+ * (`answer.poses`, `raw.status`, `raw.collection_root`) is a `TypeError` on
+ * this body, and none of them is an `IndexError`.
+ */
+const nullBody = (): Response =>
+  new Response('null', { headers: { 'content-type': 'application/json' } })
+
 function stubIndex(stub: Stub): void {
   sent = []
   asked = []
@@ -310,6 +355,7 @@ function stubIndex(stub: Stub): void {
             headers: { 'content-type': 'application/json' },
           })
         }
+        if (stub.statusNull === true) return nullBody()
         if (stub.status === 'refused') throw new TypeError('fetch failed')
         return new Response(JSON.stringify(stub.status ?? READY), {
           headers: { 'content-type': 'application/json' },
@@ -320,6 +366,7 @@ function stubIndex(stub: Stub): void {
         asked.push(body)
         if (stub.underHangs === true) return hang(init.signal)
         if (stub.underMalformed === true) return malformedBody()
+        if (stub.underNull === true) return nullBody()
         if (stub.underBodyStalls === true) return stalledBody(init.signal)
         if (stub.underStatus !== undefined && stub.underStatus !== 200) {
           return new Response(JSON.stringify({ detail: 'no' }), { status: stub.underStatus })
@@ -341,7 +388,11 @@ function stubIndex(stub: Stub): void {
             spell !== undefined && p.startsWith(spell.from)
               ? spell.to + p.slice(spell.from.length)
               : p,
-          pose: (held.posed ?? []).includes(p) ? POSE : null,
+          pose: (stub.badPosed ?? []).includes(p)
+            ? stub.badPose
+            : (held.posed ?? []).includes(p)
+              ? POSE
+              : null,
         }))
         return new Response(
           JSON.stringify({
@@ -355,15 +406,30 @@ function stubIndex(stub: Stub): void {
       }
       if (String(url).endsWith('/poses') && init?.method === 'POST') {
         const body = JSON.parse(init.body ?? '{}') as { paths: string[] }
+        // Pushed before any refusal, so `sent` is every chunk *attempted* — the
+        // number the per-chunk cells assert, and the one a batch that gave up
+        // after its first failure would get wrong.
         sent.push(body)
         if (stub.posesHangs === true) return hang(init.signal)
         if (stub.posesMalformed === true) return malformedBody()
+        if (stub.posesNull === true) return nullBody()
         if (stub.posesBodyStalls === true) return stalledBody(init.signal)
+        if ((stub.posesFailAt ?? []).includes(sent.length - 1)) {
+          return new Response(JSON.stringify({ detail: 'this chunk is not for you' }), {
+            status: 500,
+          })
+        }
         if (stub.posesStatus !== undefined && stub.posesStatus !== 200) {
           return new Response(JSON.stringify({ detail: 'no' }), { status: stub.posesStatus })
         }
-        const poses: Record<string, IndexPose | null> = {}
-        for (const p of body.paths) poses[p] = (stub.posed ?? []).includes(p) ? POSE : null
+        const poses: Record<string, unknown> = {}
+        for (const p of body.paths) {
+          poses[p] = (stub.badPosed ?? []).includes(p)
+            ? stub.badPose
+            : (stub.posed ?? []).includes(p)
+              ? POSE
+              : null
+        }
         return new Response(JSON.stringify({ poses }), {
           headers: { 'content-type': 'application/json' },
         })
@@ -496,6 +562,86 @@ describe('per-path confinement, the rules a hit is mapped under', () => {
   })
 })
 
+describe('a pose is validated where it enters, not trusted because it is typed', () => {
+  const BAD: [string, unknown][] = [
+    ['a bare string', 'up is that way'],
+    ['an `up` of the wrong arity', { ...POSE, up: [0, 1] }],
+    ['an `up` whose members are not numbers', { ...POSE, up: ['0', '1', '0'] }],
+    ['a missing `azimuth_zero`', { ...POSE, azimuth_zero: undefined }],
+    ['a `front` that is not the shape it claims', { ...POSE, front: { view: 5 } }],
+    ['null-adjacent: a number', 7],
+  ]
+
+  for (const [label, badPose] of BAD) {
+    it(`${label}: dropped, and the listing still answers`, async () => {
+      stubIndex({ badPosed: [fs('mixed', 'c.stl')], badPose })
+      expect(await posesOf('/mixed')).toEqual({})
+    })
+  }
+
+  it('the control: the same route, the same fixture, a pose that is one', async () => {
+    // Without this every cell above would pass on a route that answered `{}`
+    // for everything.
+    stubIndex({ posed: [fs('mixed', 'c.stl')] })
+    expect(await posesOf('/mixed')).toEqual({ '/mixed/c.stl': POSE })
+  })
+
+  it('a `front` that is absent is still a pose — the client reads it through `?.`', async () => {
+    // The one shape the wire may legitimately shorten: `client/src/three/pose.ts`
+    // reads `pose.front?.azimuth_deg ?? 0`, so an orientation with no front view
+    // is usable and must not be thrown away with the malformed ones.
+    const noFront = { ...POSE, front: null }
+    stubIndex({ badPosed: [fs('mixed', 'c.stl')], badPose: noFront })
+    expect(await posesOf('/mixed')).toEqual({ '/mixed/c.stl': noFront })
+  })
+
+  it('one bad pose costs only itself', async () => {
+    stubIndex({
+      posed: [fs('mixed', 'e.stl')],
+      badPosed: [fs('mixed', 'c.stl')],
+      badPose: 'nope',
+    })
+    expect(await posesOf('/mixed')).toEqual({ '/mixed/e.stl': POSE })
+  })
+})
+
+describe('a batch splits into chunks, and a chunk that fails costs only its own', () => {
+  /** Every model in `/bulk`, by library path: one more than fits in a chunk. */
+  const bulkPaths = BULK.map((n) => `/bulk/${n}`)
+
+  it('keeps the chunks that answered when one of them fails', async () => {
+    // The client's rule (`pose-for-every-model` §5.4 finding 4) on this side of
+    // the wire. All-or-nothing here means one 500 on the second chunk discards
+    // the 1024 poses the first chunk already answered with — every tile in the
+    // folder un-posed because of the models it does *not* show.
+    stubIndex({ posed: [fs('bulk', BULK[0]!), fs('bulk', BULK[POSES_MAX]!)], posesFailAt: [1] })
+    const poses = await posesForPaths(library, bulkPaths, libTop)
+    // The surviving chunk's pose is there; the failed chunk's is simply absent,
+    // which is indistinguishable from "no orientation" and is what the next
+    // wave re-asks about.
+    expect(Object.keys(poses)).toEqual(['/bulk/b0000.stl'])
+    expect(sent).toHaveLength(2)
+    expect(sent[0]!.paths).toHaveLength(POSES_MAX)
+    expect(sent[1]!.paths).toHaveLength(1)
+  })
+
+  it('every chunk failing is an empty answer, with every chunk still attempted', async () => {
+    // A failure stops that chunk, not the batch: giving up on the first would
+    // leave the second's models unasked *and* look identical in the answer, so
+    // the attempt count is the assertion that separates them.
+    stubIndex({ posed: [fs('bulk', BULK[0]!)], posesFailAt: [0, 1] })
+    expect(await posesForPaths(library, bulkPaths, libTop)).toEqual({})
+    expect(sent).toHaveLength(2)
+  })
+
+  it('the control: nothing failing answers from both chunks', async () => {
+    stubIndex({ posed: [fs('bulk', BULK[0]!), fs('bulk', BULK[POSES_MAX]!)] })
+    const poses = await posesForPaths(library, bulkPaths, libTop)
+    expect(Object.keys(poses).sort()).toEqual(['/bulk/b0000.stl', '/bulk/b1024.stl'])
+    expect(sent).toHaveLength(2)
+  })
+})
+
 describe('an index that cannot answer costs the listing nothing', () => {
   const silent: [string, Stub][] = [
     ['absent — nobody started it', { status: 'refused' }],
@@ -534,6 +680,37 @@ describe('an index that cannot answer costs the listing nothing', () => {
   it('a refusal from an index that is up is empty too — a pose never fails a listing', async () => {
     stubIndex({ posesStatus: 400 })
     expect(await posesOf('/mixed')).toEqual({})
+  })
+
+  it('a 200 of literal null is empty as well — parsing is not answering', async () => {
+    // The body a parse guard cannot catch: `null` is valid JSON, so `res.json()`
+    // resolves and the guard that catches a `SyntaxError` never fires. What
+    // fires instead is the *next* read — `answer.poses` in `askPoses` — as a
+    // `TypeError`, outside every `IndexError` catch in the module, which is a
+    // 500 for a wave that may never be made to fail by the index.
+    stubIndex({ posesNull: true, posed: [fs('mixed', 'c.stl')] })
+    expect(await posesOf('/mixed')).toEqual({})
+    expect(sent).toHaveLength(1)
+    // The paths form takes the same route in and the same way out.
+    stubIndex({ posesNull: true, posed: [fs('mixed', 'c.stl')] })
+    expect(await posesFor(['/mixed/c.stl', '/mixed/a.stl'])).toEqual({})
+  })
+
+  it('a /status of literal null is an index that has not said what it is', async () => {
+    // The probe reads its body outside `askIndex` and so needs the same guard of
+    // its own: `raw.collection_root` is the first read, and on `null` it throws
+    // past the catch that classifies a refusal. Every state below it — the
+    // volume check, `ready`, the wedged arithmetic — is unreachable, so a peek
+    // and a wave both died on the probe rather than on the call they wanted.
+    stubIndex({ statusNull: true })
+    const res = await app.request('/api/semantic/status', { headers: LOOPBACK })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ state: 'absent' })
+    // …and the routes that ride behind it answer, rather than 500.
+    expect(await posesOf('/mixed')).toEqual({})
+    expect(names(await peekOf('/mixed', 4))).toEqual(['a.stl', 'b.stl', 'c.stl', 'd.stl'])
+    expect(sent).toHaveLength(0)
+    expect(asked).toHaveLength(0)
   })
 
   it('a 200 whose body never lands is empty as well, and still a 200', async () => {
@@ -953,6 +1130,45 @@ describe('the sheet asks the index before it walks', () => {
       expect(asked).toHaveLength(1)
     }
   }, 15_000)
+
+  it('a 200 of literal null falls back to the walk too', async () => {
+    // `malformedBody` fails in the parse and is already covered; this one
+    // *parses*. `raw.status` on `null` is a `TypeError` thrown past the
+    // `IndexError` catch in `modelsUnder`, so the peek 500'd on a body the
+    // index could perfectly well send.
+    stubIndex({ underNull: true, posed: [fs('mixed', 'c.stl'), fs('mixed', 'e.stl')] })
+    expect(names(await peekOf('/mixed', 4))).toEqual(['c.stl', 'e.stl', 'a.stl', 'b.stl'])
+    // The branch really was taken: `/under` was asked, and the walk ran after it.
+    expect(asked).toHaveLength(1)
+    expect(sent).toHaveLength(1)
+  })
+
+  it('a pose the index sent that is not a pose is no pose, never an error', async () => {
+    // `/under`'s poses cross straight to `entriesUnder`'s partition and, for a
+    // hit, straight to the client — which reads `up` positionally
+    // (`client/src/three/pose.ts`). A model carrying one is still a model: it
+    // sorts into the *unposed* half rather than being dropped, so the sheet
+    // still fills.
+    for (const badPose of ['tilted-a-bit', { ...POSE, up: [0, 1] }]) {
+      stubIndex({
+        under: { models: LICH_KIT.map(kit), posed: [kit('hero.stl')] },
+        badPosed: [kit('hero.stl')],
+        badPose,
+      })
+      // `/lich` walks up empty, so every cell here came from the index — and
+      // `hero` has fallen out of the posed half to the back of walk order.
+      expect(names(await peekOf('/lich', 4))).toEqual([
+        'guard.stl',
+        'hero.stl',
+        'minion.stl',
+        'scout.stl',
+      ])
+    }
+    // The control, same fixture and a *well-formed* pose: `hero` leads. Without
+    // it a peek that ignored poses entirely would pass the loop above.
+    stubIndex({ under: { models: LICH_KIT.map(kit), posed: [kit('hero.stl')] } })
+    expect(names(await peekOf('/lich', 4))[0]).toBe('hero.stl')
+  })
 
   it('a stalling /under does not hold the sheet', async () => {
     // The `/poses` stall cell's shape, one call earlier: `/under` is advisory and
