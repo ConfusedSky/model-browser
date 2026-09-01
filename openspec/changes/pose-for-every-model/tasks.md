@@ -404,10 +404,13 @@
       no-differing-poses verdict (colliding rows share `file_identity`).
       <br>2026-09-01, addendum: masa-19's own review of `3dde233` found `/under` conflated
       "nothing searchable at all" (a folder of `.3mf`/`.obj` — the index can never hold it)
-      with "not classified yet"; an ADDITIVE `covers: <int>` field (same meaning as
-      `/query`'s scope block) lands shortly. This side stays keyed on `"unindexed"`/silence
+      with "not classified yet"; TWO ADDITIVE fields land shortly — `covers: ["stl", …]`
+      (the constant extension list `/status` already publishes, explaining why a folder can
+      scan to zero) and `n_scanned: <int>`, the actual discriminator (0 = the walk will
+      find models the index never will). masa-19 corrected the field naming against the
+      code before it shipped: their first message called the integer `covers`. This side stays keyed on `"unindexed"`/silence
       — both covers cases fall back to the walk, which answers correctly either way — and
-      `modelsUnder` tolerates the extra field unread. The covers==0 refinement (render
+      `modelsUnder` tolerates the extra field unread. The n_scanned==0 refinement (render
       unposed tiles without expecting poses from a future peek) is recorded as
       available-but-declined: nothing renders that expectation today; the demo bake planner
       is the likely first consumer
