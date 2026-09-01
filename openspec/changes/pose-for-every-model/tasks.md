@@ -571,7 +571,7 @@
       `expected 400 to be 200`
       <br>Box closed 2026-09-01 (coordinator): server half (S2, findings 1+2) and client
       half (C2, findings 4+5+6) both merged
-- [ ] 5.5 Live: the 141-tile scan re-run against the complete index; the folder-of-folders
+- [x] 5.5 Live: the 141-tile scan re-run against the complete index; the folder-of-folders
       tiles show posed sheets; fallback proven on an uncovered path
       — baseline recorded 2026-09-01 (coordinator), complete index (3,380 models, 0
       missing): **12 of 141** tiles under-use posed models despite availability — the same
@@ -579,3 +579,11 @@
       unposed presupported subtrees), not indexing lag. The number this section drives to
       zero. Scan: peek's 4 vs poses of the sheet vs poses available within depth 2 / 150
       models per folder tile at `/` and one level below
+      — done 2026-09-01 (coordinator), user's dev instance + the restarted index serving
+      `/under`: **all 12 structural tiles fixed, 12/12 sheets fully posed** (the Lich Lord
+      sheet went from four presupported Baldur files to `Baldur_Fist_L / Baldur_Hammer_R /
+      Baldur_the_Invincible / Bodil_the_Wright`, all posed). Fallback proven live
+      side-by-side: a side instance with `MODEL_BROWSER_INDEX` at a dead port answered the
+      same folder with the old walk's presupported sheet byte-for-byte, while the live
+      instance answered the posed one. No all-non-STL folder exists within depth 3 for a
+      live `"unindexed"`-with-content case; that branch stands on S2's byte-identity cells
