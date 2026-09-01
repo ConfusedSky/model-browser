@@ -377,6 +377,29 @@ export interface PosesResponse {
   poses: Record<string, IndexPose>
 }
 
+/**
+ * What a client asks for poses about when naming the directory will not do:
+ * the **landed entries' own paths**, so the supply above reaches the listings
+ * that are not one directory's contents.
+ *
+ * A flat listing draws models from every folder beneath the browsed one and a
+ * name search draws them from wherever they matched, so `?path=<dir>` would
+ * answer for the handful that happen to sit at the top and leave the rest
+ * unposed — the tiles on screen are the question, not the folder they were
+ * gathered from. Sending exactly what landed also keeps the answer joinable by
+ * construction: every key comes back under a path the client already has a tile
+ * for.
+ *
+ * Library paths, like every path on this wire. A path this library will not
+ * resolve is dropped from the answer rather than failing the request — the same
+ * silence a pose gets for a model the index has never seen, because a listing
+ * may never be made to fail by the index. At most 1024 per request (the index's
+ * own bound on the call); a longer listing asks more than once.
+ */
+export interface PosesRequest {
+  paths: string[]
+}
+
 /** Availability of the semantic index, read from the wire (semantic-search D4). */
 export type IndexState = 'ready' | 'warming' | 'wedged' | 'volume-gone' | 'absent'
 

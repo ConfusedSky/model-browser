@@ -22,16 +22,29 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
  * (which does not). Reversing is the one order this suite can produce that is
  * definitely not the filesystem's, so a cell run under it asserts the
  * pre-charge sort in `listFsDir` rather than the runtime's own tidiness.
+ *
+ * It counts as well as passes through, because *how wide the peek walked* is
+ * the thing one cell below is about and it is invisible in the answer: an
+ * uncovered folder returns the same entries either way and differs only in what
+ * it read to get them. `readdir` is the width itself (one per directory
+ * entered) and `realpath` is what a wide walk pays per find; both are counted
+ * against a control run of `peek()` in the same cell, never against a number
+ * written down here, so neither can rot as the walk's own bookkeeping changes.
  */
-const rd = vi.hoisted(() => ({ reverse: false }))
+const rd = vi.hoisted(() => ({ reverse: false, readdir: 0, realpath: 0 }))
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>()
   return {
     ...actual,
     readdir: (async (...args: Parameters<typeof actual.readdir>) => {
+      rd.readdir++
       const out = await actual.readdir(...args)
       return rd.reverse ? [...out].reverse() : out
     }) as typeof actual.readdir,
+    realpath: (async (...args: Parameters<typeof actual.realpath>) => {
+      rd.realpath++
+      return actual.realpath(...args)
+    }) as typeof actual.realpath,
   }
 })
 
@@ -40,7 +53,7 @@ import { createApp } from '../src/app'
 import { ThumbCache } from '../src/cache'
 import { createLibrary } from '../src/library'
 import { peek } from '../src/listing'
-import { posesForPaths, resetIndexStatus } from '../src/semantic'
+import { POSES_MAX, posesForPaths, probeStatus, resetIndexStatus } from '../src/semantic'
 import { LOOPBACK, libraryFor, realTempDir, stlBytes } from './helpers'
 
 /**
@@ -51,6 +64,7 @@ import { LOOPBACK, libraryFor, realTempDir, stlBytes } from './helpers'
  *   nest/    a.stl  sub/{p.stl,q.stl}
  *   mix2/    m.stl  notes.txt  kit.zip  sub/s.stl
  *   only/    one.stl
+ *   cover/   a.stl b.stl c.stl d.stl  s1/x.stl  s2/y.stl  s3/z.stl
  *   empty/
  */
 const libTop = realTempDir('mb-poses-')
@@ -86,6 +100,24 @@ writeFileSync(
 
 mkdirSync(join(libTop, 'only'))
 writeFileSync(join(libTop, 'only', 'one.stl'), stlBytes(60))
+
+// Four models at the top level and three subdirectories under them: a sheet of
+// four is satisfied without descending at all, so the narrow walk reads one
+// directory and the walk-to-the-bound reads four. That gap is what the
+// coverage cell measures.
+mkdirSync(join(libTop, 'cover'))
+for (const n of ['a.stl', 'b.stl', 'c.stl', 'd.stl']) {
+  writeFileSync(join(libTop, 'cover', n), stlBytes(70))
+}
+for (const [sub, model] of [
+  ['s1', 'x.stl'],
+  ['s2', 'y.stl'],
+  ['s3', 'z.stl'],
+] as const) {
+  mkdirSync(join(libTop, 'cover', sub))
+  writeFileSync(join(libTop, 'cover', sub, model), stlBytes(71))
+}
+
 mkdirSync(join(libTop, 'empty'))
 
 const cacheDir = realTempDir('mb-poses-cache-')
@@ -125,17 +157,33 @@ interface Stub {
   posed?: readonly string[]
   /** Answer `/poses` with this status instead of 200 (503 = still loading). */
   posesStatus?: number
+  /**
+   * Hold `/poses` open forever, answering only the caller's abort — what a real
+   * `fetch` does when the service accepted the connection and then stopped
+   * saying anything, and the only way the request's own timeout is observable
+   * from out here.
+   */
+  posesHangs?: boolean
+  /** Make `/status` take long enough that concurrent callers really overlap. */
+  statusDelayMs?: number
 }
 
 /** Every `/poses` body this server sent, in order. */
 let sent: { paths: string[] }[] = []
+/** How many times `/status` was asked — the probe count, per cell. */
+let statusAsks = 0
 
 function stubIndex(stub: Stub): void {
   sent = []
+  statusAsks = 0
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
+    vi.fn(async (url: string, init?: { method?: string; body?: string; signal?: AbortSignal }) => {
       if (String(url).endsWith('/status')) {
+        statusAsks++
+        if (stub.statusDelayMs !== undefined) {
+          await new Promise((r) => setTimeout(r, stub.statusDelayMs))
+        }
         if (stub.status === 'refused') throw new TypeError('fetch failed')
         return new Response(JSON.stringify(stub.status ?? READY), {
           headers: { 'content-type': 'application/json' },
@@ -144,6 +192,13 @@ function stubIndex(stub: Stub): void {
       if (String(url).endsWith('/poses') && init?.method === 'POST') {
         const body = JSON.parse(init.body ?? '{}') as { paths: string[] }
         sent.push(body)
+        if (stub.posesHangs === true) {
+          const signal = init.signal
+          return new Promise<Response>((_resolve, reject) => {
+            if (signal === undefined) return // nothing to abort it: hang for real
+            signal.addEventListener('abort', () => reject(signal.reason))
+          })
+        }
         if (stub.posesStatus !== undefined && stub.posesStatus !== 200) {
           return new Response(JSON.stringify({ detail: 'no' }), { status: stub.posesStatus })
         }
@@ -182,6 +237,27 @@ const peekOf = async (path: string, n?: number): Promise<DirEntry[]> => {
 }
 
 const names = (entries: DirEntry[]) => entries.map((e) => e.name)
+
+/** The paths form of the same supply: the entries a listing landed, by name. */
+const posesFor = async (
+  paths: readonly string[],
+): Promise<Record<string, IndexPose>> => {
+  const res = await app.request('/api/semantic/poses', {
+    method: 'POST',
+    headers: { ...LOOPBACK, 'content-type': 'application/json' },
+    body: JSON.stringify({ paths }),
+  })
+  expect(res.status).toBe(200)
+  return ((await res.json()) as { poses: Record<string, IndexPose> }).poses
+}
+
+/** The same POST, with whatever body a cell wants to send. */
+const postPoses = async (body: unknown): Promise<Response> =>
+  app.request('/api/semantic/poses', {
+    method: 'POST',
+    headers: { ...LOOPBACK, 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
 
 describe('the poses proxy', () => {
   it('answers a directory’s models keyed by library path, asking about real ones', async () => {
@@ -490,5 +566,234 @@ describe('an index that is silent selects exactly as it did before poses', () =>
     await identical('/mixed', 4)
     await identical('/wide', 4)
     expect(sent.length).toBeGreaterThan(0)
+  })
+})
+
+
+describe('the paths route, for the listings a directory cannot name', () => {
+  it('answers the entries it was given, wherever in the library they live', async () => {
+    // The flat and name-search case: models drawn from three folders at once.
+    // `?path=<dir>` could answer for at most one of them, which is the whole
+    // reason this form exists.
+    stubIndex({ posed: [fs('mixed', 'c.stl'), fs('nest', 'sub', 'q.stl'), fs('only', 'one.stl')] })
+    expect(
+      await posesFor(['/mixed/c.stl', '/mixed/a.stl', '/nest/sub/q.stl', '/only/one.stl']),
+    ).toEqual({
+      '/mixed/c.stl': POSE,
+      '/nest/sub/q.stl': POSE,
+      '/only/one.stl': POSE,
+    })
+    // One request, carrying exactly the real paths of what was asked about —
+    // no directory was listed and no tree was walked to answer it.
+    expect(sent).toHaveLength(1)
+    expect(sent[0]!.paths).toEqual([
+      fs('mixed', 'c.stl'),
+      fs('mixed', 'a.stl'),
+      fs('nest', 'sub', 'q.stl'),
+      fs('only', 'one.stl'),
+    ])
+  })
+
+  it('canonicalises every path, like the GET canonicalises its one', async () => {
+    stubIndex({ posed: [fs('mixed', 'c.stl')] })
+    expect(await posesFor(['//mixed/./c.stl'])).toEqual({ '/mixed/c.stl': POSE })
+  })
+
+  it('drops what the library refuses instead of failing the whole answer', async () => {
+    // A stale tile, a model outside the library, a path inside an archive: each
+    // is silent on its own, and the good entries beside them still get poses.
+    stubIndex({ posed: [fs('mixed', 'c.stl'), join(outsideFs, 'secret.stl')] })
+    expect(
+      await posesFor(['/gone.stl', '/links/escape.stl', '/mix2/kit.zip!/box.stl', '/mixed/c.stl']),
+    ).toEqual({ '/mixed/c.stl': POSE })
+    expect(sent[0]!.paths).toEqual([fs('mixed', 'c.stl')])
+  })
+
+  it('requires an array of strings, and says so in the shape every field does', async () => {
+    stubIndex({})
+    for (const body of [{}, { paths: '/mixed/a.stl' }, { paths: ['/mixed/a.stl', 7] }, []]) {
+      const res = await postPoses(body)
+      expect([JSON.stringify(body), res.status]).toEqual([JSON.stringify(body), 400])
+      expect(await res.json()).toEqual({ error: 'paths is required' })
+    }
+    expect(sent).toHaveLength(0)
+  })
+
+  it('refuses more than one upstream call’s worth, and takes exactly that many', async () => {
+    stubIndex({})
+    const one = Array.from({ length: POSES_MAX }, () => '/mixed/a.stl')
+    // At the bound: taken, and it is one request out for one request in.
+    expect(await posesFor(one)).toEqual({})
+    expect(sent).toHaveLength(1)
+    expect(sent[0]!.paths).toHaveLength(1) // one real path, named 1024 times
+
+    const res = await postPoses({ paths: [...one, '/mixed/b.stl'] })
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({
+      error: `invalid paths: ${POSES_MAX + 1} (max ${POSES_MAX})`,
+    })
+    expect(sent).toHaveLength(1) // nothing asked upstream for the refused one
+  })
+
+  it('an index that cannot answer costs it nothing either', async () => {
+    for (const stub of [
+      { status: 'refused' as const },
+      { status: { ...READY, ready: false, elapsed: 3 } },
+      { status: { ...READY, collection_root: join(libTop, 'nest') } },
+    ]) {
+      stubIndex(stub)
+      expect(await posesFor(['/mixed/c.stl'])).toEqual({})
+      expect(sent).toHaveLength(0)
+    }
+  })
+
+  it('is the same path route the GET is: the not-ready state envelope', async () => {
+    stubIndex({})
+    const home = realTempDir('mb-poses-post-unconfigured-')
+    const cache = realTempDir('mb-poses-post-unconfigured-cache-')
+    const bare = createApp(
+      new ThumbCache(cache),
+      undefined,
+      undefined,
+      createLibrary({ HOME: home, XDG_CONFIG_HOME: join(home, 'config') }),
+    )
+    const res = await bare.request('/api/semantic/poses', {
+      method: 'POST',
+      headers: { ...LOOPBACK, 'content-type': 'application/json' },
+      body: JSON.stringify({ paths: ['/mixed/a.stl'] }),
+    })
+    expect(res.status).toBe(503)
+    expect(await res.json()).toEqual({
+      error: 'no library root is configured',
+      state: 'unconfigured',
+    })
+    rmSync(home, { recursive: true, force: true })
+    rmSync(cache, { recursive: true, force: true })
+  })
+})
+
+describe('an index with nothing to say about the folder costs the peek nothing', () => {
+  /**
+   * The answers alone cannot say this. Every state below previews the same
+   * models — an uncovered folder because coverage fails per path, a silent one
+   * because there are no poses to rank by — so a peek that walked the whole
+   * entry bound and then threw the extra finds away would look identical from
+   * the outside. What separates them is the walk: a sheet of four is satisfied
+   * by `/cover`'s own level, so the narrow walk reads one directory while the
+   * walk-to-the-bound reads all four, and pays a `realpath` per find it will be
+   * told nothing about.
+   *
+   * Measured against a control run of `peek()` in the same cell rather than
+   * against numbers written here, so the walk's own bookkeeping is free to
+   * change without making these cells wrong.
+   *
+   * `/cover` and not `/mixed`: a flat directory reads once whatever the bound
+   * is, and would report "the same width" for both walks.
+   */
+  const cases: [string, Stub][] = [
+    ['absent — nobody started it', { status: 'refused' }],
+    ['warming — SigLIP is still loading', { status: { ...READY, ready: false, elapsed: 3 } }],
+    ['wedged — the load will not finish', { status: { ...READY, ready: false, elapsed: 400 } }],
+    [
+      'ready, but rooted somewhere this folder is not',
+      { status: { ...READY, collection_root: join(libTop, 'nest') } },
+    ],
+  ]
+
+  for (const [label, stub] of cases) {
+    it(`${label}: walks no wider than it did before poses, and asks nothing`, async () => {
+      stubIndex(stub)
+      rd.readdir = 0
+      rd.realpath = 0
+      const control = await peek(library, '/cover', 4)
+      const narrow = { readdir: rd.readdir, realpath: rd.realpath }
+
+      rd.readdir = 0
+      rd.realpath = 0
+      const sheet = await peekOf('/cover', 4)
+
+      // The width itself: one `readdir` per directory entered.
+      expect(rd.readdir).toBe(narrow.readdir)
+      // And the per-find cost a wide walk pays. What the route may spend on top
+      // of the walk is asking *where the index is looking*, and all of it is
+      // about the folder rather than about its contents: the probe's own
+      // `realpath` of the collection root (`mapCollectionRoot`), and the three
+      // `scopeWithin` makes for one path — resolving it through the library,
+      // then resolving it and the collection root together.
+      const ASKING = 4
+      expect(rd.realpath).toBeLessThanOrEqual(narrow.realpath + ASKING)
+
+      // The selection is still today's, byte for byte, and the index was never
+      // asked about a single model.
+      expect(JSON.stringify(sheet)).toBe(JSON.stringify(control))
+      expect(sent).toHaveLength(0)
+    })
+  }
+})
+
+describe('a stalling index does not hold the sheet', () => {
+  it(
+    'gives up on /poses within its own budget and previews the walk’s own order',
+    async () => {
+      // Ready, covering, and then silent: the one state where the peek has
+      // already committed to the wide walk and the batch is what does not come
+      // back. `/poses` is advisory, so the budget is the probe's rather than
+      // the query's — a folder tile may not wait half a minute for an answer
+      // that is allowed to be empty.
+      stubIndex({ posesHangs: true })
+      const started = Date.now()
+      expect(names(await peekOf('/mixed', 4))).toEqual(['a.stl', 'b.stl', 'c.stl', 'd.stl'])
+      const waited = Date.now() - started
+      expect(sent).toHaveLength(1)
+      // Loose enough that a loaded machine cannot fail it, and far tighter than
+      // the 30 s a scoring query is allowed — which is the whole assertion.
+      expect(waited).toBeLessThan(10_000)
+
+      // And the stall is not remembered as "ready": the timeout lands in
+      // `askIndex`'s network catch, which forgets the status, so the next tile
+      // probes again instead of trusting a 30 s TTL taken before the stall.
+      const asked = statusAsks
+      await probeStatus(library)
+      expect(statusAsks).toBe(asked + 1)
+    },
+    15_000,
+  )
+})
+
+describe('a screenful of tiles probes the index once', () => {
+  it('shares the probe that is already on the wire', async () => {
+    // Every folder tile reads the index's state before it decides how to walk,
+    // and a grid brings them on screen together. The cache is only written when
+    // a probe *resolves*, so without the in-flight memo each of these opens its
+    // own connection to learn the one fact they are all waiting for.
+    stubIndex({ statusDelayMs: 25 })
+    const seen = await Promise.all(Array.from({ length: 6 }, () => probeStatus(library)))
+    expect(statusAsks).toBe(1)
+    // One probe, and every caller got its answer — not one answer and five
+    // empty ones.
+    expect(seen.map((s) => s.status.state)).toEqual(Array.from({ length: 6 }, () => 'ready'))
+    expect(seen.every((s) => s.collectionRootFs === libTop)).toBe(true)
+  })
+
+  it('the memo is the request’s, not a second cache: the TTL still decides', async () => {
+    stubIndex({ statusDelayMs: 25 })
+    await Promise.all([probeStatus(library), probeStatus(library)])
+    expect(statusAsks).toBe(1)
+    // Settled, so the next caller reads the cache the probe wrote…
+    await probeStatus(library)
+    expect(statusAsks).toBe(1)
+    // …and forgetting that cache really does mean the next one looks again.
+    resetIndexStatus()
+    await probeStatus(library)
+    expect(statusAsks).toBe(2)
+  })
+
+  it('the explicit retry never joins it — that is the point of asking', async () => {
+    // `fresh` is the client's "look again now". A probe already on the wire was
+    // started before the user asked, so answering with it would answer the
+    // question they did not ask.
+    stubIndex({ statusDelayMs: 25 })
+    await Promise.all([probeStatus(library), probeStatus(library, { fresh: true })])
+    expect(statusAsks).toBe(2)
   })
 })

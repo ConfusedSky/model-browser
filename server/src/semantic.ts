@@ -25,6 +25,24 @@ const DEFAULT_BASE = 'http://127.0.0.1:8077'
 const PROBE_TIMEOUT_MS = 2000
 const QUERY_TIMEOUT_MS = 30_000
 
+/**
+ * What a `/poses` call may cost, and deliberately not `QUERY_TIMEOUT_MS`. A
+ * query is a thing the user asked for and will wait on; a pose is advisory —
+ * it rides behind a listing the client is already showing, and every folder
+ * tile on screen asks for one through `posedFirstPeek`. A stalling index held
+ * on the query budget would make each of those tiles wait half a minute for an
+ * answer that is allowed to be empty, which is the opposite of the delta's
+ * "the preview never waits on the index".
+ *
+ * The probe's own budget, because it bounds the same kind of call: upstream a
+ * `/poses` is a pose-cache lookup with no GPU and no lock behind it
+ * (`pose-for-every-model` §1.1), so an index that has not answered in two
+ * seconds is not busy, it is not answering. A timeout lands in `askIndex`'s
+ * network catch, which is exactly the right classification — empty poses and a
+ * forgotten status, so the next probe looks again.
+ */
+const POSES_TIMEOUT_MS = 2000
+
 /** Past this, a load has plainly gone wrong: warming becomes wedged (D4). */
 const WEDGED_AFTER_S = 180
 
@@ -116,21 +134,59 @@ async function probe(base: string): Promise<IndexAvailability> {
 }
 
 /**
+ * The probe currently in flight, if any — shared by every caller that would
+ * otherwise open one of its own.
+ *
+ * The cache above is only written once a probe *resolves*, so callers that
+ * arrive during one all miss it. That is the ordinary case rather than a race:
+ * a folder grid brings its tiles on screen together, and every one of them
+ * reads the index's state (`posedFirstPeek`) before it decides how to walk —
+ * so a screenful of folders opened a `/status` connection per tile to learn
+ * the single fact they were all waiting for.
+ *
+ * Cleared as soon as the probe settles, so the memo never outlives the request
+ * it belongs to and the TTL alone decides when the next one is taken.
+ */
+let inFlight: Promise<IndexAvailability> | null = null
+
+/** One probe, its answer written to the cache the TTL protects. `at` is the
+ *  moment the look was *decided on*, not the moment it came back — the TTL has
+ *  always been measured from there. */
+function look(base: string, at: number): Promise<IndexAvailability> {
+  return probe(base).then((status) => {
+    cached = { status, at }
+    return status
+  })
+}
+
+/**
  * What the index says about itself, `collectionRoot` still absolute — the index
  * is another process with its own view of the volume, and the path it names is
  * the one it must be asked about (D6). Cached per state rather than probed per
  * query (D4); callers may force a fresh look — the client's explicit retry.
+ *
+ * That retry is the one caller that never joins the in-flight probe: its whole
+ * point is a look taken *after* the user asked for one, and a probe already on
+ * the wire was started before. It still writes the cache everyone else reads.
  */
 async function rawStatus(opts: { fresh?: boolean }): Promise<IndexAvailability> {
   const base = baseUrl()
   if (base === null) return { state: 'absent' }
   const now = Date.now()
-  if (!opts.fresh && cached !== null && now - cached.at < TTL_MS[cached.status.state]) {
+  if (opts.fresh === true) return look(base, now)
+  if (cached !== null && now - cached.at < TTL_MS[cached.status.state]) {
     return cached.status
   }
-  const status = await probe(base)
-  cached = { status, at: now }
-  return status
+  if (inFlight !== null) return inFlight
+  const started = look(base, now)
+  inFlight = started
+  // Identity-guarded: `resetIndexStatus` can drop the memo mid-probe, and this
+  // settle must not then clear whatever look replaced it.
+  const clear = (): void => {
+    if (inFlight === started) inFlight = null
+  }
+  started.then(clear, clear)
+  return started
 }
 
 /** What the UI says when the index covers a tree this library does not hold. */
@@ -194,9 +250,16 @@ export async function indexStatus(
   return (await probeStatus(library, opts)).status
 }
 
-/** Test seam: forget what we think we know about the index. */
+/**
+ * Test seam, and `askIndex`'s answer to a network failure: forget what we think
+ * we know about the index. The in-flight memo goes with the cache — a probe
+ * started before the thing we just learned must not be what the next caller is
+ * handed. Anyone already awaiting it still gets its answer; only the next
+ * caller looks again.
+ */
 export function resetIndexStatus(): void {
   cached = null
+  inFlight = null
 }
 
 export class IndexError extends Error {
@@ -298,12 +361,22 @@ export const TOP = 60
 export type Tuning = SemanticTuning
 
 /**
- * POST one of the index's scoring routes, with the error contract both of them
- * share. One copy, because the caller's status mapping keys off `upstreamStatus`
- * (`app.ts`) and two routes classifying the same upstream status differently is
- * exactly the drift that mapping exists to prevent.
+ * POST one of the index's routes, with the error contract they share. One copy,
+ * because the caller's status mapping keys off `upstreamStatus` (`app.ts`) and
+ * two routes classifying the same upstream status differently is exactly the
+ * drift that mapping exists to prevent.
+ *
+ * How long to wait is the *caller's*, because that is the one thing the routes
+ * do not share: a scoring route answers something the user asked for and is
+ * given `QUERY_TIMEOUT_MS`, while `/poses` is advisory and is given far less
+ * (`POSES_TIMEOUT_MS`). Everything past the wait — what a refusal, a 503 and an
+ * unreachable service each mean — stays common.
  */
-async function askIndex(route: string, body: unknown): Promise<unknown> {
+async function askIndex(
+  route: string,
+  body: unknown,
+  timeoutMs: number = QUERY_TIMEOUT_MS,
+): Promise<unknown> {
   const base = baseUrl()
   if (base === null) throw new IndexError('absent', 'semantic index is not configured')
   let res: Response
@@ -312,7 +385,10 @@ async function askIndex(route: string, body: unknown): Promise<unknown> {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(QUERY_TIMEOUT_MS),
+      // A timeout aborts the fetch, so it lands in the catch below with every
+      // other way the index can fail to answer: empty poses, and a forgotten
+      // status so the next probe looks rather than trusting a stale `ready`.
+      signal: AbortSignal.timeout(timeoutMs),
     })
   } catch {
     resetIndexStatus()
@@ -526,14 +602,19 @@ export async function hitsToEntries(
 
 /**
  * The most paths one `/poses` request may carry — the index's own bound on the
- * call (`pose-for-every-model` §1.1). A larger set is chunked rather than
- * refused here: this server decides what it wants poses for, and a directory
- * holding more than a thousand models is a listing, not a malformed request.
+ * call (`pose-for-every-model` §1.1). A set this server assembled for itself is
+ * chunked rather than refused: it decides what it wants poses for, and a
+ * directory holding more than a thousand models is a listing, not a malformed
+ * request.
+ *
+ * A set a *client* handed over is refused past this instead (`POST
+ * /api/semantic/poses`), so the same number is the wire's bound too — one
+ * request in, at most one request out, and a client that wants more asks twice.
  *
  * A peek can never reach it — its finds are bounded by `PEEK_MAX_FINDS` (64),
  * which is why a contact sheet is one request whatever it walked.
  */
-const POSES_MAX = 1024
+export const POSES_MAX = 1024
 
 /** The `/poses` answer: one entry per path asked about, `null` where the index
  *  holds the model but has no orientation for it. */
@@ -550,9 +631,11 @@ interface PosesAnswer {
 async function askPoses(paths: readonly string[]): Promise<Record<string, IndexPose | null>> {
   const out: Record<string, IndexPose | null> = {}
   for (let i = 0; i < paths.length; i += POSES_MAX) {
-    const answer = (await askIndex('/poses', {
-      paths: paths.slice(i, i + POSES_MAX),
-    })) as PosesAnswer
+    const answer = (await askIndex(
+      '/poses',
+      { paths: paths.slice(i, i + POSES_MAX) },
+      POSES_TIMEOUT_MS,
+    )) as PosesAnswer
     Object.assign(out, answer.poses ?? {})
   }
   return out
@@ -624,8 +707,35 @@ export async function posesForPaths(
 }
 
 /**
- * Every pose the index holds for one directory's models, keyed by library path
- * (D2) — the listing-wide supply of the fact a search hit carries as a rider.
+ * Every pose the index holds for a set of models the client is *already
+ * showing*, keyed by library path (D2) — the listing-wide supply of the fact a
+ * search hit carries as a rider, and the core both pose routes answer on.
+ *
+ * The availability gate lives here rather than in each route, so the directory
+ * form and the paths form cannot come to disagree about what an unusable index
+ * answers. An index that is absent, warming, wedged or volume-gone, or whose
+ * collection does not cover these paths, answers `{}` — the same answers a
+ * search gets, which the client reads as "no poses", leaving every tile exactly
+ * as it renders today. Read through `probeStatus`, so the pose routes and the
+ * scoring routes cannot disagree about which state the index is in either.
+ *
+ * Coverage is not tested here: it is a property of each path and `posesForPaths`
+ * decides it per path, which is what lets one listing span a folder the
+ * collection reaches and one it does not.
+ */
+export async function posesForListing(
+  library: Library,
+  libPaths: readonly string[],
+  opts: { fresh?: boolean } = {},
+): Promise<Record<string, IndexPose>> {
+  const { status, collectionRootFs } = await probeStatus(library, opts)
+  if (status.state !== 'ready' || collectionRootFs === undefined) return {}
+  return posesForPaths(library, libPaths, collectionRootFs)
+}
+
+/**
+ * The same supply for the plain case the client asks about most: one directory,
+ * named rather than enumerated.
  *
  * The directory is listed through `listDir`, the machinery `/api/dir` itself
  * answers with, so the models asked about are exactly the models the client is
@@ -636,12 +746,6 @@ export async function posesForPaths(
  * on another process's availability. The cost of that ordering is one `readdir`
  * of a directory the client has just listed — page-cached — when the index
  * turns out to have nothing to say.
- *
- * An index that is absent, warming, wedged or volume-gone, or whose collection
- * does not cover this location, answers `{}` — the same answers a search gets,
- * which the client reads as "no poses", leaving every tile exactly as it
- * renders today. Read through `probeStatus`, so this route and the scoring
- * routes cannot disagree about which state the index is in.
  */
 export async function posesForDir(
   library: Library,
@@ -649,11 +753,9 @@ export async function posesForDir(
   opts: { fresh?: boolean } = {},
 ): Promise<Record<string, IndexPose>> {
   const listing = await listDir(library, dirPath)
-  const { status, collectionRootFs } = await probeStatus(library, opts)
-  if (status.state !== 'ready' || collectionRootFs === undefined) return {}
-  return posesForPaths(
+  return posesForListing(
     library,
     listing.entries.filter((e) => e.kind === 'model').map((e) => e.path),
-    collectionRootFs,
+    opts,
   )
 }

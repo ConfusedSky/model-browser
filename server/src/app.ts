@@ -23,10 +23,12 @@ import {
 } from './overrides'
 import {
   IndexError,
+  POSES_MAX,
   hitsToEntries,
   indexStatus,
   modelEntryAt,
   posesForDir,
+  posesForListing,
   posesForPaths,
   probeStatus,
   query as indexQuery,
@@ -110,13 +112,27 @@ function unreachable(value: never): never {
  * entry bound caps the finds at 64, so the batch is a single request whatever
  * the folder held, and the peek's worst case grows by exactly that one call.
  *
- * **When the index is not answering, this is today's code path, untouched.**
- * The probe comes first precisely so that an absent, warming or non-covering
- * index costs the peek nothing at all — not even the wider walk — and the sheet
- * is the walk's first `n` models byte for byte, which is what the requirement's
- * determinism clause promises when the index is silent. The probe itself is the
- * cached one every semantic route reads (`probeStatus`), so it is not a request
- * per tile.
+ * **When the index has nothing to say about this folder, this is today's code
+ * path, untouched.** Both tests come before the wide walk, precisely so that an
+ * index with nothing to say costs the peek nothing at all — not even the wider
+ * walk — and the sheet is the walk's first `n` models byte for byte, which is
+ * what the requirement's determinism clause promises when the index is silent.
+ *
+ * Two tests, because "not answering" and "answering about somewhere else" are
+ * different facts. The first is availability, read from the cached probe every
+ * semantic route shares (`probeStatus`), so it is not a request per tile. The
+ * second is coverage, and it needs the *folder*: `posesForPaths` decides
+ * coverage per path, which is the right grain for a listing but is decided too
+ * late for a walk — a ready index rooted at a sibling subtree would otherwise
+ * buy the entry-bound walk and a `realpath` per find to be told, path by path,
+ * what one `scopeWithin` of the directory says up front. The finds all live
+ * under it, so the folder is where that question belongs.
+ *
+ * The corner it gives up is a folder outside the collection holding a symlink
+ * into it: that model has a pose upstream and no longer gets one here. A
+ * preview is cosmetic and follows the index's coverage the way search does —
+ * paying a wide walk on every uncovered folder in the library to orient the odd
+ * symlinked one is the wrong trade.
  *
  * Ranking is applied whatever the walk found, not only when it found more than
  * `n`: "prefer posed" is about the cells the user sees, and a sheet of three
@@ -126,6 +142,12 @@ function unreachable(value: never): never {
 async function posedFirstPeek(library: Library, libPath: string, n: number): Promise<DirEntry[]> {
   const { status, collectionRootFs } = await probeStatus(library)
   if (status.state !== 'ready' || collectionRootFs === undefined) {
+    return peek(library, libPath, n)
+  }
+  // The collection's reach, asked about the folder rather than about its finds
+  // — the same call, one level up. `null` is every way it can fail to reach:
+  // outside the collection, a path the library refuses, or a virtual one (D7).
+  if ((await scopeWithin(library, libPath, collectionRootFs)) === null) {
     return peek(library, libPath, n)
   }
   const finds = await peek(library, libPath, PEEK_MAX_FINDS)
@@ -472,6 +494,54 @@ export function createApp(
     const libPath = canonicalLibPath(path)
     const body: PosesResponse = { poses: await posesForDir(library, libPath) }
     return c.json(body)
+  })
+
+  /**
+   * The same supply for a listing that is not one directory's contents: the
+   * client names the models it landed, and gets their poses.
+   *
+   * The GET above answers a *folder*, which is all a plain browse ever needs.
+   * A flat listing and a name search are the cases it cannot serve — they draw
+   * models from every folder beneath the browsed one, so a folder-shaped
+   * question answers for the few that sit at its top and leaves the rest at
+   * default framing. The entries that landed are the question here, and this
+   * route is the only place the client can put it.
+   *
+   * A POST because the paths are the body — a listing's worth of them will not
+   * fit in a query string — and not because it changes anything; like the GET
+   * it is a read, and it is gated by the library exactly the same way (same
+   * path, so the not-ready envelope middleware covers both).
+   *
+   * Refused past `POSES_MAX`, in the shape every other invalid field is refused
+   * in. That is the index's own bound on one `/poses` call, so it is what makes
+   * this route one request in, at most one request out; a client with more to
+   * ask about asks twice. It is not a bound on what this *server* may assemble
+   * for itself — `posesForDir` still chunks a directory of any size.
+   *
+   * Which paths are answerable is not this route's business: each is
+   * canonicalised the way the GET canonicalises its one path, and then
+   * `posesForPaths` confines it exactly as a search hit is confined. A path the
+   * library refuses, or one outside the collection, is simply absent from the
+   * answer — a 404 for one bad entry would let a stale tile fail the poses of
+   * every good one beside it, and a listing may never be made to fail by the
+   * index.
+   */
+  app.post('/api/semantic/poses', async (c) => {
+    const body = (await c.req.json().catch(() => null)) as { paths?: unknown } | null
+    const given = body?.paths
+    if (!Array.isArray(given)) return c.json({ error: 'paths is required' }, 400)
+    const raw: readonly unknown[] = given
+    // Every element a string, or none of it is a request: a listing that sent
+    // one stray value has a bug the answer should name, not a pose to look up.
+    const paths = raw.filter((p): p is string => typeof p === 'string')
+    if (paths.length !== raw.length) return c.json({ error: 'paths is required' }, 400)
+    if (paths.length > POSES_MAX) {
+      return c.json({ error: `invalid paths: ${paths.length} (max ${POSES_MAX})` }, 400)
+    }
+    const answer: PosesResponse = {
+      poses: await posesForListing(library, paths.map(canonicalLibPath)),
+    }
+    return c.json(answer)
   })
 
   /**

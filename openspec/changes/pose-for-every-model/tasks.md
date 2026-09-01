@@ -32,6 +32,18 @@
       ones", "asks about models only", "leaves out a model the index holds no orientation
       for", the whole `per-path confinement` and `an index that cannot answer costs the
       listing nothing` describes (7 states, each asserting no request or an empty answer)
+      <br>2026-08-31 (review follow-up, worker S): the availability gate moves out of
+      `posesForDir` into `posesForListing`, which both pose routes now answer on, so the
+      directory form and the paths form cannot come to disagree about what an unusable
+      index answers; `posesForDir` keeps the `listDir`-before-probe ordering the 404/400
+      semantics depend on. Two costs the review found, both here: **F4**, `askPoses` was
+      inheriting `QUERY_TIMEOUT_MS` (30 s) — `askIndex` now takes the budget from its
+      caller and `/poses` passes `POSES_TIMEOUT_MS` (2 s, the probe's own), a timeout
+      landing in the network catch that already empties the answer and calls
+      `resetIndexStatus`. **F5**, `rawStatus` cached only after `probe()` resolved, so N
+      folder tiles landing together opened N `/status` connections; the in-flight promise
+      is now memoised (`inFlight`, cleared on settle under an identity guard, dropped by
+      `resetIndexStatus`), and `fresh` — the explicit retry — deliberately never joins it
 - [x] 2.2 `app.ts`: `GET /api/semantic/poses?path=<dir>` (gated like other path routes;
       404/400 semantics per the path rules); wire types in `shared/types.ts`
       <br>2026-08-31: route added beside `/api/semantic/status` and deliberately *not* in
@@ -40,6 +52,25 @@
       `the poses route` — "requires a path", "404s a path that is not there, index up or
       down", "400s a file", "canonicalises the path it was given", "is a path route: the
       not-ready state envelope"
+      <br>2026-08-31 (review follow-up, worker S): **F2** — the GET answers only a
+      directory's direct children, so a flat `/` listing showing 500 models from
+      subfolders got the three poses that happened to sit at the top. `POST
+      /api/semantic/poses` takes `{ paths: string[] }` (`PosesRequest` in
+      `shared/types.ts`, whose doc says a client sends the *landed entries'* paths),
+      canonicalises each with `canonicalLibPath`, and answers the same `PosesResponse`
+      through `posesForListing` → `posesForPaths`, which confines each path exactly as a
+      hit is confined — a path the library refuses is dropped, never an error. Refused
+      past `POSES_MAX` (1024, now exported) in the route's own invalid-field shape, so it
+      is one request in and at most one upstream request out. Same path as the GET, so
+      the library gate covers both with no code of its own. Cells: `poses.test.ts` `the
+      paths route, for the listings a directory cannot name` — "answers the entries it
+      was given, wherever in the library they live" (three folders at once, asserting
+      both halves of the wire), "canonicalises every path", "drops what the library
+      refuses instead of failing the whole answer" (stale, escaping and virtual paths
+      beside a good one), "requires an array of strings", "refuses more than one upstream
+      call's worth, and takes exactly that many" (1024 taken, 1025 refused, nothing
+      asked), "an index that cannot answer costs it nothing either" (3 states), "is the
+      same path route the GET is: the not-ready state envelope"
 - [x] 2.3 The peek (`app.ts` peek handler): walk to four *posed* finds within the existing
       entry bound, unposed finds as ordered fallback; one `/poses` batch per peek over the
       finds; index silent → exactly today's selection (assert byte-identical order)
@@ -51,6 +82,18 @@
       finds in walk order, cut to `n`. Cells: `poses.test.ts` `the contact sheet prefers
       posed models` (6), `what the ranking costs` (3), `an index that is silent selects
       exactly as it did before poses` (5, byte-identity against `peek()` itself)
+      <br>2026-08-31 (review follow-up, worker S): **F3** — "a non-covering index costs
+      the peek nothing" was the comment's claim and not the code's. Coverage is decided
+      per path inside `posesForPaths`, which is *after* the walk, so a ready index rooted
+      at a sibling subtree bought the entry-bound walk and a `realpath` per find to be
+      told nothing. `posedFirstPeek` now asks `scopeWithin(library, libPath,
+      collectionRootFs)` about the **folder** before the wide walk and takes the narrow
+      `peek(library, libPath, n)` when it is null — the same branch the silent index
+      takes. The comment is corrected to say what the code now does. Judgment call: a
+      folder outside the collection holding a symlink *into* it loses the pose it used to
+      get; a preview is cosmetic and follows the index's coverage the way search does,
+      and paying a wide walk on every uncovered folder to orient the odd symlinked one is
+      the wrong trade
 - [x] 2.4 Server tests: proxy mapping + confinement + index-down; peek pose-priority, the
       fallback fill, the bound unchanged, index-down order identical; falsify the ranking
       <br>2026-08-31: `server/test/poses.test.ts`, 34 cells, stubbing `/status` and
@@ -67,6 +110,48 @@
       mock), and was re-run once against the real modules under `bun` — batch 64, last
       asked `m63.stl`, sheet `m63 m00 m01 m02` — since Node sorts `readdir` and Bun does
       not. Full run after restoring: 365 passed, 3 skipped (the real-index contract)
+      <br>**2026-08-31, re-run by worker S** — the three counts above are stale (main has
+      moved and the file has grown); these are this session's own runs, on the tree this
+      task's follow-up ships, `cd server && bunx vitest run`, 439 cells green before and
+      after each. **Ranking removed** (`finds.slice(0, n)`) → **6** fail, "expected
+      [ 'a.stl', 'b.stl', 'c.stl', 'd.stl' ] to deeply equal [ 'c.stl', 'e.stl', 'a.stl',
+      'b.stl' ]". **The index-silent branch widened to the bound** (`peek(library,
+      libPath, PEEK_MAX_FINDS)`) → **13** fail across `peek.test.ts` and `poses.test.ts`,
+      "expected '[{\"name\":\"a.stl\",\"path\":\"/mixed/a.stl…' to be
+      '[{\"name\":\"a.stl\",\"path\":\"/mixed/a.stl…' // Object.is equality".
+      **The unposed fallback dropped** (`posed.slice(0, n)`) → **8** fail, "expected
+      [ 'f.stl' ] to deeply equal [ 'f.stl', 'a.stl', 'b.stl', 'c.stl' ]".
+      <br>The widening falsification found a real gap while being re-run and it is closed
+      here: written as `(await peek(library, libPath, PEEK_MAX_FINDS)).slice(0, n)` — a
+      wide walk whose extra finds are thrown away — it passed **every** cell, because the
+      byte-identity cells compare answers and a wider walk answers identically. What was
+      untested was the walk itself. `poses.test.ts` `an index with nothing to say about
+      the folder costs the peek nothing` now measures it over all four states (absent,
+      warming, wedged, ready-but-rooted-elsewhere) against a control run of `peek()` in
+      the same cell: `readdir` count equal (the width), `realpath` count within a named
+      allowance of 4 (`mapCollectionRoot`'s one plus `scopeWithin`'s three, all about the
+      folder rather than its contents), the answer byte-identical, and no `/poses` sent.
+      The sliced widening now fails 3 of those cells, "expected 4 to be 1".
+      <br>New cells for the follow-up findings, each falsified against the whole suite
+      and restored: **F3** — `an index with nothing to say about the folder …` "ready, but
+      rooted somewhere this folder is not"; reverting the folder `scopeWithin` → 1 fail
+      (plus the flaky `open.test.ts` cell noted below), "expected 4 to be 1 // Object.is
+      equality". **F4** — `a stalling index does not hold
+      the sheet` "gives up on /poses within its own budget and previews the walk's own
+      order" (a `/poses` that answers only its own abort, a 15 s cell timeout, asserting
+      the peek returns the walk's order in under 10 s and that the next probe re-asks
+      `/status`); restoring `QUERY_TIMEOUT_MS` → 1 fail, "Test timed out in 15000ms".
+      **F5** — `a screenful of tiles probes the index once` (3 cells: six concurrent
+      `probeStatus` calls over a 25 ms `/status`, the TTL still deciding afterwards, and
+      `fresh` never joining); dropping the `inFlight` memo → 2 fail, "expected 6 to be 1
+      // Object.is equality" and "expected 2 to be 1 // Object.is equality".
+      <br>Suite on the shipped tree: **439 passed (14 files)**, including
+      `indexContract.test.ts`'s 3 cells against the live index on :8077 (`embed-cache512`,
+      collection root `/run/media/masa/STLLibrary`). Note for whoever runs it next:
+      `open.test.ts` "completes when the chooser does, even after the request is aborted"
+      is flaky under a full parallel run — 2 failures in 6 runs measured on **main** at
+      `393d61a` with none of this work applied, and green on its own every time. It is a
+      `setImmediate` race in that cell, unrelated to poses
 
 ## 3. Client: the second wave
 
