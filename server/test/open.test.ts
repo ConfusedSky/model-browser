@@ -318,8 +318,13 @@ describe('POST /api/open-with', () => {
     const gate = new Promise<void>((r) => {
       release = r
     })
+    let entered: () => void = () => {}
+    const reached = new Promise<void>((r) => {
+      entered = r
+    })
     const exec: ExecFn = async (file, args, opts) => {
       calls.push({ file, args, opts })
+      entered()
       await gate
       return { code: 0, stdout: '', stderr: '' }
     }
@@ -338,9 +343,21 @@ describe('POST /api/open-with', () => {
       signal: controller.signal,
     })
     // Let the handler reach the chooser, then drop the connection under it.
-    for (let i = 0; i < 200 && calls.length === 0; i++) {
-      await new Promise((r) => setImmediate(r))
-    }
+    //
+    // Waited on the chooser's *own* entry, never on a count of event-loop
+    // turns: the route crosses two threadpool filesystem calls before it
+    // spawns anything (`Library.resolve`'s `realpath` loop, then
+    // `resolveEntryFile`'s `stat`), and a `setImmediate` spin does not wait for
+    // those — with immediates pending the poll phase never blocks, so the old
+    // 200-turn budget was really a ~2 ms deadline on work that takes longer
+    // than that whenever the machine is loaded. That is what made this cell
+    // fail roughly one full parallel run in six, always here and never on the
+    // behaviour below.
+    //
+    // Raced against the response so a regression that answers *without*
+    // spawning still falsifies rather than hanging to the suite timeout:
+    // `pending` settles, and the assertion reports the empty `calls`.
+    await Promise.race([reached, pending])
     expect(calls).toHaveLength(1)
     controller.abort()
     release()
