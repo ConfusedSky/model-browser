@@ -59,18 +59,8 @@ export interface ThumbSave {
   ao?: boolean
 }
 
-/**
- * How many paths one `POST /api/semantic/poses` may name — the route's own
- * bound, mirrored here so a caller can hand over a listing rather than a batch
- * (pose-for-every-model D3). The same number the server chunks by against the
- * index's `POSES_MAX`.
- *
- * It has to be enforced on this side because a listing can exceed it: the 500
- * model cap (`MODEL_BROWSER_FLAT_CAP`) is the *flat walk's*, and a plain
- * directory listing goes through `listDir`, which caps nothing — a folder with
- * three thousand models lands three thousand entries.
- */
-export const POSES_MAX = 1024
+import { POSES_MAX } from '../../../shared/types'
+export { POSES_MAX }
 
 
 /**

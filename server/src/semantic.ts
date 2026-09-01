@@ -8,6 +8,8 @@ import type {
   IndexState,
   SemanticTuning,
 } from '../../shared/types'
+import { POSES_MAX } from '../../shared/types'
+export { POSES_MAX }
 import { type Library, LibraryError } from './library'
 import { listDir, modelFormat } from './listing'
 
@@ -637,21 +639,6 @@ export async function hitsToEntries(
   return { entries: settled.filter((e) => e !== null), poses, scores }
 }
 
-/**
- * The most paths one `/poses` request may carry — the index's own bound on the
- * call (`pose-for-every-model` §1.1). A set this server assembled for itself is
- * chunked rather than refused: it decides what it wants poses for, and a
- * directory holding more than a thousand models is a listing, not a malformed
- * request.
- *
- * A set a *client* handed over is refused past this instead (`POST
- * /api/semantic/poses`), so the same number is the wire's bound too — one
- * request in, at most one request out, and a client that wants more asks twice.
- *
- * A peek can never reach it — its finds are bounded by `PEEK_MAX_FINDS` (64),
- * which is why a contact sheet is one request whatever it walked.
- */
-export const POSES_MAX = 1024
 
 /** The `/poses` answer: one entry per path asked about, `null` where the index
  *  holds the model but has no orientation for it. */

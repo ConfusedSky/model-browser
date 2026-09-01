@@ -396,6 +396,15 @@ export interface PosesResponse {
  * may never be made to fail by the index. At most 1024 per request (the index's
  * own bound on the call); a longer listing asks more than once.
  */
+/**
+ * The most paths one `/poses` batch may carry — the wire bound the server
+ * refuses past, and the chunk size both sides split larger sets at. One
+ * declaration for both workspaces (`CAMERA_EPSILON` precedent): the client
+ * chunked at its own copy of this number until a review flagged the drift
+ * hazard (`pose-for-every-model` §4 F4).
+ */
+export const POSES_MAX = 1024
+
 export interface PosesRequest {
   paths: string[]
 }

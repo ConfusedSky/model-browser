@@ -376,12 +376,15 @@
       its pose"), falsified by disabling the wave effect. Nothing in this change's own
       files moved.
 
-- [ ] F4 (flagged at review 2026-09-01, yours to take or decline): `POSES_MAX = 1024` is
+- [x] F4 (flagged at review 2026-09-01, yours to take or decline): `POSES_MAX = 1024` is
       now declared twice — `client/src/api/client.ts` and `server/src/semantic.ts` — two
       literals that must agree, with the server enforcing the wire bound; a bump in one
       400s the other. `shared/types.ts` (where `PosesRequest`/`PosesResponse` moved) is
       the obvious home — same class as the RIG_VERSION never-redeclare rule.
 
+      — done 2026-09-01 (coordinator): one declaration in `shared/types.ts` (the
+      `CAMERA_EPSILON` precedent), imported by both sides; the client re-exports it so its
+      test imports stand unchanged. Typecheck and both poses suites green
 ## 5. The index-level peek (D5, 2026-09-01)
 
 - [x] 5.1 mini-classify `POST /under` — contract CONFIRMED with masa-19 (2026-09-01), they
