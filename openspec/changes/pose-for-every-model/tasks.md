@@ -212,8 +212,9 @@
       would have failed; the two neighbouring pose cells' comments are corrected where they
       said a landing was "the only thing that re-runs this effect".
       <br>Falsified, each against the suite and then restored: **`poses` out of the sweep's
-      dependency list** → 2 fail (re-run 2026-08-31 by the review worker on `393d61a`; the
-      recorded "1 fail" undercounted, and the message it carried was the *other* cell's):
+      dependency list** → 2 fail (2026-08-31, on `393d61a` — **superseded, see the
+      2026-09-01 re-run below**; the record before it said "1 fail", which undercounted, and
+      the message it carried was the *other* cell's):
       `poseWave.test.tsx` "re-renders the tiles the index spoke about and keeps every image
       meanwhile" — "expected [] to deeply equal [ '/models/aimed.stl', …(2) ]" — and
       `thumbnailQueue.test.tsx` "a pose arriving over an unchanged listing re-looks-up only
@@ -231,6 +232,21 @@
       undetectable through lookups, renders or images — reference stability is a cost
       property, not a correctness one, which is why it is pinned by asserting the reference
       itself (`expect(waved.listingPoses).toBe(poses)`) rather than through behaviour
+      <br>**2026-09-01, re-run by worker C2 (second review, finding 5).** The "2 fail"
+      above was a snapshot of `393d61a`; main has moved and two more cells now depend on
+      the sweep's `poses` dependency. On this session's tree, `cd client && bunx vitest
+      run` with **`poses` out of the sweep's dependency list** → **5 fail | 605 passed**:
+      `poseWave.test.tsx` "re-renders the tiles the index spoke about and keeps every image
+      meanwhile" — "expected [] to deeply equal [ '/models/aimed.stl', …(2) ]";
+      `poseWave.test.tsx` "a flat listing gets the poses of the models it actually shows" —
+      "expected [] to deeply equal [ '/models/Kits/aimed.stl', …(2) ]";
+      `folderSheets.test.tsx` "re-renders a preview whose cached thumbnail predates its
+      pose" — "expected undefined to be defined" (the F3 preview wave, which lands through
+      the same dependency); `thumbnailQueue.test.tsx` "a pose arriving over an unchanged
+      listing re-looks-up only what it named" — "expected \"spy\" to be called 3 times, but
+      got 2 times"; and `thumbnailQueue.test.tsx` "a loading entry whose pose did not change
+      is left running" — "expected 1 to be 2 // Object.is equality" (its control entry, the
+      one whose pose really did arrive, is never restarted). Restored and green afterwards
       <br>**2026-08-31, review (F2's cells):** `poseWave.test.tsx` gains a describe *every
       listing shape asks, not only a directory* (4 cells) — "a flat listing gets the poses of
       the models it actually shows" (the flat toggle over a `NESTED` fixture whose four
@@ -338,6 +354,13 @@
   shared type at merge. Merged main: client 53 files / 602, server 439 ×3 (one run showed
   the pre-existing `open.test.ts` abort flake S measured at 2-in-6 on untouched main),
   typecheck and validate clean.
+- **2026-09-01, re-run by worker C2 (second review, finding 5).** The client count above is
+  a snapshot of the tree it was taken on and main has moved since — the flat-listing cells
+  and the F3 preview-wave cell landed after it. Measured here, `cd client && bunx vitest
+  run`: **53 files / 605** on main at `2ffdced` with none of this session's work applied,
+  and **53 files / 610** on the tree this session ships (5 new cells: three in
+  `apiClient.test.ts` for the chunk merge, one in `poseWave.test.tsx`, one in
+  `thumbnailQueue.test.tsx`). Root `bun run typecheck` clean on both.
 
 ## Follow-ups found at the seams
 
@@ -379,6 +402,62 @@
 - [ ] 5.4 Second-review findings applied in the same round: probe-cache generation stamp
       (finding 1), POST per-path canonicalisation (finding 2), client chunk merge
       (finding 4), stale records corrected (finding 5), the two carried cells (finding 6)
+      <br>**2026-09-01, worker C2 — findings 4, 5 and 6 done; 1 and 2 are the server's and
+      are still open.**
+      <br>**Finding 4** — `HttpApiClient.semanticPosesFor` chunked all-or-nothing: chunk k
+      rejecting rejected the whole promise and discarded the poses chunks 1..k−1 had
+      already returned, and `App` swallows the rejection — so one 500 in the middle of a
+      three-thousand-model folder left *every* tile un-posed, which is the same silent
+      un-posed tail the chunking exists to prevent, reached the other way round. Each chunk
+      now has its own catch and merges what succeeded; a failed chunk contributes nothing
+      and its paths are simply absent from the map (indistinguishable from "no
+      orientation", which is what the next wave re-asks about). It rejects **only when
+      every chunk failed**, carrying the first failure, so a rejection still means "nothing
+      arrived" to a caller whose failure handling is silence. Zero paths makes no requests
+      and is not a failure. The semantics are commented at the method and in the `ApiClient`
+      doc. Cells in `apiClient.test.ts`: "semanticPosesFor keeps the chunks that answered
+      when one of them fails" (1025 paths, first chunk resolves, second 500s → resolves
+      with the first chunk's poses, both chunks still attempted), "…rejects only when every
+      chunk failed" (both 500 → rejects with the *first* message), "…asks nothing, and
+      fails at nothing, for no paths". Falsified by reverting to all-or-nothing → **2 fail
+      | 608 passed**: "promise rejected \"Error: index exploded { …(2) }\" instead of
+      resolving" and "expected \"spy\" to be called 2 times, but got 1 times"
+      <br>**Finding 6a** — `poseWave.test.tsx` gains `the library going away and coming back
+      re-asks the same landing` › "re-fires the wave for a landing that never moved —
+      accepted, not desired". `libraryReady` is a *dependency* of the wave effect rather
+      than a bare guard (so a boot listing that lands before the probe answers still gets
+      its wave), which means the readiness re-runs the effect in both directions: a library
+      that goes away and comes back under a listing that never moved POSTs the same paths a
+      second time. Driven through two *failed* navigations, because a successful one lands
+      and a new landing fires the wave for its own reasons — a failure keeps `state.result`,
+      so `landedListing`'s id and entries array are literally the same. The cell asserts the
+      second POST happens with the same paths, and then that it costs nothing: no cache
+      lookups, no renders, every tile's image unchanged. The comment says plainly that this
+      is accepted rather than desired and names what would have to change. Falsified two
+      ways: **`libraryReady` dropped from the effect's dependency list** (a bare guard) → 2
+      fail, this cell "expected \"spy\" to be called 2 times, but got 1 times" and the
+      existing "waits for the library, and does not give up on it"; and **`samePose` made
+      reference-based** → 3 fail including this cell's second half, "expected
+      [ '/models/hero.stl', …(2) ] to deeply equal []" — which is what proves the sweep
+      really does re-run here and the by-value compare is the thing making the duplicate
+      free. The wave answer is rebuilt per call (`freshWave()`) for that reason: handing
+      back the same object twice would leave the map's identity unchanged and the by-value
+      compare unreached
+      <br>**Finding 6b** — `thumbnailQueue.test.tsx` gains "a loading entry whose pose did
+      not change is left running", the missing quadrant beside the three existing cells
+      (settled/unchanged, settled/changed, loading/changed). A wave moves the map's identity
+      while a grid is mid-first-pass, and restarting in-flight work whose pose did not
+      change would be wrong *and* invisible — the cancelled render and its replacement draw
+      the same pixels. Two entries under a suspended queue, both loading; the rerender
+      hands a new map in which `a`'s pose is rebuilt but identical and `b` gains one it did
+      not have. `b` is the control: without it a sweep that never re-ran at all would pass.
+      Asserts one lookup for `a` and two for `b`, one render apiece (the retired tail never
+      runs), both ready. Falsified by **`samePose` made reference-based** → "expected 2 to
+      be 1" (a restarted) and by **`poses` out of the sweep's deps** → "expected 1 to be 2"
+      (b never restarted)
+      <br>**Finding 5** — the two stale records corrected in place above (§3.2's
+      falsification count and §4's merged-main client count), each labelled as a snapshot of
+      an older tree rather than silently overwritten
 - [ ] 5.5 Live: the 141-tile scan re-run against the complete index; the folder-of-folders
       tiles show posed sheets; fallback proven on an uncovered path
       — baseline recorded 2026-09-01 (coordinator), complete index (3,380 models, 0

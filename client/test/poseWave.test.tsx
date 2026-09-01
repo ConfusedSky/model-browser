@@ -106,6 +106,26 @@ const WAVE: PosesResponse = {
     '/models/fresh.stl': POSE,
   },
 }
+/**
+ * `WAVE` rebuilt, every object and array of it fresh — which is what a *second*
+ * round trip really hands the app, since each response is parsed anew. A cell
+ * that asserts "the duplicate answer costs nothing" has to deliver one of these
+ * rather than the same object twice, or the map's identity never changes, the
+ * sweep never re-runs, and the by-value compare it means to exercise is never
+ * reached.
+ */
+const rebuiltPose = (p: IndexPose): IndexPose => ({
+  ...p,
+  up: [p.up[0], p.up[1], p.up[2]],
+  azimuth_zero: [p.azimuth_zero[0], p.azimuth_zero[1], p.azimuth_zero[2]],
+  front: p.front === null ? null : { ...p.front },
+})
+const freshWave = (): PosesResponse => ({
+  poses: Object.fromEntries(
+    Object.entries(WAVE.poses).map(([path, pose]) => [path, rebuiltPose(pose)]),
+  ),
+})
+
 /** The same answer over `NESTED`, with `quiet` left out for the same reason. */
 const NESTED_WAVE: PosesResponse = {
   poses: {
@@ -448,6 +468,72 @@ describe('a wave belongs to the landing that fired it', () => {
     expect(lookedUp()).toEqual([])
     expect(renderThumbnail).not.toHaveBeenCalled()
     expect(tileImages()).toEqual(['blob:hero', 'blob:aimed', 'blob:fresh', 'blob:quiet'])
+  })
+})
+
+describe('the library going away and coming back re-asks the same landing', () => {
+  it('re-fires the wave for a landing that never moved — accepted, not desired', async () => {
+    // **This pins current behaviour, and the behaviour is a wart.** The wave's
+    // effect takes `libraryReady` as a *dependency* rather than a bare guard, so
+    // that a boot listing landing before the probe answers still gets its wave
+    // (the cell above). The cost is that the readiness is a boolean the effect
+    // re-runs on in BOTH directions: a library that goes away and comes back
+    // under a listing that never moved asks the index a second time about the
+    // very same paths.
+    //
+    // Accepted rather than fixed. The duplicate costs one request that the
+    // reducer overwrites the slot with and the sweep then no-ops on by value —
+    // no lookups, no renders, no images dropped — and the alternatives (a
+    // fired-for-this-id ref, or re-arming the guard on every landing) put a
+    // second piece of state beside `Result.id`, which is already the one thing
+    // that says which listing an answer belongs to. If a future change makes
+    // the duplicate cost anything, this is the cell to change.
+    //
+    // Driven through two *failed* navigations, because a successful one lands
+    // and the new landing would fire the wave for its own reasons: a failure
+    // keeps `state.result` — and so `landedListing`'s id and entries array —
+    // exactly as they were, which is what makes this the same landing.
+    // Imported from the *mocked module*, not by calling `apiClientModule()`
+    // again: the factory mints a fresh class per call, so a second one is a
+    // different constructor and `App`'s `err instanceof HttpError` — the whole
+    // reason this cell can move the library at all — would quietly be false.
+    const { HttpError } = (await import('../src/api/client')) as unknown as {
+      HttpError: new (status: number, message: string, state?: string) => Error
+    }
+    semanticPosesFor.mockImplementation(() => Promise.resolve(freshWave()))
+    await mountApp('/models', LISTING)
+    await settle()
+    expect(semanticPosesFor).toHaveBeenCalledTimes(1)
+    expect(semanticPosesFor).toHaveBeenCalledWith(MODEL_PATHS)
+    const drawn = tileImages()
+    getThumb.mockClear()
+    renderThumbnail.mockClear()
+
+    // The volume goes away: a path route 503s naming the library's state, App
+    // re-probes, and the answer is `missing`.
+    listDir.mockRejectedValue(new HttpError(503, 'the library is not available', 'missing'))
+    library.mockResolvedValue({ state: 'missing', root: '/nope' })
+    await type(pathInput(), '/other')
+    await pressEnter(pathInput())
+    await settle()
+    expect(semanticPosesFor).toHaveBeenCalledTimes(1)
+
+    // And comes back. The navigation fails again, so nothing lands and the
+    // listing on screen is still the boot one.
+    library.mockResolvedValue({ state: 'ready', id: 'test', top: '/lib', root: '/' })
+    await type(pathInput(), '/elsewhere')
+    await pressEnter(pathInput())
+    await settle()
+
+    // The wart: a second POST, about the same paths, for the same landing.
+    expect(semanticPosesFor).toHaveBeenCalledTimes(2)
+    expect(semanticPosesFor).toHaveBeenLastCalledWith(MODEL_PATHS)
+    // And the reason it is affordable: the reducer overwrites the slot with an
+    // equal map, the sweep re-runs on its identity and finds every pose
+    // unchanged by value, so not one tile is even looked up again.
+    expect(lookedUp()).toEqual([])
+    expect(renderThumbnail).not.toHaveBeenCalled()
+    expect(tileImages()).toEqual(drawn)
   })
 })
 

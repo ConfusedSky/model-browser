@@ -161,7 +161,11 @@ export interface ApiClient {
    * simply missing from the answer — a missing key is "no pose".
    *
    * Chunked, so the caller hands over a listing and not a batch: see
-   * `POSES_MAX`.
+   * `POSES_MAX`. The chunking is **partial-tolerant**: a chunk that fails
+   * contributes nothing and the others still land, so one bad round trip
+   * un-poses its own slice rather than the whole listing. It rejects only if
+   * every chunk failed — which is what makes a rejection here mean "nothing
+   * arrived" to a caller whose failure handling is silence.
    *
    * **No `AbortSignal`**, for the directory form's reason: a superseded wave is
    * dropped on arrival by the landing it names (the reducer's `listingPoses`)
@@ -356,16 +360,43 @@ export class HttpApiClient implements ApiClient {
     // background work behind a grid that is already drawn, so it may take the
     // extra round trips rather than open a burst of connections against a
     // single-worker index.
+    //
+    // **Per chunk, not all-or-nothing.** A chunk that fails contributes nothing
+    // and the rest still land: one 500 in the middle of a three-thousand-model
+    // folder used to reject the whole promise and throw away the chunks that had
+    // already answered, which is the same permanently-unposed tail the chunking
+    // exists to prevent — reached by a different road. A failed chunk's paths are
+    // simply missing from the map, which is what "the index has no orientation for
+    // this" already looks like, and the next wave asks about them again.
+    //
+    // It rejects only when EVERY chunk failed, carrying the first failure: that
+    // is the one case where nothing arrived, and it keeps the caller's
+    // silent-failure path (`App`'s wave, whose rejection handler is empty)
+    // meaning exactly that. An empty `paths` is not a failure — it makes no
+    // requests and answers `{}`.
     const poses: PosesResponse['poses'] = {}
+    // Both outcomes counted rather than inferred from `firstFailure`: a
+    // rejection value is whatever was thrown, `null` and `undefined` included,
+    // so "was there a failure" cannot be read off the value one carried.
+    let landed = 0
+    let failed = 0
+    let firstFailure: unknown = null
     for (let i = 0; i < paths.length; i += POSES_MAX) {
       const body: PosesRequest = { paths: paths.slice(i, i + POSES_MAX) }
-      const res = await this.fetchFn('/api/semantic/poses', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      Object.assign(poses, (await jsonOrThrow<PosesResponse>(res)).poses)
+      try {
+        const res = await this.fetchFn('/api/semantic/poses', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        Object.assign(poses, (await jsonOrThrow<PosesResponse>(res)).poses)
+        landed += 1
+      } catch (err) {
+        if (failed === 0) firstFailure = err
+        failed += 1
+      }
     }
+    if (landed === 0 && failed > 0) throw firstFailure
     return { poses }
   }
 

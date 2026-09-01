@@ -1014,6 +1014,72 @@ describe('the sweep reconciles its entries instead of resetting them', () => {
     expect(statuses()).toEqual(['ready'])
   })
 
+  it('a loading entry whose pose did not change is left running', async () => {
+    // The missing quadrant. The three cells above cover a *settled* tile under
+    // an unchanged pose, a settled tile under a changed one, and a *loading*
+    // tile under a changed one; this is a loading tile under an unchanged one,
+    // which is the case a wave actually produces most often — the map's
+    // identity moves for every entry it touches, and a grid mid-first-pass has
+    // work in flight for all of them.
+    //
+    // Restarting it would be wrong and invisible: the render it cancels and the
+    // one it starts draw the same pixels, so nothing on screen would say the
+    // work had been thrown away and redone. The render count is the assertion.
+    const api = fakeCache(() => ({ status: 'miss' }))
+    const lru = mesh()
+    const queue = new RenderQueue(2)
+    queue.suspend()
+    // The same array through both renders: a fresh one would be a landing, and
+    // a landing re-runs the sweep for its own reason. Here only the map moves,
+    // which is exactly what a wave does.
+    const entries = [one('/models/a.stl'), one('/models/b.stl')]
+
+    await render(
+      <Harness
+        entries={entries}
+        api={api}
+        lru={lru}
+        queue={queue}
+        ao
+        poses={{ '/models/a.stl': POSE }}
+      />,
+    )
+    await settle()
+    expect(statuses()).toEqual(['loading', 'loading'])
+    expect(vi.mocked(renderThumbnail)).not.toHaveBeenCalled() // still suspended
+
+    // The wave: a new map, `a`'s pose rebuilt but identical, `b` given one it
+    // did not have. `b` is the control — without it a sweep that never re-ran
+    // at all would pass this cell, and the claim is that it re-ran and chose to
+    // leave `a` alone.
+    await rerender(
+      <Harness
+        entries={entries}
+        api={api}
+        lru={lru}
+        queue={queue}
+        ao
+        poses={{ '/models/a.stl': clonePose(POSE), '/models/b.stl': POSE }}
+      />,
+    )
+    await settle()
+    await act(async () => {
+      queue.resume()
+    })
+    await settle()
+
+    const lookups = (path: string): number =>
+      vi.mocked(api.getThumb).mock.calls.filter((c) => c[0] === path).length
+    // `a` was looked up once and never again: its in-flight work is the work
+    // that finished. `b`'s pose genuinely arrived, so it was retired and re-run.
+    expect(lookups('/models/a.stl')).toBe(1)
+    expect(lookups('/models/b.stl')).toBe(2)
+    // One render apiece — `b`'s retired tail never ran either.
+    expect(vi.mocked(renderThumbnail)).toHaveBeenCalledTimes(2)
+    expect(api.putThumb).toHaveBeenCalledTimes(2)
+    expect(statuses()).toEqual(['ready', 'ready'])
+  })
+
   it('a preference change retires every entry’s work while every image stays up', async () => {
     // 2.1's retirement rule, watched in the window where it is visible: the new
     // pass's lookups are in flight and the old images are still on screen.

@@ -127,6 +127,52 @@ describe('HttpApiClient contract', () => {
     expect([...sent[0]!, ...sent[1]!]).toEqual(paths)
   })
 
+  it('semanticPosesFor keeps the chunks that answered when one of them fails', async () => {
+    // The chunking was all-or-nothing: chunk k rejecting rejected the whole
+    // promise and discarded chunks 1..k-1's poses, and `App` swallows the
+    // rejection — so one 500 in the middle of a large folder left *every* tile
+    // un-posed, which is the same silent un-posed tail the chunking exists to
+    // prevent, reached the other way round. A failed chunk now contributes
+    // nothing and the rest land; its paths are simply absent from the map,
+    // indistinguishable from "the index has no orientation for these".
+    const paths = Array.from({ length: POSES_MAX + 1 }, (_, i) => `/models/m${i}.stl`)
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ poses: { '/models/m0.stl': 1 } }))
+      .mockResolvedValueOnce(jsonResponse({ error: 'index exploded' }, 500))
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
+
+    await expect(api.semanticPosesFor(paths)).resolves.toEqual({
+      poses: { '/models/m0.stl': 1 },
+    })
+    // Both chunks were still attempted — the failure does not stop the loop.
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+  })
+
+  it('semanticPosesFor rejects only when every chunk failed', async () => {
+    // Nothing arrived, so the caller's silent-failure path has to still mean
+    // that. The first failure is the one raised: a later chunk's message would
+    // describe the same outage from further along.
+    const paths = Array.from({ length: POSES_MAX + 1 }, (_, i) => `/models/m${i}.stl`)
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ error: 'index exploded' }, 500))
+      .mockResolvedValueOnce(jsonResponse({ error: 'still exploded' }, 500))
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
+
+    await expect(api.semanticPosesFor(paths)).rejects.toThrow('index exploded')
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+  })
+
+  it('semanticPosesFor asks nothing, and fails at nothing, for no paths', async () => {
+    // "Every chunk failed" must not read as true when there were no chunks:
+    // zero paths is an empty answer, not an outage.
+    const fetchFn = vi.fn()
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
+    await expect(api.semanticPosesFor([])).resolves.toEqual({ poses: {} })
+    expect(fetchFn).not.toHaveBeenCalled()
+  })
+
   it('semanticPoses raises the server failure rather than swallowing it', async () => {
     // Silence is `App`'s decision, not the client's: the wire reports, and the
     // wave's caller is the one that says nothing about it.
