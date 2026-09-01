@@ -359,3 +359,21 @@
       400s the other. `shared/types.ts` (where `PosesRequest`/`PosesResponse` moved) is
       the obvious home — same class as the RIG_VERSION never-redeclare rule.
 
+## 5. The index-level peek (D5, 2026-09-01)
+
+- [ ] 5.1 mini-classify `POST /under` — `{path, limit}` → indexed models under the prefix
+      with poses, deterministic order, observable truncation; contract proposed to the
+      mini-classify session (masa-19), builder per their answer
+- [ ] 5.2 Server: `posedFirstPeek` asks the index first (`/under`, short timeout like
+      `/poses`), confines/maps per path, ranks posed-first, stats the chosen n into
+      `DirEntry`s; empty or silent → today's walk path, byte-identical (the existing
+      identity cells must keep passing unchanged); fewer than n → fill from the walk's
+      finds, deduped
+- [ ] 5.3 Tests: index-first selection reaching past the walk budget (the Lich Lord shape:
+      deep first subtree unindexed, posed models deeper); fill-from-walk; empty-answer
+      fallback identity; stat failure on a chosen path drops to the next candidate
+- [ ] 5.4 Second-review findings applied in the same round: probe-cache generation stamp
+      (finding 1), POST per-path canonicalisation (finding 2), client chunk merge
+      (finding 4), stale records corrected (finding 5), the two carried cells (finding 6)
+- [ ] 5.5 Live: the 141-tile scan re-run against the complete index; the folder-of-folders
+      tiles show posed sheets; fallback proven on an uncovered path

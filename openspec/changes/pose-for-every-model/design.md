@@ -113,3 +113,20 @@ and a cosmetic surface may follow the index's availability where search already 
 ## Migration Plan
 
 None. No stored shapes change; a client without the wave behaves exactly as today.
+
+### D5: The peek asks the index before it walks (2026-09-01, Masa)
+
+Found live with the index mid-build and confirmed structural: the peek's walk is
+depth-first under a 64-entry budget, so a folder-of-folders whose first-sorted
+subtree is deep (a "(Presupported)" tree) consumes the budget before any indexed
+kit is reached — 12 of 141 folder tiles under-used posed models, every one a
+folder of folders. Rationing the walk (level-fair round-robin) was weighed;
+Masa's call is better: the index already knows every model under a prefix and
+its pose, so the peek asks it first (`POST /under` on the index; the server
+confines and maps per path, ranks posed-first, takes n) and only walks when that
+answer is empty or the index is silent — the fallback is today's behaviour,
+byte-identical. Cells the index fills need `DirEntry` fields the index does not
+hold, so the server stats exactly the n chosen files (the `modelEntryAt` shape
+search hits already use). Fewer than n from the index SHALL be filled from the
+walk's finds, deduplicated — a two-cell sheet over a visibly fuller folder would
+be a regression against today.
