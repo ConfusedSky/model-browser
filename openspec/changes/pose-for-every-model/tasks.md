@@ -401,7 +401,16 @@
       `/poses` (pinned there); order is root-relative sorted with the sort made
       falsifiable against Python 3.12's per-component `PurePath` ordering; limit capped at
       10000 server-side; no GPU lock. The `_row_by_rel` last-wins note traced to a
-      no-differing-poses verdict (colliding rows share `file_identity`)
+      no-differing-poses verdict (colliding rows share `file_identity`).
+      <br>2026-09-01, addendum: masa-19's own review of `3dde233` found `/under` conflated
+      "nothing searchable at all" (a folder of `.3mf`/`.obj` — the index can never hold it)
+      with "not classified yet"; an ADDITIVE `covers: <int>` field (same meaning as
+      `/query`'s scope block) lands shortly. This side stays keyed on `"unindexed"`/silence
+      — both covers cases fall back to the walk, which answers correctly either way — and
+      `modelsUnder` tolerates the extra field unread. The covers==0 refinement (render
+      unposed tiles without expecting poses from a future peek) is recorded as
+      available-but-declined: nothing renders that expectation today; the demo bake planner
+      is the likely first consumer
 - [x] 5.2 Server: `posedFirstPeek` asks the index first (`/under` with limit 256, short
       timeout like `/poses`), confines/maps per path, ranks posed-first, stats the chosen n
       into `DirEntry`s; `"unindexed"` or silent → today's walk path, byte-identical (the
