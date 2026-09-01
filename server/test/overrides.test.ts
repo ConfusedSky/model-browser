@@ -133,6 +133,21 @@ describe('loading the store', () => {
     expect(problems[0]).toContain('non-string credits.sourceUrl')
   })
 
+  it('serves only the four credit fields — an unknown one never rides the wire', async () => {
+    // Allow-list, not deny-list (review round two): a store's extra field — an
+    // object, say — would otherwise reach /api/overrides and wait for the
+    // first renderer that iterates credits to hand it to React as a child.
+    // Dropped SILENTLY, unlike a wrong-typed known field: an unknown field is
+    // additive evolution (a newer writer's legitimate field on an older
+    // reader), not an error — it lives on disk untouched and simply does not
+    // resolve.
+    const { store, problems } = await loadWith(
+      v1({ '/kit': { credits: { author: 'Valandar', note: { deep: [1, 2] } } } }),
+    )
+    expect(resolveOverrides(store, '/kit')).toEqual({ credits: { author: 'Valandar' } })
+    expect(problems).toEqual([])
+  })
+
   it('drops credits that are not an object at all', async () => {
     const { store, problems } = await loadWith(v1({ '/kit': { name: 'Kit', credits: 'CC-BY' } }))
     expect(resolveOverrides(store, '/kit')).toEqual({ name: 'Kit' })

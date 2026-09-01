@@ -56,6 +56,8 @@ export interface GenerateResult {
   written: number
   /** Stems naming no directory under the kit directory, in metadata order. */
   missing: string[]
+  /** Stems that resolved outside the top, or onto it — refused, never keyed. */
+  escaped: string[]
   /** The store that was written. */
   file: string
 }
@@ -123,17 +125,24 @@ async function readStore(top: string): Promise<OverridesFile> {
   return file
 }
 
+/**
+ * Textual containment: is `dir` the top, or beneath it? Not a `realpath`
+ * test — the check has to hold for a directory that does not exist yet, and
+ * `resolve` is what collapses the `..` this refuses. `top + sep` alone would
+ * double the separator when the top IS the filesystem root, refusing every
+ * legitimate directory under it — which is why this is its own function with
+ * its own test (a root-topped library cannot be fixtured end to end).
+ */
+export function underTop(top: string, dir: string): boolean {
+  const prefix = top.endsWith(sep) ? top : top + sep
+  return dir === top || dir.startsWith(prefix)
+}
+
 export async function generateOverrides(opts: GenerateOptions): Promise<GenerateResult> {
   const report = opts.report ?? ((m: string) => console.log(m))
   const top = resolve(opts.top)
   const kitsDir = opts.kitsDir === undefined ? top : resolve(opts.kitsDir)
-  // Textual containment, decided before a single byte is read or written. Not a
-  // `realpath` test: the check has to hold for a kit directory that does not
-  // exist yet, and `resolve` is what collapses the `..` this refuses.
-  // `top + sep` would double the separator when the top IS the root, refusing
-  // every legitimate kit directory under it.
-  const topPrefix = top.endsWith(sep) ? top : top + sep
-  if (kitsDir !== top && !kitsDir.startsWith(topPrefix)) {
+  if (!underTop(top, kitsDir)) {
     throw new Error(`the kit directory must be the library top or beneath it: ${kitsDir} is not under ${top}`)
   }
 
@@ -145,6 +154,7 @@ export async function generateOverrides(opts: GenerateOptions): Promise<Generate
 
   const file = await readStore(top)
   const missing: string[] = []
+  const escaped: string[] = []
   const seen = new Set<string>()
   let read = 0
   let written = 0
@@ -156,22 +166,28 @@ export async function generateOverrides(opts: GenerateOptions): Promise<Generate
     const dir = join(kitsDir, stem)
     const s = await stat(dir).catch(() => null)
     if (s === null || !s.isDirectory()) {
-      missing.push(stem)
+      if (!missing.includes(stem)) missing.push(stem)
+      continue
+    }
+    // The containment check above guards the kit *directory*; a stem carrying
+    // `..` escapes through `join` per key (an absolute stem does NOT — POSIX
+    // `join` treats it as relative). The invariant is that a stem names a kit
+    // STRICTLY UNDER the kit directory: anything else — the top itself (whose
+    // key's credits would inherit to every model in the library: false
+    // attribution at maximum blast radius), the kits dir, or any directory
+    // above or beside it — is refused. Found by review twice over: the first
+    // guard tested `rel` shapes and missed the `.`/`..`-onto-the-top case that
+    // the old `rel === '' ? '/' : …` ternary quietly minted the root key for;
+    // testing containment under kitsDir subsumes every shape. Escapes are
+    // their own list and report line — filing them under `missing` printed
+    // "no directory for stem" about directories that exist.
+    if (dir === kitsDir || !underTop(kitsDir, dir)) {
+      report(`  stem escapes the kit directory and was skipped: ${stem}`)
+      if (!escaped.includes(stem)) escaped.push(stem)
       continue
     }
     const rel = relative(top, dir)
-    // The containment check above guards the kit *directory*; a stem carrying
-    // `..` (or an absolute path) escapes through `join` per key and would write
-    // a key the loader silently normalises into a plausible wrong path —
-    // exactly what the check exists to refuse, so it is applied to the derived
-    // key too. A metadata stem is corpus data, and corpus data does not get to
-    // name things outside the corpus.
-    if (rel === '..' || rel.startsWith(`..${sep}`) || rel.startsWith(sep)) {
-      report(`  stem escapes the top and was skipped: ${stem}`)
-      missing.push(stem)
-      continue
-    }
-    const key = rel === '' ? '/' : `/${rel.split(sep).join('/')}`
+    const key = `/${rel.split(sep).join('/')}`
     // A duplicate stem in the metadata is one key, counted once — the reported
     // count is what the credits-page gate consumes, and it must mean keys. (A
     // key already in the FILE is fine — that is what a rerun looks like.)
@@ -200,11 +216,12 @@ export async function generateOverrides(opts: GenerateOptions): Promise<Generate
   report(`keys are relative to ${top}; kit folders were looked for under ${kitsDir}`)
   for (const stem of missing) report(`  no directory for stem: ${stem}`)
   if (missing.length > 0) report(`${missing.length} stems named no directory and were skipped`)
+  if (escaped.length > 0) report(`${escaped.length} stems escaped the top and were refused`)
   // The same rule every config file here has. The store is read once per
   // resolved library, so a running server keeps answering from what it loaded.
   report('the server reads this file once per resolved library — restart it to pick this up')
 
-  return { read, written, missing, file: storePath }
+  return { read, written, missing, escaped, file: storePath }
 }
 
 const USAGE =

@@ -84,7 +84,7 @@ break the proposal's "`library.ts` untouched". The store holder keeps
 `{identity, store}` and, on each request that consults the store —
 `/api/overrides`, and since D7 every `/api/dir` and `/api/peek` — compares the
 identity against its own `state()` call (a second stat beside the gate's,
-~1.7 µs warm per `library.ts`'s measurement), reloading on mismatch. `index.ts`'s existing
+~1.7 µs warm per the measurement beside `state()`'s `compute()`), reloading on mismatch. `index.ts`'s existing
 `void library.state().then(...)` also loads eagerly when the library is ready
 at start, which is what puts the malformed-store report beside the startup
 line; a library that resolves later loads on the first overrides request, and

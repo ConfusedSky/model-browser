@@ -154,14 +154,22 @@ export async function loadOverrides(
         report(`overrides: ${file}: key ${JSON.stringify(raw)} — dropping non-object credits`)
         delete entry.credits
       } else {
+        // An allow-list, not a deny-list: what the app resolves and serves is
+        // exactly the four string fields, built fresh — so an unknown or
+        // wrong-typed field in a hand-written store never rides the wire,
+        // where the next renderer to iterate it would hand it to React as a
+        // child. Unknown fields still live on DISK untouched (the generator
+        // reads raw JSON); they just do not resolve.
+        const held = entry.credits as Record<string, unknown>
+        const clean: Record<string, string> = {}
         for (const field of ['author', 'authorUrl', 'license', 'sourceUrl'] as const) {
-          const held = entry.credits[field]
-          if (held !== undefined && typeof held !== 'string') {
+          const value = held[field]
+          if (typeof value === 'string') clean[field] = value
+          else if (value !== undefined) {
             report(`overrides: ${file}: key ${JSON.stringify(raw)} — dropping non-string credits.${field}`)
-            entry.credits = { ...entry.credits }
-            delete entry.credits[field]
           }
         }
+        entry.credits = clean
       }
     }
     // Two spellings that canonicalise to one key are one key, and the last one

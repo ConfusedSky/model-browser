@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { generateOverrides } from '../../scripts/gen-overrides'
+import { generateOverrides, underTop } from '../../scripts/gen-overrides'
 import { MARKER_DIR } from '../src/library'
 import { loadOverrides, resolveOverrides } from '../src/overrides'
 import { realTempDir } from './helpers'
@@ -209,7 +209,44 @@ describe('gen-overrides', () => {
     const result = await generateOverrides({ top, metadata, report: (m) => lines.push(m) })
     expect(result.written).toBe(0)
     expect(Object.keys((await readStore(top)).entries)).toEqual([])
-    expect(lines.some((l) => l.includes('escapes the top'))).toBe(true)
+    expect(lines.some((l) => l.includes('escapes the kit directory'))).toBe(true)
+  })
+
+  it('refuses a stem that names the top itself, and mints no root key', async () => {
+    // `..` from a kits dir one level down lands ON the top — rel is '' — and a
+    // root key's credits would inherit to every model in the library with no
+    // nearer key: false attribution at maximum blast radius (found by review;
+    // the first escape guard let it through and the root-key ternary minted
+    // `/` for it).
+    const { top, kitsDir, metadata } = fixture('miniatures/clustered-hq')
+    writeFileSync(
+      metadata,
+      JSON.stringify([
+        // Two levels up lands ON the top; one level up lands on an
+        // intermediate directory whose key would inherit credits to the whole
+        // variant tree. Both are outside the kit directory, both refused.
+        { thing_id: 1, stem: '../..', name: 'Attacker', author: 'Attacker', files: [] },
+        { thing_id: 2, stem: '..', name: 'Attacker', author: 'Attacker', files: [] },
+      ]),
+    )
+    const lines: string[] = []
+    const result = await generateOverrides({ top, kitsDir, metadata, report: (m) => lines.push(m) })
+    expect(result.written).toBe(0)
+    expect(result.escaped).toEqual(['../..', '..'])
+    expect(result.missing).toEqual([])
+    const keys = Object.keys((await readStore(top)).entries)
+    expect(keys).not.toContain('/')
+    expect(keys).not.toContain('/miniatures')
+    expect(lines.some((l) => l.includes('escapes the kit directory'))).toBe(true)
+    expect(lines.some((l) => l.includes('no directory for stem'))).toBe(false)
+  })
+
+  it('contains a kit directory under a root top — the predicate, since root cannot be fixtured', () => {
+    // `top + sep` alone doubles the separator at '/', refusing everything.
+    expect(underTop('/', '/kits')).toBe(true)
+    expect(underTop('/', '/')).toBe(true)
+    expect(underTop('/a/b', '/a/bc')).toBe(false)
+    expect(underTop('/a/b', '/a/b/c')).toBe(true)
   })
 
   it('counts a duplicated stem once — the count means keys', async () => {

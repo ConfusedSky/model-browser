@@ -538,11 +538,31 @@ describe('an index answering null roots', () => {
     stubIndex(CACHE_UNUSABLE)
     const res = await app.request('/api/semantic/status', { headers: LOOPBACK })
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { state: string; collectionRoot?: unknown }
+    const body = (await res.json()) as {
+      state: string
+      collectionRoot?: unknown
+      covers?: unknown
+      elapsed?: unknown
+    }
     // 275s past start is past WEDGED_AFTER_S — the state is a diagnosis, not
     // the point here; the point is that it answered at all.
     expect(body.state).toBe('wedged')
     expect(body.collectionRoot).toBeUndefined()
+    // Every nullable wire field is normalised, not only the one that crashed:
+    // a JSON null must never reach the typed side (found by review — the
+    // covers half of the fix was unfalsified). A PRESENT number passes.
+    expect(body.covers).toBeUndefined()
+    expect(body.elapsed).toBe(275)
+  })
+
+  it('normalises a null elapsed instead of rendering it as a number', async () => {
+    // The side panel does `elapsed !== undefined ? Math.round(elapsed) : ''` —
+    // a null slipping through drew "(0s)" where nothing belongs.
+    stubIndex({ ...CACHE_UNUSABLE, elapsed: null, failure: null })
+    const res = await app.request('/api/semantic/status', { headers: LOOPBACK })
+    const body = (await res.json()) as { state: string; elapsed?: unknown }
+    expect(res.status).toBe(200)
+    expect(body.elapsed).toBeUndefined()
   })
 
   it('leaves the peek the plain walk it always was', async () => {

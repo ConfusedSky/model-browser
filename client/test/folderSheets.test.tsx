@@ -105,10 +105,10 @@ function cells(path: string): HTMLElement[] {
   return Array.from(dirTile(path).querySelectorAll<HTMLElement>('[data-preview-cell]'))
 }
 /**
- * The empty folder — what a tile with nothing to preview shows. The folder
- * chrome is the directory tile's icon and is ALWAYS drawn (no pop-in when a
- * peek lands — Masa, 2026-08-31); "shows its icon" means the chrome stands
- * with no sheet inside it.
+ * The empty folder — what a tile with nothing to preview shows. The chrome is
+ * unconditional for dir tiles, so the load-bearing half here is "no sheet";
+ * the chrome check bites only under a regression that removes the chrome
+ * itself (e.g. reverting to an emoji), which is what it is for.
  */
 function hasIcon(path: string): boolean {
   const tile = dirTile(path)
@@ -194,6 +194,19 @@ describe('folder contact sheets', () => {
     await settle()
     expect(dirTile('/models/a').querySelector('[data-folder-chrome]')).toBe(chrome)
     expect(chrome!.querySelector('[data-preview-sheet]')).not.toBeNull()
+  })
+
+  it('keeps the archive icon on a zip tile, chrome-free', async () => {
+    // Zips are never previewed and are not folders: no chrome, no observer
+    // registration, the emoji stands. Unfalsified until now (review's catch —
+    // emptying the emoji span passed every test in the repo).
+    await mountApp('/models', {
+      path: '/models',
+      entries: [{ name: 'pack.zip', path: '/models/pack.zip', kind: 'zip' as const, size: 5, mtime: 1 }],
+    })
+    const zip = container.querySelector('[data-entry-tile="/models/pack.zip"]')!
+    expect(zip.querySelector('[data-folder-chrome]')).toBeNull()
+    expect(Array.from(zip.querySelectorAll('span')).some((s) => s.textContent === '🗜️')).toBe(true)
   })
 
   it('draws one preview full size', async () => {

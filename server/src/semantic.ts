@@ -48,13 +48,18 @@ function baseUrl(): string | null {
 export type { IndexState }
 
 interface RawStatus {
-  ready?: boolean
-  elapsed?: number
-  collection_root?: string
-  covers?: string[]
+  // Typed as the wire actually is: the index spells "not there" as JSON null
+  // (a failed load answers every root field null), so every field here admits
+  // it — which is what forces the `??` normalisation below and lets the
+  // compiler catch the next field someone forwards raw. `?` alone hid two
+  // crashes (collection_root reached libPathOf(null); elapsed rendered "(0s)").
+  ready?: boolean | null
+  elapsed?: number | null
+  collection_root?: string | null
+  covers?: string[] | null
   /** One shape for every reason a load did not complete — a dict, not a string. */
   failure?: { reason?: string; hint?: string | null; kind?: string } | null
-  volume?: { present?: boolean; root?: string; missing?: string | null }
+  volume?: { present?: boolean | null; root?: string | null; missing?: string | null } | null
 }
 
 let cached: { status: IndexAvailability; at: number } | null = null
@@ -89,7 +94,7 @@ async function probe(base: string): Promise<IndexAvailability> {
     // (posedFirstPeek). `??` makes the wire's "no root" the type's.
     collectionRoot: raw.collection_root ?? undefined,
     covers: raw.covers ?? undefined,
-    elapsed: raw.elapsed,
+    elapsed: raw.elapsed ?? undefined,
     // The index's own words, preferred to any composed here (D4). Reason and
     // hint are separate fields upstream; joined so a caller renders one string.
     detail:

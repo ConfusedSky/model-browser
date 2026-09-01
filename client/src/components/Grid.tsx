@@ -437,7 +437,20 @@ const Tile = memo(function Tile({
             one-preview sheet from reading as a model tile. Only zips keep the
             emoji — they are never previewed and are not folders. */}
         {entry.kind === 'dir' ? (
-          <div data-folder-chrome className="flex min-h-0 w-full flex-1 flex-col px-1 pt-1">
+          // role="img" with a "folder" label: the emoji used to leak '📁' into
+          // this button's content-derived accessible name, and dropping it took
+          // the only type signal a screen reader had for directories while zips
+          // kept theirs (review's catch). The chrome now states the type
+          // deliberately — a store-less dir tile announces "folder <name>". A
+          // named tile's button-level aria-label (the real name, below) takes
+          // over whole, so the type signal yields to the real-name rule there —
+          // the WCAG 2.5.3 trade already recorded on that attribute.
+          <div
+            data-folder-chrome
+            role="img"
+            aria-label="folder"
+            className="flex min-h-0 w-full flex-1 flex-col px-1 pt-1"
+          >
             <div className="h-2.5 w-1/2 shrink-0 rounded-t-md bg-amber-400/40" />
             <div className="flex min-h-0 w-full flex-1 rounded-b-md rounded-tr-md bg-amber-400/40 p-1">
               {preview !== undefined && preview.length > 0 && (
