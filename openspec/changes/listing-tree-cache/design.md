@@ -67,4 +67,13 @@ An unmounted volume is not that case, and rebasing on `library-root` (2026-08-29
 - [Removable volume mounted at a different path] → rebased on `library-root` (2026-08-29): the cache keys on the library's identity plus the root's library path and lives under `<cache>/<library-id>/`, so a remount elsewhere is a hit; an unmounted volume is the library's `missing` state, answered before any listing, and neither serves nor discards the snapshot. (Before the rebase this bullet read the opposite — a remount was a miss — which `library-root` made false.)
 - [Cache size on a very large library] → entries are metadata; the measured 18,705-entry library is trivial next to a 2 GB thumbnail budget. It shares that budget and eviction sweep, so growth is bounded by an existing mechanism rather than a new one.
 - [exfat directory mtime unreliable] → D4's stated risk, with the readdir-fingerprint fallback; must be tested on the real volume before the design is trusted.
-- [An abandoned crawl now has value, which argues against cancelling it] → real tension with `search-cancellation`; the resolution recorded in both is to cancel the *response*, not the crawl — the user stops waiting, the work still lands in the cache.
+- [An abandoned crawl now has value, which argues against cancelling it] → real tension
+  with `search-cancellation`, and this bullet used to claim a resolution "recorded in
+  both" that the sibling never carried. Reconciled 2026-09-01 (the sibling's rederivation,
+  its design D3): **cancellation wins** — the cache removes *repeat* cost, not
+  *contention*; a crawl run to completion still holds the disk head against the walk the
+  user is actually waiting for. A cancelled walk rejects with a named error
+  (`WalkCancelled`), so nothing partial exists to persist by construction, and this
+  change's "only a complete traversal may be persisted" rule is stated against walk
+  completeness — resolved **and** `!budgetExhausted` (the `walkFlat` seam) — never the
+  wire's `truncated`: a `capped` response saw the whole tree and is cacheable.
