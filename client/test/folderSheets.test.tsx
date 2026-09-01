@@ -24,11 +24,14 @@ import {
   model,
   mountApp,
   peek,
+  putThumb,
   renderThumbnail,
+  semanticPosesFor,
   settle,
   tiles,
   unmountApp,
 } from './appHarness'
+import { RIG_VERSION, THUMB_LIGHTING } from '../src/three/renderer'
 
 vi.mock('../src/api/client', async () => (await import('./appHarness')).apiClientModule())
 vi.mock('../src/three/renderer', async (importOriginal) =>
@@ -474,6 +477,53 @@ describe('folder contact sheets', () => {
     await act(async () => answer2(found(2)))
     await settle()
     expect(cells('/models/a')).toHaveLength(2)
+  })
+})
+
+describe('a sheet cell follows the index', () => {
+  // getThumb's IMPLEMENTATION survives mount's mockClear — restore the
+  // miss-everything default so later cells count renders, not this cell's hits.
+  afterEach(() => getThumb.mockResolvedValue({ status: 'miss' }))
+
+  it('re-renders a preview whose cached thumbnail predates its pose', async () => {
+    // The listing wave asks about what LANDED, and preview models never land —
+    // so a stale-posed sheet cell kept its old angle until the user walked
+    // into the folder (Masa's report, 2026-09-01). The previews' own wave
+    // closes the gap: the pose arrives, the sweep's by-value comparison sees
+    // it, and the cell re-renders posed.
+    const POSE = {
+      up: [0, 1, 0],
+      azimuth_zero: [1, 0, 0],
+      source: 'siglip',
+      confidence: 0.9,
+      front: { view: 5, azimuth_deg: 225, elevation_deg: 20 },
+    }
+    peek.mockResolvedValue(found(1))
+    semanticPosesFor.mockImplementation((paths: string[]) =>
+      Promise.resolve(
+        paths.includes('/models/a/m0.stl') ? { poses: { '/models/a/m0.stl': POSE } } : { poses: {} },
+      ),
+    )
+    // A cache hit with current recipe labels but no stored framing and no pose
+    // stamp — exactly the entry that is stale the moment the index speaks.
+    getThumb.mockResolvedValue({
+      status: 'hit',
+      pngUrl: 'blob:stale',
+      lighting: THUMB_LIGHTING,
+      rig: RIG_VERSION,
+    })
+    await mountApp('/models', ONE_FOLDER)
+    await intersect(dirTile('/models/a'))
+    await settle()
+
+    // The previews' wave asked about the preview path...
+    expect(semanticPosesFor.mock.calls.some((c) => (c[0] as string[]).includes('/models/a/m0.stl'))).toBe(true)
+    // ...and the landing pose re-rendered the cell: the PUT carries the pose
+    // stamp, which only the posed re-render writes.
+    const posedPut = putThumb.mock.calls.find(
+      (c) => c[0].path === '/models/a/m0.stl' && c[0].posed !== undefined,
+    )
+    expect(posedPut).toBeDefined()
   })
 })
 

@@ -554,8 +554,8 @@ export default function App() {
   const truncated = state.result?.truncated === true
   const entries = state.result?.entries ?? NO_ENTRIES
   /**
-   * The index's orientations for what is on screen — the answer's own where it
-   * had any, else the second wave's (pose-for-every-model D3).
+   * The index's orientations for the LISTING on screen — the answer's own
+   * where it had any, else the second wave's (pose-for-every-model D3).
    *
    * In that order and not merged: only a meaning or similarity answer carries
    * riding poses, and only a plain listing gets a wave, so the two are never
@@ -563,8 +563,11 @@ export default function App() {
    * the slot the wave filled, or the `NO_POSES` constant — because the
    * thumbnail sweep re-runs on this value's identity: an object built here per
    * render would walk the whole grid on every keystroke.
+   *
+   * Preview models are the one set this misses (they never land, so no wave
+   * ever asks about them) — `poses` below folds their own wave in.
    */
-  const poses = state.result?.poses ?? state.listingPoses ?? NO_POSES
+  const listingPoses = state.result?.poses ?? state.listingPoses ?? NO_POSES
   // What the index scored each tile at, and which scale those numbers are on.
   // The scale is read off the answer's own question — `label` is the view this
   // result answers — so a tile can only ever be labelled as the thing that
@@ -687,7 +690,58 @@ export default function App() {
   useEffect(() => {
     inFlightPeeks.current.clear()
     setPreviews(NO_PREVIEWS)
+    askedPreviewPoses.current.clear()
+    setPreviewPoses(NO_POSES)
   }, [entries])
+  /**
+   * The previews' own pose wave. The listing wave asks about what LANDED, and
+   * preview models never land — so a sheet cell whose cached thumbnail predates
+   * the index's orientation kept its stale angle until the user walked into the
+   * folder and the model landed for real (Masa's report, 2026-09-01). Asked
+   * once per preview path per listing (the ref, cleared with the map above),
+   * merged into `poses` below, and the sweep's by-value pose comparison does
+   * the rest — only the paths whose orientation actually changed re-evaluate.
+   *
+   * Same failure-is-silence and staleness rules as the peek itself: no abort,
+   * and an answer for a listing the user has left is dropped by the token.
+   */
+  const [previewPoses, setPreviewPoses] = useState<Record<string, IndexPose>>(NO_POSES)
+  const askedPreviewPoses = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    if (libraryState?.state !== 'ready' || previews.size === 0) return
+    const want: string[] = []
+    for (const found of previews.values()) {
+      for (const e of found) {
+        if (e.kind !== 'model' || askedPreviewPoses.current.has(e.path)) continue
+        askedPreviewPoses.current.add(e.path)
+        want.push(e.path)
+      }
+    }
+    if (want.length === 0) return
+    const asked = listingRef.current
+    void api.semanticPosesFor(want).then(
+      (res) => {
+        if (listingRef.current !== asked) return
+        // An empty answer merges nothing and must not churn `poses` identity —
+        // a sweep walk per silent index reply would be paid by every landing.
+        if (Object.keys(res.poses).length === 0) return
+        setPreviewPoses((prev) => ({ ...prev, ...res.poses }))
+      },
+      () => {},
+    )
+  }, [previews, libraryState?.state, api])
+  /**
+   * What the thumbnail sweep reads: the listing's poses with the previews'
+   * folded in, landed answers winning a shared path. Identity discipline
+   * holds — with no preview poses this IS `listingPoses` (same reference), and
+   * when the merge does rebuild, the sweep compares each entry's pose by value
+   * (`ao-refreshes-thumbnails` 2.1), so an unchanged path re-evaluates nothing.
+   */
+  const poses = useMemo(
+    () =>
+      previewPoses === NO_POSES ? listingPoses : { ...previewPoses, ...listingPoses },
+    [listingPoses, previewPoses],
+  )
   // The anchor needs a thumbnail like any tile, so it goes to useThumbnails —
   // memoized because that effect reconciles its per-entry state against
   // `entries` on any identity change (D2), and a fresh array per render would

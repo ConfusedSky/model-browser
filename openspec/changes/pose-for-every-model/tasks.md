@@ -338,3 +338,18 @@
   shared type at merge. Merged main: client 53 files / 602, server 439 ×3 (one run showed
   the pre-existing `open.test.ts` abort flake S measured at 2-in-6 on untouched main),
   typecheck and validate clean.
+
+## Follow-ups found at the seams
+
+- [x] F3 (2026-09-01, fixed by the contact-sheets session in App.tsx): the wave asks
+      about what LANDED, and a folder tile's preview models never land — so a sheet
+      cell whose cached thumbnail predated the index's orientation kept its stale
+      angle until the user navigated into the folder (Masa's report). App now runs a
+      previews' own wave beside the peek map: `semanticPosesFor` over each preview
+      path once per listing, merged into the sweep's `poses` (landed answers win a
+      shared path, empty answers merge nothing so identity does not churn), with the
+      same failure-is-silence and stale-landing-token rules the peek uses. Cell in
+      `folderSheets.test.tsx` ("re-renders a preview whose cached thumbnail predates
+      its pose"), falsified by disabling the wave effect. Nothing in this change's own
+      files moved.
+
