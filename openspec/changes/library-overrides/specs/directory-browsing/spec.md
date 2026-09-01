@@ -17,7 +17,9 @@ each listing shape the seam covers — a browse, a flat or deep-search listing,
 and a folder tile's preview entries alike; semantic and similarity answers are
 deliberately outside it (design D7: hits are models, generated names are
 kit-level) — while the entry's real name SHALL remain in the
-tile's own title and accessible name, and SHALL remain what find, deep search
+tile's own title and accessible name (a named directory tile's accessible name
+is "folder " plus the real name — the type signal its content-derived name
+would otherwise lose), and SHALL remain what find, deep search
 and the flat filter match: display names are display only. A folder tile's
 preview cell is the one exception by construction: it has no visible label, so
 its title IS its label surface and SHALL carry the display name where one is

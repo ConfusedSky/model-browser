@@ -102,7 +102,9 @@ describe('a tile labels itself with the stored name', () => {
     // what the user greps — so the real name stays reachable in both places a
     // reader or a screen reader would look.
     expect(kit.getAttribute('title')).toBe(STEM)
-    expect(kit.getAttribute('aria-label')).toBe(STEM)
+    // "folder " keeps the type signal the button-level label would drop; the
+    // real name remains in the accessible name, as the delta requires.
+    expect(kit.getAttribute('aria-label')).toBe(`folder ${STEM}`)
   })
 
   it('leaves an unnamed model beneath it labelled from its file name', async () => {

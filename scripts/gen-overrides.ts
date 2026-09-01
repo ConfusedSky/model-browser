@@ -56,7 +56,7 @@ export interface GenerateResult {
   written: number
   /** Stems naming no directory under the kit directory, in metadata order. */
   missing: string[]
-  /** Stems that resolved outside the top, or onto it — refused, never keyed. */
+  /** Stems that resolved outside the kit directory, or onto it — refused, never keyed. */
   escaped: string[]
   /** The store that was written. */
   file: string
@@ -133,6 +133,19 @@ async function readStore(top: string): Promise<OverridesFile> {
  * legitimate directory under it — which is why this is its own function with
  * its own test (a root-topped library cannot be fixtured end to end).
  */
+/**
+ * `join` preserves a stem's trailing separator — `join('/lib', './')` is
+ * `'/lib/'` — and `'/lib/'.startsWith('/lib/')` is true, so an unnormalised
+ * path slips both the `=== kitsDir` test and the prefix test (review round
+ * four: the root key survived two rounds of guards this way). Every path the
+ * containment predicate sees goes through here first.
+ */
+function trimSep(p: string): string {
+  let out = p
+  while (out.length > 1 && out.endsWith(sep)) out = out.slice(0, -1)
+  return out
+}
+
 export function underTop(top: string, dir: string): boolean {
   const prefix = top.endsWith(sep) ? top : top + sep
   return dir === top || dir.startsWith(prefix)
@@ -163,7 +176,7 @@ export async function generateOverrides(opts: GenerateOptions): Promise<Generate
     const stem = str(kit.stem)
     if (stem === undefined) continue
     read++
-    const dir = join(kitsDir, stem)
+    const dir = trimSep(join(kitsDir, stem))
     const s = await stat(dir).catch(() => null)
     if (s === null || !s.isDirectory()) {
       if (!missing.includes(stem)) missing.push(stem)
@@ -182,7 +195,6 @@ export async function generateOverrides(opts: GenerateOptions): Promise<Generate
     // their own list and report line — filing them under `missing` printed
     // "no directory for stem" about directories that exist.
     if (dir === kitsDir || !underTop(kitsDir, dir)) {
-      report(`  stem escapes the kit directory and was skipped: ${stem}`)
       if (!escaped.includes(stem)) escaped.push(stem)
       continue
     }
@@ -216,7 +228,8 @@ export async function generateOverrides(opts: GenerateOptions): Promise<Generate
   report(`keys are relative to ${top}; kit folders were looked for under ${kitsDir}`)
   for (const stem of missing) report(`  no directory for stem: ${stem}`)
   if (missing.length > 0) report(`${missing.length} stems named no directory and were skipped`)
-  if (escaped.length > 0) report(`${escaped.length} stems escaped the top and were refused`)
+  for (const stem of escaped) report(`  stem escapes the kit directory and was refused: ${stem}`)
+  if (escaped.length > 0) report(`${escaped.length} stems escaped the kit directory and were refused`)
   // The same rule every config file here has. The store is read once per
   // resolved library, so a running server keeps answering from what it loaded.
   report('the server reads this file once per resolved library — restart it to pick this up')

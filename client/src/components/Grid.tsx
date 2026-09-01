@@ -412,8 +412,12 @@ const Tile = memo(function Tile({
         // This does put the visible label and the accessible name deliberately
         // out of step (WCAG 2.5.3 "Label in Name") on exactly the tiles a store
         // names. That is the spec's own trade, made knowingly: the real name is
-        // the one a reader can act on outside this app.
-        aria-label={entry.displayName !== undefined ? entry.name : undefined}
+        // the one a reader can act on outside this app. The "folder " prefix
+        // keeps the type signal a button-level label would otherwise drop —
+        // without it, exactly the tiles a store names (every kit in the demo)
+        // would lose what the chrome's own img label gives the unnamed ones
+        // (review round four).
+        aria-label={entry.displayName !== undefined ? `folder ${entry.name}` : undefined}
         className={base + markClass + anchorClass}
         onClick={() => onEnter(entry)}
         onContextMenu={(e) => {

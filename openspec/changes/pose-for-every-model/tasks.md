@@ -353,3 +353,9 @@
       its pose"), falsified by disabling the wave effect. Nothing in this change's own
       files moved.
 
+- [ ] F4 (flagged at review 2026-09-01, yours to take or decline): `POSES_MAX = 1024` is
+      now declared twice — `client/src/api/client.ts` and `server/src/semantic.ts` — two
+      literals that must agree, with the server enforcing the wire bound; a bump in one
+      400s the other. `shared/types.ts` (where `PosesRequest`/`PosesResponse` moved) is
+      the obvious home — same class as the RIG_VERSION never-redeclare rule.
+

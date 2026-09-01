@@ -241,6 +241,27 @@ describe('gen-overrides', () => {
     expect(lines.some((l) => l.includes('no directory for stem'))).toBe(false)
   })
 
+  it('refuses the trailing-slash spellings join preserves', async () => {
+    // `join('/lib', './')` is `'/lib/'` — neither `=== kitsDir` nor outside
+    // the `startsWith(kitsDir + sep)` prefix, so without normalisation every
+    // dot-onto-the-top spelling written with a trailing slash minted the root
+    // key again (review round four; the third life of this bug).
+    const { top, kitsDir, metadata } = fixture('miniatures/clustered-hq')
+    writeFileSync(
+      metadata,
+      JSON.stringify([
+        { thing_id: 1, stem: './', name: 'Attacker', author: 'Attacker', files: [] },
+        { thing_id: 2, stem: 'a/../', name: 'Attacker', author: 'Attacker', files: [] },
+        { thing_id: 3, stem: '../clustered-hq/', name: 'Attacker', author: 'Attacker', files: [] },
+      ]),
+    )
+    const result = await generateOverrides({ top, kitsDir, metadata, report: () => undefined })
+    expect(result.written).toBe(0)
+    expect(result.escaped).toEqual(['./', 'a/../', '../clustered-hq/'])
+    const keys = Object.keys((await readStore(top)).entries)
+    expect(keys).toEqual([])
+  })
+
   it('contains a kit directory under a root top — the predicate, since root cannot be fixtured', () => {
     // `top + sep` alone doubles the separator at '/', refusing everything.
     expect(underTop('/', '/kits')).toBe(true)

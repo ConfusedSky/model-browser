@@ -199,6 +199,17 @@ describe('folder contact sheets', () => {
     expect(chrome!.querySelector('[data-preview-sheet]')).not.toBeNull()
   })
 
+  it('announces itself as a folder: the chrome carries the type signal', async () => {
+    // role="img" + aria-label so a store-less dir tile's content-derived
+    // accessible name reads "folder <name>" — the signal the emoji's
+    // accessible-name leak used to provide by accident. Unfalsified until now
+    // (review round four): deleting both attributes passed every test.
+    await mountApp('/models', ONE_FOLDER)
+    const chrome = dirTile('/models/a').querySelector('[data-folder-chrome]')!
+    expect(chrome.getAttribute('role')).toBe('img')
+    expect(chrome.getAttribute('aria-label')).toBe('folder')
+  })
+
   it('keeps the archive icon on a zip tile, chrome-free', async () => {
     // Zips are never previewed and are not folders: no chrome, no observer
     // registration, the emoji stands. Unfalsified until now (review's catch —
