@@ -181,14 +181,36 @@ describe('the menu on a viewer surface', () => {
     expect(flip()).not.toBeNull()
   })
 
-  it('a secondary press on the lightbox raises the same three', async () => {
+  it('a secondary press on the lightbox raises the menu an open view can honestly run', async () => {
     await openLightbox()
     expect(dialog()).not.toBeNull()
 
     const taken = await secondaryPress(dialog()!)
-    expect(items()).toEqual(['reveal', 'copyPath', 'findSimilar'])
+    // Reset framing joined 2026-09-01 (a user-reported screenshot: the panel
+    // offered it, the menu did not) — offered because its press is live-routed
+    // through resetFramingLive, not because the queued body became honest here.
+    expect(items()).toEqual(['reveal', 'copyPath', 'findSimilar', 'resetFraming'])
     expect(taken).toBe(true)
     expect(dialog()).not.toBeNull() // still open behind its own menu
+  })
+
+  it("the lightbox menu's Reset framing runs the live body, not the queued one", async () => {
+    await openLightbox()
+    await secondaryPress(dialog()!)
+    putThumb.mockClear()
+    const reset = Array.from(menu()!.querySelectorAll('button')).find(
+      (b) => b.textContent === 'Reset framing',
+    )!
+    await click(reset as HTMLElement)
+    await settle()
+    // The live body's store half is a pixel-less discard PUT — sent NOW, not
+    // queued behind the suspension the open view holds (which is what the
+    // generic body would do, and it would then sit until close and lose to
+    // the closing persist). Its arrival while the lightbox is still open is
+    // what proves the routing.
+    const discard = putThumb.mock.calls.find((c) => c[0].camera === null)
+    expect(discard).toBeDefined()
+    expect(dialog()).not.toBeNull()
   })
 
   it('still offers the whole table on a tile — the filter is the surface, not the app', async () => {

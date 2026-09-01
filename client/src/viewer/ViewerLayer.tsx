@@ -95,7 +95,15 @@ interface Props {
    * is where dismissal returns focus; in lightbox mode that is the dialog, so
    * the focus trap gets its focus back.
    */
-  onEntryMenu: (entry: DirEntry, el: HTMLElement | null, at: { x: number; y: number }) => void
+  onEntryMenu: (
+    entry: DirEntry,
+    el: HTMLElement | null,
+    at: { x: number; y: number },
+    /** The live view a framing reset needs, read at press time — the session
+     *  is private to this component, so the menu's surface hands it over the
+     *  way the panel's presses do. */
+    live?: () => LiveFramingView | null,
+  ) => void
   /**
    * Whether that menu is currently raised, read live.
    *
@@ -615,7 +623,7 @@ export default function ViewerLayer({
    */
   function raiseEntryMenu(e: React.MouseEvent): void {
     e.preventDefault()
-    onEntryMenu(viewer.entry, containerRef.current, { x: e.clientX, y: e.clientY })
+    onEntryMenu(viewer.entry, containerRef.current, { x: e.clientX, y: e.clientY }, liveFramingView)
   }
 
   useEffect(() => () => clearTimeout(copyTimerRef.current), [])
@@ -656,25 +664,29 @@ export default function ViewerLayer({
    * every command, not just that one: the surface reports what it has, and
    * which commands care is `entryActions`' business.
    */
-  function runPanelCommand(id: CommandId): void {
+  /** The live view a framing reset moves, built fresh at each read — one
+   *  construction for the panel's presses and the menu's, so the two surfaces
+   *  cannot drift in what "live" means. */
+  function liveFramingView(): LiveFramingView | null {
     const s = sessionRef.current
-    const live: LiveFramingView | null =
-      s === null
-        ? null
-        : {
-            axis: s.axis,
-            reframe: (nextCamera, nextAxis, posed) => {
-              s.reframe(nextCamera, nextAxis)
-              setSessionAxis(nextAxis)
-              runTweenLoop()
-              // The view on screen is now the index's orientation or the
-              // default — either way not the user's, and the close must not
-              // write it back over the discard just made.
-              openedFromPoseRef.current = posed
-              framingDiscardedRef.current = true
-            },
-          }
-    onCommand(id, live)
+    if (s === null) return null
+    return {
+      axis: s.axis,
+      reframe: (nextCamera, nextAxis, posed) => {
+        s.reframe(nextCamera, nextAxis)
+        setSessionAxis(nextAxis)
+        runTweenLoop()
+        // The view on screen is now the index's orientation or the
+        // default — either way not the user's, and the close must not
+        // write it back over the discard just made.
+        openedFromPoseRef.current = posed
+        framingDiscardedRef.current = true
+      },
+    }
+  }
+
+  function runPanelCommand(id: CommandId): void {
+    onCommand(id, liveFramingView())
   }
 
   // Drives renders while an axis-change tween is in flight. The loop ends on

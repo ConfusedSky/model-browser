@@ -401,6 +401,11 @@ export default function App() {
     x: number
     y: number
     surface: 'tile' | 'orbit' | 'lightbox'
+    /** The lightbox's live framing view, read at choose time — present only
+     *  when the menu was raised on the lightbox, whose session Reset framing
+     *  must move (the orbit overlay keeps the queued body: it is the tile as
+     *  far as the menu is concerned, 6.8). */
+    live?: () => LiveFramingView | null
   } | null>(null)
   const menuRef = useRef<typeof menu>(null)
   menuRef.current = menu
@@ -1793,9 +1798,17 @@ export default function App() {
    * change on every mode flip.
    */
   const onViewerEntryMenu = useCallback(
-    (entry: DirEntry, el: HTMLElement | null, at: { x: number; y: number }): void => {
+    (
+      entry: DirEntry,
+      el: HTMLElement | null,
+      at: { x: number; y: number },
+      live?: () => LiveFramingView | null,
+    ): void => {
       const surface = viewerRef.current?.mode === 'lightbox' ? 'lightbox' : 'orbit'
-      setMenu({ entry, el, x: at.x, y: at.y, surface })
+      // The live view rides only the lightbox's menu: there Reset framing must
+      // run the live body (the panel's), while the orbit overlay deliberately
+      // keeps the tile's queued body (6.8).
+      setMenu({ entry, el, x: at.x, y: at.y, surface, live: surface === 'lightbox' ? live : undefined })
     },
     [],
   )
@@ -1811,7 +1824,17 @@ export default function App() {
       // would otherwise leave the menu hanging over a listing it no longer
       // belongs to.
       closeMenu()
-      if (raised !== null) command.run?.(raised.entry, actionHost, raised.el)
+      if (raised === null) return
+      // Reset framing on the lightbox's menu runs the LIVE body, exactly as
+      // the panel's press does — the generic body would queue a render behind
+      // the suspension the viewer holds and lose to the closing persist
+      // (resetFramingLive's doc). The live view was handed over at raise time
+      // and is read now, so a reframe between raise and choose is not stale.
+      if (command.id === 'resetFraming' && raised.live !== undefined) {
+        resetFramingLive(raised.entry, actionHost, raised.live())
+        return
+      }
+      command.run?.(raised.entry, actionHost, raised.el)
     },
     [closeMenu, actionHost],
   )

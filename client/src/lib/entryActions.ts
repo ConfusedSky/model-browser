@@ -476,9 +476,9 @@ export interface LiveFramingView {
  * *Reset framing* pressed on the surface that is **showing** the model — the
  * lightbox's info panel (D6's margin, follow-up 6.6).
  *
- * The right-click menu withholds this command on a viewer surface and this
- * function is why the panel may still offer it: it is a different body, not the
- * same one on a second surface. `refreshThumbnail` would queue a render behind
+ * The lightbox's info panel — and, since 2026-09-01, the menu raised on the
+ * lightbox, which App routes here when the raise carried the live view. It is
+ * a different body from the tile menu's, not the same one on a second surface. `refreshThumbnail` would queue a render behind
  * the suspension the viewer itself holds, sit there until the lightbox closed,
  * and then lose a coin-flip against the closing persist. Here the two halves
  * are done where they can actually happen:
@@ -975,12 +975,19 @@ export const ENTRY_COMMANDS: readonly EntryCommand[] = [
  * two would come to disagree about the same model.
  *
  * *Open* goes because the model is already open — the command would re-open the
- * thing the menu was raised on. The two thumbnail commands go because from an
- * open lightbox they cannot honestly run: their renders wait on
+ * thing the menu was raised on. *Re-render thumbnail* goes because from an
+ * open lightbox it cannot honestly run: its render waits on
  * `queue.whenResumed()` and the view holds the suspension (architecture
- * D2/D3), so they would sit for as long as the user leaves it open, and the
- * closing persist then races them — writing the orbited camera straight back
- * over the discard *reset framing* was pressed for.
+ * D2/D3), so it would sit for as long as the user leaves it open, and the
+ * closing persist then races it.
+ *
+ * *Reset framing* was on this list until 2026-09-01 (a user-reported
+ * screenshot: the panel offered it, the menu did not) — for the same queued-
+ * render reason. It left the list the way the panel got to offer it in the
+ * first place: not by allowing the generic body here, but by the menu's press
+ * running `resetFramingLive` when the raise carried the lightbox's live view —
+ * App routes it, exactly as it routes the panel's press. One surface, two
+ * affordances, one live body.
  *
  * The **orbit-axis group** goes for a third reason, its own (6.7): this surface
  * already carries the live picker, which does the same thing and shows the
@@ -988,7 +995,8 @@ export const ENTRY_COMMANDS: readonly EntryCommand[] = [
  * affordance for one choice — and the worse of the two, since its write would
  * then race the closing persist that snapshots the live view.
  *
- * What is left is the three that do not care which surface asked.
+ * What is left is what does not care which surface asked — plus *Reset
+ * framing*, which cares and is rerouted rather than withheld.
  *
  * **The orbit overlay is not on this list, and was until 2026-08-22 (6.8, a
  * user-reported screenshot).** Every reason above is about a view the user has
@@ -1008,7 +1016,6 @@ export const ENTRY_COMMANDS: readonly EntryCommand[] = [
 export const LIGHTBOX_MENU_EXCLUDES: readonly MenuItemId[] = [
   'open',
   'reRenderThumbnail',
-  'resetFraming',
   'orbitAxis',
 ]
 
@@ -1023,12 +1030,12 @@ export const LIGHTBOX_MENU_EXCLUDES: readonly MenuItemId[] = [
  *
  * The asymmetry is the point, and it is about the body rather than the surface:
  *
- * - *Reset framing* is excluded from the menu above and offered here, because
- *   the panel's press runs `resetFramingLive` — a discard that re-frames the
- *   open session and clears its claim on the orientation, so the closing
- *   persist cannot resurrect what was just given up. That is the whole reason
- *   the command is allowed on this surface: the menu's body cannot do it, this
- *   one can, and only this path carries the live semantics.
+ * - *Reset framing* is offered on both of the lightbox's affordance sets, and
+ *   through the same live body on each: the panel's press and the menu's
+ *   choose both run `resetFramingLive` — a discard that re-frames the open
+ *   session and clears its claim on the orientation, so the closing persist
+ *   cannot resurrect what was just given up. The generic queued body never
+ *   runs on this surface from either set.
  * - *Re-render thumbnail* stays out of both. The closing persist already
  *   snapshots the live view under the lighting and rig in force now — it **is**
  *   the re-render — so an item for it would be a button asking for what closing
