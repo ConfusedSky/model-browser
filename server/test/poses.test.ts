@@ -52,8 +52,14 @@ import type { DirEntry, IndexPose } from '../../shared/types'
 import { createApp } from '../src/app'
 import { ThumbCache } from '../src/cache'
 import { createLibrary } from '../src/library'
-import { peek } from '../src/listing'
-import { POSES_MAX, posesForPaths, probeStatus, resetIndexStatus } from '../src/semantic'
+import { PEEK_MAX_FINDS, peek } from '../src/listing'
+import {
+  POSES_MAX,
+  UNDER_LIMIT,
+  posesForPaths,
+  probeStatus,
+  resetIndexStatus,
+} from '../src/semantic'
 import { LOOPBACK, libraryFor, realTempDir, stlBytes } from './helpers'
 
 /**
@@ -65,6 +71,7 @@ import { LOOPBACK, libraryFor, realTempDir, stlBytes } from './helpers'
  *   mix2/    m.stl  notes.txt  kit.zip  sub/s.stl
  *   only/    one.stl
  *   cover/   a.stl b.stl c.stl d.stl  s1/x.stl  s2/y.stl  s3/z.stl
+ *   lich/    01-presupported/{00..79}.txt   02-kit/{guard,hero,minion,scout}.stl
  *   empty/
  */
 const libTop = realTempDir('mb-poses-')
@@ -118,6 +125,23 @@ for (const [sub, model] of [
   writeFileSync(join(libTop, 'cover', sub, model), stlBytes(71))
 }
 
+/**
+ * The Lich Lord shape (D5), the folder this whole section exists for: a folder
+ * of folders whose **first-sorted** subtree is deep and holds no model at all,
+ * and whose kit sits behind it. Eighty entries in `01-presupported` is more than
+ * the peek's 64-entry budget, so the walk dies inside it and never reaches
+ * `02-kit` — the sheet is empty however much of the folder the index knows. It
+ * is asserted empty as a control in the cell itself rather than taken on faith
+ * here, so the fixture cannot quietly stop being the shape it is named for.
+ */
+mkdirSync(join(libTop, 'lich', '01-presupported'), { recursive: true })
+for (let i = 0; i < 80; i++) {
+  writeFileSync(join(libTop, 'lich', '01-presupported', `${String(i).padStart(2, '0')}.txt`), 'x')
+}
+mkdirSync(join(libTop, 'lich', '02-kit'))
+const LICH_KIT = ['guard.stl', 'hero.stl', 'minion.stl', 'scout.stl']
+LICH_KIT.forEach((n, i) => writeFileSync(join(libTop, 'lich', '02-kit', n), stlBytes(80 + i)))
+
 mkdirSync(join(libTop, 'empty'))
 
 const cacheDir = realTempDir('mb-poses-cache-')
@@ -150,18 +174,45 @@ const POSE: IndexPose = {
 /** A real filesystem path, the only kind the index is ever told about. */
 const fs = (...parts: string[]) => join(libTop, ...parts)
 
+/**
+ * What `/under` holds beneath the folder it is asked about (D5). `models` is the
+ * index's own order — relative-path sorted, *not* posed-first, since ranking is
+ * this server's job — and the stub scopes it to the asked prefix and honours the
+ * asked `limit`, the way the index does.
+ */
+interface UnderStub {
+  /** Real filesystem paths the index holds, in its answer order. */
+  models: readonly string[]
+  /** Which of them carry an orientation. Everything else answers `pose: null`. */
+  posed?: readonly string[]
+}
+
 interface Stub {
   /** `/status`, or `'refused'` for a connection nobody is listening on. */
   status?: unknown | 'refused'
+  /**
+   * One `/status` body per ask, in order, each with its own delay — the only way
+   * to make two probes overlap *and* disagree, which is what the cache's
+   * ordering is about. Past the end of the series, `status` answers as usual.
+   */
+  statusSeries?: readonly { body: unknown; delayMs?: number }[]
+  /**
+   * `/under`'s answer. **Absent means `"unindexed"`** — the index reaches the
+   * folder and has never scanned it — which is the walk fallback, so every cell
+   * written before D5 keeps exercising exactly the path it was written about.
+   */
+  under?: UnderStub
+  /** Answer `/under` with this status instead of 200 (503 = still loading). */
+  underStatus?: number
+  /** Hold `/under` open forever, answering only the caller's abort. */
+  underHangs?: boolean
   /** Which real paths have a pose. Everything else asked about answers `null`. */
   posed?: readonly string[]
   /** Answer `/poses` with this status instead of 200 (503 = still loading). */
   posesStatus?: number
   /**
-   * Hold `/poses` open forever, answering only the caller's abort — what a real
-   * `fetch` does when the service accepted the connection and then stopped
-   * saying anything, and the only way the request's own timeout is observable
-   * from out here.
+   * Hold `/poses` open forever, answering only the caller's abort — the only way
+   * the request's own timeout is observable from out here.
    */
   posesHangs?: boolean
   /** Make `/status` take long enough that concurrent callers really overlap. */
@@ -170,35 +221,77 @@ interface Stub {
 
 /** Every `/poses` body this server sent, in order. */
 let sent: { paths: string[] }[] = []
+/** Every `/under` body this server sent, in order. */
+let asked: { path: string; limit: number }[] = []
 /** How many times `/status` was asked — the probe count, per cell. */
 let statusAsks = 0
 
+/** A connection the caller can only abort — what a real `fetch` does when the
+ *  service accepted it and then stopped saying anything. */
+function hang(signal: AbortSignal | undefined): Promise<Response> {
+  return new Promise<Response>((_resolve, reject) => {
+    if (signal === undefined) return // nothing to abort it: hang for real
+    signal.addEventListener('abort', () => reject(signal.reason))
+  })
+}
+
 function stubIndex(stub: Stub): void {
   sent = []
+  asked = []
   statusAsks = 0
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, init?: { method?: string; body?: string; signal?: AbortSignal }) => {
       if (String(url).endsWith('/status')) {
+        const turn = stub.statusSeries?.[statusAsks]
         statusAsks++
-        if (stub.statusDelayMs !== undefined) {
-          await new Promise((r) => setTimeout(r, stub.statusDelayMs))
+        const delayMs = turn?.delayMs ?? stub.statusDelayMs
+        if (delayMs !== undefined) await new Promise((r) => setTimeout(r, delayMs))
+        if (turn !== undefined) {
+          return new Response(JSON.stringify(turn.body), {
+            headers: { 'content-type': 'application/json' },
+          })
         }
         if (stub.status === 'refused') throw new TypeError('fetch failed')
         return new Response(JSON.stringify(stub.status ?? READY), {
           headers: { 'content-type': 'application/json' },
         })
       }
+      if (String(url).endsWith('/under') && init?.method === 'POST') {
+        const body = JSON.parse(init.body ?? '{}') as { path: string; limit: number }
+        asked.push(body)
+        if (stub.underHangs === true) return hang(init.signal)
+        if (stub.underStatus !== undefined && stub.underStatus !== 200) {
+          return new Response(JSON.stringify({ detail: 'no' }), { status: stub.underStatus })
+        }
+        const held = stub.under
+        if (held === undefined) {
+          return new Response(
+            JSON.stringify({ status: 'unindexed', models: [], matched: 0, truncated: false }),
+            { headers: { 'content-type': 'application/json' } },
+          )
+        }
+        // Scoped to the prefix and cut to the asked limit, as the index scopes
+        // and cuts: a stub that answered a sibling's models would let a
+        // confinement bug through as a passing cell.
+        const under = held.models.filter((p) => p.startsWith(`${body.path}/`))
+        const models = under
+          .slice(0, body.limit)
+          .map((p) => ({ path: p, pose: (held.posed ?? []).includes(p) ? POSE : null }))
+        return new Response(
+          JSON.stringify({
+            status: 'ok',
+            models,
+            matched: under.length,
+            truncated: under.length > body.limit,
+          }),
+          { headers: { 'content-type': 'application/json' } },
+        )
+      }
       if (String(url).endsWith('/poses') && init?.method === 'POST') {
         const body = JSON.parse(init.body ?? '{}') as { paths: string[] }
         sent.push(body)
-        if (stub.posesHangs === true) {
-          const signal = init.signal
-          return new Promise<Response>((_resolve, reject) => {
-            if (signal === undefined) return // nothing to abort it: hang for real
-            signal.addEventListener('abort', () => reject(signal.reason))
-          })
-        }
+        if (stub.posesHangs === true) return hang(init.signal)
         if (stub.posesStatus !== undefined && stub.posesStatus !== 200) {
           return new Response(JSON.stringify({ detail: 'no' }), { status: stub.posesStatus })
         }
@@ -570,6 +663,216 @@ describe('an index that is silent selects exactly as it did before poses', () =>
 })
 
 
+describe('the sheet asks the index before it walks', () => {
+  /**
+   * The walk path spelled out, as `posedFirstPeek`'s body spelled it before D5:
+   * walk to the entry bound, one `/poses` batch over the finds, stable
+   * posed-first partition, cut to `n`. The same idiom as `identical` above —
+   * which compares against `peek()`, the body one change earlier — and it exists
+   * for the same reason: "byte-identical to the fallback" has to be measured
+   * against the fallback rather than against entries typed out here.
+   */
+  const walkSheet = async (path: string, n: number): Promise<DirEntry[]> => {
+    const finds = await peek(library, path, PEEK_MAX_FINDS)
+    if (finds.length === 0) return finds
+    const poses = await posesForPaths(
+      library,
+      finds.map((e) => e.path),
+      libTop,
+    )
+    return [
+      ...finds.filter((e) => poses[e.path] !== undefined),
+      ...finds.filter((e) => poses[e.path] === undefined),
+    ].slice(0, n)
+  }
+
+  const kit = (n: string) => fs('lich', '02-kit', n)
+
+  it('reaches the kit the walk’s budget can never get to', async () => {
+    // The control, and the whole reason this section exists: `/lich`'s first
+    // subtree is eighty entries of nothing, so the walk spends its budget there
+    // and comes back with an empty sheet. Every folder-of-folders tile Masa
+    // found under-used posed models this way.
+    stubIndex({})
+    expect(await peek(library, '/lich', 4)).toEqual([])
+
+    stubIndex({
+      under: {
+        models: LICH_KIT.map(kit),
+        posed: [kit('hero.stl'), kit('minion.stl')],
+      },
+    })
+    const sheet = await peekOf('/lich', 4)
+    // Posed first in the index's own order, then its unposed ones — models the
+    // walk could not have reached at all.
+    expect(names(sheet)).toEqual(['hero.stl', 'minion.stl', 'guard.stl', 'scout.stl'])
+    // Addressed and shaped like any other listing entry, stat'd here rather than
+    // described by the index: the sheet's cells are indistinguishable from the
+    // walk's.
+    expect(sheet[0]!.path).toBe('/lich/02-kit/hero.stl')
+    expect(Object.keys(sheet[0]!).sort()).toEqual([
+      'format',
+      'kind',
+      'mtime',
+      'name',
+      'path',
+      'size',
+    ])
+    expect(sheet[0]!.mtime).toBeGreaterThan(0)
+    // A full sheet from the index means no walk at all, so no `/poses` batch.
+    expect(sent).toHaveLength(0)
+  })
+
+  it('asks about the folder by its real path, and for one answer’s worth', async () => {
+    stubIndex({ under: { models: [fs('mixed', 'c.stl')], posed: [fs('mixed', 'c.stl')] } })
+    await peekOf('/mixed', 4)
+    expect(asked).toEqual([{ path: fs('mixed'), limit: UNDER_LIMIT }])
+  })
+
+  it('an unindexed answer is the walk’s own sheet, byte for byte', async () => {
+    // The fallback the requirement pins: `"unindexed"` is not "no poses", it is
+    // "walk", and what the walk then produces must be what it produced before
+    // the index was ever asked — ranking and all.
+    stubIndex({ posed: [fs('mixed', 'c.stl'), fs('mixed', 'e.stl')] })
+    const before = JSON.stringify(await walkSheet('/mixed', 4))
+    expect(JSON.stringify(await peekOf('/mixed', 4))).toBe(before)
+    // And the branch really was taken: an `"unindexed"` answer came back, and
+    // the walk happened after it rather than instead of it.
+    expect(asked).toHaveLength(1)
+    expect(names(await peekOf('/mixed', 4))).toEqual(['c.stl', 'e.stl', 'a.stl', 'b.stl'])
+  })
+
+  it('an index refusal and a 503 fall back the same way', async () => {
+    for (const underStatus of [400, 503]) {
+      stubIndex({ underStatus, posed: [fs('mixed', 'c.stl')] })
+      expect(names(await peekOf('/mixed', 4))).toEqual(['c.stl', 'a.stl', 'b.stl', 'd.stl'])
+      expect(asked).toHaveLength(1)
+    }
+  })
+
+  it('fills a short answer from the walk, without repeating what it already has', async () => {
+    // Two models under a folder holding six. `f.stl` is posed and `a.stl` is
+    // not, so the index half is [f, a] — and `a.stl` is also the walk's first
+    // find, which is what makes the dedup observable rather than incidental.
+    stubIndex({
+      under: { models: [fs('mixed', 'a.stl'), fs('mixed', 'f.stl')], posed: [fs('mixed', 'f.stl')] },
+      posed: [],
+    })
+    expect(names(await peekOf('/mixed', 4))).toEqual(['f.stl', 'a.stl', 'b.stl', 'c.stl'])
+    // The walk really did run — a short answer costs the peek its walk, which is
+    // the price D5 accepts for never showing a two-cell sheet over a full folder.
+    expect(sent).toHaveLength(1)
+  })
+
+  it('an "ok" answer holding nothing is the walk’s sheet too', async () => {
+    // Not the same fact as `"unindexed"` upstream, and deliberately the same
+    // answer here: an empty list fills from the walk by the same arithmetic a
+    // short one does.
+    stubIndex({ under: { models: [] }, posed: [fs('mixed', 'e.stl')] })
+    expect(names(await peekOf('/mixed', 4))).toEqual(['e.stl', 'a.stl', 'b.stl', 'c.stl'])
+    expect(asked).toHaveLength(1)
+  })
+
+  it('a chosen model that is no longer there gives its cell to the next candidate', async () => {
+    // The index embedded it and the file has since gone — an ordinary outcome
+    // for two independently-cached views of one removable volume, not an error.
+    //
+    // Asserted over `/lich`, whose walk finds nothing at all, precisely so the
+    // fill cannot stand in for the recovery: a peek that stat'd the first four
+    // candidates and kept what survived would come back with three cells and
+    // have nowhere to get a fourth.
+    const ghost = kit('ghost.stl')
+    stubIndex({
+      under: { models: [ghost, ...LICH_KIT.map(kit)], posed: [ghost, ...LICH_KIT.map(kit)] },
+    })
+    expect(names(await peekOf('/lich', 4))).toEqual([
+      'guard.stl',
+      'hero.stl',
+      'minion.stl',
+      'scout.stl',
+    ])
+    // Four cells from the index, so nothing walked and nothing was asked about
+    // poses — the drop cost a candidate, not a round trip.
+    expect(sent).toHaveLength(0)
+  })
+
+  it('never previews a model that leaves the library, whatever the index says', async () => {
+    // `escape.stl` is a symlink out of the library. The index followed it when
+    // it embedded, and it still must not reach a surface `/api/file` refuses the
+    // same path on — dropped, and its cell goes to the walk's fill.
+    const escape = fs('links', 'escape.stl')
+    stubIndex({
+      under: { models: [escape, fs('links', 'real.stl')], posed: [escape, fs('links', 'real.stl')] },
+      posed: [],
+    })
+    const sheet = await peekOf('/links', 4)
+    expect(sheet.map((e) => e.path)).toEqual(['/links/real.stl', '/links/alias.stl'])
+    expect(names(sheet)).not.toContain('secret.stl')
+  })
+
+  it('a stalling /under does not hold the sheet', async () => {
+    // The `/poses` stall cell's shape, one call earlier: `/under` is advisory and
+    // is given that call's budget, so a tile falls back to the walk rather than
+    // waiting the half-minute a scoring query is allowed.
+    stubIndex({ underHangs: true, posed: [fs('mixed', 'c.stl'), fs('mixed', 'e.stl')] })
+    const started = Date.now()
+    expect(names(await peekOf('/mixed', 4))).toEqual(['c.stl', 'e.stl', 'a.stl', 'b.stl'])
+    expect(Date.now() - started).toBeLessThan(10_000)
+    expect(asked).toHaveLength(1)
+  }, 15_000)
+
+  it('an index that is not answering is never asked at all', async () => {
+    // The two gates come before `/under` as well as before the walk: an index
+    // with nothing to say about the folder costs the peek not one request.
+    for (const stub of [
+      { status: 'refused' as const },
+      { status: { ...READY, ready: false, elapsed: 3 } },
+      { status: { ...READY, collection_root: join(libTop, 'nest') } },
+    ]) {
+      stubIndex(stub)
+      await peekOf('/mixed', 4)
+      expect(asked).toHaveLength(0)
+      expect(sent).toHaveLength(0)
+    }
+  })
+})
+
+describe('what the probe cache remembers is what was last asked', () => {
+  it('a fresh look is not overwritten by the stale one it raced', async () => {
+    // The confirmed race: a memoised probe is slow and says `warming`, the
+    // client's explicit retry overtakes it and says `ready`, and then the slow
+    // one settles. Written in settle order, the cache would hold `warming` — the
+    // user pressed retry, the index said it was up, and the next tile was told
+    // it was still loading, for the whole of the warming TTL.
+    stubIndex({
+      statusSeries: [
+        { body: { ...READY, ready: false, elapsed: 3 }, delayMs: 80 },
+        { body: READY, delayMs: 0 },
+      ],
+    })
+    const slow = probeStatus(library)
+    expect((await probeStatus(library, { fresh: true })).status.state).toBe('ready')
+    expect((await slow).status.state).toBe('warming')
+    // The stale answer was returned to whoever awaited it and not remembered:
+    // the next read is served from the cache, and the cache says `ready`.
+    expect((await probeStatus(library)).status.state).toBe('ready')
+    expect(statusAsks).toBe(2)
+  })
+
+  it('a probe started before a reset does not land its answer after it', async () => {
+    // `resetIndexStatus` drops the memo so the next caller looks again — but the
+    // probe it referred to is still running, and its pre-reset answer would
+    // otherwise be written into the cache the reset just emptied, standing for a
+    // 30 s TTL.
+    stubIndex({ statusSeries: [{ body: READY, delayMs: 80 }] })
+    const inFlight = probeStatus(library)
+    resetIndexStatus()
+    expect((await inFlight).status.state).toBe('ready')
+    await probeStatus(library)
+    expect(statusAsks).toBe(2)
+  })
+})
+
 describe('the paths route, for the listings a directory cannot name', () => {
   it('answers the entries it was given, wherever in the library they live', async () => {
     // The flat and name-search case: models drawn from three folders at once.
@@ -606,6 +909,20 @@ describe('the paths route, for the listings a directory cannot name', () => {
     expect(
       await posesFor(['/gone.stl', '/links/escape.stl', '/mix2/kit.zip!/box.stl', '/mixed/c.stl']),
     ).toEqual({ '/mixed/c.stl': POSE })
+    expect(sent[0]!.paths).toEqual([fs('mixed', 'c.stl')])
+  })
+
+  it('drops a path that is not spelled like one, rather than failing the batch', async () => {
+    // A path with no leading slash and one past the length bound are the two
+    // ways `canonicalLibPath` refuses a string outright. Canonicalised in one
+    // expression, either threw out of the map and 400'd the whole request — so
+    // one stale tile cost every other tile on screen its pose. Each is a
+    // per-path refusal like any other on this route: dropped, silently.
+    stubIndex({ posed: [fs('mixed', 'c.stl')] })
+    const overLong = `/${'a'.repeat(5000)}.stl`
+    expect(await posesFor(['mixed/c.stl', '/mixed/c.stl', overLong])).toEqual({
+      '/mixed/c.stl': POSE,
+    })
     expect(sent[0]!.paths).toEqual([fs('mixed', 'c.stl')])
   })
 

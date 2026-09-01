@@ -1,5 +1,5 @@
 import { realpath, stat } from 'node:fs/promises'
-import { posix, resolve, sep } from 'node:path'
+import { basename, posix, resolve, sep } from 'node:path'
 import type {
   DirEntry,
   IndexAvailability,
@@ -149,12 +149,37 @@ async function probe(base: string): Promise<IndexAvailability> {
  */
 let inFlight: Promise<IndexAvailability> | null = null
 
+/**
+ * Which "era" of knowledge about the index the cache belongs to, bumped by
+ * everything that invalidates a look already on the wire.
+ *
+ * Without it the cache is written in *settle* order rather than in *start*
+ * order, and the two differ exactly when it matters. Two probes overlap — a
+ * memoised one and the client's explicit `fresh` retry, which deliberately does
+ * not join it — the fresh one comes back `ready`, and then the older one settles
+ * on `warming` and overwrites it. The user pressed retry, the index answered
+ * that it was up, and the next read said it was still loading. The same shape
+ * defeats `resetIndexStatus`: it drops the memo so the *next* caller looks
+ * again, but a probe started before the thing we just learned could still land
+ * its stale answer in the cache afterwards.
+ *
+ * A generation rather than a timestamp because what makes an answer stale here
+ * is an event, not an interval — `at` already carries the interval, and a
+ * `fresh` look and the memoised one it raced share a millisecond routinely.
+ */
+let generation = 0
+
 /** One probe, its answer written to the cache the TTL protects. `at` is the
  *  moment the look was *decided on*, not the moment it came back — the TTL has
- *  always been measured from there. */
+ *  always been measured from there.
+ *
+ *  The write is conditional on the generation this look was *started* under
+ *  still being current: an answer whose question has since been superseded is
+ *  still returned to whoever awaited it, and simply is not remembered. */
 function look(base: string, at: number): Promise<IndexAvailability> {
+  const born = generation
   return probe(base).then((status) => {
-    cached = { status, at }
+    if (born === generation) cached = { status, at }
     return status
   })
 }
@@ -173,7 +198,13 @@ async function rawStatus(opts: { fresh?: boolean }): Promise<IndexAvailability> 
   const base = baseUrl()
   if (base === null) return { state: 'absent' }
   const now = Date.now()
-  if (opts.fresh === true) return look(base, now)
+  if (opts.fresh === true) {
+    // The retry is a new era, not a second reader of the old one: every look
+    // already on the wire was started before the user asked, so none of them
+    // may write the cache this one is about to.
+    generation++
+    return look(base, now)
+  }
   if (cached !== null && now - cached.at < TTL_MS[cached.status.state]) {
     return cached.status
   }
@@ -256,8 +287,14 @@ export async function indexStatus(
  * started before the thing we just learned must not be what the next caller is
  * handed. Anyone already awaiting it still gets its answer; only the next
  * caller looks again.
+ *
+ * Dropping the memo is not enough on its own: the probe it referred to is still
+ * running, and would otherwise write its pre-reset answer into the cache when it
+ * settles — the very answer this call exists to forget. The generation bump is
+ * what makes the forgetting stick.
  */
 export function resetIndexStatus(): void {
+  generation++
   cached = null
   inFlight = null
 }
@@ -758,4 +795,155 @@ export async function posesForDir(
     listing.entries.filter((e) => e.kind === 'model').map((e) => e.path),
     opts,
   )
+}
+
+/**
+ * The most models one `/under` answer may carry (`pose-for-every-model` D5).
+ *
+ * A contact sheet shows four cells and this asks for sixty-four times that, so
+ * the number is not about the sheet: it is about how deep into a folder's models
+ * the *posed* ones may sit before the sheet stops seeing them. The index answers
+ * in its own deterministic order (relative path), not posed-first, so a folder
+ * whose first 256 indexed models all lack an orientation shows the walk's sheet
+ * even though the index holds a posed one at position 257.
+ *
+ * `matched` and `truncated` come back beside the models and are advisory here:
+ * nothing re-asks for a second page, because the alternative to a truncated
+ * answer is the walk, and the walk cannot see past its own 64-entry budget
+ * either. Four cells is what is at stake, and a posed model past the cut being
+ * invisible to them is recorded as accepted rather than fixed (D5).
+ */
+export const UNDER_LIMIT = 256
+
+/**
+ * `/under` rides behind a folder tile exactly as `/poses` does — advisory, one
+ * per tile, on a grid that brings a screenful on at once — so it is given that
+ * call's budget rather than a second number to drift from it. Upstream it is a
+ * pure store scan (§5.1): an index that has not answered in two seconds is not
+ * busy, it is not answering, and the peek has a walk to fall back on.
+ */
+const UNDER_TIMEOUT_MS = POSES_TIMEOUT_MS
+
+/** One indexed model under a prefix: the path the index walked, and whatever
+ *  orientation it holds for it. */
+export interface UnderModel {
+  path: string
+  pose: IndexPose | null
+}
+
+/**
+ * The `/under` answer, typed as the wire actually is rather than as the contract
+ * reads — every field optional and nullable, for `RawStatus`' reason: this is
+ * another process's JSON, and a field that arrives missing must narrow to "the
+ * index said nothing useful" at the boundary instead of crashing a peek four
+ * frames later.
+ */
+interface RawUnder {
+  status?: string | null
+  models?: readonly { path?: unknown; pose?: IndexPose | null }[] | null
+  matched?: number | null
+  truncated?: boolean | null
+}
+
+/**
+ * Every model the index holds under one directory, in its own deterministic
+ * order — the peek's alternative to walking (D5).
+ *
+ * `null` means **use the walk**, and it is deliberately one value for three
+ * different facts: the index answered `unindexed` (it reaches this tree and has
+ * never scanned here), it could not be reached, or it took too long. All three
+ * are "the index has nothing to say about this folder", which is the exact
+ * condition the requirement makes the walk the answer to, and a caller that told
+ * them apart would have nothing different to do about any of them. An `"ok"`
+ * answer holding no models is *not* null: it is a real answer, and it lands as
+ * an empty list the caller fills from the walk exactly as it fills a short one.
+ *
+ * The path in, `dirRealPath`, is a **real filesystem path** — the index is
+ * another process with its own view of the volume (D6), and `scopeWithin` is
+ * what produces the spelling it resolves.
+ */
+export async function modelsUnder(
+  dirRealPath: string,
+  limit: number = UNDER_LIMIT,
+): Promise<UnderModel[] | null> {
+  let raw: RawUnder
+  try {
+    raw = (await askIndex('/under', { path: dirRealPath, limit }, UNDER_TIMEOUT_MS)) as RawUnder
+  } catch (err) {
+    // Availability states and refusals alike, for `posesForPaths`' reason: a
+    // preview may never be made to fail by the index, and here there is a walk
+    // that answers without it.
+    if (err instanceof IndexError) return null
+    throw err
+  }
+  // Anything but the one status that means "these are the models" is the walk's
+  // cue — `unindexed`, and equally a status this server has never heard of.
+  if (raw.status !== 'ok') return null
+  return (raw.models ?? []).flatMap((m) =>
+    typeof m.path === 'string' ? [{ path: m.path, pose: m.pose ?? null }] : [],
+  )
+}
+
+/**
+ * Index answers → contact-sheet cells, confined and mapped under exactly the
+ * rules a search hit is confined and mapped under (`hitsToEntries`), with the
+ * *peeked directory* standing where the collection root stands there.
+ *
+ * The directory rather than the collection is the base for two reasons. It is
+ * what was asked about, so a model outside it is a wrong answer rather than
+ * merely an out-of-scope one; and the library path it joins onto is the one the
+ * tile was addressed by, so a folder reached through an in-library symlink
+ * previews `/links/in/x.stl` — the spelling the walk produces for the same file
+ * — rather than the symlink's target under the collection.
+ *
+ * Ranked posed-first as a **stable partition**, not a sort: both halves keep the
+ * index's own order, so the sheet is a function of the answer and of nothing
+ * else, which is what the requirement's determinism clause promises.
+ *
+ * Then the chosen files are stat'd, and only the chosen ones: candidates are
+ * consumed in ranked order until `n` entries exist, so a sheet of four costs
+ * four stats over a 256-model answer rather than 256. A candidate that no longer
+ * stats is dropped and the next one takes its cell — a model can be deleted
+ * after it is embedded, and two independently-cached views of one removable
+ * volume drift by construction (D3).
+ */
+export async function entriesUnder(
+  library: Library,
+  models: readonly UnderModel[],
+  dirReal: string,
+  dirLibPath: string,
+  n: number,
+): Promise<DirEntry[]> {
+  const posed = models.filter((m) => m.pose !== null)
+  const unposed = models.filter((m) => m.pose === null)
+  const realTop = library.realTop()
+  const out: DirEntry[] = []
+  const seen = new Set<string>()
+  for (const m of [...posed, ...unposed]) {
+    if (out.length >= n) break
+    // `resolve` normalises `..` before the prefix test, for the reason
+    // `hitsToEntries` gives: this is a path string from another process, and
+    // normalising is what stops it naming a file outside what was asked about.
+    const full = resolve(m.path)
+    if (!full.startsWith(dirReal + sep)) continue
+    // Inside the directory is not yet inside the library: the index followed
+    // symlinks when it embedded, so a model that leaves the tree is dropped
+    // rather than named on a surface `/api/file` would refuse the same path on
+    // (D3).
+    const real = await realpath(full).catch(() => null)
+    if (real === null) continue
+    if (real !== realTop && !real.startsWith(realTop + sep)) continue
+    // One file, two addresses, from one string — the tail below the directory,
+    // joined onto its filesystem path and onto its library path alike.
+    const rel = full.slice(dirReal.length + 1)
+    const libPath = posix.join(dirLibPath, rel)
+    if (seen.has(libPath)) continue
+    // `basename`, not `rel`: a peek's entries are named the way the walk names
+    // them, and a sheet must not read half in bare names and half in paths.
+    const entry = await modelEntryAt(full, libPath, basename(rel))
+    if (entry === null) continue
+    seen.add(libPath)
+    out.push(entry)
+  }
+  return out
 }

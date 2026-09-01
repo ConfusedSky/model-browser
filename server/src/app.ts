@@ -24,9 +24,12 @@ import {
 import {
   IndexError,
   POSES_MAX,
+  UNDER_LIMIT,
+  entriesUnder,
   hitsToEntries,
   indexStatus,
   modelEntryAt,
+  modelsUnder,
   posesForDir,
   posesForListing,
   posesForPaths,
@@ -100,9 +103,9 @@ function unreachable(value: never): never {
 }
 
 /**
- * The models a contact sheet draws, preferring the ones the index holds an
- * orientation for (`pose-for-every-model` D4). Posed finds in walk order, then
- * unposed finds in walk order, cut to `n`.
+ * The walk's own answer, posed models first (`pose-for-every-model` D4) and
+ * uncut — the sheet's second source since D5, and the whole of it whenever the
+ * index has nothing to say about the folder.
  *
  * Posedness cannot be known mid-walk without asking per level, so the walk is
  * not asked to know it: it runs exactly as it always did, but to the **entry
@@ -112,44 +115,16 @@ function unreachable(value: never): never {
  * entry bound caps the finds at 64, so the batch is a single request whatever
  * the folder held, and the peek's worst case grows by exactly that one call.
  *
- * **When the index has nothing to say about this folder, this is today's code
- * path, untouched.** Both tests come before the wide walk, precisely so that an
- * index with nothing to say costs the peek nothing at all — not even the wider
- * walk — and the sheet is the walk's first `n` models byte for byte, which is
- * what the requirement's determinism clause promises when the index is silent.
- *
- * Two tests, because "not answering" and "answering about somewhere else" are
- * different facts. The first is availability, read from the cached probe every
- * semantic route shares (`probeStatus`), so it is not a request per tile. The
- * second is coverage, and it needs the *folder*: `posesForPaths` decides
- * coverage per path, which is the right grain for a listing but is decided too
- * late for a walk — a ready index rooted at a sibling subtree would otherwise
- * buy the entry-bound walk and a `realpath` per find to be told, path by path,
- * what one `scopeWithin` of the directory says up front. The finds all live
- * under it, so the folder is where that question belongs.
- *
- * The corner it gives up is a folder outside the collection holding a symlink
- * into it: that model has a pose upstream and no longer gets one here. A
- * preview is cosmetic and follows the index's coverage the way search does —
- * paying a wide walk on every uncovered folder in the library to orient the odd
- * symlinked one is the wrong trade.
- *
  * Ranking is applied whatever the walk found, not only when it found more than
  * `n`: "prefer posed" is about the cells the user sees, and a sheet of three
  * whose posed model sat last would otherwise contradict the sheet of five
  * beside it.
  */
-async function posedFirstPeek(library: Library, libPath: string, n: number): Promise<DirEntry[]> {
-  const { status, collectionRootFs } = await probeStatus(library)
-  if (status.state !== 'ready' || collectionRootFs === undefined) {
-    return peek(library, libPath, n)
-  }
-  // The collection's reach, asked about the folder rather than about its finds
-  // — the same call, one level up. `null` is every way it can fail to reach:
-  // outside the collection, a path the library refuses, or a virtual one (D7).
-  if ((await scopeWithin(library, libPath, collectionRootFs)) === null) {
-    return peek(library, libPath, n)
-  }
+async function walkRanked(
+  library: Library,
+  libPath: string,
+  collectionRootFs: string,
+): Promise<DirEntry[]> {
   const finds = await peek(library, libPath, PEEK_MAX_FINDS)
   if (finds.length === 0) return finds
   const poses = await posesForPaths(
@@ -161,7 +136,78 @@ async function posedFirstPeek(library: Library, libPath: string, n: number): Pro
   // A stable partition, not a sort: both halves keep the walk's order, so the
   // answer is a function of the walk and the index's reply and of nothing else.
   const unposed = finds.filter((e) => poses[e.path] === undefined)
-  return [...posed, ...unposed].slice(0, n)
+  return [...posed, ...unposed]
+}
+
+/**
+ * The models a contact sheet draws: the index's, where it holds any under this
+ * folder, and otherwise the walk's (`pose-for-every-model` D5).
+ *
+ * **The walk cannot reach what the index can.** A peek walks depth-first under
+ * a 64-entry budget, so a folder of folders whose first-sorted subtree is deep —
+ * a "(Presupported)" tree — spends the whole budget before the first indexed kit
+ * is reached, and the sheet is unposed however much of the folder the index
+ * knows. Rationing the walk was weighed and rejected (D5): the index already
+ * holds every model under a prefix and its orientation, so the peek asks it
+ * first and walks only when the answer does not fill the sheet.
+ *
+ * **When the index has nothing to say about this folder, this is today's code
+ * path, untouched.** The two tests below come before *any* walk, precisely so
+ * that an index with nothing to say costs the peek nothing at all — not even
+ * the wider walk — and the sheet is then the walk's first `n` models byte for
+ * byte, which is what the requirement's determinism clause promises when the
+ * index is silent.
+ *
+ * Two tests, because "not answering" and "answering about somewhere else" are
+ * different facts. The first is availability, read from the cached probe every
+ * semantic route shares (`probeStatus`), so it is not a request per tile. The
+ * second is coverage, and it needs the *folder*: `posesForPaths` decides
+ * coverage per path, which is the right grain for a listing but is decided too
+ * late for a walk — a ready index rooted at a sibling subtree would otherwise
+ * buy the entry-bound walk and a `realpath` per find to be told, path by path,
+ * what one `scopeWithin` of the directory says up front. And it is `scopeWithin`
+ * that produces the *real* path `/under` has to be asked about (D6), so the same
+ * call answers both questions.
+ *
+ * The corner it gives up is a folder outside the collection holding a symlink
+ * into it: that model has a pose upstream and no longer gets one here. A
+ * preview is cosmetic and follows the index's coverage the way search does —
+ * paying a wide walk on every uncovered folder in the library to orient the odd
+ * symlinked one is the wrong trade.
+ *
+ * A short answer is *filled* from the walk rather than shown as it came: a
+ * two-cell sheet over a visibly fuller folder would be a regression against
+ * today's, whatever its provenance (D5). Deduplicated by library path, since the
+ * two sources overlap by construction — the walk finds the same files the index
+ * indexed — and the walk's own ranking decides the order of what it contributes.
+ */
+async function posedFirstPeek(library: Library, libPath: string, n: number): Promise<DirEntry[]> {
+  const { status, collectionRootFs } = await probeStatus(library)
+  if (status.state !== 'ready' || collectionRootFs === undefined) {
+    return peek(library, libPath, n)
+  }
+  // The collection's reach, asked about the folder rather than about its finds
+  // — the same call, one level up. `null` is every way it can fail to reach:
+  // outside the collection, a path the library refuses, or a virtual one (D7).
+  const dirReal = await scopeWithin(library, libPath, collectionRootFs)
+  if (dirReal === null) return peek(library, libPath, n)
+
+  // `null` is "ask the walk" — unindexed here, unreachable, or too slow. An
+  // `"ok"` answer holding nothing is a real answer and lands as `[]`, which
+  // fills from the walk by the same arithmetic; the two converge on purpose.
+  const under = await modelsUnder(dirReal, UNDER_LIMIT)
+  const fromIndex =
+    under === null ? [] : await entriesUnder(library, under, dirReal, libPath, n)
+  if (fromIndex.length >= n) return fromIndex
+
+  const sheet = [...fromIndex]
+  const seen = new Set(sheet.map((e) => e.path))
+  for (const entry of await walkRanked(library, libPath, collectionRootFs)) {
+    if (sheet.length >= n) break
+    if (seen.has(entry.path)) continue
+    sheet.push(entry)
+  }
+  return sheet
 }
 
 export function createApp(
@@ -525,6 +571,16 @@ export function createApp(
    * answer — a 404 for one bad entry would let a stale tile fail the poses of
    * every good one beside it, and a listing may never be made to fail by the
    * index.
+   *
+   * That rule reaches the *canonicalisation* too, and did not always: mapping
+   * the batch in one expression let one path that is not spelled like a library
+   * path — no leading slash, past the length bound, a nested `!/` — throw out of
+   * the map and 400 the whole request, so a single stale tile in a five-hundred
+   * model listing cost every other tile its pose. It is refused per path here,
+   * and refusal means dropped, exactly as every other per-path refusal on this
+   * route means dropped. The array-of-strings check above is the one that stays
+   * a 400: a non-string element is a caller bug about the request's *shape*,
+   * while an unspellable path is one entry the answer has nothing to say about.
    */
   app.post('/api/semantic/poses', async (c) => {
     const body = (await c.req.json().catch(() => null)) as { paths?: unknown } | null
@@ -538,9 +594,17 @@ export function createApp(
     if (paths.length > POSES_MAX) {
       return c.json({ error: `invalid paths: ${paths.length} (max ${POSES_MAX})` }, 400)
     }
-    const answer: PosesResponse = {
-      poses: await posesForListing(library, paths.map(canonicalLibPath)),
+    const canonical: string[] = []
+    for (const p of paths) {
+      try {
+        canonical.push(canonicalLibPath(p))
+      } catch (err) {
+        // The two ways a string can fail to be a library path at all, both of
+        // them this route's to swallow. Anything else is a fault, not a path.
+        if (!(err instanceof LibraryError) && !(err instanceof VPathError)) throw err
+      }
     }
+    const answer: PosesResponse = { poses: await posesForListing(library, canonical) }
     return c.json(answer)
   })
 

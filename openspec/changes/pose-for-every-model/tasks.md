@@ -389,17 +389,82 @@
       matched, truncated}`; scoping via `Collection.resolve` (post-340a8f0 spellings), rel-path
       sorted, pure store scan, 503 while warming. The walk fallback keys on `"unindexed"` or
       index-silence — an empty `"ok"` means genuinely nothing indexed there
-- [ ] 5.2 Server: `posedFirstPeek` asks the index first (`/under` with limit 256, short
+- [x] 5.2 Server: `posedFirstPeek` asks the index first (`/under` with limit 256, short
       timeout like `/poses`), confines/maps per path, ranks posed-first, stats the chosen n
       into `DirEntry`s; `"unindexed"` or silent → today's walk path, byte-identical (the
       existing identity cells must keep passing unchanged); an `"ok"` answer with fewer
       than n models → fill from the walk's finds, deduped. `matched`/`truncated` advisory:
       a posed model past a truncated 256 cut is invisible to the sheet — recorded, accepted
       for 4 cells
-- [ ] 5.3 Tests: index-first selection reaching past the walk budget (the Lich Lord shape:
+      <br>— done 2026-09-01 (S2). `semantic.ts`: `UNDER_LIMIT` (256), `modelsUnder` (the
+      `/under` client — `RawUnder` typed as the wire is, every field nullable, for
+      `RawStatus`' reason; **`null` means "use the walk"** and is deliberately one value for
+      three facts — `"unindexed"`, unreachable, too slow — while an `"ok"` answer holding
+      nothing lands as `[]` and fills from the walk by the same arithmetic), and
+      `entriesUnder` (stable posed-first partition keeping the index's order within each
+      half, then confine-and-stat per candidate until `n` entries exist). `UNDER_TIMEOUT_MS`
+      is an **alias** for `POSES_TIMEOUT_MS`, not a second literal — the never-redeclare
+      rule; falsified by pointing it at `QUERY_TIMEOUT_MS` (the stall cell then times out at
+      15 s).
+      <br>Judgment call: `entriesUnder` confines against the **peeked directory**, not the
+      collection root — same three tests `hitsToEntries` makes (normalise, prefix, `realpath`
+      inside `realTop`), with the folder standing where the collection stands. That is what
+      was asked about, and the library path it joins onto is the one the tile was addressed
+      by, so a folder reached through an in-library symlink previews `/links/in/x.stl` — the
+      spelling the *walk* produces for the same file — rather than the symlink's target under
+      the collection. `basename`, not the rel path, for `name`: a sheet must not read half in
+      bare names and half in paths.
+      <br>`app.ts`: `posedFirstPeek`'s two gates are unchanged and still come before *any*
+      walk, and `scopeWithin`'s return value is now used rather than discarded — it is both
+      the coverage test and the real path `/under` must be told (D6), so the same call
+      answers both. The pre-D5 body is extracted verbatim as `walkRanked` (uncut) and the
+      fill is `for … if (sheet.length >= n) break; if (seen.has(entry.path)) continue` — with
+      an empty index half that reproduces the old `[...posed, ...unposed].slice(0, n)` byte
+      for byte, which is what keeps the identity cells passing untouched. `matched` and
+      `truncated` are read off the wire and deliberately unused: recorded in `UNDER_LIMIT`'s
+      comment (a posed model past the cut is invisible; nothing pages, because the
+      alternative is a walk that cannot see past 64 entries either)
+- [x] 5.3 Tests: index-first selection reaching past the walk budget (the Lich Lord shape:
       deep first subtree unindexed, posed models deeper); fill-from-walk; empty-answer
       fallback identity; stat failure on a chosen path drops to the next candidate
-- [ ] 5.4 Second-review findings applied in the same round: probe-cache generation stamp
+      <br>— done 2026-09-01 (S2), `server/test/poses.test.ts` (49 → 62 cells, suite 440 →
+      453, all 14 files green; the known `open.test.ts` abort flake did not appear in three
+      runs). The `fetch` stub gains `/under` — scoped to the asked prefix and cut to the
+      asked `limit`, as the index scopes and cuts, so a confinement bug cannot pass as a
+      green cell — and **absent `under` answers `"unindexed"`**, which is why every cell
+      written before D5 keeps exercising exactly the path it was written about. No existing
+      cell changed. New fixture `lich/` = `01-presupported/{00..79}.txt` + `02-kit/`'s four
+      STLs: eighty entries is past the peek's 64-entry budget, so the walk dies in the first
+      subtree and never reaches the kit.
+      <br>Cells, under `the sheet asks the index before it walks`: "reaches the kit the
+      walk's budget can never get to" (the section's reason — asserts that `peek()` itself answers `[]`
+      as an in-cell control first, then a full posed-first sheet with ordinary `DirEntry`
+      keys and no `/poses` batch at all); "asks about the folder by its real path, and for
+      one answer's worth" (`{path: <real>, limit: UNDER_LIMIT}`); "an unindexed answer is the
+      walk's own sheet, byte for byte" (against `walkSheet`, the pre-D5 body spelled out —
+      the same idiom `identical` uses one change earlier — plus `asked` length 1, so the
+      branch is proven taken rather than skipped); "an index refusal and a 503 fall back the
+      same way"; "fills a short answer from the walk, without repeating what it already has"
+      (2 index models over a folder of 6 → `[f, a, b, c]`, where `a` is also the walk's first
+      find, which is what makes the dedup observable); "an \"ok\" answer holding nothing is
+      the walk's sheet too"; "a chosen model that is no longer there gives its cell to the
+      next candidate" (over `/lich`, whose walk finds nothing — deliberately, so the fill
+      cannot stand in for the recovery: a take-n-then-stat peek comes back with three cells
+      and nowhere to get a fourth); "never previews a model that leaves the library, whatever
+      the index says"; "a stalling /under does not hold the sheet"; "an index that is not
+      answering is never asked at all" (both gates precede `/under` too — zero requests).
+      <br>Falsifications, each run against the named cells and then reverted verbatim:
+      **index half forced to `null` (walk-only)** → 9 of the 10 cells fail, the Lich Lord one
+      with `expected [] to deeply equal [ 'hero.stl', 'minion.stl', …(2) ]`; **dedup dropped
+      from the fill** → `expected [ 'f.stl', 'a.stl', 'a.stl', 'b.stl' ] to deeply equal
+      [ 'f.stl', 'a.stl', 'b.stl', 'c.stl' ]`; **`walkRanked` returning `finds` unranked** →
+      `expected '[{"name":"a.stl",…' to be '[{"name":"c.stl",…'`; **candidates `.slice(0, n)`
+      before stat'ing** → `expected [ 'guard.stl', 'hero.stl', …(1) ] to deeply equal
+      [ 'guard.stl', 'hero.stl', …(2) ]`; **`realTop` containment removed from
+      `entriesUnder`** → `expected [ '/links/escape.stl', …(2) ] to deeply equal
+      [ '/links/real.stl', …(1) ]`; **`UNDER_TIMEOUT_MS` = `QUERY_TIMEOUT_MS`** →
+      `Test timed out in 15000ms`
+- [x] 5.4 Second-review findings applied in the same round: probe-cache generation stamp
       (finding 1), POST per-path canonicalisation (finding 2), client chunk merge
       (finding 4), stale records corrected (finding 5), the two carried cells (finding 6)
       <br>**2026-09-01, worker C2 — findings 4, 5 and 6 done; 1 and 2 are the server's and
@@ -458,6 +523,44 @@
       <br>**Finding 5** — the two stale records corrected in place above (§3.2's
       falsification count and §4's merged-main client count), each labelled as a snapshot of
       an older tree rather than silently overwritten
+      <br>**Server half done 2026-09-01 (S2) — findings 1 and 2. The client half (4, 5, 6)
+      is C2's and this line stays open until it lands.**
+      <br>**Finding 1 (probe-cache write ordering).** `rawStatus` wrote the cache in *settle*
+      order, and the two orders differ exactly where it matters: the client's `fresh` retry
+      deliberately does not join a probe already on the wire, so a slow memoised look
+      answering `warming` could settle *after* the retry's `ready` and overwrite it — the user
+      presses retry, the index says it is up, and the next tile is told it is still loading
+      for the whole warming TTL. `resetIndexStatus` had the same hole from the other side: it
+      dropped the memo, but the probe that memo referred to could still land its pre-reset
+      answer afterwards. Fixed with a module-level `generation` in `semantic.ts`: `look`
+      captures it at start and writes `cached` only if it is unchanged; `rawStatus`' `fresh`
+      branch and `resetIndexStatus` bump it. A superseded answer is still *returned* to
+      whoever awaited it — only not remembered. A generation and not a timestamp because what
+      makes an answer stale here is an event, not an interval, and a `fresh` look and the
+      memoised one it raced share a millisecond routinely.
+      <br>Cells: `poses.test.ts` → `what the probe cache remembers is what was last asked` —
+      "a fresh look is not overwritten by the stale one it raced" (the reviewer's exact race,
+      driven by a new `statusSeries` stub option giving each `/status` ask its own body *and*
+      delay: warming@80 ms then ready@0 ms; asserts the slow one really did answer `warming`,
+      then that the next read is `ready` **and served from cache**, `statusAsks === 2`) and "a
+      probe started before a reset does not land its answer after it". Falsified by dropping
+      the generation guard: `expected 'warming' to be 'ready'` and `expected 1 to be 2`.
+      <br>**Finding 2 (one bad path 400s the batch).** `POST /api/semantic/poses` canonicalised
+      with `paths.map(canonicalLibPath)`, so one path that is not *spelled* like a library
+      path — no leading slash, past the 4096-byte/256-component bound, a nested `!/` — threw
+      out of the map and 400'd the whole request: a single stale tile cost every other tile in
+      a five-hundred-model listing its pose. Now canonicalised per path inside a `try`, and a
+      refusal means **dropped**, exactly as every other per-path refusal on this route means
+      dropped. `LibraryError` and `VPathError` both, since `canonicalLibPath` throws either;
+      anything else still propagates. The array-of-strings check above it stays a 400 — a
+      non-string element is a caller bug about the request's *shape*, while an unspellable
+      path is one entry the answer has nothing to say about. Route comment updated with the
+      distinction. Cell: "drops a path that is not spelled like one, rather than failing the
+      batch" (good + un-rooted + over-long → 200, the good path's pose only, and the upstream
+      batch carries exactly the one real path). Falsified by restoring the bare map:
+      `expected 400 to be 200`
+      <br>Box closed 2026-09-01 (coordinator): server half (S2, findings 1+2) and client
+      half (C2, findings 4+5+6) both merged
 - [ ] 5.5 Live: the 141-tile scan re-run against the complete index; the folder-of-folders
       tiles show posed sheets; fallback proven on an uncovered path
       — baseline recorded 2026-09-01 (coordinator), complete index (3,380 models, 0
