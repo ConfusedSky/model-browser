@@ -66,7 +66,10 @@ of its own.)
 An entry's effective overrides SHALL merge the store's keys on the entry's
 path per field, the nearest key winning each field independently — except
 `name`, which SHALL NOT inherit: a display name names the thing at its own
-key, not its subtree, and resolves from the entry's exact key alone. The ancestor
+key, not its subtree, and resolves from the walk's last ancestor key alone —
+the entry's own key for an ordinary lookup, the archive file's key for a
+zip-root lookup (whose own `…!/` spelling is a key the store forbids, so an
+exact string get could never name it). The ancestor
 walk SHALL follow the virtual-path grammar: a lookup splits into its
 filesystem half and its archive-entry half on the first `!/`; the ancestors
 are the root key `/`, then each ancestor directory of the filesystem half,

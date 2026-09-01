@@ -254,7 +254,14 @@ function parseArgs(argv: string[]): GenerateOptions {
     if (flag === undefined || !flag.startsWith('--') || value === undefined) {
       throw new Error(USAGE)
     }
-    values[flag.slice(2)] = value
+    const name = flag.slice(2)
+    // Rejected, not collected: a misspelled --kit would otherwise be swallowed
+    // and the kit directory would silently default to the top — wrong keys
+    // with a clean exit.
+    if (name !== 'top' && name !== 'metadata' && name !== 'kits') {
+      throw new Error(`unknown flag ${flag}\n${USAGE}`)
+    }
+    values[name] = value
   }
   const top = values.top
   const metadata = values.metadata

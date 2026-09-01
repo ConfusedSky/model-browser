@@ -286,7 +286,7 @@ export function displayNameOf(store: OverrideStore, libPath: string): string | u
 export function applyDisplayNames(entries: DirEntry[], store: OverrideStore): void {
   if (store.size === 0) return
   for (const entry of entries) {
-    const name = store.get(entry.path)?.name
+    const name = displayNameOf(store, entry.path)
     if (name !== undefined) entry.displayName = name
   }
 }
@@ -309,7 +309,9 @@ export async function writeOverrides(top: string, file: OverridesFile): Promise<
   const dir = join(top, MARKER_DIR)
   await mkdir(dir, { recursive: true })
   const target = join(dir, STORE_FILE)
-  const temp = join(dir, `.${STORE_FILE}.${process.pid}.${Date.now()}.tmp`)
+  // pid + ms alone can collide (two writes in one tick of one process); the
+  // random suffix cannot, and a stray loser is dot-prefixed and cleaned below.
+  const temp = join(dir, `.${STORE_FILE}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`)
   try {
     const handle = await open(temp, 'w')
     try {
