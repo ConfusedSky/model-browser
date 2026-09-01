@@ -1,38 +1,169 @@
 # Tasks — thumbnail-sweep-priority
 
-> Ordering: independent of the search and cache changes — it touches the client render queue and grid only. Two drafted changes reach into it: `ao-refreshes-thumbnails` (its 2.1 names a *parked* per-entry state for this change's far-band cancellation — whichever lands second names it) and `folder-contact-sheets` (its 2.2 needs the wholesale ranking to take a per-path *max* band and to share one `IntersectionObserver` in `Grid`). Re-read `queue.ts`, `useThumbnails.ts`, and `Grid.tsx` against main before starting (parallel sessions).
+> **Rebased 2026-09-01 against main `62f9f2d`.** The pre-rebase ordering note
+> named `ao-refreshes-thumbnails` and `folder-contact-sheets` as *drafted* changes
+> to coordinate with; both archived 2026-08-31, along with `ao-as-recipe-dimension`
+> and `remove-axis-lighting`, and `pose-for-every-model` is complete. Their
+> constraints are therefore no longer negotiable ordering — they are the shape of
+> the code, and every task below is written against it. In particular: this change
+> lands second, so the *parked* per-entry state is **this change's to name**
+> (`ao-refreshes-thumbnails` 2.1's "name it in whichever of the two changes lands
+> second"), and the shared-observer joining is this change's to do
+> (`folder-contact-sheets` 2.2's "done as the **standalone** observer … that
+> change does the joining when it does").
+>
+> Ordering now: independent of the remaining active changes. `adaptive-ao-default`
+> only feeds `useThumbnails`' `ao` argument, `library-overrides` only adds a
+> `displayName` label in `Grid.tsx`'s tile body, and nothing active touches
+> `queue.ts`. Still re-read `queue.ts`, `useThumbnails.ts`, `Grid.tsx` and
+> `App.tsx` against main before starting — parallel sessions.
+>
+> No `RIG_VERSION` bump: this is scheduling, not the recipe.
 
 ## 1. Queue priority
 
-- [ ] 1.1 `RenderQueue.push` takes a key with the job; `pump` selects the best-ranked pending job instead of `jobs.shift()`, with ties keeping insertion order so an unranked queue behaves exactly as today's FIFO (D1)
-- [ ] 1.2 A method to replace the whole ranking at once (the grid recomputes bands wholesale on scroll, rather than moving keys one at a time)
-- [ ] 1.3 Unit tests, DOM-free as the existing queue tests are: ranked jobs run before unranked; a re-ranking mid-flight changes what runs next but never interrupts a running job; ties preserve insertion order; concurrency and the suspend/`whenResumed` gating are unchanged
+- [ ] 1.1 `RenderQueue.push` takes a key with the job; `pump` selects the
+      best-ranked pending job instead of `jobs.shift()`, with ties keeping
+      insertion order so an unranked queue behaves exactly as today's FIFO (D1).
+      Ties matter more than they look: `App`'s `thumbEntries` carries preview
+      models whose paths may never be reported by any tile, so "unranked" is a
+      live case, not a fallback
+- [ ] 1.2 A method to replace the whole ranking at once (the grid recomputes bands
+      wholesale on scroll, rather than moving keys one at a time)
+- [ ] 1.3 Unit tests in `client/test/queue.test.ts`, DOM-free as its four existing
+      cells are: ranked jobs run before unranked; a re-ranking mid-flight changes
+      what runs next but never interrupts a running job; ties preserve insertion
+      order; concurrency and the `suspend`/`resume`/`whenResumed` gating are
+      unchanged
 
 ## 2. Visibility
 
-- [ ] 2.1 `Grid` observes tiles with an `IntersectionObserver` (with a prefetch margin) and reports three coarse bands — visible / near / far — throttled; no per-pixel ranking (D2)
-- [ ] 2.2 `useThumbnails` pushes jobs keyed by path and feeds the band map into the queue's re-ranking
+- [ ] 2.1 Widen `Grid`'s **existing** observer effect (the one keyed on
+      `[entries, onPeek]` that watches `[data-dir-tile]`) rather than adding a
+      second: observe model tiles too — they already carry
+      `data-model-tile={entry.path}`, so no tile markup changes — add a prefetch
+      `rootMargin`, and report three coarse bands (visible / near / far),
+      throttled, no per-pixel ranking (D2)
+- [ ] 2.2 **Drop `observer.unobserve(record.target)`** from that effect: a band
+      tracker must keep watching a tile after its first intersection. Safe because
+      `App`'s `requestPeek` already refuses a repeat with
+      `if (previewsRef.current.has(path) || inFlightPeeks.current.has(path)) return`
+      — that guard was the backstop and becomes the only guard, so a regression in
+      it now costs a duplicate peek per scroll rather than per re-render. Assert it
+      (task 4.1) rather than trusting it
+- [ ] 2.3 A folder tile registers **its preview models' paths under its own band**;
+      a path that is both a visible tile and a far folder's preview takes the
+      *nearest* band — a per-path max — so a far band never cancels visible work
+      (D2; the rule is `folder-contact-sheets` tasks 2.2 and its "preview renders
+      compete with tile renders for the queue" risk, which deferred only the code).
+      The folder's preview paths are in `App`'s `previews` map, which `Grid`
+      already receives as the `previews` prop
+- [ ] 2.4 Bands **never** become a `Tile` prop — `tilePropsEqual` is a keys-based
+      shallow compare, so one would re-render all 500 tiles per scroll settle. The
+      observer reads paths off the DOM attributes and reports them imperatively
+      (D2/D3)
 
-## 3. Cancellation on scroll-away
+## 3. The parked state
 
-- [ ] 3.1 A tile entering the `far` band cancels its **unstarted** job via the handle `push` already returns; a started job runs to completion — it holds a renderer slot and its mesh read is in flight (D3)
-- [ ] 3.2 A cancelled tile returns to **placeholder**, never to the error state `model-thumbnails` reserves for a model that failed to load or parse; re-entering the viewport re-queues it, and the mesh LRU makes that re-queue cheap (D4)
+- [ ] 3.1 `useThumbnails` returns `setBands(map)` beside `setThumb`,
+      `setPlaceholder` and `discardThumbFraming`; `App` holds it by identity (as it
+      holds `onPeek`) and passes it to `Grid`. **Document the contract where it is
+      declared**: idempotent, latest-wins per path, safe at scroll-settle
+      frequency, and it parks/unparks slots *without* a sweep-effect re-run —
+      including the one-sentence reason a `bands` argument was rejected, so nobody
+      simplifies back to a dependency that would pay a 500-entry reconcile walk per
+      scroll (D3)
+- [ ] 3.2 `EntrySlot` gains its `DirEntry` (subsuming `mtime`) — say **why** in the
+      field's comment: a parked slot must restart through `start(entry, slot)`
+      outside the sweep effect, where there is no `entries` array to look the entry
+      up in (D3)
+- [ ] 3.3 Make the render tail separately cancellable. Today `slot.cancels` is a
+      flat, unlabelled `(() => void)[]` holding the lookup handle, then `dropStale`
+      and the `queue.push` handle, and only `retire` fires it — firing all of it. A
+      parked slot needs the render handle alone, plus `dropStale` (a cancelled job
+      never runs, so its stale PNG object URL would otherwise leak) (D4)
+- [ ] 3.4 A tile entering the `far` band parks its **unstarted** render; a started
+      job runs to completion — it holds a renderer slot and its mesh read is in
+      flight (D4). A parked slot keeps everything it displays: `slot.url` is
+      untouched, so the tile shows what it had — the `{ status: 'loading' }`
+      placeholder, an embedded-3MF preview from `setPlaceholder`, or a previous
+      render — and **never** the error state `model-thumbnails` reserves for a model
+      that failed to load or parse
+- [ ] 3.5 Re-entering the viewport restarts a parked slot through the reconciler's
+      own retire/start seam — the one whose comment already names this plug-in
+      point ("This is also where a *parked* entry … would be restarted when its
+      tile comes back"). Update that comment to describe what landed rather than
+      what was anticipated. The mesh LRU makes the restart cheap (D6)
 
-## 4. Tests
+## 4. Composing with the recipe (D5)
 
-- [ ] 4.1 Component tests on the shared harness: a large uncached listing scrolled immediately to the bottom renders the now-visible tiles before the earlier ones — the assertion that fails under FIFO; a tile scrolled away before starting is not rendered; scrolled away and back, it ends up rendered and never shows the error state; a listing with all thumbnails cached is unaffected (those never enter the queue)
-- [ ] 4.2 Confirm no renderer-mock updates are needed and `RIG_VERSION` is untouched — this changes scheduling, not the recipe; if a mock needs touching, that is a signal something rendering-related moved
+- [ ] 4.1 A preference or pose retirement **restarts the lookup for every slot,
+      parked or not, and leaves a far slot's render parked.** A parked far tile
+      whose new-recipe render is already cached therefore repaints at once, which
+      is what keeps *Recipe-labelled thumbnails*' "showing a render already cached
+      under the new setting at once" literally true for every tile; one whose new
+      recipe is not cached stays parked and renders when its tile returns
+- [ ] 4.2 A parked tail restarts under the slot's **current** `(ao, pose)`, never
+      the recipe it was parked under. This falls out of `start` reading `slot.ao`
+      and `slot.pose` at restart time rather than being enforced separately —
+      assert it, since it is the kind of property a refactor can silently break by
+      capturing the recipe at park time
+- [ ] 4.3 Confirm the reconciler's survivor branch
+      (`if (slot.ao === ao && samePose(slot.pose, pose)) continue`) is not the
+      unparking path and must not become one: it `continue`s a parked slot, whose
+      inputs are unchanged, and visibility is not a dependency of that effect
 
-## 5. Verification
+## 5. Tests
 
-- [ ] 5.1 `bun run typecheck` and `bun run test` pass across workspaces
-- [ ] 5.2 Manual E2E via Playwright MCP against the real library, with the thumbnail cache cleared for the target directory (`~/.cache/model-browser`): open a 500-tile flat listing, scroll immediately to the bottom, and confirm visible tiles resolve in seconds rather than after the earlier ~490. Record the measured time-to-first-visible-image before and after — the proposal's claim is time-to-image for what you are looking at, not total sweep time, and the numbers should say exactly that
-- [ ] 5.3 **Inherited from `score-floor-by-default` 4.2b**, which archived (2026-08-27) with this
-      as its one open line — it was blocked on this change and had nowhere else to live. Re-measure
-      the capped-set sweep once 5.2 is done: a generic meaning phrase now caps at 500 tiles
-      (`fantasy character` has 875 models above the 0.1 floor), and at the ~1.07 thumbnails/s
-      measured there such a grid fills for minutes. That cap is a **wall**, not a horizon — the
-      500th tile still reads `k 0.122` against a first tile of `k 0.146` — so the whole 500 are
-      plausible matches a user will scroll, which is exactly the case this change exists for.
-      Prioritising visible tiles is what makes a capped meaning result usable rather than merely
-      correct. Use a capped meaning search as the fixture, not only a flat listing
+- [ ] 5.1 Hook-level cells in `client/test/thumbnailQueue.test.tsx` (the reconciler
+      suites live there — "the sweep reconciles its entries instead of resetting
+      them", "a preference change refreshes the grid in front of you"): a large
+      uncached listing with the bottom tiles reported visible renders those before
+      the earlier ones — the assertion that fails under FIFO; a tile parked before
+      starting is not rendered; parked and unparked, it ends up rendered and never
+      shows the error state; a preference change over a parked far tile issues its
+      lookup but no render, and shows a cached new-setting render at once (4.1); a
+      parked tail restarts under the current recipe, not the parked one (4.2); a
+      listing with all thumbnails cached is unaffected (those never enter the queue)
+- [ ] 5.2 App-mount cells in `client/test/folderSheets.test.tsx`, reusing its
+      `StubObserver`, `vi.stubGlobal('IntersectionObserver', StubObserver)`,
+      `intersect(el)` and `awayAndBack()` rather than writing a second stub —
+      happy-dom's own `IntersectionObserver` has no-op `observe`/`disconnect`, so a
+      real one makes every cell pass by never running. Cover: a preview model takes
+      its folder tile's band (2.3); a path that is both a visible tile and a far
+      folder's preview takes the nearest band; dropping `unobserve` still yields
+      exactly one peek per folder per listing, through `requestPeek`'s guard (2.2)
+- [ ] 5.3 Confirm no renderer-mock updates are needed and `RIG_VERSION` is
+      untouched — this changes scheduling, not the recipe; if a mock needs touching,
+      that is a signal something rendering-related moved. (`thumbnailQueue.test.tsx`
+      spreads the real renderer module, so a bump would surface rather than hide)
+
+## 6. Verification
+
+- [ ] 6.1 `bun run typecheck` and `bun run test` pass across workspaces
+- [ ] 6.2 Manual E2E via Playwright MCP against the real library, with the thumbnail
+      cache cleared for the target directory
+      (`~/.cache/model-browser/<library-id>/`): open a 500-tile flat listing, scroll
+      immediately to the bottom, and confirm visible tiles resolve in seconds rather
+      than after the earlier ~490. Record the measured time-to-first-visible-image
+      before and after — the proposal's claim is time-to-image for what you are
+      looking at, not total sweep time, and the numbers should say exactly that.
+      Re-measure the 2026-08-18 baseline in the same run rather than citing it: it
+      is a relayed figure from that session
+- [ ] 6.3 **Inherited from `score-floor-by-default` 4.2b**, which archived
+      (2026-08-27) with this as its one open line — it was blocked on this change
+      and had nowhere else to live. Re-measure the capped-set sweep once 6.2 is
+      done, using a **capped meaning search** as the fixture, not only a flat
+      listing: the two caps are different symbols (`listFlat`'s `cap` from
+      `envLimit('MODEL_BROWSER_FLAT_CAP', 500)` for the listing,
+      `MAX_RESULT_COUNT = 500` in `shared/types.ts` for the index), and this line is
+      about the latter. That cap is a **wall**, not a horizon — so the whole 500 are
+      plausible matches a user will scroll, which is exactly the case this change
+      exists for. Prioritising visible tiles is what makes a capped meaning result
+      usable rather than merely correct.
+      <br>The figures the carried line quotes are **relayed from
+      `score-floor-by-default`'s 2026-08-27 run** and are the thing to re-measure,
+      not to re-cite: `fantasy character` returning 875 models above the 0.1 floor,
+      the 500th tile at `k 0.122` against a first tile of `k 0.146`, and
+      ~1.07 thumbnails/s. Re-run them here and record whose run the new numbers are
+      from
