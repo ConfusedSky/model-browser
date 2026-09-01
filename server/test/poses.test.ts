@@ -56,6 +56,7 @@ import { PEEK_MAX_FINDS, peek } from '../src/listing'
 import {
   POSES_MAX,
   UNDER_LIMIT,
+  entriesUnder,
   posesForPaths,
   probeStatus,
   resetIndexStatus,
@@ -142,6 +143,16 @@ mkdirSync(join(libTop, 'lich', '02-kit'))
 const LICH_KIT = ['guard.stl', 'hero.stl', 'minion.stl', 'scout.stl']
 LICH_KIT.forEach((n, i) => writeFileSync(join(libTop, 'lich', '02-kit', n), stlBytes(80 + i)))
 
+/**
+ * A second, equally real spelling of `lich/`. The index is a separate run with
+ * its own view of the volume, and one invoked through a symlinked root answers
+ * paths under *that* root — `aka/lich/02-kit/hero.stl` for the file this server
+ * calls `lich/02-kit/hero.stl`. Nothing here peeks `/aka`; it exists so a cell
+ * can hand the peek an answer in a spelling it did not ask in.
+ */
+mkdirSync(join(libTop, 'aka'))
+symlinkSync(join(libTop, 'lich'), join(libTop, 'aka', 'lich'))
+
 mkdirSync(join(libTop, 'empty'))
 
 const cacheDir = realTempDir('mb-poses-cache-')
@@ -185,6 +196,15 @@ interface UnderStub {
   models: readonly string[]
   /** Which of them carry an orientation. Everything else answers `pose: null`. */
   posed?: readonly string[]
+  /**
+   * Re-spell the paths the answer carries, *after* the scoping and the cut have
+   * been done on the real ones. A classify run invoked through a symlinked root
+   * answers in that root's spelling for a tree this server names another way,
+   * and there is no other way to produce that from out here. Applied last on
+   * purpose: the stub stays as strict about the prefix and the limit as the
+   * index is, so a confinement bug still cannot pass as a green cell.
+   */
+  spellAs?: { from: string; to: string }
 }
 
 interface Stub {
@@ -206,6 +226,10 @@ interface Stub {
   underStatus?: number
   /** Hold `/under` open forever, answering only the caller's abort. */
   underHangs?: boolean
+  /** Answer `/under` 200 with a body that is not JSON at all. */
+  underMalformed?: boolean
+  /** Answer `/under`'s *headers* at once and never finish its body. */
+  underBodyStalls?: boolean
   /** Which real paths have a pose. Everything else asked about answers `null`. */
   posed?: readonly string[]
   /** Answer `/poses` with this status instead of 200 (503 = still loading). */
@@ -215,6 +239,10 @@ interface Stub {
    * the request's own timeout is observable from out here.
    */
   posesHangs?: boolean
+  /** Answer `/poses` 200 with a body that is not JSON at all. */
+  posesMalformed?: boolean
+  /** Answer `/poses`' *headers* at once and never finish its body. */
+  posesBodyStalls?: boolean
   /** Make `/status` take long enough that concurrent callers really overlap. */
   statusDelayMs?: number
 }
@@ -234,6 +262,36 @@ function hang(signal: AbortSignal | undefined): Promise<Response> {
     signal.addEventListener('abort', () => reject(signal.reason))
   })
 }
+
+/**
+ * `hang()`'s other half: a **200 that arrives** and then says nothing more. The
+ * status line and the headers are in on time, so `fetch` resolves and the
+ * request's own `try` is already behind us; the body never lands, and the
+ * timeout that was going to abort the request aborts the *read* instead.
+ *
+ * A real `fetch` wires its signal to the body stream it hands back. This one is
+ * a stub, so the wiring is done by hand — the same `signal.reason` `hang`
+ * rejects with, delivered to the stream rather than to the promise. Without it
+ * the read would hang for real and nothing would ever fail.
+ */
+function stalledBody(signal: AbortSignal | undefined): Response {
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        if (signal === undefined) return
+        signal.addEventListener('abort', () => controller.error(signal.reason))
+      },
+    }),
+    { headers: { 'content-type': 'application/json' } },
+  )
+}
+
+/** A 200 whose body is not JSON: the other way a request that *arrived* has no
+ *  answer in it. */
+const malformedBody = (): Response =>
+  new Response('{"status": "ok", "models": [', {
+    headers: { 'content-type': 'application/json' },
+  })
 
 function stubIndex(stub: Stub): void {
   sent = []
@@ -261,6 +319,8 @@ function stubIndex(stub: Stub): void {
         const body = JSON.parse(init.body ?? '{}') as { path: string; limit: number }
         asked.push(body)
         if (stub.underHangs === true) return hang(init.signal)
+        if (stub.underMalformed === true) return malformedBody()
+        if (stub.underBodyStalls === true) return stalledBody(init.signal)
         if (stub.underStatus !== undefined && stub.underStatus !== 200) {
           return new Response(JSON.stringify({ detail: 'no' }), { status: stub.underStatus })
         }
@@ -275,9 +335,14 @@ function stubIndex(stub: Stub): void {
         // and cuts: a stub that answered a sibling's models would let a
         // confinement bug through as a passing cell.
         const under = held.models.filter((p) => p.startsWith(`${body.path}/`))
-        const models = under
-          .slice(0, body.limit)
-          .map((p) => ({ path: p, pose: (held.posed ?? []).includes(p) ? POSE : null }))
+        const spell = held.spellAs
+        const models = under.slice(0, body.limit).map((p) => ({
+          path:
+            spell !== undefined && p.startsWith(spell.from)
+              ? spell.to + p.slice(spell.from.length)
+              : p,
+          pose: (held.posed ?? []).includes(p) ? POSE : null,
+        }))
         return new Response(
           JSON.stringify({
             status: 'ok',
@@ -292,6 +357,8 @@ function stubIndex(stub: Stub): void {
         const body = JSON.parse(init.body ?? '{}') as { paths: string[] }
         sent.push(body)
         if (stub.posesHangs === true) return hang(init.signal)
+        if (stub.posesMalformed === true) return malformedBody()
+        if (stub.posesBodyStalls === true) return stalledBody(init.signal)
         if (stub.posesStatus !== undefined && stub.posesStatus !== 200) {
           return new Response(JSON.stringify({ detail: 'no' }), { status: stub.posesStatus })
         }
@@ -468,6 +535,23 @@ describe('an index that cannot answer costs the listing nothing', () => {
     stubIndex({ posesStatus: 400 })
     expect(await posesOf('/mixed')).toEqual({})
   })
+
+  it('a 200 whose body never lands is empty as well, and still a 200', async () => {
+    // The failures that happen *after* `fetch` resolved: a body that does not
+    // parse, and one whose read is aborted by the request's own timeout with
+    // the headers long since in. Neither is a `TypeError` from the network, so
+    // before the body read moved inside a `try` they came out of `askIndex` as
+    // a bare `SyntaxError`/`AbortError` — past the `IndexError` catch that is
+    // the whole of "a pose never fails a listing", and a 500 for the wave.
+    for (const stub of [{ posesMalformed: true }, { posesBodyStalls: true }]) {
+      stubIndex({ ...stub, posed: [fs('mixed', 'c.stl')] })
+      expect(await posesOf('/mixed')).toEqual({})
+      expect(sent).toHaveLength(1)
+      // The paths form takes the same route in, so it takes the same way out.
+      stubIndex({ ...stub, posed: [fs('mixed', 'c.stl')] })
+      expect(await posesFor(['/mixed/c.stl', '/mixed/a.stl'])).toEqual({})
+    }
+  }, 20_000)
 })
 
 describe('the poses route', () => {
@@ -810,6 +894,66 @@ describe('the sheet asks the index before it walks', () => {
     expect(names(sheet)).not.toContain('secret.stl')
   })
 
+  it('a directory outside the library lends its inside to nothing', async () => {
+    // Candidates are confined against the peeked directory and nothing else,
+    // which is only safe because that directory is inside the library by
+    // construction (`scopeWithin`, over a root `mapCollectionRoot` already
+    // proved the library holds). The premise is checked rather than assumed,
+    // and here is where it is observable: no route can hand `entriesUnder` such
+    // a directory, so the boundary itself is what has to hold the line.
+    expect(
+      await entriesUnder(
+        library,
+        [{ path: join(outsideFs, 'secret.stl'), pose: POSE }],
+        outsideFs,
+        '/links',
+        4,
+      ),
+    ).toEqual([])
+  })
+
+  it('takes the index’s answer in whatever spelling the index walked in', async () => {
+    // The divergence a lexical prefix test cannot survive: the classify run was
+    // invoked through `aka/lich`, so it answers about `aka/lich/02-kit/…` for a
+    // folder this server asked about as `lich/`. Same files, same inodes, two
+    // spellings — and confined on the realpath, so the sheet fills exactly as it
+    // does when the two agree.
+    stubIndex({
+      under: {
+        models: LICH_KIT.map(kit),
+        posed: [kit('hero.stl'), kit('minion.stl')],
+        spellAs: { from: fs('lich'), to: fs('aka', 'lich') },
+      },
+    })
+    const sheet = await peekOf('/lich', 4)
+    expect(names(sheet)).toEqual(['hero.stl', 'minion.stl', 'guard.stl', 'scout.stl'])
+    // Addressed by the spelling the *tile* was addressed by, never the index's:
+    // the alias is the index's business and `/aka/lich/…` is not what the client
+    // asked about. `/lich` walks up empty, so every cell here came from the
+    // index — a lexical test would leave the sheet empty rather than wrong.
+    expect(sheet.map((e) => e.path)).toEqual([
+      '/lich/02-kit/hero.stl',
+      '/lich/02-kit/minion.stl',
+      '/lich/02-kit/guard.stl',
+      '/lich/02-kit/scout.stl',
+    ])
+    expect(sent).toHaveLength(0)
+  })
+
+  it('a 200 the index cannot finish saying falls back to the walk', async () => {
+    // Two ways an answer that *arrived* still is not one: a body that does not
+    // parse, and a body that never lands until the request's own timeout aborts
+    // the read. Both fail after `fetch` resolved — outside the try that catches
+    // a refusal — and neither is an `IndexError`, so before the body read moved
+    // inside the try they escaped `modelsUnder` and 500'd the peek. A peek may
+    // not fail because the index did: silence, of any kind, is the walk.
+    for (const stub of [{ underMalformed: true }, { underBodyStalls: true }]) {
+      stubIndex({ ...stub, posed: [fs('mixed', 'c.stl'), fs('mixed', 'e.stl')] })
+      expect(names(await peekOf('/mixed', 4))).toEqual(['c.stl', 'e.stl', 'a.stl', 'b.stl'])
+      expect(asked).toHaveLength(1)
+    }
+  }, 15_000)
+
   it('a stalling /under does not hold the sheet', async () => {
     // The `/poses` stall cell's shape, one call earlier: `/under` is advisory and
     // is given that call's budget, so a tile falls back to the walk rather than
@@ -856,6 +1000,30 @@ describe('what the probe cache remembers is what was last asked', () => {
     // The stale answer was returned to whoever awaited it and not remembered:
     // the next read is served from the cache, and the cache says `ready`.
     expect((await probeStatus(library)).status.state).toBe('ready')
+    expect(statusAsks).toBe(2)
+  })
+
+  it('two retries at once: the later look wins, not the later answer', async () => {
+    // The other side of the same rule, and the one no memo is involved in: two
+    // explicit retries overlap, because `fresh` deliberately never joins a probe
+    // already on the wire. The second bump discards the first look's write, so
+    // what the cache ends up holding is the answer to the question asked *last*
+    // — which is the whole meaning of pressing retry twice. Settle order would
+    // give the opposite: the slow first look lands afterwards and the user is
+    // told `warming` by the retry they made after being told `ready`.
+    stubIndex({
+      statusSeries: [
+        { body: { ...READY, ready: false, elapsed: 3 }, delayMs: 80 },
+        { body: READY, delayMs: 0 },
+      ],
+    })
+    const first = probeStatus(library, { fresh: true })
+    const second = probeStatus(library, { fresh: true })
+    expect((await second).status.state).toBe('ready')
+    // The slow one really did answer, and really did answer differently.
+    expect((await first).status.state).toBe('warming')
+    expect((await probeStatus(library)).status.state).toBe('ready')
+    // Served from the cache: two looks, and the third read paid for none.
     expect(statusAsks).toBe(2)
   })
 

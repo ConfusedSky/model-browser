@@ -591,6 +591,85 @@
       `expected 400 to be 200`
       <br>Box closed 2026-09-01 (coordinator): server half (S2, findings 1+2) and client
       half (C2, findings 4+5+6) both merged
+      <br>**2026-09-01, closing review of §5 — three server findings applied (worker SF).**
+      Suite `server` 454 → 459, `poses.test.ts` 62 → 67, all 14 files green (the known
+      `open.test.ts` abort flake did not appear).
+      <br>**F1 (MEDIUM) — a 200 with an unreadable body escaped the walk fallback.**
+      `askIndex`' `try` wrapped only the `fetch`; `return res.json()` sat outside it. A 200
+      whose body does not parse throws `SyntaxError`, and one whose body read is aborted
+      mid-stream by `AbortSignal.timeout` — headers in on time, body stalled — throws a
+      `DOMException` `TimeoutError`. Neither is an `IndexError`, and `modelsUnder` and
+      `posesForPaths` catch `IndexError` and nothing else, so both escaped: the peek 500'd
+      (tile falls back to its icon) and the pose wave lost the whole listing, against the
+      delta's "silence → walk". The body read is now its own `try` mapping to the same
+      `IndexError('absent')` + `resetIndexStatus()` a network failure takes — an index that
+      cannot finish saying what it means is one that is not answering. Cells:
+      `poses.test.ts` → "a 200 the index cannot finish saying falls back to the walk"
+      (`/under`, malformed and stalled, both → the walk's sheet, `asked` length 1 so the
+      branch is proven taken) and "a 200 whose body never lands is empty as well, and still
+      a 200" (`/poses`, both bodies, through the GET *and* the POST — `posesForPaths`
+      answers `{}`). New stub parts: `malformedBody()`, and `stalledBody()` — `hang()`'s
+      other half, resolving the Response at once and wiring `signal.reason` into the body
+      stream by hand, since a stubbed `fetch` is not wired to the signal the way a real one
+      is. Falsified by putting the body read back outside the try → **2 fail**, both
+      `expected 500 to be 200`; the escaping errors captured verbatim under vitest/Node:
+      `SyntaxError: Unexpected end of JSON input` and `TimeoutError: The operation was
+      aborted due to timeout` (under Bun the first reads `SyntaxError: Failed to parse
+      JSON`).
+      <br>**F2 (MEDIUM) — `entriesUnder`'s confinement could silently zero out D5.**
+      `/under` answers paths in the index's own spelling, and `entriesUnder` required
+      `resolve(m.path)` to lexically prefix `dirReal` (a realpath). A classify run invoked
+      through a symlinked root — a configuration that has happened (mini-classify
+      `340a8f0`'s history) — answers `/alias/kit/x.stl` for a tree this server calls
+      `/real/kit/x.stl`, so *every* answered path failed the test, `fromIndex` was always
+      empty, every folder degraded to the walk, and nothing reported it. Now confined on
+      the candidate's **realpath** against a once-resolved `dirTop`, with the tail taken
+      off the real path too, and the `stat` moved onto it; the `realpath` is one syscall
+      per *chosen* candidate, taken before the `stat` and dropping the candidate the same
+      way, so a sheet of four still costs four of each over a 256-model answer. The
+      library-wide `realTop` test is **gone from the loop** and deliberately: the peeked
+      directory is inside the library by construction (`scopeWithin`, over a root
+      `mapCollectionRoot` proved the library holds), so a realpath under it is under the
+      library, and keeping the second test would have left the escape case with no single
+      mutation that falsifies it. That construction argument is now checked instead of
+      assumed — once, before any candidate: a `dirTop` outside `realTop` answers nothing.
+      Cells: `UnderStub.spellAs` lets the stub re-spell what it answers *after* scoping and
+      cutting on the real paths (so a confinement bug still cannot pass green), fixture
+      gains `aka/lich -> lich`, and "takes the index's answer in whatever spelling the
+      index walked in" peeks `/lich` — whose walk finds nothing — and gets the full posed
+      sheet addressed by `/lich/02-kit/…`, the spelling the *tile* was addressed by.
+      "a directory outside the library lends its inside to nothing" drives `entriesUnder`
+      directly, the only place the guard is observable. Falsifications: **back to the
+      lexical prefix** → 2 fail, `expected [] to deeply equal [ 'hero.stl', 'minion.stl',
+      …(2) ]` (the divergent cell) and `expected [ '/links/escape.stl', …(2) ] to deeply
+      equal [ '/links/real.stl', …(1) ]` (the escape cell, which the lexical form no longer
+      catches once `realTop` is out of the loop); **the realpath containment removed** →
+      `expected [ '/links/b/secret.stl', …(2) ] to deeply equal [ '/links/real.stl', …(1) ]`
+      — so the escape falsification still bites, on the one test that now carries it;
+      **the `dirTop`-in-library guard removed** → `expected [ { name: 'secret.stl', …(5) } ]
+      to deeply equal []`.
+      <br>**F4 (LOW) — `UNDER_LIMIT`'s comment misstated the truncation outcome.** It
+      claimed a folder whose first 256 indexed models are all unposed "shows the walk's
+      sheet"; it does not — `entriesUnder` returns four of *those* unposed models, the
+      answer fills the sheet, and the walk is never consulted. Rewritten to what the code
+      does; the acceptance itself (a posed model past the cut is invisible, nothing pages)
+      is unchanged.
+      <br>**Plus one coverage cell the review asked after:** "two retries at once: the
+      later look wins, not the later answer" — two concurrent `fresh` probes, the memo-free
+      arrangement of finding 1's rule, where the second bump discards the first look's
+      write. Mutations it catches: the generation guard dropped from `look` (`expected
+      'warming' to be 'ready'`, alongside both existing cells → 3 fail) and the `fresh`
+      branch not bumping `generation` (same message, alongside the existing race cell → 2
+      fail). It catches no mutation the existing race cell misses — its keep is the second
+      arrangement, not a new mutation, and that is what it is here for.
+      <br>**Accepted, not fixed** (both LOW, reviewer-classified display-only): the
+      **walk/index alias double-cell case** — the index answers one real path, the fill
+      then contributes an in-library alias of the same file, and the sheet shows the model
+      twice under two library paths (`seen` dedupes by library path, which is the address
+      the tile is asked about, so it cannot see the two as one); and the **basename display
+      collision** — `entriesUnder` names cells by `basename`, so two models with the same
+      filename in different subfolders under the peeked directory read identically on the
+      sheet. Both are what four cells *look* like, never what they address or render.
 - [x] 5.5 Live: the 141-tile scan re-run against the complete index; the folder-of-folders
       tiles show posed sheets; fallback proven on an uncovered path
       — baseline recorded 2026-09-01 (coordinator), complete index (3,380 models, 0

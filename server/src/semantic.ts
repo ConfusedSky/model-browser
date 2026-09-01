@@ -447,7 +447,22 @@ async function askIndex(
     // report it as what it is rather than as availability.
     throw new IndexError('ready', message, res.status)
   }
-  return res.json()
+  try {
+    return await res.json()
+  } catch {
+    // The body is read inside a `try` for the same reason the request is, and
+    // it is a *second* one because the headers arriving is not the answer: a
+    // 200 whose JSON does not parse, and a 200 whose body stalls until
+    // `AbortSignal.timeout` aborts the read, both fail here rather than above.
+    // Neither is an `IndexError`, and `posesForPaths` and `modelsUnder` catch
+    // `IndexError` and nothing else — so a bare `SyntaxError` or `AbortError`
+    // escaping this call would 500 a peek and empty a pose wave's whole
+    // listing, against "silence → walk". An index that cannot finish saying
+    // what it means is an index that is not answering, and is treated as one,
+    // forgotten status and all.
+    resetIndexStatus()
+    throw new IndexError('absent', 'the semantic index is not answering')
+  }
 }
 
 export async function query(
@@ -791,8 +806,10 @@ export async function posesForDir(
  * the number is not about the sheet: it is about how deep into a folder's models
  * the *posed* ones may sit before the sheet stops seeing them. The index answers
  * in its own deterministic order (relative path), not posed-first, so a folder
- * whose first 256 indexed models all lack an orientation shows the walk's sheet
- * even though the index holds a posed one at position 257.
+ * whose first 256 indexed models all lack an orientation shows four of *those*
+ * — the answer is a real one and fills the sheet, so the walk is never
+ * consulted — even though the index holds a posed model at position 257. The
+ * cut costs the sheet its ranking there, not its cells.
  *
  * `matched` and `truncated` come back beside the models and are advisory here:
  * nothing re-asks for a second page, because the alternative to a truncated
@@ -883,6 +900,28 @@ export async function modelsUnder(
  * previews `/links/in/x.stl` — the spelling the walk produces for the same file
  * — rather than the symlink's target under the collection.
  *
+ * Confined on each candidate's **realpath**, never on the spelling it arrived
+ * in. `/under` answers paths as the index walked them, and the index is a
+ * separate run with its own idea of where the collection is: invoked through a
+ * symlinked root — a configuration that has actually happened (mini-classify
+ * `340a8f0`'s history) — it answers `/alias/kit/x.stl` for a tree this server
+ * calls `/real/kit/x.stl`. A lexical prefix test against the peeked directory
+ * fails on *every* such path, so nothing is ever confined in, `fromIndex` is
+ * always empty, and D5 silently becomes the walk again for the whole library
+ * with no surface reporting it. The `realpath` is one syscall per *chosen*
+ * candidate, taken before the `stat` and dropping the candidate the same way
+ * the `stat` does, so a sheet of four still costs four of each over a
+ * 256-model answer.
+ *
+ * That one test is the whole confinement, and deliberately: the peeked
+ * directory is inside the library — `scopeWithin` produced it, against a
+ * collection root `mapCollectionRoot` already proved the library holds — so a
+ * realpath under it is under the library too, and `hitsToEntries`' second,
+ * library-wide test would be unfalsifiable code here rather than defence.
+ * What that argument rests on is the *argument*, so the argument is checked:
+ * a `dirReal` outside the library answers nothing at all, once, before any
+ * candidate is looked at.
+ *
  * Ranked posed-first as a **stable partition**, not a sort: both halves keep the
  * index's own order, so the sheet is a function of the answer and of nothing
  * else, which is what the requirement's determinism clause promises.
@@ -903,31 +942,41 @@ export async function entriesUnder(
 ): Promise<DirEntry[]> {
   const posed = models.filter((m) => m.pose !== null)
   const unposed = models.filter((m) => m.pose === null)
-  const realTop = library.realTop()
   const out: DirEntry[] = []
+  // The base every candidate is measured against, resolved once. `scopeWithin`
+  // already hands a realpath, so this is normally `dirReal` itself; taking it
+  // anyway is what stops the test depending on how the caller spelled it.
+  const dirTop = await realpath(dirReal).catch(() => dirReal)
+  // The premise the single per-candidate test rests on, checked rather than
+  // assumed: a directory outside the library cannot lend its inside to
+  // anything.
+  const realTop = library.realTop()
+  if (dirTop !== realTop && !dirTop.startsWith(realTop + sep)) return out
   const seen = new Set<string>()
   for (const m of [...posed, ...unposed]) {
     if (out.length >= n) break
-    // `resolve` normalises `..` before the prefix test, for the reason
-    // `hitsToEntries` gives: this is a path string from another process, and
-    // normalising is what stops it naming a file outside what was asked about.
+    // `resolve` normalises `..`, for the reason `hitsToEntries` gives: this is
+    // a path string from another process, and normalising is what stops a
+    // `..` naming a file outside what was asked about before it is resolved.
     const full = resolve(m.path)
-    if (!full.startsWith(dirReal + sep)) continue
-    // Inside the directory is not yet inside the library: the index followed
-    // symlinks when it embedded, so a model that leaves the tree is dropped
-    // rather than named on a surface `/api/file` would refuse the same path on
-    // (D3).
+    // The index followed symlinks when it embedded, and spelled its answer
+    // however its own run reached the tree. Both facts are settled here: the
+    // realpath is the one spelling this server and the index can agree on, and
+    // a model whose realpath leaves the peeked directory is a wrong answer —
+    // dropped rather than named on a surface `/api/file` would refuse the same
+    // path on (D3).
     const real = await realpath(full).catch(() => null)
     if (real === null) continue
-    if (real !== realTop && !real.startsWith(realTop + sep)) continue
+    if (!real.startsWith(dirTop + sep)) continue
     // One file, two addresses, from one string — the tail below the directory,
-    // joined onto its filesystem path and onto its library path alike.
-    const rel = full.slice(dirReal.length + 1)
+    // joined onto its library path. Taken off the *real* path, so an aliased
+    // spelling lands on the cell the walk would have named for the same file.
+    const rel = real.slice(dirTop.length + 1)
     const libPath = posix.join(dirLibPath, rel)
     if (seen.has(libPath)) continue
     // `basename`, not `rel`: a peek's entries are named the way the walk names
     // them, and a sheet must not read half in bare names and half in paths.
-    const entry = await modelEntryAt(full, libPath, basename(rel))
+    const entry = await modelEntryAt(real, libPath, basename(rel))
     if (entry === null) continue
     seen.add(libPath)
     out.push(entry)
