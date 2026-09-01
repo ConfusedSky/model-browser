@@ -527,8 +527,10 @@ export function useThumbnails(
     // `poseStale` against POSE_VERSION — this only gets the pass started.
     //
     // What keeps it from churning is reference stability, not absence: `App`'s
-    // map is a landing's own, the slot the wave filled, or the `NO_POSES`
-    // constant, each set once and never rebuilt per render. `RIG_VERSION` is
+    // map is a landing's own, the slot the wave filled, the `NO_POSES`
+    // constant, or App's memoised merge of the previews' wave under the
+    // listing's — reference-stable per render in every case (the merge
+    // rebuilds only when a wave actually answers). `RIG_VERSION` is
     // still absent for D2's reason: it changes with a build, not with a
     // gesture, and nothing on screen is waiting on it.
   }, [entries, api, lru, queue, setThumb, ao, poses])

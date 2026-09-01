@@ -107,6 +107,24 @@ describe('a tile labels itself with the stored name', () => {
     expect(kit.getAttribute('aria-label')).toBe(`folder ${STEM}`)
   })
 
+  it('names a zip without calling it a folder', async () => {
+    // The non-model branch serves zips too, and the server keys any entry the
+    // store names — a hand-written store can name an archive. The stored name
+    // renders, the real name keeps the accessible name, and no "folder" prefix
+    // appears: a zip is not a folder (review round five — before the kind
+    // split, a named zip announced "folder pack.zip").
+    await renderGrid([
+      named(
+        { name: 'pack.zip', path: '/models/pack.zip', kind: 'zip' as const, size: 5, mtime: 1 },
+        'The Pack',
+      ),
+    ])
+    const zip = tileFor('/models/pack.zip')
+    expect(labelOf(zip)).toBe('The Pack')
+    expect(zip.getAttribute('title')).toBe('pack.zip')
+    expect(zip.getAttribute('aria-label')).toBe('pack.zip')
+  })
+
   it('leaves an unnamed model beneath it labelled from its file name', async () => {
     // `name` never inherits (D2/D7): the store names the kit, and thirty models
     // inside it are not thirty copies of the kit.

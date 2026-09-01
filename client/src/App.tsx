@@ -691,7 +691,35 @@ export default function App() {
     inFlightPeeks.current.clear()
     setPreviews(NO_PREVIEWS)
     askedPreviewPoses.current.clear()
-    setPreviewPoses(NO_POSES)
+    // Pruned, not reset: a preview model that survives into the new listing
+    // (walking into the folder is the common case) must not see its pose go
+    // P → undefined → P — the sweep retires and restarts the pipeline on each
+    // transition, two extra lookups per carried-over model and, if the posed
+    // render is still in flight, an unposed render plus a visible angle flip
+    // on exactly the tiles the wave exists to fix (review round five,
+    // measured). Paths that left drop; paths that stay keep their pose until
+    // the listing wave confirms the same value, which merges to no change.
+    // Pruned, not reset: a preview model that survives into the new listing
+    // (walking into the folder is the common case) must not see its pose go
+    // P → undefined → P — the sweep retires and restarts the pipeline on each
+    // transition, two extra lookups per carried-over model and, if the posed
+    // render is still in flight, an unposed render plus a visible angle flip
+    // on exactly the tiles the wave exists to fix (review round five,
+    // measured). Paths that left drop; paths that stay keep their pose until
+    // the listing wave confirms the same value, which merges to no change.
+    setPreviewPoses((prev) => {
+      if (prev === NO_POSES) return prev
+      const kept: Record<string, IndexPose> = {}
+      let count = 0
+      for (const e of entries) {
+        const pose = prev[e.path]
+        if (pose !== undefined) {
+          kept[e.path] = pose
+          count++
+        }
+      }
+      return count === 0 ? NO_POSES : kept
+    })
   }, [entries])
   /**
    * The previews' own pose wave. The listing wave asks about what LANDED, and

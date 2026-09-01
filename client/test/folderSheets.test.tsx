@@ -12,7 +12,7 @@ import { act } from 'react'
 import { zipSync } from 'fflate'
 import * as THREE from 'three'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DirEntry, DirListing } from '../../shared/types'
+import type { DirEntry, DirListing, IndexPose } from '../../shared/types'
 import {
   click,
   container,
@@ -32,6 +32,8 @@ import {
   unmountApp,
 } from './appHarness'
 import { RIG_VERSION, THUMB_LIGHTING } from '../src/three/renderer'
+import { DEFAULT_CAMERA } from '../src/three/camera'
+import { cameraForPose } from '../src/three/pose'
 
 vi.mock('../src/api/client', async () => (await import('./appHarness')).apiClientModule())
 vi.mock('../src/three/renderer', async (importOriginal) =>
@@ -495,6 +497,88 @@ describe('a sheet cell follows the index', () => {
   // getThumb's IMPLEMENTATION survives mount's mockClear — restore the
   // miss-everything default so later cells count renders, not this cell's hits.
   afterEach(() => getThumb.mockResolvedValue({ status: 'miss' }))
+
+  const poseWith = (view: number): IndexPose => ({
+    up: [0, 1, 0],
+    azimuth_zero: [1, 0, 0],
+    source: 'siglip',
+    confidence: 0.9,
+    front: { view, azimuth_deg: view * 45, elevation_deg: 20 },
+  })
+
+  it('lets a landed answer win a shared path over the preview wave', async () => {
+    // A model that is both a tile and a preview is asked about twice — the
+    // listing wave at mount, the preview wave after the peek lands. Landed
+    // answers are authoritative for shared paths ({...preview, ...listing}),
+    // so the preview's later, different answer must change nothing: two
+    // renders (unposed, then posed by the landing), never a third.
+    const L = poseWith(2)
+    const P = poseWith(6)
+    semanticPosesFor
+      .mockResolvedValueOnce({ poses: { '/models/b.stl': L } }) // listing wave
+      .mockResolvedValueOnce({ poses: { '/models/b.stl': P } }) // preview wave
+    const shared = model('b.stl')
+    peek.mockResolvedValue([shared])
+    await mountApp('/models', { path: '/models', entries: [dir('a'), shared] })
+    await settle()
+    await intersect(dirTile('/models/a'))
+    await settle()
+
+    expect(semanticPosesFor).toHaveBeenCalledTimes(2)
+    const expected = cameraForPose(L, DEFAULT_CAMERA)!
+    // The harness mock declares no parameters, so its calls type as empty
+    // tuples — the runtime args are (object, camera, axis, ao).
+    const last = renderThumbnail.mock.calls.at(-1) as unknown as unknown[]
+    expect(last[1]).toEqual(expected.camera)
+    expect(renderThumbnail).toHaveBeenCalledTimes(2)
+  })
+
+  it('asks again in a new listing — poses do not bleed across the clear', async () => {
+    peek.mockResolvedValue(found(1))
+    const FLAT = { path: '/models', entries: [dir('a'), model('a/deep.stl')], truncated: true }
+    await mountApp('/models', ONE_FOLDER)
+    listDir.mockImplementation((_p: string, opts?: { flat?: boolean }) =>
+      Promise.resolve(opts?.flat === true ? FLAT : ONE_FOLDER),
+    )
+    await intersect(dirTile('/models/a'))
+    const asksFor = (path: string) =>
+      semanticPosesFor.mock.calls.filter((c) => (c[0] as string[]).includes(path)).length
+    expect(asksFor('/models/a/m0.stl')).toBe(1)
+
+    await click(flatButton())
+    await settle()
+    await intersect(dirTile('/models/a'))
+    await settle()
+    // The asked-set cleared with the listing: the same preview path is asked
+    // about again rather than skipped on a stale memory of the last listing.
+    expect(asksFor('/models/a/m0.stl')).toBe(2)
+  })
+
+  it('keeps a surviving path\'s pose across a listing change — no flap, no re-render', async () => {
+    // Walking into the previewed folder is the common case: the model survives
+    // as a landed entry. A wholesale previewPoses reset would send its pose
+    // P → undefined → P and the sweep would retire and restart the pipeline
+    // twice; the prune keeps the pose for surviving paths, so nothing
+    // re-evaluates until the listing wave confirms the same value — which
+    // merges to no change (review round five, measured at 2x lookups before).
+    const P = poseWith(3)
+    semanticPosesFor.mockResolvedValue({ poses: { '/models/a/m0.stl': P } })
+    peek.mockResolvedValue(found(1))
+    const INSIDE = { path: '/models/a', entries: [model('a/m0.stl')] }
+    await mountApp('/models', ONE_FOLDER)
+    listDir.mockImplementation((p: string) =>
+      Promise.resolve(p === '/models/a' ? INSIDE : ONE_FOLDER),
+    )
+    await intersect(dirTile('/models/a'))
+    await settle()
+    const rendersBefore = renderThumbnail.mock.calls.length
+    const lookupsBefore = getThumb.mock.calls.filter((c) => c[0] === '/models/a/m0.stl').length
+
+    await click(dirTile('/models/a'))
+    await settle()
+    expect(getThumb.mock.calls.filter((c) => c[0] === '/models/a/m0.stl').length).toBe(lookupsBefore)
+    expect(renderThumbnail.mock.calls.length).toBe(rendersBefore)
+  })
 
   it('re-renders a preview whose cached thumbnail predates its pose', async () => {
     // The listing wave asks about what LANDED, and preview models never land —

@@ -417,7 +417,17 @@ const Tile = memo(function Tile({
         // without it, exactly the tiles a store names (every kit in the demo)
         // would lose what the chrome's own img label gives the unnamed ones
         // (review round four).
-        aria-label={entry.displayName !== undefined ? `folder ${entry.name}` : undefined}
+        // Kind-split because this branch serves zips too, and the server
+        // attaches displayName to any keyed entry without a kind filter: a
+        // hand-written store naming a zip must not make it announce "folder"
+        // (review round five). A named zip states the real name alone.
+        aria-label={
+          entry.displayName !== undefined
+            ? entry.kind === 'dir'
+              ? `folder ${entry.name}`
+              : entry.name
+            : undefined
+        }
         className={base + markClass + anchorClass}
         onClick={() => onEnter(entry)}
         onContextMenu={(e) => {

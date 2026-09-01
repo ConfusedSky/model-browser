@@ -262,6 +262,18 @@ describe('gen-overrides', () => {
     expect(keys).toEqual([])
   })
 
+  it('does not over-trim: a real stem written with a trailing slash still keys', async () => {
+    const { top, metadata } = fixture()
+    writeFileSync(
+      metadata,
+      JSON.stringify([{ thing_id: 1, stem: `${PACK}/`, name: 'Slashed', files: [] }]),
+    )
+    const result = await generateOverrides({ top, metadata, report: () => undefined })
+    expect(result.written).toBe(1)
+    expect(result.escaped).toEqual([])
+    expect(Object.keys((await readStore(top)).entries)).toEqual([`/${PACK}`])
+  })
+
   it('contains a kit directory under a root top — the predicate, since root cannot be fixtured', () => {
     // `top + sep` alone doubles the separator at '/', refusing everything.
     expect(underTop('/', '/kits')).toBe(true)

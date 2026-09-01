@@ -126,19 +126,12 @@ async function readStore(top: string): Promise<OverridesFile> {
 }
 
 /**
- * Textual containment: is `dir` the top, or beneath it? Not a `realpath`
- * test — the check has to hold for a directory that does not exist yet, and
- * `resolve` is what collapses the `..` this refuses. `top + sep` alone would
- * double the separator when the top IS the filesystem root, refusing every
- * legitimate directory under it — which is why this is its own function with
- * its own test (a root-topped library cannot be fixtured end to end).
- */
-/**
  * `join` preserves a stem's trailing separator — `join('/lib', './')` is
  * `'/lib/'` — and `'/lib/'.startsWith('/lib/')` is true, so an unnormalised
  * path slips both the `=== kitsDir` test and the prefix test (review round
- * four: the root key survived two rounds of guards this way). Every path the
- * containment predicate sees goes through here first.
+ * four: the root key survived two rounds of guards this way). The joined
+ * per-stem path goes through here before the predicate judges it; `kitsDir`
+ * itself arrives normalised from `resolve`.
  */
 function trimSep(p: string): string {
   let out = p
@@ -146,6 +139,14 @@ function trimSep(p: string): string {
   return out
 }
 
+/**
+ * Textual containment: is `dir` the top, or beneath it? Not a `realpath`
+ * test — the check has to hold for a directory that does not exist yet, and
+ * `resolve` is what collapses the `..` this refuses. `top + sep` alone would
+ * double the separator when the top IS the filesystem root, refusing every
+ * legitimate directory under it — which is why this is its own function with
+ * its own test (a root-topped library cannot be fixtured end to end).
+ */
 export function underTop(top: string, dir: string): boolean {
   const prefix = top.endsWith(sep) ? top : top + sep
   return dir === top || dir.startsWith(prefix)
@@ -168,6 +169,7 @@ export async function generateOverrides(opts: GenerateOptions): Promise<Generate
   const file = await readStore(top)
   const missing: string[] = []
   const escaped: string[] = []
+  const duplicated: string[] = []
   const seen = new Set<string>()
   let read = 0
   let written = 0
@@ -204,7 +206,7 @@ export async function generateOverrides(opts: GenerateOptions): Promise<Generate
     // count is what the credits-page gate consumes, and it must mean keys. (A
     // key already in the FILE is fine — that is what a rerun looks like.)
     if (seen.has(key)) {
-      report(`  duplicate stem, key already written this run: ${stem}`)
+      if (!duplicated.includes(stem)) duplicated.push(stem)
       continue
     }
     seen.add(key)
@@ -230,6 +232,7 @@ export async function generateOverrides(opts: GenerateOptions): Promise<Generate
   if (missing.length > 0) report(`${missing.length} stems named no directory and were skipped`)
   for (const stem of escaped) report(`  stem escapes the kit directory and was refused: ${stem}`)
   if (escaped.length > 0) report(`${escaped.length} stems escaped the kit directory and were refused`)
+  for (const stem of duplicated) report(`  duplicate stem, keyed once: ${stem}`)
   // The same rule every config file here has. The store is read once per
   // resolved library, so a running server keeps answering from what it loaded.
   report('the server reads this file once per resolved library — restart it to pick this up')
