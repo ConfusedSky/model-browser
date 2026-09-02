@@ -474,6 +474,26 @@ All re-runnable; say whose run when quoting.
   background waves (the pose pattern); **GraphQL declined** — one lockstep
   client behind the ApiClient seam (D1) buys none of its flexibility, and
   its uncacheable per-query POSTs fight the CDN plan.
+  **Precalculate, don't fetch** (Masa, 2026-09-02, correcting the paragraph
+  above — edge-caching a live peek was the weaker answer): on a baked corpus
+  the peek answer is known at bake time, so 1.3 should kill the 3-deep
+  listing→peek→thumbs waterfall, two shapes to choose between at drafting:
+  attach each dir entry's preview paths to the listing at bake (the D7 seam;
+  client keeps per-cell rendering and the cell `title`s that carry display
+  names) or precompose the 2×2 sheet into one PNG (fewest trips AND bytes —
+  one ~512² image vs four; needs both AO variants like every baked pixel;
+  loses per-cell identity/titles, the tradeoff to weigh). Locally the lazy
+  per-visible-tile peek is load-bearing (only 12 of 297 folders pay the
+  bounded walk before paint) — `listing-tree-cache` (active) may shift that
+  calculus if its snapshots grow peek answers; coordinate, don't assume.
+  **Poses on the demo are zero trips, not one** (this session, verified):
+  `useThumbnails` resolves `cached.camera ?? posed?.camera ?? DEFAULT_CAMERA`,
+  and every baked sidecar carries its posed camera, so the wave gates
+  nothing — 1.3 gates the wave off behind the features value or it fires as
+  pure transocean waste per listing. Locally the 2-trip split stays
+  load-bearing: it decouples browse from index health (absent/warming/wedged
+  must not delay a listing) and loopback trips are ~free; server-side
+  attach-with-timeout remains available if that ever changes.
 - **Corpus**: see its `NOTES.md` (STL vs GLB sizes, dedup counts, decimation
   gates). `du` on `original/` reads 516 MB vs the notes' 12 GB — hardlink
   accounting order, not a discrepancy.
