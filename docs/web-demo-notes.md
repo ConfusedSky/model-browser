@@ -379,6 +379,21 @@ All re-runnable; say whose run when quoting.
   June cut, enforcement from Aug 18, idle instances reclaimed) — rejected: a
   demo visited a few times a month *is* idle. Hetzner Falkenstein CX33 €8.49
   (~$10, no VAT outside EU) noted, not chosen — US-located preferred.
+  **Railway** (this session, 2026-09-02, railway.com/pricing, asked after Masa
+  saw "up to 48 vCPU / 48 GB per service" — that is the scaling *ceiling*, not
+  an allocation): usage-billed per second — $20/vCPU-mo, **$10/GB-RAM-mo**,
+  $0.05/GB egress; Hobby $5/mo incl. $5 credit. This workload is memory-fat
+  and idle, the worst shape for usage-billed RAM: SigLIP fp32 holds ~2.5–3 GB
+  resident 24/7 (2.8 GB measured peak, Measurements above) ⇒ ~$25–30/mo for
+  RAM alone, CPU ~nil at demo traffic, net **~$22–28/mo** — the 4 GB VPS tier
+  at less machine, not the cheap option it looks like. Risk: the checkpoint is
+  mmapped and cgroup accounting counts page cache, so billed memory may read
+  *above* RSS. Railway's app-sleeping mode would cut the RAM bill but is the
+  rejected cold-start (wake + 16 s SigLIP load). General rule this surfaced:
+  cheap usage-billed platforms discount small-or-idle, and nobody discounts
+  RAM-resident-hours. Cheapest viable path remains a flat-rate budget VPS
+  (RackNerd/OVH-class 4 GB US at ~$5–10 flat, not yet in the sweep above);
+  gate 3.3's paid hour answers whether their shared vCPUs hold the <1 s bar.
 - **Corpus**: see its `NOTES.md` (STL vs GLB sizes, dedup counts, decimation
   gates). `du` on `original/` reads 516 MB vs the notes' 12 GB — hardlink
   accounting order, not a discrepancy.
