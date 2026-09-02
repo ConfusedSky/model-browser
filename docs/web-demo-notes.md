@@ -239,6 +239,16 @@ own origin"; only its body hardcodes loopback.
    stored name where one resolves) is a small follow-up to `library-overrides`,
    whose Non-Goals deferred exactly this until the call was made.
 6. **Domain.** On the critical path for TLS and the configured-origin guard.
+   **Resolved 2026-09-02 (Masa): `masamaeda.com`** — control proven live the
+   same day (Masa added TXT `_demo-test.masamaeda.com` = "model-browser
+   2026-09-02" from the Namecheap dashboard; it answered from the authoritative
+   `registrar-servers.com` nameservers and Google's public resolver within
+   minutes; record deletable once read). Registration: Namecheap since
+   2019-11-12, **expires 2026-11-12 — confirm auto-renew before go-live**, the
+   one caveat on this decision. Exact hostname (apex vs a subdomain like
+   `demo.`/`models.`) is 1.3's call; a subdomain is the easy path — the apex is
+   bare, and the only records today are a stale `www` CNAME to a dead Netlify
+   site (cert mismatch, 404) that can be cleaned up whenever.
 7. **Which session owns the proposal.** **Resolved 2026-08-29 (Masa): this session
    — the other session closed; it also owned pose-for-every-model, now this
    session's too. The ordered tail is `web-demo-backlog` §1.** Other session's sequence

@@ -54,8 +54,12 @@
       — **display names from the store** (Masa, 2026-08-31, recorded on the item the same
       day). 1.1's draft carries `name` as a generated field already; the consumer is a
       follow-up to `library-overrides`
-- [ ] 2.4 Domain (item 6): on the critical path for TLS and the configured-origin guard —
+- [x] 2.4 Domain (item 6): on the critical path for TLS and the configured-origin guard —
       1.3 cannot name its allowed origin without it
+      — **`masamaeda.com`** (Masa, 2026-09-02, recorded on the item the same day
+      with the live TXT-record proof of control). Expires 2026-11-12 — auto-renew
+      confirmation is the caveat carried on the item; exact hostname (apex vs
+      subdomain) is 1.3's call
 - [x] 2.5 Ownership (item 7): this session owns the demo proposal and
       pose-for-every-model — Masa, 2026-08-29, the other session closed. Recorded on the
       item the same day
