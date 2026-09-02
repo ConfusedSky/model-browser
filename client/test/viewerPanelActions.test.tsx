@@ -724,6 +724,64 @@ describe('reset framing from the panel', () => {
     expect(shot[2]).toBe(resolved.axis)
   })
 
+  it('a pose-less discard over the spinner keeps the stored spindle, not the y fallback', async () => {
+    // The press can only read the axis the thumbs map holds at that moment,
+    // and during a pending open that is still the `'y'` fallback while the
+    // store holds another spindle. A pose-less discard *keeps* the stored
+    // axis (its PUT sends no axis), so adopting the press's blind read at
+    // landing framed 'y' pixels for a tile whose stored axis stayed 'z' —
+    // the close then filed a snapshot the next open would not reproduce.
+    // The landing handler must take the kept axis from its own `getThumb`
+    // answer instead.
+    let answer = (): void => {}
+    const saved = new Promise<unknown>((resolve) => {
+      answer = () =>
+        resolve({
+          status: 'hit',
+          // An axis and no camera, and no pose anywhere: the discard resolves
+          // pose-less, so this axis is exactly what it promises to keep.
+          axis: 'z',
+          pngUrl: 'blob:stored',
+          lighting: THUMB_LIGHTING,
+          rig: RIG_VERSION,
+        })
+    })
+    await unmountApp()
+    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models' })
+    semanticPosesFor.mockResolvedValue({ poses: {} })
+    getThumb.mockReturnValue(saved)
+    await mountAppAtCurrentUrl('/?path=%2Fmodels&model=%2Fmodels%2FAlpha%2Ffound.stl', NESTED)
+    listDir.mockResolvedValue(NESTED)
+    await wait(200)
+    expect(dialog()).not.toBeNull()
+    expect(dialog()!.querySelector('.animate-spin')).not.toBeNull()
+
+    await click(action('resetFraming'))
+    await settle()
+    // Pose-less: the camera is discarded and the axis is kept — no axis field.
+    expect(writesFor(FOUND).filter((b) => b.camera === null && b.axis === undefined).length).toBe(1)
+
+    await act(async () => {
+      answer()
+      await saved
+    })
+    await settle()
+    putThumb.mockClear()
+    renderThumbnail.mockClear()
+
+    await click(closeButton())
+    await wait(250)
+    expect(dialog()).toBeNull()
+
+    // The snapshot the close files is taken about the spindle the store kept.
+    expect(renderThumbnail.mock.calls.length).toBe(1)
+    const shot = renderThumbnail.mock.calls[0] as unknown as [unknown, typeof STORED, string]
+    expect(shot[2]).toBe('z')
+    // And at the discarded camera — the press's half that *was* resolved blind.
+    expect(shot[1].az).toBeCloseTo(DEFAULT_CAMERA.az)
+    expect(shot[1].el).toBeCloseTo(DEFAULT_CAMERA.el)
+  })
+
   it('does not carry a pending discard into the next model opened', async () => {
     // The clear at the top of the session effect. A reframe recorded while one
     // model's mesh was in flight belongs to that open; the model that replaces

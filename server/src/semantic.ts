@@ -69,7 +69,7 @@ export type { IndexState }
 
 /**
  * The one thing every body this module reads has to be before it is read: a
- * non-null object.
+ * non-null, non-array object.
  *
  * `res.json()` succeeding is not the same as an answer arriving. `null`, a
  * bare number and a bare string are all valid JSON, and every one of them
@@ -78,9 +78,15 @@ export type { IndexState }
  * outside `askIndex`'s parse `try` and outside the `IndexError` catches that
  * are the whole of "a listing may never be made to fail by the index", so it
  * escaped as far as a 500 on a peek and an emptied pose wave.
+ *
+ * Arrays are excluded even though their property reads answer `undefined`
+ * rather than throwing: an array is not any shape this module ever asked for,
+ * and admitting one made `probe` read `[]` as a status whose every field was
+ * absent — `ready !== true`, so an index answering garbage was reported as
+ * `warming`, a state that says waiting will help.
  */
 function isObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
 /** A pose's two direction fields: three numbers, no fewer and no more. Arity is
@@ -468,6 +474,23 @@ export const TOP = 60
 export type Tuning = SemanticTuning
 
 /**
+ * The classification for every way the index can fail to *say* something —
+ * unreachable, a body that never parses, a body shaped like nothing this
+ * module asked for. One constructor because the pairing is the contract: the
+ * status is forgotten alongside the error, so the next probe looks again
+ * rather than trusting a `ready` the index has just contradicted.
+ *
+ * Applied by `askIndex` to whole bodies, and by the typed callers (`query`,
+ * `similar`) to a body that is an object but is missing the very field the
+ * route exists to carry — an index that cannot produce its route's shape has
+ * not answered that route.
+ */
+function notAnswering(): IndexError {
+  resetIndexStatus()
+  return new IndexError('absent', 'the semantic index is not answering')
+}
+
+/**
  * POST one of the index's routes, with the error contract they share. One copy,
  * because the caller's status mapping keys off `upstreamStatus` (`app.ts`) and
  * two routes classifying the same upstream status differently is exactly the
@@ -498,8 +521,7 @@ async function askIndex(
       signal: AbortSignal.timeout(timeoutMs),
     })
   } catch {
-    resetIndexStatus()
-    throw new IndexError('absent', 'the semantic index is not answering')
+    throw notAnswering()
   }
   if (res.status === 503) {
     // Raced the probe while SigLIP loads — the warming state, not a failure.
@@ -529,8 +551,7 @@ async function askIndex(
     // listing, against "silence → walk". An index that cannot finish saying
     // what it means is an index that is not answering, and is treated as one,
     // forgotten status and all.
-    resetIndexStatus()
-    throw new IndexError('absent', 'the semantic index is not answering')
+    throw notAnswering()
   }
   // Parsing is not answering, and the gap between them is a `TypeError` waiting
   // in every caller. A 200 whose body is literal `null` parses perfectly and
@@ -540,10 +561,7 @@ async function askIndex(
   // emptied pose wave. Caught here rather than at each caller so the three
   // routes cannot come to disagree about what a body-shaped-like-nothing means,
   // which is `askIndex`' whole reason for being one function.
-  if (!isObject(parsed)) {
-    resetIndexStatus()
-    throw new IndexError('absent', 'the semantic index is not answering')
-  }
+  if (!isObject(parsed)) throw notAnswering()
   return parsed
 }
 
@@ -552,7 +570,7 @@ export async function query(
   scope: string | null,
   tuning: Tuning = {},
 ): Promise<QueryResult> {
-  return (await askIndex('/query', {
+  const raw = (await askIndex('/query', {
     text,
     path: scope ?? undefined,
     // Each bound forwarded on its own presence, because the two compose in the
@@ -567,7 +585,15 @@ export async function query(
       : {}),
     ...(tuning.raw === true ? { raw: true } : {}),
     ...(tuning.pool !== undefined ? { pool: tuning.pool } : {}),
-  })) as QueryResult
+  })) as Partial<QueryResult>
+  // An object body is not yet this route's answer: `results` feeds
+  // `hitsToEntries`' map and `scope` is read field by field on the way to the
+  // wire, so a body missing either would throw in the route handler, outside
+  // every `IndexError` catch — a 500 for what is really an index talking
+  // nonsense. The fields *inside* a present scope stay unchecked: wrong-typed
+  // ones serialize oddly but crash nothing.
+  if (!Array.isArray(raw.results) || !isObject(raw.scope)) throw notAnswering()
+  return raw as QueryResult
 }
 
 /** What `/similar` answers with. No `weak` and no `truncated`: the index
@@ -605,11 +631,15 @@ export async function similar(
   k?: number,
   pool?: Tuning['pool'],
 ): Promise<SimilarResult> {
-  return (await askIndex('/similar', {
+  const raw = (await askIndex('/similar', {
     path,
     ...(k !== undefined ? { k } : {}),
     ...(pool !== undefined ? { pool } : {}),
-  })) as SimilarResult
+  })) as Partial<SimilarResult>
+  // `query`'s reason: `results` is the field the route exists to carry, and a
+  // body without an array there would throw in `hitsToEntries`, not here.
+  if (!Array.isArray(raw.results)) throw notAnswering()
+  return raw as SimilarResult
 }
 
 /**
@@ -720,6 +750,12 @@ export async function hitsToEntries(
   }
   const settled = await Promise.all(
     hits.map(async (h): Promise<DirEntry | null> => {
+      // The *array* was gated where the cast happened (`query`/`similar`);
+      // its elements are still another process's JSON. A hit that is not an
+      // object naming a string `rel_path` has no join key — `resolve` throws
+      // on a non-string — and is dropped the way a hit that resolves to
+      // nothing is.
+      if (!isObject(h) || typeof h.rel_path !== 'string') return null
       // `rel_path` is the join key and the only field trusted for it: this is
       // data from another process, and `resolve` normalising `..` is what stops
       // a hit naming a file outside the collection. The index's absolute `path`
@@ -980,7 +1016,9 @@ export interface UnderModel {
  */
 interface RawUnder {
   status?: string | null
-  models?: readonly { path?: unknown; pose?: unknown }[] | null
+  /** `unknown` outright, not a typed array: `models: 5` is one property read
+   *  from crashing `flatMap`, so even the list-ness is checked, not declared. */
+  models?: unknown
   matched?: number | null
   truncated?: boolean | null
 }
@@ -1019,11 +1057,18 @@ export async function modelsUnder(
   // Anything but the one status that means "these are the models" is the walk's
   // cue — `unindexed`, and equally a status this server has never heard of.
   if (raw.status !== 'ok') return null
+  // A `models` that is not a list reads as an empty one, like an absent or
+  // null field: an `"ok"` answer holding nothing usable still lands as a real
+  // answer the caller fills from the walk, cell by cell, the same way it
+  // fills a short one.
+  const models: readonly unknown[] = Array.isArray(raw.models) ? raw.models : []
   // A malformed pose is "no pose" rather than a dropped model: the path is what
   // the peek is here for, and an unposed candidate still fills a cell — it
-  // simply sorts into the unposed half of `entriesUnder`'s partition.
-  return (raw.models ?? []).flatMap((m) =>
-    typeof m.path === 'string'
+  // simply sorts into the unposed half of `entriesUnder`'s partition. A
+  // malformed *model* — not an object, or no string path — is dropped: there
+  // is no cell without a path.
+  return models.flatMap((m) =>
+    isObject(m) && typeof m.path === 'string'
       ? [{ path: m.path, pose: isIndexPose(m.pose) ? m.pose : null }]
       : [],
   )

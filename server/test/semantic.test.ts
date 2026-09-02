@@ -178,6 +178,15 @@ describe('semantic index availability', () => {
     expect(body.detail).toBe('cache built with different settings — rerun classify_stls.py')
   })
 
+  it('a /status body that is an array is absent, not warming', async () => {
+    // Valid JSON, and an object by `typeof` — but its every field reads as
+    // absent, so `ready !== true` classified it as warming: a state that says
+    // waiting will help, for an index answering garbage.
+    stubIndex([])
+    const res = await app.request('/api/semantic/status', { headers: LOOPBACK })
+    expect(((await res.json()) as { state: string }).state).toBe('absent')
+  })
+
   it('availability is cached, not probed per query', async () => {
     stubIndex(READY, { scope: { path: null, status: 'indexed', n_indexed: 1, n_scanned: 1, covers: ['stl'] }, weak: false, results: [] })
     await app.request('/api/semantic/status', { headers: LOOPBACK })
@@ -396,6 +405,36 @@ describe('semantic query', () => {
     const res = await post({ text: 'dragon' })
     expect(res.status).toBe(503)
     expect((await res.json()).state).toBe('absent')
+  })
+
+  it('a 200 missing the answer’s own fields is an index that is not answering', async () => {
+    // An object body that carries no `results` array and no `scope` dict:
+    // trusted, it threw in the route handler (`hitsToEntries`' map, then
+    // `result.scope.path`) — a 500 for what is really the index talking
+    // nonsense. Gated where the cast happens, it classifies like any other
+    // non-answer.
+    for (const body of [{}, { scope: result.scope, weak: false, results: 5 }, { results: [] }]) {
+      resetIndexStatus()
+      stubIndex(READY, body)
+      const res = await post({ text: 'dragon' })
+      expect(res.status).toBe(503)
+      expect(((await res.json()) as { state: string }).state).toBe('absent')
+    }
+  })
+
+  it('a garbage element inside a real results array is dropped, not a 500', async () => {
+    // The array gate cannot vouch for the elements — still another process's
+    // JSON. A hit with no string `rel_path` has no join key (`resolve` throws
+    // on a non-string), so it is dropped the way a moved-away hit is, and the
+    // real hit beside it still becomes a tile.
+    stubIndex(READY, {
+      ...result,
+      results: [null, 5, { ...hit('x.stl'), rel_path: 7 }, hit('dragon.stl')],
+    })
+    const res = await post({ text: 'dragon' })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { entries: { path: string }[] }
+    expect(body.entries.map((e) => e.path)).toEqual(['/dragon.stl'])
   })
 
   it('a 503 racing the warmup folds back into warming', async () => {

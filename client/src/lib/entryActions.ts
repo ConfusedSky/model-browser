@@ -517,8 +517,13 @@ export function resetFramingLive(
   host: ActionHost,
   view: LiveFramingView | null,
 ): void {
-  // The kept axis only ever describes a live view; with no session there is
-  // none to keep, and the resolved axis this produces goes unread.
+  // The resolved axis is read for real: `reframe` moves the open session about
+  // it, or records it for an open still in flight (`pendingReframeRef`). The
+  // `'y'` stands in only when there is no view at all — nothing on screen and
+  // nothing pending, so the resolved framing is applied to nothing — and in a
+  // pose-less discard, where `framingAfterDiscard` echoes the kept axis back
+  // and the landing handler re-reads the kept value from its own `getThumb`
+  // rather than trusting a read the thumbs map may not have settled for.
   const framing = framingAfterDiscard(host.poses[entry.path], view?.axis ?? 'y')
   void host.api
     .putThumb({

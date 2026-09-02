@@ -249,6 +249,12 @@ interface Stub {
   underBodyStalls?: boolean
   /** Answer `/under` 200 with a body of literal `null` — valid JSON, no answer. */
   underNull?: boolean
+  /**
+   * Answer `/under` 200 with exactly this JSON body, bypassing the fixture's
+   * scoping and cutting — for bodies whose *shape* is the point (an object
+   * whose fields hold the wrong types), which `under` cannot spell.
+   */
+  underBody?: unknown
   /** Which real paths have a pose. Everything else asked about answers `null`. */
   posed?: readonly string[]
   /**
@@ -367,6 +373,11 @@ function stubIndex(stub: Stub): void {
         if (stub.underHangs === true) return hang(init.signal)
         if (stub.underMalformed === true) return malformedBody()
         if (stub.underNull === true) return nullBody()
+        if (stub.underBody !== undefined) {
+          return new Response(JSON.stringify(stub.underBody), {
+            headers: { 'content-type': 'application/json' },
+          })
+        }
         if (stub.underBodyStalls === true) return stalledBody(init.signal)
         if (stub.underStatus !== undefined && stub.underStatus !== 200) {
           return new Response(JSON.stringify({ detail: 'no' }), { status: stub.underStatus })
@@ -1141,6 +1152,32 @@ describe('the sheet asks the index before it walks', () => {
     // The branch really was taken: `/under` was asked, and the walk ran after it.
     expect(asked).toHaveLength(1)
     expect(sent).toHaveLength(1)
+  })
+
+  it('an "ok" answer whose models is not a list reads as an empty one', async () => {
+    // The next layer in from literal `null`: an object body whose *field*
+    // holds the wrong type. `raw.models` of `5` made `flatMap` a `TypeError`
+    // thrown past the `IndexError` catch, so the peek 500'd on a body that
+    // parsed and even said `"ok"`. Now it lands as the empty ok answer — the
+    // walk's sheet, by the same arithmetic a short answer fills by.
+    stubIndex({ underBody: { status: 'ok', models: 5 }, posed: [fs('mixed', 'e.stl')] })
+    expect(names(await peekOf('/mixed', 4))).toEqual(['e.stl', 'a.stl', 'b.stl', 'c.stl'])
+    expect(asked).toHaveLength(1)
+  })
+
+  it('a garbage element inside a real models list is dropped, not a crash', async () => {
+    // Elements are the layer after the list: `m.path` on a `null` element is
+    // the same `TypeError` one layer down. A model that is not an object
+    // naming a string path has no cell; the real one beside it keeps its own,
+    // and the walk fills the rest.
+    stubIndex({
+      underBody: {
+        status: 'ok',
+        models: [null, 'a.stl', { path: 5 }, { path: fs('mixed', 'f.stl'), pose: null }],
+      },
+      posed: [],
+    })
+    expect(names(await peekOf('/mixed', 4))).toEqual(['f.stl', 'a.stl', 'b.stl', 'c.stl'])
   })
 
   it('a pose the index sent that is not a pose is no pose, never an error', async () => {

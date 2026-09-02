@@ -301,7 +301,10 @@ export default function ViewerLayer({
    *
    * The framing itself is not recomputed here: it is the one `resetFramingLive`
    * already resolved through `framingAfterDiscard`, handed over by `reframe`, so
-   * this component learns no second copy of D7's rule.
+   * this component learns no second copy of D7's rule. The one exception is the
+   * pose-less discard's *axis*, which that rule says is kept, not resolved —
+   * the landing handler reads the kept value from its own `getThumb` answer,
+   * because the press could only see the thumbs map's possibly-unsettled copy.
    */
   const pendingReframeRef = useRef<{
     camera: CameraState
@@ -401,7 +404,15 @@ export default function ViewerLayer({
           pendingReframeRef.current = null
           openedFromPoseRef.current = discarded.posed
         }
-        const axisAt = discarded?.axis ?? saved.axis
+        // A posed discard installs the pose's own axis; a pose-less one *keeps*
+        // the stored axis (`framingAfterDiscard`, whose PUT sends no axis). The
+        // press could only read the axis the thumbs map held at that moment —
+        // during a pending open that can still be the `'y'` fallback while the
+        // store holds another spindle — so the kept axis is named by `saved`,
+        // the same answer the store's keep is measured against, not by the
+        // press's blind read.
+        const axisAt =
+          discarded !== null && discarded.posed ? discarded.axis : saved.axis
         const s = new ViewerSession(object, axisAt, discarded?.camera ?? saved.camera)
         sessionRef.current = s
         setSession(s)

@@ -262,6 +262,19 @@ describe('a model’s neighbours', () => {
     expect((await res.json()).state).toBe('warming')
   })
 
+  it('a 200 with no results array is an index that is not answering', async () => {
+    // `results` is the field this route exists to carry; trusted, its absence
+    // (or a number in its place) threw in `hitsToEntries`' map — a 500 for the
+    // index talking nonsense. Gated where the cast happens instead.
+    for (const body of [{}, { results: 5 }]) {
+      resetIndexStatus()
+      stubIndex(READY, body)
+      const res = await post({ path: '/hero.stl' })
+      expect(res.status).toBe(503)
+      expect(((await res.json()) as { state: string }).state).toBe('absent')
+    }
+  })
+
   it('refuses a virtual path and a path outside the collection without asking the index', async () => {
     // Defense at the boundary: the honest client sends neither (the command is
     // absent on archive entries and outside the collection), so reaching here
