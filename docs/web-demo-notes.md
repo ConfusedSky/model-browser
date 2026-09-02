@@ -460,6 +460,20 @@ All re-runnable; say whose run when quoting.
   deciding (Masa: later): from a US vantage against an EU test box measure
   first paint, a scroll screen of sheets, a lightbox open, one search —
   the per-interaction shapes, not a bare ping.
+  **Trip-reduction shapes** (Masa floated GraphQL, posing as the example;
+  this session's read, 2026-09-02): poses are already frugal — one
+  background POST batch per listing (`semanticPosesFor`, chunked only past
+  `POSES_MAX`) behind an already-drawn grid, and `displayName` rides the
+  listing at emission (D7) for zero trips. The real fan-out is per-tile
+  `peek`/thumb GETs (12 + 10/scroll) — and there, batching and edge-caching
+  pull opposite ways: a batched POST always crosses the ocean, while small
+  immutable GETs are edge-cached after the first visitor, costing ~0 origin
+  trips on a baked corpus. Playbook for 1.3, by leverage: immutable GETs +
+  CDN for everything baked; ride-the-listing for per-entry fields (credits
+  could join displayName if lightbox trips mattered); batch endpoints for
+  background waves (the pose pattern); **GraphQL declined** — one lockstep
+  client behind the ApiClient seam (D1) buys none of its flexibility, and
+  its uncacheable per-query POSTs fight the CDN plan.
 - **Corpus**: see its `NOTES.md` (STL vs GLB sizes, dedup counts, decimation
   gates). `du` on `original/` reads 516 MB vs the notes' 12 GB — hardlink
   accounting order, not a discrepancy.
