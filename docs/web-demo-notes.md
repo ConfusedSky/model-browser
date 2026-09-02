@@ -517,6 +517,25 @@ All re-runnable; say whose run when quoting.
   reload API in the mini-classify style are cheap extensions D5's open
   reconciliation seam accommodates. All of it belongs in `listing-tree-cache`
   via an update before implementation starts, not in 1.3.
+  **Thumbnails join the pattern** (Masa, 2026-09-02; grounded this session):
+  `getThumb` already versions its URL (`path`+`mtime`+`ao`) but `app.ts`
+  sends no `Cache-Control` at all, so every tile refetches per visit with
+  the browser's HTTP cache sitting unused. Two moves: (1) **make the
+  versioned URL cacheable** — add the recipe to the URL (a RIG_VERSION bump
+  must change it or immutable pins stale pixels) and serve
+  `immutable, max-age=<long>`; repeat visits then cost zero pixel trips,
+  browser-cache locally, browser+CDN on the demo — the biggest trip-killer
+  in this thread for a header and a URL param. (2) **presence/validity rides
+  the listing** from a ThumbCache in-memory index (cached/stale/missing +
+  current URL per entry): kills the per-tile miss-check GET, and is exactly
+  the staleness feed `thumbnail-sweep-priority` (active) wants — a
+  convergence to coordinate between the two active changes. Wrinkle, the
+  authored/derived line again: the PNG is derived but the **camera is
+  authored** — an orbit re-renders new pixels at the same path+mtime, so
+  locally the listing-attached meta must carry a write generation that
+  joins the URL (an orbit changes the URL; the pinned old entry is never
+  asked for again). Demo: moot — read-only cache is genuinely immutable,
+  visitor orbits are localStorage-only per 2.1.
 - **Corpus**: see its `NOTES.md` (STL vs GLB sizes, dedup counts, decimation
   gates). `du` on `original/` reads 516 MB vs the notes' 12 GB — hardlink
   accounting order, not a discrepancy.
