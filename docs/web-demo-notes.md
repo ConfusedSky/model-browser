@@ -494,6 +494,29 @@ All re-runnable; say whose run when quoting.
   load-bearing: it decouples browse from index health (absent/warming/wedged
   must not delay a listing) and loopback trips are ~free; server-side
   attach-with-timeout remains available if that ever changes.
+  **The cache should hold poses and preview choices too** (Masa, 2026-09-02,
+  extending `listing-tree-cache` in discussion; that change is drafted,
+  unstarted): both are derived, regenerable, per-path — the hybrid split's
+  cache side, never `overrides.json` (whose reserved `pose` stays the
+  *manual* override) — and stable between index rebuilds, so recomputing per
+  refresh buys nothing. Cached, they ride the listing at emission like
+  `displayName`, shrinking the local wave to genuinely-unknown entries and a
+  plain refresh to one trip, zero index calls. Constraints to carry into
+  that change's design: (a) D1's snapshot-is-a-function-of-the-root-alone
+  invariant is test-pinned — poses/previews are **layers beside the tree,
+  not fields in it**, keyed tree + index generation (POSE_VERSION precedent;
+  the zip-directory layer is the shape); (b) preview choices depend on the
+  *subtree* but mtime never propagates upward — D4's revalidation visits
+  every directory anyway, so a changed directory re-derives previews for
+  itself **and its ancestors**, which must be stated or it will be missed;
+  (c) with these layers the demo bake becomes exactly "this cache fully
+  warmed, shipped read-only" — item 7's 'the bake is a sweep' stops being an
+  analogy and becomes the same code path, which is 1.3's cleanest shape.
+  Also from this thread (Masa): eager startup *revalidation* (D4's stat
+  pass over a persisted snapshot, never a cold full walk) and an explicit
+  reload API in the mini-classify style are cheap extensions D5's open
+  reconciliation seam accommodates. All of it belongs in `listing-tree-cache`
+  via an update before implementation starts, not in 1.3.
 - **Corpus**: see its `NOTES.md` (STL vs GLB sizes, dedup counts, decimation
   gates). `du` on `original/` reads 516 MB vs the notes' 12 GB — hardlink
   accounting order, not a discrepancy.
