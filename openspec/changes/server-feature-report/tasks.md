@@ -19,12 +19,15 @@
 ## 2. Client
 
 - [ ] 2.1 `ApiClient.features()` (`jsonOrThrow`, like `apps()`); `App` fetches it in a
-      mount effect on the `refreshApps` shape and holds it in state, defaulting to
-      all-on on failure (design D3 — the deliberate asymmetry with apps-to-null is in
-      the design, cite it at the call site)
+      mount effect on the `refreshApps` shape and holds it as three-valued state —
+      unknown while in flight (gated surfaces withheld), all-on on failure (design
+      D3 — the deliberate asymmetry with apps-to-null is in the design, cite it at
+      the call site)
 - [ ] 2.2 Client tests: harness gains a `features` mock defaulting to all-on (every
       pre-existing test unchanged — the byte-identity requirement's cell); a failed
-      read renders identically to all-on; the request goes through `ApiClient`
+      read renders identically to all-on; a gated surface is absent while the report
+      is unresolved and never flashes (drive with a hanging mock); the request goes
+      through `ApiClient`
 
 ## 3. Verification
 

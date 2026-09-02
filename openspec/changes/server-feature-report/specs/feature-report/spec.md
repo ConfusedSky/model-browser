@@ -24,14 +24,20 @@ never be the enforcement of anything.
 The client SHALL fetch the report once per session through its API client and hold it
 in one place surfaces read. A surface gated on a capability SHALL be withheld when the
 report declares it off — withheld as the launcher's surfaces are withheld on an empty
-report, leaving no gap where it stood. A read that fails SHALL resolve to a report with
-every capability on: the report shapes surfaces, the server enforces, so a failed read
-costs nothing but the shaping. With every capability on, the client SHALL render
-byte-identically to a client with no report mechanism at all.
+report, leaving no gap where it stood — and SHALL likewise be withheld while the
+report is not yet known, so a capability the server will deny is never shown and then
+taken away. A read that fails SHALL resolve to a report with every capability on: the
+report shapes surfaces, the server enforces, so a failed read costs nothing but the
+shaping. With every capability on, the client SHALL render byte-identically to a
+client with no report mechanism at all.
 
 #### Scenario: Everything on changes nothing
 - **WHEN** the report declares every capability on — including by defaulting after a failed read
 - **THEN** every surface renders exactly as it did before the report existed
+
+#### Scenario: No flash of a denied surface
+- **WHEN** a future consumer gates a surface on a capability a server declares off, and the report has not yet arrived
+- **THEN** the surface is withheld from the first render, not shown and then withdrawn when the report lands
 
 #### Scenario: A withheld capability leaves no trace
 - **WHEN** a future consumer gates a surface on a capability the report declares off

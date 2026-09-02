@@ -44,18 +44,29 @@ per-request state, the report is static per-process configuration, and mixing th
 couples every state answer to config wiring. The cost is one ~100-byte GET per
 session, the same price `/api/apps` already pays for the same reason.
 
-### D3: Fetched once, held beside `apps`, failing open
+### D3: Fetched once, held beside `apps`; unknown withholds, failure opens
 
 `App` fetches it in a mount effect exactly as `refreshApps` does and holds it in
 state; consumers read it from there (context extraction can come when a consumer
-outside `App`'s tree needs it). A failed read resolves to the everything-on default:
-the report only shapes surfaces, enforcement is server-side (Non-Goals), so failing
-open is today's UI, while failing closed would silently withhold local features — and
-silently reroute orbit persistence — on a transient error. The asymmetry with
-`/api/apps` failing to `null`/withheld is deliberate and worth stating: offering a
-launch into an app the registry cannot vouch for acts on the user's machine; offering
-a surface whose write the server will refuse merely earns an error the route already
-gives.
+outside `App`'s tree needs it). The state is three-valued, and the middle value is
+what kills the flash (Masa's round-trip question surfaced it, 2026-09-02): while the
+report is **unknown** — in flight — gated surfaces are withheld, so a demo visitor
+never sees write surfaces render and then vanish one transocean RTT later; locally
+the withholding lasts one loopback round trip, invisible. A **failed** read resolves
+to the everything-on default: the report only shapes surfaces, enforcement is
+server-side (Non-Goals), so failing open is today's UI, while failing closed would
+silently withhold local features — and silently reroute orbit persistence — on a
+transient error. The asymmetry with `/api/apps` failing to `null`/withheld is
+deliberate and worth stating: offering a launch into an app the registry cannot vouch
+for acts on the user's machine; offering a surface whose write the server will refuse
+merely earns an error the route already gives.
+
+*Noted for 1.3, not taken here:* once the demo change makes Hono serve the client
+shell, it may seed the report into the served HTML (an inline global read before
+fetching) to erase the startup round trip entirely. That is serve-time machinery a
+`bun run dev` session never exercises — Vite serves the shell locally and the fetch
+path must exist regardless — so it belongs to the change that owns static serving,
+as an optimization over a flash this decision has already removed.
 
 ### D4: Constructed at start, injected like the launcher
 
