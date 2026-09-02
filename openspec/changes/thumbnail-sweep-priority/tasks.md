@@ -73,8 +73,12 @@
       it scrolls on screen). One observer cannot do it — one `rootMargin` yields
       two states, and `intersectionRatio` is measured against the *expanded*
       root, so visible and near both read ~1.0. **Both observers take `App`'s
-      `<main>` scroller as their `root`** — App passes its ref to `Grid` as a
-      prop, as it passes `onPeek` — because the intersection algorithm clips the
+      `<main>` scroller as their `root`** — App gives `<main>` a `ref` and
+      passes the **`RefObject`, never its `.current`** (stable in deps;
+      `.current` is populated during commit before passive effects, so the
+      skip-until-populated guard is belt-and-braces, while passing the element
+      hands the first render `null` with nothing ever retrying) — because the
+      intersection algorithm clips the
       target against every clipping ancestor before the margin applies: against
       the default viewport root, a tile scrolled out of `<main>` reports empty
       whatever the margin, and `near` silently collapses to the viewport edge
@@ -91,9 +95,17 @@
       (D2). `previews` reaches the registration rule through a ref kept fresh
       per render — **not** the dependency array, which would rebuild both
       observers per landed peek (a new map identity each time) — and a small
-      effect keyed on `previews` alone republishes the tracked bands through the
-      shared publish closure, so a landed peek's models join their folder's band
-      at once with no observer churn (D2)
+      effect keyed on `previews` alone republishes the tracked bands, so a
+      landed peek's models join their folder's band at once with no observer
+      churn. The seam between the two effects is a ref, not a shared closure
+      (two effects cannot share one): the tracked `Map` in a component-level
+      `useRef`, the publish function written to `publishRef` by the observer
+      effect, the previews effect declared **after** it and calling
+      `publishRef.current?.()` (D2). The observer effect's full dependency
+      list after this change is `[entries, onPeek, setBands, mainRef]` — every
+      entry identity-stable or listing-scoped; three separate decisions (the
+      previews ref, 2.5's wrapper identity, the `RefObject`) exist to keep
+      anything unstable out of it
 - [ ] 2.2 **Drop `observer.unobserve(record.target)`** from that effect: a band
       tracker must keep watching a tile after its first intersection. Safe because
       `App`'s `requestPeek` already refuses a repeat with
@@ -119,11 +131,19 @@
       the find filter hides has a slot but no tile — unreported, never parked,
       ranked above far, and the sweep would read gigabytes for entries the user
       just filtered away. `App` wraps the `setBands` it hands to `Grid`,
-      merging `far` for every model path in `thumbEntries` and not in
-      `shownEntries` before forwarding — one set difference per report, at the
-      one place both lists exist. Clearing the filter changes `shownEntries`,
-      re-runs the observer effect, and the fresh merged reports unpark through
-      the ordinary path
+      adding `far` before forwarding, under two rules that are each
+      load-bearing (D3, round-2 review): the hidden set is **`entries` minus
+      `filteredListing`** (model paths; the anchor is prepended separately and
+      exempt; kind-hidden tiles are deliberately included) — never
+      "`thumbEntries` minus `shownEntries`", whose difference contains every
+      folder-preview model by construction and would park the sheet cells of a
+      folder on screen; and the merge **never overwrites a band the incoming
+      map reports** (D2's per-path max at App's layer) — a hidden tile can
+      simultaneously be a visible folder's preview cell, and the folder's
+      registration must win. The wrapper is `useCallback` with an empty
+      dependency list reading both lists through per-render refs (the
+      `requestPeek` idiom), so `Grid`'s effect sees one stable identity —
+      built on the lists it would churn per keystroke and per landed peek
 
 ## 3. The parked state
 
@@ -221,7 +241,7 @@
       recipe is not cached stays parked and renders when its tile returns —
       unless its mesh is still warm, in which case the tail is pushed at the far
       rank and completes once nothing better-ranked is pending (3.4a's
-      exception, applied at the `parked` flag by 3.3a's tail gate)
+      exception, applied by 3.3a's tail gate — the flag and the band ref both)
 - [ ] 4.2 A parked tail restarts under the slot's **current** `(ao, pose)`, never
       the recipe it was parked under. This falls out of `start` reading `slot.ao`
       and `slot.pose` at restart time rather than being enforced separately —
@@ -247,17 +267,19 @@
       queue); a far tile whose mesh the LRU still holds is rendered after every
       visible tile rather than parked, and its PNG is filed (3.4a) — with the
       control that the same tile with a cold mesh is parked; a kept far job
-      whose mesh was evicted before its turn, its tile still far, parks with
-      `slot.parked` set and without `acquire` being called (`acquire` on the
-      fake is the observable read — the file has no loader, 5.1a); the same
-      kept job woken with its tile **back on screen** calls `acquire` and
+      whose mesh was evicted before its turn, its tile still far, does not call
+      `acquire` (`acquire` on the fake is the observable read — the file has no
+      loader, 5.1a) — and the flag it sets is asserted by **consequence**, not
+      by inspection (`EntrySlot` is module-private): report the path `visible`
+      afterwards and assert it renders, which only passes if the self-park set
+      `parked`, since re-ranking alone would find no queued job; the same
+      kept job woken with its tile no longer reported far calls `acquire` and
       renders — never a stranded `loading` tile (3.4a); a pose or
       preference retirement of a parked cold slot issues its lookup and **no
       push and no `acquire`** — D5's own path through
       3.3a's gate; a slot created after the last report — the reconciler's
       same-path-new-mtime replacement — is still gated far by the band ref
-      (3.1); a filter-hidden model is reported far through App's wrapper and
-      parks (2.5); an unpark landing while the retirement's lookup is in flight
+      (3.1); an unpark landing while the retirement's lookup is in flight
       files **exactly one PUT** (3.3b — the double-start writes two); a park
       landing after a render started, where that render then fails, falls back
       to its stale PNG and never shows the error state (1.2a — the unconditional
@@ -284,7 +306,15 @@
       preview model takes
       its folder tile's band (2.3); a path that is both a visible tile and a far
       folder's preview takes the nearest band; dropping `unobserve` still yields
-      exactly one peek per folder per listing, through `requestPeek`'s guard (2.2)
+      exactly one peek per folder per listing, through `requestPeek`'s guard
+      (2.2); a **visible** folder whose preview models are not listing entries
+      has those models unparked and rendered — the cell that fails if 2.5's
+      wrapper over-reaches into the preview set; a filter-hidden model is
+      reported far through App's wrapper and parks (2.5 — this cell lives here,
+      not in 5.1: the wrapper, `shownEntries` and `Grid` exist only in an
+      App mount); and a filter-hidden tile that is also a visible folder's
+      preview cell takes the folder's band — the merge never overwrites a
+      report (2.5)
 - [ ] 5.3 Confirm no renderer-mock updates are needed and `RIG_VERSION` is
       untouched — this changes scheduling, not the recipe; if a renderer mock
       needs touching, that is a signal something rendering-related moved.

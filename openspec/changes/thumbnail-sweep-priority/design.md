@@ -139,10 +139,14 @@ scrolled out of `<main>` has an empty rect no matter how generous `rootMargin`
 is: `near` silently collapses to the viewport edge, tiles park the instant they
 leave it (voiding D4's oscillation reasoning), and the peek-timing change below
 never happens. `rootMargin` buys a prefetch band only when `root` *is* the
-scrolling container. `App` owns `<main>` and passes its ref to `Grid` as a
-prop, exactly as it passes `onPeek`; the effect skips building observers until
-the ref is populated (it is, by the time tiles exist — `<main>` is their
-ancestor). The park margin itself is a named constant with a tune-then-freeze
+scrolling container. `App` owns `<main>`, gives it a `ref`, and passes **the
+`RefObject`, never its `.current`** (round-2 review): the object's identity is
+stable in a dependency list, and its `.current` is populated during commit,
+before passive effects run — so the effect's skip-until-populated guard is
+belt-and-braces, not a state anything waits in. Passing the element instead
+would hand the first render `null` with nothing ever re-rendering `Grid` to
+retry: a permanent no-observer bug invisible under a stubbed observer. The park
+margin itself is a named constant with a tune-then-freeze
 line (task 6.2): "generous" is a decision about oscillation and peek timing,
 and it gets a recorded value, not an adjective. So: the **band observer** — the
 widened existing one, rooted at the scroller — carries the park margin, and its
@@ -186,9 +190,15 @@ effect:
   republish free, not the observer churn, which is the larger cost). `Grid`
   keeps `previewsRef.current = previews` fresh per render, the registration
   rule reads it at report time, and a small effect keyed on `previews` alone
-  republishes the already-tracked bands through the shared publish closure —
-  no observer is touched, and a landed peek's models join their folder's band
-  immediately rather than at the next scroll.
+  republishes the already-tracked bands — no observer is touched, and a landed
+  peek's models join their folder's band immediately rather than at the next
+  scroll. The seam between the two effects is a ref, because two effects
+  cannot share a closure (round-2 review): the tracked `Map` lives in a
+  component-level `useRef` outside both, the observer effect writes its
+  publish function into a `publishRef` on each run, and the previews effect —
+  declared **after** the observer effect, since setups run in declaration
+  order and an earlier declaration would fire against an unset ref on mount —
+  calls `publishRef.current?.()`.
 
 A folder tile registers **its preview models' paths under its own band**, and a
 path that is both a visible tile and a far folder's preview takes the *nearest*
@@ -256,11 +266,35 @@ by the find filter has a slot but no tile: unreported, never parked, ranked
 *above* far — with a filter narrowing 500 tiles to 3, the sweep would go on
 reading gigabytes for the 497 just filtered away. `Grid` cannot report what has
 no DOM node, but `App` knows the difference: it wraps the `setBands` it hands
-to `Grid`, merging `far` for every model path in `thumbEntries` and not in
-`shownEntries` before forwarding — one set difference per report, at the one
-place both lists exist. Clearing the filter changes `shownEntries`, re-runs the
-observer effect, and the fresh reports (merged with a now-empty hidden set)
-unpark through the ordinary path.
+to `Grid`, adding `far` before forwarding. Two halves of that rule are
+load-bearing, and the first draft of this paragraph got both wrong (round-2
+review):
+
+- **The hidden set is `entries` minus `filteredListing`** (model paths only;
+  the anchor is prepended separately and so exempt) — the tiles the filter or
+  a kind restriction actually hid, both deliberately. It is *not*
+  "`thumbEntries` minus `shownEntries`": preview models are appended to
+  `thumbEntries` precisely because they are not tiles, so that difference
+  contains every folder-preview model on every report, and stamping those far
+  is what task 2.3 and the delta's shown-inside-another-tile scenario forbid —
+  it would park the sheet cells of a folder the user is looking at.
+- **The merge never overwrites a band the incoming map reports** — the
+  per-path max of D2, applied at `App`'s layer. Needed even with the scoped
+  set: a filter-hidden *tile* can simultaneously be a **visible folder's
+  preview cell**, and the folder's registration must win, or the model is
+  parked while something showing it is on screen.
+
+The wrapper itself is identity-stable — `useCallback` with an empty dependency
+list, reading the two lists through refs kept fresh per render, the idiom
+`requestPeek` already uses (`previewsRef`, `listingRef`). Built on the lists
+directly it would change identity per find-filter keystroke *and* per landed
+peek (`thumbEntries` memoises over `previews`, which is a new map per landing),
+and anything unstable handed to `Grid`'s observer effect re-imports exactly the
+rebuild churn the previews-ref decision above removed. Clearing the filter
+changes `shownEntries`, re-runs the observer effect, and the fresh merged
+reports unpark what comes back on screen or near it; models still off screen
+now report `far` honestly and stay parked, which is the rule working, not a
+gap.
 
 The alternative — a `bands` argument beside `ao` and `poses` — is rejected and
 recorded so nobody simplifies back to it: bands change on every scroll settle, and
@@ -347,7 +381,7 @@ would push a render and read a mesh for a tile the band map already said is
 far. So `EntrySlot` gains `parked: boolean`, and the lookup tail consults it
 before `queue.push`: a parked slot's tail runs `dropStale` (the stale PNG it
 minted would otherwise be a decoded image nothing releases) and files no
-render — unless the mesh is warm, in which case the exception below applies at
+render — unless the mesh is warm, in which case the exception above applies at
 the flag exactly as at the handle, and the tail pushes at the far rank. The
 tail consults the flag **and the band in force** (D3's ref, 2026-09-02): a
 current `far` report gates exactly as `parked` does, which is what parks work
@@ -422,7 +456,9 @@ parked and renders when its tile comes back — unless its mesh is still warm, i
 which case D4's exception applies at the flag exactly as at the handle: the
 cheap tail is pushed at the far rank and finishes once nothing better-ranked is
 pending, making the new-recipe image durable before eviction takes the mesh.
-Mechanically this is the lookup tail consulting `slot.parked` (D4): the
+Mechanically this is the lookup tail consulting `slot.parked` and the band in
+force (D4's gate, flag and ref both — the ref half is what catches a slot
+created after the last report, which a retirement's fresh lookup reaches too): the
 retirement's fresh lookup runs for every slot, and it is the tail's own gate —
 never queue ranking — that withholds or files the render.
 
@@ -456,9 +492,11 @@ usually been evicted, and the read — the one irreversible cost — is paid aga
 D4's warm-mesh exception is what closes that gap: work whose read is already
 paid is finished while finishing is still cheap, and the PNG it files is durable
 where the LRU entry is not. What parking discards is then only work that had
-incurred no cost, and the LRU is the recheck seam that keeps it so: `has` at
-park time says which jobs are past the expensive part, and `has` again at start
-time says whether that is still true.
+incurred no cost. The recheck seam is as D4 states it, not the LRU alone
+(round-2 review — this sentence originally lagged the H2/M7 fold-ins): at park
+time the **held-or-loading peek** says which jobs are past the expensive part,
+and at start time the **band ref comes first**, with the peek behind it — the
+LRU answers "is the cheap path still cheap", never "may this run".
 
 ## Risks / Trade-offs
 

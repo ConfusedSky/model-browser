@@ -75,8 +75,11 @@ to what they are looking at, rather than to the size of the directory.
   `IntersectionObserver` watching `[data-dir-tile]` for folder previews; this
   change widens it to model tiles and band reporting — the joining
   `folder-contact-sheets` explicitly deferred to whichever change landed second
-  — and adds a second, zero-margin observer in the same effect to split visible
-  from near, which one observer's single `rootMargin` cannot do (design D2).
+  — and adds a second, margin-less observer in the same effect to split visible
+  from near, which one observer's single `rootMargin` cannot do. Both observers
+  root at `App`'s `<main>` scroller, without which the park margin is inert —
+  the intersection algorithm clips at the scrolling ancestor before any margin
+  on the default root applies (design D2).
 - Unchanged: the concurrency limit, suspension during orbit/lightbox, the
   cached-lookup path that bypasses the queue entirely, and every pixel of what a
   thumbnail looks like. This is scheduling, not rendering, so no `RIG_VERSION`
@@ -132,10 +135,12 @@ None.
   keys-based shallow compare, so a per-tile band would re-render all 500 tiles on
   every scroll settle.
 - `client/src/App.tsx` — holds the `setBands` callback by identity, as it holds
-  `onPeek`; passes `<main>`'s ref to `Grid` as the observers' root; and wraps
-  `setBands` to merge `far` for filter-hidden models (in `thumbEntries`, not in
-  `shownEntries`) before forwarding, so the sweep does not keep reading entries
-  the user just filtered away (D3).
+  `onPeek`; gives `<main>` a `ref` and passes the `RefObject` to `Grid` as the
+  observers' root; and wraps `setBands` to add `far` for filter-hidden models —
+  `entries` minus `filteredListing`, never overwriting a band the report
+  carries (D3: the wider `thumbEntries`-based difference captures every
+  folder-preview model and would park sheet cells on screen) — so the sweep
+  does not keep reading entries the user just filtered away.
 - `client/src/three/lru.ts` — `MeshLru` gains a held-or-loading peek beside
   `has` (recency-free, like `has`): an acquire still in flight must read as
   warm, or its render is parked while the read completes anyway (D4).
