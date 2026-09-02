@@ -44,22 +44,30 @@ per-request state, the report is static per-process configuration, and mixing th
 couples every state answer to config wiring. The cost is one ~100-byte GET per
 session, the same price `/api/apps` already pays for the same reason.
 
-### D3: Fetched once, held beside `apps`; unknown withholds, failure opens
+### D3: Not known withholds offers — and only an explicit value changes a behavior
 
-`App` fetches it in a mount effect exactly as `refreshApps` does and holds it in
-state; consumers read it from there (context extraction can come when a consumer
-outside `App`'s tree needs it). The state is three-valued, and the middle value is
-what kills the flash (Masa's round-trip question surfaced it, 2026-09-02): while the
-report is **unknown** — in flight — gated surfaces are withheld, so a demo visitor
-never sees write surfaces render and then vanish one transocean RTT later; locally
-the withholding lasts one loopback round trip, invisible. A **failed** read resolves
-to the everything-on default: the report only shapes surfaces, enforcement is
-server-side (Non-Goals), so failing open is today's UI, while failing closed would
-silently withhold local features — and silently reroute orbit persistence — on a
-transient error. The asymmetry with `/api/apps` failing to `null`/withheld is
-deliberate and worth stating: offering a launch into an app the registry cannot vouch
-for acts on the user's machine; offering a surface whose write the server will refuse
-merely earns an error the route already gives.
+`App` fetches it in a mount effect and holds it in state; consumers read it from
+there (context extraction can come when a consumer outside `App`'s tree needs it).
+The state is two-behaviored (Masa, 2026-09-02, overturning this draft's first
+fail-open version): a report that is **known** gates by its values; a report that is
+**not known** — still in flight, or failed — withholds gated surfaces. This kills
+the flash (a demo visitor never sees write surfaces render and vanish one transocean
+RTT later; locally the withholding lasts one loopback round trip, invisible), and it
+never opens on error: a features read that fails almost always accompanies a server
+that cannot answer anything, so the "usable app silently missing features" case
+fail-open was protecting barely exists, while fail-open teaches future field-adders
+the wrong lesson about a report whose one hazard is being mistaken for enforcement.
+An unresolved report is retried on each listing landing until it resolves — the
+index-status schedule, for its reason: a server that answers late must become fully
+usable without a reload.
+
+The rule that makes fail-closed safe is the offer/behavior split: the report
+withholds **offers** (a tab, a menu entry, a button); it never changes what an
+existing **behavior** does except on an **explicitly declared** value. Orbit
+persistence (decision 2.1's consumer) keeps writing to the server unless the report
+explicitly declares thumb writes off — a transient failure must not silently
+relocate where a user's framing is stored. Offers fail closed; behaviors keep
+today's default until told otherwise.
 
 *Noted for 1.3, not taken here:* once the demo change makes Hono serve the client
 shell, it may seed the report into the served HTML (an inline global read before

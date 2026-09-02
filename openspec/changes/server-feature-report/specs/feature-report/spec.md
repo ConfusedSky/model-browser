@@ -21,23 +21,35 @@ never be the enforcement of anything.
 - **THEN** it contains capability fields only, and nothing identifies a deployment kind
 
 ### Requirement: The client resolves the report once and shapes surfaces by it
-The client SHALL fetch the report once per session through its API client and hold it
-in one place surfaces read. A surface gated on a capability SHALL be withheld when the
-report declares it off — withheld as the launcher's surfaces are withheld on an empty
-report, leaving no gap where it stood — and SHALL likewise be withheld while the
-report is not yet known, so a capability the server will deny is never shown and then
-taken away. A read that fails SHALL resolve to a report with every capability on: the
-report shapes surfaces, the server enforces, so a failed read costs nothing but the
-shaping. With every capability on, the client SHALL render byte-identically to a
-client with no report mechanism at all.
+The client SHALL fetch the report through its API client and hold it in one place
+surfaces read. A surface gated on a capability SHALL be withheld unless a known
+report declares that capability on — withheld while the report is in flight, withheld
+when the read failed, and withheld when a known report declares it off, in every case
+as the launcher's surfaces are withheld on an empty report, leaving no gap where a
+surface stood. A report that has not resolved SHALL be retried on each listing
+landing until it resolves, so a server that answers late becomes fully usable
+without a reload. A capability's absence of knowledge SHALL only ever withhold an
+offer: a behavior with an existing default SHALL keep that default unless a known
+report explicitly declares its capability off — not knowing must never silently
+change what an action does or where data is stored. With a known report declaring
+every capability on, the client SHALL render byte-identically to a client with no
+report mechanism at all.
 
 #### Scenario: Everything on changes nothing
-- **WHEN** the report declares every capability on — including by defaulting after a failed read
+- **WHEN** the report is known and declares every capability on
 - **THEN** every surface renders exactly as it did before the report existed
 
 #### Scenario: No flash of a denied surface
 - **WHEN** a future consumer gates a surface on a capability a server declares off, and the report has not yet arrived
 - **THEN** the surface is withheld from the first render, not shown and then withdrawn when the report lands
+
+#### Scenario: A failed read never opens a surface
+- **WHEN** the report read fails
+- **THEN** gated surfaces stay withheld, and the report is retried on the next listing landing rather than assumed
+
+#### Scenario: Not knowing does not move a behavior
+- **WHEN** a behavior with an existing default is tied to a capability, and the report is unknown or failed
+- **THEN** the behavior keeps its existing default, changing only when a known report explicitly declares that capability off
 
 #### Scenario: A withheld capability leaves no trace
 - **WHEN** a future consumer gates a surface on a capability the report declares off

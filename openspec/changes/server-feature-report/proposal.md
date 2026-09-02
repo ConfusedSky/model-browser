@@ -17,10 +17,13 @@ one capability report, settled in `docs/web-demo-notes.md` (2026-09-02): resolve
   with one field — `thumbWrites` (whether `PUT /api/thumb` is accepted). Constructed
   once at server start and injectable like the launcher; today's value is
   everything-on, and the demo change flips fields via its env selection.
-- The client fetches it **once per session** at mount (the `/api/apps` schedule) and
-  resolves it into one place the UI reads. A failed read defaults to everything-on: the
-  report shapes *surfaces*, never security — enforcement always lives server-side with
-  whatever turns a capability off — so failing open is today's behavior, not a hole.
+- The client fetches it at mount and resolves it into one place the UI reads. Gated
+  surfaces are **withheld until a known report opens them** — in flight and failed
+  reads alike, retried per listing landing until resolved — so nothing flashes and
+  nothing opens on error. The report shapes *surfaces*, never security: enforcement
+  always lives server-side with whatever turns a capability off, and a behavior with
+  an existing default changes only on an explicitly declared value, never on a failed
+  read (design D3's offer/behavior split).
 - No consumer behavior changes in this change: with the report at its default, every
   surface renders byte-identically to today. Consumers (orbit routing, bulk-job
   surfaces, chat-tab hiding) gate on it in their own changes.
