@@ -81,7 +81,14 @@
       beside `applyDisplayNames`, same in-place caveat as the preamble's `displayName`
       note — cached snapshot entries must not bake annotations in; serve copies. A
       library with no layer content emits byte-identical listings (pin with the
-      library-overrides DOM/wire-identity cells as precedent)
+      library-overrides DOM/wire-identity cells as precedent). **Shape seam
+      (2026-09-02):** `thumbnail-image-serving` (drafted, sequenced after this
+      §6) consumes the thumbnail annotation and its design D2 names the field
+      shape — `DirEntry.thumb?: { gen, framed, camera?, axis?, ao?: { state,
+      lighting?, rig?, posed? }, noao?: {…} }`, i.e. 6.2's presence/staleness/
+      gen/framed plus the recipe labels and stored camera/axis the client's
+      usability test reads. Adopt it here or amend it there — one shape, not
+      two; that change's proposal says the same
 - [ ] 6.4 Client: the pose wave asks only for entries whose listing carried no pose
       (`semanticPosesFor` callers in `App`); everything else about the wave — background,
       chunked, silent-failure — unchanged
