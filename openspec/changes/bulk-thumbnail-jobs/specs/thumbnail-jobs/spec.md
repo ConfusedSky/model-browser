@@ -6,7 +6,8 @@
 The client SHALL offer bulk thumbnail work as jobs of two operations over a scope — a
 subtree or the whole library. *Generate* SHALL render and store a thumbnail for each
 model in scope whose thumbnail is missing or stale, touching no current entry. *Reset*
-SHALL apply, to each model in scope with a stored orientation, the same
+SHALL apply, to each model in scope with a stored orientation — a stored camera or a
+stored axis, the definition the derivation and the counts share (review M4) — the same
 give-up-the-orientation semantics the per-model action defines (`entry-actions`), and
 then render its thumbnail, so no image remains that was rendered from a discarded
 camera. A job's work list SHALL be derived at launch from per-entry state, and progress
@@ -29,8 +30,12 @@ record.
 
 ### Requirement: One job at a time, always preemptible, never overwriting the user
 At most one bulk job SHALL run at a time; launching while one runs SHALL surface the
-running job rather than starting a second. Job work SHALL run at a priority below all
-interactive thumbnail work, so what the user is looking at always renders first. An
+running job rather than starting a second. Job work SHALL rank no better than deferred
+far work — the render queue's lowest existing rank, with which it may tie — so
+on-screen, near, and unreported work always renders first. (A rank strictly below
+`far` does not exist and would contradict the sweep capability's exhaustive ordering;
+adding one is a `model-thumbnails` MODIFY stacked after that change archives, deferred
+until tying with far tiles proves insufficient — review S1.) An
 entry whose stored state changed after the job's launch — detected by its write
 generation having moved — SHALL be skipped and counted, never overwritten. A per-entry
 failure SHALL be counted and reported without stopping the job; the job fails as a
@@ -49,9 +54,14 @@ whole only when nothing in it could proceed.
 - **THEN** the job continues, the failure is counted and visible at completion, and a relaunch retries it
 
 ### Requirement: Jobs are launched with their cost stated, and watched from one chip
-Each launcher SHALL state the derived count of work it proposes before running. A reset
-SHALL require confirmation carrying that count, since it discards user-authored
-framings; a generate SHALL run without confirmation. A launched job SHALL be
+A launcher's cost SHALL be stated where it can be delivered without re-shaping the
+surface that offers it: the `library` tab's buttons carry their counts (the tab renders
+asynchronously already); a context-menu entry is uncounted — the menu is measured,
+clamped and focus-seeded from its command list at mount, and a late-arriving count
+would move it (review M6) — and states its count at the next step instead. A reset
+SHALL require confirmation carrying the derived count, since it discards user-authored
+framings; a generate SHALL run without confirmation, its count appearing on the
+progress affordance as the job starts. A launched job SHALL be
 represented by one persistent, dismissible progress affordance, the same whichever
 launcher started it, surviving navigation, showing operation, scope, progress, and
 failures, and offering cancellation at any time. Dismissing it SHALL NOT cancel the

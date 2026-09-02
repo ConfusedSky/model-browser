@@ -8,7 +8,10 @@ Both needs surfaced in the trip-reduction thread (`docs/web-demo-notes.md`, 2026
 settled in discussion with Masa): a scoped, resumable way to *generate what is missing*
 and *reset what was framed*, launched where the need is visible, without a background
 warmer that grinds a spinning, sometimes-absent volume unasked (the always-on
-alternative was weighed and declined there — one 500-tile listing is 20.21 GB of reads).
+alternative was weighed and declined there — one 500-tile listing measured 20.21 GB of
+reads, `thumbnail-sweep-priority`'s 2026-08-18 figure, relayed; that change's own task
+asks for a re-measure before load-bearing use, review M13 corrected this line's
+original mis-attribution to the notes).
 
 ## What Changes
 
@@ -53,7 +56,9 @@ alternative was weighed and declined there — one 500-tile listing is 20.21 GB 
 
 ## Impact
 
-- Client: `EntryMenu` (container entries gain the two actions), `SidePanel` (a fourth
+- Client: `ENTRY_COMMANDS`/`commandsFor` in `entryActions.ts` — the one per-kind action
+  table; `EntryMenu` only draws it (review M7), and `ActionHost` grows a job-launch
+  capability; `SidePanel` (a fourth
   `library` tab), the job runner beside `useThumbnails`' queue plumbing, the chip.
 - Server: none beyond what other changes provide — the job PUTs through `/api/thumb` as
   ordinary renders do.

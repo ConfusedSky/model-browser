@@ -26,9 +26,9 @@ surfaces read. A surface gated on a capability SHALL be withheld unless a known
 report declares that capability on — withheld while the report is in flight, withheld
 when the read failed, and withheld when a known report declares it off, in every case
 as the launcher's surfaces are withheld on an empty report, leaving no gap where a
-surface stood. A report that has not resolved SHALL be retried on each listing
-landing until it resolves, so a server that answers late becomes fully usable
-without a reload. A capability's absence of knowledge SHALL only ever withhold an
+surface stood. A report that has not resolved SHALL be retried on each navigation
+until it resolves, so a server that answers late becomes fully usable without a
+reload. A capability's absence of knowledge SHALL only ever withhold an
 offer: a behavior with an existing default SHALL keep that default unless a known
 report explicitly declares its capability off — not knowing must never silently
 change what an action does or where data is stored. With a known report declaring
@@ -45,7 +45,7 @@ report mechanism at all.
 
 #### Scenario: A failed read never opens a surface
 - **WHEN** the report read fails
-- **THEN** gated surfaces stay withheld, and the report is retried on the next listing landing rather than assumed
+- **THEN** gated surfaces stay withheld, and the report is retried on the next navigation rather than assumed
 
 #### Scenario: Not knowing does not move a behavior
 - **WHEN** a behavior with an existing default is tied to a capability, and the report is unknown or failed

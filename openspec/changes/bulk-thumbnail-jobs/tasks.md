@@ -1,5 +1,19 @@
 # Tasks — bulk-thumbnail-jobs
 
+> **NOT READY TO IMPLEMENT — two review findings need a design pass first
+> (2026-09-02, with Masa):** S2 — nothing delivers the client a subtree/library
+> enumeration or count (the thumbnail-state index is server-side, its only seam is
+> per-listing-entry annotation, and `/api/dir?flat=true` caps at 500 models with no
+> pagination), so the derivation needs either a server scope/count endpoint
+> (revising this change's "no new server endpoint" Non-Goal) or a different shape.
+> M5 — the reused `refreshThumbnail` body reports per-entry failures to the user
+> (one message per failure, wrong fanned out) and resolves poses from the current
+> landing's `host.poses` only, so a bulk reset outside a meaning grid would take
+> the no-pose branch corpus-wide instead of restoring index framings; the job
+> needs its own per-entry op sharing internals, plus its own `semanticPosesFor`
+> wave over its scope. Do not start tasks below until both are resolved and this
+> banner is replaced with the resolutions.
+
 > Hard ordering, all three before this change: `thumbnail-sweep-priority` (the priority
 > bands the job drains through), `listing-tree-cache` §6 (the thumbnail-state index
 > — presence, staleness, generation, and the `framed` bit its 6.2 carries for this
@@ -28,12 +42,20 @@
 
 ## 2. Surfaces
 
-- [ ] 2.1 `EntryMenu`: on dir and zip entries, "Generate thumbnails beneath" and
+- [ ] 2.1 `ENTRY_COMMANDS` + `commandsFor` (`entryActions.ts` — the one per-kind
+      table; `EntryMenu` only draws it, review M7; new `CommandId`s, `applies` on
+      containers, the ASCII per-kind table in the doc comment updated, and a
+      job-launch capability on `ActionHost`): on dir and zip entries, "Generate
+      thumbnails beneath" and
       "Reset framings beneath", each with its derived count; absent on model entries.
       Reset confirms with the count (D5)
 - [ ] 2.2 `SidePanel`: fourth tab `library` with "Generate N missing thumbnails" and
       "Reset N framings" for the whole library; counts from the index, no walk. Tab
-      joins the stored-tab rules as `chat`/`search` do (`similar` stays transient)
+      does NOT join the stored-tab rules — it follows `similar`'s exclusion instead:
+      a tab the feature report can empty is a tab that can be absent, which is the
+      condition `StoredTab` exists to exclude, and the `tabStore` parser must not
+      learn a value that can name a missing tab (review M8, overturning this line's
+      first version)
 - [ ] 2.3 The progress chip: app-level, survives navigation, shows
       operation/scope/done/total/failed/skipped, Cancel; dismiss hides without
       cancelling (D2)

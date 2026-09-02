@@ -59,8 +59,7 @@
 - [ ] 5.1 Additive staleness marker on `/api/dir` responses; a freshly walked listing carries none
 - [ ] 5.2 Client: present cached results immediately with a "refreshing" affordance, and reconcile the corrected listing when it arrives — no new transport (the Hono app must run on Node unchanged, architecture D1), so the client issues an ordinary follow-up request on seeing the marker; the existing latest-wins guard and skeleton already cover a later response landing
 
-## 6. Derived layers and explicit freshness (added 2026-09-02 — see design D7–D9;
-##    build after §4, the layers hang off the snapshot and its revalidation)
+## 6. Derived layers and explicit freshness (added 2026-09-02 — see design D7–D9; build after §4, the layers hang off the snapshot and its revalidation)
 
 - [ ] 6.1 Pose and preview-choice layers beside the snapshot module: per-path entries
       keyed against the tree plus the index generation and pose version; populated when
@@ -70,7 +69,10 @@
       **and its ancestors** (D7's stated subtlety)
 - [ ] 6.2 Thumbnail-state index: `ThumbCache` exposes an in-memory per-path index —
       presence, staleness against the snapshot's mtime, the sidecar's write
-      generation, and `framed` (a stored camera exists) — maintained on its own
+      generation, and `framed` (a stored camera OR axis exists — the definition
+      `bulk-thumbnail-jobs`' reset shares, review M4; presence/staleness are per
+      occlusion variant, since the store keys renders that way, review m20) —
+      maintained on its own
       reads/writes, no directory rescan per listing. The write generation is a seam
       the immutable-thumbnail-serving change consumes and `framed` one
       `bulk-thumbnail-jobs` consumes (its reset counts/derivation); keep the shape

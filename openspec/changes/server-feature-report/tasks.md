@@ -20,8 +20,9 @@
 
 - [ ] 2.1 `ApiClient.features()` (`jsonOrThrow`, like `apps()`); `App` fetches it in a
       mount effect and holds `FeatureReport | null` — null (in flight or failed)
-      withholds gated surfaces; an unresolved report is retried on each listing
-      landing (the index-status schedule) until it resolves (design D3). Cite D3's
+      withholds gated surfaces; an unresolved report is retried on each
+      navigation — an effect keyed on the view path mirroring the index-availability
+      effect's trigger, no poll, no timer — until it resolves (design D3). Cite D3's
       offer/behavior split where consumers will look
 - [ ] 2.2 Client tests: harness gains a `features` mock defaulting to a known all-on
       report (every pre-existing test unchanged — the byte-identity requirement's

@@ -40,7 +40,8 @@ preemptible, or it fights the disk the user is using.
 
 A job is `(operation, scope)`. Its work list is derived at launch from the
 per-entry state the cache indexes already hold — generate: models in scope
-missing or stale; reset: models in scope with a stored camera (`framed`) — and
+missing or stale; reset: models in scope with a stored orientation — a camera or an
+axis, the definition `framed` in `listing-tree-cache` 6.2 must share (review M4) — and
 is never persisted: each completed entry's own state change removes it from any
 future derivation. Resume-after-cancel, after-crash, after-app-close is
 therefore "launch it again"; the second run's derivation is exactly the
@@ -84,13 +85,19 @@ between check and write; the window is one queue job wide.
 
 ### D5: Counts before consent
 
-Every launcher states its derived count before running: the library tab's
-buttons read "Generate N missing thumbnails" / "Reset N framings"; the context
-menu entries state N for the subtree. Generate runs on click — it is additive.
-Reset confirms first (count in the dialog): it destroys the user's curated
-framings, which no re-run can rederive. Both counts come from the cache
-indexes (one lookup per entry in scope, no filesystem walk); a container whose
-subtree the index cannot yet enumerate states that instead of a number.
+A launcher states its cost where the surface can deliver it (review M6 narrowed the
+first version, which counted everywhere): the library tab's buttons read "Generate N
+missing thumbnails" / "Reset N framings" — that surface renders asynchronously
+already. A context-menu entry is uncounted: `EntryCommand.labelFor` is
+`(entry) => string` with no context, and `EntryMenu` measures, clamps and
+focus-seeds from its command list at mount, so a late-arriving count would visibly
+move the menu (the `AvailabilityContext` doc records exactly this hazard). The
+count appears at the next step instead — reset's confirmation dialog carries it
+before anything is discarded; generate's appears on the chip as the job starts.
+Reset confirms first: it destroys the user's curated framings, which no re-run can
+rederive. Counts come from the cache indexes (one lookup per entry in scope, no
+filesystem walk); a scope the index cannot yet enumerate states that instead of a
+number.
 
 ### D6: The `library` tab is the whole-library launcher, and the app's maintenance surface
 

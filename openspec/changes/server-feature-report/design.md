@@ -36,7 +36,8 @@ accepted"), so a field's owner is whoever makes it false, not this change.
 
 ### D2: Its own ungated route, not a rider on `/api/library`
 
-`GET /api/features`, joining `UNGATED` beside `/api/library` and `/api/apps`: the
+`GET /api/features`, joining `UNGATED` beside `/api/library`, `/api/apps` and
+`/api/semantic/status`: the
 client needs the report while the library is unconfigured (the surfaces it shapes
 exist in every state). Riding the `/api/library` envelope was weighed (zero extra
 trips — the session's running theme) and declined: `library.state()` is dynamic
@@ -57,9 +58,12 @@ never opens on error: a features read that fails almost always accompanies a ser
 that cannot answer anything, so the "usable app silently missing features" case
 fail-open was protecting barely exists, while fail-open teaches future field-adders
 the wrong lesson about a report whose one hazard is being mistaken for enforcement.
-An unresolved report is retried on each listing landing until it resolves — the
-index-status schedule, for its reason: a server that answers late must become fully
-usable without a reload.
+An unresolved report is retried on each navigation (path change) until it resolves —
+the trigger the index-availability effect actually implements (it is keyed on the view
+path, not on listings landing: a flat toggle or find filter at the same path does not
+fire it — review finding M12 corrected this decision's earlier "listing landing"
+wording), and for that effect's reason: a server that answers late must become fully
+usable without a reload. No poll, no timer; the loop terminates by resolving.
 
 The rule that makes fail-closed safe is the offer/behavior split: the report
 withholds **offers** (a tab, a menu entry, a button); it never changes what an

@@ -33,12 +33,18 @@
 ## 2. Client: passing and learning the key
 
 - [ ] 2.1 `client.ts`: `getThumb(path, mtime, ao, gen?)` appends `gen` when given;
-      `ThumbResult` and the PUT result carry `gen` (additive to `shared/types.ts` wire
-      shapes)
-- [ ] 2.2 `useThumbnails`: keep the last-seen gen on the entry's slot (the `EntrySlot`
-      map it already holds), pass it on that entry's next fetch, update it from GET and
-      PUT echoes. No persistence — a fresh session rides the ETag tier until it learns
-      generations (and later, until listings deliver them)
+      `ThumbResult` carries `gen`, and `putThumb`'s return type changes from
+      `Promise<void>` (its `okOrThrow` skips the body today) to carry the echoed gen —
+      a signature change across the interface, both implementations, and the harness
+      mock, named as such (review m16)
+- [ ] 2.2 `useThumbnails`: keep the last-seen gen on the entry's slot as `thumbGen` —
+      NOT `generation`, which `EntrySlot` already uses for its retirement counter
+      (review m15) — pass it on that entry's next fetch, update it from GET and PUT
+      echoes. Hook PUTs only: the out-of-hook PUT sites (`App`'s orbit persist and
+      `entryActions`' three) have no slot to write back to and rely on the stale-gen
+      tier, which is what it exists for (review m16). No persistence — slots retire on
+      navigation, so each listing visit's first fetch per entry rides the ETag tier
+      until listings deliver gens
 - [ ] 2.3 Client tests: gen present → appended to the URL; absent → byte-identical
       request URL to today's (compat: absent-ao pattern is the precedent); a PUT's
       echoed gen is used by the entry's next GET; harness thumb mock extended

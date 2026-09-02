@@ -32,9 +32,9 @@ one capability report, settled in `docs/web-demo-notes.md` (2026-09-02): resolve
 
 ### New Capabilities
 
-- `feature-report`: what the report is, how it reaches the client, its once-per-session
-  schedule, the fail-open rule, and the report-is-advisory / enforcement-is-server-side
-  boundary.
+- `feature-report`: what the report is, how it reaches the client, the fail-closed
+  withholding with retry-until-resolved, and the report-is-advisory /
+  enforcement-is-server-side boundary (with D3's offer/behavior split).
 
 ### Modified Capabilities
 
@@ -51,5 +51,6 @@ None. Consumers modify their own capabilities when they adopt the report.
 - Known consumers, none in this change: `web-demo-backlog` 1.3 (env-driven values,
   chat tab), `bulk-thumbnail-jobs` (its `library` tab and menu entries),
   the 2.1 orbit routing. Each adds its own fields/gating; this change is the mechanism.
-- No collision: no active change adds routes beside these or touches the report's files
-  beyond additive type edits (checked 2026-09-02).
+- Collision check (re-run 2026-09-02 after review): no active change touches the
+  report's files beyond additive type edits. `listing-tree-cache` 6.6 does add a
+  reload endpoint — a different route, no overlap, named so this claim stays honest.
