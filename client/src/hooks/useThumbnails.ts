@@ -90,6 +90,22 @@ interface EntrySlot {
   /** Cancel handles for this generation's in-flight work. */
   cancels: (() => void)[]
   /**
+   * The server's **write** generation for this entry, as last reported by a GET
+   * or a PUT of this hook's own (`immutable-thumbnail-serving` D4). Passed on
+   * the next fetch for this entry, which is what earns a cacheable answer.
+   *
+   * Not to be confused with `generation` above, which is this slot's
+   * *retirement* counter and a purely client-side affair. These two numbers
+   * share nothing: one is bumped by `retire`, the other only ever arrives from
+   * the server.
+   *
+   * `undefined` until something says otherwise, and never persisted — a fresh
+   * session simply rides the validator tier until its first answer teaches it
+   * one. Entry-level, matching the server's own scoping, so it survives an
+   * occlusion toggle: the number describes the entry, not the render.
+   */
+  thumbGen: number | undefined
+  /**
    * The object URL the tile is displaying, and which this hook owns — including
    * URLs minted *outside* the hook and handed in through `setThumb` (`App`'s
    * `persist`, `entryActions`' re-render). Ownership lives here rather than in a
@@ -347,7 +363,19 @@ export function useThumbnails(
             // under — one value for the whole pass, so the request and the
             // write that answers it cannot name two different renders (D4/D4a).
             // A toggle mid-load retires this pass rather than bending it.
-            const cached = await api.getThumb(entry.path, entry.mtime, ao)
+            // Named only when known, mirroring the URL rule one level up: a
+            // slot that has learned nothing asks exactly the call every pass
+            // made before generations existed, rather than a fourth argument
+            // spelling out its ignorance.
+            const cached = await (slot.thumbGen === undefined
+              ? api.getThumb(entry.path, entry.mtime, ao)
+              : api.getThumb(entry.path, entry.mtime, ao, slot.thumbGen))
+            // Learned before the liveness gate, and deliberately: the
+            // generation is a fact about the entry on the server, not about
+            // whether this pass still answers for the tile. A retired pass that
+            // discards it would make the replacement pass re-learn it, paying a
+            // revalidation for nothing.
+            if (cached.gen !== undefined) slot.thumbGen = cached.gen
             if (!alive()) {
               // The lookup already minted an object URL for a tile that no
               // longer exists — release it rather than leak the decoded PNG.
@@ -449,7 +477,7 @@ export function useThumbnails(
                   // forbids in as many words ("without the first pass's renders
                   // landing on top of it").
                   if (!alive()) return dropStale()
-                  await api.putThumb({
+                  const written = await api.putThumb({
                     path: entry.path,
                     mtime: entry.mtime,
                     png,
@@ -460,6 +488,11 @@ export function useThumbnails(
                     // pixels are what that answer asked for.
                     ao,
                   })
+                  // This write moved the entry's generation, and the answer
+                  // says where to. Taking it here is what keeps the tile's next
+                  // fetch cacheable — without it the very pass that changed the
+                  // entry would go on asking under the number it invalidated.
+                  if (written.gen !== undefined) slot.thumbGen = written.gen
                   if (!alive()) return dropStale()
                   setThumb(entry.path, {
                     status: 'ready',
@@ -531,6 +564,7 @@ export function useThumbnails(
           pose,
           cancels: [],
           url: undefined,
+          thumbGen: undefined,
         }
         slots.set(entry.path, fresh)
         added.push(entry.path)

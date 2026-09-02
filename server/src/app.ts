@@ -858,7 +858,54 @@ export function createApp(
     }
     const libPath = canonicalLibPath(path)
     await library.resolve(libPath)
-    return c.json(await cache.get(libPath, mtime, aoParam !== 'off'))
+    const body = await cache.get(libPath, mtime, aoParam !== 'off')
+    const gen = body.gen ?? 0
+
+    // A response that is not a hit is never cacheable, in any tier
+    // (`immutable-thumbnail-serving` D3). A cached miss outlives the render
+    // that fills it, which is the tile that stays empty forever; and a miss is
+    // cheap to re-ask, carrying no PNG.
+    if (body.status !== 'hit') {
+      c.header('Cache-Control', 'no-store')
+      return c.json(body)
+    }
+
+    // Tier 1 — the reader named a generation. `path + mtime + ao + gen` names
+    // these exact bytes, so if the number is current the answer can be pinned
+    // for as long as the browser cares to keep it: any later write moves the
+    // entry to a different `gen`, and this URL is simply never requested again
+    // (D2). A number that is *not* current lost a race with a write; it gets
+    // the current bytes and the current `gen` in the body, uncacheable, so it
+    // re-keys on its next fetch rather than being redirected or refused.
+    //
+    // `public` is deliberate and inert here: on loopback there is no
+    // intermediary to act on it. It is written for the demo, where an edge
+    // cache is exactly what should be allowed to hold these tiles.
+    const named = c.req.query('gen')
+    if (named !== undefined) {
+      c.header('Cache-Control', named === String(gen) ? 'public, max-age=31536000, immutable' : 'no-cache')
+      return c.json(body)
+    }
+
+    // Tier 2 — the reader could not know the generation (a fresh session,
+    // before anything has told it one). Validator caching: it stores the body
+    // against this tag, and an unchanged entry then costs a 304 with no body
+    // instead of the base64 PNG.
+    //
+    // The tag is the **entry's** generation even though this URL names one AO
+    // variant. A write to either render moves it, so a write to one variant
+    // makes the other revalidate once for nothing. That is deliberate
+    // conservatism: the alternative is a per-render counter, and a reader keyed
+    // on one render's number can be handed the other render's write without
+    // noticing. One wasted 304 against never serving stale pixels.
+    const etag = `"${gen}"`
+    c.header('Cache-Control', 'no-cache')
+    c.header('ETag', etag)
+    // Exact match only. Every client that gets a tag here echoes back the bytes
+    // it was given, so the list and weak-comparison forms of `If-None-Match`
+    // cannot arise from this route's own tags.
+    if (c.req.header('if-none-match') === etag) return c.body(null, 304)
+    return c.json(body)
   })
 
   app.put('/api/thumb', async (c) => {
@@ -889,7 +936,7 @@ export function createApp(
     if (body.ao !== undefined && typeof body.ao !== 'boolean') {
       return c.json({ error: `invalid ao: ${String(body.ao)}` }, 400)
     }
-    await cache.put(libPath, {
+    const gen = await cache.put(libPath, {
       mtime: body.mtime,
       png: body.png !== undefined ? Buffer.from(body.png, 'base64') : undefined,
       camera: body.camera,
@@ -899,7 +946,10 @@ export function createApp(
       posed: body.posed,
       ao: body.ao,
     })
-    return c.json({ ok: true })
+    // The generation this write landed under, so the writer can key its next
+    // read from it without a round trip to discover what it just caused. Not
+    // cacheable in any sense — a PUT's answer never is — so no header here.
+    return c.json({ ok: true, gen })
   })
 
   return app

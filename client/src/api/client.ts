@@ -37,6 +37,22 @@ export interface ThumbResult {
   posed?: number
   /** Object URL for the cached PNG, present on 'hit'. */
   pngUrl?: string
+  /**
+   * The entry's write generation, as the server last reported it
+   * (`immutable-thumbnail-serving` D4). Passing it back on the next read for
+   * this entry is what earns an `immutable` answer; not knowing it costs a
+   * revalidation, never a wrong picture.
+   */
+  gen?: number
+}
+
+/**
+ * What a thumbnail write reports back. Only the generation: the write either
+ * succeeded or threw, so there is nothing else for a caller to read.
+ */
+export interface ThumbPutResult {
+  /** The entry's generation *after* this write. */
+  gen?: number
 }
 
 export interface ThumbSave {
@@ -218,8 +234,14 @@ export interface ApiClient {
    * by default, which is what a request with no `ao` has always meant and what
    * the server still reads an absent parameter as.
    */
-  getThumb(path: string, mtime: number, ao?: boolean): Promise<ThumbResult>
-  putThumb(save: ThumbSave): Promise<void>
+  /**
+   * `gen` names the write generation the caller believes this entry is at. Sent
+   * only when known: an answer at that generation can be cached indefinitely,
+   * and one that is no longer current comes back uncacheable with the current
+   * number so the caller re-keys (D2).
+   */
+  getThumb(path: string, mtime: number, ao?: boolean, gen?: number): Promise<ThumbResult>
+  putThumb(save: ThumbSave): Promise<ThumbPutResult>
   /**
    * What the platform registry reports for the model types this app handles,
    * plus whether a chooser is configured — the whole report in one answer,
@@ -463,12 +485,16 @@ export class HttpApiClient implements ApiClient {
     return res.arrayBuffer()
   }
 
-  async getThumb(path: string, mtime: number, ao = true): Promise<ThumbResult> {
+  async getThumb(path: string, mtime: number, ao = true, gen?: number): Promise<ThumbResult> {
     // Appended only when off: absent already means the occluded render, so an
     // occlusion-on request is byte-identical to every request this client sent
     // before renders were keyed by occlusion (D2).
+    //
+    // `gen` follows the same rule for the same reason: appended only when the
+    // caller has one, so a client that has learned nothing yet sends exactly
+    // the bytes it sent before this change and rides the validator tier.
     const res = await this.fetchFn(
-      `/api/thumb?path=${encodeURIComponent(path)}&mtime=${mtime}${ao ? '' : '&ao=off'}`,
+      `/api/thumb?path=${encodeURIComponent(path)}&mtime=${mtime}${ao ? '' : '&ao=off'}${gen !== undefined ? `&gen=${gen}` : ''}`,
     )
     const body = await jsonOrThrow<ThumbGetResponse>(res)
     return {
@@ -478,6 +504,7 @@ export class HttpApiClient implements ApiClient {
       lighting: body.lighting,
       rig: body.rig,
       posed: body.posed,
+      gen: body.gen,
       pngUrl: body.png !== undefined ? base64ToBlobUrl(body.png) : undefined,
     }
   }
@@ -513,7 +540,7 @@ export class HttpApiClient implements ApiClient {
     await okOrThrow(res)
   }
 
-  async putThumb(save: ThumbSave): Promise<void> {
+  async putThumb(save: ThumbSave): Promise<ThumbPutResult> {
     const res = await this.fetchFn('/api/thumb', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
@@ -530,5 +557,12 @@ export class HttpApiClient implements ApiClient {
       }),
     })
     if (!res.ok) throw await errorOf(res)
+    // Parsed rather than discarded since this change: the answer carries the
+    // generation this write landed under, which is what lets the writer key its
+    // own next read. A body that is missing or unparseable is not a failed
+    // write — an older server answers `{ok:true}` and nothing else — so it
+    // degrades to "generation unknown", which is the validator tier.
+    const body = (await res.json().catch(() => ({}))) as { gen?: number }
+    return { gen: body.gen }
   }
 }

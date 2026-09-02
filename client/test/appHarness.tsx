@@ -21,7 +21,7 @@ export const listDir = vi.fn()
 export const getThumb = vi.fn().mockResolvedValue({ status: 'miss' })
 // Shared so lightbox tests can assert the close path persisted (settle →
 // snapshot → putThumb); cleared per mount like getThumb.
-export const putThumb = vi.fn().mockResolvedValue(undefined)
+export const putThumb = vi.fn().mockResolvedValue({})
 // A folder tile's contact sheet (folder-contact-sheets). Shared and cleared per
 // mount like getThumb, so a test can both count the requests a grid issued and
 // choose what a folder previews. The default is the answer for a folder with

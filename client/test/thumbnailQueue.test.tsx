@@ -194,7 +194,7 @@ describe('thumbnail cache lookups vs the render queue', () => {
   it('the miss path stays gated: no render work while suspended, completes on resume', async () => {
     const api = {
       getThumb: vi.fn().mockResolvedValue({ status: 'miss' }),
-      putThumb: vi.fn().mockResolvedValue(undefined),
+      putThumb: vi.fn().mockResolvedValue({}),
     } as unknown as ApiClient
     const lru = fakeLru()
     const queue = new RenderQueue(2)
@@ -230,7 +230,7 @@ describe('thumbnail cache lookups vs the render queue', () => {
         lighting: 'axis', // the retired spindle-aligned label — no client writes it now
         rig: RIG_VERSION, // current rig — the lighting clause alone must trigger this
       }),
-      putThumb: vi.fn().mockResolvedValue(undefined),
+      putThumb: vi.fn().mockResolvedValue({}),
     } as unknown as ApiClient
     const lru = fakeLru()
 
@@ -262,7 +262,7 @@ describe('thumbnail cache lookups vs the render queue', () => {
           rig: RIG_VERSION,
         })
         .mockResolvedValueOnce({ status: 'hit', pngUrl: 'blob:ax', lighting: 'axis', rig: RIG_VERSION }),
-      putThumb: vi.fn().mockResolvedValue(undefined),
+      putThumb: vi.fn().mockResolvedValue({}),
     } as unknown as ApiClient
     const lru = fakeLru()
 
@@ -291,7 +291,7 @@ describe('thumbnail cache lookups vs the render queue', () => {
         lighting: THUMB_LIGHTING,
         rig: RIG_VERSION,
       }),
-      putThumb: vi.fn().mockResolvedValue(undefined),
+      putThumb: vi.fn().mockResolvedValue({}),
     } as unknown as ApiClient
     const lru = fakeLru()
 
@@ -313,7 +313,7 @@ describe('thumbnail cache lookups vs the render queue', () => {
         camera: { az: 1, el: 0, distR: 2, target: [0, 0, 0] },
         lighting: 'axis',
       }),
-      putThumb: vi.fn().mockResolvedValue(undefined),
+      putThumb: vi.fn().mockResolvedValue({}),
     } as unknown as ApiClient
     const lru = fakeLru(new Set(), vi.fn().mockRejectedValue(new Error('load failed')))
 
@@ -335,7 +335,7 @@ describe('thumbnail cache lookups vs the render queue', () => {
         lighting: THUMB_LIGHTING, // label matches — only the rig version is stale
         rig: 1,
       }),
-      putThumb: vi.fn().mockResolvedValue(undefined),
+      putThumb: vi.fn().mockResolvedValue({}),
     } as unknown as ApiClient
     const lru = fakeLru()
 
@@ -354,7 +354,7 @@ describe('thumbnail cache lookups vs the render queue', () => {
   it('a legacy hit with no stored label also re-renders', async () => {
     const api = {
       getThumb: vi.fn().mockResolvedValue({ status: 'hit', pngUrl: 'blob:legacy' }),
-      putThumb: vi.fn().mockResolvedValue(undefined),
+      putThumb: vi.fn().mockResolvedValue({}),
     } as unknown as ApiClient
     const lru = fakeLru()
 
@@ -424,7 +424,7 @@ describe('the sweep follows the occlusion preference', () => {
   it('with the preference off, the lookup, the render and the PUT all name the unoccluded render', async () => {
     const api = {
       getThumb: vi.fn().mockResolvedValue({ status: 'miss' }),
-      putThumb: vi.fn().mockResolvedValue(undefined),
+      putThumb: vi.fn().mockResolvedValue({}),
     } as unknown as ApiClient
     const obj = {} as THREE.Object3D
     const lru = fakeLru(new Set(), vi.fn().mockResolvedValue(obj))
@@ -442,7 +442,7 @@ describe('the sweep follows the occlusion preference', () => {
   it('with the preference on, all three name the occluded render', async () => {
     const api = {
       getThumb: vi.fn().mockResolvedValue({ status: 'miss' }),
-      putThumb: vi.fn().mockResolvedValue(undefined),
+      putThumb: vi.fn().mockResolvedValue({}),
     } as unknown as ApiClient
     const obj = {} as THREE.Object3D
     const lru = fakeLru(new Set(), vi.fn().mockResolvedValue(obj))
@@ -466,7 +466,7 @@ describe('the sweep follows the occlusion preference', () => {
     // is unchanged: this answer is about the render that was asked for.
     const api = {
       getThumb: vi.fn().mockResolvedValue({ status: 'stale', camera: CAM, axis: '-z' }),
-      putThumb: vi.fn().mockResolvedValue(undefined),
+      putThumb: vi.fn().mockResolvedValue({}),
     } as unknown as ApiClient
     const obj = {} as THREE.Object3D
     const lru = fakeLru(new Set(), vi.fn().mockResolvedValue(obj))
@@ -528,7 +528,7 @@ const clonePose = (p: IndexPose): IndexPose => ({
 function fakeCache(answer: (path: string, ao: boolean) => Record<string, unknown>): ApiClient {
   return {
     getThumb: vi.fn((path: string, _mtime: number, ao: boolean) => Promise.resolve(answer(path, ao))),
-    putThumb: vi.fn().mockResolvedValue(undefined),
+    putThumb: vi.fn().mockResolvedValue({}),
   } as unknown as ApiClient
 }
 const freshHit = (extra: Record<string, unknown> = {}) => ({
@@ -679,7 +679,7 @@ describe('a preference change refreshes the grid in front of you', () => {
           ? Promise.resolve(freshHit())
           : gate.then(() => ({ status: 'stale' as const, pngUrl: URL.createObjectURL(new Blob()) })),
       ),
-      putThumb: vi.fn().mockResolvedValue(undefined),
+      putThumb: vi.fn().mockResolvedValue({}),
     } as unknown as ApiClient
     const lru = mesh()
 
@@ -1114,7 +1114,7 @@ describe('the sweep reconciles its entries instead of resetting them', () => {
       getThumb: vi.fn((_p: string, _m: number, ao: boolean) =>
         ao ? Promise.resolve(freshHit()) : gate.then(() => freshHit()),
       ),
-      putThumb: vi.fn().mockResolvedValue(undefined),
+      putThumb: vi.fn().mockResolvedValue({}),
     } as unknown as ApiClient
     const lru = mesh()
 
@@ -1316,7 +1316,7 @@ describe('the sweep reconciles its entries instead of resetting them', () => {
       getThumb: vi.fn((_p: string, _m: number, ao: boolean) =>
         ao ? Promise.resolve(freshHit()) : Promise.reject(new Error('cache offline')),
       ),
-      putThumb: vi.fn().mockResolvedValue(undefined),
+      putThumb: vi.fn().mockResolvedValue({}),
     } as unknown as ApiClient
 
     await render(
@@ -1357,7 +1357,7 @@ describe('the sweep reconciles its entries instead of resetting them', () => {
       getThumb: vi.fn((_p: string, _m: number, ao: boolean) =>
         Promise.resolve(ao ? freshHit() : { status: 'miss' }),
       ),
-      putThumb: vi.fn().mockResolvedValue(undefined),
+      putThumb: vi.fn().mockResolvedValue({}),
     } as unknown as ApiClient
 
     await render(
@@ -1609,5 +1609,77 @@ describe('visible-first ordering and deferral', () => {
     await settle()
 
     expect(acquired(lru)).toEqual(['/models/m0.stl', '/models/m1.stl']) // insertion order: unreported
+  })
+})
+
+/**
+ * The write generation the hook carries per entry
+ * (`immutable-thumbnail-serving` 2.2). It is learned passively — from the
+ * answers the hook already reads — and spent on the next fetch for that entry.
+ */
+describe('the generation a tile keys its next fetch from', () => {
+  /** A cache that reports generations and records what each lookup asked for. */
+  function genCache(answer: (path: string, ao: boolean) => Record<string, unknown>, putGen: number) {
+    const asked: (number | undefined)[] = []
+    const api = {
+      getThumb: vi.fn((path: string, _mtime: number, ao: boolean, gen?: number) => {
+        asked.push(gen)
+        return Promise.resolve(answer(path, ao))
+      }),
+      putThumb: vi.fn().mockResolvedValue({ gen: putGen }),
+    } as unknown as ApiClient
+    return { api, asked }
+  }
+
+  it('asks with nothing on a first sight, then with what the answer taught it', async () => {
+    // A hit, so no render and no PUT: the only thing that can teach the slot a
+    // generation here is the GET echo itself.
+    const { api, asked } = genCache(() => freshHit({ gen: 42 }), 0)
+    const queue = new RenderQueue(2)
+    const entries = models(1)
+
+    await render(<Harness entries={entries} api={api} lru={mesh()} queue={queue} ao />)
+    await settle()
+    expect(asked).toEqual([undefined]) // nothing known yet: the validator tier
+
+    // A toggle retires the pass and looks the same entry up again. The slot
+    // survives a retirement, so the generation it learned survives with it —
+    // and it is entry-level, so the *other* render's request carries it too.
+    await rerender(<Harness entries={entries} api={api} lru={mesh()} queue={queue} ao={false} />)
+    await settle()
+    expect(asked).toEqual([undefined, 42])
+  })
+
+  it("spends a PUT's echoed generation on the entry's next lookup", async () => {
+    // A miss drives the full tail: render, PUT, and the echo the PUT answers
+    // with. Nothing in the GET can supply the number here — the miss reports
+    // none — so a second lookup carrying it can only have come from the write.
+    const { api, asked } = genCache(() => ({ status: 'miss' }), 7)
+    const queue = new RenderQueue(2)
+    const entries = models(1)
+
+    await render(<Harness entries={entries} api={api} lru={mesh()} queue={queue} ao />)
+    await settle()
+    expect(vi.mocked(api.putThumb)).toHaveBeenCalledTimes(1)
+    expect(asked).toEqual([undefined])
+
+    await rerender(<Harness entries={entries} api={api} lru={mesh()} queue={queue} ao={false} />)
+    await settle()
+    expect(asked).toEqual([undefined, 7])
+  })
+
+  it('starts a genuinely new entry unkeyed rather than inheriting a neighbour’s', async () => {
+    // The generation belongs to one entry. A slot created for a different path
+    // has learned nothing, whatever its neighbours know.
+    const { api, asked } = genCache(() => freshHit({ gen: 42 }), 0)
+    const queue = new RenderQueue(2)
+
+    await render(<Harness entries={models(1)} api={api} lru={mesh()} queue={queue} ao />)
+    await settle()
+    await rerender(<Harness entries={models(2)} api={api} lru={mesh()} queue={queue} ao />)
+    await settle()
+
+    // m0 was not re-looked-up (nothing about it moved); m1 is new and unkeyed.
+    expect(asked).toEqual([undefined, undefined])
   })
 })

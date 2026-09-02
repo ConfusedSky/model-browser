@@ -167,6 +167,32 @@ export interface ThumbGetResponse {
   posed?: number
   /** base64 PNG, present when status === 'hit'. */
   png?: string
+  /**
+   * The entry's write generation — a counter the server moves on **every**
+   * write to the entry, whichever render or field carried it, and never
+   * regresses (`immutable-thumbnail-serving` D1). Together with the request's
+   * `path`, `mtime` and `ao` it fully names the response bytes, which is what
+   * lets a read that already knows it be answered `immutable`.
+   *
+   * Entry-level, like `camera` and `axis` and for the same reason: it is the
+   * entry that is written, not one of its two renders, so both renders of a
+   * path always report the same number.
+   *
+   * The server sets it on every answer, a miss included (0 for an entry that
+   * does not exist). Optional only so that entries and clients from before
+   * this change stay readable — absence reads as 0.
+   */
+  gen?: number
+}
+
+/**
+ * What `PUT /api/thumb` answers. `gen` is the entry's generation **after** this
+ * write, so the client that wrote can key its next read from it without a
+ * round trip to find out what it just caused.
+ */
+export interface ThumbPutResponse {
+  ok: true
+  gen: number
 }
 
 export interface ThumbPutRequest {

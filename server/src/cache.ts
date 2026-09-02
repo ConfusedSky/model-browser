@@ -41,6 +41,25 @@ interface Meta extends RenderLabels {
   axis?: OrbitAxis
   /** The unoccluded sibling's labels; absent when it is not cached. */
   noao?: RenderLabels
+  /**
+   * Write generation (`immutable-thumbnail-serving` D1) — the cache validator
+   * every read echoes and every write moves.
+   *
+   * It sits here, beside `path`/`camera`/`axis`, and **not** in either render's
+   * `RenderLabels`, because it is a fact about the *entry*. `put` invalidates
+   * the *sibling* render in three separate cases — `supersedes` deletes its PNG
+   * outright, and both `moved` and the unowned-pose rule run `clearRecipe` over
+   * its labels — so a write aimed at one render routinely changes what the
+   * other one answers. A per-render counter would leave the invalidated
+   * sibling's URL unchanged while its bytes changed underneath, which under
+   * `immutable` pins them. One counter for both renders is the conservative
+   * direction: a write to one variant churns the other's cached URL once, which
+   * costs a revalidation and can never serve stale pixels.
+   *
+   * Absent on every sidecar written before this change, which reads as 0.
+   * `allocateGen` is the only thing that produces a value for it.
+   */
+  gen?: number
 }
 
 /**
@@ -107,6 +126,57 @@ function hasLabels(labels: RenderLabels): boolean {
     labels.rig !== undefined ||
     labels.posed !== undefined
   )
+}
+
+/**
+ * The last write generation handed out, process-wide. Module-level rather than
+ * per-cache so that two `ThumbCache` instances over one directory — which is
+ * what the test suite builds, and what any future second reader would be —
+ * cannot issue the same number.
+ */
+let lastGen = 0
+
+/**
+ * Allocate the generation a write will land under (D1) — strictly increasing,
+ * never repeated.
+ *
+ * Allocated **here, not from the sidecar `put` just read**, and that is the
+ * whole point. `put` is an unserialized read-modify-write (see its own note):
+ * two concurrent puts for one path each merge against the same `prev`. A
+ * generation derived from what they read — `prev.gen + 1` — is therefore issued
+ * *twice*, for two different sets of bytes, and under `immutable` that is the
+ * one failure with no recovery path: the loser's PUT echoed a number that is
+ * also the winner's, so the stale-generation tier never fires, and a browser
+ * that fetched at that number serves the loser's pixels for a year.
+ *
+ * Allocating outside the merge gives the two writes different numbers. The last
+ * writer's sidecar still wins — that race is unchanged and still accepted — but
+ * the loser's number is simply never current, so it is never granted
+ * `immutable` and its next read re-keys against the winner's.
+ *
+ * Three floors, each covering what the others cannot:
+ *
+ * - `Date.now()` — so a generation never regresses across an entry's eviction
+ *   and re-creation, or across a process restart, where no in-memory counter
+ *   survives to say what was already issued.
+ * - `lastGen + 1` — carries it past a tie when two writes land inside one
+ *   millisecond, which wall-clock alone cannot separate. This is also the term
+ *   that closes the race above: it is read and updated in one synchronous step,
+ *   so the second of two interleaved puts cannot see the first's value.
+ * - `prev + 1` — the entry's own stored generation, for the case neither clock
+ *   term covers: a `prev` written by some *other* process's clock, which a
+ *   cache directory copied between machines or a clock skew can put ahead of
+ *   both `Date.now()` and this process's `lastGen`. Without it a write would
+ *   issue a number below the entry's own stored one — a per-entry regression,
+ *   which is the exact failure the generation exists to prevent.
+ *
+ * Reading `prev` here does not reintroduce the duplicate-issue race, because
+ * `lastGen` still participates: two puts that merged against the same sidecar
+ * pass the same `prev`, but the second still clears the first's `lastGen`.
+ */
+function allocateGen(prev: number | undefined): number {
+  lastGen = Math.max(Date.now(), lastGen + 1, (prev ?? 0) + 1)
+  return lastGen
 }
 
 const DEFAULT_CAP = 2 * 1024 ** 3
@@ -214,7 +284,11 @@ export class ThumbCache {
     const dir = await this.entryDir()
     const key = this.key(path)
     const meta = await this.readMeta(dir, key)
-    if (meta === null) return { status: 'miss' }
+    // An entry that does not exist has answered nothing, so it has issued no
+    // generation: 0. The number still rides along, because the caller's cache
+    // policy is decided from it uniformly and a miss is `no-store` anyway.
+    if (meta === null) return { status: 'miss', gen: 0 }
+    const gen = meta.gen ?? 0
     const labels: RenderLabels = (ao ? meta : meta.noao) ?? {}
     // Not defaulted here: the *absence* of a stored axis is information a
     // client needs. Defaulting it to 'y' made "nothing stored" indistinguishable
@@ -230,12 +304,12 @@ export class ThumbCache {
     // or the model has an orientation stored, and either way the client has
     // something to re-render from. An axis alone is not enough — an entry
     // holding only an axis is still a miss, as it was before renders split.
-    if (labels.mtime !== mtime) return { status: meta.camera !== undefined || labels.mtime !== undefined ? 'stale' : 'miss', camera: meta.camera, axis, lighting, rig, posed }
+    if (labels.mtime !== mtime) return { status: meta.camera !== undefined || labels.mtime !== undefined ? 'stale' : 'miss', camera: meta.camera, axis, lighting, rig, posed, gen }
     let png
     try {
       png = await readFile(this.pngFile(dir, key, ao))
     } catch {
-      return { status: 'stale', camera: meta.camera, axis, lighting, rig, posed }
+      return { status: 'stale', camera: meta.camera, axis, lighting, rig, posed, gen }
     }
     // LRU clock for size-cap eviction is the png file's mtime. Bumping it via
     // utimes (instead of rewriting the meta json) keeps reads race-free
@@ -244,7 +318,7 @@ export class ThumbCache {
     // clock, so reading one never defends the other from the cap (D3).
     const now = new Date()
     await utimes(this.pngFile(dir, key, ao), now, now).catch(() => {})
-    return { status: 'hit', camera: meta.camera, axis, lighting, rig, posed, png: png.toString('base64') }
+    return { status: 'hit', camera: meta.camera, axis, lighting, rig, posed, gen, png: png.toString('base64') }
   }
 
   /**
@@ -262,8 +336,18 @@ export class ThumbCache {
    * for the one exception the unowned-pose rule below states: an entry holding
    * no orientation has no shared angle for both renders to be drawn under, so
    * the applied-pose record takes that role and a difference in it is a move.
+   *
+   * Returns the entry's generation after the write. This is the **only** place
+   * a generation is issued: every write path the app has — either render's
+   * pixels, a camera set or discarded, an axis set or discarded — arrives here,
+   * so bumping unconditionally at one point is what makes "any change to what a
+   * thumbnail URL would answer moves the generation" true by construction
+   * rather than by an enumeration that a later write path could fall out of
+   * (D1). A put that happens to change nothing observable still bumps; the cost
+   * is one revalidation, and the alternative — deciding per field whether this
+   * write mattered — is the shape that pins stale pixels the day it is wrong.
    */
-  async put(path: string, opts: { mtime: number; png?: Buffer; camera?: CameraState | null; axis?: OrbitAxis | null; lighting?: LightingMode; rig?: number; posed?: number; ao?: boolean }): Promise<void> {
+  async put(path: string, opts: { mtime: number; png?: Buffer; camera?: CameraState | null; axis?: OrbitAxis | null; lighting?: LightingMode; rig?: number; posed?: number; ao?: boolean }): Promise<number> {
     const dir = await this.entryDir()
     const key = this.key(path)
     const ao = opts.ao ?? true
@@ -350,11 +434,15 @@ export class ThumbCache {
 
     const occluded = ao ? mine : theirs
     const unoccluded = ao ? theirs : mine
+    // `prev` is a floor here, never the source: see `allocateGen`. Two puts
+    // that merged against the same sidecar must not land under one number.
+    const gen = allocateGen(prev?.gen)
     const meta: Meta = {
       path,
       ...occluded,
       camera,
       axis,
+      gen,
       // Omitted rather than written empty, so an entry that has never held an
       // unoccluded render keeps exactly the sidecar shape it had before this
       // change — the whole of the "no migration" claim (D1).
@@ -371,6 +459,7 @@ export class ThumbCache {
       this.writesSinceMaintain = 0
       void this.runMaintain()
     }
+    return gen
   }
 
   private async runMaintain(): Promise<void> {
@@ -478,6 +567,17 @@ export class ThumbCache {
       // ride the stale read — they say what recipe the evicted pixels were
       // under, which is what the client asks a stale answer for — and the other
       // render is untouched, cap candidate on its own clock or not.
+      //
+      // The generation rides through on the spread and is deliberately **not**
+      // bumped (D1). Eviction reclaims space; it does not change what the
+      // evicted pixels were of. A browser still holding this entry at its
+      // current generation holds bytes that are correct for this path, mtime
+      // and recipe, and serving them from its own cache is better than the
+      // `stale` answer it would get here — which would cost a re-render of a
+      // picture that has not changed. What must never happen is the generation
+      // *regressing*, and the spread is what guarantees it: drop `...fresh` for
+      // a hand-built object and a re-render would re-issue numbers this path
+      // has already answered under.
       await this.writeMeta(
         dir,
         m.key,
@@ -623,6 +723,11 @@ export class ThumbCache {
       // than because anything is expected to be found.
       await rename(this.pngFile(this.dir, key, true), this.pngFile(target, newKey, true)).catch(() => {})
       await rename(this.pngFile(this.dir, key, false), this.pngFile(target, newKey, false)).catch(() => {})
+      // Re-keying, not writing: the pixels and every label are the ones that
+      // were already there, so the generation comes across on the spread
+      // unbumped along with them. A legacy entry carries none at all, which
+      // reads as 0 and is correct — nothing has ever cached a generation for a
+      // path under its new library key.
       await this.writeMeta(target, newKey, { ...meta, path: libPath })
       await rm(this.metaFile(this.dir, key), { force: true })
       moved++

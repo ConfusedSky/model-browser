@@ -249,6 +249,57 @@ describe('HttpApiClient contract', () => {
     ])
   })
 
+  // The generation is appended only when the caller has one, for exactly the
+  // reason `ao` is appended only when off: a client that has learned nothing
+  // yet must send the bytes it sent before this change existed, so an old
+  // server and a warm browser cache both answer it unchanged.
+  it('getThumb names the generation it knows, and only then', async () => {
+    const fetchFn = vi.fn(() => Promise.resolve(jsonResponse({ status: 'miss' })))
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
+
+    await api.getThumb('/m.stl', 42, true, 7)
+    expect(fetchFn).toHaveBeenCalledWith(
+      `/api/thumb?path=${encodeURIComponent('/m.stl')}&mtime=42&gen=7`,
+    )
+
+    // Beside `ao=off`, in that order — one URL, both dimensions.
+    await api.getThumb('/m.stl', 42, false, 7)
+    expect(fetchFn).toHaveBeenLastCalledWith(
+      `/api/thumb?path=${encodeURIComponent('/m.stl')}&mtime=42&ao=off&gen=7`,
+    )
+
+    // Absent, and explicitly undefined: neither may add a parameter. This is
+    // the byte-identity claim — the URL is the one the cell above pins.
+    await api.getThumb('/m.stl', 42, true, undefined)
+    await api.getThumb('/m.stl', 42)
+    const urls = fetchFn.mock.calls.slice(2).map((c) => (c as unknown[])[0])
+    expect(urls).toEqual([
+      `/api/thumb?path=${encodeURIComponent('/m.stl')}&mtime=42`,
+      `/api/thumb?path=${encodeURIComponent('/m.stl')}&mtime=42`,
+    ])
+  })
+
+  it('getThumb carries the generation the server reported', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ status: 'miss', gen: 99 }))
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
+    expect((await api.getThumb('/m.stl', 42)).gen).toBe(99)
+  })
+
+  it('putThumb reports the generation its write landed under', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ ok: true, gen: 1234 }))
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
+    expect(await api.putThumb({ path: '/m.stl', mtime: 42 })).toEqual({ gen: 1234 })
+  })
+
+  // An older server answers `{ok:true}` and nothing else. That is a successful
+  // write with no generation to report, not a failure: the caller degrades to
+  // the validator tier rather than throwing.
+  it('putThumb treats a generation-less answer as a success', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ ok: true }))
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
+    expect(await api.putThumb({ path: '/m.stl', mtime: 42 })).toEqual({ gen: undefined })
+  })
+
   it('getThumb on miss has no pngUrl', async () => {
     const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ status: 'miss' }))
     const api = new HttpApiClient(fetchFn as unknown as typeof fetch)

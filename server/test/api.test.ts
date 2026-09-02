@@ -608,3 +608,138 @@ describe('a cache under the app’s own library', () => {
     expect(body.png).toBe(png)
   })
 })
+
+/**
+ * Cacheability of thumbnail reads (`immutable-thumbnail-serving`).
+ *
+ * These are the first header assertions about caching in this suite — the
+ * existing ones cover `content-type` and the same-origin guard — so the idiom
+ * is `res.headers.get('cache-control')`, lower-cased because `Headers` is
+ * case-insensitive on read and that is how the rest of the file spells it.
+ *
+ * A cache of its own, not the module-level one: every cell here reasons about
+ * exact generation values, and the shared cache has been written by two hundred
+ * lines of earlier cells.
+ */
+describe('thumbnail cacheability', () => {
+  const cacheDir2 = mkdtempSync(join(tmpdir(), 'mb-cache-gen-'))
+  const cache2 = new ThumbCache(cacheDir2)
+  const app2 = createApp(cache2, undefined, undefined, libraryFor(fx.dir))
+  const png2 = Buffer.from('gen-fake-png').toString('base64')
+  const path2 = '/loose.stl'
+  const cam2 = { az: 1, el: 0.5, distR: 2, target: [0, 0, 0] as [number, number, number] }
+
+  const get2 = (q: string, headers: Record<string, string> = LOOPBACK) =>
+    app2.request(`/api/thumb?${q}`, { headers })
+  const put2 = (body: Record<string, unknown>) =>
+    app2.request('/api/thumb', {
+      method: 'PUT',
+      headers: { ...LOOPBACK, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+
+  afterAll(() => {
+    rmSync(cacheDir2, { recursive: true, force: true })
+  })
+
+  it('never lets a miss be stored — the tile that would stay empty forever', async () => {
+    const res = await get2(`path=${encodeURIComponent('/nothing-here.stl')}&mtime=1`)
+    const body = (await res.json()) as ThumbGetResponse
+    expect(body.status).toBe('miss')
+    expect(res.headers.get('cache-control')).toBe('no-store')
+    // No validator either: there is nothing to revalidate against, and an ETag
+    // here would invite a 304 that answers "your miss is still current".
+    expect(res.headers.get('etag')).toBeNull()
+  })
+
+  it('answers a PUT with the generation it wrote, and the next read agrees', async () => {
+    const put = await put2({ path: path2, mtime: 111, png: png2 })
+    expect(put.status).toBe(200)
+    const written = (await put.json()) as { ok: boolean; gen: number }
+    expect(typeof written.gen).toBe('number')
+
+    const body = (await (await get2(`path=${encodeURIComponent(path2)}&mtime=111`)).json()) as ThumbGetResponse
+    expect(body.status).toBe('hit')
+    // The echo is the point: a writer must be able to key its own next read
+    // from its own write, without a round trip to discover what it caused.
+    expect(body.gen).toBe(written.gen)
+  })
+
+  it('pins a read that names the current generation, and only that read', async () => {
+    const cur = ((await (await get2(`path=${encodeURIComponent(path2)}&mtime=111`)).json()) as ThumbGetResponse).gen!
+
+    const fresh = await get2(`path=${encodeURIComponent(path2)}&mtime=111&gen=${cur}`)
+    expect(fresh.headers.get('cache-control')).toBe('public, max-age=31536000, immutable')
+    expect(((await fresh.json()) as ThumbGetResponse).status).toBe('hit')
+
+    // A generation that is no longer current lost a race with a write. It gets
+    // the *current* bytes and the *current* number, uncacheable, so the reader
+    // re-keys rather than being redirected or refused.
+    const stale = await get2(`path=${encodeURIComponent(path2)}&mtime=111&gen=${cur - 1}`)
+    expect(stale.headers.get('cache-control')).toBe('no-cache')
+    const staleBody = (await stale.json()) as ThumbGetResponse
+    expect(staleBody.status).toBe('hit')
+    expect(staleBody.png).toBe(png2) // current content, not an empty re-key hint
+    expect(staleBody.gen).toBe(cur)
+  })
+
+  it('gives a generation-less read a validator, and answers 304 to it', async () => {
+    const first = await get2(`path=${encodeURIComponent(path2)}&mtime=111`)
+    const cur = ((await first.json()) as ThumbGetResponse).gen!
+    expect(first.headers.get('cache-control')).toBe('no-cache')
+    expect(first.headers.get('etag')).toBe(`"${cur}"`)
+
+    // The revalidation this tier exists for: same entry, unchanged, and the
+    // answer carries no body at all rather than the base64 PNG.
+    const revalidated = await get2(`path=${encodeURIComponent(path2)}&mtime=111`, {
+      ...LOOPBACK,
+      'if-none-match': `"${cur}"`,
+    })
+    expect(revalidated.status).toBe(304)
+    expect(await revalidated.text()).toBe('')
+
+    // A validator that does not match is not a revalidation — it is a first
+    // read by a client holding something else, and it gets the whole body.
+    const mismatched = await get2(`path=${encodeURIComponent(path2)}&mtime=111`, {
+      ...LOOPBACK,
+      'if-none-match': '"0"',
+    })
+    expect(mismatched.status).toBe(200)
+    expect(((await mismatched.json()) as ThumbGetResponse).png).toBe(png2)
+  })
+
+  it('moves the generation on every write, whatever the write carried', async () => {
+    const genOf = async (): Promise<number> =>
+      ((await (await get2(`path=${encodeURIComponent(path2)}&mtime=111`)).json()) as ThumbGetResponse).gen!
+
+    const before = await genOf()
+    // Pixels.
+    const a = (await (await put2({ path: path2, mtime: 111, png: png2 })).json()) as { gen: number }
+    expect(a.gen).toBeGreaterThan(before)
+    // A camera, no pixels — the authored write the whole design exists for.
+    const b = (await (await put2({ path: path2, mtime: 111, camera: cam2 })).json()) as { gen: number }
+    expect(b.gen).toBeGreaterThan(a.gen)
+    // An axis.
+    const c2 = (await (await put2({ path: path2, mtime: 111, axis: '-z' })).json()) as { gen: number }
+    expect(c2.gen).toBeGreaterThan(b.gen)
+    // And the discards, which are writes too: a tile framed and then un-framed
+    // must not be served the framed pixels from a cache.
+    const d = (await (await put2({ path: path2, mtime: 111, camera: null })).json()) as { gen: number }
+    expect(d.gen).toBeGreaterThan(c2.gen)
+    const e = (await (await put2({ path: path2, mtime: 111, axis: null })).json()) as { gen: number }
+    expect(e.gen).toBeGreaterThan(d.gen)
+    expect(await genOf()).toBe(e.gen)
+  })
+
+  it('refuses to cache anything that is not a hit, even for an entry that exists', async () => {
+    // The entry is real and holds a camera; this mtime is not its render's.
+    const res = await get2(`path=${encodeURIComponent(path2)}&mtime=999`)
+    const body = (await res.json()) as ThumbGetResponse
+    expect(body.status).not.toBe('hit')
+    expect(res.headers.get('cache-control')).toBe('no-store')
+    // Not even when the reader names the current generation: the tier is
+    // decided by the status first, and a non-hit never reaches the gen tiers.
+    const named = await get2(`path=${encodeURIComponent(path2)}&mtime=999&gen=${body.gen}`)
+    expect(named.headers.get('cache-control')).toBe('no-store')
+  })
+})

@@ -15,9 +15,11 @@ import {
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { ThumbGetResponse } from '../../shared/types'
+import { createApp } from '../src/app'
 import { ThumbCache } from '../src/cache'
-import { libraryFor, makeFixtures, realTempDir } from './helpers'
+import { LOOPBACK, libraryFor, makeFixtures, realTempDir } from './helpers'
 
 const cleanups: string[] = []
 
@@ -80,7 +82,12 @@ const onlyFile = (dir: string, ext: string): string =>
  * lands the put exactly between them, deterministically and without a timer.
  */
 class InterposingCache extends ThumbCache {
-  private armed: { key: string; run: () => Promise<void> } | null = null
+  // `Promise<unknown>`, not `Promise<void>`: every cell arms a `put`, which
+  // returns the generation it wrote (`immutable-thumbnail-serving`). Nothing
+  // here reads that value — the interposition is about *when* the write lands —
+  // so the callback's result is deliberately unconstrained rather than
+  // discarded at each call site.
+  private armed: { key: string; run: () => Promise<unknown> } | null = null
   private reads = 0
   /**
    * Did the armed `run` actually fire? Every cell must assert this
@@ -95,7 +102,7 @@ class InterposingCache extends ThumbCache {
   fired = false
 
   /** Run `run` after the snapshot has read `path`'s sidecar, before the re-read. */
-  arm(path: string, run: () => Promise<void>): void {
+  arm(path: string, run: () => Promise<unknown>): void {
     this.armed = { key: createHash('sha256').update(path).digest('hex'), run }
     this.reads = 0
     this.fired = false
@@ -1163,5 +1170,181 @@ describe('ThumbCache occlusion renders', () => {
     expect(readdirSync(cache.dir)).toHaveLength(0) // one model, one existence
     expect((await cache.get(doomed, 1, true)).status).toBe('miss')
     expect((await cache.get(doomed, 1, false)).status).toBe('miss')
+  })
+})
+
+/**
+ * A cache that runs one `put` *inside* another's read-modify-write window.
+ *
+ * `InterposingCache` above cannot express this: it fires on the **second** read
+ * of a key, which is the shape `maintain`'s snapshot-then-re-read pass has, and
+ * three cells depend on that rule. A racing pair of puts reads the sidecar once
+ * each, so the callback has to fire on the *first* read — and after
+ * `super.readMeta` has resolved but before its value is handed back, so the
+ * outer put goes on to merge against the snapshot it took **before** the inner
+ * write landed. That is precisely the interleave `put`'s own comment describes
+ * as accepted and unclosable: two puts merging against one `prev`.
+ */
+class RacingCache extends ThumbCache {
+  private armed: (() => Promise<unknown>) | null = null
+  /** Did the armed write actually land inside the window? Assert it, always. */
+  fired = false
+
+  arm(run: () => Promise<unknown>): void {
+    this.armed = run
+    this.fired = false
+  }
+
+  protected override async readMeta(dir: string, key: string) {
+    const meta = await super.readMeta(dir, key)
+    const run = this.armed
+    if (run !== null) {
+      this.armed = null // exactly once — the armed put reads this sidecar too
+      this.fired = true
+      await run()
+    }
+    return meta
+  }
+}
+
+describe('write generations', () => {
+  it('never re-issues a generation across an entry being evicted and re-created', async () => {
+    const cache = tempCache()
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const path = join(fx.dir, 'loose.stl')
+
+    const first = await cache.put(path, { mtime: 1, png: Buffer.from('one') })
+    // Evict the whole entry, exactly as the existence sweep does — sidecar and
+    // pixels both, so the next write finds nothing to continue from.
+    for (const f of readdirSync(cache.dir)) rmSync(join(cache.dir, f), { force: true })
+    expect((await cache.get(path, 1)).status).toBe('miss')
+
+    const second = await cache.put(path, { mtime: 1, png: Buffer.from('two') })
+    // Strictly greater, not merely different. A counter that restarted at 0
+    // here would re-issue numbers this path has already answered under, and a
+    // browser holding one of them would serve the old pixels for a year.
+    expect(second).toBeGreaterThan(first)
+    expect((await cache.get(path, 1)).gen).toBe(second)
+  })
+
+  it('seeds a fresh process from the wall clock rather than from zero', async () => {
+    // The cell above cannot see a broken seed, and that is why this one exists:
+    // the allocator's high-water mark is module state, so *within* one process
+    // even a plain 0-seeded counter answers "strictly greater" and the
+    // write/delete/write shape passes against it. What that shape cannot test
+    // is the number a **fresh** process starts from — and a browser's cache
+    // outlives the process, so an entry re-created after a restart must not be
+    // handed a number this path may already have answered under.
+    //
+    // Asserted against the clock, not against a previous generation: comparing
+    // the two would be comparing against this suite's own accumulated
+    // allocations, which burst well past wall-clock (200 puts in ~16ms end up
+    // ~184ms ahead — re-run the loop in `allocateGen`'s terms to see it).
+    const dir = mkdtempSync(join(tmpdir(), 'mb-cache-restart-'))
+    cleanups.push(dir)
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+
+    vi.resetModules()
+    const restarted = await import('../src/cache')
+    const before = Date.now()
+    const gen = await new restarted.ThumbCache(dir).put(join(fx.dir, 'loose.stl'), {
+      mtime: 1,
+      png: Buffer.from('one'),
+    })
+    // A counter starting at 0 lands on 1 here, twelve orders of magnitude below
+    // the numbers the previous process was issuing.
+    expect(gen).toBeGreaterThanOrEqual(before)
+  })
+
+  it('never lands below a generation the sidecar already carries', async () => {
+    // The case neither clock term covers: a `gen` written by some *other*
+    // machine's clock. A cache directory copied between machines, or a clock
+    // skew, puts the stored number ahead of both `Date.now()` and this
+    // process's high-water mark — and without the sidecar's own value as a
+    // floor, the next write issues a number *below* the entry's stored one.
+    // That is a per-entry regression, which is the one thing the generation
+    // exists to prevent.
+    const cache = tempCache()
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const path = join(fx.dir, 'loose.stl')
+    await cache.put(path, { mtime: 1, png: Buffer.from('one') })
+
+    // Forge the foreign clock: a generation a million seconds in the future.
+    const metaFile = onlyFile(cache.dir, '.json')
+    const meta = JSON.parse(readFileSync(metaFile, 'utf8')) as { gen: number }
+    const foreign = Date.now() + 1_000_000_000
+    writeFileSync(metaFile, JSON.stringify({ ...meta, gen: foreign }))
+
+    const next = await cache.put(path, { mtime: 1, png: Buffer.from('two') })
+    expect(next).toBeGreaterThan(foreign)
+    expect((await cache.get(path, 1)).gen).toBe(next)
+  })
+
+  it('gives two puts that raced on one entry different generations', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mb-cache-race-'))
+    cleanups.push(dir)
+    const cache = new RacingCache(dir)
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const path = join(fx.dir, 'loose.stl')
+
+    await cache.put(path, { mtime: 1, png: Buffer.from('seed') })
+
+    // `inner` runs to completion inside `outer`'s read→write window, so both
+    // merge against the same sidecar. `inner` allocates first; `outer` writes
+    // last, so the surviving sidecar is `outer`'s.
+    let inner = 0
+    cache.arm(async () => {
+      inner = await cache.put(path, { mtime: 1, png: Buffer.from('inner') })
+    })
+    const outer = await cache.put(path, { mtime: 1, png: Buffer.from('outer') })
+    expect(cache.fired).toBe(true) // the write landed *inside* the window
+
+    // The generation cannot be derived from the sidecar the merge read, or both
+    // of these are the same number — and then the loser's number is also the
+    // winner's, the stale tier never fires, and a browser that fetched at it
+    // serves the loser's pixels under `immutable` with no way back.
+    expect(inner).not.toBe(outer)
+    expect(outer).toBeGreaterThan(inner) // allocated later, and it wrote last
+
+    // The surviving entry is the last writer's, at the last writer's number.
+    const after = await cache.get(path, 1)
+    expect(after.gen).toBe(outer)
+    expect(Buffer.from(after.png!, 'base64').toString()).toBe('outer')
+  })
+
+  it('never lets the loser of that race be answered as immutable', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mb-cache-race2-'))
+    cleanups.push(dir)
+    const cache = new RacingCache(dir)
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const app = createApp(cache, undefined, undefined, libraryFor(fx.dir))
+
+    await cache.put('/loose.stl', { mtime: 1, png: Buffer.from('seed') })
+    let inner = 0
+    cache.arm(async () => {
+      inner = await cache.put('/loose.stl', { mtime: 1, png: Buffer.from('inner') })
+    })
+    const outer = await cache.put('/loose.stl', { mtime: 1, png: Buffer.from('outer') })
+    expect(cache.fired).toBe(true)
+
+    const ask = (gen: number) =>
+      app.request(`/api/thumb?path=${encodeURIComponent('/loose.stl')}&mtime=1&gen=${gen}`, {
+        headers: LOOPBACK,
+      })
+
+    // This is the assertion the whole allocator exists for. The loser's number
+    // is not current, so its answer is uncacheable and the reader re-keys.
+    const loser = await ask(inner)
+    expect(loser.headers.get('cache-control')).toBe('no-cache')
+    expect(((await loser.json()) as ThumbGetResponse).gen).toBe(outer)
+
+    // And the winner's number is the one that gets pinned.
+    const winner = await ask(outer)
+    expect(winner.headers.get('cache-control')).toBe('public, max-age=31536000, immutable')
   })
 })

@@ -84,7 +84,7 @@ function harness(
 ): Harness {
   const queue = new RenderQueue(1)
   const getThumb = vi.fn().mockResolvedValue(cached)
-  const putThumb = vi.fn().mockResolvedValue(undefined)
+  const putThumb = vi.fn().mockResolvedValue({})
   const setThumb = vi.fn()
   const report = vi.fn()
   const acquire = vi.fn().mockResolvedValue(MESH)
@@ -459,6 +459,9 @@ function fakeCache(): Pick<ApiClient, 'getThumb' | 'putThumb'> {
         rig: fresh ? save.rig : (save.rig ?? prev?.rig),
         posed: fresh ? save.posed : (save.posed ?? prev?.posed),
       })
+      // This fake models pixels and labels, not cache validators: it issues no
+      // generations, and every caller treats an absent one as "not known yet".
+      return {}
     },
   }
 }
