@@ -97,6 +97,13 @@ export class ListingCache {
   }
 
   private start(library: Library, root: string): Promise<void> {
+    // Joined, not raced: `list()`'s in-flight check and its call here are
+    // separated by a whole walk's worth of awaits, so two first requests for
+    // one root can both arrive — without this, the second would overwrite the
+    // map and run a duplicate pass (harmless bytes-wise, atomic same-content
+    // saves, but "two never run at once" would be aspiration, not fact).
+    const existing = this.inFlight.get(root)
+    if (existing !== undefined) return existing
     const run = this.run(library, root)
       // Never rejects: `run` handles its own failures, and this is the belt to
       // that brace — a rejection here would be unhandled, since the serving
