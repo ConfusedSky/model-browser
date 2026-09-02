@@ -558,6 +558,18 @@ All re-runnable; say whose run when quoting.
   the presence layer, so after `thumbnail-sweep-priority` and the
   `listing-tree-cache` layers — its own small change when drafted, not a
   rider on either.
+  **Partition of this thread into changes** (settled with Masa, 2026-09-02):
+  (1) an **update to `listing-tree-cache`** carrying all three derived
+  layers — poses, preview choices, thumb presence (same shape: per-path,
+  derived, attached at emission) — plus startup revalidation and the reload
+  API; (2) a new change, **immutable thumbnail serving** (Cache-Control +
+  rig/generation in the URL key) — independent, can land first; (3) a new
+  change, **the precache action**, hard-ordered after `listing-tree-cache`
+  and `thumbnail-sweep-priority`, MODIFYing the sweep capability
+  post-archive and carrying the presence-feed consumption as a task.
+  Nothing is added to `thumbnail-sweep-priority` itself: its 2026-09-01
+  rebase — four sibling archives rewrote every file it cites — is the
+  argument for stacking on it rather than growing it again.
 - **Corpus**: see its `NOTES.md` (STL vs GLB sizes, dedup counts, decimation
   gates). `du` on `original/` reads 516 MB vs the notes' 12 GB — hardlink
   accounting order, not a discrepancy.
