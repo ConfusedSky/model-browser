@@ -69,6 +69,16 @@ The cache also holds what the walk cannot see but the server repeatedly re-asks 
 
 The structural rule protects D1: the tree snapshot is a function of the root alone, and that invariant is what lets one snapshot serve every query. Poses and preview choices are functions of root *plus index state*, so they are separate layers, the way the zip-directory layer is keyed against archive identity. Their validity key must be something the server can itself observe — review finding M9: `IndexAvailability` carries no build identity, the `generation` in `semantic.ts` is a probe-memo counter that moves on user retries, and `POSE_VERSION` is a client constant the server deliberately never interprets — so the layers carry the server's own layer-version constant and are dropped wholesale on a reload (D9) and when the index's reported `collectionRoot` changes. Thumbnail state is not persisted here at all — the thumbnail store is already durable; this layer is an in-memory index over it, exposing presence, staleness and the write generation **per render** (presence is per occlusion variant, since the store keys renders that way — the seam the immutable-thumbnail-serving change and the bulk jobs' "missing or stale" derivation consume).
 
+*Persistence settled 2026-09-02 (stage-3 worker's check-in, adjudicated):* both derived
+layers are **in-memory**, not persisted. The deciding reason is M9's own finding turned
+around: the server has no observable index build identity (`IndexAvailability` carries
+none, `semantic.ts`'s counter is a probe memo, `POSE_VERSION` is the client's), so a
+persisted pose would outlive a re-classification with nothing able to notice — across
+restarts, with thumbnails rendering under it. In-memory bounds that blast radius to one
+process and makes a restart a free drop point. Secondary: persistence would put whole-file
+rewrites on the pose wave's hot path with coalescing machinery nothing else here needs,
+and the rebuild is already the background fill path by this design's own last paragraph.
+
 One subtlety is stated in the delta because it will otherwise be missed: a preview choice depends on a directory's *subtree*, and directory mtime does not propagate upward — but D4's revalidation visits every directory anyway, so a detected change re-derives preview choices for the changed directory and each of its ancestors.
 
 Emission never blocks on the semantic index: a layer answers from what it holds or not at all, and the client's existing wave remains the fill path for entries the pose layer does not know. That keeps the recorded reason for the wave's existence — browse must not couple to index health — while shrinking the wave to genuinely unknown entries.
