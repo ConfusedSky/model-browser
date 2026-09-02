@@ -84,6 +84,17 @@ The server SHALL attach to listing entries, at emission, the derived per-entry f
 - **WHEN** a library has no cached poses, preview choices, or thumbnails
 - **THEN** every listing is byte-identical to one emitted before this capability existed
 
+### Requirement: A subtree's models are enumerable with their derived facts
+The server SHALL answer, for a library path, every model beneath it — the whole subtree, archive contents included — each carrying the same derived thumbnail facts the listing annotation carries, resolved by key lookup alone, together with whether the traversal that produced the set was complete. The answer SHALL NOT be bounded by a listing's response cap: it is an enumeration, not a listing, and a scope cut to a cap would silently be a different scope. It SHALL be served from the cached tree where one exists, touching no directory or archive in that case; where none exists it SHALL traverse as a listing miss does, storing the tree only if the traversal was complete, and SHALL state incompleteness rather than refuse.
+
+#### Scenario: A kit is enumerated from the snapshot
+- **WHEN** a client asks for the models beneath a folder whose tree is cached
+- **THEN** every model beneath it is answered with its thumbnail facts, none is dropped by a cap, and no directory or archive is read
+
+#### Scenario: An incomplete traversal says so
+- **WHEN** the models beneath a root with no cached tree are asked for and the traversal stops against its work limit
+- **THEN** the answer carries what was found and states that it is incomplete, and nothing is cached for that root
+
 ### Requirement: Derived layers live beside the tree and die with their sources
 Derived layers SHALL be stored beside the tree snapshot, never as fields within it: the snapshot remains a function of the walked root alone. Each layer entry SHALL record the identity of what it was derived from, in terms the server can itself observe: pose and preview-choice entries carry the server's layer version — a constant bumped when the derivation's meaning changes — and are dropped wholesale by the reload operation and when the index's reported collection root changes; thumbnail state carries the thumbnail store's own record, per render — presence and staleness are per occlusion variant, since the store keys renders that way. A layer entry SHALL NOT be served once its recorded identity has moved. Because a preview choice depends on a directory's subtree while directory freshness signals do not propagate upward, a detected change in any directory SHALL re-derive the preview choices of that directory and of each of its ancestors.
 

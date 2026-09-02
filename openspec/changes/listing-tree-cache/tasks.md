@@ -111,6 +111,22 @@
 - [ ] 6.6 Reload endpoint (D9): runs the same pass now, answers whether anything moved;
       client affordance minimal (the stale-marker reconciliation already covers how
       corrections land)
+- [ ] 6.7 Scope enumeration (added 2026-09-02 — the seam `bulk-thumbnail-jobs` waits on;
+      its review finding S2, settled with Masa by ordering rather than by a walk of that
+      change's own): a read-only route answering **every model beneath a library path** —
+      the whole subtree, archive contents included, with no response cap
+      (`MODEL_BROWSER_FLAT_CAP` bounds *listings*; this is not one) — each entry carrying
+      its 6.3 annotation, resolved from the 6.2 index by key lookup exactly as emission
+      does, and the answer stating whether the traversal was complete. Served from the
+      snapshot when one exists, no filesystem I/O; a root with none pays the walk as a
+      flat listing's miss does (4.1 — persisted only if complete, per 4.1a) on the search
+      budget, and an incomplete traversal is answered as incomplete, never refused. Shape
+      to build: `GET /api/models?path=` → `{ path, entries, complete }` (the name is the
+      implementer's; the contract is the delta's *enumerable* requirement). Entries are
+      copies (preamble). The annotation is the one shape `thumbnail-image-serving` D2
+      names (`DirEntry.thumb`) — the same object on a listing and on an enumeration,
+      never two. Cell: a 600-model fixture enumerates 600 (a flat listing of it caps at
+      500); a snapshot-served enumeration opens no directory and no archive (instrument)
 
 ## 7. Tests
 

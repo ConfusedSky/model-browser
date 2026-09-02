@@ -10,7 +10,11 @@ SHALL apply, to each model in scope with a stored orientation — a stored camer
 stored axis, the definition the derivation and the counts share (review M4) — the same
 give-up-the-orientation semantics the per-model action defines (`entry-actions`), and
 then render its thumbnail, so no image remains that was rendered from a discarded
-camera. A job's work list SHALL be derived at launch from per-entry state, and progress
+camera. A job's work list SHALL be derived at launch from per-entry state — obtained by
+enumerating the scope's models together with their cached thumbnail facts
+(`listing-cache`'s enumeration), never by walking the filesystem from the client and
+never cut to a listing's cap; a scope whose enumeration reports itself incomplete SHALL
+still run over what was found and SHALL say so on the progress affordance — and progress
 SHALL be tracked by nothing but that state: a completed entry drops out of any later
 derivation, so launching the same job again continues where the last run stopped,
 whatever ended it. Per-entry work SHALL be atomic. There SHALL be no persisted job

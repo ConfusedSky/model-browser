@@ -73,6 +73,24 @@ Emission never blocks on the semantic index: a layer answers from what it holds 
 
 *Alternative — fields inside the snapshot:* one store, but the snapshot's key would have to grow index generation, and an index rebuild would invalidate the tree it has no bearing on — the exact coupling D1 exists to refuse.
 
+**Enumeration is one more read over the same two structures (added 2026-09-02, for
+`bulk-thumbnail-jobs`; its review finding S2, settled with Masa).** A bulk job needs the
+models beneath a path together with their thumbnail facts, and nothing the app has can
+answer that: `/api/dir?flat=true` is a *listing* — capped at 500 models, budgeted for a
+browse — and the annotation above rides listings only. So the tree cache exposes an
+enumeration: every model in the snapshot beneath a path, each carrying the emission
+annotation, uncapped, with the traversal's completeness stated (task 6.7). It is the
+snapshot joined to the thumbnail-state index by key — exactly what emission reads, and no
+third structure — which is why it lives here rather than in the jobs change. The two
+shapes weighed there and declined: a client-side walk is N round trips through a capped
+route; a walk-and-join route of the jobs change's own, over `walkFlat`'s collector and the
+sidecars, lands without waiting for §6 but pays the cold walk this change exists to remove —
+on every launch and every opening of the library tab for its counts — and is rewritten the
+day §6 lands. On a root with no snapshot the enumeration walks as a listing miss walks, under
+D1's completeness rule (only a complete walk is persisted), and an incomplete traversal is
+answered as such rather than refused: the caller is an explicit action about to read every
+one of those models anyway, and a job that knows its scope was cut can say so.
+
 ### D8: Startup revalidation, never a startup walk (added 2026-09-02)
 
 When a library resolves ready and a snapshot exists, the incremental D4 pass starts immediately rather than waiting for the first request — changes made while the app was closed are usually discovered before anyone lists anything. The bound is D4's own: one `stat` per directory (~5.6s cold worst case here), not the ~32s walk. A root with no snapshot is *not* walked at startup: an eager cold walk would grind a spinning, sometimes-absent volume at every launch for a listing nobody asked for, and the `search-cancellation` reconciliation already established that background crawls contend for the disk head with interactive work.

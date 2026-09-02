@@ -61,12 +61,15 @@ original mis-attribution to the notes).
   capability; `SidePanel` (a fourth
   `library` tab), the job runner beside `useThumbnails`' queue plumbing, the chip.
 - Server: none beyond what other changes provide — the job PUTs through `/api/thumb` as
-  ordinary renders do.
+  ordinary renders do, and enumerates its scope through the tree cache's route.
 - Hard ordering, all three ahead of this change: `thumbnail-sweep-priority` (the
-  priority bands the job drains through), `listing-tree-cache` §6 (the thumbnail-state
-  index answering missing/stale/framed counts — the `framed` bit is added to its 6.2 by
-  this drafting), `immutable-thumbnail-serving` (the write generation the mid-job skip
-  reads).
+  priority bands the job drains through; archived 2026-09-02), `listing-tree-cache` §6
+  through 6.7 (the thumbnail-state index answering missing/stale/framed — the `framed`
+  bit is added to its 6.2 by this drafting — and the scope enumeration its 6.7 adds for
+  this change: every model beneath a path with those facts, uncapped. Added by the
+  2026-09-02 design pass over review S2; a client-side walk and a route of this
+  change's own were both declined there, design D8), `immutable-thumbnail-serving` (the
+  write generation the mid-job skip reads; landed 2026-09-02).
 - `SidePanel` is also touched by the future demo change's chat-tab hiding
   (`web-demo-backlog` 1.3) — additive on both sides, but declare the ordering when 1.3
   is drafted. On the demo both operations are write actions: the planned feature report

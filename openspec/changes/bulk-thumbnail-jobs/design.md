@@ -10,7 +10,8 @@ the server never renders), through `App`'s `RenderQueue` — which
 `immutable-thumbnail-serving` adds a write generation bumped by every write;
 `listing-tree-cache` §6 gives `ThumbCache` an in-memory per-path index
 (presence, staleness, generation — and `framed`, added to its 6.2 alongside this
-drafting). Per-model *refresh* and *give up the orientation* actions exist in
+drafting) and, since this change's 2026-09-02 design pass, a scope enumeration
+over the snapshot carrying those facts per model (its 6.7 — D8 below). Per-model *refresh* and *give up the orientation* actions exist in
 `entry-actions`, with exact discard semantics this change reuses rather than
 restates. The always-on background warmer was weighed and declined in
 `docs/web-demo-notes.md` (2026-09-02): bulk work is explicit, scoped, and
@@ -27,8 +28,9 @@ preemptible, or it fights the disk the user is using.
 
 **Non-Goals:**
 - Automatic/scheduled warming. Explicit launch only.
-- Server-side rendering, or any new server endpoint — the job is a client loop
-  over existing per-entry operations.
+- Server-side rendering, or any new server endpoint *of this change's* — the
+  scope enumeration is `listing-tree-cache`'s (its 6.7, D8), and the job is a
+  client loop over per-entry operations.
 - The demo's hiding of these surfaces — that is the feature report's business
   (undrafted; `web-demo-backlog` 1.3 and the notes' Defaults), declared here
   only as a seam.
@@ -39,7 +41,8 @@ preemptible, or it fights the disk the user is using.
 ### D1: Jobs are derivations, not records
 
 A job is `(operation, scope)`. Its work list is derived at launch from the
-per-entry state the cache indexes already hold — generate: models in scope
+per-entry state the cache indexes already hold, delivered by the tree cache's
+scope enumeration (D8) — generate: models in scope
 missing or stale; reset: models in scope with a stored orientation — a camera or an
 axis, the definition `framed` in `listing-tree-cache` 6.2 must share (review M4) — and
 is never persisted: each completed entry's own state change removes it from any
@@ -108,6 +111,71 @@ reload affordance (its 6.6) and cache statistics; this change creates the tab
 with its two buttons and leaves the rest to their owners. On the demo the
 feature report empties it (every occupant is a write action), and an empty tab
 is not shown — the launcher empty-report precedent.
+
+### D7: One per-entry body, three callers (added 2026-09-02 — review M5)
+
+`refreshThumbnail` (`entryActions.ts`) is the body both per-model thumbnail
+commands run, and D3 wanted to fan it out. Two things in it are the *command's*,
+not the operation's: it reports every failure to the user
+(`host.report(RENDER_FAILED)` — one sentence per failed model, which fanned over a
+kit is a wall of them), and it resolves the model's orientation from `host.poses`,
+the current landing's answer — populated by a meaning or similarity landing only,
+so a reset launched from a plain folder would take the no-pose branch for every
+model in it, discarding cameras and rendering at the default where the index would
+have framed them.
+
+So the body is split, not shared. A core — `renderEntryThumbnail(entry, deps,
+{ discardFraming, pose, expectGen })` — does the lookup, the resolution
+(`framingAfterDiscard` on discard, the sweep's rule otherwise), the render, the
+PUT and the `setThumb`; it takes the pose as a parameter, answers
+`'done' | 'skipped'`, and throws on failure. The command's wrapper is what
+`refreshThumbnail` keeps: the queue push, the pose read from `host.poses`, the
+one-line report. The job's wrapper passes its own pose (D8's wave) and the `gen`
+it snapshotted at launch — the core's existing cache read compares and answers
+`skipped` when it moved, so D4 costs no second lookup — and counts a throw instead
+of saying it. One resolution rule, one PUT shape, and D3's promise (the same
+semantics as the per-model action) is true by construction rather than by two
+bodies agreeing.
+
+*Alternative — call the command and catch its report:* the report goes through
+the host, not a return value, and the pose would still be the landing's. A flag on
+the command would be the second reading of "same body" that drifts.
+
+### D8: The tree cache enumerates the scope; the job derives (added 2026-09-02 — review S2, settled with Masa)
+
+Nothing the app had could enumerate a scope: `/api/dir?flat=true` is a listing —
+capped at 500 models, budgeted for a browse — and `listing-tree-cache`'s
+annotation rides listings only. Two shapes were weighed. A route of this change's
+own — walk the subtree over `walkFlat`'s collector, uncapped, join each model
+against its sidecar — lands now and waits on nothing. An enumeration read on the
+tree cache — its 6.7: every model beneath a path from the snapshot, each with its
+6.2/6.3 facts, no cap, completeness stated — waits for §6. The second was taken.
+The first pays the cold walk the tree cache exists to remove — on every launch,
+and on every opening of the library tab for its counts, against a volume the notes
+measured at ~32 s cold — and is rewritten the day §6 lands; the second makes the
+tab's count a memory read, which is what "honest counts, no walk" (D5) meant all
+along. The price is ordering, and this change pays it: nothing starts before 6.7
+is on main.
+
+The join stays where the constants are. The server states facts per model —
+presence and labels per variant, `gen`, `framed`, camera/axis, the one annotation
+shape `thumbnail-image-serving` D2 names — and the client judges: generate keeps a
+model whose recipe-in-force variant fails the hook's own hit test (`lighting`,
+`rig`, and `posed` against the pose the job holds); reset keeps `framed`. That
+predicate is extracted from `useThumbnails`' hit branch rather than restated, so
+the job and the sweep cannot disagree about what is stale. And because the test
+reads a pose, the job runs its own orientation wave over the enumerated models
+first — `semanticPosesFor`, chunked, failure is silence: the listing wave's
+contract — which is also what D7's core renders unowned models under, so a
+generate over a plain folder frames them as a visit would and a reset restores
+index framings rather than defaults. The library tab's counts are the same
+derivation, run when the tab opens, over the app's root — `LibraryState.root`,
+the viewpoint the app opens at, which is what "the library" means on screen.
+
+An enumeration that reports itself incomplete (a root with no snapshot whose walk
+stopped against its budget) is still a job, over what was found; the chip says the
+scope was cut, and the next launch — over a tree the walk may since have completed
+— picks up the rest. Consistent with D1: the derivation is a launch-time snapshot.
 
 ## Risks / Trade-offs
 
