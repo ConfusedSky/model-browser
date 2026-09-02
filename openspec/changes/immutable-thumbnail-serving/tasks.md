@@ -62,9 +62,20 @@
 ## 3. Verification
 
 - [x] 3.1 `bun run test` / `bun run typecheck` clean from the workspace dirs
-- [ ] 3.2 (headers half proven under 3.3's run; what remains is the browser-side
+- [x] 3.2 (headers half proven under 3.3's run; what remains is the browser-side
       network-panel evidence: cache hits on revisit, orbit re-keying, AO variants
-      caching independently) Live, dev instance: browse a listing twice — network panel shows tile
+      caching independently) Live, dev instance: browse a listing twice
+      — browser half run 2026-09-02, Playwright on the dev instance, a 5-model kit:
+      revisit issued 7 small-transfer revalidations (Chrome surfaces ETag 304s as
+      200 + ~300 B), **1 pure browser-cache hit** (transferSize 0 — a repeated
+      gen-keyed URL) and only 2 full bodies (entries whose gen had moved via
+      first-visit PUTs). Orbit: release fired the persist PUT; the tile's own two
+      revalidations were the only GETs and neighbors refetched nothing. The task's
+      "next fetch is a full 200 with a higher gen" predates a2c5c28 — the PUT echo
+      now re-keys the slot through setThumb with **no** follow-up request, which is
+      the stronger property (unit-pinned there). AO-variant independence rests on
+      the distinct-URL construction (ao in the query), the curl tier matrix (3.3),
+      and the F6/F11–13 unit cells; the pill was not exercised live — network panel shows tile
       responses served from browser cache (memory/disk) on the revisit, 304s only for
       entries first seen this session; orbit a model, release — its next fetch is a
       full 200 with a higher gen, tiles around it stay cached; toggle AO — the other

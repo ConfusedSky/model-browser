@@ -39,6 +39,12 @@
 > listingSkeleton cells fail). 3.1 green on the same runs.
 
 - [x] 3.1 `bun run test` / `bun run typecheck` clean from the workspace dirs
-- [ ] 3.2 Live: `/api/features` answers all-on on the dev instance, answers while
+- [x] 3.2 Live: `/api/features` answers all-on on the dev instance, answers while
       unconfigured (`MODEL_BROWSER_ROOT` unset), and the app renders identically with
       the route stubbed to fail
+      — all three run 2026-09-02: dev instance answered {"thumbWrites":true} by curl;
+      a real unconfigured instance (createApp + Bun.serve on 3178, config pointed at a
+      missing file) answered the report 200 all-on while /api/dir gave the 503
+      unconfigured envelope; Playwright with the route aborted rendered the identical
+      73-tile root with identical chrome to the unstubbed load (the only trace: the
+      aborted fetches' own console errors)
