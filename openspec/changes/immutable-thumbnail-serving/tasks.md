@@ -59,11 +59,18 @@
 ## 3. Verification
 
 - [x] 3.1 `bun run test` / `bun run typecheck` clean from the workspace dirs
-- [ ] 3.2 Live, dev instance: browse a listing twice — network panel shows tile
+- [ ] 3.2 (headers half proven under 3.3's run; what remains is the browser-side
+      network-panel evidence: cache hits on revisit, orbit re-keying, AO variants
+      caching independently) Live, dev instance: browse a listing twice — network panel shows tile
       responses served from browser cache (memory/disk) on the revisit, 304s only for
       entries first seen this session; orbit a model, release — its next fetch is a
       full 200 with a higher gen, tiles around it stay cached; toggle AO — the other
       variant's URLs cache independently
-- [ ] 3.3 Header check against a second client (fresh profile or curl): gen-less GET
+- [x] 3.3 Header check against a second client (fresh profile or curl): gen-less GET
       answers `no-cache` + ETag and 304s on the validator; `gen`-carrying GET answers
       `immutable`; miss answers `no-store`
+      — run 2026-09-02, curl against the hot-reloaded dev instance (3177), a real
+      library model: gen-less hit → 200 `no-cache` + ETag "0"; If-None-Match → 304;
+      current-gen → `public, max-age=31536000, immutable`; stale-gen (1 vs 0) → 200
+      `no-cache` with current gen in body; nonexistent path → `no-store`. A
+      pre-generation sidecar reads gen 0, as specified
