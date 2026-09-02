@@ -47,7 +47,7 @@ A directory's mtime changes when an entry is added, removed, or renamed within i
 
 The tradeoff is honest: because mtime does not propagate upward, every directory must be stat'd, so revalidation is proportional to directory count and cannot be short-circuited at the root. That is the price of not running a watcher.
 
-*Risk to settle at apply:* this library is on **exfat**, whose timestamp semantics are coarser and less dependable than ext4's (2-second granularity, and behavior varies by driver). D4 must be validated on exfat specifically before it is trusted; if directory mtime proves unreliable there, the fallback is to treat a directory's `(entry count, total size)` as a weak fingerprint, which costs the readdir but still skips the per-entry stats and the zip tails.
+*Risk settled 2026-09-02 (task 1.1's run, `scripts/probe-dir-mtime.py` on the real volume):* directory mtime on this exfat volume under the Linux `exfat` driver is **reliable and fine-grained** — every add/remove/rename of a direct entry (file or subdir) moves the parent's mtime, content edits and deeper changes do not, granularity is **10 ms** (the on-disk resolution, honored: ~90 ops at 50 ms spacing yielded ~90 distinct stamps), and timestamps survive unmount/remount byte-identically. The feared 2-second class does not apply here. The `(entry count, total size)` readdir-fingerprint fallback is therefore **not built for this volume**; it remains recorded as the contingency for filesystems the wider target may meet (network mounts, other drivers), to be validated the same way — the probe script takes any directory.
 
 ### D5: Serve the snapshot immediately, converge afterwards
 

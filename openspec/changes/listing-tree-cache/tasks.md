@@ -18,8 +18,21 @@
 
 ## 1. Validate the freshness signal before building on it
 
-- [ ] 1.1 **Do this first — D4 rests on it.** Measure directory-mtime behavior on the real **exfat** volume (`/run/media/masa/Files and S`): add, remove, and rename entries in a directory and confirm its mtime moves in each case, at what granularity, and whether it survives unmount/remount. exfat timestamps are coarser than ext4's and driver-dependent
-- [ ] 1.2 If mtime proves unreliable there, fall back to the readdir fingerprint (entry count + total size per directory) from D4 and record the switch in the design before writing cache code — it still skips per-entry stats and zip tails, which is where the measured cost is
+- [x] 1.1 **Do this first — D4 rests on it.** Measure directory-mtime behavior on the real **exfat** volume (`/run/media/masa/Files and S`): add, remove, and rename entries in a directory and confirm its mtime moves in each case, at what granularity, and whether it survives unmount/remount. exfat timestamps are coarser than ext4's and driver-dependent
+      — run 2026-09-02 (`scripts/probe-dir-mtime.py`, re-runnable against any volume;
+      coordinator session, /dev/sda2 exfat 3.7T spinning, linux `exfat` driver, relatime):
+      **all eight behavior probes pass** — add/remove/rename of files AND subdirs each
+      move the parent's mtime; a content edit does not; a change one level down does not
+      move the grandparent. **Granularity is 10 ms**, not the feared 2 s: ~90 adds at
+      50 ms spacing produced ~90 distinct mtimes stepping in clean 10 ms units (the
+      exFAT on-disk resolution, honored by this driver). **Remount-safe**: every probe
+      directory's mtime was byte-identical after `udisksctl unmount`/`mount`, 10 ms
+      fractional parts included. Residual D4 hazard window is one 10 ms granule, not 2 s
+- [x] 1.2 If mtime proves unreliable there, fall back to the readdir fingerprint (entry count + total size per directory) from D4 and record the switch in the design before writing cache code — it still skips per-entry stats and zip tails, which is where the measured cost is
+      — not needed: 1.1 proved mtime reliable on the real volume (all moves detected,
+      no false moves, 10 ms granularity, remount-stable). The fallback stays in D4 as
+      the contingency for *other* filesystems per the proposal's wider-target note,
+      unbuilt here
 
 ## 2. Cache store
 
