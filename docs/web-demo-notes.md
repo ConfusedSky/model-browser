@@ -525,7 +525,11 @@ All re-runnable; say whose run when quoting.
   must change it or immutable pins stale pixels) and serve
   `immutable, max-age=<long>`; repeat visits then cost zero pixel trips,
   browser-cache locally, browser+CDN on the demo — the biggest trip-killer
-  in this thread for a header and a URL param. (2) **presence/validity rides
+  in this thread for a header and a URL param. (No storage cost anywhere
+  ours, a first reading Masa checked 2026-09-02: the version is a query
+  key over the same single cached file — a change overwrites that file as
+  today and the new key simply never asks the old URL again; the only
+  "old copy" lives in the browser/CDN cache until their own eviction.) (2) **presence/validity rides
   the listing** from a ThumbCache in-memory index (cached/stale/missing +
   current URL per entry): kills the per-tile miss-check GET, and is exactly
   the staleness feed `thumbnail-sweep-priority` (active) wants — a
