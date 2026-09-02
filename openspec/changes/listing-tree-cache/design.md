@@ -35,7 +35,9 @@ The invariant is load-bearing and fragile: `search-matches-folder-names` collect
 
 ### D2: On disk, beside the thumbnail cache
 
-Warm walks are already fast on both media (0.030–0.039 ms/entry) — the OS page cache is doing that job well. An in-process cache would duplicate it and, like it, be empty at the moment that matters. Persisting to `~/.cache/model-browser` is what makes the *first* walk after a restart cheap, and it inherits `ThumbCache`'s directory, its size accounting, and its eviction sweep rather than inventing a second policy.
+Warm walks are already fast on both media (0.030–0.039 ms/entry) — the OS page cache is doing that job well. An in-process cache would duplicate it and, like it, be empty at the moment that matters. Persisting to `~/.cache/model-browser` is what makes the *first* walk after a restart cheap, and it inherits `ThumbCache`'s directory and its policy *shape* rather than inventing a second policy.
+
+*Settled 2026-09-02 at implementation (stage-1 worker's read of `maintain()`):* literal sharing of the sweep is destructive — `maintain()` treats every `*.json` in the per-library directory as a thumbnail sidecar, so a snapshot there either aborts the whole sweep silently (`sourceExists(undefined)` throws a `TypeError` that `runMaintain` swallows) or, had it carried a `path` field, would be deleted as a dead thumbnail. The snapshot store therefore lives in `<cache>/<library-id>/snapshots/` — a plain directory name fails the sweep's own `.endsWith('.json')` test, so `maintain()` is byte-unchanged and blind to it — and carries its **own bound in the same policy shape**: one validated env knob (`MODEL_BROWSER_SNAPSHOT_CAP`, default 64 MB, malformed → default), oldest-first eviction. Not a shared byte pool: a ~2 MB snapshot in a 2 GB PNG budget would let thumbnail churn evict thirty seconds of cold-walk protection to reclaim 0.1% of the cap. One location, one policy shape, two bounds; remount-following and the `rm -rf <id-dir>` reset gesture are preserved. The delta's requirement was amended to say this in as many words.
 
 ### D3: Archive directories are cached against the archive's mtime
 
