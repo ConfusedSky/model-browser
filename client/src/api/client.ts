@@ -3,6 +3,7 @@ import type {
   CameraState,
   DirEntry,
   DirListing,
+  FeatureReport,
   IndexAvailability,
   LibraryState,
   PosesResponse,
@@ -229,6 +230,15 @@ export interface ApiClient {
    * the registry. Never called from a menu-open path (D6/2.5).
    */
   apps(): Promise<AppsReport>
+  /**
+   * What this server accepts and offers (feature-report D2) — capability
+   * fields, never a mode name, so one client build serves every deployment.
+   *
+   * Answerable in every library state, and read through here like everything
+   * else (D1): a surface that gates on the report must not be able to reach the
+   * network around the client the tests inject.
+   */
+  features(): Promise<FeatureReport>
   /** Open `path` in the application `appId` names — a one-shot launch, resolving
    *  when the platform's launch command succeeded (L8). */
   open(path: string, appId: string): Promise<void>
@@ -475,6 +485,11 @@ export class HttpApiClient implements ApiClient {
   async apps(): Promise<AppsReport> {
     const res = await this.fetchFn('/api/apps')
     return jsonOrThrow<AppsReport>(res)
+  }
+
+  async features(): Promise<FeatureReport> {
+    const res = await this.fetchFn('/api/features')
+    return jsonOrThrow<FeatureReport>(res)
   }
 
   async open(path: string, appId: string): Promise<void> {

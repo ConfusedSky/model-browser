@@ -34,6 +34,10 @@ vi.mock('../src/api/client', () => ({
     // with nothing associated and no chooser, so nothing about the persist
     // path changes here.
     apps = vi.fn().mockResolvedValue({ chooser: false, types: {} })
+    // What the server offers (feature-report), read on mount beside `apps`. A
+    // known all-on report — today's server — so the persist path is the one
+    // this file was written against; the report gates no surface it touches.
+    features = vi.fn().mockResolvedValue({ thumbWrites: true })
     open = vi.fn()
     openWith = vi.fn()
   },

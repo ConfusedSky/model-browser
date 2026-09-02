@@ -5,6 +5,7 @@ import { Readable } from 'node:stream'
 import { Hono } from 'hono'
 import type {
   DirEntry,
+  FeatureReport,
   LightingMode,
   OrbitAxis,
   PosesResponse,
@@ -210,6 +211,15 @@ async function posedFirstPeek(library: Library, libPath: string, n: number): Pro
   return sheet
 }
 
+/**
+ * Every capability on — what this server does today, and `createApp`'s default
+ * so a caller that has no opinion gets the whole app (feature-report D4).
+ * `index.ts` passes it explicitly: that call is the construction site, and the
+ * demo change replaces this value there with its env selection without touching
+ * the mechanism.
+ */
+export const ALL_FEATURES: FeatureReport = { thumbWrites: true }
+
 export function createApp(
   cache: ThumbCache = new ThumbCache(),
   launcher: Launcher = createLauncher(),
@@ -228,6 +238,11 @@ export function createApp(
   // talking about; `index.ts` passes its own so the eager load's report lands
   // beside the startup line.
   overrides: OverrideHolder = createOverrideHolder(library),
+  // What this server accepts and offers (feature-report D4). Injected like the
+  // five above so a test drives a variant rather than the process's own
+  // construction, and read once — a per-process configuration, so the
+  // restart-after-editing rule every config in this app follows.
+  features: FeatureReport = ALL_FEATURES,
 ): Hono {
   const app = new Hono()
 
@@ -240,11 +255,17 @@ export function createApp(
    * thing is not there" is a state the UI renders, not a fault.
    *
    * The exceptions are the routes that are about the *app* rather than about a
-   * path: the state itself, the machine's application registry, and the index's
-   * availability. Re-asked per request, because `missing` is re-evaluated each
-   * time — a volume mounted after start needs no restart.
+   * path: the state itself, the machine's application registry, this server's
+   * own capabilities, and the index's availability. Re-asked per request,
+   * because `missing` is re-evaluated each time — a volume mounted after start
+   * needs no restart.
    */
-  const UNGATED = new Set(['/api/library', '/api/apps', '/api/semantic/status'])
+  const UNGATED = new Set([
+    '/api/library',
+    '/api/apps',
+    '/api/features',
+    '/api/semantic/status',
+  ])
   app.use('/api/*', async (c, next) => {
     if (UNGATED.has(c.req.path)) return next()
     const s = await library.state()
@@ -445,6 +466,20 @@ export function createApp(
    * mattered (L5).
    */
   app.get('/api/apps', async (c) => c.json(await launcher.report()))
+
+  /**
+   * What this server accepts and offers (feature-report D2).
+   *
+   * Its own route rather than a rider on `/api/library`: that answer is dynamic
+   * per-request state, this is static per-process configuration, and mixing
+   * them would couple every state answer to config wiring. Ungated for the same
+   * reason `/api/apps` is — the surfaces it shapes exist in every library
+   * state, so the client needs it before there is a library.
+   *
+   * Answered verbatim from the injected value: nothing is recomputed here, and
+   * nothing about the request can change it.
+   */
+  app.get('/api/features', (c) => c.json(features))
 
   /**
    * Launch an application with an entry's file. The client sends an

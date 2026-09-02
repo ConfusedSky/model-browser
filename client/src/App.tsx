@@ -3,6 +3,7 @@ import type * as THREE from 'three'
 import type {
   AppsReport,
   DirEntry,
+  FeatureReport,
   IndexPose,
   IndexScore,
   LibraryState,
@@ -466,6 +467,29 @@ export default function App() {
    * read fails — which the actions read as "no applications, no chooser", so
    * they are absent rather than present and inert.
    */
+  /**
+   * What this server accepts and offers — the one place surfaces read the
+   * feature report from (feature-report D3). Component-local for `apps`'
+   * reason: nothing in the search machine reads a capability report.
+   *
+   * `null` is **not known**: still in flight, or the read failed. The two are
+   * deliberately not distinguished, because consumers treat them the same —
+   * and the rule that makes that safe is D3's offer/behavior split, which any
+   * consumer added here must follow:
+   *
+   * - An **offer** (a tab, a menu entry, a button) is withheld unless a known
+   *   report declares its capability on. Withheld while unknown, so nothing
+   *   renders and then vanishes a round trip later, and withheld on a failed
+   *   read, so nothing opens on error.
+   * - A **behavior** with an existing default keeps that default until a known
+   *   report *explicitly* declares its capability off. Not knowing must never
+   *   silently change what an action does or where data is stored — a
+   *   transient failure may not relocate a user's data.
+   *
+   * The report is advisory either way: refusing a capability is the server's
+   * job, and a client that ignored this would lose UX, never gain access.
+   */
+  const [features, setFeatures] = useState<FeatureReport | null>(null)
   const [apps, setApps] = useState<AppsReport | null>(null)
   const [actionText, setActionText] = useState<{ text: string; tone: 'ok' | 'error' } | null>(null)
   const actionTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -1433,6 +1457,39 @@ export default function App() {
       clearTimeout(timer)
     }
   }, [api, dispatch, state.view.path])
+
+  /**
+   * Read the feature report, on the availability effect's trigger above and
+   * for its reason: mount, then again on each **navigation** *until it
+   * resolves*, so a server that answers late becomes fully usable without a
+   * reload (feature-report D3). The view path is the key, exactly as it is
+   * above — a re-list at the same path (a flat toggle, a find filter) is not a
+   * navigation and asks nothing. No timer of its own, and no poll: unlike a
+   * warming index, a report that failed has no state of its own to watch, so
+   * the interactions the app already makes are the whole schedule.
+   *
+   * One effect rather than a mount effect plus a navigation effect: `features`
+   * starts `null`, so this already fires at mount, and a second effect would
+   * only duplicate that first request. Once it resolves the guard makes every
+   * later navigation free, and a failed read leaves the state at `null` —
+   * which is not a re-render, so nothing retries until the next navigation.
+   */
+  useEffect(() => {
+    if (features !== null) return
+    let alive = true
+    void api.features().then(
+      (report) => {
+        if (alive) setFeatures(report)
+      },
+      () => {
+        // Deliberately nothing: `null` already means "not known", and the next
+        // navigation asks again. Withholding on a failed read is the point (D3).
+      },
+    )
+    return () => {
+      alive = false
+    }
+  }, [api, features, state.view.path])
 
   /**
    * Read the platform registry into the session's held report — the whole of

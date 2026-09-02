@@ -1,7 +1,7 @@
 // Bun entry point — the only runtime-specific file. The app itself (Hono) runs
 // unchanged on Node for a future Electron main/sidecar.
 import { ThumbCache } from './cache'
-import { createApp } from './app'
+import { ALL_FEATURES, createApp } from './app'
 import { ZipTempStore, createLauncher } from './launch'
 import { createLibrary } from './library'
 import { createOverrideHolder } from './overrides'
@@ -31,7 +31,18 @@ void library.state().then((s) => {
   } else console.log(`library: ${s.state}`)
 })
 
-const app = createApp(cache, createLauncher(), new ZipTempStore(), library, overrides)
+// The feature report is built here rather than left to `createApp`'s default,
+// because this is the construction site the demo change edits: today every
+// capability is on, and 1.3 replaces this value with its env selection without
+// touching the route or the type (feature-report D4).
+const app = createApp(
+  cache,
+  createLauncher(),
+  new ZipTempStore(),
+  library,
+  overrides,
+  ALL_FEATURES,
+)
 
 export default {
   port: 3177,

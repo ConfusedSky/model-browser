@@ -64,6 +64,13 @@ export const semanticSearch = vi.fn()
 // test opts *into* the row and the item existing, and every test written before
 // this feature sees the menu it was written against.
 export const apps = vi.fn().mockResolvedValue({ chooser: false, types: {} })
+// What this server accepts and offers (feature-report). The default is a
+// **known** report with every capability on — what today's server answers — and
+// that is what makes every test written before the report existed still assert
+// the app it was written against: surfaces gate on a known report, so an all-on
+// one changes nothing. A test that wants a withheld surface opts into a report
+// that says so, or into one that never resolves.
+export const features = vi.fn().mockResolvedValue({ thumbWrites: true })
 // Named `openApp` rather than `open`: `open` is a global in a DOM environment,
 // and the shadowing reads as a mistake at every call site.
 export const openApp = vi.fn().mockResolvedValue(undefined)
@@ -131,6 +138,7 @@ export function apiClientModule(): Record<string, unknown> {
       semanticPosesFor = semanticPosesFor
       similar = similar
       apps = apps
+      features = features
       open = openApp
       openWith = openWith
     },
@@ -272,6 +280,9 @@ async function mount(initial: DirListing): Promise<void> {
   // session's own one reading of the registry and nothing left over — which is
   // exactly the count "raising a menu fires no fetch" is measured against.
   apps.mockClear()
+  // Cleared beside `apps` and for its reason: "the report is read once and then
+  // not again" is a count, and it must be this mount's.
+  features.mockClear()
   // Cleared before the render like `apps`, so a count read afterwards is this
   // session's own — one boot probe, plus whatever the test provoked.
   library.mockClear()
@@ -326,6 +337,12 @@ export async function unmountApp(): Promise<void> {
   // during mount, so a test configures it *before* mounting and the default is
   // restored on the way out.
   apps.mockResolvedValue({ chooser: false, types: {} })
+  // Same rule as `apps`': the report is read during mount, so a test configures
+  // it before mounting and the all-on default is restored on the way out —
+  // including after a test made the read fail or hang, which `mockReset` is
+  // what clears.
+  features.mockReset()
+  features.mockResolvedValue({ thumbWrites: true })
   openApp.mockResolvedValue(undefined)
   openWith.mockResolvedValue(undefined)
   semanticSearch.mockReset()

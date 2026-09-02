@@ -459,6 +459,22 @@ export interface AppsReport {
 }
 
 /**
+ * `GET /api/features` — what this server accepts and offers, as named
+ * capability fields and never as a mode name (feature-report D1): the client
+ * cannot branch on a deployment kind it never learns.
+ *
+ * Constructed once at server start and answerable in every library state. It is
+ * **advisory** — it shapes what the client offers, and is never the enforcement
+ * of anything: refusing a write stays the route's own job, owned by whichever
+ * change turns the field off. Each future field lands with the change that owns
+ * making it false.
+ */
+export interface FeatureReport {
+  /** Whether `PUT /api/thumb` is accepted. */
+  thumbWrites: boolean
+}
+
+/**
  * What the server knows about the library (library-root D4). `ready` is the
  * only state in which a path route answers; the others are states the UI
  * renders rather than faults — `missing` names the root because mounting it is
