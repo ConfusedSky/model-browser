@@ -8,13 +8,20 @@ import type { Band } from '../three/queue'
 
 /**
  * The park boundary: how far past the scrollport a tile may sit before its
- * render is parked, as the band observer's `rootMargin`. Generous relative to
- * the prefetch (the margin-less observer's edge) so that ordinary scrolling
- * oscillation does not park-and-restart the same tile — crossing it takes
- * deliberate travel. Initial value pending the tune-then-freeze pass (tasks
- * 6.2b): two scrollport-heights above and below, judged against the 500-tile
- * flat listing; record the judged value and screen height there before
- * archiving.
+ * render is parked, as the band observer's `rootMargin` — two
+ * scrollport-heights above and below. Generous relative to the prefetch (the
+ * margin-less observer's edge) so that ordinary scrolling oscillation does not
+ * park-and-restart the same tile — crossing it takes deliberate travel.
+ *
+ * Tuned and frozen 2026-09-02 (task 6.2b), against the real library's
+ * 500-tile flat listing at a 1280×900 window (809 px scrollport), sweep
+ * throughput ~0.8 thumbnails/s cold: the two-screen band held 28 tiles ≈ 35 s
+ * of prefetch runway — a screen or two of scrolling lands on rendered
+ * tiles — while 455 of 500 models stayed parked and unread, and ±1-screen
+ * oscillation triggered only the freshly exposed prefetch rows, never a
+ * park/unpark churn. Percentages are relative to the scrollport, so the band
+ * scales with the window; re-judge here if tile or window geometry changes
+ * materially.
  */
 export const PARK_ROOT_MARGIN = '200% 0px 200% 0px'
 

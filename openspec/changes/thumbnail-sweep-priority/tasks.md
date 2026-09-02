@@ -329,7 +329,7 @@
 ## 6. Verification
 
 - [x] 6.1 `bun run typecheck` and `bun run test` pass across workspaces
-- [ ] 6.2 Manual E2E via Playwright MCP against the real library, with the thumbnail
+- [x] 6.2 Manual E2E via Playwright MCP against the real library, with the thumbnail
       cache cleared for the target directory
       (`~/.cache/model-browser/<library-id>/`): open a 500-tile flat listing, scroll
       immediately to the bottom, and confirm visible tiles resolve in seconds rather
@@ -347,7 +347,7 @@
       **(c)** count kept versus parked far jobs — the warm-mesh exception's
       benefit is asserted in prose and should be seen firing (D4's honest-bound
       paragraph)
-- [ ] 6.3 **Inherited from `score-floor-by-default` 4.2b**, which archived
+- [x] 6.3 **Inherited from `score-floor-by-default` 4.2b**, which archived
       (2026-08-27) with this as its one open line — it was blocked on this change
       and had nowhere else to live. Re-measure the capped-set sweep once 6.2 is
       done, using a **capped meaning search** as the fixture, not only a flat
@@ -364,3 +364,33 @@
       the 500th tile at `k 0.122` against a first tile of `k 0.146`, and
       ~1.07 thumbnails/s. Re-run them here and record whose run the new numbers are
       from
+
+## Run record — 6.2/6.3 (2026-09-02, this session's run, Playwright MCP)
+
+Conditions: real library (`/run/media/masa/STLLibrary`, 500-model flat cap),
+cold cache (backed up and restored around the run), 1280×900 window, 809 px
+scrollport, dev instance. Sweep throughput measured **0.80 thumbnails/s** over
+the first 100 s (the 2026-08-18 relay said ~1.07/s; both are one machine's
+cold-cache figure — re-measure, don't re-cite).
+
+- **6.2 headline**: deep scroll to the bottom of the 500-tile flat listing.
+  FIFO baseline (same build, observers silenced — D1's fallback *is* the old
+  behaviour): first visible image **not yet rendered at 100 s**, 80 renders all
+  at the top; extrapolated ~9–10 min to reach the bottom at measured
+  throughput. With bands: **first visible image 2.2 s**, all 16 visible tiles
+  filled in **9.2 s**, only 1 non-visible render before them.
+- **6.2a**: renders after settling: 16 visible + 28 within two
+  scrollport-heights (the near band, alive through the scroller root) + 1
+  boundary tile, then the sweep **stopped** — flat across 60 s of watching.
+- **6.2b**: `PARK_ROOT_MARGIN` frozen at `'200% 0px 200% 0px'`; the judged
+  conditions live in the constant's own comment (Grid.tsx). ±1-screen
+  oscillation ×3 added only the freshly exposed prefetch rows; a deliberate
+  jump to the middle unparked and rendered 13/20 visible tiles in 15 s.
+- **6.2c**: kept vs parked on the cold sweep: **0 kept, 455 parked** of 500 —
+  the warm-mesh exception fires on toggle paths, not fresh sweeps, exactly as
+  D4's honest-bound paragraph predicts.
+- **6.3**: `fantasy character` at the 0.1 floor, top 500: **826 matched**
+  (2026-08-27's relay said 875 — the library moved), 500 returned, first tile
+  k 0.146, 500th k 0.119. Deep scroll to the weakest matches: first visible
+  image **2.1 s**, all visible filled in **8.3 s** — the capped wall is now
+  browsable end to end, which is what this change owed `score-floor-by-default`.
