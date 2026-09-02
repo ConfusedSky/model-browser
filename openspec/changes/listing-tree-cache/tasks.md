@@ -36,16 +36,64 @@
 
 ## 2. Cache store
 
-- [ ] 2.1 A metadata cache module beside `server/src/cache.ts`, following its patterns: same `~/.cache/model-browser` root and `MODEL_BROWSER_CACHE` override, same size accounting and `maintain()` sweep, one env knob per limit through a validating helper (`envLimit`'s existing contract — a malformed value must not silently unbound anything)
-- [ ] 2.2 Snapshot shape: entries keyed by library id plus the walked root's library path, holding name/kind/size/mtime, plus per-directory freshness state; versioned on disk so a format change invalidates rather than mis-parses
-- [ ] 2.3 Keyed on the library's identity plus the walked root's **library path**, under
+- [x] 2.1 A metadata cache module beside `server/src/cache.ts`, following its patterns: same `~/.cache/model-browser` root and `MODEL_BROWSER_CACHE` override, same size accounting and `maintain()` sweep, one env knob per limit through a validating helper (`envLimit`'s existing contract — a malformed value must not silently unbound anything)
+      — landed 2026-09-02 as `server/src/snapshot.ts` (`SnapshotStore`). Cache root and
+      library are constructor arguments on `ThumbCache`'s shape, so the suite never reads
+      the env. `MODEL_BROWSER_SNAPSHOT_CAP` (default 64 MB) goes through `envCap`, a copy
+      of `envLimit`'s contract; falsified by returning `Number(raw)` unvalidated, which
+      fails the knob cell with `expected NaN to be 67108864`.
+      **The sweep is the store's own, not `ThumbCache.maintain()`** — see D2 and 2.3 below
+- [x] 2.2 Snapshot shape: entries keyed by library id plus the walked root's library path, holding name/kind/size/mtime, plus per-directory freshness state; versioned on disk so a format change invalidates rather than mis-parses
+      — `SnapshotEntry` (name/path/kind/format/size/mtime) plus `SnapshotDir`
+      (`{path, mtime}`, D4's per-directory signal, a record so the readdir-fingerprint
+      fallback can be added without changing what `mtime` means). Deliberately **not**
+      `DirEntry`: that shape carries `displayName`, which `applyDisplayNames` sets in place
+      and never clears, so persisting it would bake one request's override names into every
+      later answer — the preamble's hazard, made unrepresentable rather than merely
+      discouraged. `SNAPSHOT_VERSION` guards the format and writes are atomic
+      (temp + fsync + rename, `writeOverrides`' procedure). Reads are **pure**: a file of
+      the wrong version is refused, not deleted; `maintain` reaps it
+- [x] 2.3 Keyed on the library's identity plus the walked root's **library path**, under
       `<cache>/<library-id>/`, so the same library at another mountpoint is a hit and two
       libraries with the same layout never share a snapshot (D6)
+      — `<cache>/<library-id>/snapshots/tree-<sha256(root library path)>.json`, one file
+      per walked root, plus `archives.json` per library. **The `snapshots/` subdirectory is
+      load-bearing, not tidiness** (D2, amended in `b54967c` after this was read):
+      `ThumbCache.maintain()` treats every `*.json` in the per-library directory as a
+      thumbnail sidecar, so a snapshot filed flat there makes `sourceExists(meta.path)`
+      throw on an undefined path and aborts the whole sweep — silently, since `runMaintain`
+      swallows it. Demonstrated, not assumed: filing them flat fails the coexistence cell
+      with `TypeError: Cannot read properties of undefined (reading 'startsWith')` from
+      `library.ts`'s `resolve`. `maintain()` is byte-unchanged. Identity is checked twice
+      over — the directory *and* a `library` field inside each file, so a file restored
+      into the wrong library's directory is refused on its own contents
 
 ## 3. Archive directory cache (the largest measured win)
 
-- [ ] 3.1 `zip.ts`'s central-directory read consults the cache keyed on the archive's `{mtime, size}`; an unchanged archive is never opened (D3). Measured at ~6.7s across 409 archives on the spinning volume — assert in a test that a second walk opens zero archives
-- [ ] 3.2 A rewritten archive re-reads and replaces its cached directory
+- [x] 3.1 `zip.ts`'s central-directory read consults the cache keyed on the archive's `{mtime, size}`; an unchanged archive is never opened (D3). Measured at ~6.7s across 409 archives on the spinning volume — assert in a test that a second walk opens zero archives
+      — landed 2026-09-02. `listZipEntries(zipPath, cache?)` takes an optional
+      `ZipDirCache`, a two-method structural interface **declared in `zip.ts`** so that file
+      imports no cache plumbing; `SnapshotStore.archiveCache()` implements it and maps the
+      filesystem path to a library path, so the layer survives a remount. `listing.ts` is
+      untouched — both its call sites pass nothing, and stage 2 (4.1) threads the cache in.
+      **`fileSize()` became a `stat()`**: it read the size by `open`+`fstat`, which would
+      open every archive on the cache-hit path and make "never opened" unmeetable by
+      construction; `stat` also supplies the mtime half of the key. No pre-existing zip or
+      listing cell noticed the difference (ENOENT parity) — all 530 server tests pass
+      untouched. The zero-opens claim is **instrumented at the syscall**, never timed: a
+      `vi.mock('node:fs/promises')` wrapper records every `open` by path. Two cells — a
+      second walk in the same process, and a second walk in a *later* store over the same
+      cache directory (what a restart is). Falsified by removing the cache consult, which
+      reports `expected [ 2, 2, 2 ] to deeply equal [ +0, +0, +0 ]` (2 = the tail read plus
+      the central-directory read)
+- [x] 3.2 A rewritten archive re-reads and replaces its cached directory
+      — the rewritten archive is re-read, its neighbour still answers with zero opens, and
+      the *replacement* is what persists. Falsified by dropping the `{mtime, size}`
+      comparison: `expected [ 'part-0.stl' ] to deeply equal [ 'extra.stl', 'renamed.stl' ]`.
+      Fixture note for later stages: `cpSync` gives the copy a fresh mtime (and
+      `preserveTimestamps` still loses sub-millisecond precision), so a copied archive is a
+      *rewritten* one and correctly misses — a remount must be simulated with `renameSync`,
+      which keeps the inode
 
 ## 4. Walk integration and revalidation
 
@@ -131,6 +179,31 @@
 ## 7. Tests
 
 - [ ] 7.1 Server: cached and walked responses are entry-for-entry identical on an unchanged tree (including ordering and truncation); one cached tree serves several different queries and both settings of the folder-matching option without re-traversing (instrument the walk, do not infer from timing); a second walk opens no archives; adding, removing, and renaming a model is picked up; a present-but-unreadable root invalidates rather than serving; the same tree reached at a different mountpoint under the same library is a **hit**; an unmounted library answers `missing` and leaves the snapshot in place; the on-disk format version invalidates a stale snapshot
+      <br>**Partly landed 2026-09-02 (stage 1) — `server/test/snapshot.test.ts`, 25 cells.
+      Deliberately still unchecked**: the remaining cells need §4's walk integration, which
+      does not exist yet. Done here: **a second walk opens no archives** (3.1, both
+      in-process and across a restart, instrumented at `open`); **the format version
+      invalidates a stale snapshot** (and an unparseable one, and a read stays pure —
+      the sweep reaps, the reader refuses); **a different mountpoint under the same library
+      is a hit**, driven through the library's identity rather than by remounting, for the
+      tree and for the archive layer; two same-layout libraries never share a snapshot;
+      a rewritten archive is re-read (3.2); atomic writes leave the old snapshot or the new
+      one, never a torn one; the store directory is created lazily and its absence is
+      tolerated by every operation (a pre-change cache has no `snapshots/`); the size bound
+      falls back on a malformed knob and evicts oldest-read-first; and the snapshot store is
+      invisible to `ThumbCache.maintain()`, which still sweeps.
+      Still owed by §4: cached-vs-walked entry-for-entry identity, one tree serving several
+      queries and both folder-matching settings, add/remove/rename pickup, a
+      present-but-unreadable root invalidating, and an unmounted library answering `missing`
+      with the snapshot left in place.
+      Every behavioral cell above was **falsified before being trusted** — each defect
+      (skipped version check, either half of the library key, dropped `{mtime, size}`
+      comparison, no cache consult, non-atomic write, unvalidated knob, reversed eviction
+      order, snapshots filed flat) was introduced, watched to fail, and reverted. One
+      finding: "two same-layout libraries never share" is guarded **twice** (the directory
+      *and* the in-file `library` field) and only fails when both are removed — recorded
+      because a single-defect falsification of that cell passes and would have looked like
+      coverage
 - [ ] 7.2 Client: a stale-marked listing renders immediately with the refreshing affordance and reconciles on the follow-up; an unmarked listing shows no affordance; a superseded reconciliation is discarded by latest-wins
 - [ ] 7.3 Layers (server): an index-generation bump stops pose/preview answers while the
       tree keeps serving; a deep directory change re-derives its ancestors' preview

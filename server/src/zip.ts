@@ -1,4 +1,4 @@
-import { open } from 'node:fs/promises'
+import { open, stat } from 'node:fs/promises'
 import { inflateSync } from 'fflate'
 
 export class ZipError extends Error {}
@@ -12,6 +12,35 @@ export interface ZipEntry {
   method: number
   /** Offset of the local file header. */
   localOffset: number
+}
+
+/**
+ * What identifies an archive for caching purposes (`listing-tree-cache` D3):
+ * its modification time and its size. A zip's central directory is immutable
+ * while those are — rewriting an archive necessarily rewrites its tail.
+ */
+export interface ArchiveId {
+  /** `mtimeMs` of the archive file. */
+  mtime: number
+  /** The archive's size in bytes. */
+  size: number
+}
+
+/**
+ * The archive-directory cache `listZipEntries` consults, declared **here** as a
+ * structural interface rather than imported from the module that implements it.
+ * That direction is deliberate: `snapshot.ts` knows about zips, `zip.ts` knows
+ * nothing about cache directories, library identity or eviction, so this file
+ * stays a zip parser and the persistence story stays in one place.
+ *
+ * Asynchronous on both halves because the implementation backs onto a file it
+ * loads lazily; an in-memory hit still costs only a microtask.
+ */
+export interface ZipDirCache {
+  /** The archive's entries as of `id`, or undefined if it holds another version. */
+  get(zipPath: string, id: ArchiveId): Promise<ZipEntry[] | undefined>
+  /** Record `entries` as this archive's directory at `id`. */
+  set(zipPath: string, id: ArchiveId, entries: ZipEntry[]): Promise<void>
 }
 
 const EOCD_SIG = 0x06054b50
@@ -31,21 +60,36 @@ async function readAt(path: string, offset: number, length: number): Promise<Buf
   }
 }
 
-async function fileSize(path: string): Promise<number> {
-  const fh = await open(path, 'r')
-  try {
-    return (await fh.stat()).size
-  } finally {
-    await fh.close()
-  }
-}
-
 /**
  * List a zip's entries by reading only the central directory — nothing is
  * decompressed and nothing is written to disk.
+ *
+ * With a `cache`, an archive whose `{mtime, size}` is unchanged since it was
+ * last read is answered from it and **never opened** (D3) — the largest single
+ * measured win in `listing-tree-cache`, ~6.7 s across 409 archives on the
+ * spinning volume, because a central directory lives at the file's tail and no
+ * OS-level caching keeps those seeks warm.
+ *
+ * The identity comes from `stat`, not from an open handle, and that is the
+ * requirement rather than a tidy-up: the size used to be read by opening the
+ * file and calling `fstat`, which would open every archive on the cache-hit
+ * path too and make "an unchanged archive is not opened" unmeetable by
+ * construction. `stat` supplies the mtime half of the key at the same time.
  */
-export async function listZipEntries(zipPath: string): Promise<ZipEntry[]> {
-  const size = await fileSize(zipPath)
+export async function listZipEntries(zipPath: string, cache?: ZipDirCache): Promise<ZipEntry[]> {
+  const info = await stat(zipPath)
+  const id: ArchiveId = { mtime: info.mtimeMs, size: info.size }
+  if (cache !== undefined) {
+    const hit = await cache.get(zipPath, id)
+    if (hit !== undefined) return hit
+  }
+  const entries = await readCentralDirectory(zipPath, id.size)
+  if (cache !== undefined) await cache.set(zipPath, id, entries)
+  return entries
+}
+
+/** The parse itself: the tail seek and the central-directory walk. */
+async function readCentralDirectory(zipPath: string, size: number): Promise<ZipEntry[]> {
   const tailLen = Math.min(size, EOCD_SCAN)
   const tail = await readAt(zipPath, size - tailLen, tailLen)
 
