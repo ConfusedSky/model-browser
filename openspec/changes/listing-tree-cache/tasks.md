@@ -69,10 +69,12 @@
       is absent. Preview re-derivation on directory change covers the changed directory
       **and its ancestors** (D7's stated subtlety)
 - [ ] 6.2 Thumbnail-state index: `ThumbCache` exposes an in-memory per-path index —
-      presence, staleness against the snapshot's mtime, and the sidecar's write
-      generation — maintained on its own reads/writes, no directory rescan per listing.
-      The write generation is a seam the immutable-thumbnail-serving change consumes;
-      keep its shape additive
+      presence, staleness against the snapshot's mtime, the sidecar's write
+      generation, and `framed` (a stored camera exists) — maintained on its own
+      reads/writes, no directory rescan per listing. The write generation is a seam
+      the immutable-thumbnail-serving change consumes and `framed` one
+      `bulk-thumbnail-jobs` consumes (its reset counts/derivation); keep the shape
+      additive
 - [ ] 6.3 Emission: additive `DirEntry` fields (`shared/types.ts`) attached in `app.ts`
       beside `applyDisplayNames`, same in-place caveat as the preamble's `displayName`
       note — cached snapshot entries must not bake annotations in; serve copies. A

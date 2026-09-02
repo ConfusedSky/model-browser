@@ -460,116 +460,40 @@ All re-runnable; say whose run when quoting.
   deciding (Masa: later): from a US vantage against an EU test box measure
   first paint, a scroll screen of sheets, a lightbox open, one search —
   the per-interaction shapes, not a bare ping.
-  **Trip-reduction shapes** (Masa floated GraphQL, posing as the example;
-  this session's read, 2026-09-02): poses are already frugal — one
-  background POST batch per listing (`semanticPosesFor`, chunked only past
-  `POSES_MAX`) behind an already-drawn grid, and `displayName` rides the
-  listing at emission (D7) for zero trips. The real fan-out is per-tile
-  `peek`/thumb GETs (12 + 10/scroll) — and there, batching and edge-caching
-  pull opposite ways: a batched POST always crosses the ocean, while small
-  immutable GETs are edge-cached after the first visitor, costing ~0 origin
-  trips on a baked corpus. Playbook for 1.3, by leverage: immutable GETs +
-  CDN for everything baked; ride-the-listing for per-entry fields (credits
-  could join displayName if lightbox trips mattered); batch endpoints for
-  background waves (the pose pattern); **GraphQL declined** — one lockstep
-  client behind the ApiClient seam (D1) buys none of its flexibility, and
-  its uncacheable per-query POSTs fight the CDN plan.
-  **Precalculate, don't fetch** (Masa, 2026-09-02, correcting the paragraph
-  above — edge-caching a live peek was the weaker answer): on a baked corpus
-  the peek answer is known at bake time, so 1.3 should kill the 3-deep
-  listing→peek→thumbs waterfall, two shapes to choose between at drafting:
-  attach each dir entry's preview paths to the listing at bake (the D7 seam;
-  client keeps per-cell rendering and the cell `title`s that carry display
-  names) or precompose the 2×2 sheet into one PNG (fewest trips AND bytes —
-  one ~512² image vs four; needs both AO variants like every baked pixel;
-  loses per-cell identity/titles, the tradeoff to weigh). Locally the lazy
-  per-visible-tile peek is load-bearing (only 12 of 297 folders pay the
-  bounded walk before paint) — `listing-tree-cache` (active) may shift that
-  calculus if its snapshots grow peek answers; coordinate, don't assume.
-  **Poses on the demo are zero trips, not one** (this session, verified):
-  `useThumbnails` resolves `cached.camera ?? posed?.camera ?? DEFAULT_CAMERA`,
-  and every baked sidecar carries its posed camera, so the wave gates
-  nothing — 1.3 gates the wave off behind the features value or it fires as
-  pure transocean waste per listing. Locally the 2-trip split stays
-  load-bearing: it decouples browse from index health (absent/warming/wedged
-  must not delay a listing) and loopback trips are ~free; server-side
-  attach-with-timeout remains available if that ever changes.
-  **The cache should hold poses and preview choices too** (Masa, 2026-09-02,
-  extending `listing-tree-cache` in discussion; that change is drafted,
-  unstarted): both are derived, regenerable, per-path — the hybrid split's
-  cache side, never `overrides.json` (whose reserved `pose` stays the
-  *manual* override) — and stable between index rebuilds, so recomputing per
-  refresh buys nothing. Cached, they ride the listing at emission like
-  `displayName`, shrinking the local wave to genuinely-unknown entries and a
-  plain refresh to one trip, zero index calls. Constraints to carry into
-  that change's design: (a) D1's snapshot-is-a-function-of-the-root-alone
-  invariant is test-pinned — poses/previews are **layers beside the tree,
-  not fields in it**, keyed tree + index generation (POSE_VERSION precedent;
-  the zip-directory layer is the shape); (b) preview choices depend on the
-  *subtree* but mtime never propagates upward — D4's revalidation visits
-  every directory anyway, so a changed directory re-derives previews for
-  itself **and its ancestors**, which must be stated or it will be missed;
-  (c) with these layers the demo bake becomes exactly "this cache fully
-  warmed, shipped read-only" — item 7's 'the bake is a sweep' stops being an
-  analogy and becomes the same code path, which is 1.3's cleanest shape.
-  Also from this thread (Masa): eager startup *revalidation* (D4's stat
-  pass over a persisted snapshot, never a cold full walk) and an explicit
-  reload API in the mini-classify style are cheap extensions D5's open
-  reconciliation seam accommodates. All of it belongs in `listing-tree-cache`
-  via an update before implementation starts, not in 1.3.
-  **Thumbnails join the pattern** (Masa, 2026-09-02; grounded this session):
-  `getThumb` already versions its URL (`path`+`mtime`+`ao`) but `app.ts`
-  sends no `Cache-Control` at all, so every tile refetches per visit with
-  the browser's HTTP cache sitting unused. Two moves: (1) **make the
-  versioned URL cacheable** — add the recipe to the URL (a RIG_VERSION bump
-  must change it or immutable pins stale pixels) and serve
-  `immutable, max-age=<long>`; repeat visits then cost zero pixel trips,
-  browser-cache locally, browser+CDN on the demo — the biggest trip-killer
-  in this thread for a header and a URL param. (No storage cost anywhere
-  ours, a first reading Masa checked 2026-09-02: the version is a query
-  key over the same single cached file — a change overwrites that file as
-  today and the new key simply never asks the old URL again; the only
-  "old copy" lives in the browser/CDN cache until their own eviction.) (2) **presence/validity rides
-  the listing** from a ThumbCache in-memory index (cached/stale/missing +
-  current URL per entry): kills the per-tile miss-check GET, and is exactly
-  the staleness feed `thumbnail-sweep-priority` (active) wants — a
-  convergence to coordinate between the two active changes. Wrinkle, the
-  authored/derived line again: the PNG is derived but the **camera is
-  authored** — an orbit re-renders new pixels at the same path+mtime, so
-  locally the listing-attached meta must carry a write generation that
-  joins the URL (an orbit changes the URL; the pinned old entry is never
-  asked for again). Demo: moot — read-only cache is genuinely immutable,
-  visitor orbits are localStorage-only per 2.1.
-  **Precache generation, the third leg** (Masa, 2026-09-02, clarifying the
-  above: generate missing thumbnails ahead of demand, not just serve them
-  better): on the demo this is the bake, already planned. Locally the
-  mechanism falls out of this thread's pieces — tree snapshot (every path)
-  minus thumb-presence layer (has/stale) = the precache queue, fed into
-  `thumbnail-sweep-priority`'s lowest band, whose start gate and far-band
-  cancellation make preemption free. Rendering stays client-side (D2), so
-  precache means the running app warming during idle. **Explicit action,
-  not always-on** — the rebased sweep change's own measurement prices it:
-  one 500-tile listing is 20.21 GB / ~168 s of pure I/O, so the library is
-  hours, on removable media ~15× slower cold and not always attached, with
-  in-flight large reads holding the disk head against interactive work
-  (the contention `search-cancellation` chose cancellation over). A
-  progress-visible "generate all thumbnails" action, resumable off the
-  presence layer, fits that reality. Ordering: needs the sweep bands and
-  the presence layer, so after `thumbnail-sweep-priority` and the
-  `listing-tree-cache` layers — its own small change when drafted, not a
-  rider on either.
-  **Partition of this thread into changes** (settled with Masa, 2026-09-02):
-  (1) an **update to `listing-tree-cache`** carrying all three derived
-  layers — poses, preview choices, thumb presence (same shape: per-path,
-  derived, attached at emission) — plus startup revalidation and the reload
-  API; (2) a new change, **immutable thumbnail serving** (Cache-Control +
-  rig/generation in the URL key) — independent, can land first; (3) a new
-  change, **the precache action**, hard-ordered after `listing-tree-cache`
-  and `thumbnail-sweep-priority`, MODIFYing the sweep capability
-  post-archive and carrying the presence-feed consumption as a task.
-  Nothing is added to `thumbnail-sweep-priority` itself: its 2026-09-01
-  rebase — four sibling archives rewrote every file it cites — is the
-  argument for stacking on it rather than growing it again.
+  **Trip reduction — where it landed** (thread of 2026-09-02, Masa + this
+  session; the mechanics now live in changes, which supersede this file):
+  the local-app work became **`listing-tree-cache`** (updated in place: pose /
+  preview-choice / thumb-state layers beside the snapshot, startup
+  revalidation, reload API — its D7–D9), **`immutable-thumbnail-serving`**
+  (drafted: write generation, two caching tiers, `no-store` misses), and
+  **`bulk-thumbnail-jobs`** (drafted: generate + reset-framings jobs, two
+  launchers, the `library` side-panel tab, re-derivable job semantics — its
+  D1–D6). Nothing was added to `thumbnail-sweep-priority`: its 2026-09-01
+  rebase is the argument for stacking on it, not growing it. What stays
+  *here* because no change owns it yet:
+  - **GraphQL declined** (Masa floated it; settled 2026-09-02): one lockstep
+    client behind the ApiClient seam (D1) buys none of its flexibility, and
+    uncacheable per-query POSTs fight the CDN plan — batching and
+    edge-caching pull opposite ways, and on a read-only corpus the cache
+    wins. Ride-the-listing and batch endpoints stay the two house idioms.
+  - **1.3's bake shapes** (undrafted): kill the listing→peek→thumbs
+    waterfall at bake — either preview paths attached to dir entries (keeps
+    per-cell `title`s carrying display names) or a precomposed 2×2 sheet PNG
+    (fewest trips and bytes; loses per-cell identity; needs both AO
+    variants) — with the layers landed, the bake is exactly "the caches
+    fully warmed, shipped read-only", one code path with the local app. And
+    the pose wave gates **off** on the demo (verified: `cached.camera ??
+    posed?.camera` — every baked sidecar carries its posed camera, so the
+    wave fires as pure waste otherwise).
+  - **The feature report** (undrafted; settles this section's `features`
+    bullet): a server capability report — what this server *does*, never a
+    named mode — resolved once in `main.tsx` via ApiClient (one client build
+    for both modes; `import.meta.env` would fork it), the launcher's
+    empty-report gating as precedent. First field `thumbWrites`; known
+    consumers: 2.1's localStorage orbit routing, `bulk-thumbnail-jobs`'
+    surfaces (all write actions — the report empties the `library` tab and
+    withholds the menu entries), 1.3's chat-tab hiding. Small change, drafts
+    whenever; 1.3 needs it.
 - **Corpus**: see its `NOTES.md` (STL vs GLB sizes, dedup counts, decimation
   gates). `du` on `original/` reads 516 MB vs the notes' 12 GB — hardlink
   accounting order, not a discrepancy.
