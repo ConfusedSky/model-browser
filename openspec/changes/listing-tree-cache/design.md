@@ -61,6 +61,26 @@ Nothing is served from the snapshot that revalidation has contradicted, and a re
 
 An unmounted volume is not that case, and rebasing on `library-root` (2026-08-29) is what separates the two. A snapshot is keyed by the library's identity plus the walked root's library path and lives under `<cache>/<library-id>/`, so it is not addressed by mount point at all: the same library mounted somewhere else is a **hit**, not a miss. And a volume that is gone is the library's `missing` state, which `library` requires be answered before any listing is attempted — so revalidation never runs against it, and the snapshot is neither served nor discarded. The hazard this decision exists to prevent, a snapshot outliving its volume and becoming a listing of files that are not there, is stopped by that state; invalidating on an absent volume was the pre-library way of stopping it and would now throw away a snapshot that is still correct.
 
+### D7: Derived layers beside the snapshot, never inside it (added 2026-09-02)
+
+The cache also holds what the walk cannot see but the server repeatedly re-asks for: a model's pose (today fetched by the client's per-listing wave through the semantic proxy), a directory's preview choice (today recomputed per `peek`), and a model's thumbnail state (today discovered by a per-tile `getThumb`). All three are derived, regenerable, per-path — and stable between index rebuilds — so recomputing them per request buys nothing. They attach to listing entries at emission by key lookup, the `applyDisplayNames` shape.
+
+The structural rule protects D1: the tree snapshot is a function of the root alone, and that invariant is what lets one snapshot serve every query. Poses and preview choices are functions of root *plus index state*, so they are separate layers keyed against the tree and the index generation (`POSE_VERSION` is the existing per-kind precedent), the way the zip-directory layer is keyed against archive identity. Thumbnail state is not persisted here at all — the thumbnail store is already durable; this layer is an in-memory index over it, exposing per-path presence, staleness, and the write generation (the seam the immutable-thumbnail-serving change consumes).
+
+One subtlety is stated in the delta because it will otherwise be missed: a preview choice depends on a directory's *subtree*, and directory mtime does not propagate upward — but D4's revalidation visits every directory anyway, so a detected change re-derives preview choices for the changed directory and each of its ancestors.
+
+Emission never blocks on the semantic index: a layer answers from what it holds or not at all, and the client's existing wave remains the fill path for entries the pose layer does not know. That keeps the recorded reason for the wave's existence — browse must not couple to index health — while shrinking the wave to genuinely unknown entries.
+
+*Alternative — fields inside the snapshot:* one store, but the snapshot's key would have to grow index generation, and an index rebuild would invalidate the tree it has no bearing on — the exact coupling D1 exists to refuse.
+
+### D8: Startup revalidation, never a startup walk (added 2026-09-02)
+
+When a library resolves ready and a snapshot exists, the incremental D4 pass starts immediately rather than waiting for the first request — changes made while the app was closed are usually discovered before anyone lists anything. The bound is D4's own: one `stat` per directory (~5.6s cold worst case here), not the ~32s walk. A root with no snapshot is *not* walked at startup: an eager cold walk would grind a spinning, sometimes-absent volume at every launch for a listing nobody asked for, and the `search-cancellation` reconciliation already established that background crawls contend for the disk head with interactive work.
+
+### D9: Reload is revalidation with a name (added 2026-09-02)
+
+An explicit reload endpoint (mini-classify's reload is the precedent) runs the same incremental pass on demand and reports whether anything moved. It adds no machinery — D5's stale-marker reconciliation already defines how corrected listings reach the client — it only gives the user a handle for "I changed the library elsewhere, look now" instead of waiting for the next request's revalidation.
+
 ## Risks / Trade-offs
 
 - [The snapshot goes stale in ways mtime cannot see — a file edited in place, a same-name replacement within the mtime granularity] → names are what this indexes, and a replaced file keeps its name; the thumbnail cache already keys on `path + mtime` independently, so a stale entry produces a re-render rather than a wrong image.

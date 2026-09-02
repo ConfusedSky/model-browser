@@ -68,3 +68,47 @@ Cached content SHALL never be served once revalidation has contradicted it, and 
 #### Scenario: A stale entry never outlives its contradiction
 - **WHEN** revalidation finds an entry no longer on disk
 - **THEN** it is absent from the corrected listing and is not served from cache again
+
+### Requirement: Derived annotations ride the listing
+The server SHALL attach to listing entries, at emission, the derived per-entry facts its caches already hold — a model's pose, a directory's preview choice (the entries its contact sheet shows), and a model's thumbnail state (cached, stale, or absent, with the cached image's write generation) — as additive fields resolved by key lookup alone. Emission SHALL NOT wait on the semantic index or any other service: a fact the caches cannot answer is simply absent from that entry, and a library with no derived-layer content SHALL emit listings byte-identical to one where these layers do not exist. What the client does with an absent fact — asking the index directly, rendering without it — is unchanged by this capability.
+
+#### Scenario: A revisit is one request
+- **WHEN** a root whose entries' poses and thumbnail states are already cached is listed again
+- **THEN** the response carries them inline and the client needs no per-entry or per-listing follow-up for what the caches knew
+
+#### Scenario: The index being down does not slow a listing
+- **WHEN** the semantic index is absent, warming, or wedged
+- **THEN** listings emit at full speed, carrying whatever annotations the layers already held and omitting the rest
+
+#### Scenario: No layers, byte-identical
+- **WHEN** a library has no cached poses, preview choices, or thumbnails
+- **THEN** every listing is byte-identical to one emitted before this capability existed
+
+### Requirement: Derived layers live beside the tree and die with their sources
+Derived layers SHALL be stored beside the tree snapshot, never as fields within it: the snapshot remains a function of the walked root alone. Each layer entry SHALL record the identity of what it was derived from — pose and preview-choice entries the index generation and pose version they were computed under, thumbnail state the thumbnail store's own record — and SHALL NOT be served once that identity has moved. Because a preview choice depends on a directory's subtree while directory freshness signals do not propagate upward, a detected change in any directory SHALL re-derive the preview choices of that directory and of each of its ancestors.
+
+#### Scenario: An index rebuild invalidates poses, not the tree
+- **WHEN** the semantic index is rebuilt under a new generation
+- **THEN** cached poses and preview choices stop being served while the tree snapshot continues to serve listings
+
+#### Scenario: A deep change re-derives its ancestors' previews
+- **WHEN** revalidation finds a directory changed several levels below the root
+- **THEN** preview choices are re-derived for that directory and every directory above it, and an unchanged sibling branch keeps its cached choices
+
+### Requirement: A persisted snapshot is revalidated at startup
+When a library resolves ready and a snapshot exists for it, the server SHALL begin the incremental revalidation pass at once rather than waiting for the first request. Startup SHALL NOT walk a root that has no snapshot, and SHALL NOT full-walk one that does: the pass is the same per-directory freshness check revalidation always uses.
+
+#### Scenario: Changes made while the app was closed
+- **WHEN** entries were added to the library while the server was down and the app is then started
+- **THEN** revalidation is already underway at the first listing, which either reflects the change or converges to it without the user asking
+
+#### Scenario: No snapshot, no startup cost
+- **WHEN** the server starts against a library that has never been walked
+- **THEN** startup does not walk it, and the first request pays the walk as it does today
+
+### Requirement: Freshness on demand
+The server SHALL expose an explicit reload operation that runs the incremental revalidation immediately for the library and reports what it found. A reload SHALL use the same per-directory check as routine revalidation — never a full re-walk — and a listing requested after a completed reload SHALL reflect what the reload discovered.
+
+#### Scenario: The user edited the library elsewhere
+- **WHEN** files were moved on disk outside the app and the user triggers a reload
+- **THEN** the next listing reflects the change without a restart, and the reload's answer says whether anything moved

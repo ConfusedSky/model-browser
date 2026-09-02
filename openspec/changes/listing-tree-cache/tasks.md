@@ -59,12 +59,47 @@
 - [ ] 5.1 Additive staleness marker on `/api/dir` responses; a freshly walked listing carries none
 - [ ] 5.2 Client: present cached results immediately with a "refreshing" affordance, and reconcile the corrected listing when it arrives — no new transport (the Hono app must run on Node unchanged, architecture D1), so the client issues an ordinary follow-up request on seeing the marker; the existing latest-wins guard and skeleton already cover a later response landing
 
-## 6. Tests
+## 6. Derived layers and explicit freshness (added 2026-09-02 — see design D7–D9;
+##    build after §4, the layers hang off the snapshot and its revalidation)
 
-- [ ] 6.1 Server: cached and walked responses are entry-for-entry identical on an unchanged tree (including ordering and truncation); one cached tree serves several different queries and both settings of the folder-matching option without re-traversing (instrument the walk, do not infer from timing); a second walk opens no archives; adding, removing, and renaming a model is picked up; a present-but-unreadable root invalidates rather than serving; the same tree reached at a different mountpoint under the same library is a **hit**; an unmounted library answers `missing` and leaves the snapshot in place; the on-disk format version invalidates a stale snapshot
-- [ ] 6.2 Client: a stale-marked listing renders immediately with the refreshing affordance and reconciles on the follow-up; an unmarked listing shows no affordance; a superseded reconciliation is discarded by latest-wins
+- [ ] 6.1 Pose and preview-choice layers beside the snapshot module: per-path entries
+      keyed against the tree plus the index generation and pose version; populated when
+      the server's semantic proxy answers (poses) and when a peek derives a choice
+      (previews); never consulted-and-blocked-on at emission — a lookup hits or the field
+      is absent. Preview re-derivation on directory change covers the changed directory
+      **and its ancestors** (D7's stated subtlety)
+- [ ] 6.2 Thumbnail-state index: `ThumbCache` exposes an in-memory per-path index —
+      presence, staleness against the snapshot's mtime, and the sidecar's write
+      generation — maintained on its own reads/writes, no directory rescan per listing.
+      The write generation is a seam the immutable-thumbnail-serving change consumes;
+      keep its shape additive
+- [ ] 6.3 Emission: additive `DirEntry` fields (`shared/types.ts`) attached in `app.ts`
+      beside `applyDisplayNames`, same in-place caveat as the preamble's `displayName`
+      note — cached snapshot entries must not bake annotations in; serve copies. A
+      library with no layer content emits byte-identical listings (pin with the
+      library-overrides DOM/wire-identity cells as precedent)
+- [ ] 6.4 Client: the pose wave asks only for entries whose listing carried no pose
+      (`semanticPosesFor` callers in `App`); everything else about the wave — background,
+      chunked, silent-failure — unchanged
+- [ ] 6.5 Startup revalidation (D8): when the library resolves ready and a snapshot
+      exists, start the incremental pass; no snapshot → nothing at startup. Reuses the
+      library-ready hook `library-overrides`' eager store load established in `index.ts`
+- [ ] 6.6 Reload endpoint (D9): runs the same pass now, answers whether anything moved;
+      client affordance minimal (the stale-marker reconciliation already covers how
+      corrections land)
 
-## 7. Verification
+## 7. Tests
 
-- [ ] 7.1 `bun run typecheck` and `bun run test` pass across workspaces
-- [ ] 7.2 Re-run the proposal's measurement on **both** volumes with `vm.drop_caches` between runs, and record the numbers here: cold search on the spinning exfat volume should land near its warm figure (~0.8s) rather than ~32s. Report the revalidation cost separately — that is the one that scales with directory count and is the honest recurring price
+- [ ] 7.1 Server: cached and walked responses are entry-for-entry identical on an unchanged tree (including ordering and truncation); one cached tree serves several different queries and both settings of the folder-matching option without re-traversing (instrument the walk, do not infer from timing); a second walk opens no archives; adding, removing, and renaming a model is picked up; a present-but-unreadable root invalidates rather than serving; the same tree reached at a different mountpoint under the same library is a **hit**; an unmounted library answers `missing` and leaves the snapshot in place; the on-disk format version invalidates a stale snapshot
+- [ ] 7.2 Client: a stale-marked listing renders immediately with the refreshing affordance and reconciles on the follow-up; an unmarked listing shows no affordance; a superseded reconciliation is discarded by latest-wins
+- [ ] 7.3 Layers (server): an index-generation bump stops pose/preview answers while the
+      tree keeps serving; a deep directory change re-derives its ancestors' preview
+      choices and not an unchanged sibling's; emission with a wedged index is as fast as
+      with none (instrument, don't time); no-layer listings byte-identical. Client: the
+      wave requests only unposed entries; a reload surfaces an external change without
+      restart
+
+## 8. Verification
+
+- [ ] 8.1 `bun run typecheck` and `bun run test` pass across workspaces
+- [ ] 8.2 Re-run the proposal's measurement on **both** volumes with `vm.drop_caches` between runs, and record the numbers here: cold search on the spinning exfat volume should land near its warm figure (~0.8s) rather than ~32s. Report the revalidation cost separately — that is the one that scales with directory count and is the honest recurring price

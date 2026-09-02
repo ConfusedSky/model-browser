@@ -44,7 +44,7 @@ eventually, so it should not be deleted as dead weight if this machine turns out
 it. (The narrower scoping reached this session via a parallel one; the wider target came
 from Masa directly.)
 
-Task 7.2 still asks for both volumes. When the spinning one is unattached, measure what is
+Task 8.2 still asks for both volumes. When the spinning one is unattached, measure what is
 present and record which column is missing rather than silently reporting one number.
 
 Three facts follow, and together they decide the design.
@@ -62,6 +62,17 @@ Three facts follow, and together they decide the design.
 - **Incremental revalidation by directory mtime**: one `stat` per directory rather than per entry, and only changed directories are re-read. A directory's mtime moves on add/remove/rename and not on content edits — the exact granularity a name index needs.
 - **A freshness contract in the response**: a listing served from the snapshot says so, so the client can show results immediately and reconcile when revalidation finishes, rather than the UI silently presenting stale data as current.
 - No change to what a listing *contains*: entries, ordering, caps, and truncation semantics are the existing requirements' business. This sits underneath them.
+- **Derived layers beside the snapshot** (added 2026-09-02, the trip-reduction thread in
+  `docs/web-demo-notes.md`): poses, folder preview choices, and thumbnail
+  presence/staleness — derived, regenerable, per-path facts the app today re-asks for per
+  request — cached beside the tree (keyed against tree + index generation; thumbnail state
+  is an in-memory index over the already-durable thumbnail store) and attached to listing
+  entries at emission as additive fields, the `applyDisplayNames` shape. A revisit becomes
+  one request; the client's pose wave shrinks to entries the layer does not know; emission
+  never blocks on the semantic index.
+- **Startup revalidation and an explicit reload** (same date): the incremental
+  revalidation pass runs when a ready library has a snapshot — never a cold walk at
+  startup — and a reload endpoint runs the same pass on demand, in mini-classify's style.
 
 ## Capabilities
 
@@ -80,3 +91,4 @@ None. `directory-browsing`'s flat-listing requirements and `file-search`'s deep-
 - `client/` — surfacing "these results are being refreshed" and reconciling the revalidated response; the existing latest-wins guard and skeleton already handle a second response landing later.
 - Disk — a metadata snapshot is small next to the thumbnail cache (the measured library is 18,705 entries), but it shares that directory's budget and eviction story.
 - Interacts with `search-cancellation`: once a crawl populates a shared cache, an abandoned crawl is no longer wasted work, which changes what cancellation should actually cancel. Recorded in both changes' designs.
+- The derived layers touch the emission seam in `app.ts` (`applyDisplayNames` precedent), `shared/types.ts` (additive `DirEntry` fields), and the semantic proxy for pose/preview derivation. Downstream consumers, deliberately not in this change: `thumbnail-sweep-priority` may later read the staleness feed instead of per-tile lookups; the immutable-thumbnail-serving change consumes the write generation; the future precache action drains tree-minus-presence. Declared here so those changes stack on this capability rather than modifying its files in parallel.
