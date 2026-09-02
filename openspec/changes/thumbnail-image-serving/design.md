@@ -117,6 +117,24 @@ other case — no annotation (an entry the index has not seen, an older
 server), `stale`, `miss`, or a `posed` the client's pose predates — takes
 today's lookup path unchanged, and the lookup's answer still governs.
 
+**The image can fail to arrive, and the tile must recover on its own** (peer
+review, 2026-09-02). Between the listing's emission and the browser's fetch the
+entry can be *evicted* — `ThumbCache.maintain`'s size-cap sweep makes that
+real, if rare — and a stale-generation race only ever answers current bytes,
+but an eviction answers 404. So the tile's `<img>` carries an `onError` that
+the hook wires to demote that entry to the lookup path: the slot is retired
+and started as if the annotation had said `miss`, and the lookup's answer then
+governs. One branch, one cell (evict between annotate and fetch; the tile
+recovers through the lookup). A tile drawn from the listing is therefore never
+left broken by a fact that stopped being true after it was stated.
+
+**The annotation's generation rides into `setThumb`.** Since `a2c5c28`
+(`immutable-thumbnail-serving`) `ThumbState` carries `gen`, and `setThumb`
+adopts it *absence included* — a state without one clears the slot's learned
+`thumbGen`, which is the fix for the stale-gen pinning hole. The annotation
+branch must therefore pass `gen: entry.thumb.gen`, or drawing from the listing
+would wipe the very key that makes the entry's later fetches immutable.
+
 The URL is a plain string the hook does not own: object-URL ownership
 (`slot.url` revocation on displace, removal and unmount) applies only to
 `blob:` URLs, decided by prefix. A tile can therefore hold either kind over
@@ -170,8 +188,14 @@ route and the branch.
   re-rendered after the listing was served] → the image URL names the old
   `gen`; the server answers the current bytes under `no-cache`. Never stale
   pixels; one uncacheable fetch. The next listing names the new generation.
-- [Listing payload grows] → ~60 KB on the 500-tile cap, one request; against
-  50 MB removed. Recorded, not mitigated.
+- [Listing payload grows] → ~120 bytes per entry is the optimistic figure
+  (peer review): a stored `camera` is a full `CameraState`, so framed entries
+  cost more. Measure it in 6.2 and record the honest number; one request
+  growing by tens of KB against 50 MB removed is the trade whatever the
+  digit. Recorded, not mitigated.
+- [An entry evicted between emission and fetch] → the image fetch answers 404
+  and the tile's `onError` demotes the entry to the lookup path (D3); the
+  recovery is asserted by a cell that evicts between annotate and fetch.
 - [500 `<img>` fetches at once through the dev proxy's HTTP/1.1 connection
   limit] → `loading="lazy"` makes the browser fetch by approach, not by
   listing; the visible screen's ~16 images arrive first by the browser's own

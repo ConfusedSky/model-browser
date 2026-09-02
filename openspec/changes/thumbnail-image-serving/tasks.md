@@ -45,7 +45,10 @@
       (`lighting === THUMB_LIGHTING`, `rig === RIG_VERSION`, `poseStale` false
       against the pose the hook holds — the *same* predicate the hit branch
       applies to a lookup answer, extracted so it cannot drift), `setThumb`
-      the tile `ready` at the image URL with the entry's `camera`/`axis` and
+      the tile `ready` at the image URL with the entry's `camera`/`axis` **and
+      `gen: entry.thumb.gen`** — `setThumb` adopts the generation absence
+      included since `a2c5c28`, so omitting it would wipe the slot's learned
+      key and demote the entry's later fetches to the validator tier — and
       push nothing; every other case takes the lookup path unchanged (D3)
 - [ ] 2.3 Object-URL ownership by scheme: `slot.url` revocation on displace,
       removal and unmount fires only for `blob:` URLs; an image URL is a
@@ -55,6 +58,12 @@
       the browser fetches listing-known images by approach, not by listing.
       Confirm `overlayRectFor`'s measurement of the image box is unaffected by
       a not-yet-loaded lazy image (it measures the box, not the pixels)
+- [ ] 2.5 The image's `onError` demotes the entry to the lookup path (D3): the
+      `<img>` reports the failure through a per-tile callback held by identity
+      like the others; the hook retires the slot and starts it as if the
+      annotation had said `miss`. Only for image URLs — a `blob:` URL that
+      fails is the existing error path. An entry evicted between the listing's
+      emission and the fetch answers 404 and recovers this way
 
 ## 3. Ranked lookups
 
@@ -91,9 +100,14 @@
       (the constants decide, not the server); an entry with no `thumb` takes
       the lookup path; an entry whose `posed` predates the held pose issues a
       lookup; a tile drawn from an image URL, re-rendered to a `blob:`, then
-      removed, revokes exactly one URL. Falsify each against its broken variant
-      (skip the test → the old-rig cell passes wrongly; revoke by identity →
-      the ownership cell double-revokes)
+      removed, revokes exactly one URL; a tile drawn from the listing keeps the
+      entry's `gen` on its slot, so its next lookup names it (the `setThumb`
+      absence-clears rule); an entry evicted between annotate and fetch — the
+      `<img>` fires `onError` — recovers through the lookup and never shows
+      the error state. Falsify each against its broken variant (skip the test
+      → the old-rig cell passes wrongly; revoke by identity → the ownership
+      cell double-revokes; omit `gen` → the retention cell reads `undefined`;
+      no `onError` wiring → the eviction cell stays broken)
 - [ ] 5.2 `api.test.ts` server cells: the image route's bytes equal the
       lookup's decoded `png` for the same key; `immutable` when `gen` matches,
       `no-cache` with current bytes when superseded, 404 `no-store` on a miss;
