@@ -378,6 +378,11 @@
 
 ## Run record — 6.2/6.3 (2026-09-02, this session's run, Playwright MCP)
 
+> **This record measures the parked build (`313da25`).** Its 6.2a ("the sweep
+> stopped") and 6.2c ("0 kept, 455 parked") describe behaviour deferral
+> replaced; the deep-scroll headline is re-measured under deferral in the 7.7
+> record below.
+
 Conditions: real library (`/run/media/masa/STLLibrary`, 500-model flat cap),
 cold cache (backed up and restored around the run), 1280×900 window, 809 px
 scrollport, dev instance. Sweep throughput measured **0.80 thumbnails/s** over
@@ -393,7 +398,7 @@ cold-cache figure — re-measure, don't re-cite).
 - **6.2a**: renders after settling: 16 visible + 28 within two
   scrollport-heights (the near band, alive through the scroller root) + 1
   boundary tile, then the sweep **stopped** — flat across 60 s of watching.
-- **6.2b**: `PARK_ROOT_MARGIN` frozen at `'200% 0px 200% 0px'`; the judged
+- **6.2b**: `FAR_ROOT_MARGIN` frozen at `'200% 0px 200% 0px'`; the judged
   conditions live in the constant's own comment (Grid.tsx). ±1-screen
   oscillation ×3 added only the freshly exposed prefetch rows; a deliberate
   jump to the middle unparked and rendered 13/20 visible tiles in 15 s.
@@ -457,10 +462,22 @@ folder tiles on screen, so nothing visible needed a render: **mesh reads
 climbed 37 → 46 → 70 → 95 → 112 → 127 → 141 over 98 s** and kept going, the
 queue draining nearest-first with nothing on screen to serve — the exact
 scenario in which the parked build froze at the near boundary (its 6.2 record
-shows 45 renders then flat for 60 s). Deferral verified. Every falsifiable cell
-in 7.6 was run against its broken variant — far-never-runs, cells at the
-folder's own band, defaulted observer halves, hidden folders ignored — and
-fails there; push order in the app-mount cells is staged to contradict the
-asserted rank, which is what caught two cells that first passed by luck. The
-sheet-after-tiles order is pinned by its cell; the real listing's top screens
-hold no model tiles beside folders to observe it against.
+shows 45 renders then flat for 60 s). Deferral verified. Falsification, corrected after the second review (F2): the
+first record here claimed the cells-at-own-band variant failed its cell — it
+did not; the cell's push order agreed with its assertion. The cells for the
+folder-cell rank, nearest-wins and never-overwrite now stage a push order that
+contradicts the rank they assert, and each was re-run against its broken
+variant (`CELL_BAND` identity, last-write-wins `put`, the wrapper overwriting
+reported bands) and fails there, alongside far-never-runs, defaulted observer
+halves and hidden-folders-ignored, which failed as first recorded. F1's
+reproducing cell (a peek landing after the band reports) fails against the
+`thumbEntries`-keyed reset and passes against the listing key.
+
+The deep-scroll headline re-measured under deferral (F4), same conditions,
+uncached flat listing `/Loot Studios` (500 tiles, 0 cached at the bottom):
+first new visible image **7.6 s** after the jump, all 15 visible tiles in
+**9.8 s**. Slower to first image than the parked build's 2.2 s, and honestly
+so: under deferral the queue had already started two far jobs at the top of
+the listing before the jump, and a started job runs to completion before rank
+rules again — the price of never withholding work, paid once per deep jump.
+Still seconds against the FIFO baseline's ten minutes.

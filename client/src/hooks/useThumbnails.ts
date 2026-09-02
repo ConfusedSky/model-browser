@@ -189,6 +189,17 @@ export function useThumbnails(
    * default, never an override of the user's (semantic-search D5).
    */
   poses: Record<string, IndexPose> = {},
+  /**
+   * What "a different listing is on screen" means for the band ranking's
+   * reset — App's own `entries`, the landing's array. Not `entries` above,
+   * which is `thumbEntries`: that is rebuilt whenever a folder peek lands (the
+   * preview models are appended to it), and a reset keyed on it wiped the
+   * ranking at exactly the moment the user had stopped scrolling and the
+   * peeks answered — every pending job fell back to listing order until the
+   * next scroll (2026-09-02 review, F1). Defaults to `entries` for callers
+   * that have no separate listing.
+   */
+  listingKey: unknown = entries,
 ) {
   const [thumbs, setThumbs] = useState<Map<string, ThumbState>>(new Map())
   const slotsRef = useRef<Map<string, EntrySlot>>(new Map())
@@ -306,7 +317,7 @@ export function useThumbnails(
    * it at commit time: position ranks work, it never withholds it (D4).
    */
   const bandsRef = useRef<ReadonlyMap<string, Band>>(new Map())
-  const lastEntriesRef = useRef<DirEntry[] | null>(null)
+  const lastListingRef = useRef<unknown>(null)
 
   /**
    * Replace the visibility ranking wholesale — the grid's report, forwarded
@@ -332,10 +343,9 @@ export function useThumbnails(
     const slots = slotsRef.current
     // A new listing starts unreported: the previous listing's verdicts must
     // not order this one's work (a same-path survivor included) until its own
-    // grid reports. Identity, because that is what "a different listing is on
-    // screen" means everywhere else in this hook.
-    if (lastEntriesRef.current !== entries) {
-      lastEntriesRef.current = entries
+    // grid reports. Keyed on `listingKey`, never on `entries` — see its doc.
+    if (lastListingRef.current !== listingKey) {
+      lastListingRef.current = listingKey
       bandsRef.current = new Map()
       queue.setRanking(bandsRef.current)
     }

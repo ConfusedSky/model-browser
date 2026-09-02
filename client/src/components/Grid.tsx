@@ -23,7 +23,7 @@ import type { Band } from '../three/queue'
  * scales with the window; re-judge here if tile or window geometry changes
  * materially.
  */
-export const PARK_ROOT_MARGIN = '200% 0px 200% 0px'
+export const FAR_ROOT_MARGIN = '200% 0px 200% 0px'
 
 /** How near a band sorts — the per-path max ("nearest wins") compares on this. */
 const NEARNESS: Record<Band, number> = { visible: 0, near: 1, far: 2 }
@@ -187,6 +187,11 @@ function Grid({
       const cells = shown.get(path)
       if (cells !== undefined) for (const cell of cells) put(cell.path, CELL_BAND[band])
     }
+    // Nothing heard by both observers yet — the first observer's initial
+    // batch after a rebuild fills one half for every path — is not a report
+    // either: an empty map would replace a ranking in force with "everything
+    // unreported" for one observation cycle.
+    if (bands.size === 0) return
     onBands(bands)
   }, [onBands])
   /**
@@ -215,11 +220,14 @@ function Grid({
    * must stay so: an unstable entry here pays an observer rebuild per render.
    */
   useEffect(() => {
+    // Cleared before the guard below: an empty listing renders no grid (no
+    // `gridRef`), and the previous listing's paths must not survive in the
+    // tracked state for the previews effect to publish.
+    const state = bandStateRef.current
+    state.clear()
     const root = gridRef.current
     const scroller = scrollRoot.current
     if (root === null || scroller === null) return
-    const state = bandStateRef.current
-    state.clear()
     const stateOf = (path: string): { inPark?: boolean; inView?: boolean } => {
       let s = state.get(path)
       if (s === undefined) {
@@ -244,7 +252,7 @@ function Grid({
     }
     const bandObserver = new IntersectionObserver((records) => apply(records, 'inPark', true), {
       root: scroller,
-      rootMargin: PARK_ROOT_MARGIN,
+      rootMargin: FAR_ROOT_MARGIN,
     })
     const viewObserver = new IntersectionObserver((records) => apply(records, 'inView', false), {
       root: scroller,

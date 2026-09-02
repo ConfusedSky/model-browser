@@ -906,6 +906,9 @@ export default function App() {
     // decision) re-run the sweep over the grid already on screen.
     ao,
     poses,
+    // The listing's own array, not `thumbEntries`: the band ranking resets
+    // per listing, and a landed peek must not count as one (review F1).
+    entries,
   )
   placeholderRef.current = setPlaceholder
 
@@ -1765,7 +1768,7 @@ export default function App() {
    * observer effect sees one stable identity; built on the lists themselves it
    * would churn per find-filter keystroke and per landed peek. Clearing the
    * filter re-runs the observer effect via `shownEntries`, and the fresh
-   * merged reports unpark what is back on or near the screen.
+   * merged reports re-rank what is back on or near the screen.
    */
   const filteredRef = useRef(filteredListing)
   filteredRef.current = filteredListing

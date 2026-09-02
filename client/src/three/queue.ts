@@ -8,7 +8,7 @@ interface Job {
   cancelled: boolean
   started: boolean
   /** The path this render is for, or undefined for keyless work — a render the
-   *  user pressed for, which belongs to no slot and is never parked. */
+   *  user pressed for, which belongs to no slot and is never re-ranked. */
   key: string | undefined
 }
 
@@ -50,9 +50,12 @@ export class RenderQueue {
   /**
    * Queue a job, optionally keyed by the path it renders, and get back a
    * cancel handle that **reports whether the job was still pending** — true
-   * exactly when the cancel prevented a run. The caller keys cleanup on that
-   * answer: a job that already started owns its resources (its stale-PNG
-   * fallback included) until it finishes on its own (D4/1.2a).
+   * exactly when the cancel prevented a run, and idempotent. Nothing in the
+   * app reads that answer today: the hook's `retire` releases a job's stale
+   * PNG unconditionally and `dropStale` is idempotent, so a started job that
+   * loses its fallback simply errors into the image it already shows. The
+   * answer is kept because it is the honest contract of a cancel, and pinned
+   * in `queue.test.ts`.
    */
   push(run: () => Promise<void>, key?: string): () => boolean {
     const job: Job = { run, cancelled: false, started: false, key }

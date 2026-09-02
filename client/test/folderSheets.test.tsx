@@ -837,7 +837,9 @@ describe('bands rank work through the whole pipeline', () => {
 
   it('a folder’s sheet fills after the model tiles beside it', async () => {
     // Cells rank one band worse than their folder (D2, amended): a visible
-    // folder's cells are `near`, behind the visible model tile.
+    // folder's cells are `near`, behind the visible model tile. The cell's
+    // render is pushed *first*, so were cells at the folder's own band both
+    // would be visible and the cell would win on insertion order.
     const gate = gateThumbs()
     const LISTING: DirListing = { path: '/models', entries: [...BLOCKERS, dir('a'), model('x.stl')] }
     peek.mockResolvedValue(found(1))
@@ -846,11 +848,40 @@ describe('bands rank work through the whole pipeline', () => {
     await intersect(dirTile('/models/a')) // peek lands; the cell queues
     await report(modelTile('/models/x.stl'), { inPark: true, inView: true })
     await startBlockers(gate)
+    await gate.open(['/models/a/m0.stl'])
+    await gate.open(['/models/x.stl'])
     await gate.open()
     await hold.release()
 
     const order = renderedAfterBlockers()
     expect(order.indexOf('/models/x.stl')).toBeLessThan(order.indexOf('/models/a/m0.stl'))
+  })
+
+  it('a peek landing after the band reports does not wipe the ranking (F1)', async () => {
+    // `thumbEntries` is rebuilt when a peek lands; the hook's per-listing reset
+    // must key on the listing, not on that array — or the ranking vanished at
+    // exactly the moment the user had stopped scrolling and the peeks answered.
+    // The control is the same cell with the peek landing first.
+    let answer!: (found: DirEntry[]) => void
+    peek.mockReturnValue(new Promise<DirEntry[]>((resolve) => (answer = resolve)))
+    const gate = gateThumbs()
+    const LISTING: DirListing = { path: '/models', entries: [...BLOCKERS, dir('a'), model('x.stl'), model('y.stl')] }
+    await mountApp('/models', LISTING)
+    const hold = holdSlots()
+    await intersect(dirTile('/models/a')) // peek requested, not yet answered
+    await report(modelTile('/models/y.stl'), { inPark: false, inView: false }) // y far
+    await report(modelTile('/models/x.stl'), { inPark: true, inView: true }) // x visible
+    await startBlockers(gate)
+    await act(async () => answer(found(1))) // the peek lands *after* the reports
+    await settle()
+    await gate.open(['/models/y.stl']) // y pushed first…
+    await gate.open(['/models/x.stl'])
+    await gate.open()
+    await hold.release()
+
+    // …and still renders after x: the ranking survived the landing.
+    const order = renderedAfterBlockers()
+    expect(order.indexOf('/models/x.stl')).toBeLessThan(order.indexOf('/models/y.stl'))
   })
 
   it('a filter-hidden model is reported far and rendered after what is shown', async () => {
@@ -927,13 +958,49 @@ describe('bands rank work through the whole pipeline', () => {
     await settle()
     await report(modelTile('/models/alpha-z.stl'), { inPark: false, inView: false }) // a far tile
     await report(dirTile('/models/alpha'), { inPark: true, inView: true })
+    await gate.open(['/models/alpha-z.stl']) // the far tile is pushed first…
+    await gate.open(['/models/other.stl'])
     await gate.open()
     await hold.release()
 
-    // other.stl: hidden as a tile, but the visible folder's cell (near) — so
-    // it renders before the far tile alpha-z.
+    // …yet other.stl renders before it: hidden as a tile, but the visible
+    // folder's cell (near). Were the wrapper's `far` to overwrite that, both
+    // would be far and alpha-z would keep its head start.
     const order = renderedAfterBlockers()
     expect(order.indexOf('/models/other.stl')).toBeLessThan(order.indexOf('/models/alpha-z.stl'))
+  })
+
+  it('a path that is both a visible tile and a far folder’s cell takes the nearest position', async () => {
+    // Nearest wins per path (D2): x's own tile is visible, a's registration
+    // of it is far. Pushed after the near tile y, x still runs first — under
+    // last-write-wins it would be far and lose.
+    const gate = gateThumbs()
+    const LISTING: DirListing = { path: '/models', entries: [...BLOCKERS, dir('a'), model('x.stl'), model('y.stl')] }
+    peek.mockResolvedValue([model('x.stl')]) // x is also a's cell
+    await mountApp('/models', LISTING)
+    const hold = holdSlots()
+    await intersect(dirTile('/models/a')) // the peek lands
+    // Rebuild the observers (a filter keystroke and back) so the tracked
+    // state forgets the folder: below, x's own tile is heard *before* the
+    // folder, so the folder's `far` registration is the later write — a
+    // last-write-wins `put` would demote x; the nearest-wins max keeps it.
+    const { openFind, findInput, type } = await import('./appHarness')
+    await openFind()
+    await type(findInput()!, 'zzz')
+    await settle()
+    await type(findInput()!, '')
+    await settle()
+    await report(modelTile('/models/x.stl'), { inPark: true, inView: true }) // x's own tile visible, heard first
+    await report(dirTile('/models/a'), { inPark: false, inView: false }) // folder far, heard second
+    await report(modelTile('/models/y.stl'), { inPark: true, inView: false }) // y near
+    await startBlockers(gate)
+    await gate.open(['/models/y.stl'])
+    await gate.open(['/models/x.stl'])
+    await gate.open()
+    await hold.release()
+
+    const order = renderedAfterBlockers()
+    expect(order.indexOf('/models/x.stl')).toBeLessThan(order.indexOf('/models/y.stl'))
   })
 
   it('a far folder’s cells wait behind a visible tile', async () => {

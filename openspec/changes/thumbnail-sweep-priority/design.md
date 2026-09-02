@@ -92,7 +92,7 @@ selects the best-ranked pending job rather than the oldest. The queue does not
 know what a viewport is — it holds a rank per key and a way to replace the whole
 ranking at once, which the grid drives. Keeping the visibility model out of the
 queue keeps it testable without a DOM, which is how `client/test/queue.test.ts` is
-written (four cells, no `@vitest-environment` pragma).
+written (twelve cells now, no `@vitest-environment` pragma).
 
 Ties keep insertion order, so behavior with no visibility information at all is
 exactly today's FIFO — the fallback is the current behavior rather than something
@@ -156,7 +156,7 @@ margin itself is a named constant with a tune-then-freeze
 line (task 6.2): "generous" is a decision about oscillation and peek timing,
 and it gets a recorded value, not an adjective. So: the **band observer** — the
 widened existing one, rooted at the scroller — carries the park margin, and its
-events are exactly the far-boundary crossings (park and unpark decisions, and
+events are exactly the far-boundary crossings (the `far` rank, and
 `onPeek`); a **second, margin-less observer** on the same root and the same
 tiles splits visible from near, and its events are the scrollport-edge
 crossings that upgrade a prefetched tile the moment it appears. Every band
@@ -236,8 +236,8 @@ and reports them imperatively; no band reaches React state.
 `discardThumbFraming`; `App` holds it by identity and passes it to `Grid`, exactly
 as it holds `onPeek`. Its contract, documented where it is declared: **idempotent,
 latest-wins per path, and safe to call at scroll-settle frequency** — it replaces
-the queue's ranking wholesale, parks slots that moved to `far`, and restarts
-parked slots that moved back, all without a React re-render.
+the queue's ranking wholesale — and touches no slot: position ranks work, it
+never withholds it (D4) — all without a React re-render.
 
 Three clauses of that contract are load-bearing enough to spell out
 (2026-09-01 review):
@@ -249,28 +249,32 @@ Three clauses of that contract are load-bearing enough to spell out
   bands — exactly the per-keystroke walk D3 rejects as a dependency, re-imported
   through the observer unless the equal case costs nothing.
 - **Absent is not far.** A path missing from the map is *unreported* — it ranks
-  in the middle class (D1) and is never parked. Only an explicit `far` report
-  parks. The distinction is easy to erase in a wholesale replacement — a
+  in the middle class (D1), above far. Only an explicit `far` report defers. The distinction is easy to erase in a wholesale replacement — a
   `setBands` that defaulted missing paths to `far` would pass every ordering
   test while parking the world — so it is stated here and asserted (task 5.1).
-- **Slots are resolved through `slotsRef` at call time, never through captured
-  references.** A band map is a message from the DOM's past; a slot may have
-  been retired (navigation, mtime change) between the report and this call, and
-  a park or restart applied to a captured slot object would act on work the
-  reconciler already ended. A path with no live slot is ignored.
+- **The map is a message from the DOM's past, and `setBands` acts on nothing
+  but the queue.** It resolves no slots — there is no per-slot work to apply a
+  report to (D4) — so a report that arrives after the listing it described has
+  gone can only misorder for one batch, and the per-listing reset below stops
+  even that.
 
 **The accepted map is kept only for the early exit, and reset per listing**
 (amended 2026-09-02). With no park gate there is nothing to read it at commit
-time; it exists so a republished-but-equal map costs nothing. When `entries`
-changes identity the hook drops it and clears the queue's ranking (code-review
+time; it exists so a republished-but-equal map costs nothing. When the
+*listing* changes the hook drops it and clears the queue's ranking (code-review
 finding 5): a previous listing's `far` verdict must not order a new listing's
 work, and a same-path survivor starts unreported until the new grid reports.
+"The listing" is App's own `entries`, passed as a separate `listingKey` — not
+the `entries` the hook sweeps, which is `thumbEntries` and is rebuilt whenever
+a folder peek lands. Keyed on that, the reset fired at exactly the moment the
+user had stopped scrolling and the peeks answered, and every pending job fell
+back to listing order until the next scroll (2026-09-02 second review, F1 —
+found by a reproducing cell, which now stands as the regression).
 
 **Filter-hidden models are reported far, by `App`** (2026-09-02 opus review —
 the sharpest "effort follows attention" case, previously unmentioned). `Grid`
 renders `shownEntries` while the hook sweeps `thumbEntries`, so a model hidden
-by the find filter has a slot but no tile: unreported, never parked, ranked
-*above* far — with a filter narrowing 500 tiles to 3, the sweep would go on
+by the find filter has a slot but no tile: unreported, ranked *above* far — with a filter narrowing 500 tiles to 3, the sweep would go on
 reading gigabytes for the 497 just filtered away. `Grid` cannot report what has
 no DOM node, but `App` knows the difference: it wraps the `setBands` it hands
 to `Grid`, adding `far` before forwarding. Two halves of that rule are
@@ -287,12 +291,13 @@ review):
   `thumbEntries` precisely because they are not tiles, so that difference
   contains every folder-preview model on every report, and stamping those far
   is what task 2.3 and the delta's shown-inside-another-tile scenario forbid —
-  it would park the sheet cells of a folder the user is looking at.
+  it would defer the sheet cells of a folder the user is looking at behind
+  everything.
 - **The merge never overwrites a band the incoming map reports** — the
   per-path max of D2, applied at `App`'s layer. Needed even with the scoped
   set: a filter-hidden *tile* can simultaneously be a **visible folder's
   preview cell**, and the folder's registration must win, or the model is
-  parked while something showing it is on screen.
+  deferred behind everything while something showing it is on screen.
 
 The wrapper forwards the report untouched when `filteredListing` *is*
 `entries` by identity — the unfiltered case, where a 500-entry Set would be a
@@ -313,12 +318,10 @@ the sweep effect's dependency array is what triggers the reconciler's walk over
 every entry, so a bands dependency would pay a 500-entry reconcile per scroll for
 a signal the reconciler does not read.
 
-The corollary is that **unparking cannot ride the sweep effect at all.** A parked
-slot's `ao` and `pose` are unchanged, so the survivor branch `continue`s it; and
-visibility is not a dependency. `setBands` therefore restarts a parked slot
-directly, which is why `EntrySlot` gains a `DirEntry` field: `start(entry, slot)`
-needs the entry, and outside the effect there is no `entries` array to look it up
-in. (The slot holds `mtime` today for identity; the whole entry subsumes it.)
+`EntrySlot` holds its `DirEntry` (task 3.2). The reason it was added — a
+restart from outside the sweep effect — went with the parked design; it stays
+because the removal loop reads `slot.entry.mtime` and the sibling change
+`immutable-thumbnail-serving` sits its `thumbGen` beside it.
 
 ### D4: Position ranks work; it never removes it (amended 2026-09-02)
 
@@ -366,7 +369,11 @@ inside fully cached content, where the queue has nothing nearer to do. The
 invariant is therefore *far work never runs ahead of nearer work*, not *far
 work never runs*. The queue holds every miss's job for the listing's life
 (~500 at the flat cap), scanned per `take`; finding 7's husk-splice keeps that
-scan to live jobs, and at n=500 it is microseconds.
+scan to live jobs, and at n=500 it is microseconds. And a job that carries a
+stale-hit PNG (a rig or label upgrade, a pose wave over an unposed listing)
+keeps that Blob alive until it runs or is retired — under parking the far
+job's cancel released it at once. Up to ~500 decoded PNGs for the length of a
+drain, bounded by the listing; plain misses carry none.
 
 **Kept from the parked design, because it was about ranking, not removal:**
 the cancel handle's pending answer (`push` returns it), keyless presses
@@ -452,3 +459,18 @@ Ten verified findings and four test nits against the parked implementation
 - [Deferral fights the pose wave's retirements] → it cannot: a pose wave
   retires and re-`start`s through the reconciler, and the fresh tail queues at
   the rank in force (D5). Nothing is withheld, so nothing needs resurrecting.
+
+### D7: Second review disposition (2026-09-02, fresh opus reviewer on the amended build)
+
+| # | Finding | Disposition |
+|---|---|---|
+| F1 | The per-listing ranking reset keyed on `thumbEntries` identity, which a landed peek rebuilds — the ranking was wiped right after the user stopped scrolling | **Fixed**: `useThumbnails` takes a `listingKey` (App's `entries`) for the reset; the reviewer's reproducing cell is the regression |
+| F2 | The folder-cell rule's cell passed with `CELL_BAND` reverted; §7.7 claimed otherwise | **Fixed**: the cell releases the cell's lookup first, so it only passes if rank decides; §7.7's claim corrected |
+| F3 | D3 still described `setBands` parking and restarting slots | **Fixed**: edited in place; code comments in `App` and `queue` likewise |
+| F4 | The 6.2 run record measures the parked build without saying so; the deep-scroll headline was not re-measured under deferral | **Fixed**: the record is labelled, and 7.7's record carries the deferral re-measurement |
+| F5, F6 | Nearest-wins and never-overwrite unfalsified | **Fixed**: cells stage a contradicting push order |
+| F7, F10 | Empty-state guards unfalsified; an all-half-heard batch could publish an empty map | **Fixed**: `publish` also returns on an empty *result*; both guards recorded here as defensive |
+| F8 | Stale-hit PNGs retained for the drain | **Recorded** in D4's honesty paragraph |
+| F9 | `state.clear()` below the empty-listing early return | **Fixed**: cleared first |
+| F11 | `push`'s docstring claimed a consumer for the pending answer | **Fixed**: the docstring says nothing reads it and why it stays |
+| F12–F14 | Twelve cells not four; `PARK_ROOT_MARGIN` vocabulary; root/margin unfalsifiable under the stub | **Fixed** the first two (renamed `FAR_ROOT_MARGIN`); the third is inherent to happy-dom and covered by E2E 6.2a/7.7 |
