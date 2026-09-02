@@ -135,7 +135,7 @@ beforeEach(async () => {
   getThumb.mockReset()
   getThumb.mockResolvedValue({ status: 'hit', pngUrl: 'blob:t', lighting: THUMB_LIGHTING, rig: RIG_VERSION })
   putThumb.mockReset()
-  putThumb.mockResolvedValue(undefined)
+  putThumb.mockResolvedValue({})
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)

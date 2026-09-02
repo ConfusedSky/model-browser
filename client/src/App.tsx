@@ -2166,7 +2166,7 @@ export default function App() {
             return img.decode().catch(() => {})
           },
         )
-        await Promise.all([
+        const [, written] = await Promise.all([
           decode,
           api.putThumb({
             path: entry.path,
@@ -2200,6 +2200,11 @@ export default function App() {
           url,
           camera: opts.camera === false ? undefined : state,
           axis: opts.camera === false ? undefined : axis,
+          // The write this pass just made moved the entry's generation; handing
+          // the echo over is what keeps the tile's next fetch cacheable instead
+          // of demoting it to a revalidation (setThumb adopts absence as
+          // "unknown, re-learn").
+          gen: written.gen,
         })
       } catch {
         // persistence is best-effort; the orbit itself already happened

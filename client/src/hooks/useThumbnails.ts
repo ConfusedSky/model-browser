@@ -13,6 +13,17 @@ export interface ThumbState {
   url?: string
   camera?: CameraState
   axis?: OrbitAxis
+  /**
+   * The server write generation these pixels answer for, when the writer knows
+   * it (`immutable-thumbnail-serving` D4). `setThumb` adopts it as the slot's
+   * `thumbGen` — and adopts its *absence* too: a write that cannot name its
+   * generation invalidates the one the slot had learned, because the entry's
+   * next fetch must not ask under a number some out-of-hook PUT just outdated.
+   * An immutable-cached answer at a stale number is served by the browser
+   * without ever reaching the server, so the stale-gen tier cannot catch it —
+   * clearing here is what keeps that tier reachable.
+   */
+  gen?: number
 }
 
 /**
@@ -223,6 +234,14 @@ export function useThumbnails(
     // still pointing at it for one commit: the image is already decoded.
     if (slot.url !== undefined && slot.url !== state.url) URL.revokeObjectURL(slot.url)
     slot.url = state.url
+    // The generation travels with the write, absence included: an external
+    // writer that did not (or could not) plumb its PUT echo leaves `undefined`
+    // here, which demotes the entry's next fetch to the validator tier instead
+    // of letting an immutable-cached response answer for bytes a write just
+    // replaced (the pinning hole the 2026-09-02 review confirmed). The hook's
+    // own passes hand back the value they already learned, so for them this
+    // assignment is a no-op.
+    slot.thumbGen = state.gen
     // This state is the tile's answer now, so nothing older may still answer
     // for it. An outside write does not go through the sweep and so retires
     // nothing by itself: a tail queued behind a suspended queue — rendering at
@@ -260,6 +279,13 @@ export function useThumbnails(
    * and inventing a `ready` entry with no image would blank the tile.
    */
   const discardThumbFraming = useCallback((path: string, dropAxis: boolean) => {
+    // The discard's PUT (resetFramingLive's, pixel-less) moved the entry's
+    // generation on the server, and its echo is not plumbed this far — so the
+    // learned number is stale the moment this runs. Cleared for the same
+    // reason `setThumb` adopts absence: the next fetch must revalidate rather
+    // than let an immutable-cached answer stand for a discarded framing.
+    const slot = slotsRef.current.get(path)
+    if (slot !== undefined) slot.thumbGen = undefined
     setThumbs((prev) => {
       const cur = prev.get(path)
       if (cur === undefined) return prev
@@ -423,6 +449,7 @@ export function useThumbnails(
                 url: cached.pngUrl,
                 camera: cached.camera,
                 axis: cached.axis,
+                gen: slot.thumbGen,
               })
               return
             }
@@ -509,6 +536,7 @@ export function useThumbnails(
                     url: URL.createObjectURL(png),
                     camera: cached.camera,
                     axis: cached.axis,
+                    gen: slot.thumbGen,
                   })
                   dropStale()
                 } catch {
@@ -521,6 +549,7 @@ export function useThumbnails(
                       url,
                       camera: cached.camera,
                       axis: cached.axis,
+                      gen: slot.thumbGen,
                     })
                   } else if (alive()) {
                     // The same rule as the lookup catch above (F3): carry the
@@ -529,7 +558,7 @@ export function useThumbnails(
                     // image a previous pass put on this tile. The review that
                     // pinned the lookup catch flagged this branch as its
                     // sibling; the setThumb guard makes the write non-revoking.
-                    setThumb(entry.path, { status: 'error', url: slot.url })
+                    setThumb(entry.path, { status: 'error', url: slot.url, gen: slot.thumbGen })
                 } else {
                   dropStale()
                 }
@@ -545,7 +574,7 @@ export function useThumbnails(
             // pixels that are still perfectly good. `slot.url === state.url`
             // makes this a non-revoking write; `alive()` is what says the slot
             // is still this entry's.
-            if (alive()) setThumb(entry.path, { status: 'error', url: slot.url })
+            if (alive()) setThumb(entry.path, { status: 'error', url: slot.url, gen: slot.thumbGen })
           }
         }),
       )

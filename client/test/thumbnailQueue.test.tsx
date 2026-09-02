@@ -1668,6 +1668,47 @@ describe('the generation a tile keys its next fetch from', () => {
     expect(asked).toEqual([undefined, 7])
   })
 
+  it('forgets its key when an outside writer hands pixels in without one', async () => {
+    // The pinning hole the 2026-09-02 review confirmed: an out-of-hook PUT
+    // (App's persist, entryActions') moves the server's generation, and a
+    // subsequent fetch under the OLD number is answered by the browser's
+    // immutable cache without the server ever seeing it — the stale-gen tier
+    // cannot fire on a request that is never made. So `setThumb` adopts a
+    // write's generation *including its absence*: pixels handed in without a
+    // number invalidate the learned one, demoting the next fetch to the
+    // validator tier, which asks the server and gets the truth.
+    const { api, asked } = genCache(() => freshHit({ gen: 42 }), 0)
+    const queue = new RenderQueue(2)
+    const entries = models(1)
+
+    await render(<Harness entries={entries} api={api} lru={mesh()} queue={queue} ao />)
+    await settle()
+    expect(asked).toEqual([undefined]) // learned 42 from the echo
+
+    act(() => lastSetThumb!(entries[0]!.path, { status: 'ready', url: 'blob:external' }))
+    await rerender(<Harness entries={entries} api={api} lru={mesh()} queue={queue} ao={false} />)
+    await settle()
+    // Not [undefined, 42]: the outside write outdated that number.
+    expect(asked).toEqual([undefined, undefined])
+  })
+
+  it("adopts the generation an outside writer does know", async () => {
+    // The common outside writer (App's orbit persist) has the PUT echo in hand
+    // and passes it through, so the next fetch is immutable-keyed at the NEW
+    // number rather than paying a revalidation for a value the write knew.
+    const { api, asked } = genCache(() => freshHit({ gen: 42 }), 0)
+    const queue = new RenderQueue(2)
+    const entries = models(1)
+
+    await render(<Harness entries={entries} api={api} lru={mesh()} queue={queue} ao />)
+    await settle()
+
+    act(() => lastSetThumb!(entries[0]!.path, { status: 'ready', url: 'blob:external', gen: 9 }))
+    await rerender(<Harness entries={entries} api={api} lru={mesh()} queue={queue} ao={false} />)
+    await settle()
+    expect(asked).toEqual([undefined, 9])
+  })
+
   it('starts a genuinely new entry unkeyed rather than inheriting a neighbour’s', async () => {
     // The generation belongs to one entry. A slot created for a different path
     // has learned nothing, whatever its neighbours know.

@@ -430,7 +430,7 @@ function refreshThumbnail(
       const object = await host.lru.acquire(entry.path)
       await host.queue.whenResumed()
       const png = await renderThumbnail(object, camera, axis, ao)
-      await host.api.putThumb({
+      const written = await host.api.putThumb({
         path: entry.path,
         mtime: entry.mtime,
         png,
@@ -458,6 +458,9 @@ function refreshThumbnail(
         url: URL.createObjectURL(png),
         camera: discardFraming ? undefined : cached.camera,
         axis: dropAxis ? undefined : cached.axis,
+        // The PUT above moved the generation; the echo keeps the tile's next
+        // fetch cacheable (setThumb adopts absence as "re-learn").
+        gen: written.gen,
       })
     } catch {
       // The tile keeps whatever it was showing — a render that did not happen
@@ -689,7 +692,7 @@ export function setOrbitAxis(
       // (D4/D4a) — after the gate, like the other re-render command's.
       const ao = aoEnabled()
       const png = await renderThumbnail(object, DEFAULT_CAMERA, axis, ao)
-      await host.api.putThumb({
+      const written = await host.api.putThumb({
         path: entry.path,
         mtime: entry.mtime,
         png,
@@ -707,6 +710,8 @@ export function setOrbitAxis(
         url: URL.createObjectURL(png),
         camera: undefined,
         axis,
+        // As in the re-render command: the echo, so the next fetch stays keyed.
+        gen: written.gen,
       })
     } catch {
       host.report(RENDER_FAILED)
