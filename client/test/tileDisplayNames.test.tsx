@@ -70,6 +70,8 @@ async function renderGrid(
         scoreScale={null}
         previews={previews}
         onPeek={() => {}}
+        onBands={() => {}}
+        scrollRoot={{ current: document.body }}
       />,
     )
   })

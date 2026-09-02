@@ -30,7 +30,7 @@
 
 ## 1. Queue priority
 
-- [ ] 1.1 `RenderQueue.push` takes a key with the job; `pump` selects the
+- [x] 1.1 `RenderQueue.push` takes a key with the job; `pump` selects the
       best-ranked pending job instead of `jobs.shift()`, with ties keeping
       insertion order so an unranked queue behaves exactly as today's FIFO (D1).
       Ties matter more than they look: `App`'s `thumbEntries` carries preview
@@ -45,14 +45,14 @@
       ranking is unreported, **never far** — a replacement that defaulted
       missing paths to far would pass every ordering cell while parking the
       world; assert absent ≠ far explicitly
-- [ ] 1.2 A method to replace the whole ranking at once (the grid recomputes bands
+- [x] 1.2 A method to replace the whole ranking at once (the grid recomputes bands
       wholesale on scroll, rather than moving keys one at a time)
-- [ ] 1.2a `push`'s cancel handle **reports whether the job was still pending**
+- [x] 1.2a `push`'s cancel handle **reports whether the job was still pending**
       (D4): parking must fire `dropStale` only for a job that never ran — a
       started job keeps its `staleUrl` for its own `catch`'s fallback, and a
       park that revoked it under a render that then failed would write the
       error state 3.4 forbids
-- [ ] 1.3 Unit tests in `client/test/queue.test.ts`, DOM-free as its four existing
+- [x] 1.3 Unit tests in `client/test/queue.test.ts`, DOM-free as its four existing
       cells are: ranked jobs run before unranked and unranked before far;
       keyless jobs run with visible-ranked ones; a re-ranking mid-flight changes
       what runs next but never interrupts a running job; ties preserve insertion
@@ -62,7 +62,7 @@
 
 ## 2. Visibility
 
-- [ ] 2.1 Widen `Grid`'s **existing** observer effect (the one keyed on
+- [x] 2.1 Widen `Grid`'s **existing** observer effect (the one keyed on
       `[entries, onPeek]` that watches `[data-dir-tile]`): observe model tiles
       too — they already carry `data-model-tile={entry.path}`, so no tile markup
       changes — and report three coarse bands (visible / near / far) through
@@ -106,7 +106,7 @@
       entry identity-stable or listing-scoped; three separate decisions (the
       previews ref, 2.5's wrapper identity, the `RefObject`) exist to keep
       anything unstable out of it
-- [ ] 2.2 **Drop `observer.unobserve(record.target)`** from that effect: a band
+- [x] 2.2 **Drop `observer.unobserve(record.target)`** from that effect: a band
       tracker must keep watching a tile after its first intersection. Safe because
       `App`'s `requestPeek` already refuses a repeat with
       `if (previewsRef.current.has(path) || inFlightPeeks.current.has(path)) return`
@@ -115,18 +115,18 @@
       (task 4.1) rather than trusting it. Update `awayAndBack()`'s docstring in
       `folderSheets.test.tsx` in the same commit — it credits the dropped
       `unobserve` for stopping a second report
-- [ ] 2.3 A folder tile registers **its preview models' paths under its own band**;
+- [x] 2.3 A folder tile registers **its preview models' paths under its own band**;
       a path that is both a visible tile and a far folder's preview takes the
       *nearest* band — a per-path max — so a far band never cancels visible work
       (D2; the rule is `folder-contact-sheets` tasks 2.2 and its "preview renders
       compete with tile renders for the queue" risk, which deferred only the code).
       The folder's preview paths are in `App`'s `previews` map, which `Grid`
       already receives as the `previews` prop
-- [ ] 2.4 Bands **never** become a `Tile` prop — `tilePropsEqual` is a keys-based
+- [x] 2.4 Bands **never** become a `Tile` prop — `tilePropsEqual` is a keys-based
       shallow compare, so one would re-render all 500 tiles per scroll settle. The
       observer reads paths off the DOM attributes and reports them imperatively
       (D2/D3)
-- [ ] 2.5 **Filter-hidden models are reported far, by `App`** (D3): `Grid`
+- [x] 2.5 **Filter-hidden models are reported far, by `App`** (D3): `Grid`
       renders `shownEntries` while the hook sweeps `thumbEntries`, so a model
       the find filter hides has a slot but no tile — unreported, never parked,
       ranked above far, and the sweep would read gigabytes for entries the user
@@ -147,7 +147,7 @@
 
 ## 3. The parked state
 
-- [ ] 3.1 `useThumbnails` returns `setBands(map)` beside `setThumb`,
+- [x] 3.1 `useThumbnails` returns `setBands(map)` beside `setThumb`,
       `setPlaceholder` and `discardThumbFraming`; `App` holds it by identity (as it
       holds `onPeek`) and passes it to `Grid`. **Document the contract where it is
       declared**: idempotent, latest-wins per path, safe at scroll-settle
@@ -168,17 +168,17 @@
       restart through `slotsRef` **at call time** — a band map is a message from
       the DOM's past, and a path with no live slot is a no-op, never a captured
       slot object acted on after its retirement
-- [ ] 3.2 `EntrySlot` gains its `DirEntry` (subsuming `mtime`) — say **why** in the
+- [x] 3.2 `EntrySlot` gains its `DirEntry` (subsuming `mtime`) — say **why** in the
       field's comment: a parked slot must restart through `start(entry, slot)`
       outside the sweep effect, where there is no `entries` array to look the entry
       up in (D3)
-- [ ] 3.3 Make the render tail separately cancellable. Today `slot.cancels` is a
+- [x] 3.3 Make the render tail separately cancellable. Today `slot.cancels` is a
       flat, unlabelled `(() => void)[]` holding the lookup handle, then `dropStale`
       and the `queue.push` handle, and only `retire` fires it — firing all of it. A
       parked slot needs the render handle alone, plus `dropStale` — but only when
       the handle reports the job was still pending (1.2a): a started job keeps
       its `staleUrl` for its own `catch`'s fallback (D4)
-- [ ] 3.3a `EntrySlot` gains **`parked: boolean`**, and the lookup tail consults
+- [x] 3.3a `EntrySlot` gains **`parked: boolean`**, and the lookup tail consults
       it before `queue.push` (D4): the render handle and `dropStale` are
       registered *inside* the tail, so at park time the render may not exist
       yet — the lookup is in flight, and cancelling it is forbidden. A parked
@@ -191,7 +191,7 @@
       lowest-ranked job still runs eventually, and running is what a parked
       cold tail must not do. This is D5's own path: every recipe/pose
       retirement of a parked slot runs a fresh lookup whose tail hits this gate
-- [ ] 3.3b Two ordering rules on the flag (D4): `retire` never clears `parked`
+- [x] 3.3b Two ordering rules on the flag (D4): `retire` never clears `parked`
       (the flag is the band's fact, the generation the recipe's — a pose wave
       retiring a parked slot leaves it parked, or the wave resurrects exactly
       the job the band parked); and unpark is never a bare `start` — it is
@@ -199,14 +199,14 @@
       generation is dead before its successor exists, and one slot can never
       run two passes of one generation (two lookups, two PUTs, a double mesh
       read — both would pass `alive()`)
-- [ ] 3.4 A tile entering the `far` band parks its **unstarted** render; a started
+- [x] 3.4 A tile entering the `far` band parks its **unstarted** render; a started
       job runs to completion — it holds a renderer slot and its mesh read is in
       flight (D4). A parked slot keeps everything it displays: `slot.url` is
       untouched, so the tile shows what it had — the `{ status: 'loading' }`
       placeholder, an embedded-3MF preview from `setPlaceholder`, or a previous
       render — and **never** the error state `model-thumbnails` reserves for a model
       that failed to load or parse
-- [ ] 3.4a **The warm-mesh exception** (D4/D6): entering `far` cancels the render
+- [x] 3.4a **The warm-mesh exception** (D4/D6): entering `far` cancels the render
       only when the mesh is neither held nor loading — `MeshLru` gains a
       **held-or-loading peek** beside `has` (`has` reads only `entries`, so a
       `warm()` hover or an acquire still in flight read as cold and their
@@ -221,7 +221,7 @@
       it. Parking never causes a mesh read. The peek, like `has`, must never
       bump recency — an acquire at park time would distort eviction toward
       exactly the meshes being deprioritised
-- [ ] 3.5 Re-entering the viewport restarts a parked slot through the reconciler's
+- [x] 3.5 Re-entering the viewport restarts a parked slot through the reconciler's
       own retire/start seam — the one whose comment already names this plug-in
       point ("This is also where a *parked* entry … would be restarted when its
       tile comes back") — via 3.3b's clear-flag → `retire` → `start`, resolving
@@ -233,7 +233,7 @@
 
 ## 4. Composing with the recipe (D5)
 
-- [ ] 4.1 A preference or pose retirement **restarts the lookup for every slot,
+- [x] 4.1 A preference or pose retirement **restarts the lookup for every slot,
       parked or not, and leaves a far slot's render parked.** A parked far tile
       whose new-recipe render is already cached therefore repaints at once, which
       is what keeps *Recipe-labelled thumbnails*' "showing a render already cached
@@ -242,19 +242,19 @@
       unless its mesh is still warm, in which case the tail is pushed at the far
       rank and completes once nothing better-ranked is pending (3.4a's
       exception, applied by 3.3a's tail gate — the flag and the band ref both)
-- [ ] 4.2 A parked tail restarts under the slot's **current** `(ao, pose)`, never
+- [x] 4.2 A parked tail restarts under the slot's **current** `(ao, pose)`, never
       the recipe it was parked under. This falls out of `start` reading `slot.ao`
       and `slot.pose` at restart time rather than being enforced separately —
       assert it, since it is the kind of property a refactor can silently break by
       capturing the recipe at park time
-- [ ] 4.3 Confirm the reconciler's survivor branch
+- [x] 4.3 Confirm the reconciler's survivor branch
       (`if (slot.ao === ao && samePose(slot.pose, pose)) continue`) is not the
       unparking path and must not become one: it `continue`s a parked slot, whose
       inputs are unchanged, and visibility is not a dependency of that effect
 
 ## 5. Tests
 
-- [ ] 5.1 Hook-level cells in `client/test/thumbnailQueue.test.tsx` (the reconciler
+- [x] 5.1 Hook-level cells in `client/test/thumbnailQueue.test.tsx` (the reconciler
       suites live there — "the sweep reconciles its entries instead of resetting
       them", "a preference change refreshes the grid in front of you"): a large
       uncached listing with the bottom tiles reported visible renders those before
@@ -280,19 +280,23 @@
       3.3a's gate; a slot created after the last report — the reconciler's
       same-path-new-mtime replacement — is still gated far by the band ref
       (3.1); an unpark landing while the retirement's lookup is in flight
-      files **exactly one PUT** (3.3b — the double-start writes two); a park
+      runs one pass, not two — **one acquire, one render** (3.3b; the PUT count
+      alone cannot falsify this, found by falsification: `setThumb`'s own
+      retire kills the second pass before *its* PUT either way, so the
+      double-start's real cost is the doubled read and render at concurrency
+      two); a park
       landing after a render started, where that render then fails, falls back
       to its stale PNG and never shows the error state (1.2a — the unconditional
       `dropStale` revokes the fallback out from under the catch); a band map
       omitting a path leaves that path unreported and unparked — absent is
       never far (1.1)
-- [ ] 5.1a Extend `thumbnailQueue.test.tsx`'s LRU fakes first: every cell builds
+- [x] 5.1a Extend `thumbnailQueue.test.tsx`'s LRU fakes first: every cell builds
       `{ acquire: vi.fn() } as unknown as MeshLru` (ten-plus occurrences), so
       the moment the tail consults the held-or-loading peek, every cell that
       reaches it throws. One shared factory returning `{ acquire, has, <peek> }`
       over a test-owned warm set, used by all cells — the warm set is also how
       the 3.4a cells stage warm/cold/evicted
-- [ ] 5.2 App-mount cells in `client/test/folderSheets.test.tsx`, **extending**
+- [x] 5.2 App-mount cells in `client/test/folderSheets.test.tsx`, **extending**
       its `StubObserver`, `vi.stubGlobal('IntersectionObserver', StubObserver)`,
       `intersect(el)` and `awayAndBack()` rather than writing a second stub —
       happy-dom's own `IntersectionObserver` has no-op `observe`/`disconnect`, so a
@@ -315,7 +319,7 @@
       App mount); and a filter-hidden tile that is also a visible folder's
       preview cell takes the folder's band — the merge never overwrites a
       report (2.5)
-- [ ] 5.3 Confirm no renderer-mock updates are needed and `RIG_VERSION` is
+- [x] 5.3 Confirm no renderer-mock updates are needed and `RIG_VERSION` is
       untouched — this changes scheduling, not the recipe; if a renderer mock
       needs touching, that is a signal something rendering-related moved.
       (`thumbnailQueue.test.tsx` spreads the real renderer module, so a bump
@@ -324,7 +328,7 @@
 
 ## 6. Verification
 
-- [ ] 6.1 `bun run typecheck` and `bun run test` pass across workspaces
+- [x] 6.1 `bun run typecheck` and `bun run test` pass across workspaces
 - [ ] 6.2 Manual E2E via Playwright MCP against the real library, with the thumbnail
       cache cleared for the target directory
       (`~/.cache/model-browser/<library-id>/`): open a 500-tile flat listing, scroll

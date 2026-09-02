@@ -9,7 +9,7 @@ import { useThumbnails, type ThumbState } from '../src/hooks/useThumbnails'
 import type { MeshLru } from '../src/three/lru'
 import { DEFAULT_CAMERA } from '../src/three/camera'
 import { POSE_VERSION } from '../src/three/pose'
-import { RenderQueue } from '../src/three/queue'
+import { RenderQueue, type Band } from '../src/three/queue'
 import { renderThumbnail, RIG_VERSION, THUMB_LIGHTING } from '../src/three/renderer'
 
 // The hook only reaches the renderer through renderThumbnail — fake it.
@@ -21,6 +21,25 @@ vi.mock('../src/three/renderer', async (importOriginal) => ({
   renderThumbnail: vi.fn(() => Promise.resolve(new Blob())),
 }))
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+
+/**
+ * The LRU as every cell fakes it (sweep-priority 5.1a): the park gates consult
+ * the held-or-loading peek, so a hand-rolled `{ acquire }` object throws the
+ * moment a cell sets bands. `warm` is the test-owned warm set — the parking
+ * cells stage warm, cold and evicted meshes by mutating it — and `acquire` is
+ * the observable read: this fake has no loader, so "the read the rule forbids"
+ * is asserted on `acquire` itself.
+ */
+function fakeLru(
+  warm: ReadonlySet<string> = new Set(),
+  acquire = vi.fn().mockResolvedValue({} as THREE.Object3D),
+): MeshLru<THREE.Object3D> {
+  return {
+    acquire,
+    has: (path: string) => warm.has(path),
+    holds: (path: string) => warm.has(path),
+  } as unknown as MeshLru<THREE.Object3D>
+}
 
 function models(n: number): DirEntry[] {
   return Array.from({ length: n }, (_, i) => ({
@@ -52,10 +71,18 @@ function Harness({
   ao?: boolean
   poses?: Record<string, IndexPose>
 }) {
-  const { thumbs, setThumb, setPlaceholder } = useThumbnails(entries, api, lru, queue, ao, poses)
+  const { thumbs, setThumb, setPlaceholder, setBands } = useThumbnails(
+    entries,
+    api,
+    lru,
+    queue,
+    ao,
+    poses,
+  )
   lastThumbs = thumbs
   lastSetThumb = setThumb
   lastSetPlaceholder = setPlaceholder
+  lastSetBands = setBands
   // One line per committed render, so a cell can assert what the grid *passed
   // through* and not only where it ended up — a toggle that blanks every tile
   // to a spinner and back lands on the same final statuses as one that does not.
@@ -77,6 +104,7 @@ function Harness({
 /** The hook's own setters, for the cells that write through them from outside. */
 let lastSetThumb: ((path: string, state: ThumbState) => void) | null = null
 let lastSetPlaceholder: ((path: string, url: string) => void) | null = null
+let lastSetBands: ((bands: ReadonlyMap<string, Band>) => void) | null = null
 let lastThumbs = new Map<string, ThumbState>()
 let renderLog: string[][] = []
 
@@ -155,7 +183,7 @@ describe('thumbnail cache lookups vs the render queue', () => {
         .fn()
         .mockResolvedValue({ status: 'hit', pngUrl: 'blob:cached', lighting: THUMB_LIGHTING, rig: RIG_VERSION }),
     } as unknown as ApiClient
-    const lru = { acquire: vi.fn() } as unknown as MeshLru<THREE.Object3D>
+    const lru = fakeLru(new Set(), vi.fn())
     const queue = new RenderQueue(2)
     queue.suspend() // a suspended queue runs nothing; hits must not need it
 
@@ -171,7 +199,7 @@ describe('thumbnail cache lookups vs the render queue', () => {
       getThumb: vi.fn().mockResolvedValue({ status: 'miss' }),
       putThumb: vi.fn().mockResolvedValue(undefined),
     } as unknown as ApiClient
-    const lru = { acquire: vi.fn().mockResolvedValue({}) } as unknown as MeshLru<THREE.Object3D>
+    const lru = fakeLru()
     const queue = new RenderQueue(2)
     queue.suspend()
 
@@ -207,7 +235,7 @@ describe('thumbnail cache lookups vs the render queue', () => {
       }),
       putThumb: vi.fn().mockResolvedValue(undefined),
     } as unknown as ApiClient
-    const lru = { acquire: vi.fn().mockResolvedValue({}) } as unknown as MeshLru<THREE.Object3D>
+    const lru = fakeLru()
 
     await render(<Harness entries={models(1)} api={api} lru={lru} queue={new RenderQueue(2)} />)
     await settle()
@@ -239,7 +267,7 @@ describe('thumbnail cache lookups vs the render queue', () => {
         .mockResolvedValueOnce({ status: 'hit', pngUrl: 'blob:ax', lighting: 'axis', rig: RIG_VERSION }),
       putThumb: vi.fn().mockResolvedValue(undefined),
     } as unknown as ApiClient
-    const lru = { acquire: vi.fn().mockResolvedValue({}) } as unknown as MeshLru<THREE.Object3D>
+    const lru = fakeLru()
 
     await render(<Harness entries={models(2)} api={api} lru={lru} queue={new RenderQueue(2)} />)
     await settle()
@@ -268,7 +296,7 @@ describe('thumbnail cache lookups vs the render queue', () => {
       }),
       putThumb: vi.fn().mockResolvedValue(undefined),
     } as unknown as ApiClient
-    const lru = { acquire: vi.fn().mockResolvedValue({}) } as unknown as MeshLru<THREE.Object3D>
+    const lru = fakeLru()
 
     await render(<Harness entries={models(4)} api={api} lru={lru} queue={new RenderQueue(2)} />)
     await settle()
@@ -290,9 +318,7 @@ describe('thumbnail cache lookups vs the render queue', () => {
       }),
       putThumb: vi.fn().mockResolvedValue(undefined),
     } as unknown as ApiClient
-    const lru = {
-      acquire: vi.fn().mockRejectedValue(new Error('load failed')),
-    } as unknown as MeshLru<THREE.Object3D>
+    const lru = fakeLru(new Set(), vi.fn().mockRejectedValue(new Error('load failed')))
 
     await render(<Harness entries={models(1)} api={api} lru={lru} queue={new RenderQueue(2)} />)
     await settle()
@@ -314,7 +340,7 @@ describe('thumbnail cache lookups vs the render queue', () => {
       }),
       putThumb: vi.fn().mockResolvedValue(undefined),
     } as unknown as ApiClient
-    const lru = { acquire: vi.fn().mockResolvedValue({}) } as unknown as MeshLru<THREE.Object3D>
+    const lru = fakeLru()
 
     await render(<Harness entries={models(1)} api={api} lru={lru} queue={new RenderQueue(2)} />)
     await settle()
@@ -333,7 +359,7 @@ describe('thumbnail cache lookups vs the render queue', () => {
       getThumb: vi.fn().mockResolvedValue({ status: 'hit', pngUrl: 'blob:legacy' }),
       putThumb: vi.fn().mockResolvedValue(undefined),
     } as unknown as ApiClient
-    const lru = { acquire: vi.fn().mockResolvedValue({}) } as unknown as MeshLru<THREE.Object3D>
+    const lru = fakeLru()
 
     await render(<Harness entries={models(1)} api={api} lru={lru} queue={new RenderQueue(2)} />)
     await settle()
@@ -356,7 +382,7 @@ describe('thumbnail cache lookups vs the render queue', () => {
     const api = {
       getThumb: vi.fn(() => gate.then(() => ({ status: 'miss' }))),
     } as unknown as ApiClient
-    const lru = { acquire: vi.fn() } as unknown as MeshLru<THREE.Object3D>
+    const lru = fakeLru(new Set(), vi.fn())
 
     await render(<Harness entries={models(20)} api={api} lru={lru} queue={new RenderQueue(2)} />)
     await settle()
@@ -380,7 +406,7 @@ describe('thumbnail cache lookups vs the render queue', () => {
     const api = {
       getThumb: vi.fn(() => gate.then(() => ({ status: 'hit', pngUrl: 'blob:orphan' }))),
     } as unknown as ApiClient
-    const lru = { acquire: vi.fn() } as unknown as MeshLru<THREE.Object3D>
+    const lru = fakeLru(new Set(), vi.fn())
 
     await render(<Harness entries={models(1)} api={api} lru={lru} queue={new RenderQueue(2)} />)
     await settle()
@@ -404,7 +430,7 @@ describe('the sweep follows the occlusion preference', () => {
       putThumb: vi.fn().mockResolvedValue(undefined),
     } as unknown as ApiClient
     const obj = {} as THREE.Object3D
-    const lru = { acquire: vi.fn().mockResolvedValue(obj) } as unknown as MeshLru<THREE.Object3D>
+    const lru = fakeLru(new Set(), vi.fn().mockResolvedValue(obj))
 
     await render(
       <Harness entries={models(1)} api={api} lru={lru} queue={new RenderQueue(2)} ao={false} />,
@@ -422,7 +448,7 @@ describe('the sweep follows the occlusion preference', () => {
       putThumb: vi.fn().mockResolvedValue(undefined),
     } as unknown as ApiClient
     const obj = {} as THREE.Object3D
-    const lru = { acquire: vi.fn().mockResolvedValue(obj) } as unknown as MeshLru<THREE.Object3D>
+    const lru = fakeLru(new Set(), vi.fn().mockResolvedValue(obj))
 
     await render(<Harness entries={models(1)} api={api} lru={lru} queue={new RenderQueue(2)} />)
     await settle()
@@ -446,7 +472,7 @@ describe('the sweep follows the occlusion preference', () => {
       putThumb: vi.fn().mockResolvedValue(undefined),
     } as unknown as ApiClient
     const obj = {} as THREE.Object3D
-    const lru = { acquire: vi.fn().mockResolvedValue(obj) } as unknown as MeshLru<THREE.Object3D>
+    const lru = fakeLru(new Set(), vi.fn().mockResolvedValue(obj))
 
     await render(
       <Harness entries={models(1)} api={api} lru={lru} queue={new RenderQueue(2)} ao={false} />,
@@ -515,8 +541,7 @@ const freshHit = (extra: Record<string, unknown> = {}) => ({
   rig: RIG_VERSION,
   ...extra,
 })
-const mesh = () =>
-  ({ acquire: vi.fn().mockResolvedValue({}) }) as unknown as MeshLru<THREE.Object3D>
+const mesh = () => fakeLru()
 
 describe('a preference change refreshes the grid in front of you', () => {
   it('the other setting’s cached render is shown at once: one lookup per tile, no render', async () => {
@@ -563,7 +588,7 @@ describe('a preference change refreshes the grid in front of you', () => {
       ao ? freshHit({ camera: CAM, axis: '-z' }) : { status: 'stale', camera: CAM, axis: '-z' },
     )
     const obj = {} as THREE.Object3D
-    const lru = { acquire: vi.fn().mockResolvedValue(obj) } as unknown as MeshLru<THREE.Object3D>
+    const lru = fakeLru(new Set(), vi.fn().mockResolvedValue(obj))
 
     await render(<Harness entries={entries} api={api} lru={lru} queue={new RenderQueue(2)} ao />)
     await settle()
@@ -1400,5 +1425,369 @@ describe('the sweep reconciles its entries instead of resetting them', () => {
     })
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:orphan')
     expect(lastThumbs.has('/models/a.stl')).toBe(false)
+  })
+})
+
+// ─── thumbnail-sweep-priority ───────────────────────────────────────────────
+// Visible-first ordering and the parked state. Bands reach the hook the way
+// App forwards Grid's reports — through `setBands` — and the LRU's warm set is
+// the 5.1a factory's, mutated to stage warm, cold and evicted meshes.
+
+/** Push a band map the way a report arrives. */
+const bands = (pairs: Record<string, Band>): Promise<void> =>
+  act(async () => {
+    lastSetBands!(new Map(Object.entries(pairs)))
+  })
+
+/** The paths `acquire` was asked for, in execution order — the observable
+ *  reads, and (under concurrency 1) the render order. */
+const acquired = (lru: MeshLru<THREE.Object3D>): string[] =>
+  vi.mocked(lru.acquire).mock.calls.map((c) => c[0] as string)
+
+describe('visible-first ordering and the parked state', () => {
+  it('bottom tiles reported visible render before the earlier ones — fails under FIFO', async () => {
+    const api = fakeCache(() => ({ status: 'miss' }))
+    const lru = fakeLru()
+    const queue = new RenderQueue(1)
+    queue.suspend() // every tail queued, nothing started: ordering is rank's alone
+
+    await render(<Harness entries={models(6)} api={api} lru={lru} queue={queue} ao />)
+    await settle()
+    await bands({ '/models/m4.stl': 'visible', '/models/m5.stl': 'visible' })
+
+    await act(async () => {
+      queue.resume()
+    })
+    await settle()
+
+    expect(acquired(lru).slice(0, 2)).toEqual(['/models/m4.stl', '/models/m5.stl'])
+    expect(statuses()).toEqual(Array.from({ length: 6 }, () => 'ready'))
+  })
+
+  it('a tile parked before starting is not rendered; unparked, it lands and never errors', async () => {
+    const api = fakeCache(() => ({ status: 'miss' }))
+    const lru = fakeLru()
+    const queue = new RenderQueue(1)
+    queue.suspend()
+
+    await render(<Harness entries={models(2)} api={api} lru={lru} queue={queue} ao />)
+    await settle()
+    await bands({ '/models/m1.stl': 'far' })
+    await act(async () => {
+      queue.resume()
+    })
+    await settle()
+
+    // The parked tile keeps its placeholder — loading, never the error state.
+    expect(statuses()).toEqual(['ready', 'loading'])
+    expect(acquired(lru)).toEqual(['/models/m0.stl'])
+
+    await bands({ '/models/m1.stl': 'visible' })
+    await settle()
+
+    expect(statuses()).toEqual(['ready', 'ready'])
+    // No commit in between showed the error state.
+    for (const commit of renderLog) for (const cell of commit) expect(cell.startsWith('error')).toBe(false)
+  })
+
+  it('absent is never far: a path the map omits still renders', async () => {
+    const api = fakeCache(() => ({ status: 'miss' }))
+    const lru = fakeLru()
+    const queue = new RenderQueue(1)
+    queue.suspend()
+
+    await render(<Harness entries={models(2)} api={api} lru={lru} queue={queue} ao />)
+    await settle()
+    await bands({ '/models/m0.stl': 'far' }) // m1 unmentioned
+    await act(async () => {
+      queue.resume()
+    })
+    await settle()
+
+    expect(statuses()).toEqual(['loading', 'ready'])
+    expect(acquired(lru)).toEqual(['/models/m1.stl'])
+  })
+
+  it('a fully cached listing is unaffected by any band map', async () => {
+    const api = fakeCache(() => freshHit())
+    const lru = fakeLru()
+
+    await render(<Harness entries={models(3)} api={api} lru={lru} queue={new RenderQueue(2)} ao />)
+    await settle()
+    await bands({ '/models/m0.stl': 'far', '/models/m1.stl': 'far', '/models/m2.stl': 'far' })
+    await settle()
+
+    expect(statuses()).toEqual(['ready', 'ready', 'ready'])
+    expect(vi.mocked(renderThumbnail)).not.toHaveBeenCalled()
+    expect(lru.acquire).not.toHaveBeenCalled()
+  })
+
+  it('a preference change over a parked far tile shows a cached new-setting render at once', async () => {
+    // 4.1's cached half: the retirement restarts the lookup, parked or not.
+    const api = fakeCache((_p, ao) => (ao ? { status: 'miss' } : freshHit()))
+    const lru = fakeLru()
+    const queue = new RenderQueue(1)
+    queue.suspend()
+
+    await render(<Harness entries={models(1)} api={api} lru={lru} queue={queue} ao />)
+    await settle()
+    await bands({ '/models/m0.stl': 'far' })
+
+    await rerender(<Harness entries={models(1)} api={api} lru={lru} queue={queue} ao={false} />)
+    await settle()
+
+    expect(statuses()).toEqual(['ready']) // repainted from the cache, still parked
+    expect(api.getThumb).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(renderThumbnail)).not.toHaveBeenCalled()
+    expect(lru.acquire).not.toHaveBeenCalled()
+  })
+
+  it('a retirement of a parked cold slot issues its lookup and no push and no acquire', async () => {
+    // 4.1's uncached half — D5's own path through the tail gate: the fresh
+    // lookup runs, and it is the tail's own gate that withholds the render.
+    const api = fakeCache(() => ({ status: 'miss' }))
+    const lru = fakeLru()
+    const queue = new RenderQueue(1)
+    queue.suspend()
+
+    await render(<Harness entries={models(1)} api={api} lru={lru} queue={queue} ao />)
+    await settle()
+    await bands({ '/models/m0.stl': 'far' })
+    await act(async () => {
+      queue.resume()
+    })
+
+    await rerender(<Harness entries={models(1)} api={api} lru={lru} queue={queue} ao={false} />)
+    await settle()
+
+    expect(api.getThumb).toHaveBeenCalledTimes(2) // the retirement's fresh lookup ran
+    expect(lru.acquire).not.toHaveBeenCalled() // and its tail was withheld
+    expect(statuses()).toEqual(['loading'])
+  })
+
+  it('a parked tail restarts under the current recipe, never the parked one', async () => {
+    // 4.2: parking does not freeze a pass, it cancels one; unparking reads the
+    // slot's recipe as it is then.
+    const api = fakeCache(() => ({ status: 'miss' }))
+    const obj = {} as THREE.Object3D
+    const lru = fakeLru(new Set(), vi.fn().mockResolvedValue(obj))
+    const queue = new RenderQueue(1)
+    queue.suspend()
+
+    await render(<Harness entries={models(1)} api={api} lru={lru} queue={queue} ao />)
+    await settle()
+    await bands({ '/models/m0.stl': 'far' }) // parked under ao=true
+    await act(async () => {
+      queue.resume()
+    })
+
+    await rerender(<Harness entries={models(1)} api={api} lru={lru} queue={queue} ao={false} />)
+    await settle()
+    await bands({ '/models/m0.stl': 'visible' }) // unpark under ao=false
+    await settle()
+
+    expect(vi.mocked(api.getThumb).mock.calls.at(-1)![2]).toBe(false)
+    expect(vi.mocked(renderThumbnail)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(renderThumbnail)).toHaveBeenCalledWith(obj, DEFAULT_CAMERA, 'y', false)
+    expect(vi.mocked(api.putThumb).mock.calls[0]![0].ao).toBe(false)
+  })
+
+  it('a far tile whose mesh is warm renders after every visible tile, and its PNG is filed', async () => {
+    // 3.4a, with its control: the same tile cold is parked instead.
+    const warm = new Set(['/models/m2.stl'])
+    const api = fakeCache(() => ({ status: 'miss' }))
+    const lru = fakeLru(warm)
+    const queue = new RenderQueue(1)
+    queue.suspend()
+
+    await render(<Harness entries={models(3)} api={api} lru={lru} queue={queue} ao />)
+    await settle()
+    await bands({
+      '/models/m0.stl': 'visible',
+      '/models/m1.stl': 'visible',
+      '/models/m2.stl': 'far',
+    })
+    await act(async () => {
+      queue.resume()
+    })
+    await settle()
+
+    expect(acquired(lru)).toEqual(['/models/m0.stl', '/models/m1.stl', '/models/m2.stl'])
+    expect(api.putThumb).toHaveBeenCalledTimes(3) // the kept job filed its PNG
+    expect(statuses()).toEqual(['ready', 'ready', 'ready'])
+
+    // The control, cold: same shape, no warm set — the far tile parks.
+    await act(async () => {
+      root!.unmount()
+    })
+    vi.mocked(renderThumbnail).mockClear()
+    const lru2 = fakeLru()
+    const api2 = fakeCache(() => ({ status: 'miss' }))
+    const queue2 = new RenderQueue(1)
+    queue2.suspend()
+    await render(<Harness entries={models(3)} api={api2} lru={lru2} queue={queue2} ao />)
+    await settle()
+    await bands({
+      '/models/m0.stl': 'visible',
+      '/models/m1.stl': 'visible',
+      '/models/m2.stl': 'far',
+    })
+    await act(async () => {
+      queue2.resume()
+    })
+    await settle()
+    expect(acquired(lru2)).toEqual(['/models/m0.stl', '/models/m1.stl'])
+    expect(statuses()).toEqual(['ready', 'ready', 'loading'])
+  })
+
+  it('a kept job woken cold and still far parks itself — proven by rendering on return', async () => {
+    // The self-park sets the flag, asserted by consequence: report the path
+    // visible afterwards and it renders, which only happens if the unpark path
+    // could reach it — re-ranking alone would find no queued job.
+    const warm = new Set(['/models/m0.stl'])
+    const api = fakeCache(() => ({ status: 'miss' }))
+    const lru = fakeLru(warm)
+    const queue = new RenderQueue(1)
+    queue.suspend()
+
+    await render(<Harness entries={models(1)} api={api} lru={lru} queue={queue} ao />)
+    await settle()
+    await bands({ '/models/m0.stl': 'far' }) // kept: warm, so not parked
+    warm.delete('/models/m0.stl') // evicted before its turn
+    await act(async () => {
+      queue.resume()
+    })
+    await settle()
+
+    expect(lru.acquire).not.toHaveBeenCalled() // parking never causes a mesh read
+    expect(statuses()).toEqual(['loading']) // never error
+
+    await bands({ '/models/m0.stl': 'visible' })
+    await settle()
+
+    expect(acquired(lru)).toEqual(['/models/m0.stl'])
+    expect(statuses()).toEqual(['ready'])
+  })
+
+  it('a kept job woken with its tile no longer far reads and renders — no stranded tile', async () => {
+    // The round-2 regression: kept means never flagged, so if the wake-up
+    // check consulted only the mesh, a visible tile would sit on loading with
+    // nothing to ever restart it.
+    const warm = new Set(['/models/m0.stl'])
+    const api = fakeCache(() => ({ status: 'miss' }))
+    const lru = fakeLru(warm)
+    const queue = new RenderQueue(1)
+    queue.suspend()
+
+    await render(<Harness entries={models(1)} api={api} lru={lru} queue={queue} ao />)
+    await settle()
+    await bands({ '/models/m0.stl': 'far' }) // kept at the far rank
+    warm.delete('/models/m0.stl') // evicted while queued
+    await bands({ '/models/m0.stl': 'visible' }) // the user scrolled back
+    await act(async () => {
+      queue.resume()
+    })
+    await settle()
+
+    // Woken visible: it pays the read — exactly right for a tile on screen.
+    expect(acquired(lru)).toEqual(['/models/m0.stl'])
+    expect(statuses()).toEqual(['ready'])
+  })
+
+  it('a slot created after the last report is still gated far by the band ref', async () => {
+    // The reconciler's same-path-new-mtime replacement starts unconditionally;
+    // the tail's read of the band in force is what parks it.
+    const api = fakeCache(() => ({ status: 'miss' }))
+    const lru = fakeLru()
+    const queue = new RenderQueue(1)
+
+    await render(<Harness entries={[one('/models/a.stl', 1)]} api={api} lru={lru} queue={queue} ao />)
+    await settle()
+    expect(statuses()).toEqual(['ready'])
+    await bands({ '/models/a.stl': 'far' })
+
+    await rerender(
+      <Harness entries={[one('/models/a.stl', 2)]} api={api} lru={lru} queue={queue} ao />,
+    )
+    await settle()
+
+    expect(api.getThumb).toHaveBeenLastCalledWith('/models/a.stl', 2, true)
+    expect(acquired(lru)).toEqual(['/models/a.stl']) // the first render's read only
+    expect(statuses()).toEqual(['loading'])
+  })
+
+  it('an unpark landing while the retirement’s lookup is in flight runs one pass, not two', async () => {
+    // 3.3b: unpark is clear-flag → retire → start, so the in-flight pass is
+    // dead before its successor exists. A bare start beside it runs two passes
+    // of one generation — both stay alive() into the queue, and at the queue's
+    // real concurrency of two they read and render the same mesh twice.
+    // (`setThumb`'s own retire dedupes the *PUT* either way — the second pass
+    // dies at its pre-PUT check — so the read and the render are the
+    // observables here, not the write. Falsified against the bare-start
+    // variant, which is how the PUT-count claim was caught overstating.)
+    let release!: () => void
+    const gate = new Promise<void>((r) => {
+      release = r
+    })
+    const api = {
+      getThumb: vi.fn((_p: string, _m: number, ao: boolean) =>
+        ao ? Promise.resolve({ status: 'miss' }) : gate.then(() => ({ status: 'miss' })),
+      ),
+      putThumb: vi.fn().mockResolvedValue(undefined),
+    } as unknown as ApiClient
+    const lru = fakeLru()
+    const queue = new RenderQueue(2)
+    queue.suspend()
+
+    await render(<Harness entries={models(1)} api={api} lru={lru} queue={queue} ao />)
+    await settle()
+    await bands({ '/models/m0.stl': 'far' }) // parked cold
+    await act(async () => {
+      queue.resume()
+    })
+
+    // The toggle retires the parked slot; its fresh lookup hangs on the gate.
+    await rerender(<Harness entries={models(1)} api={api} lru={lru} queue={queue} ao={false} />)
+    // The tile comes back while that lookup is still in flight.
+    await bands({ '/models/m0.stl': 'visible' })
+    release()
+    await settle()
+
+    expect(lru.acquire).toHaveBeenCalledTimes(1) // one mesh read, not two
+    expect(vi.mocked(renderThumbnail)).toHaveBeenCalledTimes(1)
+    expect(api.putThumb).toHaveBeenCalledTimes(1)
+    expect(statuses()).toEqual(['ready'])
+  })
+
+  it('a park landing after a render started leaves its stale-PNG fallback intact', async () => {
+    // 1.2a: the cancel handle answers false for a started job, so the park
+    // must not fire dropStale — the render's own catch still needs the stale
+    // PNG, and revoking it would write the error state 3.4 forbids.
+    let fail!: (err: Error) => void
+    vi.mocked(renderThumbnail).mockImplementationOnce(
+      () =>
+        new Promise<Blob>((_r, reject) => {
+          fail = reject
+        }),
+    )
+    const api = fakeCache(() => ({
+      status: 'hit',
+      pngUrl: URL.createObjectURL(new Blob()),
+      lighting: 'axis', // the retired label: stale pixels, re-render queued
+    }))
+    const lru = fakeLru()
+    const queue = new RenderQueue(1)
+
+    await render(<Harness entries={models(1)} api={api} lru={lru} queue={queue} ao />)
+    await settle()
+    expect(vi.mocked(renderThumbnail)).toHaveBeenCalledTimes(1) // started, drawing
+
+    await bands({ '/models/m0.stl': 'far' }) // the park lands under it
+    fail(new Error('render died'))
+    await settle()
+
+    // The catch fell back to the stale PNG — never the error state.
+    expect(statuses()).toEqual(['ready'])
+    for (const commit of renderLog) for (const cell of commit) expect(cell.startsWith('error')).toBe(false)
   })
 })

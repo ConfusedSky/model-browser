@@ -1,28 +1,74 @@
+/** Where a tile stands relative to the viewport, as the grid reports it.
+ *  Coarse on purpose: the queue is two jobs wide and cannot exploit finer
+ *  resolution than "on screen, about to be, known to be neither". */
+export type Band = 'visible' | 'near' | 'far'
+
 interface Job {
   run: () => Promise<void>
   cancelled: boolean
+  started: boolean
+  /** The path this render is for, or undefined for keyless work — a render the
+   *  user pressed for, which belongs to no slot and is never parked. */
+  key: string | undefined
 }
+
+/**
+ * How a job's band orders it. Keyless work ranks with `visible`: it exists only
+ * because the user pressed an on-screen control, and ranking it unreported
+ * would put a press behind a screenful of sweep misses. `undefined` (a key no
+ * report covers) sits *between* near and far — an unreported path may be
+ * anywhere, while `far` is the one band known to be off screen, so far work is
+ * taken last of all. Absent is therefore never far: a ranking that defaulted
+ * missing keys to far would park the world (thumbnail-sweep-priority D1).
+ */
+const RANK: Record<Band, number> = { visible: 0, near: 1, far: 3 }
+const UNREPORTED = 2
 
 /**
  * Limited-concurrency thumbnail render queue. Suspends while an orbit overlay
  * or lightbox is active (the shared renderer may only serve one purpose at a
  * time) and resumes where it left off.
+ *
+ * Pending work is taken by rank, not arrival: the grid replaces the whole
+ * ranking as the view scrolls (`setRanking`), and `pump` takes the best-ranked
+ * pending job, ties keeping insertion order — so a queue with no ranking at
+ * all behaves exactly as the FIFO it used to be (D1). A running job is never
+ * interrupted by a re-ranking; only what runs *next* changes.
  */
 export class RenderQueue {
   private jobs: Job[] = []
   private running = 0
   private suspended = false
   private resumeWaiters: (() => void)[] = []
+  private ranking: ReadonlyMap<string, Band> = new Map()
 
   constructor(private concurrency = 2) {}
 
-  push(run: () => Promise<void>): () => void {
-    const job: Job = { run, cancelled: false }
+  /**
+   * Queue a job, optionally keyed by the path it renders, and get back a
+   * cancel handle that **reports whether the job was still pending** — true
+   * exactly when the cancel prevented a run. The caller keys cleanup on that
+   * answer: a job that already started owns its resources (its stale-PNG
+   * fallback included) until it finishes on its own (D4/1.2a).
+   */
+  push(run: () => Promise<void>, key?: string): () => boolean {
+    const job: Job = { run, cancelled: false, started: false, key }
     this.jobs.push(job)
     this.pump()
     return () => {
+      if (job.started || job.cancelled) return false
       job.cancelled = true
+      return true
     }
+  }
+
+  /**
+   * Replace the ranking wholesale — the grid recomputes bands on scroll rather
+   * than moving keys one at a time (D1/D2). Keys absent from the map are
+   * unreported, never far.
+   */
+  setRanking(bands: ReadonlyMap<string, Band>): void {
+    this.ranking = bands
   }
 
   suspend(): void {
@@ -46,11 +92,42 @@ export class RenderQueue {
     return new Promise((resolve) => this.resumeWaiters.push(resolve))
   }
 
+  private rankOf(job: Job): number {
+    if (job.key === undefined) return RANK.visible
+    const band = this.ranking.get(job.key)
+    return band === undefined ? UNREPORTED : RANK[band]
+  }
+
+  /** The best-ranked pending job, ties by insertion order — `jobs` is kept in
+   *  arrival order, so the first of the best rank is the oldest of them. */
+  private take(): Job | undefined {
+    let bestAt = -1
+    let bestRank = Number.POSITIVE_INFINITY
+    for (let i = 0; i < this.jobs.length; i++) {
+      const job = this.jobs[i]!
+      if (job.cancelled) continue
+      const rank = this.rankOf(job)
+      if (rank < bestRank) {
+        bestRank = rank
+        bestAt = i
+        if (rank === 0) break
+      }
+    }
+    if (bestAt === -1) {
+      // Nothing runnable; drop the cancelled husks so they are not rescanned.
+      this.jobs = []
+      return undefined
+    }
+    const job = this.jobs[bestAt]!
+    this.jobs.splice(bestAt, 1)
+    return job
+  }
+
   private pump(): void {
     while (!this.suspended && this.running < this.concurrency) {
-      const job = this.jobs.shift()
+      const job = this.take()
       if (job === undefined) return
-      if (job.cancelled) continue
+      job.started = true
       this.running++
       void job.run().finally(() => {
         this.running--

@@ -80,7 +80,7 @@ import { sameListing, SIMILAR_K, toUrlView, type Prefs, type Subject, type View 
 import { MeshLru } from './three/lru'
 import { disposeModel, embedded3mfThumbnail, formatOf, geometryBytes, parseModel } from './three/models'
 import { POSE_VERSION } from './three/pose'
-import { RenderQueue } from './three/queue'
+import { RenderQueue, type Band } from './three/queue'
 import { RIG_VERSION, THUMB_LIGHTING } from './three/renderer'
 import ViewerLayer, { type ViewerState } from './viewer/ViewerLayer'
 import { aoEnabled, setAoEnabled } from './viewer/aoToggle'
@@ -667,6 +667,11 @@ export default function App() {
   previewsRef.current = previews
   const listingRef = useRef(entries)
   listingRef.current = entries
+  /** The scroller `Grid`'s observers root at — a `RefObject`, never its
+   *  `.current`, so its identity is stable in the observer effect's deps and
+   *  its population (during commit, before passive effects) is never waited
+   *  on (sweep-priority D2). */
+  const mainRef = useRef<HTMLElement>(null)
   /**
    * Ask for one folder's preview, at most once per listing.
    *
@@ -867,7 +872,7 @@ export default function App() {
           : libraryMissingText(libraryState.root)
 
   const showSkeleton = useDelayedFlag(busy(state), SKELETON_DELAY_MS)
-  const { thumbs, setThumb, setPlaceholder, discardThumbFraming } = useThumbnails(
+  const { thumbs, setThumb, setPlaceholder, discardThumbFraming, setBands } = useThumbnails(
     thumbEntries,
     api,
     lru,
@@ -1681,6 +1686,44 @@ export default function App() {
     () => (anchor === undefined ? filteredListing : [anchor, ...filteredListing]),
     [anchor, filteredListing],
   )
+  /**
+   * `Grid`'s band report with App's own knowledge merged in (sweep-priority
+   * D3/2.5): a model the kind option or the find filter hid has a slot but no
+   * tile, so no observer can report it — unmerged it stays unreported, ranked
+   * *above* far, and the sweep keeps reading entries the user just filtered
+   * away. Two rules, each load-bearing:
+   *
+   * - the hidden set is `entries` minus `filteredListing` — the tiles a
+   *   restriction actually hid (the anchor is prepended separately and so
+   *   exempt; kind-hidden tiles deliberately included). Never "`thumbEntries`
+   *   minus `shownEntries`": that difference contains every folder-preview
+   *   model by construction, and marking those far would park the sheet cells
+   *   of a folder on screen.
+   * - the merge never overwrites a band the report carries — the per-path max
+   *   at this layer. A hidden tile can simultaneously be a visible folder's
+   *   preview cell, and the folder's registration must win.
+   *
+   * Read through per-render refs (the `requestPeek` idiom) so `Grid`'s
+   * observer effect sees one stable identity; built on the lists themselves it
+   * would churn per find-filter keystroke and per landed peek. Clearing the
+   * filter re-runs the observer effect via `shownEntries`, and the fresh
+   * merged reports unpark what is back on or near the screen.
+   */
+  const filteredRef = useRef(filteredListing)
+  filteredRef.current = filteredListing
+  const reportBands = useCallback(
+    (bands: ReadonlyMap<string, Band>) => {
+      let merged: Map<string, Band> | null = null
+      const shown = new Set(filteredRef.current.map((e) => e.path))
+      for (const e of listingRef.current) {
+        if (e.kind !== 'model' || shown.has(e.path) || bands.has(e.path)) continue
+        merged ??= new Map(bands)
+        merged.set(e.path, 'far')
+      }
+      setBands(merged ?? bands)
+    },
+    [setBands],
+  )
   // A kind restriction can empty the grid too, and it is a different sentence:
   // the results are there, this view is not showing them. It is decided first
   // and from `kept`, so the message names the control that actually hid the
@@ -2367,6 +2410,7 @@ export default function App() {
             differ by the scrollbar's ~15px, which is enough to drop the grid's
             auto-fill from 7 columns to 6 and resize every tile by ~29px. */}
         <main
+          ref={mainRef}
           className="min-w-0 flex-1 overflow-auto [scrollbar-gutter:stable]"
           aria-busy={(libraryMessage === null && showSkeleton) || undefined}
         >
@@ -2476,6 +2520,8 @@ export default function App() {
                   scoreScale={scoreScale}
                   previews={previews}
                   onPeek={requestPeek}
+                  onBands={reportBands}
+                  scrollRoot={mainRef}
                 />
               ) : null}
               {emptyNotice}

@@ -52,3 +52,149 @@ describe('RenderQueue suspension', () => {
     expect(ran).toEqual([])
   })
 })
+
+/** A job that records its run, pushed while the queue is held so ordering is
+ *  decided by rank alone, never by how fast the first dispatch went. */
+function recorder(ran: string[], name: string) {
+  return async () => {
+    ran.push(name)
+  }
+}
+
+describe('RenderQueue priority', () => {
+  it('takes visible before near, near before unreported, unreported before far', async () => {
+    const queue = new RenderQueue(1)
+    const ran: string[] = []
+    queue.suspend()
+    queue.push(recorder(ran, 'far'), 'far')
+    queue.push(recorder(ran, 'unreported'), 'unreported')
+    queue.push(recorder(ran, 'near'), 'near')
+    queue.push(recorder(ran, 'visible'), 'visible')
+    queue.setRanking(
+      new Map([
+        ['far', 'far'],
+        ['near', 'near'],
+        ['visible', 'visible'],
+      ]),
+    )
+    queue.resume()
+    await tick()
+    expect(ran).toEqual(['visible', 'near', 'unreported', 'far'])
+  })
+
+  it('a key absent from the ranking is unreported, never far', async () => {
+    // The regression D1 names: a ranking that defaulted missing keys to far
+    // would park the world and still pass every ordering cell that only ranks
+    // what it mentions. Asserted directly: the unmentioned key beats far.
+    const queue = new RenderQueue(1)
+    const ran: string[] = []
+    queue.suspend()
+    queue.push(recorder(ran, 'mentioned-far'), 'a')
+    queue.push(recorder(ran, 'absent'), 'b')
+    queue.setRanking(new Map([['a', 'far']]))
+    queue.resume()
+    await tick()
+    expect(ran).toEqual(['absent', 'mentioned-far'])
+  })
+
+  it('keyless jobs run with visible-ranked ones, in insertion order', async () => {
+    // A keyless push is a user press (refreshThumbnail, setOrbitAxis) — it
+    // must not wait behind a screenful of unranked sweep misses.
+    const queue = new RenderQueue(1)
+    const ran: string[] = []
+    queue.suspend()
+    queue.push(recorder(ran, 'unranked'), 'u')
+    queue.push(recorder(ran, 'press'))
+    queue.push(recorder(ran, 'visible'), 'v')
+    queue.setRanking(new Map([['v', 'visible']]))
+    queue.resume()
+    await tick()
+    expect(ran).toEqual(['press', 'visible', 'unranked'])
+  })
+
+  it('an unranked queue behaves exactly as the FIFO it used to be', async () => {
+    const queue = new RenderQueue(1)
+    const ran: string[] = []
+    queue.suspend()
+    for (const name of ['a', 'b', 'c', 'd']) queue.push(recorder(ran, name), name)
+    queue.resume()
+    await tick()
+    expect(ran).toEqual(['a', 'b', 'c', 'd'])
+  })
+
+  it('ties keep insertion order within a band', async () => {
+    const queue = new RenderQueue(1)
+    const ran: string[] = []
+    queue.suspend()
+    for (const name of ['a', 'b', 'c']) queue.push(recorder(ran, name), name)
+    queue.setRanking(
+      new Map([
+        ['a', 'near'],
+        ['b', 'near'],
+        ['c', 'near'],
+      ]),
+    )
+    queue.resume()
+    await tick()
+    expect(ran).toEqual(['a', 'b', 'c'])
+  })
+
+  it('a re-ranking mid-flight changes what runs next, never what is running', async () => {
+    const queue = new RenderQueue(1)
+    const ran: string[] = []
+    let release = (): void => {}
+    const held = new Promise<void>((r) => {
+      release = r
+    })
+    queue.push(async () => {
+      ran.push('running')
+      await held
+      ran.push('running-done')
+    })
+    queue.push(recorder(ran, 'a'), 'a')
+    queue.push(recorder(ran, 'b'), 'b')
+    await tick()
+    expect(ran).toEqual(['running'])
+    // b overtakes a while the first job holds the only slot — and the running
+    // job is not interrupted by the ranking arriving under it.
+    queue.setRanking(new Map<string, 'visible' | 'far'>([['b', 'visible'], ['a', 'far']]))
+    release()
+    await tick()
+    expect(ran).toEqual(['running', 'running-done', 'b', 'a'])
+  })
+
+  it('the cancel handle answers true for a pending job, false for a started one', async () => {
+    const queue = new RenderQueue(1)
+    let release = (): void => {}
+    const held = new Promise<void>((r) => {
+      release = r
+    })
+    const cancelStarted = queue.push(async () => {
+      await held
+    })
+    const cancelPending = queue.push(async () => {})
+    await tick()
+    // The first job holds the slot (started); the second waits (pending). The
+    // answer is what keys `dropStale`: a started job owns its stale-PNG
+    // fallback until it finishes on its own (1.2a).
+    expect(cancelStarted()).toBe(false)
+    expect(cancelPending()).toBe(true)
+    // Idempotent: a second ask never claims the cancel again.
+    expect(cancelPending()).toBe(false)
+    release()
+    await tick()
+  })
+
+  it('priority respects the suspension gate exactly as FIFO did', async () => {
+    const queue = new RenderQueue(1)
+    const ran: string[] = []
+    queue.suspend()
+    queue.push(recorder(ran, 'v'), 'v')
+    queue.setRanking(new Map([['v', 'visible']]))
+    await tick()
+    expect(ran).toEqual([]) // ranked or not, nothing starts while suspended
+    queue.resume()
+    await tick()
+    expect(ran).toEqual(['v'])
+  })
+})

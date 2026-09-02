@@ -1,9 +1,25 @@
-import { memo, useEffect, useRef } from 'react'
+import { memo, useEffect, useRef, type RefObject } from 'react'
 import { baseName } from '../../../shared/names'
 import type { DirEntry, IndexScore } from '../../../shared/types'
 import type { ThumbState } from '../hooks/useThumbnails'
 import { formatCosine, formatZ } from '../lib/format'
 import { SCALE_BADGE, SCALE_SPOKEN, Z_LABEL, type ScoreScale } from '../lib/scoreScale'
+import type { Band } from '../three/queue'
+
+/**
+ * The park boundary: how far past the scrollport a tile may sit before its
+ * render is parked, as the band observer's `rootMargin`. Generous relative to
+ * the prefetch (the margin-less observer's edge) so that ordinary scrolling
+ * oscillation does not park-and-restart the same tile — crossing it takes
+ * deliberate travel. Initial value pending the tune-then-freeze pass (tasks
+ * 6.2b): two scrollport-heights above and below, judged against the 500-tile
+ * flat listing; record the judged value and screen height there before
+ * archiving.
+ */
+export const PARK_ROOT_MARGIN = '200% 0px 200% 0px'
+
+/** How near a band sorts — the per-path max ("nearest wins") compares on this. */
+const NEARNESS: Record<Band, number> = { visible: 0, near: 1, far: 2 }
 
 interface Props {
   entries: DirEntry[]
@@ -42,9 +58,29 @@ interface Props {
    * compares them by identity like `score`.
    */
   previews: ReadonlyMap<string, DirEntry[]>
-  /** Ask for a folder's preview — raised once per tile, when it first comes on
-   *  screen. App holds it by identity and drops a repeat (D1). */
+  /** Ask for a folder's preview — raised when a tile crosses the park
+   *  boundary. App holds it by identity and its guard drops repeats (D1);
+   *  since the band observer keeps watching, repeats now arrive per scroll,
+   *  and that guard is the only one (sweep-priority 2.2). */
   onPeek: (path: string) => void
+  /**
+   * Report every observed tile's band, wholesale, after each observer batch —
+   * `visible` / `near` / `far`, with a folder's preview models registered
+   * under the folder's own band and a path shown in more than one place
+   * taking the nearest (sweep-priority D2). App wraps this before it reaches
+   * the render pipeline; held by identity like `onPeek`.
+   */
+  onBands: (bands: ReadonlyMap<string, Band>) => void
+  /**
+   * The scrolling container both observers use as their `root` — App's
+   * `<main>`, as a `RefObject` (stable in deps; `.current` is populated
+   * during commit, before passive effects). It must be the scroller: the
+   * intersection algorithm clips the target against every clipping ancestor
+   * before the root's margin applies, so a `rootMargin` against the default
+   * viewport root is inert and the `near` band collapses to the viewport
+   * edge (sweep-priority D2).
+   */
+  scrollRoot: RefObject<HTMLElement | null>
 }
 
 /**
@@ -81,40 +117,134 @@ function Grid({
   scoreScale,
   previews,
   onPeek,
+  onBands,
+  scrollRoot,
 }: Props) {
   const gridRef = useRef<HTMLDivElement>(null)
   /**
-   * One observer for the grid, watching folder tiles only (D1): a preview costs
-   * a request, so it is paid for folders the user actually scrolls to rather
-   * than for every folder in the listing. Zip tiles are never previewed and are
-   * never observed — `data-dir-tile` is written by the `dir` branch alone.
+   * Each observed tile's last record from both observers, keyed by path — the
+   * band is derived from the pair (`inView` → visible, else `inPark` → near,
+   * else far). Component-level, because two effects read it: the observer
+   * effect writes it, and the previews effect below republishes from it.
+   */
+  const bandStateRef = useRef<Map<string, { inPark: boolean; inView: boolean }>>(new Map())
+  /**
+   * The observer effect's publish function, reachable by the previews effect —
+   * two effects cannot share a closure, so the seam is this ref, written on
+   * each observer-effect run and cleared on its teardown.
+   */
+  const publishRef = useRef<(() => void) | null>(null)
+  /**
+   * `previews` at report time, not at effect-build time: the registration rule
+   * reads it inside observer callbacks, and putting `previews` in the effect's
+   * deps instead would disconnect and rebuild both observers once per landed
+   * peek — `requestPeek`'s `land` mints a new map identity each time
+   * (sweep-priority D2).
+   */
+  const previewsRef = useRef(previews)
+  previewsRef.current = previews
+  /**
+   * Two observers in one effect, rooted at the scroller (sweep-priority D2).
+   * The band observer — the one `folder-contact-sheets` landed for peeks,
+   * widened to model tiles — carries the park margin: its events are the
+   * far-boundary crossings, and `onPeek` rides it, so a folder's peek now
+   * fires at the park boundary, screens before the tile is seen (a deliberate
+   * timing change; the peek is a cheap bounded advisory and that is what a
+   * prefetch band is for). The margin-less observer splits visible from near:
+   * its events are the scrollport-edge crossings that upgrade a prefetched
+   * tile the moment it appears. Three bands take both — one `rootMargin`
+   * yields two states, and `intersectionRatio` is measured against the
+   * *expanded* root, so visible and near read alike to a single observer.
+   *
+   * No `unobserve` on first intersection any more: a band tracker keeps
+   * watching, so `App`'s `requestPeek` guard (refusing a path already
+   * answered or in flight) is the only repeat-peek guard — asserted in the
+   * suite rather than trusted.
    *
    * Built and populated in **one** effect so there is no window in which an
-   * observer exists but nothing is observed, and no second effect to keep in
-   * step with this one's deps. It is rebuilt when the listing changes, which is
-   * also when App clears the map the peeks fill — the two stay in step by
-   * keying on the same array.
-   *
-   * `onPeek` is App's `useCallback`, stable across renders; if it ever stops
-   * being, this tears down and rebuilds the observer on every render.
+   * observer exists but nothing is observed. Rebuilt when the listing
+   * changes, which is also when App clears the previews map — the two stay in
+   * step by keying on the same array. Everything else in the dependency list
+   * is identity-stable by design (App's `useCallback`s, the `RefObject`), and
+   * must stay so: an unstable entry here pays an observer rebuild per render.
    */
   useEffect(() => {
     const root = gridRef.current
-    if (root === null) return
-    const observer = new IntersectionObserver((records) => {
-      for (const record of records) {
-        if (!record.isIntersecting) continue
-        // Unobserved on the way past: one peek per tile per listing is what the
-        // requirement asks for, and App's own guard is the backstop for the
-        // tile that is re-observed after a re-render.
-        observer.unobserve(record.target)
-        const path = (record.target as HTMLElement).dataset.dirTile
-        if (path !== undefined) onPeek(path)
+    const scroller = scrollRoot.current
+    if (root === null || scroller === null) return
+    const state = bandStateRef.current
+    state.clear()
+    const stateOf = (path: string): { inPark: boolean; inView: boolean } => {
+      let s = state.get(path)
+      if (s === undefined) {
+        s = { inPark: false, inView: false }
+        state.set(path, s)
       }
+      return s
+    }
+    const publish = (): void => {
+      const bands = new Map<string, Band>()
+      // The per-path max: a path shown in more than one place — its own tile
+      // and a folder's preview — takes the nearest band, so a far band never
+      // cancels visible work (D2).
+      const put = (path: string, band: Band): void => {
+        const cur = bands.get(path)
+        if (cur === undefined || NEARNESS[band] < NEARNESS[cur]) bands.set(path, band)
+      }
+      const shown = previewsRef.current
+      for (const [path, s] of state) {
+        const band: Band = s.inView ? 'visible' : s.inPark ? 'near' : 'far'
+        put(path, band)
+        // A folder's preview models register under the folder's own band —
+        // they have no tile of their own, and unregistered they would rank
+        // after every visible tile even while their folder is on screen.
+        const cells = shown.get(path)
+        if (cells !== undefined) for (const cell of cells) put(cell.path, band)
+      }
+      onBands(bands)
+    }
+    publishRef.current = publish
+    const apply = (
+      records: IntersectionObserverEntry[],
+      half: 'inPark' | 'inView',
+      peeks: boolean,
+    ): void => {
+      for (const record of records) {
+        const el = record.target as HTMLElement
+        const path = el.dataset.dirTile ?? el.dataset.modelTile
+        if (path === undefined) continue
+        stateOf(path)[half] = record.isIntersecting
+        if (peeks && record.isIntersecting && el.dataset.dirTile !== undefined) onPeek(path)
+      }
+      publish()
+    }
+    const bandObserver = new IntersectionObserver((records) => apply(records, 'inPark', true), {
+      root: scroller,
+      rootMargin: PARK_ROOT_MARGIN,
     })
-    for (const el of root.querySelectorAll<HTMLElement>('[data-dir-tile]')) observer.observe(el)
-    return () => observer.disconnect()
-  }, [entries, onPeek])
+    const viewObserver = new IntersectionObserver((records) => apply(records, 'inView', false), {
+      root: scroller,
+    })
+    for (const el of root.querySelectorAll<HTMLElement>('[data-dir-tile], [data-model-tile]')) {
+      bandObserver.observe(el)
+      viewObserver.observe(el)
+    }
+    return () => {
+      bandObserver.disconnect()
+      viewObserver.disconnect()
+      publishRef.current = null
+    }
+  }, [entries, onPeek, onBands, scrollRoot])
+
+  /**
+   * A landed peek's models join their folder's band at once, with no observer
+   * churn: republish the already-tracked bands through the ref. Declared
+   * *after* the observer effect — setups run in declaration order, and an
+   * earlier declaration would fire against an unset ref on mount.
+   */
+  useEffect(() => {
+    publishRef.current?.()
+  }, [previews])
 
   // Below the hooks, not above them: the observer effect must run on every
   // render of this component, and an early return before it would make it

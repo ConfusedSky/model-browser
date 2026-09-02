@@ -61,7 +61,13 @@ class StubObserver {
   static live: StubObserver[] = []
   readonly targets = new Set<Element>()
   private connected = true
-  constructor(readonly callback: IntersectionObserverCallback) {
+  /** `options` identifies which of the grid's two observers this is: the band
+   *  observer carries the park `rootMargin`, the visible-splitting one none —
+   *  the selector `report` addresses them by (sweep-priority 5.2). */
+  constructor(
+    readonly callback: IntersectionObserverCallback,
+    readonly options?: IntersectionObserverInit,
+  ) {
     StubObserver.live.push(this)
   }
   observe(el: Element): void {
@@ -84,18 +90,31 @@ class StubObserver {
   }
 }
 
-/** Report `el` as on screen to whichever live observer is watching it. */
-async function intersect(el: Element): Promise<void> {
+/**
+ * Deliver one record about `el` to each of the grid's two observers — the band
+ * (park-margin) observer gets `inPark`, the margin-less one `inView` — so a
+ * cell can express all three bands: `{inPark: true, inView: true}` is visible,
+ * `{inPark: true, inView: false}` near, `{inPark: false, inView: false}` far.
+ * The old `intersect` reached every observer with `true` alike, which with two
+ * observers could only ever say "visible" (sweep-priority 5.2).
+ */
+async function report(el: Element, at: { inPark: boolean; inView: boolean }): Promise<void> {
   await act(async () => {
     for (const observer of StubObserver.live) {
       if (!observer.live || !observer.targets.has(el)) continue
+      const isIntersecting = observer.options?.rootMargin !== undefined ? at.inPark : at.inView
       observer.callback(
-        [{ target: el, isIntersecting: true } as unknown as IntersectionObserverEntry],
+        [{ target: el, isIntersecting } as unknown as IntersectionObserverEntry],
         observer as unknown as IntersectionObserver,
       )
     }
   })
   await settle()
+}
+
+/** Report `el` as fully on screen. */
+async function intersect(el: Element): Promise<void> {
+  await report(el, { inPark: true, inView: true })
 }
 
 function dirTile(path: string): HTMLElement {
@@ -124,9 +143,11 @@ function hasIcon(path: string): boolean {
  * Take every tile off screen and bring it back, inside one listing — the find
  * filter unmounts the tiles it hides, and the grid re-observes what returns.
  *
- * This is the shape "scrolled away and back" takes in a test, and it is the
- * only one that reaches App's own guard: a *second* report of a tile that was
- * never unmounted is stopped earlier, by the observer's `unobserve`.
+ * This is the shape "scrolled away and back" takes in a test. Since
+ * `thumbnail-sweep-priority` dropped the observer's `unobserve` (a band
+ * tracker keeps watching), every repeat report — re-observed or not — reaches
+ * `App`'s `requestPeek`, whose guard is the one thing standing between a
+ * scroll and a duplicate peek.
  */
 async function awayAndBack(): Promise<void> {
   const { openFind, findInput, type } = await import('./appHarness')
@@ -162,9 +183,9 @@ describe('folder contact sheets', () => {
     await intersect(dirTile('/models/a'))
     expect(peek.mock.calls).toEqual([['/models/a']])
 
-    // A second report of the same tile. Stopped by the observer, which drops a
-    // tile the moment it has asked — the map guard is a separate mechanism and
-    // has its own test below.
+    // A second report of the same tile. The observer no longer unobserves —
+    // a band tracker keeps watching (sweep-priority 2.2) — so this repeat
+    // reaches `requestPeek`, and its guard is the only thing refusing it.
     await intersect(dirTile('/models/a'))
     expect(peek).toHaveBeenCalledTimes(1)
   })
@@ -703,5 +724,148 @@ describe('a peek landing resets nothing (D3)', () => {
     })
     await settle()
     expect(container.querySelector('[data-model-tile="/models/b.stl"] img')).not.toBeNull()
+  })
+})
+
+// ─── thumbnail-sweep-priority (5.2) ─────────────────────────────────────────
+// The band pipeline end to end: Grid's two observers → App's wrapper →
+// useThumbnails' parking. Only an App mount has all three, which is why these
+// cells live here and not in thumbnailQueue.test.tsx.
+
+function modelTile(path: string): HTMLElement {
+  const el = container.querySelector<HTMLElement>(`[data-model-tile="${path}"]`)
+  if (el === null) throw new Error(`no model tile for ${path}`)
+  return el
+}
+
+/** The paths whose renders were filed — a parked model never reaches `putThumb`. */
+const rendered = (): string[] => putThumb.mock.calls.map((c) => (c[0] as { path: string }).path)
+
+/** Hold every lookup until `open()`, so a band decision can land before any
+ *  tail is pushed — the real grid's misses resolve too fast to race by hand. */
+function gateThumbs(): { open: () => Promise<void> } {
+  let opened = false
+  const waiters: (() => void)[] = []
+  getThumb.mockImplementation(() =>
+    opened
+      ? Promise.resolve({ status: 'miss' })
+      : new Promise((resolve) => waiters.push(() => resolve({ status: 'miss' }))),
+  )
+  return {
+    open: async () => {
+      opened = true
+      await act(async () => {
+        for (const w of waiters) w()
+      })
+      await settle()
+    },
+  }
+}
+
+describe('bands park and unpark through the whole pipeline', () => {
+  it('a visible folder’s preview models are rendered — never parked by the hidden-set merge', async () => {
+    // The cell that fails if App's wrapper over-reaches: preview models are in
+    // `thumbEntries` and never in `shownEntries`, so a wrapper built on that
+    // difference marks every one of them far and the sheet cells of a folder
+    // on screen are parked instead of drawn (round-2 review, N1).
+    const gate = gateThumbs()
+    peek.mockResolvedValue(found(2))
+    await mountApp('/models', ONE_FOLDER)
+    await intersect(dirTile('/models/a'))
+    await gate.open()
+
+    expect(rendered()).toEqual(
+      expect.arrayContaining(['/models/a/m0.stl', '/models/a/m1.stl']),
+    )
+  })
+
+  it('a filter-hidden model is reported far through App’s wrapper and parks; back, it renders', async () => {
+    const gate = gateThumbs()
+    const LISTING: DirListing = {
+      path: '/models',
+      entries: [model('x.stl'), model('y.stl')],
+    }
+    await mountApp('/models', LISTING)
+    const { openFind, findInput, type } = await import('./appHarness')
+    await openFind()
+    await type(findInput()!, 'x')
+    await settle()
+    // A report arrives while y's tile is hidden: the wrapper merges y as far.
+    await report(modelTile('/models/x.stl'), { inPark: true, inView: true })
+    await gate.open()
+
+    expect(rendered()).toContain('/models/x.stl')
+    expect(rendered()).not.toContain('/models/y.stl') // parked, cold, unread
+
+    // The filter clears; y's tile returns and reports — the ordinary unpark.
+    await type(findInput()!, '')
+    await settle()
+    await report(modelTile('/models/y.stl'), { inPark: true, inView: true })
+    await settle()
+
+    expect(rendered()).toContain('/models/y.stl')
+  })
+
+  it('a hidden tile that is a visible folder’s preview cell keeps the folder’s band', async () => {
+    // The merge never overwrites a band the report carries: the folder's
+    // registration wins over the wrapper's far. The preview deliberately names
+    // a path outside the folder — the fixture's liberty, since the mechanism
+    // joins on paths and the server's containment is not what is under test.
+    const gate = gateThumbs()
+    const LISTING: DirListing = {
+      path: '/models',
+      entries: [dir('alpha'), model('other.stl')],
+    }
+    peek.mockResolvedValue([model('other.stl')])
+    await mountApp('/models', LISTING)
+    await intersect(dirTile('/models/alpha')) // peek lands; other.stl is a cell
+    const { openFind, findInput, type } = await import('./appHarness')
+    await openFind()
+    await type(findInput()!, 'alpha') // hides other.stl's tile, keeps the folder
+    await settle()
+    await report(dirTile('/models/alpha'), { inPark: true, inView: true })
+    await gate.open()
+
+    // Hidden as a tile, shown as a cell: the visible folder's band won.
+    expect(rendered()).toContain('/models/other.stl')
+  })
+
+  it('a far folder parks its preview cells; a visible tile of the same path wins them back', async () => {
+    // Both halves of the per-path max: registration under the folder's band
+    // parks the cells of a folder scrolled far, and the nearest position wins
+    // where the same model is also an on-screen tile.
+    const gate = gateThumbs()
+    const LISTING: DirListing = {
+      path: '/models',
+      entries: [dir('a'), model('x.stl')],
+    }
+    peek.mockResolvedValue([model('x.stl')])
+    await mountApp('/models', LISTING)
+    await intersect(dirTile('/models/a')) // peek lands under a visible folder
+    await report(dirTile('/models/a'), { inPark: false, inView: false }) // now far
+    await gate.open()
+
+    expect(rendered()).not.toContain('/models/x.stl') // the cell parked with its folder
+
+    await report(modelTile('/models/x.stl'), { inPark: true, inView: true })
+    await settle()
+
+    expect(rendered()).toContain('/models/x.stl') // its own tile's band won
+  })
+
+  it('a near report upgrades a parked model without waiting for visible', async () => {
+    // The delta's clause is three-valued — "no longer reported far" — so near
+    // is enough to unpark (round-2 review, N3).
+    const gate = gateThumbs()
+    const LISTING: DirListing = { path: '/models', entries: [model('x.stl')] }
+    await mountApp('/models', LISTING)
+    await report(modelTile('/models/x.stl'), { inPark: false, inView: false }) // far
+    await gate.open()
+    expect(rendered()).not.toContain('/models/x.stl')
+
+    await report(modelTile('/models/x.stl'), { inPark: true, inView: false }) // near
+    await settle()
+
+    expect(rendered()).toContain('/models/x.stl')
   })
 })
