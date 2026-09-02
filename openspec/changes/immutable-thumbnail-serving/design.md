@@ -112,7 +112,12 @@ gen (that change's declared seam), the client is fully keyed from the start and 
 The gen-carrying request must also *answer* the current gen in the body: a stale-gen
 request (the client's number lost a race with a concurrent write) is answered with the
 current bytes and current gen, un-cached (`no-cache`), so the client re-keys — never a
-redirect, never an error.
+redirect, never an error. One limit of this tier, found by review after landing
+(a2c5c28): it only helps a request that *reaches the server*, and a browser holding an
+immutable answer at the outdated number never sends one. So every writer that changes
+an entry must move the client's number through the one seam external pixels already
+enter by — `ThumbState.gen`, adopted by `setThumb` absence-included — rather than
+counting on this tier to catch what the browser will not ask.
 
 ### D3: A miss is `no-store`
 

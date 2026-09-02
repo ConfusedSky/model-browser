@@ -46,9 +46,12 @@
 - [x] 2.2 `useThumbnails`: keep the last-seen gen on the entry's slot as `thumbGen` —
       NOT `generation`, which `EntrySlot` already uses for its retirement counter
       (review m15) — pass it on that entry's next fetch, update it from GET and PUT
-      echoes. Hook PUTs only: the out-of-hook PUT sites (`App`'s orbit persist and
-      `entryActions`' three) have no slot to write back to and rely on the stale-gen
-      tier, which is what it exists for (review m16). No persistence — slots retire on
+      echoes. The out-of-hook PUT sites reach the slot through `setThumb` after all
+      — this line's first version had them "rely on the stale-gen tier", which the
+      post-landing review (a2c5c28) proved unreachable: an immutable-cached answer
+      at the outdated number never contacts the server. `ThumbState` carries `gen`;
+      writers that know their echo pass it, `discardThumbFraming` clears, absence
+      means re-learn. No persistence — slots retire on
       navigation, so each listing visit's first fetch per entry rides the ETag tier
       until listings deliver gens
 - [x] 2.3 Client tests: gen present → appended to the URL; absent → byte-identical
