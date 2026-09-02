@@ -1,62 +1,92 @@
 # Thumbnail Image Serving
 
+> Reviewed twice before implementation (2026-09-02): a peer session's review
+> (eviction fallback, the `gen` contract) and a fresh opus review whose
+> twenty-three findings are folded in here and dispositioned in design D8.
+> The second review also corrected this proposal's cost story — read the Why
+> as it stands, not as first drafted.
+
 ## Why
 
 Measured 2026-09-02 on the real library (this session's run — re-measure before
-citing, task 6.1): opening the 500-tile flat root with ~60% of its thumbnails
+citing, task 6.2): opening the 500-tile flat root with ~60% of its thumbnails
 already cached cost **618 `/api/thumb` lookups, 49.7 MB over the wire and 65
 seconds of wall time** — against one `/api/dir` at 434 ms and a pose wave of
 two requests at 37 ms. Every cached tile is a separate JSON request whose body
-carries the PNG *base64-encoded* (~80 KB each), parsed by the client into a
-Blob and minted as an object URL, through an 8-wide FIFO limiter that makes a
-visible tile's hit wait behind hundreds of off-screen ones, on a disk the
-thumbnail-sweep drain is reading meshes from at the same time. A local server
-feels slow because the cached path costs almost as much as the uncached one.
+carries the PNG base64-encoded (~80 KB each), parsed into a Blob and minted as
+an object URL, through an 8-wide FIFO limiter that makes a visible tile's hit
+wait behind hundreds of off-screen ones.
 
-`immutable-thumbnail-serving` (2026-09-02) made those lookups HTTP-cacheable
-by generation, and `listing-tree-cache` §6 will attach each entry's thumbnail
-state to the listing. Neither removes the request: the first keeps its JSON
-body, and its own Non-Goals rule out an image response; the second delivers
-the *state*, not the bytes. This change is the shape both were pointing at.
+What those 65 seconds are, honestly: 49.7 MB at ~765 KB/s over loopback is not
+a transport cost. It is the USB disk serving 618 PNG reads while the sweep's
+far drain pulled 2.4 GB of meshes off the same head. So the wins are three,
+and they are not the same win:
+
+1. **On a first visit, the cost is how many cached tiles are looked up at
+   all.** A tile far off screen does not need its 80 KB in memory until the
+   user approaches it. Today's limiter looks up every tile in listing order;
+   ranking those lookups by the sweep's band map and *holding* the far ones
+   turns 618 reads into the ~16 on screen plus the near band — a pure client
+   change on machinery that already exists, and the first step here (§0).
+2. **On a revisit, the cost should be zero.** `immutable-thumbnail-serving`
+   made the lookup cacheable by generation, but a cacheable JSON request is
+   still a request, a parse and a Blob. An image the tile references by URL is
+   answered by the browser's own cache with no request, once the listing can
+   say which image and which generation.
+3. **A lookup for a tile the user can see must not wait on the drain.** The
+   deferred far reads and the cache lookups share one disk; ranking cannot
+   express "do not start that 25 MB read while this 50 KB read waits" across
+   two queues, a gate can.
+
+`listing-tree-cache` §6 will attach each entry's thumbnail state to the
+listing; `immutable-thumbnail-serving` gave the lookup its generation and
+cache tiers. Neither removes the request. This change is the shape both were
+pointing at, staged so the half that needs nothing from anyone lands first.
 
 ## What Changes
 
+- **§0, landable today: far lookups are held, and lookups are ranked.** The
+  lookup limiter becomes a ranked queue on the same band map that ranks
+  renders; a lookup for a `far` tile is not issued until the tile is nearer.
+  Unlike renders, held lookups do *not* drain at idle: a lookup warms nothing
+  on disk, it only pulls an off-screen tile's PNG into memory, and on a cached
+  500-tile listing that is 500 Blobs nobody is looking at. This step alone
+  captures most of the measured first-visit cost with no server work and no
+  dependency on another change.
 - **Cached thumbnails are images the tile references by URL.** A new
-  `GET /api/thumb/image` answers the PNG bytes directly — `image/png`,
-  `immutable` when the URL names the current generation, the same
-  `path + mtime + ao + gen` key `immutable-thumbnail-serving` defined. A tile
-  whose listing entry says "cached under the current recipe, generation N"
-  sets `<img src>` to that URL and never calls `getThumb`: no limiter, no JSON,
-  no base64 (−33% bytes), no Blob, no object URL to own, native parallel
-  fetching, and on a revisit the browser's own cache answers with zero bytes.
-- **The listing carries what a lookup used to answer.** The per-entry
-  thumbnail state `listing-tree-cache` §6.2/6.3 attaches — presence and
-  staleness per occlusion variant, the write generation, `framed` — is joined
-  here by the recipe labels the client's staleness test reads (`lighting`,
-  `rig`, `posed`) and the stored `camera`/`axis`, so the client applies the
-  *same* test it applies to a `getThumb` answer today, locally, per entry,
-  from the listing. The test stays client-side: `RIG_VERSION` and
-  `POSE_VERSION` are client constants the server deliberately never
-  interprets.
-- **A lookup is issued only for what the listing could not answer** — an
-  entry with no annotation (the index has not seen it), a stale or missing
-  render, or a pose the client holds that the entry's `posed` predates. Those
-  lookups are **ranked like renders**: the lookup limiter takes the same band
-  map the render queue does, so a visible tile's lookup no longer waits behind
-  off-screen ones.
-- **Far mesh reads yield to pending lookups.** The render queue does not
-  dispatch `far`-ranked work while lookups are pending — a cache hit for a
-  tile on screen must never wait on a deferred tile's 25 MB read. Everything
-  nearer than far is unaffected; the idle drain resumes the moment lookups
-  settle.
-- **Freshly rendered pixels keep their object URL** until eviction, as today —
-  the bytes are already in memory, and a PUT's echoed generation is what the
-  *next* listing will name. Nothing about rendering, the recipe, `RIG_VERSION`
-  or the cache's on-disk shape changes.
-- Unchanged: `GET /api/thumb`'s JSON contract (still served, still the
-  fallback for what the listing cannot answer), the PUT, the sidecars, the
-  sweep's ranking and deferral, the pose wave (37 ms is not a problem worth a
-  change; §6.1's pose layer shrinks it further on its own).
+  `GET /api/thumb/image` answers the PNG bytes — `image/png`, `immutable`
+  when the URL names the current generation, on the same `path + mtime + ao +
+  gen` key and the same three tiers `immutable-thumbnail-serving` defined. A
+  tile whose listing entry says "cached under a recipe the client judges
+  current, generation N" sets `<img src>` to that URL and never calls
+  `getThumb`. The image is `loading="lazy"`, so a cached listing costs a
+  screenful of image fetches, not a listing's worth; on a revisit the
+  browser's cache answers with no request.
+- **The listing carries what a lookup used to answer.** The per-entry state
+  `listing-tree-cache` §6.2/6.3 attaches is joined by the recipe labels the
+  client's usability test reads and the stored camera/axis, so the client
+  applies the *same* test it applies to a `getThumb` answer today, locally,
+  per entry. The test stays client-side: `RIG_VERSION` and `POSE_VERSION` are
+  client constants the server deliberately never interprets. The annotation
+  is attached wherever model entries are emitted — the directory and flat
+  listings, peeks, and the two scoring routes' hit joins — so a meaning or
+  similarity grid gets it too.
+- **Far mesh reads yield to pending lookups for nearer tiles.** The render
+  queue does not dispatch `far`-ranked work while a lookup ranked nearer than
+  far is pending — and the gate is time-bounded, so one wedged lookup cannot
+  freeze the idle drain the sweep promised.
+- **A listing-drawn tile recovers on its own.** An entry evicted between
+  emission and fetch answers 404; the image's `onError` demotes the entry to
+  the lookup path, once per generation, remembered on the slot.
+- **The cache's eviction clock is kept honest.** The image route bumps the
+  same least-recently-read clock the lookup bumps; a browser-cached view is
+  invisible to the server by design, and that trade is recorded rather than
+  hidden (design D7).
+- Unchanged: `GET /api/thumb`'s JSON contract (still served, still the answer
+  for what the listing cannot say), the PUT, the sidecars, the sweep's
+  ranking and deferral of renders, every pixel, `RIG_VERSION`, and the pose
+  wave — 37 ms is not a problem worth a change, and §6.1's pose layer shrinks
+  it further on its own.
 
 ## Capabilities
 
@@ -66,40 +96,50 @@ None.
 
 ### Modified Capabilities
 
-- `model-thumbnails`: ADD *Cached thumbnails are served as images* (the image
-  endpoint and its caching contract); ADD *A listing-known thumbnail is drawn
-  without a lookup* (the client consumes the entry's state and labels, applies
-  its staleness test locally, and references the image by URL); ADD *Lookups
-  are ranked with renders*; ADD *Far reads yield to pending lookups*. All
-  ADD-only with distinct titles: `immutable-thumbnail-serving` ADDs *Thumbnail
-  responses are cacheable by their key* here and this change builds on it;
-  `listing-tree-cache` ADDs to `listing-cache` (*Derived annotations ride the
-  listing*), which is the annotation this change reads and does not redefine.
+- `model-thumbnails`: ADD *Cached thumbnails are served as images*; ADD *A
+  listing-known thumbnail is drawn without a lookup*; ADD *Lookups are ranked
+  with renders, and far lookups wait*; ADD *Far reads yield to pending
+  lookups* (which says in its own words that it qualifies *Client-side
+  thumbnail rendering*'s deferral rule, and that the gate is bounded so "a
+  listing left open warms itself" survives). All ADD-only with distinct
+  titles — checked against main and every active delta:
+  `immutable-thumbnail-serving` ADDs *Thumbnail responses are cacheable by
+  their key* here and this change builds on it; `listing-tree-cache` ADDs to
+  `listing-cache` (*Derived annotations ride the listing*), the annotation
+  this change consumes and does not redefine.
 
 ## Impact
 
-- `server/src/app.ts` — `GET /api/thumb/image` beside `GET /api/thumb`: same
-  key, same generation tiers, `image/png` body, `no-store` on a miss. The
-  listing emission attaches the recipe labels and stored camera/axis to
-  `listing-tree-cache` 6.3's per-entry annotation (one additive object; this
-  change owns its fields, that change owns the index they come from).
-- `server/src/cache.ts` — the in-memory index of 6.2 exposes labels and
-  camera/axis per entry alongside presence/staleness/gen; a read of the PNG
-  bytes by key for the image route.
-- `shared/types.ts` — `DirEntry.thumb?` (additive): per-variant
-  `{ state: 'hit' | 'stale' | 'miss', lighting?, rig?, posed? }`, plus
-  entry-level `gen`, `camera?`, `axis?`, `framed`.
+- `client/src/hooks/useThumbnails.ts` — (§0) the lookup limiter becomes a
+  module-level ranked queue whose far rank is held, with one helper writing
+  both queues' rankings (the per-listing reset included) and a test reset;
+  `start` reads the entry's annotation first and, where it answers, the
+  tile's state is seeded in the same batch that seeds `loading` — never a
+  competing `setThumb` — at the image URL with the entry's camera/axis and
+  `gen`; the survivor test includes the annotation's generation; object-URL
+  ownership applies to `blob:` URLs only; an `onError` demotion remembered
+  per slot and generation.
+- `client/src/three/queue.ts` — `pending` (live jobs, husks excluded), a
+  far gate with a liveness bound, `onIdle`, `poke`, and a held-far mode for
+  the lookup instance.
+- `client/src/components/Grid.tsx` — the tile `<img>` gets a declared square
+  box (`aspect-ratio: 1/1`) so `overlayRectFor` measures a real rect before
+  the lazy image loads, `loading="lazy"`/`decoding="async"`, a placeholder
+  until `load`, and an `onError` that reports the *path* it draws — `ThumbView`
+  is shared with folder-sheet cells.
+- `client/src/App.tsx` — `overlayRectFor`'s fallback widened to an `<img>`
+  with no box yet; the `onImageError` callback held by identity.
 - `client/src/api/client.ts` — `thumbImageUrl(path, mtime, ao, gen)`; no new
-  fetch.
-- `client/src/hooks/useThumbnails.ts` — the slot's `start` reads the entry's
-  annotation first and, where it answers, sets the tile's URL to the image URL
-  and issues no lookup; the lookup limiter becomes rank-aware (`setBands`
-  feeds it the same map); object-URL ownership applies only to `blob:` URLs.
-- `client/src/three/queue.ts` — a `lookupsPending` gate on `far` dispatch.
-- `client/src/components/Grid.tsx` — none: a tile draws `thumb.url` whatever
-  scheme it is.
-- Ordering: **after `listing-tree-cache` §6** (this consumes its per-entry
-  annotation and its `ThumbCache` index) and after `immutable-thumbnail-serving`
-  (already landed). Coordinate the annotation's field names with that change's
-  6.3 before either lands — this proposal names them; that change's task
-  should adopt or amend them, not invent a second shape.
+  fetch. (`getThumb` still takes no abort signal — noted, not changed here.)
+- `server/src/app.ts` — `GET /api/thumb/image` beside `GET /api/thumb`,
+  sharing one extracted tier helper; the annotation attached at every
+  model-entry emission site.
+- `server/src/cache.ts` — the image bytes read for the route, bumping the LRU
+  clock exactly as the JSON hit does; the 6.2 index exposes per-variant labels
+  and camera/axis and stores the sidecar's mtime so `state` is *derived* at
+  emission, never stored.
+- `shared/types.ts` — `DirEntry.thumb?` (additive), design D2's shape.
+- Ordering: §0/§3/§4 and the image route (§1.1–1.2) depend on nothing
+  unlanded and can start today. The annotation half — 1.3, 1.4, 2.2's first
+  branch, 2.5, 5.1, 5.3, 6.2 — waits on `listing-tree-cache` §6, whose 6.3
+  already carries this change's field shape (its tasks, 2026-09-02).
