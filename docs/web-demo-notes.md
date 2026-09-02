@@ -485,15 +485,10 @@ All re-runnable; say whose run when quoting.
     the pose wave gates **off** on the demo (verified: `cached.camera ??
     posed?.camera` — every baked sidecar carries its posed camera, so the
     wave fires as pure waste otherwise).
-  - **The feature report** (undrafted; settles this section's `features`
-    bullet): a server capability report — what this server *does*, never a
-    named mode — resolved once in `main.tsx` via ApiClient (one client build
-    for both modes; `import.meta.env` would fork it), the launcher's
-    empty-report gating as precedent. First field `thumbWrites`; known
-    consumers: 2.1's localStorage orbit routing, `bulk-thumbnail-jobs`'
-    surfaces (all write actions — the report empties the `library` tab and
-    withholds the menu entries), 1.3's chat-tab hiding. Small change, drafts
-    whenever; 1.3 needs it.
+  - **The feature report** — drafted 2026-09-02 as `server-feature-report`
+    (settles this section's `features` bullet: capability report via
+    ApiClient, never a mode; that change supersedes this line). 1.3 and
+    `bulk-thumbnail-jobs` gate on it; 2.1's orbit routing reads it.
 - **Corpus**: see its `NOTES.md` (STL vs GLB sizes, dedup counts, decimation
   gates). `du` on `original/` reads 516 MB vs the notes' 12 GB — hardlink
   accounting order, not a discrepancy.
