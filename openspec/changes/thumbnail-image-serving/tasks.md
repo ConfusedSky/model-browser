@@ -1,6 +1,6 @@
 # Tasks — thumbnail-image-serving
 
-> **What can start today:** §0, §1.1–1.2, §3 and §4 depend on nothing unlanded
+> **Landed:** §0 (2026-09-02). **What can start today:** §1.1–1.2 and §4 depend on nothing unlanded
 > — only `immutable-thumbnail-serving` (archived 2026-09-02). **What waits on
 > `listing-tree-cache` §6:** 1.3, 1.4, 2.2's annotation branch, 2.5, 5.1's
 > annotated cells, 5.3, and 6.2's revisit measurement. That change's 6.3
@@ -11,31 +11,33 @@
 >
 > No `RIG_VERSION` bump: nothing here changes a pixel.
 
-## 0. Hold far lookups, rank the rest (D0/D4 — lands first, client only)
+## 0. Rank the lookups (D0/D4 — landed first, client only)
 
-- [ ] 0.1 `RenderQueue` gains a held-far mode (constructor option): `take`
-      never dispatches `far`-ranked jobs; they wait until a re-ranking moves
-      them. `lookupLimit` becomes a module-level `new RenderQueue(8)` in that
-      mode, keyed by path, on which `suspend` is never called — say so on the
-      instance; structurally `App` holds no reference to it. Retire
-      `makeLimiter`. Cancellation on retirement is unchanged: the push handle
-      joins `slot.cancels` as before
-- [ ] 0.2 One helper applies a band map to **both** queues, and both writers
-      use it — `setBands`, and the sweep effect's per-listing reset
-      (`4161f37`) — so the lookup queue never keeps a previous listing's far
-      verdict for a survivor (D4)
-- [ ] 0.3 The module-level queue's cross-mount state has an owner: the hook's
-      wiring effect clears the far gate and `onIdle` (§4) in its cleanup, and
-      the module exports a test reset called in `beforeEach` beside the
-      preference-module resets `client/test/CLAUDE.md` documents (D4)
-- [ ] 0.4 Cells: a far tile's lookup is not issued at open and is issued when
-      reported near (the D0 cell — falsify by unholding far); a visible tile's
-      lookup is taken ahead of earlier-queued off-screen ones under the
-      render-order rule in `client/test/CLAUDE.md` (hold the lookup queue's
-      slots so rank decides); a suspended render queue does not stall a
-      lookup; a listing change resets the lookup ranking (falsify by resetting
-      only the render queue); a leaked pending lookup from one cell does not
-      close the next cell's gate (the reset)
+- [x] 0.1 `lookupLimit` becomes a module-level `new RenderQueue(8)`, keyed by
+      path, on which `suspend` is never called — said on the instance;
+      structurally `App` holds no reference to it. `setRanking` re-pumps.
+      `makeLimiter` retired. Cancellation on retirement unchanged: the push
+      handle joins `slot.cancels` as before. **Ranked, not held** (D0/F24):
+      the held-far mode was built, failed the retirement cell against main's
+      "consulted at once whatever its position", and was removed
+- [x] 0.2 One helper (`applyRanking`) applies a band map to **both** queues,
+      and both writers use it — `setBands`, and the sweep effect's per-listing
+      reset (`4161f37`) (D4)
+- [x] 0.3 The module-level queue's cross-cell state has an owner:
+      `RenderQueue.clear()` drops pending jobs and the ranking, and the hook
+      exports `resetLookupQueueForTests`, called in `beforeEach` in
+      `thumbnailQueue.test.tsx` and `folderSheets.test.tsx`. The far gate and
+      `onIdle` cleanup this task also named land with §4, which creates them
+- [x] 0.4 Cells (`thumbnailQueue.test.tsx`, *lookups are ranked with
+      renders*): a far tile's lookup runs after everything nearer **and does
+      run** (falsified against an unranked lookup queue — m8 first — and
+      against a held far rank — m8 never); a visible tile's lookup is taken
+      ahead of earlier-queued off-screen ones (falsified against unranked); a
+      suspended render queue does not stall a lookup; a listing change resets
+      the lookup ranking (falsified against a render-queue-only reset); the
+      test reset drops a pending lookup (falsified against a `clear` that
+      drops nothing). All under the render-order rule: `gateLookups` holds
+      the eight slots and releases in a chosen order
 
 ## 1. Server: the image route and the annotation's fields
 
@@ -100,9 +102,8 @@
 
 ## 3. (folded into §0)
 
-- [ ] 3.1 Confirm nothing remains here: ranking and holding both landed in
-      §0. Kept as a numbered placeholder so the proposal's "§3/§4 land first"
-      references resolve
+- [x] 3.1 Nothing remains here: ranking landed in §0. Kept as a numbered
+      placeholder so the proposal's "§3/§4 land first" references resolve
 
 ## 4. Far reads yield to pending lookups
 
@@ -160,9 +161,10 @@
 - [ ] 6.1 `bun run typecheck` and `bun run test` pass across workspaces
 - [ ] 6.2 Re-run the proposal's profile against the real library, in stages,
       recording whose run and the conditions beside the 2026-09-02 baseline
-      (618 lookups / 49.7 MB / 65 s): **after §0 alone** — lookups issued at
-      open on the cached flat root (target: the visible screen plus the near
-      band) and wall time to every visible tile; **after §1–§2** — lookups on
+      (618 lookups / 49.7 MB / 65 s): **after §0 alone — done 2026-09-02,
+      this session:** on the flat root's cached region, 16 visible tiles in
+      545 ms, their lookups completing at ranks 0–17 of the listing's — first,
+      as ranked; the remaining stages measure **after §1–§2** — lookups on
       a fully annotated listing (target: zero), bytes on a second load of the
       same listing (target: zero for cached tiles), and the listing's own
       payload growth measured, not estimated; in the browser, that a 404

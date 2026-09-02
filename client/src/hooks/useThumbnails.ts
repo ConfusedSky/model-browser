@@ -5,7 +5,7 @@ import type { ApiClient } from '../api/client'
 import { DEFAULT_CAMERA } from '../three/camera'
 import type { MeshLru } from '../three/lru'
 import { cameraForPose, POSE_VERSION } from '../three/pose'
-import type { Band, RenderQueue } from '../three/queue'
+import { RenderQueue, type Band } from '../three/queue'
 import { RIG_VERSION, renderThumbnail, THUMB_LIGHTING } from '../three/renderer'
 
 export interface ThumbState {
@@ -31,44 +31,26 @@ export interface ThumbState {
  * cached directory fills at the speed of the cache, not renderer concurrency.
  * Module-level so a superseded listing's in-flight lookups share the limit
  * with its successor's, which is exactly why queued lookups must stay
- * cancellable: leaving the render queue also left its cancellation behind, and
- * a dead listing's 500 lookups would otherwise block its successor's.
+ * cancellable: a dead listing's 500 lookups would otherwise block its
+ * successor's.
+ *
+ * A `RenderQueue` rather than a plain limiter since `thumbnail-image-serving`
+ * §0: lookups are ranked by the same band map that ranks renders, so a visible
+ * tile's answer is never queued behind off-screen ones. Ranked, not held — a
+ * far tile's lookup runs after everything nearer, but it does run, because
+ * the capability's own text says a recipe change consults every entry's
+ * cache "at once whatever its position", and a held lookup would leave a far
+ * tile showing the old recipe until approached. Never suspended: `App`
+ * suspends only the render queue it created and holds no reference to this
+ * one.
  */
-const lookupLimit = makeLimiter(8)
+let lookupQueue = new RenderQueue(8)
 
-interface Job {
-  run: () => Promise<void>
-  cancelled: boolean
-}
-
-/** Same job/cancel shape as RenderQueue, minus the suspend/resume gate. */
-function makeLimiter(limit: number) {
-  const jobs: Job[] = []
-  let active = 0
-
-  function pump(): void {
-    // active++ happens here, synchronously with the slot test, so a caller
-    // arriving mid-drain cannot claim a slot a woken job already owns.
-    while (active < limit) {
-      const job = jobs.shift()
-      if (job === undefined) return
-      if (job.cancelled) continue
-      active++
-      void job.run().finally(() => {
-        active--
-        pump()
-      })
-    }
-  }
-
-  return (run: () => Promise<void>): (() => void) => {
-    const job: Job = { run, cancelled: false }
-    jobs.push(job)
-    pump()
-    return () => {
-      job.cancelled = true
-    }
-  }
+/** Test seam: drop the module-level queue's pending lookups and ranking, so
+ *  a pending lookup one cell leaves behind is not dispatched during the next. */
+export function resetLookupQueueForTests(): void {
+  lookupQueue.clear()
+  lookupQueue = new RenderQueue(8)
 }
 
 /**
@@ -356,13 +338,26 @@ export function useThumbnails(
    * does not read (D3). A path absent from the map is unreported, **never
    * far** — only an explicit `far` report defers (D1/D3).
    */
+  /**
+   * The one writer of a ranking: both queues take the same map, so a lookup
+   * can never be held by a verdict the render queue has already forgotten.
+   * Both `setBands` and the per-listing reset below go through it.
+   */
+  const applyRanking = useCallback(
+    (bands: ReadonlyMap<string, Band>) => {
+      bandsRef.current = bands
+      queue.setRanking(bands)
+      lookupQueue.setRanking(bands)
+    },
+    [queue],
+  )
+
   const setBands = useCallback(
     (bands: ReadonlyMap<string, Band>) => {
       if (sameBands(bandsRef.current, bands)) return
-      bandsRef.current = bands
-      queue.setRanking(bands)
+      applyRanking(bands)
     },
-    [queue],
+    [applyRanking],
   )
 
   useEffect(() => {
@@ -372,8 +367,7 @@ export function useThumbnails(
     // grid reports. Keyed on `listingKey`, never on `entries` — see its doc.
     if (lastListingRef.current !== listingKey) {
       lastListingRef.current = listingKey
-      bandsRef.current = new Map()
-      queue.setRanking(bandsRef.current)
+      applyRanking(new Map())
     }
     const models = entries.filter((e) => e.kind === 'model')
     const wanted = new Map(models.map((e) => [e.path, e]))
@@ -392,7 +386,7 @@ export function useThumbnails(
         slotsRef.current.get(entry.path) === slot && slot.generation === generation
 
       slot.cancels.push(
-        lookupLimit(async () => {
+        lookupQueue.push(async () => {
           if (!alive()) return
           try {
             // The occlusion recipe this entry is looked up, rendered and filed
@@ -576,7 +570,7 @@ export function useThumbnails(
             // is still this entry's.
             if (alive()) setThumb(entry.path, { status: 'error', url: slot.url, gen: slot.thumbGen })
           }
-        }),
+        }, entry.path),
       )
     }
 
@@ -656,7 +650,7 @@ export function useThumbnails(
     // rebuilds only when a wave actually answers). `RIG_VERSION` is
     // still absent for D2's reason: it changes with a build, not with a
     // gesture, and nothing on screen is waiting on it.
-  }, [entries, api, lru, queue, setThumb, ao, poses])
+  }, [entries, api, lru, queue, setThumb, ao, poses, applyRanking])
 
   // Only an unmount disposes. Separate from the sweep effect on purpose: that
   // one must have no cleanup at all, or React would tear every entry down

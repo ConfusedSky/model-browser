@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as THREE from 'three'
 import type { DirEntry, IndexPose } from '../../shared/types'
 import type { ApiClient } from '../src/api/client'
-import { useThumbnails, type ThumbState } from '../src/hooks/useThumbnails'
+import { resetLookupQueueForTests, useThumbnails, type ThumbState } from '../src/hooks/useThumbnails'
 import type { MeshLru } from '../src/three/lru'
 import { DEFAULT_CAMERA } from '../src/three/camera'
 import { POSE_VERSION } from '../src/three/pose'
@@ -150,6 +150,9 @@ beforeEach(() => {
   minted = 0
   renderLog = []
   lastThumbs = new Map()
+  // The lookup queue is module-level and ranked: a held far lookup one cell
+  // leaves behind would be dispatched by the next cell's report.
+  resetLookupQueueForTests()
   vi.stubGlobal('URL', {
     ...URL,
     createObjectURL: vi.fn(() => `blob:mint${minted++}`),
@@ -1722,5 +1725,120 @@ describe('the generation a tile keys its next fetch from', () => {
 
     // m0 was not re-looked-up (nothing about it moved); m1 is new and unkeyed.
     expect(asked).toEqual([undefined, undefined])
+  })
+})
+
+// ─── thumbnail-image-serving §0 ─────────────────────────────────────────────
+// Lookups are ranked by the band map — far last, after everything nearer, but
+// taken: a recipe change must consult every entry's cache "at once whatever
+// its position" (main's Client-side thumbnail rendering), so a far lookup is
+// ordered, never held. The lookup queue is eight wide, so its order is
+// observable only with all eight slots held (client/test/CLAUDE.md's
+// render-order rule, applied to lookups): `gateLookups` parks every getThumb
+// until released, and the cells release in a chosen order.
+
+/** A cache whose lookups park until released — per path, in a chosen order. */
+function gateLookups(answer: () => Record<string, unknown> = () => ({ status: 'miss' })) {
+  const waiting = new Map<string, () => void>()
+  const asked: string[] = []
+  const api = {
+    getThumb: vi.fn(
+      (path: string) =>
+        new Promise((resolve) => {
+          asked.push(path)
+          waiting.set(path, () => resolve(answer()))
+        }),
+    ),
+    putThumb: vi.fn().mockResolvedValue(undefined),
+  } as unknown as ApiClient
+  return {
+    api,
+    asked,
+    release: async (path: string) => {
+      const go = waiting.get(path)
+      waiting.delete(path)
+      await act(async () => {
+        go?.()
+      })
+      await settle()
+    },
+  }
+}
+
+describe('lookups are ranked with renders', () => {
+  it('a far tile’s lookup runs after everything nearer — and does run', async () => {
+    // Ten models: eight lookups start at once and hold the slots; m8 and m9
+    // queue, m8 pushed first. m9 near, m8 far: m9 goes first when a slot
+    // frees, and m8 follows on the next — ordered, not held (D0). Falsify by
+    // ranking only the render queue (m8 first) or by holding far (m8 never).
+    const gate = gateLookups()
+    const queue = new RenderQueue(2)
+    queue.suspend()
+
+    await render(<Harness entries={models(10)} api={gate.api} lru={fakeLru()} queue={queue} ao />)
+    await settle()
+    expect(gate.asked).toHaveLength(8)
+    await bands({ '/models/m8.stl': 'far', '/models/m9.stl': 'near' })
+    await gate.release('/models/m0.stl')
+    expect(gate.asked[8]).toBe('/models/m9.stl')
+    await gate.release('/models/m1.stl')
+    expect(gate.asked[9]).toBe('/models/m8.stl')
+  })
+
+  it('a visible tile’s lookup is taken ahead of earlier-queued off-screen ones', async () => {
+    const gate = gateLookups()
+    const queue = new RenderQueue(2)
+    queue.suspend()
+
+    await render(<Harness entries={models(10)} api={gate.api} lru={fakeLru()} queue={queue} ao />)
+    await settle()
+    await bands({ '/models/m9.stl': 'visible', '/models/m8.stl': 'near' })
+    await gate.release('/models/m0.stl')
+
+    expect(gate.asked[8]).toBe('/models/m9.stl')
+  })
+
+  it('a suspended render queue does not stall a lookup', async () => {
+    // The lookup queue is a RenderQueue too, and is never the one App
+    // suspends. Pinned here rather than trusted.
+    const api = fakeCache(() => freshHit())
+    const queue = new RenderQueue(2)
+    queue.suspend()
+
+    await render(<Harness entries={models(3)} api={api} lru={fakeLru()} queue={queue} ao />)
+    await settle()
+
+    expect(statuses()).toEqual(['ready', 'ready', 'ready'])
+  })
+
+  it('a listing change resets the lookup ranking too', async () => {
+    // The old listing ranked m9 ahead of m8; a landing with the same paths
+    // keeps their queued lookups and must forget that order. Falsify by
+    // resetting only the render queue's ranking (m9 would still go first).
+    const gate = gateLookups()
+    const queue = new RenderQueue(2)
+    queue.suspend()
+
+    await render(<Harness entries={models(10)} api={gate.api} lru={fakeLru()} queue={queue} ao />)
+    await settle()
+    await bands({ '/models/m9.stl': 'visible', '/models/m8.stl': 'far' })
+    await rerender(<Harness entries={models(10)} api={gate.api} lru={fakeLru()} queue={queue} ao />)
+    await settle()
+    await gate.release('/models/m0.stl')
+
+    expect(gate.asked[8]).toBe('/models/m8.stl') // insertion order: both unreported
+  })
+
+  it('the test reset drops a pending lookup so it cannot fire in the next cell', async () => {
+    const gate = gateLookups()
+    const queue = new RenderQueue(2)
+    queue.suspend()
+
+    await render(<Harness entries={models(10)} api={gate.api} lru={fakeLru()} queue={queue} ao />)
+    await settle()
+    resetLookupQueueForTests()
+    await gate.release('/models/m0.stl') // a slot frees on the *old* instance
+
+    expect(gate.asked).toHaveLength(8) // m8/m9 were dropped, not dispatched
   })
 })

@@ -56,8 +56,8 @@ claimed.
 ## Goals / Non-Goals
 
 **Goals:**
-- A first visit looks up the tiles the user is near, not the listing: far
-  lookups are held until the tile approaches.
+- A first visit answers the tiles the user is near first: lookups are ranked
+  by the band map, far last.
 - A cached tile the listing can vouch for costs the browser one native image
   fetch when it approaches, and on a revisit zero bytes.
 - The lookups that remain are ranked by the band map, so a visible tile's
@@ -82,30 +82,39 @@ claimed.
 
 ## Decisions
 
-### D0: Far lookups are held, not merely ranked — and this lands first
+### D0: Lookups are ranked, not held — and this lands first
 
-The alternative the first draft never weighed: the band map already tells the
-hook which tiles are far, and a lookup for a far tile buys nothing until the
-tile approaches — it pulls 80 KB into a Blob for a tile nobody sees, and on a
-cached 500-tile listing that is 500 Blobs and 618 disk reads for 16 pictures.
-So the lookup queue takes the sweep's ranking (D4) **and holds its far rank**:
-a far lookup is not dispatched until a report moves the tile nearer. Unlike
-renders (archived sweep D4), held lookups do not drain at idle, because a
-lookup warms nothing on disk — the pixels are already there — it only spends
-the disk and the heap on what is off screen.
+The alternative the first draft never weighed: the band map already tells
+the hook which tiles are far, and today's `makeLimiter(8)` looks tiles up in
+listing order, so a visible tile's cache hit waits behind hundreds of
+off-screen ones. The lookup queue therefore takes the sweep's ranking (D4):
+visible, near, unreported, far. A pure client change on machinery that
+exists, no server work, no dependency on `listing-tree-cache`; §0 of the
+tasks, landed 2026-09-02.
 
-This is a pure client change on machinery that exists today, with no server
-work and no dependency on `listing-tree-cache`, and it captures most of the
-proposal's first-visit cost by itself: ~16 lookups plus the near band instead
-of 618. It is §0 of the tasks and lands before anything else here. Everything
-after it is about the revisit (D1–D3) and the disk (D5).
+**Ranked, not held.** The second review proposed holding far lookups outright
+(F23), and the first fold-in adopted that; implementing it failed a cell that
+the capability's own text explains: *Client-side thumbnail rendering* says a
+recipe change consults every entry's cache "at once whatever its position",
+and *Recipe-labelled thumbnails* says a control "answers on the listing in
+front of the user, showing a render already cached under the new setting at
+once". A held far lookup leaves a far tile showing the old recipe until the
+user approaches it — a contradiction the archived sweep change wrote into
+main deliberately, on the grounds that a lookup is ~7 ms and never occupies
+the render queue. So far lookups are *ordered last*, and they run. What that
+gives up: on a fully cached first visit all 618 lookups still happen — after
+the visible and near ones, whose answers are what the user is waiting for —
+and those reads still share the disk with the drain (D5's gate keeps the
+drain from getting in *their* way). The reads themselves go away only when
+the listing can vouch for the bytes (D1–D3), which is why this change does
+not stop at §0.
 
-*Trade:* a listing that is fully cached no longer looks up its off-screen
-tiles ahead of the user, so scrolling far into it meets tiles that fetch on
-arrival rather than tiles already holding a Blob. With the near band's runway
-that is a few hundred milliseconds per screen; against 65 s at open it is the
-right trade, and D1–D3 make the arrival fetch a browser-cached image anyway.
+Measured after §0 (2026-09-02, this session, cached region of the flat root,
+1280×900): the 16 visible tiles filled in **545 ms**, and their lookups
+completed at ranks 0–17 of the listing's lookups — first, as ranked.
 
+*Alternative — hold far lookups until approached:* captures the disk reads
+too, and contradicts main. Recorded in D8 as F24.
 ### D1: An image route beside the JSON one, on the same key and the same tiers
 
 `GET /api/thumb/image?path&mtime[&ao=off][&gen]` answers `image/png` bytes.
@@ -219,9 +228,10 @@ a string the hook does not own, and a tile can hold either over its life.
 
 ### D4: Lookups are ranked by reusing the render queue's class, not its instance
 
-The lookups that remain are keyed, cancellable, bounded and now ranked and
-held — which is `RenderQueue` with `far` held and `suspend` never called.
-`lookupLimit` becomes a module-level `new RenderQueue(8)` in held-far mode.
+The lookups that remain are keyed, cancellable, bounded and now ranked —
+which is `RenderQueue` with `suspend` never called. `lookupLimit` becomes a
+module-level `new RenderQueue(8)`; `setRanking` re-pumps, so a re-ranking
+that changes what runs next takes effect without waiting for a push.
 Suspension cannot leak into it structurally: `App` creates and suspends only
 its own `new RenderQueue(2)` and holds no reference to a module-level queue.
 Cancellation on retirement is preserved verbatim — `push`'s handle joins
@@ -248,9 +258,9 @@ test conventions already document.
 `RenderQueue.take` skips `far`-ranked jobs while a gate says no. The signal
 is **a lookup ranked nearer than far pending**, not any lookup: D5's own
 reason is that a tile the user can see must not wait on a deferred tile's
-25 MB read, and under D0 the far lookups are held anyway — during an AO toggle
-over a 500-tile grid (the archived D5's blessed 500-lookup storm) or an idle
-drain, the pending lookups would otherwise stall the drain for tiles nobody is
+25 MB read, and under D0 the far lookups run last anyway — during an AO toggle
+over a 500-tile grid (the archived D5's blessed 500-lookup storm) the far
+tiles' pending lookups would otherwise stall the drain for tiles nobody is
 waiting on.
 
 **Liveness.** `getThumb` takes no abort signal and has no timeout; a
@@ -273,8 +283,8 @@ a tile the user also wants.
 Every piece is additive: a client without the annotation takes the lookup
 path; a server without the image route is never asked for it (image URLs are
 built only from an annotation only that server emits); older clients ignore
-`thumb`. D0's held far lookups and the far gate are client-only and revert
-with the code.
+`thumb`. D0's ranked lookups and the far gate are client-only and revert with the
+code.
 
 ### D7: The eviction clock
 
@@ -320,7 +330,8 @@ Two things here touch that:
 | F20 | "−33% bytes" overstates | **Fixed** (proposal): ~25% |
 | F21 | "Native parallel fetching" is false over HTTP/1.1 | **Struck** (Context records why) |
 | F22 | The 65 s is disk-bound; the Why attributed it to the request shape | **Rewritten** (proposal Why): lazy first visit, cached revisit, the disk gate |
-| F23 | The cheaper alternative — hold far lookups on the existing band map — was never weighed | **Adopted as D0 and §0**, landable first |
+| F23 | The cheaper alternative — hold far lookups on the existing band map — was never weighed | **Adopted as D0 and §0** for the ranking; the hold was dropped (F24) |
+| F24 | *(found implementing §0)* Holding far lookups contradicts main's "consulted at once whatever its position" — a far tile would keep its old recipe until approached; a cell failed on it | **Decided** (D0): ranked last, not held; the disk reads are D1–D3's to remove |
 | — | Blocking understated | **Fixed** (tasks header): which halves can start today |
 
 ## Risks / Trade-offs
@@ -334,9 +345,8 @@ Two things here touch that:
 - [Listing payload grows] → measured in 6.2, recorded honestly; framed
   entries carry a whole `CameraState`. Tens of KB on one request against 50 MB
   removed.
-- [A held far lookup means scrolling far into a cached listing fetches on
-  arrival] → D0's trade; the near band's runway and the browser cache make it
-  a few hundred milliseconds per screen.
+- [Far lookups still cost their disk reads on a first visit] → D0 ranks, it
+  does not hold (main forbids holding); the reads go away only with D1–D3.
 - [The far gate stalls the idle drain] → nearer-than-far signal plus a time
   bound (D5); a cell pins that a never-settling lookup cannot hold far work
   past the bound.

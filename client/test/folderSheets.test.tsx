@@ -32,6 +32,7 @@ import {
   unmountApp,
 } from './appHarness'
 import { RIG_VERSION, THUMB_LIGHTING } from '../src/three/renderer'
+import { resetLookupQueueForTests } from '../src/hooks/useThumbnails'
 import { DEFAULT_CAMERA } from '../src/three/camera'
 import { cameraForPose } from '../src/three/pose'
 
@@ -186,6 +187,7 @@ function found(n: number): DirEntry[] {
 beforeEach(() => {
   StubObserver.live = []
   vi.stubGlobal('IntersectionObserver', StubObserver)
+  resetLookupQueueForTests()
 })
 afterEach(() => unmountApp())
 

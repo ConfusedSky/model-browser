@@ -75,6 +75,22 @@ export class RenderQueue {
    */
   setRanking(bands: ReadonlyMap<string, Band>): void {
     this.ranking = bands
+    // A re-ranking changes what runs next; pumping here costs nothing when
+    // every slot is busy and lets a queue that emptied its runnable set
+    // re-check without waiting for a push or a finish.
+    this.pump()
+  }
+
+  /**
+   * Drop every pending job and the ranking. For tests: the lookup queue is
+   * module-level, so a pending lookup one cell leaves behind would otherwise
+   * be dispatched during the next cell. Running jobs finish on their own;
+   * their `alive()` checks already refuse a departed listing.
+   */
+  clear(): void {
+    for (const job of this.jobs) job.cancelled = true
+    this.jobs = []
+    this.ranking = new Map()
   }
 
   suspend(): void {

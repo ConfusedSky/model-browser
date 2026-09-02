@@ -65,20 +65,20 @@ Where a listing entry carries the thumbnail facts a lookup would answer — per 
 - **WHEN** a tile drawn from an image URL is later re-rendered and shown from an object URL, and then removed from the listing
 - **THEN** the object URL is released and nothing is released for the image URL
 
-### Requirement: Lookups are ranked with renders, and far lookups wait
-The thumbnail lookups the client still issues SHALL be taken in the same position order as renders — on screen, near, then unreported — under the same reported bands, so that a tile on screen never waits for its answer behind lookups for tiles that are not. A lookup for a tile reported far SHALL NOT be issued until the tile is reported nearer: unlike a deferred render, a held lookup warms nothing, and is not taken when the queue falls idle. Lookups SHALL NOT be suspended by an orbit overlay or lightbox, as before. A change of listing SHALL reset the lookups' ranking exactly as it resets the renders'.
+### Requirement: Lookups are ranked with renders
+The thumbnail lookups the client still issues SHALL be taken in the same position order as renders — on screen, near, unreported, then far — under the same reported bands, so that a tile on screen never waits for its answer behind lookups for tiles that are not. A lookup ranked far SHALL still be taken once nothing nearer is pending: a change to a model's pixel inputs consults its cache at once whatever its position, as *Client-side thumbnail rendering* requires, and a held lookup would leave a far tile showing the old inputs until approached. Lookups SHALL NOT be suspended by an orbit overlay or lightbox, as before. A change of listing SHALL reset the lookups' ranking exactly as it resets the renders'.
 
 #### Scenario: A visible tile's lookup is not queued behind the listing
 - **WHEN** a large listing is opened and the user scrolls far down it while its lookups are still in flight
 - **THEN** the lookups for the tiles now on screen are taken next, ahead of lookups queued earlier for tiles that are not
 
-#### Scenario: A far tile is not looked up until approached
+#### Scenario: A far tile is looked up last, not never
 - **WHEN** a large cached listing is opened and left at its top
-- **THEN** only the tiles on screen and near it are looked up; a tile far down the listing is looked up when the user scrolls toward it, and not before
+- **THEN** the tiles on screen and near it are looked up first, and a tile far down the listing is looked up after them without the user scrolling toward it
 
 #### Scenario: A new listing forgets the old ranking for lookups too
 - **WHEN** the user navigates to a listing sharing paths with the previous one
-- **THEN** no lookup in the new listing is held by a far verdict the previous listing reported
+- **THEN** no lookup in the new listing is ordered by a verdict the previous listing reported
 
 ### Requirement: Far reads yield to pending lookups
 This requirement qualifies *Client-side thumbnail rendering*'s rule that deferred far work is taken when nothing nearer is pending: while a thumbnail lookup for a tile ranked nearer than far is pending, the render queue SHALL NOT start work ranked far, so that a cache lookup for a tile the user can see or is near to seeing is never made to wait on a deferred tile's model read on the same storage. Work ranked nearer than far SHALL be unaffected. The hold SHALL be bounded in time: a lookup that does not settle within the bound SHALL NOT keep far work waiting, so a listing left open still warms itself as that rule promises. Deferred work SHALL resume as soon as the pending lookups settle, without waiting for another render to be queued.

@@ -22,12 +22,15 @@ a transport cost. It is the USB disk serving 618 PNG reads while the sweep's
 far drain pulled 2.4 GB of meshes off the same head. So the wins are three,
 and they are not the same win:
 
-1. **On a first visit, the cost is how many cached tiles are looked up at
-   all.** A tile far off screen does not need its 80 KB in memory until the
-   user approaches it. Today's limiter looks up every tile in listing order;
-   ranking those lookups by the sweep's band map and *holding* the far ones
-   turns 618 reads into the ~16 on screen plus the near band — a pure client
-   change on machinery that already exists, and the first step here (§0).
+1. **On a first visit, the cost the user feels is the order.** Today's
+   limiter looks up every tile in listing order, so a visible tile's cache
+   hit waits behind hundreds of off-screen ones. Ranking lookups by the
+   sweep's band map — visible, near, unreported, far — answers the screen
+   first; it is a pure client change on machinery that exists, and the first
+   step here (§0, landed 2026-09-02: 16 visible tiles in 545 ms, their
+   lookups first). The far lookups still run, after: the capability's own
+   text says a recipe change consults every entry "at once whatever its
+   position", so a far lookup is ordered last, never held (design D0).
 2. **On a revisit, the cost should be zero.** `immutable-thumbnail-serving`
    made the lookup cacheable by generation, but a cacheable JSON request is
    still a request, a parse and a Blob. An image the tile references by URL is
@@ -45,14 +48,13 @@ pointing at, staged so the half that needs nothing from anyone lands first.
 
 ## What Changes
 
-- **§0, landable today: far lookups are held, and lookups are ranked.** The
-  lookup limiter becomes a ranked queue on the same band map that ranks
-  renders; a lookup for a `far` tile is not issued until the tile is nearer.
-  Unlike renders, held lookups do *not* drain at idle: a lookup warms nothing
-  on disk, it only pulls an off-screen tile's PNG into memory, and on a cached
-  500-tile listing that is 500 Blobs nobody is looking at. This step alone
-  captures most of the measured first-visit cost with no server work and no
-  dependency on another change.
+- **§0, landed: lookups are ranked.** The lookup limiter is a ranked queue on
+  the same band map that ranks renders, so a visible tile's lookup is never
+  queued behind off-screen ones; a listing change resets both queues'
+  rankings through one helper. Far lookups run last but do run — holding
+  them would contradict the recipe-change rule main already carries. This
+  step fixes the order the user waits in; the disk reads it does not remove
+  are what the rest of the change is for.
 - **Cached thumbnails are images the tile references by URL.** A new
   `GET /api/thumb/image` answers the PNG bytes — `image/png`, `immutable`
   when the URL names the current generation, on the same `path + mtime + ao +
@@ -98,7 +100,7 @@ None.
 
 - `model-thumbnails`: ADD *Cached thumbnails are served as images*; ADD *A
   listing-known thumbnail is drawn without a lookup*; ADD *Lookups are ranked
-  with renders, and far lookups wait*; ADD *Far reads yield to pending
+  with renders*; ADD *Far reads yield to pending
   lookups* (which says in its own words that it qualifies *Client-side
   thumbnail rendering*'s deferral rule, and that the gate is bounded so "a
   listing left open warms itself" survives). All ADD-only with distinct
@@ -111,7 +113,7 @@ None.
 ## Impact
 
 - `client/src/hooks/useThumbnails.ts` — (§0) the lookup limiter becomes a
-  module-level ranked queue whose far rank is held, with one helper writing
+  module-level ranked queue, with one helper writing
   both queues' rankings (the per-listing reset included) and a test reset;
   `start` reads the entry's annotation first and, where it answers, the
   tile's state is seeded in the same batch that seeds `loading` — never a
