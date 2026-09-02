@@ -166,7 +166,11 @@
 - [x] 4.3 `docs/web-demo-notes.md`: item 1 points at this change as its implementation
       (`web-demo-backlog` 1.1 already ticks — done at drafting, 2026-08-31)
       — done 2026-08-31 with the applied note on the item
-- [ ] 4.4 After archive: hand-write the new capability's `## Purpose` in
+- [x] 4.4 After archive: hand-write the new capability's `## Purpose` in
       `openspec/specs/library-overrides/spec.md` (archiving does not generate one —
       `library`'s was hand-authored) and check what the delta preambles left in both
       main specs, per the delta-comment rule
+      — done 2026-09-02 at archive: Purpose written in the `library` capability's
+      style (ownership, the identity rule, pointer to design.md D1–D7); the deltas
+      carried no HTML comments, and none landed in `directory-browsing`,
+      `model-viewer`, or the new spec (grepped all three)

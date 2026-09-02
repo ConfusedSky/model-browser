@@ -286,3 +286,34 @@ The rig SHALL additionally carry two colored rim accents — red at rig-space �
 - **WHEN** the user changes a model's orbit axis in the lightbox
 - **THEN** the rig — rim accents included — follows the camera through the animation, with no lighting snap
 
+### Requirement: The panel credits the model's source
+When the viewed entry resolves credits from the library's override store, the
+lightbox side panel SHALL show an attribution block: the author (linked to the
+author URL when one is stored), the license, and a link to the source. The
+block SHALL sit among the model's metadata, before the panel's actions — the
+existing "describes before it offers" rule, which appending after the action
+strip would break. Because credits arrive from a read rather than from the
+directory entry, the block MAY appear after the panel is first shown; no
+placeholder and no loading state SHALL stand in for it meanwhile. When the
+entry resolves no credits — no store, no covering key, or the overrides read
+failed — the panel SHALL show no attribution block and no placeholder for it:
+attribution is displayed where it exists, never advertised as missing. The
+overrides read SHALL follow the viewer subject — asked when it changes,
+its answer ignored once the subject has moved on.
+
+#### Scenario: A credited model
+- **WHEN** the lightbox opens on a model beneath a kit whose key holds credits
+- **THEN** the panel shows the author, license and source link for that kit, among the metadata and before the actions
+
+#### Scenario: An uncredited model
+- **WHEN** the lightbox opens on a model no key covers
+- **THEN** the panel shows no attribution block
+
+#### Scenario: A failed read is silent
+- **WHEN** the overrides request fails while the lightbox is open
+- **THEN** the panel renders as it does for an uncredited model, and nothing else in the viewer is affected
+
+#### Scenario: The subject moves on
+- **WHEN** the viewer subject changes before the previous subject's overrides answer arrives
+- **THEN** the late answer is not rendered for the new subject
+

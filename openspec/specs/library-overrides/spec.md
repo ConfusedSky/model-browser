@@ -1,0 +1,168 @@
+# library-overrides Specification
+
+## Purpose
+The override store is a library's sidecar metadata: per-path display names, credits
+(author, license, source — the CC-BY attribution the demo corpus requires), and a
+reserved pose field, kept in one versioned file beside the library marker and keyed by
+canonical library path. It exists so metadata the filesystem cannot carry travels with
+the library itself — loaded per resolved identity, never per process, so a repointed
+root can never serve another library's credits. This capability owns the store's format,
+its field-wise longest-prefix resolution over the virtual-path grammar, the route that
+serves resolved answers, and the generator that populates credits from the corpus
+metadata; how listings and the viewer display the results lives with `directory-browsing`
+and `model-viewer`. Established by the change `library-overrides` (archived 2026-09-02);
+the reasoning behind each requirement is in that change's design.md (D1–D7).
+## Requirements
+### Requirement: A per-library override store
+A library MAY carry one override store at `.model-browser/overrides.json`
+beside the library marker, versioned (`version: 1`) and keyed by canonical
+library path. Each key SHALL hold any of: a display name, credits (author,
+author URL, license, source URL), and a pose field reserved by name. The
+server SHALL read the store once per resolved library — when the library first
+resolves ready, held for as long as that resolution stands, and dropped with
+it, so a re-resolved library (a repointed root, a different volume at the same
+mount) is answered from its own store or from none, never from the previous
+library's. An absent file SHALL behave as an empty store; a file that fails to
+parse or carries an unknown version SHALL be reported when the load happens
+and treated as empty rather than failing the library. The loader SHALL
+canonicalise every key it reads and report any key it cannot; the root key is
+spelled `/`. Canonicalisation covers only the filesystem half, so the loader
+SHALL additionally strip a trailing slash from a key's entry half (or report
+the key) — zip listings commonly spell directory entries `parts/`, and an
+unstripped `/kit/a.zip!/parts/` would silently never match the walk's
+`/kit/a.zip!/parts` — and SHALL reject and report a key whose entry half is
+empty (`…!/`), the store's forbidden zip-root spelling. Every writer of the file SHALL write atomically and durably
+(write-temp, rename, fsync), so a torn write can never replace a valid store
+with half of one. (The store's directory is the marker directory, which the
+`library` capability already keeps out of listings — the capability where any
+wider invisibility promise would belong; this requirement adds no reachability
+of its own.)
+
+#### Scenario: Absent store
+- **WHEN** a library has no `overrides.json`
+- **THEN** the server starts normally and every entry resolves no overrides
+
+#### Scenario: Malformed or unknown-version store
+- **WHEN** `overrides.json` exists but is not valid JSON, or carries a version this build does not know
+- **THEN** the condition is reported when the store is loaded, the library works normally, and every entry resolves no overrides
+
+#### Scenario: Read once per resolved library
+- **WHEN** the file changes while the library it belongs to stays resolved
+- **THEN** answers reflect the store as loaded, until the server restarts or the library re-resolves
+
+#### Scenario: The library changes identity
+- **WHEN** the root is repointed, or a different tree arrives at the same mount, and the library re-resolves
+- **THEN** overrides answer from the newly resolved library's store — or resolve nothing where it has none — never from the previous library's
+
+#### Scenario: An uncanonical key
+- **WHEN** the store holds a key spelled `/kit/` or another spelling canonicalisation changes
+- **THEN** the loader canonicalises it (or reports the key it cannot), and lookups match it
+
+#### Scenario: An archive-interior key with a trailing slash
+- **WHEN** the store holds a key spelled `/kit/a.zip!/parts/`
+- **THEN** the loader stores it as `/kit/a.zip!/parts` (or reports it), and lookups beneath that interior directory match it
+
+### Requirement: Field-wise longest-prefix resolution
+An entry's effective overrides SHALL merge the store's keys on the entry's
+path per field, the nearest key winning each field independently — except
+`name`, which SHALL NOT inherit: a display name names the thing at its own
+key, not its subtree, and resolves from the walk's last ancestor key alone —
+the entry's own key for an ordinary lookup, the archive file's key for a
+zip-root lookup (whose own `…!/` spelling is a key the store forbids, so an
+exact string get could never name it). The ancestor
+walk SHALL follow the virtual-path grammar: a lookup splits into its
+filesystem half and its archive-entry half on the first `!/`; the ancestors
+are the root key `/`, then each ancestor directory of the filesystem half,
+then — when the lookup has no entry half — the lookup's own key, or — when it
+has one — the archive file's own path followed by each interior directory of
+the entry half and finally the entry's own key. A lookup whose entry half is
+empty (the zip-root spelling `…!/`) SHALL resolve exactly as the archive
+file's own path does. Prefix boundaries within each half SHALL be path
+segments: `/kit` covers `/kit/x.stl` and not `/kit2/x.stl`. The archive
+file's key SHALL be the one key for the archive and its interior root — a
+`!/`-suffixed key is a spelling this store forbids, rejected and reported by
+the loader.
+
+#### Scenario: A kit's credits reach its files
+- **WHEN** `/kit` holds credits and `/kit/sub/x.stl` holds none
+- **THEN** `/kit/sub/x.stl` resolves the kit's credits
+
+#### Scenario: A file key overrides per field only
+- **WHEN** `/kit` holds credits, and `/kit/x.stl` holds only a pose
+- **THEN** `/kit/x.stl` resolves the kit's credits together with its own pose
+
+#### Scenario: A name does not inherit
+- **WHEN** `/kit` holds a name and credits, and `/kit/x.stl` holds nothing
+- **THEN** `/kit/x.stl` resolves the kit's credits and no name — the name labels the kit alone
+
+#### Scenario: Segment boundaries
+- **WHEN** `/kit` holds credits and the library holds `/kit2/y.stl`
+- **THEN** `/kit2/y.stl` resolves nothing from `/kit`
+
+#### Scenario: An archive entry inherits through the archive's path
+- **WHEN** `/kit/a.zip` holds credits
+- **THEN** `/kit/a.zip!/parts/x.stl` resolves them, through the ancestors `/`, `/kit`, `/kit/a.zip`
+
+#### Scenario: A key inside an archive
+- **WHEN** `/kit/a.zip!/parts` and `/kit/a.zip` both hold credits
+- **THEN** `/kit/a.zip!/parts/x.stl` resolves the interior key's credits — the nearer key wins
+
+### Requirement: Resolved overrides are served per entry
+The server SHALL answer an entry's resolved overrides for a requested library
+path — the resolved fields, or an empty answer where nothing resolves. The
+request SHALL require a path, be canonicalised, and be resolved through the
+library exactly as the canonicalising path routes are, refused paths refused
+here too, and SHALL answer the library's not-ready envelope while the library
+is not ready. The client SHALL reach it only through its API client.
+
+#### Scenario: An entry with credits
+- **WHEN** the client asks for an entry beneath a kit key holding credits
+- **THEN** the answer carries those credits
+
+#### Scenario: Nothing resolves
+- **WHEN** the client asks for an entry no key covers
+- **THEN** the answer is empty, not an error
+
+#### Scenario: Library not ready
+- **WHEN** the library is unconfigured or missing
+- **THEN** the route answers the same state envelope every path route gives
+
+### Requirement: Credits are generated from the corpus metadata
+A generator SHALL populate a library's override store from
+`metadata/miniatures.json`, taking the library top and the kit directory
+(defaulting to the top). The kit directory SHALL be the library top or a
+directory beneath it; any other kit directory SHALL be refused before anything
+is written — outside the top, `relative()` yields `..`-keys that normalise
+into plausible-but-wrong spellings rather than errors. For each kit's
+top-level `stem`, the directory key is
+`/` plus the top-relative path of the kit's folder under the kit directory,
+and it receives the kit's display name and credits (author, author URL,
+license, source URL). Only top-level `stem` values SHALL become keys — the
+per-file `stem` entries in the metadata are not folders. The generator SHALL
+merge into an existing store — replacing only the fields it owns on the keys
+it generates, preserving every other field and key (a stored pose survives a
+rerun) — and SHALL write as the store requires (write-temp, rename, fsync). A
+`stem` naming no directory under the kit directory SHALL be reported and
+skipped, and the run SHALL report how many keys it wrote against how many kits
+it read.
+
+#### Scenario: Fresh generation
+- **WHEN** the generator runs against a library whose top has no existing store
+- **THEN** every kit whose folder exists gets a key with its name and credits, and the counts are reported
+
+#### Scenario: A kit directory outside the top is refused
+- **WHEN** the generator is given a kit directory that is not the top or beneath it
+- **THEN** it refuses before writing anything
+
+#### Scenario: Keys are top-relative
+- **WHEN** the library top is above the kit directory (kits at `<top>/miniatures/clustered-hq/<stem>`)
+- **THEN** the generated keys carry the full top-relative path, and rooting the library at the kit directory itself yields keys `/<stem>`
+
+#### Scenario: Rerun preserves what it does not own
+- **WHEN** a key already holds a pose and the generator reruns
+- **THEN** the key's name and credits are regenerated and the pose is untouched
+
+#### Scenario: Metadata drift
+- **WHEN** a kit's `stem` names no directory under the kit directory
+- **THEN** that kit is reported and skipped, and no dead key is written
+
