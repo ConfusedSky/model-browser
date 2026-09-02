@@ -65,7 +65,7 @@ own origin"; only its body hardcodes loopback.
 |---|---|---|
 | Port the server (container/VM), don't bake to static | corpus NOTES + both sessions | bake was weighed: D1's `ApiClient` seam would host a static client, `similar` is image×image dot products the browser could do, but text→embedding needs the SigLIP text tower (hundreds of MB) — one endpoint at minimum |
 | Always-on VM, not cold-start serverless | Masa | 16 s SigLIP load + `wedged` UI is the wrong first impression |
-| CPU-only index, fp32, US-located, 4–8 GB | Masa | see Measurements; GPU warmed is tens of ms, CPU 0.3–0.6 s judged acceptable (<1 s) |
+| CPU-only index, fp32, US-located, 4–8 GB | Masa | see Measurements; GPU warmed is tens of ms, CPU 0.3–0.6 s judged acceptable (<1 s). **US-located relaxed 2026-09-02 (Masa): EU origins back in consideration pending a visitor-latency benchmark** — and therefore round-trip count is a first-class 1.3 design concern; see the EU paragraph in Measurements |
 | Folder tiles get a 2×2 contact sheet — **a main-app change, before the split** (applied 2026-08-31: `folder-contact-sheets`, including the D3 no-reset assertions and the live checks once `ao-refreshes-thumbnails` landed the same day; every task closed, cold-media numbers in its tasks.md 3.4) | Masa | `Grid.tsx` draws sheets from `GET /api/peek` per visible tile, inside amber folder chrome; verified live on the clustered-hq root — 297 folders, 12 peeks on first paint, 10 more per scroll screen, AO toggle re-renders cells with no reset |
 | Credits/provenance shown in the lightbox info panel | Masa | plus a generated credits page for CC-BY |
 | ~~Lighting menu hidden in demo mode~~ → **axis lighting mode removed from the main app; camera is the only mode; the pill goes** (implemented: `remove-axis-lighting`, applied 2026-08-31 — row closed) | Masa | the hide was only ever to stop visitors picking axis. Item 9 has the grounding (every sidecar says `camera`, 0 `axis` — 1,758 at this session's count, 1,792 at later reviewers' runs the same day; axis's motivating bug has no counterpart in camera mode) |
@@ -444,6 +444,22 @@ All re-runnable; say whose run when quoting.
   not worth ~$3/mo against a zero-moving-parts $4.54 OVH box — but it is the
   designated fallback if gate 3.3 measures >1 s on oversold vCPUs: warm GPU
   inference is tens of ms, fixing latency and cost in one move.**
+  **EU origins re-admitted** (Masa, 2026-09-02, relaxing the Decided table's
+  US-located row): Hetzner Falkenstein CX33 €8.49 (~$10) and the EU sides of
+  Contabo/OVH/netcup re-enter — often better hardware per dollar than their
+  US racks. Cost to a US visitor is ~90–150 ms RTT **per round trip, not per
+  byte**, so the design lever is trip count, which 1.3 must treat as
+  first-class: (a) baked thumbnails and static bundles are immutable — serve
+  them with long `max-age`/`immutable` so a visitor fetches each once ever;
+  (b) HTTP/2 (Caddy's default) multiplexes the tile-fetch fan-out onto one
+  connection — fan-out is fine, *waterfalls* are not (listing → peek → thumb
+  is 3 deep; lightbox → overrides rides an open panel, fine); (c) the option
+  that mostly dissolves the question: a free-tier CDN (e.g. Cloudflare) in
+  front of an EU origin caches thumbnails/static at US edges, leaving only
+  `/api/*` crossing the ocean — "EU compute, US bytes". Benchmark before
+  deciding (Masa: later): from a US vantage against an EU test box measure
+  first paint, a scroll screen of sheets, a lightbox open, one search —
+  the per-interaction shapes, not a bare ping.
 - **Corpus**: see its `NOTES.md` (STL vs GLB sizes, dedup counts, decimation
   gates). `du` on `original/` reads 516 MB vs the notes' 12 GB — hardlink
   accounting order, not a discrepancy.
