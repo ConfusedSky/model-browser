@@ -536,6 +536,24 @@ All re-runnable; say whose run when quoting.
   joins the URL (an orbit changes the URL; the pinned old entry is never
   asked for again). Demo: moot — read-only cache is genuinely immutable,
   visitor orbits are localStorage-only per 2.1.
+  **Precache generation, the third leg** (Masa, 2026-09-02, clarifying the
+  above: generate missing thumbnails ahead of demand, not just serve them
+  better): on the demo this is the bake, already planned. Locally the
+  mechanism falls out of this thread's pieces — tree snapshot (every path)
+  minus thumb-presence layer (has/stale) = the precache queue, fed into
+  `thumbnail-sweep-priority`'s lowest band, whose start gate and far-band
+  cancellation make preemption free. Rendering stays client-side (D2), so
+  precache means the running app warming during idle. **Explicit action,
+  not always-on** — the rebased sweep change's own measurement prices it:
+  one 500-tile listing is 20.21 GB / ~168 s of pure I/O, so the library is
+  hours, on removable media ~15× slower cold and not always attached, with
+  in-flight large reads holding the disk head against interactive work
+  (the contention `search-cancellation` chose cancellation over). A
+  progress-visible "generate all thumbnails" action, resumable off the
+  presence layer, fits that reality. Ordering: needs the sweep bands and
+  the presence layer, so after `thumbnail-sweep-priority` and the
+  `listing-tree-cache` layers — its own small change when drafted, not a
+  rider on either.
 - **Corpus**: see its `NOTES.md` (STL vs GLB sizes, dedup counts, decimation
   gates). `du` on `original/` reads 516 MB vs the notes' 12 GB — hardlink
   accounting order, not a discrepancy.
