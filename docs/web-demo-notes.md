@@ -412,6 +412,21 @@ All re-runnable; say whose run when quoting.
   never faulted, so the full load never paid for vision; the peak is
   query-time working memory (1.2 GB after load, 2.8 GB after the first
   query). Nothing fits under Fly's 2 GB cap; the verdict stands on both legs.
+  **Budget flat-rate sweep** (this session, 2026-09-02, Masa's ask; provider
+  pages + review sites, re-run at the URLs): **RackNerd** 4 GB/2–3 cores/
+  60 GB SSD/multi-US-DC at **$37–60/yr** (~$3–5/mo) — promo stock that sells
+  out and does not restock, racknerdtracker.com tracks live offers;
+  **Contabo** Cloud VPS 4 (4 vCPU/8 GB/100 GB, NY/Seattle/St. Louis) listed
+  €5.50, lands **~$7/mo** in the US per review sites (on-page US surcharge
+  unconfirmed — check at order); **OVH US** VPS-1 (2 vCore/4 GB/40 GB NVMe,
+  unlimited traffic at 500 Mbps) **$4.54/mo on a 12-month commitment**, VPS-2
+  (4/8 GB) $8.50 — the most established operator of the three. All meet
+  4 GB+/US/always-on/flat at ≤$9 vs the name-brand $24–28. The open axis is
+  CPU: 0.31 s/query on the 7940HS (8 threads; 0.55–0.6 s pinned to 4), and
+  budget hosts run older, oversold silicon — 1–2 s is plausible, which is
+  gate 3.3's question; RackNerd's *year* costs less than one Vultr month, so
+  the paid hour can simply be a paid year. Fit: 4 GB works (2.8 peak + Bun
+  app + OS ≈ 3.3, add swap); Contabo's 8 GB removes the headroom worry for ~$2.
 - **Corpus**: see its `NOTES.md` (STL vs GLB sizes, dedup counts, decimation
   gates). `du` on `original/` reads 516 MB vs the notes' 12 GB — hardlink
   accounting order, not a discrepancy.
