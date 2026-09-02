@@ -37,3 +37,12 @@
   a boot elsewhere gets it through that parameter. `mountAppAtCurrentUrl(url, listing)` is
   the deep-link entry — it replaces the whole URL, `'/'` included, which is how the boot
   with no path named is asserted
+- **Render *order* is observable only while both queue slots are held.** App's
+  `RenderQueue` is two wide, so with two free slots the first two pushed jobs start in push
+  order whatever their rank — an app-mount cell asserting "x renders before y" over two or
+  three tiles passes or fails by lookup-resolution luck (two such cells did pass, and
+  falsifying against a broken variant is what caught them). `folderSheets.test.tsx` has the
+  pattern: `holdSlots()` hangs two blocker renders, `gateThumbs().open([...paths])` releases
+  lookups in a chosen order, and the cell stages a push order that *contradicts* the rank it
+  asserts, so it can only pass if rank decided. Hook-level cells (`thumbnailQueue.test.tsx`)
+  get the same guarantee more simply: `queue.suspend()` before the pushes, `resume()` after
