@@ -117,6 +117,24 @@ async function intersect(el: Element): Promise<void> {
   await report(el, { inPark: true, inView: true })
 }
 
+/** Deliver a record to ONE of the grid's observers only — the band observer
+ *  for `inPark`, the margin-less one for `inView` — leaving the other half
+ *  unheard. */
+async function reportHalf(el: Element, half: 'inPark' | 'inView', isIntersecting: boolean): Promise<void> {
+  await act(async () => {
+    for (const observer of StubObserver.live) {
+      if (!observer.live || !observer.targets.has(el)) continue
+      const isBand = observer.options?.rootMargin !== undefined
+      if ((half === 'inPark') !== isBand) continue
+      observer.callback(
+        [{ target: el, isIntersecting } as unknown as IntersectionObserverEntry],
+        observer as unknown as IntersectionObserver,
+      )
+    }
+  })
+  await settle()
+}
+
 function dirTile(path: string): HTMLElement {
   const el = container.querySelector<HTMLElement>(`[data-dir-tile="${path}"]`)
   if (el === null) throw new Error(`no folder tile for ${path}`)
@@ -743,129 +761,221 @@ const rendered = (): string[] => putThumb.mock.calls.map((c) => (c[0] as { path:
 
 /** Hold every lookup until `open()`, so a band decision can land before any
  *  tail is pushed — the real grid's misses resolve too fast to race by hand. */
-function gateThumbs(): { open: () => Promise<void> } {
+function gateThumbs(): { open: (only?: string[]) => Promise<void> } {
   let opened = false
-  const waiters: (() => void)[] = []
-  getThumb.mockImplementation(() =>
+  const waiters: { path: string; go: () => void }[] = []
+  getThumb.mockImplementation((path: string) =>
     opened
       ? Promise.resolve({ status: 'miss' })
-      : new Promise((resolve) => waiters.push(() => resolve({ status: 'miss' }))),
+      : new Promise((resolve) => waiters.push({ path, go: () => resolve({ status: 'miss' }) })),
   )
   return {
-    open: async () => {
-      opened = true
+    /** Release every held lookup, or only those for `only` (the rest stay held). */
+    open: async (only?: string[]) => {
+      if (only === undefined) opened = true
+      // Released in registration order, so a cell that releases in two
+      // calls controls push order exactly — which is what lets it stage a
+      // push order that contradicts the rank it asserts.
+      const due = waiters.filter((w) => only === undefined || only.includes(w.path))
+      for (const w of due) waiters.splice(waiters.indexOf(w), 1)
       await act(async () => {
-        for (const w of waiters) w()
+        for (const w of due) w.go()
       })
       await settle()
     },
   }
 }
 
-describe('bands park and unpark through the whole pipeline', () => {
-  it('a visible folder’s preview models are rendered — never parked by the hidden-set merge', async () => {
+/**
+ * Occupy both of App's render slots with two visible blocker tiles whose
+ * renders hang, so every tail released afterwards *queues* and the queue's
+ * rank decides the order they run in once the blockers finish. Without this,
+ * two free slots start the first two pushed jobs in push order whatever their
+ * rank, and an ordering assertion over two or three tiles passes or fails by
+ * lookup-resolution luck. Call after `mountApp` (which resets the renderer
+ * mock), release the blockers' lookups first, then the rest.
+ */
+// Named to share the `alpha` token with the folder cells below use, so one
+// needle can hide a single tile while keeping the blockers on screen.
+const BLOCKERS = [model('alpha-b1.stl'), model('alpha-b2.stl')]
+const BLOCKER_PATHS = BLOCKERS.map((b) => b.path)
+function holdSlots(): { release: () => Promise<void> } {
+  const finish: ((b: Blob) => void)[] = []
+  for (let i = 0; i < 2; i++) {
+    renderThumbnail.mockImplementationOnce(() => new Promise<Blob>((r) => finish.push(r)))
+  }
+  return {
+    release: async () => {
+      await act(async () => {
+        for (const f of finish) f(new Blob())
+      })
+      await settle()
+    },
+  }
+}
+/** Report both blockers fully on screen and start their renders. */
+async function startBlockers(gate: { open: (only?: string[]) => Promise<void> }): Promise<void> {
+  for (const p of BLOCKER_PATHS) await report(modelTile(p), { inPark: true, inView: true })
+  await gate.open(BLOCKER_PATHS)
+}
+/** The rendered paths after the blockers. */
+const renderedAfterBlockers = (): string[] => rendered().filter((p) => !BLOCKER_PATHS.includes(p))
+
+describe('bands rank work through the whole pipeline', () => {
+  it('a visible folder’s preview models are rendered — never deferred by the hidden-set merge', async () => {
     // The cell that fails if App's wrapper over-reaches: preview models are in
     // `thumbEntries` and never in `shownEntries`, so a wrapper built on that
-    // difference marks every one of them far and the sheet cells of a folder
-    // on screen are parked instead of drawn (round-2 review, N1).
+    // difference marks every one of them far (round-2 review, N1).
     const gate = gateThumbs()
     peek.mockResolvedValue(found(2))
     await mountApp('/models', ONE_FOLDER)
     await intersect(dirTile('/models/a'))
     await gate.open()
 
-    expect(rendered()).toEqual(
-      expect.arrayContaining(['/models/a/m0.stl', '/models/a/m1.stl']),
-    )
+    expect(rendered()).toEqual(expect.arrayContaining(['/models/a/m0.stl', '/models/a/m1.stl']))
   })
 
-  it('a filter-hidden model is reported far through App’s wrapper and parks; back, it renders', async () => {
+  it('a folder’s sheet fills after the model tiles beside it', async () => {
+    // Cells rank one band worse than their folder (D2, amended): a visible
+    // folder's cells are `near`, behind the visible model tile.
+    const gate = gateThumbs()
+    const LISTING: DirListing = { path: '/models', entries: [...BLOCKERS, dir('a'), model('x.stl')] }
+    peek.mockResolvedValue(found(1))
+    await mountApp('/models', LISTING)
+    const hold = holdSlots()
+    await intersect(dirTile('/models/a')) // peek lands; the cell queues
+    await report(modelTile('/models/x.stl'), { inPark: true, inView: true })
+    await startBlockers(gate)
+    await gate.open()
+    await hold.release()
+
+    const order = renderedAfterBlockers()
+    expect(order.indexOf('/models/x.stl')).toBeLessThan(order.indexOf('/models/a/m0.stl'))
+  })
+
+  it('a filter-hidden model is reported far and rendered after what is shown', async () => {
     const gate = gateThumbs()
     const LISTING: DirListing = {
       path: '/models',
-      entries: [model('x.stl'), model('y.stl')],
+      entries: [...BLOCKERS, model('x.stl'), model('y.stl')],
     }
     await mountApp('/models', LISTING)
+    const hold = holdSlots()
+    await startBlockers(gate)
     const { openFind, findInput, type } = await import('./appHarness')
     await openFind()
-    await type(findInput()!, 'x')
+    await type(findInput()!, 'x') // keeps x; hides y (and the running blockers)
     await settle()
     // A report arrives while y's tile is hidden: the wrapper merges y as far.
     await report(modelTile('/models/x.stl'), { inPark: true, inView: true })
     await gate.open()
+    await hold.release()
 
-    expect(rendered()).toContain('/models/x.stl')
-    expect(rendered()).not.toContain('/models/y.stl') // parked, cold, unread
+    // Deferred, not withheld: y renders too, after x.
+    const order = renderedAfterBlockers()
+    expect(order.indexOf('/models/x.stl')).toBeLessThan(order.indexOf('/models/y.stl'))
+    expect(order).toContain('/models/y.stl')
+  })
 
-    // The filter clears; y's tile returns and reports — the ordinary unpark.
-    await type(findInput()!, '')
+  it('a hidden folder’s preview cells are reported far (finding 2)', async () => {
+    const gate = gateThumbs()
+    const LISTING: DirListing = {
+      path: '/models',
+      entries: [...BLOCKERS, dir('alpha'), model('z.stl')],
+    }
+    peek.mockResolvedValue([model('alpha/w.stl')])
+    await mountApp('/models', LISTING)
+    const hold = holdSlots()
+    await intersect(dirTile('/models/alpha')) // peek lands: w is alpha's cell
+    await startBlockers(gate)
+    const { openFind, findInput, type } = await import('./appHarness')
+    await openFind()
+    await type(findInput()!, 'z') // keeps z; hides alpha (and the running blockers)
     await settle()
-    await report(modelTile('/models/y.stl'), { inPark: true, inView: true })
-    await settle()
+    // z is reported far itself, and its render is pushed *before* w's: under
+    // the rule both are far and insertion order keeps z first; were w left
+    // unreported it would rank above far and overtake z.
+    await report(modelTile('/models/z.stl'), { inPark: false, inView: false })
+    await gate.open(['/models/z.stl'])
+    await gate.open(['/models/alpha/w.stl'])
+    await gate.open()
+    await hold.release()
 
-    expect(rendered()).toContain('/models/y.stl')
+    const order = renderedAfterBlockers()
+    expect(order.indexOf('/models/z.stl')).toBeLessThan(order.indexOf('/models/alpha/w.stl'))
+    expect(order).toContain('/models/alpha/w.stl')
   })
 
   it('a hidden tile that is a visible folder’s preview cell keeps the folder’s band', async () => {
-    // The merge never overwrites a band the report carries: the folder's
-    // registration wins over the wrapper's far. The preview deliberately names
-    // a path outside the folder — the fixture's liberty, since the mechanism
-    // joins on paths and the server's containment is not what is under test.
+    // The merge never overwrites a band the report carries. The preview
+    // deliberately names a path outside the folder — the fixture's liberty,
+    // since the mechanism joins on paths and the server's containment is not
+    // what is under test.
     const gate = gateThumbs()
     const LISTING: DirListing = {
       path: '/models',
-      entries: [dir('alpha'), model('other.stl')],
+      entries: [...BLOCKERS, dir('alpha'), model('other.stl'), model('alpha-z.stl')],
     }
     peek.mockResolvedValue([model('other.stl')])
     await mountApp('/models', LISTING)
-    await intersect(dirTile('/models/alpha')) // peek lands; other.stl is a cell
+    const hold = holdSlots()
+    await intersect(dirTile('/models/alpha'))
+    await startBlockers(gate)
     const { openFind, findInput, type } = await import('./appHarness')
     await openFind()
-    await type(findInput()!, 'alpha') // hides other.stl's tile, keeps the folder
+    await type(findInput()!, 'alpha') // hides other.stl's tile alone
     await settle()
+    await report(modelTile('/models/alpha-z.stl'), { inPark: false, inView: false }) // a far tile
     await report(dirTile('/models/alpha'), { inPark: true, inView: true })
     await gate.open()
+    await hold.release()
 
-    // Hidden as a tile, shown as a cell: the visible folder's band won.
-    expect(rendered()).toContain('/models/other.stl')
+    // other.stl: hidden as a tile, but the visible folder's cell (near) — so
+    // it renders before the far tile alpha-z.
+    const order = renderedAfterBlockers()
+    expect(order.indexOf('/models/other.stl')).toBeLessThan(order.indexOf('/models/alpha-z.stl'))
   })
 
-  it('a far folder parks its preview cells; a visible tile of the same path wins them back', async () => {
-    // Both halves of the per-path max: registration under the folder's band
-    // parks the cells of a folder scrolled far, and the nearest position wins
-    // where the same model is also an on-screen tile.
+  it('a far folder’s cells wait behind a visible tile', async () => {
+    const gate = gateThumbs()
+    const LISTING: DirListing = { path: '/models', entries: [...BLOCKERS, dir('a'), model('z.stl')] }
+    peek.mockResolvedValue(found(1)) // a/m0 is a's cell, no tile of its own
+    await mountApp('/models', LISTING)
+    const hold = holdSlots()
+    await intersect(dirTile('/models/a'))
+    await report(dirTile('/models/a'), { inPark: false, inView: false }) // folder far → its cell far
+    await report(modelTile('/models/z.stl'), { inPark: true, inView: true })
+    await startBlockers(gate)
+    await gate.open()
+    await hold.release()
+
+    const order = renderedAfterBlockers()
+    expect(order.indexOf('/models/z.stl')).toBeLessThan(order.indexOf('/models/a/m0.stl'))
+    expect(order).toContain('/models/a/m0.stl') // deferred, not withheld: it drains
+  })
+
+  it('a tile heard by only one observer is unreported, not a band from a defaulted half', async () => {
+    // Code-review finding 6, at the pipeline level: deliver only the band
+    // observer's record for x (near, by that half alone) — with the view half
+    // unheard, x must be unreported (ranked after near), not derived as near.
     const gate = gateThumbs()
     const LISTING: DirListing = {
       path: '/models',
-      entries: [dir('a'), model('x.stl')],
+      entries: [...BLOCKERS, model('x.stl'), model('y.stl')],
     }
-    peek.mockResolvedValue([model('x.stl')])
     await mountApp('/models', LISTING)
-    await intersect(dirTile('/models/a')) // peek lands under a visible folder
-    await report(dirTile('/models/a'), { inPark: false, inView: false }) // now far
+    const hold = holdSlots()
+    await reportHalf(modelTile('/models/x.stl'), 'inPark', true) // x: one half only
+    await report(modelTile('/models/y.stl'), { inPark: true, inView: false }) // y: near, both halves
+    await startBlockers(gate)
+    await gate.open(['/models/x.stl']) // x's render is pushed first…
+    await gate.open(['/models/y.stl'])
     await gate.open()
+    await hold.release()
 
-    expect(rendered()).not.toContain('/models/x.stl') // the cell parked with its folder
-
-    await report(modelTile('/models/x.stl'), { inPark: true, inView: true })
-    await settle()
-
-    expect(rendered()).toContain('/models/x.stl') // its own tile's band won
-  })
-
-  it('a near report upgrades a parked model without waiting for visible', async () => {
-    // The delta's clause is three-valued — "no longer reported far" — so near
-    // is enough to unpark (round-2 review, N3).
-    const gate = gateThumbs()
-    const LISTING: DirListing = { path: '/models', entries: [model('x.stl')] }
-    await mountApp('/models', LISTING)
-    await report(modelTile('/models/x.stl'), { inPark: false, inView: false }) // far
-    await gate.open()
-    expect(rendered()).not.toContain('/models/x.stl')
-
-    await report(modelTile('/models/x.stl'), { inPark: true, inView: false }) // near
-    await settle()
-
-    expect(rendered()).toContain('/models/x.stl')
+    // …yet y runs first: near beats unreported. Were x derived from its one
+    // heard half it would be `near` too and keep its head start.
+    const order = renderedAfterBlockers()
+    expect(order.indexOf('/models/y.stl')).toBeLessThan(order.indexOf('/models/x.stl'))
   })
 })

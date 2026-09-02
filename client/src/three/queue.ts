@@ -18,8 +18,11 @@ interface Job {
  * would put a press behind a screenful of sweep misses. `undefined` (a key no
  * report covers) sits *between* near and far — an unreported path may be
  * anywhere, while `far` is the one band known to be off screen, so far work is
- * taken last of all. Absent is therefore never far: a ranking that defaulted
- * missing keys to far would park the world (thumbnail-sweep-priority D1).
+ * taken last of all — and it *is* taken, when nothing nearer is pending: far
+ * work is deferred, never discarded, which is how a listing left open drains
+ * itself nearest-first (thumbnail-sweep-priority D4). Absent is never far: a
+ * ranking that defaulted missing keys to far would push the world to the back
+ * (D1).
  */
 const RANK: Record<Band, number> = { visible: 0, near: 1, far: 3 }
 const UNREPORTED = 2
@@ -103,21 +106,24 @@ export class RenderQueue {
   private take(): Job | undefined {
     let bestAt = -1
     let bestRank = Number.POSITIVE_INFINITY
-    for (let i = 0; i < this.jobs.length; i++) {
+    for (let i = 0; i < this.jobs.length; ) {
       const job = this.jobs[i]!
-      if (job.cancelled) continue
+      if (job.cancelled) {
+        // Dropped as the scan meets it, not left for every later take to
+        // rescan: a listing's lifetime of retirements would otherwise pile up
+        // hundreds of husks, each holding its run closure reachable.
+        this.jobs.splice(i, 1)
+        continue
+      }
       const rank = this.rankOf(job)
       if (rank < bestRank) {
         bestRank = rank
         bestAt = i
         if (rank === 0) break
       }
+      i++
     }
-    if (bestAt === -1) {
-      // Nothing runnable; drop the cancelled husks so they are not rescanned.
-      this.jobs = []
-      return undefined
-    }
+    if (bestAt === -1) return undefined
     const job = this.jobs[bestAt]!
     this.jobs.splice(bestAt, 1)
     return job

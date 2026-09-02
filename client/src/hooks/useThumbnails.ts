@@ -74,12 +74,7 @@ function makeLimiter(limit: number) {
  * key, in that order.
  */
 interface EntrySlot {
-  /**
-   * The entry this slot answers for — its `mtime` is half the cache key, and
-   * the whole entry is held (not the mtime alone) because a parked slot must
-   * restart through `start(entry, slot)` *outside* the sweep effect, where
-   * there is no `entries` array to look the entry up in (D3).
-   */
+  /** The entry this slot answers for; its `mtime` is half the cache key. */
   entry: DirEntry
   /**
    * Bumped on every retirement. The work a start issued captures this value and
@@ -94,25 +89,6 @@ interface EntrySlot {
   pose: IndexPose | undefined
   /** Cancel handles for this generation's in-flight work. */
   cancels: (() => void)[]
-  /**
-   * The *parked* state `ao-refreshes-thumbnails` named and left for whichever
-   * change landed second (D4): this slot's render was withheld or cancelled
-   * unstarted because its tile is reported far. Not finished, not error — the
-   * tile keeps whatever it is showing. The band's fact, never the recipe's:
-   * `retire` must not clear it, or a pose wave would resurrect exactly the job
-   * the band map parked (3.3b); only `setBands`' unpark and the start-time
-   * re-check write it.
-   */
-  parked: boolean
-  /**
-   * Park this generation's *queued render* alone — the labelled handle 3.3
-   * gives the tail, since `cancels` is flat and firing it all would kill the
-   * lookup too. Cancels the pushed job and, exactly when the cancel reports
-   * the job was still pending (queue.ts), releases the stale PNG the lookup
-   * minted; a started job keeps its `staleUrl` for its own catch's fallback.
-   * Stale handles are harmless: the cancel is idempotent and answers false.
-   */
-  parkTail?: () => void
   /**
    * The object URL the tile is displaying, and which this hook owns — including
    * URLs minted *outside* the hook and handed in through `setThumb` (`App`'s
@@ -308,76 +284,45 @@ export function useThumbnails(
   }, [])
 
   /**
-   * The band map in force — held in a ref and **read, not only pushed** (D3):
-   * the lookup tail and the kept job's start-time check derive park-ness from
-   * it at the moment work would commit, which is what parks slots created
-   * after the last report (StrictMode's remount clears `slotsRef` while the
-   * observers republish an identical map the early-exit swallows; a
-   * same-path-new-mtime slot starts unconditionally).
+   * The band map last accepted — kept only so a republished-but-equal map
+   * costs nothing (the grid republishes a fresh identity per observer batch
+   * and per find-filter keystroke), and reset per listing below. Nothing reads
+   * it at commit time: position ranks work, it never withholds it (D4).
    */
   const bandsRef = useRef<ReadonlyMap<string, Band>>(new Map())
-  /**
-   * The latest sweep effect's `start`, for restarts outside it. Unparking
-   * cannot ride the sweep effect at all: a parked slot's inputs are unchanged,
-   * so the survivor branch `continue`s it, and visibility is not a dependency
-   * (D3). Written at the end of each effect run, so a restart always uses the
-   * current recipe closure.
-   */
-  const startRef = useRef<(entry: DirEntry, slot: EntrySlot) => void>(() => {})
+  const lastEntriesRef = useRef<DirEntry[] | null>(null)
 
   /**
    * Replace the visibility ranking wholesale — the grid's report, forwarded
-   * through App (D2/D3). Contract: idempotent and **cheap when equal** (the
-   * value-equal early exit below — `shownEntries`' identity changes per
-   * find-filter keystroke, republishing ~500 unchanged bands that must cost
-   * nothing), latest-wins per path, safe at scroll-settle frequency. It parks
-   * slots that moved to `far` and restarts parked slots that moved back,
-   * all *without* a sweep-effect re-run: a `bands` argument beside `ao` and
+   * through App (D2/D3). Contract: idempotent and **cheap when equal**,
+   * latest-wins per path, safe at scroll-settle frequency, and it re-ranks
+   * *without* a sweep-effect re-run: a `bands` argument beside `ao` and
    * `poses` was rejected because the dependency array is what triggers the
    * reconciler's walk over every entry, and bands change on every scroll
    * settle — a 500-entry reconcile per scroll for a signal the reconciler
-   * does not read (D3).
-   *
-   * Slots are resolved through `slotsRef` at call time, never captured: a band
-   * map is a message from the DOM's past, and a path with no live slot is a
-   * no-op. A path absent from the map is unreported, **never far** — only an
-   * explicit `far` report parks (D1/D3).
+   * does not read (D3). A path absent from the map is unreported, **never
+   * far** — only an explicit `far` report defers (D1/D3).
    */
   const setBands = useCallback(
     (bands: ReadonlyMap<string, Band>) => {
       if (sameBands(bandsRef.current, bands)) return
       bandsRef.current = bands
       queue.setRanking(bands)
-      const slots = slotsRef.current
-      for (const [path, band] of bands) {
-        if (band !== 'far') continue
-        const slot = slots.get(path)
-        if (slot === undefined || slot.parked) continue
-        // The warm-mesh exception (D4): a mesh held or being read is past the
-        // expensive part, so its render is kept — it simply runs at the far
-        // rank, last, and its PNG outlives any eviction.
-        if (lru.holds(path)) continue
-        slot.parked = true
-        slot.parkTail?.()
-      }
-      for (const [path, slot] of slots) {
-        if (!slot.parked || bands.get(path) === 'far') continue
-        // Unpark is never a bare `start` (3.3b): clear the flag, then retire,
-        // then start — the same seam the reconciler uses — so a lookup in
-        // flight for the current generation is dead before its successor
-        // exists, and one slot can never run two passes of one generation.
-        // No mtime re-check: a parked entry back at a new mtime is the
-        // reconciler's ordinary removal-then-addition, never an unpark.
-        slot.parked = false
-        retire(slot)
-        startRef.current(slot.entry, slot)
-      }
     },
-    [queue, lru],
+    [queue],
   )
 
   useEffect(() => {
     const slots = slotsRef.current
+    // A new listing starts unreported: the previous listing's verdicts must
+    // not order this one's work (a same-path survivor included) until its own
+    // grid reports. Identity, because that is what "a different listing is on
+    // screen" means everywhere else in this hook.
+    if (lastEntriesRef.current !== entries) {
+      lastEntriesRef.current = entries
+      bandsRef.current = new Map()
+      queue.setRanking(bandsRef.current)
+    }
     const models = entries.filter((e) => e.kind === 'model')
     const wanted = new Map(models.map((e) => [e.path, e]))
     const removed: string[] = []
@@ -458,40 +403,14 @@ export function useThumbnails(
             // URL. Registered on the slot, so a retirement drops this lookup's
             // stale PNG while leaving the tile's *displayed* URL alone.
             slot.cancels.push(dropStale)
-            // The park gate, derived at the moment the render would commit
-            // (D4/3.3a): the flag, and the band in force — the render handle
-            // and dropStale are registered inside this tail, so at park time
-            // the render may not exist yet to cancel, and this is also D5's
-            // own path (every recipe/pose retirement of a parked slot runs a
-            // fresh lookup that lands here). The gate is the flag and the
-            // ref, never queue ranking — a lowest-ranked job still runs
-            // eventually, and running is what a parked cold tail must not do.
-            // A warm mesh (held or being read) is past the expensive part and
-            // falls through: its render is filed at the far rank instead.
-            if (
-              (slot.parked || bandsRef.current.get(entry.path) === 'far') &&
-              !lru.holds(entry.path)
-            ) {
-              slot.parked = true
-              dropStale()
-              return
-            }
             // Only the miss/stale tail touches the shared renderer — it alone
             // goes through the queue. Registered synchronously after the
             // `alive` check above, so cleanup always sees this handle.
+            // Keyed by path so the queue can rank it by the tile's band; a
+            // far tile's job simply waits behind everything nearer and is
+            // taken when nothing nearer is pending (D4).
             const cancelRender = queue.push(async () => {
               if (!alive()) return dropStale()
-              // The start-time re-check, band first, then mesh (D4): a kept
-              // job can wake long after it was ranked far, with the mesh
-              // evicted meanwhile. Woken with its tile no longer reported far
-              // it reads and renders — a tile the user can see is never left
-              // waiting on a parked job. Woken cold *and still far* it parks
-              // itself, flag set, so the ordinary unpark path reaches it.
-              // Parking never causes a mesh read.
-              if (bandsRef.current.get(entry.path) === 'far' && !lru.holds(entry.path)) {
-                slot.parked = true
-                return dropStale()
-              }
               try {
                   // In-flight jobs must not parse or drive the shared renderer
                   // while an orbit/lightbox is active — wait out the
@@ -574,14 +493,6 @@ export function useThumbnails(
               }
             }, entry.path)
             slot.cancels.push(cancelRender)
-            // The labelled render handle (3.3): `slot.cancels` is flat and
-            // only wholesale-fired, so parking needs this one reachable alone
-            // — cancel the queued render and, exactly when the cancel reports
-            // it was still pending, release the stale PNG it would have
-            // consumed. A started job keeps `staleUrl` for its own catch.
-            slot.parkTail = () => {
-              if (cancelRender()) dropStale()
-            }
           } catch {
             // Carrying the URL the slot already owns, not a bare error: the
             // requirement keeps each existing image until its replacement
@@ -619,7 +530,6 @@ export function useThumbnails(
           ao,
           pose,
           cancels: [],
-          parked: false,
           url: undefined,
         }
         slots.set(entry.path, fresh)
@@ -632,19 +542,14 @@ export function useThumbnails(
       if (slot.ao === ao && samePose(slot.pose, pose)) continue
       // Retirement, not a reset: cancel what is running and look this entry up
       // again under the new recipe, while the tile keeps the image and the
-      // state it is showing until the replacement lands (D3). A *parked* slot
-      // stays parked through this — the flag is the band's fact, not the
-      // recipe's — and its fresh lookup's tail withholds the render again at
-      // the park gate (D5); the restart-on-return lives in `setBands`' unpark,
-      // which uses this same retire/start seam from outside the effect.
+      // state it is showing until the replacement lands (D3). The fresh
+      // lookup's tail queues at whatever rank the band map gives the tile —
+      // a far one waits its turn, nothing is withheld (D5).
       retire(slot)
       slot.ao = ao
       slot.pose = pose
       start(entry, slot)
     }
-    // Restarts from outside this effect (unparking) go through the recipe
-    // closure of the *latest* run, never a stale one.
-    startRef.current = start
 
     if (removed.length > 0 || added.length > 0) {
       setThumbs((prev) => {

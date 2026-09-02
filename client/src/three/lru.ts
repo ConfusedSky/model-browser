@@ -39,19 +39,6 @@ export class MeshLru<T> {
     return this.entries.has(path)
   }
 
-  /**
-   * Held **or being read** — the peek the far band's parking rule consults
-   * (thumbnail-sweep-priority D4). A load in flight is already past the cost
-   * that rule exists to avoid paying twice, and a later `acquire` joins the
-   * pending promise rather than starting a second read, so counting it warm
-   * causes no read. Like `has`, strictly a peek: it must never bump recency —
-   * an acquire at park time would distort eviction toward exactly the meshes
-   * being deprioritised.
-   */
-  holds(path: string): boolean {
-    return this.entries.has(path) || this.loading.has(path)
-  }
-
   /** Get the mesh, loading it if needed. Marks the entry most-recently-used. */
   async acquire(path: string): Promise<T> {
     const hit = this.entries.get(path)

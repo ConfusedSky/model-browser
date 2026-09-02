@@ -23,12 +23,10 @@ vi.mock('../src/three/renderer', async (importOriginal) => ({
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 /**
- * The LRU as every cell fakes it (sweep-priority 5.1a): the park gates consult
- * the held-or-loading peek, so a hand-rolled `{ acquire }` object throws the
- * moment a cell sets bands. `warm` is the test-owned warm set — the parking
- * cells stage warm, cold and evicted meshes by mutating it — and `acquire` is
- * the observable read: this fake has no loader, so "the read the rule forbids"
- * is asserted on `acquire` itself.
+ * The LRU as every cell fakes it (sweep-priority 5.1a): one factory so the
+ * hook's view of the LRU cannot drift from cell to cell. `warm` answers `has`;
+ * `acquire` is the observable read — this fake has no loader, so "what was
+ * read, and in what order" is asserted on `acquire` itself.
  */
 function fakeLru(
   warm: ReadonlySet<string> = new Set(),
@@ -37,7 +35,6 @@ function fakeLru(
   return {
     acquire,
     has: (path: string) => warm.has(path),
-    holds: (path: string) => warm.has(path),
   } as unknown as MeshLru<THREE.Object3D>
 }
 
@@ -1444,7 +1441,7 @@ const bands = (pairs: Record<string, Band>): Promise<void> =>
 const acquired = (lru: MeshLru<THREE.Object3D>): string[] =>
   vi.mocked(lru.acquire).mock.calls.map((c) => c[0] as string)
 
-describe('visible-first ordering and the parked state', () => {
+describe('visible-first ordering and deferral', () => {
   it('bottom tiles reported visible render before the earlier ones — fails under FIFO', async () => {
     const api = fakeCache(() => ({ status: 'miss' }))
     const lru = fakeLru()
@@ -1464,33 +1461,30 @@ describe('visible-first ordering and the parked state', () => {
     expect(statuses()).toEqual(Array.from({ length: 6 }, () => 'ready'))
   })
 
-  it('a tile parked before starting is not rendered; unparked, it lands and never errors', async () => {
+  it('far work waits behind everything nearer, then drains — a listing left open warms itself', async () => {
+    // Deferral, not parking (D4): the far tile is never rendered ahead of
+    // nearer work, and it is rendered once nothing nearer is pending. Under
+    // the parked design this cell's last assertion fails — the far tile stays
+    // `loading` forever.
     const api = fakeCache(() => ({ status: 'miss' }))
     const lru = fakeLru()
     const queue = new RenderQueue(1)
     queue.suspend()
 
-    await render(<Harness entries={models(2)} api={api} lru={lru} queue={queue} ao />)
+    await render(<Harness entries={models(3)} api={api} lru={lru} queue={queue} ao />)
     await settle()
-    await bands({ '/models/m1.stl': 'far' })
+    await bands({ '/models/m0.stl': 'far', '/models/m1.stl': 'visible', '/models/m2.stl': 'near' })
     await act(async () => {
       queue.resume()
     })
     await settle()
 
-    // The parked tile keeps its placeholder — loading, never the error state.
-    expect(statuses()).toEqual(['ready', 'loading'])
-    expect(acquired(lru)).toEqual(['/models/m0.stl'])
-
-    await bands({ '/models/m1.stl': 'visible' })
-    await settle()
-
-    expect(statuses()).toEqual(['ready', 'ready'])
-    // No commit in between showed the error state.
+    expect(acquired(lru)).toEqual(['/models/m1.stl', '/models/m2.stl', '/models/m0.stl'])
+    expect(statuses()).toEqual(['ready', 'ready', 'ready'])
     for (const commit of renderLog) for (const cell of commit) expect(cell.startsWith('error')).toBe(false)
   })
 
-  it('absent is never far: a path the map omits still renders', async () => {
+  it('absent is never far: a path the map omits runs before deferred work', async () => {
     const api = fakeCache(() => ({ status: 'miss' }))
     const lru = fakeLru()
     const queue = new RenderQueue(1)
@@ -1504,8 +1498,7 @@ describe('visible-first ordering and the parked state', () => {
     })
     await settle()
 
-    expect(statuses()).toEqual(['loading', 'ready'])
-    expect(acquired(lru)).toEqual(['/models/m1.stl'])
+    expect(acquired(lru)).toEqual(['/models/m1.stl', '/models/m0.stl'])
   })
 
   it('a fully cached listing is unaffected by any band map', async () => {
@@ -1520,10 +1513,11 @@ describe('visible-first ordering and the parked state', () => {
     expect(statuses()).toEqual(['ready', 'ready', 'ready'])
     expect(vi.mocked(renderThumbnail)).not.toHaveBeenCalled()
     expect(lru.acquire).not.toHaveBeenCalled()
+    expect(api.getThumb).toHaveBeenCalledTimes(3) // a re-rank re-looks-up nothing
   })
 
-  it('a preference change over a parked far tile shows a cached new-setting render at once', async () => {
-    // 4.1's cached half: the retirement restarts the lookup, parked or not.
+  it('a preference change over a far tile shows a cached new-setting render at once', async () => {
+    // 4.1's cached half: the retirement restarts the lookup whatever the band.
     const api = fakeCache((_p, ao) => (ao ? { status: 'miss' } : freshHit()))
     const lru = fakeLru()
     const queue = new RenderQueue(1)
@@ -1536,38 +1530,40 @@ describe('visible-first ordering and the parked state', () => {
     await rerender(<Harness entries={models(1)} api={api} lru={lru} queue={queue} ao={false} />)
     await settle()
 
-    expect(statuses()).toEqual(['ready']) // repainted from the cache, still parked
+    expect(statuses()).toEqual(['ready']) // repainted from the cache
     expect(api.getThumb).toHaveBeenCalledTimes(2)
     expect(vi.mocked(renderThumbnail)).not.toHaveBeenCalled()
-    expect(lru.acquire).not.toHaveBeenCalled()
   })
 
-  it('a retirement of a parked cold slot issues its lookup and no push and no acquire', async () => {
-    // 4.1's uncached half — D5's own path through the tail gate: the fresh
-    // lookup runs, and it is the tail's own gate that withholds the render.
+  it('a retirement’s fresh render queues at the position in force, behind nearer work', async () => {
+    // 4.1's uncached half under deferral (D5): the fresh tail is pushed, not
+    // withheld — and it waits behind the visible tile.
     const api = fakeCache(() => ({ status: 'miss' }))
     const lru = fakeLru()
     const queue = new RenderQueue(1)
     queue.suspend()
 
-    await render(<Harness entries={models(1)} api={api} lru={lru} queue={queue} ao />)
+    // The same array through both renders: a toggle keeps `thumbEntries`'
+    // identity, and a fresh array would be a landing — which resets the
+    // ranking (the cell below this one).
+    const entries = models(2)
+    await render(<Harness entries={entries} api={api} lru={lru} queue={queue} ao />)
     await settle()
-    await bands({ '/models/m0.stl': 'far' })
+    await bands({ '/models/m0.stl': 'far', '/models/m1.stl': 'visible' })
+    await rerender(<Harness entries={entries} api={api} lru={lru} queue={queue} ao={false} />)
+    await settle()
     await act(async () => {
       queue.resume()
     })
-
-    await rerender(<Harness entries={models(1)} api={api} lru={lru} queue={queue} ao={false} />)
     await settle()
 
-    expect(api.getThumb).toHaveBeenCalledTimes(2) // the retirement's fresh lookup ran
-    expect(lru.acquire).not.toHaveBeenCalled() // and its tail was withheld
-    expect(statuses()).toEqual(['loading'])
+    expect(acquired(lru)).toEqual(['/models/m1.stl', '/models/m0.stl'])
+    expect(vi.mocked(api.putThumb).mock.calls.every((c) => c[0].ao === false)).toBe(true)
   })
 
-  it('a parked tail restarts under the current recipe, never the parked one', async () => {
-    // 4.2: parking does not freeze a pass, it cancels one; unparking reads the
-    // slot's recipe as it is then.
+  it('deferred work renders under the current recipe, never the one it was queued under', async () => {
+    // 4.2: the job reads `slot.ao`/`slot.pose` when it runs; a retirement in
+    // between kills the old tail through the generation check.
     const api = fakeCache(() => ({ status: 'miss' }))
     const obj = {} as THREE.Object3D
     const lru = fakeLru(new Set(), vi.fn().mockResolvedValue(obj))
@@ -1576,218 +1572,42 @@ describe('visible-first ordering and the parked state', () => {
 
     await render(<Harness entries={models(1)} api={api} lru={lru} queue={queue} ao />)
     await settle()
-    await bands({ '/models/m0.stl': 'far' }) // parked under ao=true
+    await bands({ '/models/m0.stl': 'far' }) // queued far under ao=true
+    await rerender(<Harness entries={models(1)} api={api} lru={lru} queue={queue} ao={false} />)
+    await settle()
     await act(async () => {
       queue.resume()
     })
-
-    await rerender(<Harness entries={models(1)} api={api} lru={lru} queue={queue} ao={false} />)
-    await settle()
-    await bands({ '/models/m0.stl': 'visible' }) // unpark under ao=false
     await settle()
 
-    expect(vi.mocked(api.getThumb).mock.calls.at(-1)![2]).toBe(false)
     expect(vi.mocked(renderThumbnail)).toHaveBeenCalledTimes(1)
     expect(vi.mocked(renderThumbnail)).toHaveBeenCalledWith(obj, DEFAULT_CAMERA, 'y', false)
     expect(vi.mocked(api.putThumb).mock.calls[0]![0].ao).toBe(false)
   })
 
-  it('a far tile whose mesh is warm renders after every visible tile, and its PNG is filed', async () => {
-    // 3.4a, with its control: the same tile cold is parked instead.
-    const warm = new Set(['/models/m2.stl'])
-    const api = fakeCache(() => ({ status: 'miss' }))
-    const lru = fakeLru(warm)
-    const queue = new RenderQueue(1)
-    queue.suspend()
-
-    await render(<Harness entries={models(3)} api={api} lru={lru} queue={queue} ao />)
-    await settle()
-    await bands({
-      '/models/m0.stl': 'visible',
-      '/models/m1.stl': 'visible',
-      '/models/m2.stl': 'far',
-    })
-    await act(async () => {
-      queue.resume()
-    })
-    await settle()
-
-    expect(acquired(lru)).toEqual(['/models/m0.stl', '/models/m1.stl', '/models/m2.stl'])
-    expect(api.putThumb).toHaveBeenCalledTimes(3) // the kept job filed its PNG
-    expect(statuses()).toEqual(['ready', 'ready', 'ready'])
-
-    // The control, cold: same shape, no warm set — the far tile parks.
-    await act(async () => {
-      root!.unmount()
-    })
-    vi.mocked(renderThumbnail).mockClear()
-    const lru2 = fakeLru()
-    const api2 = fakeCache(() => ({ status: 'miss' }))
-    const queue2 = new RenderQueue(1)
-    queue2.suspend()
-    await render(<Harness entries={models(3)} api={api2} lru={lru2} queue={queue2} ao />)
-    await settle()
-    await bands({
-      '/models/m0.stl': 'visible',
-      '/models/m1.stl': 'visible',
-      '/models/m2.stl': 'far',
-    })
-    await act(async () => {
-      queue2.resume()
-    })
-    await settle()
-    expect(acquired(lru2)).toEqual(['/models/m0.stl', '/models/m1.stl'])
-    expect(statuses()).toEqual(['ready', 'ready', 'loading'])
-  })
-
-  it('a kept job woken cold and still far parks itself — proven by rendering on return', async () => {
-    // The self-park sets the flag, asserted by consequence: report the path
-    // visible afterwards and it renders, which only happens if the unpark path
-    // could reach it — re-ranking alone would find no queued job.
-    const warm = new Set(['/models/m0.stl'])
-    const api = fakeCache(() => ({ status: 'miss' }))
-    const lru = fakeLru(warm)
-    const queue = new RenderQueue(1)
-    queue.suspend()
-
-    await render(<Harness entries={models(1)} api={api} lru={lru} queue={queue} ao />)
-    await settle()
-    await bands({ '/models/m0.stl': 'far' }) // kept: warm, so not parked
-    warm.delete('/models/m0.stl') // evicted before its turn
-    await act(async () => {
-      queue.resume()
-    })
-    await settle()
-
-    expect(lru.acquire).not.toHaveBeenCalled() // parking never causes a mesh read
-    expect(statuses()).toEqual(['loading']) // never error
-
-    await bands({ '/models/m0.stl': 'visible' })
-    await settle()
-
-    expect(acquired(lru)).toEqual(['/models/m0.stl'])
-    expect(statuses()).toEqual(['ready'])
-  })
-
-  it('a kept job woken with its tile no longer far reads and renders — no stranded tile', async () => {
-    // The round-2 regression: kept means never flagged, so if the wake-up
-    // check consulted only the mesh, a visible tile would sit on loading with
-    // nothing to ever restart it.
-    const warm = new Set(['/models/m0.stl'])
-    const api = fakeCache(() => ({ status: 'miss' }))
-    const lru = fakeLru(warm)
-    const queue = new RenderQueue(1)
-    queue.suspend()
-
-    await render(<Harness entries={models(1)} api={api} lru={lru} queue={queue} ao />)
-    await settle()
-    await bands({ '/models/m0.stl': 'far' }) // kept at the far rank
-    warm.delete('/models/m0.stl') // evicted while queued
-    await bands({ '/models/m0.stl': 'visible' }) // the user scrolled back
-    await act(async () => {
-      queue.resume()
-    })
-    await settle()
-
-    // Woken visible: it pays the read — exactly right for a tile on screen.
-    expect(acquired(lru)).toEqual(['/models/m0.stl'])
-    expect(statuses()).toEqual(['ready'])
-  })
-
-  it('a slot created after the last report is still gated far by the band ref', async () => {
-    // The reconciler's same-path-new-mtime replacement starts unconditionally;
-    // the tail's read of the band in force is what parks it.
+  it('a listing change resets the ranking: the old listing’s verdicts do not order the new one', async () => {
+    // Code-review finding 5. The same paths survive into a new `entries`
+    // identity; without the reset, m0's `far` from the old listing would still
+    // push it behind m1.
     const api = fakeCache(() => ({ status: 'miss' }))
     const lru = fakeLru()
     const queue = new RenderQueue(1)
-
-    await render(<Harness entries={[one('/models/a.stl', 1)]} api={api} lru={lru} queue={queue} ao />)
-    await settle()
-    expect(statuses()).toEqual(['ready'])
-    await bands({ '/models/a.stl': 'far' })
-
-    await rerender(
-      <Harness entries={[one('/models/a.stl', 2)]} api={api} lru={lru} queue={queue} ao />,
-    )
-    await settle()
-
-    expect(api.getThumb).toHaveBeenLastCalledWith('/models/a.stl', 2, true)
-    expect(acquired(lru)).toEqual(['/models/a.stl']) // the first render's read only
-    expect(statuses()).toEqual(['loading'])
-  })
-
-  it('an unpark landing while the retirement’s lookup is in flight runs one pass, not two', async () => {
-    // 3.3b: unpark is clear-flag → retire → start, so the in-flight pass is
-    // dead before its successor exists. A bare start beside it runs two passes
-    // of one generation — both stay alive() into the queue, and at the queue's
-    // real concurrency of two they read and render the same mesh twice.
-    // (`setThumb`'s own retire dedupes the *PUT* either way — the second pass
-    // dies at its pre-PUT check — so the read and the render are the
-    // observables here, not the write. Falsified against the bare-start
-    // variant, which is how the PUT-count claim was caught overstating.)
-    let release!: () => void
-    const gate = new Promise<void>((r) => {
-      release = r
-    })
-    const api = {
-      getThumb: vi.fn((_p: string, _m: number, ao: boolean) =>
-        ao ? Promise.resolve({ status: 'miss' }) : gate.then(() => ({ status: 'miss' })),
-      ),
-      putThumb: vi.fn().mockResolvedValue(undefined),
-    } as unknown as ApiClient
-    const lru = fakeLru()
-    const queue = new RenderQueue(2)
     queue.suspend()
+    const first = models(2)
 
-    await render(<Harness entries={models(1)} api={api} lru={lru} queue={queue} ao />)
+    await render(<Harness entries={first} api={api} lru={lru} queue={queue} ao />)
     await settle()
-    await bands({ '/models/m0.stl': 'far' }) // parked cold
+    await bands({ '/models/m0.stl': 'far', '/models/m1.stl': 'visible' })
+
+    // A landing: a fresh array of the same entries. Survivors keep their slots
+    // and their queued tails; the ranking must not survive with them.
+    await rerender(<Harness entries={models(2)} api={api} lru={lru} queue={queue} ao />)
+    await settle()
     await act(async () => {
       queue.resume()
     })
-
-    // The toggle retires the parked slot; its fresh lookup hangs on the gate.
-    await rerender(<Harness entries={models(1)} api={api} lru={lru} queue={queue} ao={false} />)
-    // The tile comes back while that lookup is still in flight.
-    await bands({ '/models/m0.stl': 'visible' })
-    release()
     await settle()
 
-    expect(lru.acquire).toHaveBeenCalledTimes(1) // one mesh read, not two
-    expect(vi.mocked(renderThumbnail)).toHaveBeenCalledTimes(1)
-    expect(api.putThumb).toHaveBeenCalledTimes(1)
-    expect(statuses()).toEqual(['ready'])
-  })
-
-  it('a park landing after a render started leaves its stale-PNG fallback intact', async () => {
-    // 1.2a: the cancel handle answers false for a started job, so the park
-    // must not fire dropStale — the render's own catch still needs the stale
-    // PNG, and revoking it would write the error state 3.4 forbids.
-    let fail!: (err: Error) => void
-    vi.mocked(renderThumbnail).mockImplementationOnce(
-      () =>
-        new Promise<Blob>((_r, reject) => {
-          fail = reject
-        }),
-    )
-    const api = fakeCache(() => ({
-      status: 'hit',
-      pngUrl: URL.createObjectURL(new Blob()),
-      lighting: 'axis', // the retired label: stale pixels, re-render queued
-    }))
-    const lru = fakeLru()
-    const queue = new RenderQueue(1)
-
-    await render(<Harness entries={models(1)} api={api} lru={lru} queue={queue} ao />)
-    await settle()
-    expect(vi.mocked(renderThumbnail)).toHaveBeenCalledTimes(1) // started, drawing
-
-    await bands({ '/models/m0.stl': 'far' }) // the park lands under it
-    fail(new Error('render died'))
-    await settle()
-
-    // The catch fell back to the stale PNG — never the error state.
-    expect(statuses()).toEqual(['ready'])
-    for (const commit of renderLog) for (const cell of commit) expect(cell.startsWith('error')).toBe(false)
+    expect(acquired(lru)).toEqual(['/models/m0.stl', '/models/m1.stl']) // insertion order: unreported
   })
 })

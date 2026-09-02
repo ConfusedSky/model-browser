@@ -1695,10 +1695,11 @@ export default function App() {
    *
    * - the hidden set is `entries` minus `filteredListing` — the tiles a
    *   restriction actually hid (the anchor is prepended separately and so
-   *   exempt; kind-hidden tiles deliberately included). Never "`thumbEntries`
+   *   exempt; kind-hidden tiles deliberately included): a hidden model by its
+   *   path, a hidden folder by its preview cells' paths. Never "`thumbEntries`
    *   minus `shownEntries`": that difference contains every folder-preview
-   *   model by construction, and marking those far would park the sheet cells
-   *   of a folder on screen.
+   *   model by construction, and marking those far would defer the sheet
+   *   cells of a folder on screen behind everything.
    * - the merge never overwrites a band the report carries — the per-path max
    *   at this layer. A hidden tile can simultaneously be a visible folder's
    *   preview cell, and the folder's registration must win.
@@ -1713,12 +1714,27 @@ export default function App() {
   filteredRef.current = filteredListing
   const reportBands = useCallback(
     (bands: ReadonlyMap<string, Band>) => {
+      // Unfiltered — `filteredListing` *is* `entries` — is the common case,
+      // and a 500-entry Set per batch would be a guaranteed no-op there.
+      if (filteredRef.current === listingRef.current) {
+        setBands(bands)
+        return
+      }
       let merged: Map<string, Band> | null = null
-      const shown = new Set(filteredRef.current.map((e) => e.path))
-      for (const e of listingRef.current) {
-        if (e.kind !== 'model' || shown.has(e.path) || bands.has(e.path)) continue
+      const hide = (path: string): void => {
+        if (bands.has(path)) return // never overwrite a reported band
         merged ??= new Map(bands)
-        merged.set(e.path, 'far')
+        if (!merged.has(path)) merged.set(path, 'far')
+      }
+      const shown = new Set(filteredRef.current.map((e) => e.path))
+      const previews = previewsRef.current
+      for (const e of listingRef.current) {
+        if (shown.has(e.path)) continue
+        if (e.kind === 'model') hide(e.path)
+        // A hidden folder's preview cells have no tile either; left
+        // unreported they would rank above genuinely far work — reads and
+        // renders for content the user just filtered away.
+        else if (e.kind === 'dir') for (const cell of previews.get(e.path) ?? []) hide(cell.path)
       }
       setBands(merged ?? bands)
     },

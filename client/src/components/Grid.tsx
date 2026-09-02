@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, type RefObject } from 'react'
+import { memo, useCallback, useEffect, useRef, type RefObject } from 'react'
 import { baseName } from '../../../shared/names'
 import type { DirEntry, IndexScore } from '../../../shared/types'
 import type { ThumbState } from '../hooks/useThumbnails'
@@ -7,19 +7,19 @@ import { SCALE_BADGE, SCALE_SPOKEN, Z_LABEL, type ScoreScale } from '../lib/scor
 import type { Band } from '../three/queue'
 
 /**
- * The park boundary: how far past the scrollport a tile may sit before its
- * render is parked, as the band observer's `rootMargin` — two
- * scrollport-heights above and below. Generous relative to the prefetch (the
- * margin-less observer's edge) so that ordinary scrolling oscillation does not
- * park-and-restart the same tile — crossing it takes deliberate travel.
+ * The far boundary: how far past the scrollport a tile may sit before its
+ * render ranks `far` — deferred behind everything nearer — as the band
+ * observer's `rootMargin`, two scrollport-heights above and below. Generous
+ * relative to the prefetch (the margin-less observer's edge) so that ordinary
+ * scrolling oscillation does not flip the same tile's rank back and forth —
+ * crossing it takes deliberate travel.
  *
  * Tuned and frozen 2026-09-02 (task 6.2b), against the real library's
  * 500-tile flat listing at a 1280×900 window (809 px scrollport), sweep
  * throughput ~0.8 thumbnails/s cold: the two-screen band held 28 tiles ≈ 35 s
  * of prefetch runway — a screen or two of scrolling lands on rendered
- * tiles — while 455 of 500 models stayed parked and unread, and ±1-screen
- * oscillation triggered only the freshly exposed prefetch rows, never a
- * park/unpark churn. Percentages are relative to the scrollport, so the band
+ * tiles — and ±1-screen oscillation triggered only the freshly exposed
+ * prefetch rows. Percentages are relative to the scrollport, so the band
  * scales with the window; re-judge here if tile or window geometry changes
  * materially.
  */
@@ -27,6 +27,15 @@ export const PARK_ROOT_MARGIN = '200% 0px 200% 0px'
 
 /** How near a band sorts — the per-path max ("nearest wins") compares on this. */
 const NEARNESS: Record<Band, number> = { visible: 0, near: 1, far: 2 }
+/**
+ * The band a folder's preview cells register at: one worse than the folder's
+ * own. A sheet is the folder's decoration and the model tiles beside it are
+ * what the user came for — at the folder's own band, a folder one or two
+ * screens up sat `near` with its cells tied against the near model tiles
+ * below, first in listing order, and the sheet won (sweep-priority D2,
+ * amended 2026-09-02).
+ */
+const CELL_BAND: Record<Band, Band> = { visible: 'near', near: 'far', far: 'far' }
 
 interface Props {
   entries: DirEntry[]
@@ -73,8 +82,8 @@ interface Props {
   /**
    * Report every observed tile's band, wholesale, after each observer batch —
    * `visible` / `near` / `far`, with a folder's preview models registered
-   * under the folder's own band and a path shown in more than one place
-   * taking the nearest (sweep-priority D2). App wraps this before it reaches
+   * one band worse than the folder's own and a path shown in more than one
+   * place taking the nearest (sweep-priority D2). App wraps this before it reaches
    * the render pipeline; held by identity like `onPeek`.
    */
   onBands: (bands: ReadonlyMap<string, Band>) => void
@@ -129,18 +138,15 @@ function Grid({
 }: Props) {
   const gridRef = useRef<HTMLDivElement>(null)
   /**
-   * Each observed tile's last record from both observers, keyed by path — the
-   * band is derived from the pair (`inView` → visible, else `inPark` → near,
-   * else far). Component-level, because two effects read it: the observer
-   * effect writes it, and the previews effect below republishes from it.
+   * Each observed tile's last record from each observer, keyed by path. A half
+   * stays `undefined` until that observer has reported the tile — the band
+   * (`inView` → visible, else `inPark` → near, else far) is derived only once
+   * both have, so a tile heard by one observer is unreported rather than a
+   * band derived from a defaulted half (the delta's "never defaulted";
+   * code-review finding 6). Component-level so `publish` can read it from
+   * either effect below.
    */
-  const bandStateRef = useRef<Map<string, { inPark: boolean; inView: boolean }>>(new Map())
-  /**
-   * The observer effect's publish function, reachable by the previews effect —
-   * two effects cannot share a closure, so the seam is this ref, written on
-   * each observer-effect run and cleared on its teardown.
-   */
-  const publishRef = useRef<(() => void) | null>(null)
+  const bandStateRef = useRef<Map<string, { inPark?: boolean; inView?: boolean }>>(new Map())
   /**
    * `previews` at report time, not at effect-build time: the registration rule
    * reads it inside observer callbacks, and putting `previews` in the effect's
@@ -150,6 +156,39 @@ function Grid({
    */
   const previewsRef = useRef(previews)
   previewsRef.current = previews
+  /**
+   * Report every tracked tile's band, wholesale. A component-level callback
+   * over the refs and the `onBands` prop — not a closure of the observer
+   * effect — so the two effects that call it need no shared seam and no
+   * declaration order (code-review finding 10). Returns early while nothing
+   * is tracked: the previews effect can fire right after a listing change has
+   * cleared the state, and an empty report would read as "every path is
+   * unreported" over work the last report had ranked (finding 3).
+   */
+  const publish = useCallback(() => {
+    const state = bandStateRef.current
+    if (state.size === 0) return
+    const bands = new Map<string, Band>()
+    // The per-path max: a path shown in more than one place — its own tile
+    // and a folder's preview — takes the nearest band, so a far band never
+    // outranks visible work (D2).
+    const put = (path: string, band: Band): void => {
+      const cur = bands.get(path)
+      if (cur === undefined || NEARNESS[band] < NEARNESS[cur]) bands.set(path, band)
+    }
+    const shown = previewsRef.current
+    for (const [path, s] of state) {
+      if (s.inPark === undefined || s.inView === undefined) continue
+      const band: Band = s.inView ? 'visible' : s.inPark ? 'near' : 'far'
+      put(path, band)
+      // A folder's preview models register one band worse than the folder —
+      // they have no tile of their own, and unregistered they would rank
+      // after every visible tile even while their folder is on screen.
+      const cells = shown.get(path)
+      if (cells !== undefined) for (const cell of cells) put(cell.path, CELL_BAND[band])
+    }
+    onBands(bands)
+  }, [onBands])
   /**
    * Two observers in one effect, rooted at the scroller (sweep-priority D2).
    * The band observer — the one `folder-contact-sheets` landed for peeks,
@@ -181,36 +220,14 @@ function Grid({
     if (root === null || scroller === null) return
     const state = bandStateRef.current
     state.clear()
-    const stateOf = (path: string): { inPark: boolean; inView: boolean } => {
+    const stateOf = (path: string): { inPark?: boolean; inView?: boolean } => {
       let s = state.get(path)
       if (s === undefined) {
-        s = { inPark: false, inView: false }
+        s = {}
         state.set(path, s)
       }
       return s
     }
-    const publish = (): void => {
-      const bands = new Map<string, Band>()
-      // The per-path max: a path shown in more than one place — its own tile
-      // and a folder's preview — takes the nearest band, so a far band never
-      // cancels visible work (D2).
-      const put = (path: string, band: Band): void => {
-        const cur = bands.get(path)
-        if (cur === undefined || NEARNESS[band] < NEARNESS[cur]) bands.set(path, band)
-      }
-      const shown = previewsRef.current
-      for (const [path, s] of state) {
-        const band: Band = s.inView ? 'visible' : s.inPark ? 'near' : 'far'
-        put(path, band)
-        // A folder's preview models register under the folder's own band —
-        // they have no tile of their own, and unregistered they would rank
-        // after every visible tile even while their folder is on screen.
-        const cells = shown.get(path)
-        if (cells !== undefined) for (const cell of cells) put(cell.path, band)
-      }
-      onBands(bands)
-    }
-    publishRef.current = publish
     const apply = (
       records: IntersectionObserverEntry[],
       half: 'inPark' | 'inView',
@@ -239,19 +256,14 @@ function Grid({
     return () => {
       bandObserver.disconnect()
       viewObserver.disconnect()
-      publishRef.current = null
     }
-  }, [entries, onPeek, onBands, scrollRoot])
+  }, [entries, onPeek, publish, scrollRoot])
 
-  /**
-   * A landed peek's models join their folder's band at once, with no observer
-   * churn: republish the already-tracked bands through the ref. Declared
-   * *after* the observer effect — setups run in declaration order, and an
-   * earlier declaration would fire against an unset ref on mount.
-   */
+  /** A landed peek's models join their folder's band at once, with no
+   *  observer churn: republish the already-tracked bands. */
   useEffect(() => {
-    publishRef.current?.()
-  }, [previews])
+    publish()
+  }, [previews, publish])
 
   // Below the hooks, not above them: the observer effect must run on every
   // render of this component, and an early return before it would make it

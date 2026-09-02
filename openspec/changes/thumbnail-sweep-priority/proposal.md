@@ -14,9 +14,10 @@
 > `62f9f2d` and every code citation re-checked at that commit, then re-verified
 > 2026-09-02 at HEAD by an opus review whose findings — the observers' root,
 > the band-aware start gate, and the *Recipe-labelled thumbnails* qualification
-> among them — are folded into all four artifacts. The intent is
-> unchanged: visible-first render ordering, and far-band cancellation of work
-> that has not started.
+> among them — are folded into all four artifacts; then **amended 2026-09-02**
+> after measurement against the real library (design D4): far work is deferred
+> to the back of the queue, never cancelled. The intent is unchanged —
+> visible-first render ordering — and the mechanism is now the simpler one.
 
 ## Why
 
@@ -54,23 +55,21 @@ to what they are looking at, rather than to the size of the directory.
 - **Visibility drives that priority**: the grid reports which tiles are on screen,
   and scrolling re-prioritises the queue rather than appending to it. A tile
   scrolled far away yields its place; a tile scrolled into view claims one.
-- **Work for tiles that left the viewport before starting is parked** rather than
-  run: `RenderQueue.push` already returns a cancel handle, and nothing calls it
-  for scroll today. *Parked* is the third per-entry state
-  `ao-refreshes-thumbnails` named and deliberately left for this change — cancelled
-  unstarted, restartable on re-entry, distinct from finished and from error.
-  The one exception (added 2026-09-01, user review): a model whose mesh is
-  already in memory — a prior render, a lightbox open, or a folder preview
-  loaded it — is past the expensive part, so its render is kept, taken last,
-  and completed rather than discarded; the read already paid becomes a durable
-  cached image instead of gambling on the mesh LRU. If the mesh is evicted
-  before its turn comes, it parks then, without reading. Parking never causes
-  a mesh read.
-- **The far band never cancels a cache lookup**, only the render tail. A parked
-  tile that the preference or the index's opinion moves under is looked up again
-  at once — so a render already cached under the new setting still paints, as
-  *Recipe-labelled thumbnails* requires — while its render stays parked until its
-  tile comes back.
+- **Work for tiles that left the viewport is deferred, never discarded**
+  (amended 2026-09-02 — the parked design was built, measured and replaced,
+  design D4): far work stays queued at the lowest rank and runs only when
+  nothing nearer is pending. While the user is active there is always nearer
+  work, so scrolling past uncached tiles spends nothing on them; when the user
+  stops, the queue drains nearest-first — a listing left open warms itself,
+  which the parked design's frozen sweep did not. No per-entry parked state:
+  `ao-refreshes-thumbnails`' deferred third state resolves as unneeded.
+- **A folder's sheet fills after the tiles beside it**: preview cells rank one
+  band worse than their folder (a visible folder's cells are near), so a
+  contact sheet never outranks the model tiles the user is scrolling toward.
+- **The far band never cancels a cache lookup**, only defers the render tail.
+  A recipe change re-looks-up every tile at once — so a render already cached
+  under the new setting still paints, as *Recipe-labelled thumbnails* requires
+  — and a miss queues at its position.
 - **The grid's one observer effect serves both readers.** `Grid` already has an
   `IntersectionObserver` watching `[data-dir-tile]` for folder previews; this
   change widens it to model tiles and band reporting — the joining
@@ -96,17 +95,21 @@ None.
 - `model-thumbnails`: the **Client-side thumbnail rendering** requirement
   describes the queue as limited-concurrency and suspendable but says nothing
   about the order work is taken in — which is how strict listing order became the
-  behavior by default. It gains an ordering rule: visible tiles first; work for
-  tiles that left the viewport before starting is parked rather than completed —
-  except work whose mesh is already in memory, which is finished last rather
-  than discarded, so a paid read always yields a durable image; and a parked
-  entry is looked up but not rendered when its recipe moves under it, so it
-  re-renders when its tile returns.
+  behavior by default. It gains an ordering rule: visible tiles first, then
+  near, then unreported, then far — position orders work and never discards
+  it, so a listing left open drains nearest-first; a folder's preview cells
+  rank one band worse than the folder; hidden content is reported far; and a
+  recipe change re-looks-up every entry at once, queueing a miss at its
+  position.
 - `model-thumbnails`: the **Recipe-labelled thumbnails** requirement's "and
-  rendering only what is not [cached]" clause is qualified for work parked off
-  screen (2026-09-02 opus review: unqualified, the archived spec would carry
-  two sentences contradicting each other). One clause; every scenario carried
-  unchanged.
+  rendering only what is not [cached]" clause is qualified for work deferred
+  off screen (2026-09-02 opus review: unqualified, the archived spec would
+  carry two sentences contradicting each other). One clause; every scenario
+  carried unchanged.
+- `directory-browsing`: **Folder tiles preview their contents** — the peek is
+  requested when a tile comes within the prefetch band, not only on screen
+  (code-review finding 1; one sentence, one scenario body, nine scenarios
+  carried).
 
 ## Impact
 
@@ -116,12 +119,11 @@ None.
   still pending. The two keyless `push` callers (`refreshThumbnail`,
   `setOrbitAxis` in `entryActions`) stay keyless and rank with visible work —
   they are user presses.
-- `client/src/hooks/useThumbnails.ts` — `start` pushes its queue job with a key;
-  `EntrySlot` gains its `DirEntry` and a parked marker, and its `cancels` list
-  gains a separately-reachable render handle (today it is a flat, unlabelled
-  `(() => void)[]` that only `retire` fires, so the render tail cannot be
-  cancelled without also killing the lookup). The hook returns an imperative
-  `setBands`.
+- `client/src/hooks/useThumbnails.ts` — `start` pushes its queue job with a
+  key, unconditionally; `EntrySlot` gains its `DirEntry`. The hook returns an
+  imperative `setBands` (a value-equal early exit over `queue.setRanking`),
+  and resets the accepted map when `entries` changes identity. No parked
+  marker, no labelled render handle — the amendment removed both.
 - `client/src/components/Grid.tsx` — the existing observer effect widens to
   `[data-model-tile]` as well as `[data-dir-tile]`, stops unobserving on first
   intersection (a band tracker must keep watching; the repeat-peek guard moves
@@ -141,9 +143,9 @@ None.
   carries (D3: the wider `thumbEntries`-based difference captures every
   folder-preview model and would park sheet cells on screen) — so the sweep
   does not keep reading entries the user just filtered away.
-- `client/src/three/lru.ts` — `MeshLru` gains a held-or-loading peek beside
-  `has` (recency-free, like `has`): an acquire still in flight must read as
-  warm, or its render is parked while the read completes anyway (D4).
+- `client/src/three/lru.ts` — untouched after the amendment (the
+  held-or-loading peek existed only for the parked design's warm-mesh
+  exception).
 - No server, API, cache-schema, or pixel-recipe change; `RIG_VERSION` is
   untouched.
 - Related but separate: the 500-model cap is what makes a single view this

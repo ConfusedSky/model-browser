@@ -147,6 +147,13 @@
 
 ## 3. The parked state
 
+> **Superseded 2026-09-02 (§7).** These tasks were done as written and then
+> measured against the real library; the parked design they implement was
+> replaced by deferral (design D4). Their checkmarks record what landed at
+> `313da25`, not what the code does now — §7 is the current shape. 3.1 (the
+> `setBands` contract, minus its parked clauses), 3.2 and 3.3 survive; 3.3a,
+> 3.3b, 3.4, 3.4a and 3.5 describe machinery that no longer exists.
+
 - [x] 3.1 `useThumbnails` returns `setBands(map)` beside `setThumb`,
       `setPlaceholder` and `discardThumbFraming`; `App` holds it by identity (as it
       holds `onPeek`) and passes it to `Grid`. **Document the contract where it is
@@ -253,6 +260,10 @@
       inputs are unchanged, and visibility is not a dependency of that effect
 
 ## 5. Tests
+
+> 5.1's parked cells (the flag, the unpark race, the warm-mesh pair, the
+> stranded-tile wake-up) were retired by 7.6; the checkmark records what landed
+> at `313da25`. 5.1a, 5.2 and 5.3 survive with the deferral cells in their place.
 
 - [x] 5.1 Hook-level cells in `client/test/thumbnailQueue.test.tsx` (the reconciler
       suites live there — "the sweep reconciles its entries instead of resetting
@@ -394,3 +405,62 @@ cold-cache figure — re-measure, don't re-cite).
   k 0.146, 500th k 0.119. Deep scroll to the weakest matches: first visible
   image **2.1 s**, all visible filled in **8.3 s** — the capped wall is now
   browsable end to end, which is what this change owed `score-floor-by-default`.
+
+## 7. Amendment 2026-09-02 — deferral replaces parking; code-review fold-in
+
+> The parked implementation was measured against the real library (run
+> record above) and then probed again after the user reported that a listing
+> left idle never warmed and that folder sheets won over the model tiles they
+> were scrolling toward. Both reproduced. At the same time a code review from
+> `model-browser-agent-2` (opus finders, adversarially verified) landed ten
+> findings, one an archive blocker. Design D4 records why deferral replaces
+> parking; D6 dispositions every finding. These tasks are that work.
+
+- [x] 7.1 **Deferral in the hook** (D4): the lookup tail always pushes its
+      keyed render — no park gate, no wake-up re-check. Remove `parked`,
+      `parkTail`, the unpark loop, `startRef`, and `MeshLru.holds`. `setBands`
+      is the value-equal early exit plus `queue.setRanking`, and the accepted
+      map is **reset when `entries` changes identity** (finding 5), with the
+      queue's ranking cleared alongside it
+- [x] 7.2 **Queue**: `take` splices cancelled husks as the scan meets them
+      (finding 7); far is real work, taken when nothing nearer is pending —
+      idle draining is the queue's default, not a feature (D4)
+- [x] 7.3 **Grid**: cells rank one band worse than their folder (D2); a path
+      is published only once both observers have reported it (finding 6);
+      `publish` is a component-level callback over refs, no `publishRef`, no
+      declaration-order coupling (finding 10); early return while the tracked
+      state is empty (finding 3)
+- [x] 7.4 **App wrapper**: a hidden folder's preview cells are reported far,
+      never overwriting a reported band (finding 2); forward the report
+      untouched when `filteredListing` is `entries` by identity (finding 9)
+- [x] 7.5 **`directory-browsing` delta** (finding 1, archive blocker): MODIFY
+      *Folder tiles preview their contents* — peek at the prefetch band; nine
+      scenarios carried, one body changed; no overlap with
+      `search-cancellation`'s ADD
+- [x] 7.6 **Tests**: retire every parked cell (the flag, the unpark race, the
+      warm-mesh pair, the stranded-tile wake-up); add: far work runs after
+      everything nearer and drains at idle (the FIFO-failing cell stays);
+      deferred work renders under the current recipe; a listing change resets
+      the ranking; a folder's cells render after the model tiles beside it; a
+      hidden folder's cells are reported far; a path heard by one observer
+      only is unreported; the fake LRU drops `holds`
+- [x] 7.7 `bun run typecheck` and `bun run test` pass; E2E against the real
+      library: after visible and near fill, mesh reads **continue** nearest-
+      first (the frozen-sweep repro now drains); a folder on screen beside
+      uncached model tiles fills its sheet after them
+
+## Run record — 7.7 (2026-09-02, this session's run, Playwright MCP)
+
+Same conditions as the 6.2 record (1280×900, dev instance, real library).
+Uncached listing `/Warhammer` flat (500 tiles), landed at its top — all
+folder tiles on screen, so nothing visible needed a render: **mesh reads
+climbed 37 → 46 → 70 → 95 → 112 → 127 → 141 over 98 s** and kept going, the
+queue draining nearest-first with nothing on screen to serve — the exact
+scenario in which the parked build froze at the near boundary (its 6.2 record
+shows 45 renders then flat for 60 s). Deferral verified. Every falsifiable cell
+in 7.6 was run against its broken variant — far-never-runs, cells at the
+folder's own band, defaulted observer halves, hidden folders ignored — and
+fails there; push order in the app-mount cells is staged to contradict the
+asserted rank, which is what caught two cells that first passed by luck. The
+sheet-after-tiles order is pinned by its cell; the real listing's top screens
+hold no model tiles beside folders to observe it against.
