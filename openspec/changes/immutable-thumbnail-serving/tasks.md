@@ -19,6 +19,12 @@
       write) rather than 0, so a re-created entry's generation exceeds any previously
       issued for that path. Test: write, delete the entry, write again — the second
       gen is strictly greater
+      — landed 2026-09-02 (e3f5604) with a correction on the record: the specified
+      cell CANNOT catch a bad seed (the allocator's high-water is module state, so
+      within one process even a 0-seeded counter answers "strictly greater" — its
+      falsification passed 102 cells). The shipped cell resets modules and pins a
+      fresh process's first generation against the wall clock, which does fail
+      against the 0-seed
 - [x] 1.3 `app.ts` `GET /api/thumb`: optional `gen` query param. Hit + `gen` current →
       `Cache-Control: public, max-age=31536000, immutable`. Hit + `gen` stale → current
       body and gen, `Cache-Control: no-cache`. Hit + no `gen` → `Cache-Control:

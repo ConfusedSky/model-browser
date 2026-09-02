@@ -76,6 +76,17 @@ path + mtime + recipe, so serving from its own cache beats a needless re-render
 (worker finding, 2026-09-02, recorded here so a hand-built replacement object at
 either site is recognizable as the regression it would be).
 
+One bound measured at implementation (2026-09-02, probe re-runnable in
+`allocateGen`'s terms): the `lastGen + 1` term outruns wall-clock under burst
+allocation — 200 puts in 16 ms ended 184 ms ahead — so a restart after a burst can
+re-issue numbers below the previous process's high-water. Reaching a live collision
+needs burst + restart + whole-entry eviction + an exact numeric hit, and the `prev`
+floor covers every case where the sidecar survives; accepted. If cross-restart
+monotonicity ever becomes a real guarantee (a second reader, a synced cache), persist
+the high-water mark — and note the first attempted restart test asserted
+strictly-greater across restart and failed against correct code for exactly this
+reason, so do not re-add that assertion without the persistence.
+
 *Alternative — hash the response:* content-addressing without a counter, but the ETag
 would have to be computed per request from the body, and the client could never predict
 the URL; a counter is predictable, cheap, and the listing layer can carry it.
