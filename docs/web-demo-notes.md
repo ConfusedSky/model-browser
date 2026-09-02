@@ -394,6 +394,20 @@ All re-runnable; say whose run when quoting.
   RAM-resident-hours. Cheapest viable path remains a flat-rate budget VPS
   (RackNerd/OVH-class 4 GB US at ~$5–10 flat, not yet in the sweep above);
   gate 3.3's paid hour answers whether their shared vCPUs hold the <1 s bar.
+  **Checkpoint/restore for scale-to-zero** (this session, 2026-09-02, Masa's
+  ask): right shape (snapshot post-SigLIP-load, restore on demand), blocked
+  twice over. `docker checkpoint` (CRIU, experimental) needs a privileged VM —
+  which is flat-rate, where scale-to-zero saves $0; usage-billed platforms
+  that would save money don't allow CRIU. The managed form, Fly.io machine
+  suspend/resume (Firecracker snapshots, resume "a few hundred ms",
+  storage-only while suspended), has a **hard ≤ 2 GB memory limit**
+  (fly.io/docs/reference/suspend-resume) vs our 2.8 GB fp32 peak — and resume
+  is not guaranteed (deploy/migration/snapshot loss ⇒ cold boot), so the 16 s
+  warming path must exist regardless. Possible lever, noted not pursued: the
+  demo only embeds *text* (image embeddings precomputed), so a text-tower-only
+  serving mode might fit under 2 GB — a mini-classify change; the earlier
+  "text-tower-only no gain" note was about load time, not resident size.
+  Re-check the limit if revisiting; it is the whole verdict.
 - **Corpus**: see its `NOTES.md` (STL vs GLB sizes, dedup counts, decimation
   gates). `du` on `original/` reads 516 MB vs the notes' 12 GB — hardlink
   accounting order, not a discrepancy.
