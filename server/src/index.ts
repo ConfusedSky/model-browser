@@ -5,11 +5,16 @@ import { ALL_FEATURES, createApp } from './app'
 import { ZipTempStore, createLauncher } from './launch'
 import { createLibrary } from './library'
 import { createOverrideHolder } from './overrides'
+import { SnapshotStore } from './snapshot'
 
 const library = createLibrary()
 // Positional to keep the three existing parameters' defaults; the library is
 // what files entries under `<cache>/<id>/` and gates the sweep (D5).
 const cache = new ThumbCache(undefined, undefined, undefined, library)
+// The walked-tree cache, filed under the same per-library directory and bounded
+// by its own knob (`listing-tree-cache` D2). Built here rather than inside
+// `createApp` for `cache`'s reason: the startup sweep below needs it.
+const snapshots = new SnapshotStore(undefined, undefined, library)
 // Built here rather than left to `createApp`'s default so the eager load below
 // can use it: a malformed store then reports beside the startup line rather
 // than on whichever request happened to ask first (library-overrides D1).
@@ -28,6 +33,10 @@ void library.state().then((s) => {
     // The startup sweep resolves every cached path through the library, so it
     // has nothing to say until there is one.
     void cache.maintain()
+    // The snapshot store's sweep is its own — one location, two bounds (D2) —
+    // and runs beside it for the same reason: it is filed per library, so it
+    // has nothing to sweep until the library has resolved.
+    void snapshots.maintain()
   } else console.log(`library: ${s.state}`)
 })
 
@@ -42,6 +51,7 @@ const app = createApp(
   library,
   overrides,
   ALL_FEATURES,
+  snapshots,
 )
 
 export default {

@@ -97,7 +97,7 @@
 
 ## 4. Walk integration and revalidation
 
-- [ ] 4.1 `listFlat` serves from the snapshot when one exists for the root; a miss walks and populates. The snapshot is keyed by the **root alone** (its library path under the library's id) — not by `q`, not by the search options — and filtering runs over it exactly as it runs over a live walk (D1)
+- [x] 4.1 `listFlat` serves from the snapshot when one exists for the root; a miss walks and populates. The snapshot is keyed by the **root alone** (its library path under the library's id) — not by `q`, not by the search options — and filtering runs over it exactly as it runs over a live walk (D1)
       <br>**The seam 4.1a needs already exists (2026-09-01, aggregate-review worker WR-S).**
       `server/src/listing.ts` exports `walkFlat` — `listFlat`'s body, returning
       `{ listing, budgetExhausted, capped }` — and `listFlat` is now a one-line wrapper
@@ -107,17 +107,91 @@
       itself forever. `budgetExhausted` alone is the completeness fact. Cells:
       `flat.test.ts` › "the two reasons a listing is truncated, which the wire does not
       tell apart"
-- [ ] 4.1a Only a **complete** traversal is persisted: a walk that stopped against its step budget populates nothing, or a partial tree is stored as though whole and is permanently wrong (D1). Test that a budget-truncated walk leaves no snapshot behind, and that the next unbudgeted request traverses
-- [ ] 4.2 Incremental revalidation: one `stat` per directory, re-reading only those whose freshness signal moved (D4). Never a background full re-walk — that reintroduces the cold cost off-screen (D5)
-- [ ] 4.3 A revalidation that cannot be completed against a root that is **present** — an
+      <br>— landed 2026-09-02 (stage 2). `walkFlat` takes the `SnapshotStore` as a
+      trailing optional parameter and returns an additional `fromSnapshot`; every
+      existing caller compiles unchanged and the pre-change suite is byte-green (530
+      cells). Its body split into **`gatherFlat`** — the traversal, with no query, no cap
+      and no snapshot in sight — and the filter/cap/emit block, which now runs over
+      either a fresh gather or a stored one. That split *is* D1: the three collections
+      `gatherFlat` returns are what a snapshot holds, and nothing below that line has
+      ever seen the query. Stored in the walk's own emission order (containers, then the
+      deeper containers, then the models) and partitioned back by kind and by whether the
+      name carries a `/`; nothing is sorted on the way in or out, per the Bun/Node
+      `readdir` divergence. `store.archiveCache()` is threaded through `FlatWalk.zips`
+      into `walkZip`'s `listZipEntries` — falsified by dropping it, which fails "opens no
+      archive" with `expected 2 to be +0`. **Deep search needs no second integration**:
+      `/api/dir?flat=true&q=` is the only deep-search path in the app; `/api/semantic*`
+      delegates to the index and `walkRanked` is `peek`, which is bounded, unsnapshotted
+      and deliberately outside this
+- [x] 4.1a Only a **complete** traversal is persisted: a walk that stopped against its step budget populates nothing, or a partial tree is stored as though whole and is permanently wrong (D1). Test that a budget-truncated walk leaves no snapshot behind, and that the next unbudgeted request traverses
+      — the gate is `!budgetExhausted` at the one `store.save` call in `walkFlat`.
+      Falsified twice: dropping the gate fails the budget cell with
+      `expected { root: '/kit', …(3) } to be null`, and writing it against the wire's
+      truncation instead (`budgetExhausted || models.length > FLAT_CAP`) fails the
+      capped-but-complete cell with `expected null not to be null` — the exact confusion
+      the note above warns about, caught by a cell of its own. A walk that **rejects**
+      persists nothing by construction: `save` is the only write and the only flush, and
+      it is downstream of the traversal. `WalkCancelled` does not exist yet
+      (`search-cancellation` has not landed), so the cell injects the rejection at the
+      unreadable-root failure that does escape `walkFlat` today, and asserts both halves —
+      no tree file, and a later store still opens the archive
+- [x] 4.2 Incremental revalidation: one `stat` per directory, re-reading only those whose freshness signal moved (D4). Never a background full re-walk — that reintroduces the cold cost off-screen (D5)
+      — `revalidateTree` (listing.ts) re-runs `gatherFlat` with the snapshot's `dirs`
+      indexed as a per-directory reuse map: `levelFor` stats each directory, hands back
+      the recorded level unchanged when the mtime matches, and `readdir`s only where it
+      moved. A new subdirectory under a changed one is walked fresh from there, so an
+      addition is not limited to the folder that moved. Archives are revalidated by their
+      own `{mtime, size}` through the D3 layer rather than by directory mtime, which is
+      what a zip rewritten in place needs. Instrumented at the syscall, never timed: the
+      add cell asserts `readdir` was called for exactly `<kit>/a` and no archive was
+      opened; the unchanged-tree cell asserts zero of each. Falsified by dropping the
+      mtime comparison (always reuse), which fails six cells —
+      `expected [ 'a', 'z', 'box.zip', …(6) ] to include 'a/added.stl'` and
+      `expected [] to deeply equal [ '…/kit/a' ]` among them
+- [x] 4.3 A revalidation that cannot be completed against a root that is **present** — an
       unreadable directory, permissions changed — invalidates rather than serving cached
       entries. A root that is not present at all never reaches revalidation: it is the
       library's `missing` state, answered before any listing, which neither serves the
       snapshot nor discards it (D6)
+      — a failed pass raises `RevalidationError`, and `ListingCache`'s catch calls
+      `store.invalidate(root)`. Two guards, and **each fails a different cell**, so
+      neither is dead weight: `walkFsLevel`'s catch re-throws `RevalidationError` instead
+      of swallowing it like an unreadable subdirectory (falsified → the unreadable-folder
+      cell fails `expected { root: '/kit', …(3) } to be null`), and a recorded directory
+      whose `realpath` can no longer be established is a contradiction rather than an
+      unconfined entry to skip (falsified → the unreadable-*root* cell fails the same
+      way). The second exists because **`chmod` does not move a directory's mtime**: an
+      unreadable root's own level is reused unchanged and it is the children's `realpath`
+      that raises EACCES. The `missing` state is answered by `createApp`'s existing
+      library gate — the `UNGATED` middleware above every path route, which 503s before
+      `/api/dir` is reached — so nothing was rebuilt; a cell drives the route and asserts
+      the 503 with the snapshot still loadable. The pass itself checks readiness twice,
+      and the second check needed a cell of its own to be reachable at all: removing it
+      passed everything until a cell was added for the volume leaving *mid*-pass, which
+      is the real gap (the pass runs after the response). Falsified then →
+      `expected null not to be null`
 
 ## 5. Freshness on the wire
 
-- [ ] 5.1 Additive staleness marker on `/api/dir` responses; a freshly walked listing carries none
+- [x] 5.1 Additive staleness marker on `/api/dir` responses; a freshly walked listing carries none
+      — `DirListing.stale?: true` (`shared/types.ts`), absent otherwise and never `false`.
+      Owned by **`server/src/listingCache.ts`**, a new module holding the one genuinely
+      new decision this stage makes: validation state is per **(process, root)**, since a
+      snapshot is durable but "has this process checked it" is not and cannot be read off
+      the file. A cache-serve for an unvalidated root answers at once, marked, and starts
+      the incremental pass single-flighted per root; a request arriving while that pass is
+      in flight **awaits it and is served unmarked**, which is what makes §5.2's one
+      follow-up request terminate rather than loop on the marker — the worst wait is the
+      ~5.6 s incremental pass, not the ~32 s walk. After a completed pass, serves are
+      unmarked for the process, and the pass has *applied* what it found, so the following
+      serve **is** the corrected listing. A fresh walk is never marked. Threaded through
+      `createApp` as a trailing `snapshots?: SnapshotStore` (the `features` precedent);
+      **absent by default**, so with no store `ListingCache` is `listFlat` and nothing
+      else and every pre-existing cell is untouched. Falsified: always marking a
+      cache-serve (`expected true to be undefined`), marking a fresh walk (same), not
+      awaiting the in-flight pass and never starting one (`expected true to be false`,
+      and the wire cell's `expected undefined to be defined` — it polls to convergence
+      rather than assuming a timing)
 - [ ] 5.2 Client: present cached results immediately with a "refreshing" affordance, and reconcile the corrected listing when it arrives — no new transport (the Hono app must run on Node unchanged, architecture D1), so the client issues an ordinary follow-up request on seeing the marker; the existing latest-wins guard and skeleton already cover a later response landing
 
 ## 6. Derived layers and explicit freshness (added 2026-09-02 — see design D7–D9; build after §4, the layers hang off the snapshot and its revalidation)
@@ -178,7 +252,7 @@
 
 ## 7. Tests
 
-- [ ] 7.1 Server: cached and walked responses are entry-for-entry identical on an unchanged tree (including ordering and truncation); one cached tree serves several different queries and both settings of the folder-matching option without re-traversing (instrument the walk, do not infer from timing); a second walk opens no archives; adding, removing, and renaming a model is picked up; a present-but-unreadable root invalidates rather than serving; the same tree reached at a different mountpoint under the same library is a **hit**; an unmounted library answers `missing` and leaves the snapshot in place; the on-disk format version invalidates a stale snapshot
+- [x] 7.1 Server: cached and walked responses are entry-for-entry identical on an unchanged tree (including ordering and truncation); one cached tree serves several different queries and both settings of the folder-matching option without re-traversing (instrument the walk, do not infer from timing); a second walk opens no archives; adding, removing, and renaming a model is picked up; a present-but-unreadable root invalidates rather than serving; the same tree reached at a different mountpoint under the same library is a **hit**; an unmounted library answers `missing` and leaves the snapshot in place; the on-disk format version invalidates a stale snapshot
       <br>**Partly landed 2026-09-02 (stage 1) — `server/test/snapshot.test.ts`, 25 cells.
       Deliberately still unchecked**: the remaining cells need §4's walk integration, which
       does not exist yet. Done here: **a second walk opens no archives** (3.1, both
@@ -204,6 +278,26 @@
       *and* the in-file `library` field) and only fails when both are removed — recorded
       because a single-defect falsification of that cell passes and would have looked like
       coverage
+      <br>**Completed 2026-09-02 (stage 2) — `server/test/listingCache.test.ts`, 22 cells**,
+      alongside stage 1's 25. The five owed above all landed: cached-vs-walked identity
+      (ordering *and* truncation reporting, with the no-store walk as the control); nine
+      asks — several queries and both folder-matching settings — off one tree with zero
+      `readdir`s and zero archive opens, instrumented at the syscall through a
+      `node:fs/promises` mock rather than inferred from timing; add, remove, rename and a
+      whole new folder picked up; a present-but-unreadable root and a present-but-unreadable
+      folder each invalidating; and an unmounted library answering `missing` with the
+      snapshot left in place, at the route and in the pass. Every behavioral cell was
+      falsified before being trusted — thirteen defects introduced, watched to fail and
+      reverted; each one's exact failure text is recorded against §4.1–§4.3 and §5.1 above.
+      Two findings worth inheriting. **A `git checkout` is not how a falsification is
+      unwound** — it reverts the whole working file rather than the patch, and cost this
+      stage a full re-application of `listing.ts`; patch and unpatch against a copy.
+      And **"serves copies" has no single-defect falsification at this stage**, recorded
+      rather than left looking like coverage: `store.load` re-parses the file per request
+      and `partition` and `wire` each mint fresh objects, so no one defect makes an
+      annotation stick — making `wire` hand back its input fails the three *identity*
+      cells and leaves the copies cell green. It guards a future in-memory snapshot cache,
+      not today's code, and should be read that way
 - [ ] 7.2 Client: a stale-marked listing renders immediately with the refreshing affordance and reconciles on the follow-up; an unmarked listing shows no affordance; a superseded reconciliation is discarded by latest-wins
 - [ ] 7.3 Layers (server): an index-generation bump stops pose/preview answers while the
       tree keeps serving; a deep directory change re-derives its ancestors' preview

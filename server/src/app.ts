@@ -15,7 +15,8 @@ import { ThumbCache } from './cache'
 import { guard } from './guard'
 import { LaunchError, type Launcher, ZipTempStore, createLauncher } from './launch'
 import { LibraryError, type Library, canonicalLibPath, createLibrary } from './library'
-import { ListingError, PEEK_MAX_FINDS, complete, listDir, listFlat, peek } from './listing'
+import { ListingError, PEEK_MAX_FINDS, complete, listDir, peek } from './listing'
+import { ListingCache } from './listingCache'
 import {
   type OverrideHolder,
   applyDisplayNames,
@@ -39,6 +40,7 @@ import {
   scopeWithin,
   similar as indexSimilar,
 } from './semantic'
+import type { SnapshotStore } from './snapshot'
 import { VPathError } from './vpath'
 import { ZipError, extractEntry } from './zip'
 
@@ -243,8 +245,15 @@ export function createApp(
   // construction, and read once — a per-process configuration, so the
   // restart-after-editing rule every config in this app follows.
   features: FeatureReport = ALL_FEATURES,
+  // The walked-tree cache (`listing-tree-cache` §4). Injected like the six
+  // above, and **absent by default**: with no store, `ListingCache` walks every
+  // request exactly as this app did before the change, so a caller with no
+  // opinion — and every test written before it — is unaffected. `index.ts`
+  // constructs the real one against the library.
+  snapshots?: SnapshotStore,
 ): Hono {
   const app = new Hono()
+  const listings = new ListingCache(snapshots)
 
   app.use('/api/*', guard)
 
@@ -329,7 +338,10 @@ export function createApp(
     // the `size` field costs (library-overrides D7). Both return paths get it —
     // the flat/deep-search listing is a listing shape like any other.
     if (flat) {
-      const listing = await listFlat(library, libPath, q, { folderMatching })
+      // Through the listing cache, which serves the snapshot where there is one
+      // and owns the `stale` marker; with no store behind it this is `listFlat`
+      // and nothing else.
+      const listing = await listings.list(library, libPath, q, { folderMatching })
       applyDisplayNames(listing.entries, await overrides.store())
       return c.json(listing)
     }

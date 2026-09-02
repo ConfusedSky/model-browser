@@ -25,6 +25,18 @@ export interface DirListing {
   entries: DirEntry[]
   /** Flat listings only: models were dropped by the return cap or walk budget. */
   truncated?: boolean
+  /**
+   * This answer came from a cached tree that this server process has not yet
+   * checked against the filesystem (`listing-tree-cache` §5.1). The entries are
+   * shown at once and a revalidation pass is already running; the client's job
+   * is to say so and to ask again, at which point the corrected listing arrives.
+   *
+   * **Absent means fresh-or-validated** — a listing produced by an actual walk
+   * carries no marker, and neither does one served from a snapshot the process
+   * has since revalidated. Never `false`: the field is additive, so an older
+   * client and a hand-written request see exactly what they saw before.
+   */
+  stale?: true
 }
 
 /**
