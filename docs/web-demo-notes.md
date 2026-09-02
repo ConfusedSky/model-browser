@@ -403,11 +403,15 @@ All re-runnable; say whose run when quoting.
   storage-only while suspended), has a **hard ≤ 2 GB memory limit**
   (fly.io/docs/reference/suspend-resume) vs our 2.8 GB fp32 peak — and resume
   is not guaranteed (deploy/migration/snapshot loss ⇒ cold boot), so the 16 s
-  warming path must exist regardless. Possible lever, noted not pursued: the
-  demo only embeds *text* (image embeddings precomputed), so a text-tower-only
-  serving mode might fit under 2 GB — a mini-classify change; the earlier
-  "text-tower-only no gain" note was about load time, not resident size.
-  Re-check the limit if revisiting; it is the whole verdict.
+  warming path must exist regardless. The text-tower-only lever this row
+  first floated is **measured dead** (Masa's catch, 2026-09-02; this row
+  briefly claimed the earlier finding covered only load time — wrong): the
+  mini-classify 2026-08-28 run (`eval/cpu_dtype.py`, its fp16-on-a-cpu
+  learnings table) shows text-tower-only fp32 at the **same 2.8 GB peak** as
+  the full load — `from_pretrained` mmaps the checkpoint and vision pages are
+  never faulted, so the full load never paid for vision; the peak is
+  query-time working memory (1.2 GB after load, 2.8 GB after the first
+  query). Nothing fits under Fly's 2 GB cap; the verdict stands on both legs.
 - **Corpus**: see its `NOTES.md` (STL vs GLB sizes, dedup counts, decimation
   gates). `du` on `original/` reads 516 MB vs the notes' 12 GB — hardlink
   accounting order, not a discrepancy.
