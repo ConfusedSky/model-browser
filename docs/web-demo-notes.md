@@ -211,12 +211,25 @@ own origin"; only its body hardcodes loopback.
    camera/axis land; the measurement no longer blocks it.
 3. **Visitor orbits.** With `PUT /api/thumb` rejected, persist a visitor's
    drag-to-orbit in *their* localStorage, or freeze curated framings?
+   **Resolved 2026-09-01 (Masa): persist in the visitor's localStorage** —
+   against the notes' frozen default. Consistent with the Defaults section's
+   reasoning, which only ruled out *server-side* persistence (an anonymous
+   `PUT` is a global edit under D4); a localStorage camera is per-visitor and
+   per-browser, edits nothing shared, and the baked thumbnails stay the
+   curated framings. The demo-mode change (backlog 1.3) owns the mechanism —
+   camera reads fall back localStorage → baked sidecar, writes go to
+   localStorage where the main app would `PUT`.
 4. **Landing.** Kit tiles with contact sheets — is that the whole first screen,
    or also a sentence for a recruiter (what this is, what to try) — banner,
    About link beside credits, or nothing? (Sheets exist as of 2026-08-31 —
    `folder-contact-sheets`, applied — so the tiles half is real;
    whether the root should open in flat view instead of, or as well as, sheets
    is still its own question, unclosed by that change.)
+   **Resolved in principle 2026-09-01 (Masa): there is a landing page** — the
+   first screen is not the bare tile grid alone. Its contents (banner vs About
+   beside credits, the copy, the flat-view question above) are deliberately
+   deferred; the demo-mode change (backlog 1.3) carries them as an open design
+   question and does not block on them structurally.
 5. **Names.** Rename folders at corpus build (re-embed — needed anyway) or
    display-name from the store (near-free if #1 is sidecars; ids stay in paths).
    **Resolved 2026-08-31 (Masa): display names from the store.** Near-free now

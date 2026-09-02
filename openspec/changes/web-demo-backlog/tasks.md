@@ -36,11 +36,19 @@
 
 ## 2. Decisions to record in `docs/web-demo-notes.md` (answer + date on the item)
 
-- [ ] 2.1 Visitor orbits (item 3): with `PUT /api/thumb` refused, persist a visitor's
+- [x] 2.1 Visitor orbits (item 3): with `PUT /api/thumb` refused, persist a visitor's
       drag in their own localStorage, or freeze curated framings? Notes' default:
       frozen; a persisted orbit is a global edit
-- [ ] 2.2 Landing (item 4): kit tiles with contact sheets alone, or also a sentence for a
+      — **localStorage** (Masa, 2026-09-01, recorded on the item the same day):
+      per-visitor persistence edits nothing shared, so the frozen default's
+      global-edit objection does not apply; baked thumbnails stay the curated
+      framings. Mechanism lands in 1.3
+- [x] 2.2 Landing (item 4): kit tiles with contact sheets alone, or also a sentence for a
       recruiter — banner, About beside credits, or nothing
+      — **a landing page exists** (Masa, 2026-09-01, recorded on the item the same
+      day): not the bare grid alone. Contents (banner vs About, copy, the flat-view
+      sub-question) deliberately deferred — 1.3 carries them as an open design
+      question, not a blocker
 - [x] 2.3 Names (item 5): rename folders at corpus build (re-embed) or display names from
       the store (near-free once 1.1 exists; ids stay in paths)
       — **display names from the store** (Masa, 2026-08-31, recorded on the item the same
