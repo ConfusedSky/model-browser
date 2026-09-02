@@ -427,6 +427,23 @@ All re-runnable; say whose run when quoting.
   gate 3.3's question; RackNerd's *year* costs less than one Vultr month, so
   the paid hour can simply be a paid year. Fit: 4 GB works (2.8 peak + Bun
   app + OS ≈ 3.3, add swap); Contabo's 8 GB removes the headroom worry for ~$2.
+  **Managed/usage-billed inference** (this session, 2026-09-02, Masa's ask):
+  generic embedding APIs (OpenAI/Cohere/Jina, hosted SigLIP-2) are unusable
+  at any price — the cache's vectors are our exact so400m checkpoint's space,
+  so the host must run *that checkpoint*: Modal ($30/mo free renewing credit,
+  per-second, cold start 2–5 s small models ⇒ text tower **$0/mo** at demo
+  traffic), HF Inference Endpoints (per-minute CPU ~$0.03–0.06/hr,
+  scale-to-zero, ~30 s–1 min wake), Replicate (per-second, custom-model cold
+  starts tens of s). Architecture if taken: only text→vector leaves the box —
+  ranking is dot products + z over a ~10 MB matrix, hostable beside Hono on a
+  $12–15/yr 1 GB box ⇒ ~$1–2/mo total. Prices: non-monetary — a mini-classify
+  embed/rank split, a second external dependency under "link never dead",
+  first-search cold start (the kept `warming` state's shape), and an
+  embedding-parity re-verification (cache embedded fp16-on-GPU; rankings
+  measured dtype-tolerant, but a new runtime re-runs that check). **Verdict:
+  not worth ~$3/mo against a zero-moving-parts $4.54 OVH box — but it is the
+  designated fallback if gate 3.3 measures >1 s on oversold vCPUs: warm GPU
+  inference is tens of ms, fixing latency and cost in one move.**
 - **Corpus**: see its `NOTES.md` (STL vs GLB sizes, dedup counts, decimation
   gates). `du` on `original/` reads 516 MB vs the notes' 12 GB — hardlink
   accounting order, not a discrepancy.
