@@ -1,7 +1,10 @@
 # Design — thumbnail-sweep-priority
 
 > **Rebased 2026-09-01.** Every citation below was re-checked against main at
-> `62f9f2d`. The pre-rebase draft's Context was written against a
+> `62f9f2d`, and re-verified 2026-09-02 at HEAD by an opus review (~20 symbols
+> checked; `App.tsx` and `entryActions.ts` moved but no cited region changed —
+> that review's findings are folded in below, marked 2026-09-02).
+> The pre-rebase draft's Context was written against a
 > `useThumbnails` that no longer exists and a `Grid` that has since grown an
 > observer; its D2 and D3 were rederived, and D3/D5 below are new. See
 > proposal.md's header note for what landed underneath.
@@ -35,8 +38,11 @@ drafted:
 
 - **The reconciler's cancellation seam.** `slot.cancels` is a flat, unlabelled
   `(() => void)[]` holding, in order, the lookup handle, then (registered inside
-  the lookup) `dropStale` and the `queue.push` handle. Only `retire` fires them,
-  and it fires all of them. A far-band rule needs to reach the *render* handle
+  the lookup) `dropStale` and the `queue.push` handle. Two sites fire them, both
+  firing all of them: `retire`, and the unmount disposal effect, which walks the
+  slots directly (`slot.generation++` then each cancel) without calling
+  `retire` — any labelled render handle this change adds must be handled on
+  both paths. A far-band rule needs to reach the *render* handle
   alone — and to run `dropStale`, since a cancelled job never runs and its stale
   PNG object URL would otherwise leak.
 - **The retire/start seam already marks its own plug-in point.** The reconciler's
@@ -122,16 +128,31 @@ margin is indistinguishable from one three screens past it — read as `far`,
 against D4's "generously beyond the prefetch margin" — and `intersectionRatio`
 is measured against the expanded root too, so visible and near both report ~1.0
 and a prefetched tile scrolling onto the screen never upgrades, which is the
-common case, failed silently. Nor can rect math patch it from a scroll handler:
-the scroller is `App`'s `<main>` (`overflow-auto`), scroll does not bubble, and
-`Grid` holds no reference to it — there is no throttle carrier in the component.
-So: the **band observer** — the widened existing one — carries the generous park
-margin, and its events are exactly the far-boundary crossings (park and unpark
-decisions, and `onPeek`); a **second, zero-margin observer** over the same tiles
-splits visible from near, and its events are the viewport-edge crossings that
-upgrade a prefetched tile the moment it appears. Every band transition is then
-an observer callback — already coalesced per frame by the platform — so there is
-no scroll listener, no rect math, and no throttle of this change's own.
+common case, failed silently.
+
+**Both observers take the scroller as their `root`, and the margin is dead
+without it** (2026-09-02 opus review). The intersection algorithm clips the
+target against every clipping ancestor between target and root *before* the
+root's margin-expanded bounds are consulted — and the scroller is `App`'s
+`<main>` (`overflow-auto`), so against the default viewport root a tile
+scrolled out of `<main>` has an empty rect no matter how generous `rootMargin`
+is: `near` silently collapses to the viewport edge, tiles park the instant they
+leave it (voiding D4's oscillation reasoning), and the peek-timing change below
+never happens. `rootMargin` buys a prefetch band only when `root` *is* the
+scrolling container. `App` owns `<main>` and passes its ref to `Grid` as a
+prop, exactly as it passes `onPeek`; the effect skips building observers until
+the ref is populated (it is, by the time tiles exist — `<main>` is their
+ancestor). The park margin itself is a named constant with a tune-then-freeze
+line (task 6.2): "generous" is a decision about oscillation and peek timing,
+and it gets a recorded value, not an adjective. So: the **band observer** — the
+widened existing one, rooted at the scroller — carries the park margin, and its
+events are exactly the far-boundary crossings (park and unpark decisions, and
+`onPeek`); a **second, margin-less observer** on the same root and the same
+tiles splits visible from near, and its events are the scrollport-edge
+crossings that upgrade a prefetched tile the moment it appears. Every band
+transition is then an observer callback — already coalesced per frame by the
+platform — so there is no scroll listener, no rect math, and no throttle of
+this change's own.
 
 `onPeek` riding the band observer is a peek-timing change, made deliberately:
 today's observer has no `rootMargin`, so a folder requests its peek on touching
@@ -157,13 +178,17 @@ effect:
   — that guard was the backstop for a re-observed tile and becomes the only guard,
   which is why it is named here rather than left implicit;
 - report bands through D3's `setBands` instead of only raising `onPeek`;
-- add `previews` to the effect's dependencies (2026-09-01 review). The
-  registration rule below reads it, and the effect's closure would otherwise
-  hold the map from before a peek landed — newly landed preview models would go
-  unreported (safe, but unranked where the rule promises the folder's band)
-  until the next unrelated re-run. A landed peek is bounded — one per folder per
-  listing, through `requestPeek`'s guard — and `setBands`' cheap idempotence
-  (D3) makes the extra republish free.
+- read `previews` through a ref, not the dependency array (revised 2026-09-02;
+  the 09-01 fold-in put it in the deps, and the opus review priced that
+  honestly: `requestPeek`'s `land` mints a new map identity per landed peek, so
+  a deps entry disconnects and rebuilds *both* observers and re-observes every
+  tile once per folder that peeks — the equal-map early-exit makes the
+  republish free, not the observer churn, which is the larger cost). `Grid`
+  keeps `previewsRef.current = previews` fresh per render, the registration
+  rule reads it at report time, and a small effect keyed on `previews` alone
+  republishes the already-tracked bands through the shared publish closure —
+  no observer is touched, and a landed peek's models join their folder's band
+  immediately rather than at the next scroll.
 
 A folder tile registers **its preview models' paths under its own band**, and a
 path that is both a visible tile and a far folder's preview takes the *nearest*
@@ -212,6 +237,31 @@ Three clauses of that contract are load-bearing enough to spell out
   a park or restart applied to a captured slot object would act on work the
   reconciler already ended. A path with no live slot is ignored.
 
+**The map in force lives in a hook-held ref, and it is read, not only pushed**
+(2026-09-02 opus review). `setBands` stores the accepted map (the equality
+early-exit already requires keeping it); the lookup tail and the kept-job
+start-time check read it (D4). Without the read side, park-ness exists only at
+the moment a report is applied, and every slot created *after* the last report
+slips through: StrictMode's unmount→remount clears `slotsRef` while the
+observers republish an identical map — the early-exit then guarantees no
+replay, so in dev nothing is ever parked — and a same-path-new-mtime entry is a
+removal-then-addition whose fresh slot starts unconditionally, far or not.
+Deriving "is this far?" at push time from the ref makes park-ness a property of
+the moment work would be committed, and all of those orderings stop mattering.
+
+**Filter-hidden models are reported far, by `App`** (2026-09-02 opus review —
+the sharpest "effort follows attention" case, previously unmentioned). `Grid`
+renders `shownEntries` while the hook sweeps `thumbEntries`, so a model hidden
+by the find filter has a slot but no tile: unreported, never parked, ranked
+*above* far — with a filter narrowing 500 tiles to 3, the sweep would go on
+reading gigabytes for the 497 just filtered away. `Grid` cannot report what has
+no DOM node, but `App` knows the difference: it wraps the `setBands` it hands
+to `Grid`, merging `far` for every model path in `thumbEntries` and not in
+`shownEntries` before forwarding — one set difference per report, at the one
+place both lists exist. Clearing the filter changes `shownEntries`, re-runs the
+observer effect, and the fresh reports (merged with a now-empty hidden set)
+unpark through the ordinary path.
+
 The alternative — a `bands` argument beside `ao` and `poses` — is rejected and
 recorded so nobody simplifies back to it: bands change on every scroll settle, and
 the sweep effect's dependency array is what triggers the reconciler's walk over
@@ -244,19 +294,40 @@ previous render under the old recipe, a lightbox session, a folder preview, a
 and a PNG encode, no I/O) while the expensive part sits in a cache that will
 evict it (D6), so the read risks being paid twice; finishing it makes the work
 durable — a cached PNG outlives any eviction. So entering `far` parks an
-unstarted render only when `MeshLru.has(entry.path)` answers false (`has` is a
-peek, not an acquire — it does not bump recency, so asking does not distort
-eviction, and it must stay that way). A warm-mesh render stays queued, ranked
-after everything else, unranked work included: `far` is the one band *known* to
-be off screen, while an unranked path merely has no tile reporting it. Kept
-work re-checks at start — the queue takes it only when nothing better-ranked is
-pending (there is no idle notion; a kept job can run mid-scroll-burst, bounded
-by everything above it going first), and the mesh can be evicted by then — and
-a job that wakes to a cold mesh parks itself at that point instead of loading.
-The invariant either way: **parking never causes a mesh read** — cancelled work
-never reads, a withheld tail never reads, and a job already running when its
-tile leaves was started by the band it had then. The far band governs the read,
-not the render.
+unstarted render only when the mesh is neither held nor loading — `MeshLru`
+gains a **held-or-loading peek** beside `has` (2026-09-02 opus review: `has`
+reads only `entries`, never `loading`, so a `warm()` hover or any acquire still
+in flight read as cold and their renders were parked while the read completed
+anyway — the exact waste this exception exists to prevent; a kept job's
+`acquire` joins the pending promise and starts no second read, so the invariant
+below holds). Like `has`, the peek must never bump recency — an acquire at park
+time would distort eviction toward exactly the meshes being deprioritised. A
+warm-mesh render stays queued, ranked after everything else, unranked work
+included: `far` is the one band *known* to be off screen, while an unranked
+path merely has no tile reporting it. Kept work re-checks at start — the queue
+takes it only when nothing better-ranked is pending (there is no idle notion; a
+kept job can run mid-scroll-burst, bounded by everything above it going first),
+and the mesh can be evicted by then. The re-check reads **the band in force
+(D3's ref) first, then the mesh** (2026-09-02 opus review): a job that wakes
+with its tile back on screen reads and renders — paying the read for a tile the
+user is looking at is exactly right, and the unconditional mesh check written
+here before stranded that tile forever: kept means never flagged, re-ranked to
+visible means no unpark, so a self-park on eviction left a visible tile on
+`loading` with nothing to ever restart it, against the delta's own
+scrolled-away-and-back scenario. Only a job that wakes cold **and still far**
+parks itself — and self-parking **sets `slot.parked`**, so the ordinary unpark
+path reaches it when the tile returns. The invariant either way: **parking
+never causes a mesh read** — cancelled work never reads, a withheld tail never
+reads, and a job already running when its tile leaves was started by the band
+it had then. The far band governs the read, not the render.
+
+The honest bound on the exception (2026-09-02 opus review): during a fresh
+sweep nearly every candidate is cold — an unstarted job has never read for
+itself, and nothing else has either — so the exception mostly fires on D5's
+toggle path over an already-rendered grid, and there for roughly a
+`DEFAULT_BUDGET`-worth of the most recent meshes (~40 at the measured 25.1 MB
+median). Task 6.2 counts kept versus parked in the real run rather than letting
+"a paid read always yields a durable image" stand unmeasured.
 
 **Parked is not finished, and not error.** `ao-refreshes-thumbnails` named this
 third per-entry state and left it for whichever change landed second; this is it.
@@ -278,8 +349,12 @@ before `queue.push`: a parked slot's tail runs `dropStale` (the stale PNG it
 minted would otherwise be a decoded image nothing releases) and files no
 render — unless the mesh is warm, in which case the exception below applies at
 the flag exactly as at the handle, and the tail pushes at the far rank. The
-gate must be the flag, never queue ranking: a lowest-ranked job still runs
-eventually, and running is precisely what a parked cold tail must not do.
+tail consults the flag **and the band in force** (D3's ref, 2026-09-02): a
+current `far` report gates exactly as `parked` does, which is what parks work
+for slots created after the last report landed — D3's StrictMode and new-mtime
+cases. The gate must be the flag and the ref, never queue ranking: a
+lowest-ranked job still runs eventually, and running is precisely what a parked
+cold tail must not do.
 
 The queue-side half still exists for work already pushed, and it must say what
 it did: **`push`'s cancel handle reports whether the job was still pending.**
@@ -326,8 +401,17 @@ parked, does the parking survive?
 *Recipe-labelled thumbnails* requires that a preference change "answer on the
 listing in front of the user, showing a render already cached under the new
 setting at once and rendering only what is not", and that a preference change
-"cancels the in-flight pass whole". Both stay literally true under the rule taken
-here:
+"cancels the in-flight pass whole". The second stays literally true under the
+rule taken here; the first does **not** — a parked far tile with a cold mesh
+renders *less* than "what is not [cached]", and that sentence's own contrast
+("not only to those a subsequent visit rebuilds") scopes it to the whole
+listing, not the viewport. Claiming both held was the 2026-09-02 opus review's
+third finding: after archive the main spec would have carried both sentences,
+contradicting each other, invisible to `openspec validate`. So the delta now
+carries a second MODIFIED block qualifying that one clause — parked off-screen
+work is looked up at once and rendered when its tile returns (or completed
+behind on-screen work where its mesh is held) — and the rule here is what that
+qualified sentence describes:
 
 **Retirement restarts the lookup for every slot, parked or not; only the render
 tail stays parked.** The lookup never touches the queue — it runs under
@@ -391,9 +475,16 @@ time says whether that is still true.
   `disconnect` are `// TODO: Implement`, so a real one reports nothing and every
   test passes by never running. `client/test/folderSheets.test.tsx` already carries
   the `StubObserver` and `vi.stubGlobal('IntersectionObserver', StubObserver)` that
-  fix this, plus an `intersect(el)` helper and an `awayAndBack()` helper — reuse
-  them rather than writing a second stub. D1's split keeps the queue's own priority
-  tests DOM-free.
+  fix this, plus an `intersect(el)` helper and an `awayAndBack()` helper —
+  **extend them, don't merely reuse them** (2026-09-02 opus review): `intersect`
+  delivers `isIntersecting: true` to *every* live observer watching the element,
+  which with two observers per grid always reads `visible` — `near` needs one
+  observer addressed and not the other, and `far` needs a `false` report,
+  neither expressible today. The stub gains an observer selector and the helper
+  an intersecting argument (e.g. `report(el, {inPark, inView})`), and
+  `awayAndBack()`'s docstring — which credits `unobserve` for stopping a second
+  report — is updated when task 2.2 drops the unobserve. D1's split keeps the
+  queue's own priority tests DOM-free.
 - [Scroll-driven re-ranking on a 500-tile grid could itself cost frames] → D2's
   throttling and three-band coarseness bound it, D3 keeps it out of React
   entirely, and the ranking is a map replacement, not a re-sort per tile.

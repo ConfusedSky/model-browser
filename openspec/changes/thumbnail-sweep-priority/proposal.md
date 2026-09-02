@@ -11,7 +11,10 @@
 > one, for folder previews); and the *parked* per-entry state that
 > `ao-refreshes-thumbnails` deferred to "whichever of the two lands second" is
 > now this change's to name. Every artifact here was rederived against main at
-> `62f9f2d` and every code citation re-checked at that commit. The intent is
+> `62f9f2d` and every code citation re-checked at that commit, then re-verified
+> 2026-09-02 at HEAD by an opus review whose findings — the observers' root,
+> the band-aware start gate, and the *Recipe-labelled thumbnails* qualification
+> among them — are folded into all four artifacts. The intent is
 > unchanged: visible-first render ordering, and far-band cancellation of work
 > that has not started.
 
@@ -96,6 +99,11 @@ None.
   than discarded, so a paid read always yields a durable image; and a parked
   entry is looked up but not rendered when its recipe moves under it, so it
   re-renders when its tile returns.
+- `model-thumbnails`: the **Recipe-labelled thumbnails** requirement's "and
+  rendering only what is not [cached]" clause is qualified for work parked off
+  screen (2026-09-02 opus review: unqualified, the archived spec would carry
+  two sentences contradicting each other). One clause; every scenario carried
+  unchanged.
 
 ## Impact
 
@@ -115,13 +123,22 @@ None.
   `[data-model-tile]` as well as `[data-dir-tile]`, stops unobserving on first
   intersection (a band tracker must keep watching; the repeat-peek guard moves
   entirely onto `App`'s `requestPeek`, which already refuses a path in
-  `previewsRef.current` or `inFlightPeeks.current`), gains a second zero-margin
-  observer in the same effect (D2), takes `previews` as a dependency, and
-  reports bands through `setBands`. **Bands never become a `Tile` prop** — `tilePropsEqual` is a
+  `previewsRef.current` or `inFlightPeeks.current`), gains a second margin-less
+  observer in the same effect (D2), roots **both** observers at `App`'s `<main>`
+  scroller (passed down as a prop — a `rootMargin` against the default viewport
+  root is clipped away by the scrolling ancestor before it applies, D2), reads
+  `previews` through a ref rather than the dependency array, and reports bands
+  through `setBands`. **Bands never become a `Tile` prop** — `tilePropsEqual` is a
   keys-based shallow compare, so a per-tile band would re-render all 500 tiles on
   every scroll settle.
 - `client/src/App.tsx` — holds the `setBands` callback by identity, as it holds
-  `onPeek`.
+  `onPeek`; passes `<main>`'s ref to `Grid` as the observers' root; and wraps
+  `setBands` to merge `far` for filter-hidden models (in `thumbEntries`, not in
+  `shownEntries`) before forwarding, so the sweep does not keep reading entries
+  the user just filtered away (D3).
+- `client/src/three/lru.ts` — `MeshLru` gains a held-or-loading peek beside
+  `has` (recency-free, like `has`): an acquire still in flight must read as
+  warm, or its render is parked while the read completes anyway (D4).
 - No server, API, cache-schema, or pixel-recipe change; `RIG_VERSION` is
   untouched.
 - Related but separate: the 500-model cap is what makes a single view this
