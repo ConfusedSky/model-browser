@@ -8,7 +8,7 @@
 ## 1. Server
 
 - [ ] 1.1 The report type in `shared/types.ts` (`thumbWrites: boolean` to start) and a
-      constructed value in `index.ts` handed into `makeApp` the way the launcher is —
+      constructed value in `index.ts` handed into `createApp` the way the launcher is —
       injectable; today's construction is all-on constants, replaced by 1.3's env
       selection later (design D4)
 - [ ] 1.2 `GET /api/features` in `app.ts` answering it, added to `UNGATED` beside
