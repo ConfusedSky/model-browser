@@ -88,26 +88,56 @@ undefined. That matters more than it did when this was drafted: `thumbEntries`
 now carries preview models whose paths may never be reported by any tile. One
 rank sorts *below* unranked: `far`. An unranked path merely has no tile
 reporting it and could be anywhere; a far path is known to be off screen — and
-far jobs are in the queue at all only through D4's warm-mesh exception, as
-idle-time work.
+far jobs are in the queue at all only through D4's warm-mesh exception, taken
+when nothing better-ranked is pending.
+
+`push` has two callers that pass no key at all, and they are not oversights to
+be keyed later (2026-09-01 review): `refreshThumbnail` and `setOrbitAxis`
+(`entryActions`) push renders that belong to no slot — they are registered on
+no `cancels` list, so they are unparkable by construction, which is right: both
+exist only because the user pressed a control, and a press is not scrolled
+away. For the same reason a **keyless job ranks with `visible`**: ranking it
+unranked would put a user's own re-render behind a screenful of sweep misses,
+which inverts "effort follows attention" at the one moment attention is
+explicit. This is the single deliberate deviation from "no visibility
+information means today's FIFO": with bands in force, a pressed re-render no
+longer waits behind sweep work that merely got there first.
 
 *Alternative — a second high-priority queue:* two queues sharing one concurrency
 budget reproduces the same ranking problem with more state, and the interesting
 case (a tile moving between classes as it scrolls) becomes a migration between
 queues rather than a number changing.
 
-### D2: Visibility extends the observer the grid already has
+### D2: Visibility is two observers in the one effect the grid already has
 
-`Grid` observes its tiles and reports which are intersecting, plus a margin so the
-next screenful is already warm. Reporting is throttled and coarse — three bands
-(visible, near, far) rather than a continuous distance — because the queue is two
-wide and cannot exploit finer resolution, and because a per-pixel ranking would
-re-sort the pending set on every scroll frame for no benefit.
+`Grid` observes its tiles and reports three coarse bands (visible, near, far)
+rather than a continuous distance — the queue is two wide and cannot exploit
+finer resolution, and a per-pixel ranking would re-sort the pending set on every
+scroll frame for no benefit.
 
-This is not a new observer. `folder-contact-sheets` landed one as the *standalone*
-observer precisely because this change had not landed, and recorded that
-"whichever lands second does the joining". Joining means three edits to the
-existing effect:
+Three bands take **two `IntersectionObserver`s**, and the count is forced, not
+chosen (2026-09-01 review). One observer has one `rootMargin` and yields two
+states: a tile is in or out of the *expanded* root, so a tile 1px past the
+margin is indistinguishable from one three screens past it — read as `far`,
+against D4's "generously beyond the prefetch margin" — and `intersectionRatio`
+is measured against the expanded root too, so visible and near both report ~1.0
+and a prefetched tile scrolling onto the screen never upgrades, which is the
+common case, failed silently. Nor can rect math patch it from a scroll handler:
+the scroller is `App`'s `<main>` (`overflow-auto`), scroll does not bubble, and
+`Grid` holds no reference to it — there is no throttle carrier in the component.
+So: the **band observer** — the widened existing one — carries the generous park
+margin, and its events are exactly the far-boundary crossings (park and unpark
+decisions, and `onPeek`); a **second, zero-margin observer** over the same tiles
+splits visible from near, and its events are the viewport-edge crossings that
+upgrade a prefetched tile the moment it appears. Every band transition is then
+an observer callback — already coalesced per frame by the platform — so there is
+no scroll listener, no rect math, and no throttle of this change's own.
+
+What stays true from `folder-contact-sheets`' deferral is that this is one
+*effect*: the joining it recorded ("whichever lands second does the joining")
+happens in the existing effect, which also creates and disconnects the second
+observer; nothing gains a second lifecycle. Joining means four edits to that
+effect:
 
 - widen the query from `[data-dir-tile]` to model tiles as well — model tiles
   already carry `data-model-tile={entry.path}`, so nothing in the tile markup
@@ -118,15 +148,25 @@ existing effect:
   `if (previewsRef.current.has(path) || inFlightPeeks.current.has(path)) return`
   — that guard was the backstop for a re-observed tile and becomes the only guard,
   which is why it is named here rather than left implicit;
-- report bands through D3's `setBands` instead of only raising `onPeek`.
+- report bands through D3's `setBands` instead of only raising `onPeek`;
+- add `previews` to the effect's dependencies (2026-09-01 review). The
+  registration rule below reads it, and the effect's closure would otherwise
+  hold the map from before a peek landed — newly landed preview models would go
+  unreported (safe, but unranked where the rule promises the folder's band)
+  until the next unrelated re-run. A landed peek is bounded — one per folder per
+  listing, through `requestPeek`'s guard — and `setBands`' cheap idempotence
+  (D3) makes the extra republish free.
 
 A folder tile registers **its preview models' paths under its own band**, and a
 path that is both a visible tile and a far folder's preview takes the *nearest*
 band — a per-path max — so a far band never cancels visible work. That rule is not
 invented here: `folder-contact-sheets` tasks 2.2 and its "preview renders compete
 with tile renders for the queue" risk state it, having deferred only the code.
-Without it a preview model has no tile of its own, so it would be unranked (after
-every visible tile) and, worse, could read as far and be parked forever.
+Without it a preview model has no tile of its own, so it would be unranked —
+after every visible tile even while its folder sits on screen. (It could not be
+parked: absent is never far, D3. The registration rule is about rank, and the
+nearest-band max is what keeps a *reported* far folder from parking a preview
+model that is also a visible tile.)
 
 Bands must **never** become a `Tile` prop. `tilePropsEqual` is a keys-based
 shallow compare over `TileProps` (deliberately written over the keys so a new prop
@@ -143,6 +183,26 @@ as it holds `onPeek`. Its contract, documented where it is declared: **idempoten
 latest-wins per path, and safe to call at scroll-settle frequency** — it replaces
 the queue's ranking wholesale, parks slots that moved to `far`, and restarts
 parked slots that moved back, all without a React re-render.
+
+Three clauses of that contract are load-bearing enough to spell out
+(2026-09-01 review):
+
+- **Idempotent means cheap when equal** — `setBands` early-exits on a map equal
+  to the one in force, before touching the queue or any slot. The caller cannot
+  guarantee rarity: `shownEntries`' identity changes on every find-filter
+  keystroke, which re-runs the observer effect and republishes ~500 unchanged
+  bands — exactly the per-keystroke walk D3 rejects as a dependency, re-imported
+  through the observer unless the equal case costs nothing.
+- **Absent is not far.** A path missing from the map is *unreported* — it ranks
+  in the middle class (D1) and is never parked. Only an explicit `far` report
+  parks. The distinction is easy to erase in a wholesale replacement — a
+  `setBands` that defaulted missing paths to `far` would pass every ordering
+  test while parking the world — so it is stated here and asserted (task 5.1).
+- **Slots are resolved through `slotsRef` at call time, never through captured
+  references.** A band map is a message from the DOM's past; a slot may have
+  been retired (navigation, mtime change) between the report and this call, and
+  a park or restart applied to a captured slot object would act on work the
+  reconciler already ended. A path with no live slot is ignored.
 
 The alternative — a `bands` argument beside `ao` and `poses` — is rejected and
 recorded so nobody simplifies back to it: bands change on every scroll settle, and
@@ -181,10 +241,14 @@ peek, not an acquire — it does not bump recency, so asking does not distort
 eviction, and it must stay that way). A warm-mesh render stays queued, ranked
 after everything else, unranked work included: `far` is the one band *known* to
 be off screen, while an unranked path merely has no tile reporting it. Kept
-work re-checks at start — the queue drains it only at idle, and the mesh can be
-evicted by then — and a job that wakes to a cold mesh parks itself at that
-point instead of loading. The invariant either way: **a far tile never
-triggers a mesh read** — the far band governs the read, not the render.
+work re-checks at start — the queue takes it only when nothing better-ranked is
+pending (there is no idle notion; a kept job can run mid-scroll-burst, bounded
+by everything above it going first), and the mesh can be evicted by then — and
+a job that wakes to a cold mesh parks itself at that point instead of loading.
+The invariant either way: **parking never causes a mesh read** — cancelled work
+never reads, a withheld tail never reads, and a job already running when its
+tile leaves was started by the band it had then. The far band governs the read,
+not the render.
 
 **Parked is not finished, and not error.** `ao-refreshes-thumbnails` named this
 third per-entry state and left it for whichever change landed second; this is it.
@@ -192,14 +256,52 @@ Concretely a parked slot keeps everything it is displaying — `slot.url` is
 untouched, so the tile shows whatever it had: the `{ status: 'loading' }`
 placeholder the reconciler wrote, an embedded-3MF preview from `setPlaceholder`, or
 a previous render. It must never land in the error state `model-thumbnails`
-reserves for a model that failed to load or parse. Parking also runs `dropStale`,
-because a cancelled job never runs and the stale PNG the lookup minted would
-otherwise be a decoded image nothing releases.
+reserves for a model that failed to load or parse.
 
-Reaching the render handle alone requires giving it a name. `slot.cancels` is
-flat and unlabelled and only `retire` fires it, so parking as written today would
-kill the lookup too. The slot gets a separately-reachable render handle beside the
-list.
+**Parked is a slot flag, not only a queue action** (2026-09-01 review). A
+cancel handle can only reach work already pushed, and the render handle and
+`dropStale` are registered *inside* the lookup tail — so at the moment a park
+lands, the render may not exist yet: the lookup is in flight, and this change
+forbids cancelling it. Worse, this is D5's *own* path, not an edge: every
+recipe or pose retirement of a parked slot runs a fresh lookup, whose tail
+would push a render and read a mesh for a tile the band map already said is
+far. So `EntrySlot` gains `parked: boolean`, and the lookup tail consults it
+before `queue.push`: a parked slot's tail runs `dropStale` (the stale PNG it
+minted would otherwise be a decoded image nothing releases) and files no
+render — unless the mesh is warm, in which case the exception below applies at
+the flag exactly as at the handle, and the tail pushes at the far rank. The
+gate must be the flag, never queue ranking: a lowest-ranked job still runs
+eventually, and running is precisely what a parked cold tail must not do.
+
+The queue-side half still exists for work already pushed, and it must say what
+it did: **`push`'s cancel handle reports whether the job was still pending.**
+Parking fires `dropStale` only on that answer — a started job runs to
+completion still owning its `staleUrl`, because its `catch` falls back to it,
+and a park that revoked it out from under a render that then failed would leave
+`staleUrl === undefined` with `alive()` still true: the error state this
+decision forbids, written by the parking that promised not to.
+
+Three ordering rules keep the flag coherent against the machinery that already
+exists (2026-09-01 review):
+
+- **`retire` never clears `parked`.** The flag is the band's fact; the
+  generation is the recipe's. A pose wave retiring a parked slot leaves it
+  parked — that is the whole of D5 — and a retire that cleared the flag would
+  resurrect exactly the job the band map parked.
+- **Unpark is never a bare `start`.** A parked slot's current generation can
+  have a lookup in flight (a retirement just restarted it); a blind `start`
+  beside it double-starts one slot under one generation — both passes hold the
+  same generation, both stay `alive()`, two lookups land, two PUTs file, and
+  the mesh is read twice. Unpark is *clear the flag, then `retire`, then
+  `start`* — the same seam the reconciler already uses, which makes the
+  in-flight pass dead before its successor exists. The cost is re-running a
+  ~7 ms lookup in a race that is rare; the alternative is tracking in-flight
+  state per generation, which is machinery for the same answer.
+- Band-map application resolves slots at call time (D3's third clause); a park
+  or unpark for a path whose slot was retired is a no-op. And restarts carry no
+  mtime re-check: a parked entry that returns at a new mtime is the
+  reconciler's ordinary removal-then-addition on one key — the parked slot is
+  retired and replaced, never unparked into staleness.
 
 *Risk:* fast scrolling could park and restart the same tile repeatedly. The `far`
 band is defined generously (well beyond the prefetch margin) so that oscillation
@@ -225,9 +327,12 @@ tail stays parked.** The lookup never touches the queue — it runs under
 new-recipe render is already cached repaints immediately, like every other tile. A
 parked far tile whose new recipe is *not* cached does not push a render; it stays
 parked and renders when its tile comes back — unless its mesh is still warm, in
-which case D4's exception applies at restart exactly as at park time: the cheap
-tail is pushed at the far rank and finishes at idle, making the new-recipe image
-durable before eviction takes the mesh.
+which case D4's exception applies at the flag exactly as at the handle: the
+cheap tail is pushed at the far rank and finishes once nothing better-ranked is
+pending, making the new-recipe image durable before eviction takes the mesh.
+Mechanically this is the lookup tail consulting `slot.parked` (D4): the
+retirement's fresh lookup runs for every slot, and it is the tail's own gate —
+never queue ranking — that withholds or files the render.
 
 A parked tail always restarts under the slot's **current** `(ao, pose)`, never the
 recipe it was parked under. That falls out of the design rather than needing

@@ -61,17 +61,19 @@ to what they are looking at, rather than to the size of the directory.
   loaded it — is past the expensive part, so its render is kept, taken last,
   and completed rather than discarded; the read already paid becomes a durable
   cached image instead of gambling on the mesh LRU. If the mesh is evicted
-  before its turn comes, it parks then, without reading. A far tile never
-  triggers a mesh read.
+  before its turn comes, it parks then, without reading. Parking never causes
+  a mesh read.
 - **The far band never cancels a cache lookup**, only the render tail. A parked
   tile that the preference or the index's opinion moves under is looked up again
   at once — so a render already cached under the new setting still paints, as
   *Recipe-labelled thumbnails* requires — while its render stays parked until its
   tile comes back.
-- **The grid's one `IntersectionObserver` serves both readers.** `Grid` already
-  has one, watching `[data-dir-tile]` for folder previews; this change widens it
-  to model tiles and to band reporting, which is the joining
-  `folder-contact-sheets` explicitly deferred to whichever change landed second.
+- **The grid's one observer effect serves both readers.** `Grid` already has an
+  `IntersectionObserver` watching `[data-dir-tile]` for folder previews; this
+  change widens it to model tiles and band reporting — the joining
+  `folder-contact-sheets` explicitly deferred to whichever change landed second
+  — and adds a second, zero-margin observer in the same effect to split visible
+  from near, which one observer's single `rootMargin` cannot do (design D2).
 - Unchanged: the concurrency limit, suspension during orbit/lightbox, the
   cached-lookup path that bypasses the queue entirely, and every pixel of what a
   thumbnail looks like. This is scheduling, not rendering, so no `RIG_VERSION`
@@ -98,8 +100,11 @@ None.
 ## Impact
 
 - `client/src/three/queue.ts` — `RenderQueue` gains priority: jobs carry a key,
-  pending jobs can be re-ranked wholesale, and `pump` takes the highest-ranked
-  rather than the oldest.
+  pending jobs can be re-ranked wholesale, `pump` takes the highest-ranked
+  rather than the oldest, and the cancel handle reports whether the job was
+  still pending. The two keyless `push` callers (`refreshThumbnail`,
+  `setOrbitAxis` in `entryActions`) stay keyless and rank with visible work —
+  they are user presses.
 - `client/src/hooks/useThumbnails.ts` — `start` pushes its queue job with a key;
   `EntrySlot` gains its `DirEntry` and a parked marker, and its `cancels` list
   gains a separately-reachable render handle (today it is a flat, unlabelled
@@ -110,8 +115,9 @@ None.
   `[data-model-tile]` as well as `[data-dir-tile]`, stops unobserving on first
   intersection (a band tracker must keep watching; the repeat-peek guard moves
   entirely onto `App`'s `requestPeek`, which already refuses a path in
-  `previewsRef.current` or `inFlightPeeks.current`), and reports bands through
-  `setBands`. **Bands never become a `Tile` prop** — `tilePropsEqual` is a
+  `previewsRef.current` or `inFlightPeeks.current`), gains a second zero-margin
+  observer in the same effect (D2), takes `previews` as a dependency, and
+  reports bands through `setBands`. **Bands never become a `Tile` prop** — `tilePropsEqual` is a
   keys-based shallow compare, so a per-tile band would re-render all 500 tiles on
   every scroll settle.
 - `client/src/App.tsx` — holds the `setBands` callback by identity, as it holds

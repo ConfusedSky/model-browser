@@ -31,23 +31,48 @@
       models whose paths may never be reported by any tile, so "unranked" is a
       live case, not a fallback. The `far` rank sorts *below* unranked — an
       unreported path may be anywhere, a far one is known off screen — and far
-      jobs are in the queue at all only through D4's warm-mesh exception
+      jobs are in the queue at all only through D4's warm-mesh exception. A
+      **keyless** push (`refreshThumbnail` and `setOrbitAxis` in `entryActions`
+      pass no key, and stay that way — their renders belong to no slot and are
+      unparkable by construction) ranks with `visible`: both exist only because
+      the user pressed an on-screen control (D1). A path absent from the
+      ranking is unreported, **never far** — a replacement that defaulted
+      missing paths to far would pass every ordering cell while parking the
+      world; assert absent ≠ far explicitly
 - [ ] 1.2 A method to replace the whole ranking at once (the grid recomputes bands
       wholesale on scroll, rather than moving keys one at a time)
+- [ ] 1.2a `push`'s cancel handle **reports whether the job was still pending**
+      (D4): parking must fire `dropStale` only for a job that never ran — a
+      started job keeps its `staleUrl` for its own `catch`'s fallback, and a
+      park that revoked it under a render that then failed would write the
+      error state 3.4 forbids
 - [ ] 1.3 Unit tests in `client/test/queue.test.ts`, DOM-free as its four existing
-      cells are: ranked jobs run before unranked; a re-ranking mid-flight changes
+      cells are: ranked jobs run before unranked and unranked before far;
+      keyless jobs run with visible-ranked ones; a re-ranking mid-flight changes
       what runs next but never interrupts a running job; ties preserve insertion
-      order; concurrency and the `suspend`/`resume`/`whenResumed` gating are
-      unchanged
+      order; the cancel handle answers true for a pending job and false for a
+      started one; concurrency and the `suspend`/`resume`/`whenResumed` gating
+      are unchanged
 
 ## 2. Visibility
 
 - [ ] 2.1 Widen `Grid`'s **existing** observer effect (the one keyed on
-      `[entries, onPeek]` that watches `[data-dir-tile]`) rather than adding a
-      second: observe model tiles too — they already carry
-      `data-model-tile={entry.path}`, so no tile markup changes — add a prefetch
-      `rootMargin`, and report three coarse bands (visible / near / far),
-      throttled, no per-pixel ranking (D2)
+      `[entries, onPeek]` that watches `[data-dir-tile]`): observe model tiles
+      too — they already carry `data-model-tile={entry.path}`, so no tile markup
+      changes — and report three coarse bands (visible / near / far) through
+      **two observers in this one effect** (D2): the widened existing one
+      carries the generous park `rootMargin` (its events are the far-boundary
+      crossings, and `onPeek`), and a new zero-margin one over the same tiles
+      splits visible from near (its events upgrade a prefetched tile the moment
+      it scrolls on screen). One observer cannot do it — one `rootMargin` yields
+      two states, and `intersectionRatio` is measured against the *expanded*
+      root, so visible and near both read ~1.0 — and `Grid` has no scroll
+      handle to patch it with (the scroller is `App`'s `<main>`; scroll does
+      not bubble). Band transitions are exactly observer callbacks: no scroll
+      listener, no rect math, no throttle of our own. Add `previews` to the
+      effect's deps so a landed peek's models join their folder's band (bounded:
+      one peek per folder, and 3.1's equal-map early-exit makes the republish
+      free)
 - [ ] 2.2 **Drop `observer.unobserve(record.target)`** from that effect: a band
       tracker must keep watching a tile after its first intersection. Safe because
       `App`'s `requestPeek` already refuses a repeat with
@@ -76,7 +101,13 @@
       frequency, and it parks/unparks slots *without* a sweep-effect re-run —
       including the one-sentence reason a `bands` argument was rejected, so nobody
       simplifies back to a dependency that would pay a 500-entry reconcile walk per
-      scroll (D3)
+      scroll (D3). Idempotent means **cheap when equal**: early-exit on a map
+      equal to the one in force — `shownEntries`' identity changes per
+      find-filter keystroke, re-running the observer effect and republishing
+      ~500 unchanged bands, which must cost nothing. And resolve every park or
+      restart through `slotsRef` **at call time** — a band map is a message from
+      the DOM's past, and a path with no live slot is a no-op, never a captured
+      slot object acted on after its retirement
 - [ ] 3.2 `EntrySlot` gains its `DirEntry` (subsuming `mtime`) — say **why** in the
       field's comment: a parked slot must restart through `start(entry, slot)`
       outside the sweep effect, where there is no `entries` array to look the entry
@@ -84,8 +115,27 @@
 - [ ] 3.3 Make the render tail separately cancellable. Today `slot.cancels` is a
       flat, unlabelled `(() => void)[]` holding the lookup handle, then `dropStale`
       and the `queue.push` handle, and only `retire` fires it — firing all of it. A
-      parked slot needs the render handle alone, plus `dropStale` (a cancelled job
-      never runs, so its stale PNG object URL would otherwise leak) (D4)
+      parked slot needs the render handle alone, plus `dropStale` — but only when
+      the handle reports the job was still pending (1.2a): a started job keeps
+      its `staleUrl` for its own `catch`'s fallback (D4)
+- [ ] 3.3a `EntrySlot` gains **`parked: boolean`**, and the lookup tail consults
+      it before `queue.push` (D4): the render handle and `dropStale` are
+      registered *inside* the tail, so at park time the render may not exist
+      yet — the lookup is in flight, and cancelling it is forbidden. A parked
+      slot's tail runs `dropStale` and files no render (unless the mesh is
+      warm — 3.4a applies at the flag exactly as at the handle, pushing at the
+      far rank). The gate is the flag, **never queue ranking** — a
+      lowest-ranked job still runs eventually, and running is what a parked
+      cold tail must not do. This is D5's own path: every recipe/pose
+      retirement of a parked slot runs a fresh lookup whose tail hits this gate
+- [ ] 3.3b Two ordering rules on the flag (D4): `retire` never clears `parked`
+      (the flag is the band's fact, the generation the recipe's — a pose wave
+      retiring a parked slot leaves it parked, or the wave resurrects exactly
+      the job the band parked); and unpark is never a bare `start` — it is
+      clear-flag, `retire`, `start`, so a lookup in flight for the current
+      generation is dead before its successor exists, and one slot can never
+      run two passes of one generation (two lookups, two PUTs, a double mesh
+      read — both would pass `alive()`)
 - [ ] 3.4 A tile entering the `far` band parks its **unstarted** render; a started
       job runs to completion — it holds a renderer slot and its mesh read is in
       flight (D4). A parked slot keeps everything it displays: `slot.url` is
@@ -97,14 +147,18 @@
       only when `MeshLru.has(entry.path)` answers false. A warm-mesh render stays
       queued at the far rank — last, behind unranked work — and the kept job
       re-checks `lru.has` when it starts, parking itself then if the mesh was
-      evicted in the meantime, so a far tile never triggers a mesh read. `has` is
+      evicted in the meantime, so parking never causes a mesh read. `has` is
       a peek and must stay one — an acquire (or any recency bump) at park time
       would distort eviction toward exactly the meshes being deprioritised
 - [ ] 3.5 Re-entering the viewport restarts a parked slot through the reconciler's
       own retire/start seam — the one whose comment already names this plug-in
       point ("This is also where a *parked* entry … would be restarted when its
-      tile comes back"). Update that comment to describe what landed rather than
-      what was anticipated. The mesh LRU makes the restart cheap (D6)
+      tile comes back") — via 3.3b's clear-flag → `retire` → `start`, resolving
+      the slot through `slotsRef` at call time (3.1). Update that comment to
+      describe what landed rather than what was anticipated. No mtime re-check
+      here: a parked entry back at a new mtime is the reconciler's ordinary
+      removal-then-addition — the slot is retired and replaced, never unparked
+      into staleness. The mesh LRU makes the restart cheap (D6)
 
 ## 4. Composing with the recipe (D5)
 
@@ -115,8 +169,8 @@
       under the new setting at once" literally true for every tile; one whose new
       recipe is not cached stays parked and renders when its tile returns —
       unless its mesh is still warm, in which case the tail is pushed at the far
-      rank and completes at idle (3.4a's exception, applied at restart exactly
-      as at park time)
+      rank and completes once nothing better-ranked is pending (3.4a's
+      exception, applied at the `parked` flag by 3.3a's tail gate)
 - [ ] 4.2 A parked tail restarts under the slot's **current** `(ao, pose)`, never
       the recipe it was parked under. This falls out of `start` reading `slot.ao`
       and `slot.pose` at restart time rather than being enforced separately —
@@ -143,7 +197,16 @@
       visible tile rather than parked, and its PNG is filed (3.4a) — with the
       control that the same tile with a cold mesh is parked; a kept far job whose
       mesh was evicted before its turn parks without the LRU loader firing
-      (assert on the loader mock, which is the read the rule forbids)
+      (assert on the loader mock, which is the read the rule forbids); a pose or
+      preference retirement of a parked cold slot issues its lookup and **no
+      push and no read** — the loader mock again, on D5's own path through
+      3.3a's gate; an unpark landing while the retirement's lookup is in flight
+      files **exactly one PUT** (3.3b — the double-start writes two); a park
+      landing after a render started, where that render then fails, falls back
+      to its stale PNG and never shows the error state (1.2a — the unconditional
+      `dropStale` revokes the fallback out from under the catch); a band map
+      omitting a path leaves that path unreported and unparked — absent is
+      never far (1.1)
 - [ ] 5.2 App-mount cells in `client/test/folderSheets.test.tsx`, reusing its
       `StubObserver`, `vi.stubGlobal('IntersectionObserver', StubObserver)`,
       `intersect(el)` and `awayAndBack()` rather than writing a second stub —
