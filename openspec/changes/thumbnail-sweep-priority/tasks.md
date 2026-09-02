@@ -13,8 +13,10 @@
 > change does the joining when it does").
 >
 > Ordering now: independent of the remaining active changes. `adaptive-ao-default`
-> only feeds `useThumbnails`' `ao` argument, `library-overrides` only adds a
-> `displayName` label in `Grid.tsx`'s tile body, and nothing active touches
+> only feeds `useThumbnails`' `ao` argument; `library-overrides` archived
+> 2026-09-01 (its `displayName` label is in `Grid.tsx`'s tile body now, outside
+> the observer effect); `listing-tree-cache` and `search-cancellation` touch
+> neither this capability nor these files; and nothing active touches
 > `queue.ts`. Still re-read `queue.ts`, `useThumbnails.ts`, `Grid.tsx` and
 > `App.tsx` against main before starting — parallel sessions.
 >
@@ -27,7 +29,9 @@
       insertion order so an unranked queue behaves exactly as today's FIFO (D1).
       Ties matter more than they look: `App`'s `thumbEntries` carries preview
       models whose paths may never be reported by any tile, so "unranked" is a
-      live case, not a fallback
+      live case, not a fallback. The `far` rank sorts *below* unranked — an
+      unreported path may be anywhere, a far one is known off screen — and far
+      jobs are in the queue at all only through D4's warm-mesh exception
 - [ ] 1.2 A method to replace the whole ranking at once (the grid recomputes bands
       wholesale on scroll, rather than moving keys one at a time)
 - [ ] 1.3 Unit tests in `client/test/queue.test.ts`, DOM-free as its four existing
@@ -89,6 +93,13 @@
       placeholder, an embedded-3MF preview from `setPlaceholder`, or a previous
       render — and **never** the error state `model-thumbnails` reserves for a model
       that failed to load or parse
+- [ ] 3.4a **The warm-mesh exception** (D4/D6): entering `far` cancels the render
+      only when `MeshLru.has(entry.path)` answers false. A warm-mesh render stays
+      queued at the far rank — last, behind unranked work — and the kept job
+      re-checks `lru.has` when it starts, parking itself then if the mesh was
+      evicted in the meantime, so a far tile never triggers a mesh read. `has` is
+      a peek and must stay one — an acquire (or any recency bump) at park time
+      would distort eviction toward exactly the meshes being deprioritised
 - [ ] 3.5 Re-entering the viewport restarts a parked slot through the reconciler's
       own retire/start seam — the one whose comment already names this plug-in
       point ("This is also where a *parked* entry … would be restarted when its
@@ -102,7 +113,10 @@
       whose new-recipe render is already cached therefore repaints at once, which
       is what keeps *Recipe-labelled thumbnails*' "showing a render already cached
       under the new setting at once" literally true for every tile; one whose new
-      recipe is not cached stays parked and renders when its tile returns
+      recipe is not cached stays parked and renders when its tile returns —
+      unless its mesh is still warm, in which case the tail is pushed at the far
+      rank and completes at idle (3.4a's exception, applied at restart exactly
+      as at park time)
 - [ ] 4.2 A parked tail restarts under the slot's **current** `(ao, pose)`, never
       the recipe it was parked under. This falls out of `start` reading `slot.ao`
       and `slot.pose` at restart time rather than being enforced separately —
@@ -124,7 +138,12 @@
       shows the error state; a preference change over a parked far tile issues its
       lookup but no render, and shows a cached new-setting render at once (4.1); a
       parked tail restarts under the current recipe, not the parked one (4.2); a
-      listing with all thumbnails cached is unaffected (those never enter the queue)
+      listing with all thumbnails cached is unaffected (those never enter the
+      queue); a far tile whose mesh the LRU still holds is rendered after every
+      visible tile rather than parked, and its PNG is filed (3.4a) — with the
+      control that the same tile with a cold mesh is parked; a kept far job whose
+      mesh was evicted before its turn parks without the LRU loader firing
+      (assert on the loader mock, which is the read the rule forbids)
 - [ ] 5.2 App-mount cells in `client/test/folderSheets.test.tsx`, reusing its
       `StubObserver`, `vi.stubGlobal('IntersectionObserver', StubObserver)`,
       `intersect(el)` and `awayAndBack()` rather than writing a second stub —

@@ -50,7 +50,7 @@ drafted:
 
 The measurement that motivates this: one flat listing = 500 model tiles =
 20.21 GB of STL, at 120 MB/s ≈ 168s of I/O, two jobs wide (2026-08-18; relayed,
-re-measure per task 5.2).
+re-measure per task 6.2).
 
 ## Goals / Non-Goals
 
@@ -85,7 +85,11 @@ written (four cells, no `@vitest-environment` pragma).
 Ties keep insertion order, so behavior with no visibility information at all is
 exactly today's FIFO — the fallback is the current behavior rather than something
 undefined. That matters more than it did when this was drafted: `thumbEntries`
-now carries preview models whose paths may never be reported by any tile.
+now carries preview models whose paths may never be reported by any tile. One
+rank sorts *below* unranked: `far`. An unranked path merely has no tile
+reporting it and could be anywhere; a far path is known to be off screen — and
+far jobs are in the queue at all only through D4's warm-mesh exception, as
+idle-time work.
 
 *Alternative — a second high-priority queue:* two queues sharing one concurrency
 budget reproduces the same ranking problem with more state, and the interesting
@@ -163,6 +167,25 @@ mesh load is in flight, and the existing `suspend`/`whenResumed` gating is the o
 safe interruption point. So the rule is precise: unstarted render work for a far
 tile is parked, started work runs to completion.
 
+**Exception — a mesh already in memory is past the expensive part** (added
+2026-09-01, user review). The mesh read happens *inside* the render job
+(`start`'s queued tail calls `lru.acquire`), so an unstarted job has never read
+anything for itself — but the mesh can be warm from another actor: the model's
+previous render under the old recipe, a lightbox session, a folder preview, a
+`warm()` hover. Cancelling that job discards the cheap remainder (a GPU pass
+and a PNG encode, no I/O) while the expensive part sits in a cache that will
+evict it (D6), so the read risks being paid twice; finishing it makes the work
+durable — a cached PNG outlives any eviction. So entering `far` parks an
+unstarted render only when `MeshLru.has(entry.path)` answers false (`has` is a
+peek, not an acquire — it does not bump recency, so asking does not distort
+eviction, and it must stay that way). A warm-mesh render stays queued, ranked
+after everything else, unranked work included: `far` is the one band *known* to
+be off screen, while an unranked path merely has no tile reporting it. Kept
+work re-checks at start — the queue drains it only at idle, and the mesh can be
+evicted by then — and a job that wakes to a cold mesh parks itself at that
+point instead of loading. The invariant either way: **a far tile never
+triggers a mesh read** — the far band governs the read, not the render.
+
 **Parked is not finished, and not error.** `ao-refreshes-thumbnails` named this
 third per-entry state and left it for whichever change landed second; this is it.
 Concretely a parked slot keeps everything it is displaying — `slot.url` is
@@ -181,7 +204,8 @@ list.
 *Risk:* fast scrolling could park and restart the same tile repeatedly. The `far`
 band is defined generously (well beyond the prefetch margin) so that oscillation
 needs deliberate effort, and restarting is cheap — the expensive part is the mesh
-read, which a parked job never began (D6).
+read, which a parked job never began: under the exception above, parked jobs are
+exactly the cold ones (D6).
 
 ### D5: A recipe change re-looks-up a parked slot but does not un-park its render
 
@@ -200,7 +224,10 @@ tail stays parked.** The lookup never touches the queue — it runs under
 `lookupLimit`'s own concurrency of 8 at ~7 ms a call — so a parked far tile whose
 new-recipe render is already cached repaints immediately, like every other tile. A
 parked far tile whose new recipe is *not* cached does not push a render; it stays
-parked and renders when its tile comes back.
+parked and renders when its tile comes back — unless its mesh is still warm, in
+which case D4's exception applies at restart exactly as at park time: the cheap
+tail is pushed at the far rank and finishes at idle, making the new-recipe image
+durable before eviction takes the mesh.
 
 A parked tail always restarts under the slot's **current** `(ao, pose)`, never the
 recipe it was parked under. That falls out of the design rather than needing
@@ -220,13 +247,21 @@ far tiles, which would go on showing the old recipe's image. **Preference wins**
 (un-park and start everything, today's behaviour) re-pushes ~500 far jobs that the
 current band map cancels again on the next `setBands` — paying to un-decide.
 
-### D6: The mesh LRU makes restarting cheap where it matters
+### D6: The mesh LRU decides what parking may discard
 
-A job parked after its mesh was already loaded costs nothing to redo — `MeshLru`
-still holds the geometry (`lru.acquire(entry.path)` is the hook's only way in), so
-the restarted job skips straight to rendering. This is why parking is safe to be
-liberal about: the irreversible cost is the disk read, and the LRU is what keeps it
-from being paid twice.
+A restarted job whose mesh is still held costs nothing to redo — `lru.acquire`
+is a memory hit (`MeshLru` is the hook's only way in) and the job skips straight
+to rendering. But that sentence has a lifetime: `MeshLru` is byte-budgeted
+(`DEFAULT_BUDGET`, ~1 GB of parsed geometry) and the proposal's own measurement
+puts the median model at 25.1 MB, so a few dozen meshes fit and a 500-tile sweep
+churns them continuously. A parked warm-mesh tile that returns minutes later has
+usually been evicted, and the read — the one irreversible cost — is paid again.
+D4's warm-mesh exception is what closes that gap: work whose read is already
+paid is finished while finishing is still cheap, and the PNG it files is durable
+where the LRU entry is not. What parking discards is then only work that had
+incurred no cost, and the LRU is the recheck seam that keeps it so: `has` at
+park time says which jobs are past the expensive part, and `has` again at start
+time says whether that is still true.
 
 ## Risks / Trade-offs
 

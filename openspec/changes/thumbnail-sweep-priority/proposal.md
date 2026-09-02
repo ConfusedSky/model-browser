@@ -18,7 +18,7 @@
 ## Why
 
 Measured 2026-08-18 on the real library (that session's run; re-measure before
-citing — task 5.2). A flat listing of one library root returns 500 model tiles —
+citing — task 6.2). A flat listing of one library root returns 500 model tiles —
 the cap, `listFlat`'s `cap` from `envLimit('MODEL_BROWSER_FLAT_CAP', 500)` — and
 those 500 models total **20.21 GB** of STL: median 25.1 MB, p90 99.9 MB, largest
 221.4 MB. The disk delivers 120 MB/s over USB, so a first visit to that view is
@@ -56,6 +56,13 @@ to what they are looking at, rather than to the size of the directory.
   for scroll today. *Parked* is the third per-entry state
   `ao-refreshes-thumbnails` named and deliberately left for this change — cancelled
   unstarted, restartable on re-entry, distinct from finished and from error.
+  The one exception (added 2026-09-01, user review): a model whose mesh is
+  already in memory — a prior render, a lightbox open, or a folder preview
+  loaded it — is past the expensive part, so its render is kept, taken last,
+  and completed rather than discarded; the read already paid becomes a durable
+  cached image instead of gambling on the mesh LRU. If the mesh is evicted
+  before its turn comes, it parks then, without reading. A far tile never
+  triggers a mesh read.
 - **The far band never cancels a cache lookup**, only the render tail. A parked
   tile that the preference or the index's opinion moves under is looked up again
   at once — so a render already cached under the new setting still paints, as
@@ -82,9 +89,11 @@ None.
   describes the queue as limited-concurrency and suspendable but says nothing
   about the order work is taken in — which is how strict listing order became the
   behavior by default. It gains an ordering rule: visible tiles first; work for
-  tiles that left the viewport before starting is parked rather than completed;
-  and a parked entry is looked up but not rendered when its recipe moves under it,
-  so it re-renders when its tile returns.
+  tiles that left the viewport before starting is parked rather than completed —
+  except work whose mesh is already in memory, which is finished last rather
+  than discarded, so a paid read always yields a durable image; and a parked
+  entry is looked up but not rendered when its recipe moves under it, so it
+  re-renders when its tile returns.
 
 ## Impact
 
