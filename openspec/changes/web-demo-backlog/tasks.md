@@ -30,9 +30,19 @@
       Reconcile with `ao-refreshes-thumbnails` §2b's `poseStale` rule, which it will
       exercise on every model
 - [ ] 1.3 the demo mode — the split itself (notes' "Not drafted" paragraph and Defaults):
-      env-selected mode, public-origin guard replacing the loopback body of *API
-      restricted to the app's own origin*, read-only thumbs, launcher off, chat tab
-      hidden, static serving, the bake, the credits page. Needs 2.1–2.4 decided first
+      a separately-configured deployment, public-origin guard replacing the loopback body
+      of *API restricted to the app's own origin*, read-only thumbs, launcher off, chat tab
+      hidden, static serving, the bake, the credits page. 2.1–2.4 are all decided, and four
+      shape decisions were taken 2026-09-02 (Masa) and recorded in the notes: its own
+      config in the existing `config.json` rather than `MODEL_BROWSER_ROOT` (which
+      `library-root` made an ordinary local setting — the 2026-08-28 default was stale;
+      no third file, and the never-recorded `config.json`/`launch.json` split is now
+      justified in the notes), one capability field per surface, each with its own default and
+      the built-in set being the supported/tested configuration rather than merely the
+      initial one (chat off — see the `tabStore` fallback it breaks), preview paths on dir entries as
+      the bake shape, and `models.masamaeda.com`.
+      Still open and carried as design questions, not blockers: the landing page's contents
+      (2.2), and the origin/CDN and host choices that gate 3.3
 
 ## 2. Decisions to record in `docs/web-demo-notes.md` (answer + date on the item)
 

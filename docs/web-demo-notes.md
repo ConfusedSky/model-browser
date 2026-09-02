@@ -245,10 +245,11 @@ own origin"; only its body hardcodes loopback.
    `registrar-servers.com` nameservers and Google's public resolver within
    minutes; record deletable once read). Registration: Namecheap since
    2019-11-12, **expires 2026-11-12 — confirm auto-renew before go-live**, the
-   one caveat on this decision. Exact hostname (apex vs a subdomain like
-   `demo.`/`models.`) is 1.3's call; a subdomain is the easy path — the apex is
-   bare, and the only records today are a stale `www` CNAME to a dead Netlify
-   site (cert mismatch, 404) that can be cleaned up whenever.
+   one caveat on this decision. **Hostname decided 2026-09-02 (Masa):
+   `models.masamaeda.com`** — the subdomain this row called the easy path. The
+   apex stays bare; the only records today are a stale `www` CNAME to a dead
+   Netlify site (cert mismatch, 404) that can be cleaned up whenever. This is
+   the origin 1.3's guard is configured with.
 7. **Which session owns the proposal.** **Resolved 2026-08-29 (Masa): this session
    — the other session closed; it also owned pose-for-every-model, now this
    session's too. The ordered tail is `web-demo-backlog` §1.** Other session's sequence
@@ -329,10 +330,79 @@ own origin"; only its body hardcodes loopback.
 ## Defaults this session would take unless told otherwise
 
 - Download replaces Open-in/Open-with; Copy path becomes Copy link.
-- Demo is an **env-selected mode of this repo**, not a fork: `MODEL_BROWSER_ROOT`
-  set ⇒ confinement, read-only thumbs, launcher disabled, public-origin guard;
-  the hidden controls come from a `features` value resolved once in `main.tsx`
-  (via `ApiClient` or `import.meta.env`), keeping `if(DEMO)` out of `App.tsx`.
+- Demo is a **separately-configured deployment of this repo**, not a fork.
+  **Both halves of the 2026-08-28 default are now stale and superseded (Masa,
+  2026-09-02):**
+  - the *selector* was `MODEL_BROWSER_ROOT` set ⇒ demo, written two days before
+    `library-root` landed. That variable is now read by `configuredRoot` as one
+    of the two ordinary ways to configure **any** local run — `bun run dev` sets
+    it — so it cannot select anything. **Decided (Masa, 2026-09-02): the
+    existing `config.json`, not a new file and not `.env`.** Capability fields,
+    the guard's allowed origin and the bind address join `root` there, read once
+    at start, `MODEL_BROWSER_CONFIG` already overriding the path so a container
+    mounts its own. Interaction to remember: `configuredRoot` returns early when
+    `MODEL_BROWSER_ROOT` is set, so that variable overrides the `root` key
+    *without* skipping the file — today the early return means the file is never
+    parsed at all, and with flags in it the file is always read.
+    **Why not a third file, and why the two that exist are two:** asked by Masa,
+    and there is **no recorded justification** for the `config.json`/
+    `launch.json` split. `open-in-slicer` (archived 2026-08-27) introduced
+    `launch.json`; `library-root` D4 introduced `config.json` citing "the
+    `launch.json` precedent, `loadLaunchConfig`"; `server-feature-report` D4
+    cites it again — all three for the *loading mechanism* (XDG config home, env
+    override, read-once), never for the file being separate. `launch.json`
+    appears in no spec at all. The split is accretion. It is defensible after the
+    fact — a hand-authored argv-template DSL naming the machine's installed apps,
+    normally absent, and the one config the demo never has — but that argues for
+    `launch.json` staying separate, not for the flags becoming a third file: the
+    demo needs `root`, the flags and the origin to be *coherent*, two files let a
+    container mount half of it, and a third file is a third instance of the
+    restart-after-editing gotcha. The rule this settles on, recorded because it
+    was not: a separate file is for a different **authoring** concern (templates
+    a user writes by hand, normally absent); the same file is for what describes
+    **this deployment** — which library, what it accepts, where it is reachable.
+  - the *client* half named a `features` value resolved in `main.tsx` via
+    `ApiClient` **or** `import.meta.env`. `server-feature-report` (archived
+    2026-09-02) settled this: the report is fetched through `ApiClient` and held
+    in `App.tsx`, never a build-time value, and never names a mode.
+- **Capability fields are one per surface** (Masa, 2026-09-02), not one coarse
+  demo flag: thumbnail writes (the one field that exists today), the launcher,
+  the chat tab, the bulk-job surfaces, and the semantic states a visitor can do
+  nothing about. Each is a capability a server can state truthfully on its own,
+  which is what keeps the report from becoming a mode name by another spelling.
+- **The built-in defaults are the supported configuration** (Masa, 2026-09-02),
+  and each field carries its own default rather than every field defaulting on.
+  *No flags set* is not "the empty configuration" — it is **the maintained set,
+  and its audience is the eventual distributed Electron app** (D1's seam): what
+  someone who installs this app gets. Authoring flags is the exceptional path.
+  **Narrowed the same day, after a first statement that overshot:** exceptional
+  does not mean untested. The demo's own config is **checked into the repo**, not
+  hand-authored on the box, and 1.3 tests that combination as a second named
+  configuration — so the public deployment cannot drift from what CI proves, and
+  "you are on your own" applies to arbitrary user-authored combinations only.
+  Three consequences beyond the field values: the constant is named for what it is (`ALL_FEATURES` is now simply
+  wrong — it is the *supported* set, not every capability on); the suite covers
+  that set as its primary configuration and the demo's as the one named second,
+  with any other combination exercised only by the change that owns the field,
+  which is what bounds the combinatorial accretion `server-feature-report`'s own
+  risks list flagged; and
+  all-on stops describing anything anyone runs, so the spec's *Everything on
+  changes nothing* scenario is no longer a picture of the shipped app but a
+  proof that the report mechanism is inert — worth saying in 1.3's design before
+  a reviewer reads it as the former. The demo's config then *states* every field,
+  including the ones already at their default — so the day chat ships, the demo
+  turns it on by editing a value that is already there. Chat is the first field
+  whose default is **off**: it is a placeholder with no backend (chat-panel:
+  "submitted chat input MAY be ignored or echoed locally"), and an unfinished tab
+  is clutter locally and a bad first impression on a portfolio link. Two
+  consequences, both 1.3's: `ALL_FEATURES` stops being "every capability on —
+  what this server does today" and becomes the default report, needing a rename
+  and a re-documented comment; and `SidePanel`'s `tabStore` parses
+  `raw === 'search' ? 'search' : 'chat'`, so an absent key, an unknown value and
+  a recorded `'chat'` all resolve to chat — with chat withheld, every profile
+  that never touched the panel opens on a tab that is not there. The file already
+  documents this exact hazard for the Similar tab; the fallback becomes `search`
+  when chat is withheld.
 - Thumbnails **pre-baked, read-only**. PNG is derivable, camera is opinion:
   anonymous `PUT` of PNG bytes for any path is thumbnail defacement, and a
   persisted orbit is a global edit under D4 (camera keyed by path). "Crowd-warmed"
@@ -476,11 +546,13 @@ All re-runnable; say whose run when quoting.
     uncacheable per-query POSTs fight the CDN plan — batching and
     edge-caching pull opposite ways, and on a read-only corpus the cache
     wins. Ride-the-listing and batch endpoints stay the two house idioms.
-  - **1.3's bake shapes** (undrafted): kill the listing→peek→thumbs
-    waterfall at bake — either preview paths attached to dir entries (keeps
-    per-cell `title`s carrying display names) or a precomposed 2×2 sheet PNG
-    (fewest trips and bytes; loses per-cell identity; needs both AO
-    variants) — with the layers landed, the bake is exactly "the caches
+  - **1.3's bake shape — decided 2026-09-02 (Masa): preview paths attached
+    to dir entries.** It kills the listing→peek→thumbs waterfall while keeping
+    each cell its own image, so the per-cell `title`s keep carrying the display
+    names `library-overrides` D7 put there, and the demo runs the same drawing
+    code as the local app. The alternative — a precomposed 2×2 sheet PNG, fewest
+    trips and bytes — was declined for losing per-cell identity and needing both
+    AO variants composed. With the layers landed, the bake is exactly "the caches
     fully warmed, shipped read-only", one code path with the local app. And
     the pose wave gates **off** on the demo (verified: `cached.camera ??
     posed?.camera` — every baked sidecar carries its posed camera, so the
