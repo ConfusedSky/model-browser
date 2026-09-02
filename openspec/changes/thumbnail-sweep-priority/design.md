@@ -133,6 +133,14 @@ upgrade a prefetched tile the moment it appears. Every band transition is then
 an observer callback — already coalesced per frame by the platform — so there is
 no scroll listener, no rect math, and no throttle of this change's own.
 
+`onPeek` riding the band observer is a peek-timing change, made deliberately:
+today's observer has no `rootMargin`, so a folder requests its peek on touching
+the viewport; here it fires at the generous park boundary, screens earlier. That
+is what a prefetch band is for — the peek is a cheap advisory (`/under` with its
+own 2 s budget, else the bounded walk), still one per folder per listing through
+`requestPeek`'s guard, and firing it early means a folder's preview cells are
+usually resolved before the tile is ever seen.
+
 What stays true from `folder-contact-sheets`' deferral is that this is one
 *effect*: the joining it recorded ("whichever lands second does the joining")
 happens in the existing effect, which also creates and disconnects the second

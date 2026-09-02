@@ -69,10 +69,17 @@
       root, so visible and near both read ~1.0 — and `Grid` has no scroll
       handle to patch it with (the scroller is `App`'s `<main>`; scroll does
       not bubble). Band transitions are exactly observer callbacks: no scroll
-      listener, no rect math, no throttle of our own. Add `previews` to the
-      effect's deps so a landed peek's models join their folder's band (bounded:
-      one peek per folder, and 3.1's equal-map early-exit makes the republish
-      free)
+      listener, no rect math, no throttle of our own. The per-path band is
+      derived from the two observers' *last* records: the effect's closure holds
+      a plain `Map<path, {inPark, inView}>` (rebuilt with the observers), each
+      callback updates its half, and the band is `inView` → visible, else
+      `inPark` → near, else far — republished wholesale via `setBands` after
+      each callback batch. `onPeek` rides the band observer — a deliberate
+      timing change (today's observer has no `rootMargin`): the peek now fires
+      at the park boundary, screens early, which is what a prefetch band is for
+      (D2). Add `previews` to the effect's deps so a landed peek's models join
+      their folder's band (bounded: one peek per folder, and 3.1's equal-map
+      early-exit makes the republish free)
 - [ ] 2.2 **Drop `observer.unobserve(record.target)`** from that effect: a band
       tracker must keep watching a tile after its first intersection. Safe because
       `App`'s `requestPeek` already refuses a repeat with
