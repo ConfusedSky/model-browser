@@ -57,8 +57,8 @@ alternative was weighed and declined there — one 500-tile listing is 20.21 GB 
   `library` tab), the job runner beside `useThumbnails`' queue plumbing, the chip.
 - Server: none beyond what other changes provide — the job PUTs through `/api/thumb` as
   ordinary renders do.
-- Hard ordering, all three ahead of this change: `thumbnail-sweep-priority` (the bands
-  and start gate the job drains through), `listing-tree-cache` §6 (the thumbnail-state
+- Hard ordering, all three ahead of this change: `thumbnail-sweep-priority` (the
+  priority bands the job drains through), `listing-tree-cache` §6 (the thumbnail-state
   index answering missing/stale/framed counts — the `framed` bit is added to its 6.2 by
   this drafting), `immutable-thumbnail-serving` (the write generation the mid-job skip
   reads).

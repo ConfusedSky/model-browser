@@ -1,7 +1,7 @@
 # Tasks — bulk-thumbnail-jobs
 
-> Hard ordering, all three before this change: `thumbnail-sweep-priority` (the bands and
-> start gate the job drains through), `listing-tree-cache` §6 (the thumbnail-state index
+> Hard ordering, all three before this change: `thumbnail-sweep-priority` (the priority
+> bands the job drains through), `listing-tree-cache` §6 (the thumbnail-state index
 > — presence, staleness, generation, and the `framed` bit its 6.2 carries for this
 > change), `immutable-thumbnail-serving` (the write generation D4's skip reads).
 > Re-read all three against main before starting — they are active and parallel-owned.
@@ -14,8 +14,10 @@
       work list derived at launch from the thumbnail-state index (generate:
       missing/stale in scope; reset: `framed` in scope), snapshotting each entry's
       write generation (D1, D4). No persistence
-- [ ] 1.2 Entries feed the render queue's lowest band; the band-aware start gate and
-      far-band cancellation are the preemption story — nothing job-specific
+- [ ] 1.2 Entries feed the render queue at the rank below every interactive band; the
+      queue's nearest-first draining is the preemption story (as of the sweep change's
+      26dcc18 rederivation: deferred work is outranked, never cancelled) — nothing
+      job-specific
 - [ ] 1.3 Reset's per-entry op reuses the existing give-up-the-orientation
       implementation (the lightbox/menu action's code path), then renders — one
       definition, fanned out (D3). Generate's is the ordinary render-and-PUT

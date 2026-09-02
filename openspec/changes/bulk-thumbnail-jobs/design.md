@@ -4,7 +4,8 @@
 
 Thumbnails are rendered client-side only (architecture D2: one `WebGLRenderer`;
 the server never renders), through `App`'s `RenderQueue` — which
-`thumbnail-sweep-priority` is giving priority bands and a band-aware start gate.
+`thumbnail-sweep-priority` is giving priority bands drained nearest-first (its
+26dcc18 rederivation: far work is deferred at the lowest rank, never cancelled).
 `ThumbCache` stores one PNG + sidecar per path and recipe;
 `immutable-thumbnail-serving` adds a write generation bumped by every write;
 `listing-tree-cache` §6 gives `ThumbCache` an in-memory per-path index
