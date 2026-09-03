@@ -7,15 +7,17 @@ import type {
   DirEntry,
   FeatureReport,
   LightingMode,
+  ModelsListing,
   OrbitAxis,
   PosesResponse,
+  ReloadResult,
   ThumbPutRequest,
 } from '../../shared/types'
 import { ThumbCache } from './cache'
 import { guard } from './guard'
 import { LaunchError, type Launcher, ZipTempStore, createLauncher } from './launch'
 import { LibraryError, type Library, canonicalLibPath, createLibrary } from './library'
-import { ListingError, PEEK_MAX_FINDS, complete, listDir, peek } from './listing'
+import { ListingError, PEEK_MAX_FINDS, complete, enumerateModels, listDir, peek } from './listing'
 import { ListingCache } from './listingCache'
 import {
   type OverrideHolder,
@@ -184,16 +186,25 @@ async function walkRanked(
  * two sources overlap by construction — the walk finds the same files the index
  * indexed — and the walk's own ranking decides the order of what it contributes.
  */
-async function posedFirstPeek(library: Library, libPath: string, n: number): Promise<DirEntry[]> {
+async function posedFirstPeek(
+  library: Library,
+  libPath: string,
+  n: number,
+): Promise<{ entries: DirEntry[]; collectionRootFs: string | undefined }> {
+  // Handed back beside the sheet rather than re-probed by the caller: this
+  // function already asks, the answer is what the preview layer records its
+  // identity against (§6.1), and a second `probeStatus` at the route would be a
+  // probe taken on the layer's behalf — which is exactly what "observe the
+  // answers that already flow" rules out.
   const { status, collectionRootFs } = await probeStatus(library)
   if (status.state !== 'ready' || collectionRootFs === undefined) {
-    return peek(library, libPath, n)
+    return { entries: await peek(library, libPath, n), collectionRootFs }
   }
   // The collection's reach, asked about the folder rather than about its finds
   // — the same call, one level up. `null` is every way it can fail to reach:
   // outside the collection, a path the library refuses, or a virtual one (D7).
   const dirReal = await scopeWithin(library, libPath, collectionRootFs)
-  if (dirReal === null) return peek(library, libPath, n)
+  if (dirReal === null) return { entries: await peek(library, libPath, n), collectionRootFs }
 
   // `null` is "ask the walk" — unindexed here, unreachable, or too slow. An
   // `"ok"` answer holding nothing is a real answer and lands as `[]`, which
@@ -201,7 +212,7 @@ async function posedFirstPeek(library: Library, libPath: string, n: number): Pro
   const under = await modelsUnder(dirReal, UNDER_LIMIT)
   const fromIndex =
     under === null ? [] : await entriesUnder(library, under, dirReal, libPath, n)
-  if (fromIndex.length >= n) return fromIndex
+  if (fromIndex.length >= n) return { entries: fromIndex, collectionRootFs }
 
   const sheet = [...fromIndex]
   const seen = new Set(sheet.map((e) => e.path))
@@ -210,7 +221,7 @@ async function posedFirstPeek(library: Library, libPath: string, n: number): Pro
     if (seen.has(entry.path)) continue
     sheet.push(entry)
   }
-  return sheet
+  return { entries: sheet, collectionRootFs }
 }
 
 /**
@@ -251,9 +262,84 @@ export function createApp(
   // opinion — and every test written before it — is unaffected. `index.ts`
   // constructs the real one against the library.
   snapshots?: SnapshotStore,
+  /**
+   * The listing cache itself, which owns the per-(process, root) validation
+   * state and the derived layers (§6.1). Defaulted to one built over
+   * `snapshots`, so every existing caller is unaffected.
+   *
+   * It is a parameter because **startup revalidation must run on the same
+   * instance the app serves from** (§6.5): a pass run by a second instance
+   * would correct the snapshot on disk while this app's own cache still
+   * believed the root unchecked, so the first listing would be marked stale and
+   * would start a duplicate pass behind it — paying twice for what had just
+   * been done. `index.ts` constructs one, kicks the startup pass on it, and
+   * hands it here.
+   */
+  listings: ListingCache = new ListingCache(snapshots),
 ): Hono {
   const app = new Hono()
-  const listings = new ListingCache(snapshots)
+  const layers = listings.layers
+
+  /**
+   * Attach what this server's caches already knew about these entries (§6.3):
+   * the thumbnail state, a model's pose, a folder's contact sheet.
+   *
+   * Beside `applyDisplayNames` and for its reason (library-overrides D7): a
+   * listing leaves `listing.ts` by five paths and this is the one place all of
+   * them pass through, so one pass covers browse, flat search, peek and the
+   * enumeration alike without threading a lookup through four signatures.
+   *
+   * **Mutates in place, which is safe because every entry here is already
+   * fresh** — `wire` mints a new object per entry on the walked path, and
+   * `partition` does on the cached one, so the snapshot's own objects never
+   * reach a route. That is the delta's "serve copies" rule, already discharged
+   * upstream; copying again here would only hide a regression in it. It is the
+   * same in-place caveat `displayName` carries, and the same answer.
+   *
+   * **Three Map gets and no I/O.** Nothing here can wait on the semantic index,
+   * the filesystem or the thumbnail store: a fact the caches cannot answer is
+   * simply absent from that entry, and the client asks for it exactly as it did
+   * before. That is what makes a wedged index cost a listing nothing, and what
+   * makes a library with no layer content emit byte-identical listings.
+   */
+  function annotate(entries: DirEntry[]): void {
+    for (const entry of entries) {
+      const thumb = cache.annotate(entry.path, entry.mtime)
+      if (thumb !== undefined) entry.thumb = thumb
+      if (entry.kind === 'model') {
+        const pose = layers.poseFor(entry.path)
+        if (pose !== undefined) entry.pose = pose
+      } else if (entry.kind === 'dir') {
+        // The sheet a tile draws by default. A tile asking for more cells still
+        // asks `/api/peek`, which is the only place a wider sheet is derived.
+        const preview = layers.previewFor(entry.path, PEEK_DEFAULT)
+        if (preview !== undefined) entry.preview = preview
+      }
+    }
+  }
+
+  /**
+   * The collection root the index is currently answering from, as the layers
+   * record their identity against (§6.1, design D7/M9).
+   *
+   * Read from the probe every semantic route already makes — memoised per state
+   * by `indexStatus`, so it is not a second round trip and **never a poll**. The
+   * layers are told what the answers passing through this server were derived
+   * against; nothing here asks the index anything on their behalf.
+   *
+   * Asked on every pose answer, **including an empty one**, and that is
+   * load-bearing rather than tidy: the root is what `/status` reports, not
+   * something the pose map carries, so "the index answered about no model here"
+   * is exactly what a repointed collection looks like from this side. Gating
+   * this on a non-empty answer made a repoint undetectable — the models under
+   * the old root stop resolving, the answer comes back empty, and the layer
+   * would have gone on serving poses derived from a collection the index has
+   * left. An index that is not answering at all reports no root, and
+   * `recordPoses` treats that silence as no observation rather than as a move.
+   */
+  async function collectionRoot(): Promise<string | undefined> {
+    return (await probeStatus(library)).collectionRootFs
+  }
 
   app.use('/api/*', guard)
 
@@ -343,11 +429,76 @@ export function createApp(
       // and nothing else.
       const listing = await listings.list(library, libPath, q, { folderMatching })
       applyDisplayNames(listing.entries, await overrides.store())
+      annotate(listing.entries)
       return c.json(listing)
     }
     const listing = await listDir(library, libPath)
     applyDisplayNames(listing.entries, await overrides.store())
+    annotate(listing.entries)
     return c.json(listing)
+  })
+
+  /**
+   * Every model beneath a library path, with the thumbnail facts a listing
+   * carries (§6.7) — the scope a bulk job reads before it derives its work list
+   * (`bulk-thumbnail-jobs` D8).
+   *
+   * **An enumeration, not a listing, and the difference is the point.**
+   * `MODEL_BROWSER_FLAT_CAP` bounds what a *listing* returns, because a grid
+   * shows a screenful; a scope silently cut to a cap would be a different scope,
+   * and a job that rendered 500 of 600 models while reporting success would be
+   * wrong in the one way nobody would notice. So no cap applies here. The walk's
+   * step budget still does — that bounds the **work**, not the **answer** — and
+   * a traversal it stops is reported as incomplete rather than refused: the
+   * caller is about to read every one of these models anyway, and a job that
+   * knows its scope was cut can say so.
+   *
+   * A path route like `/api/dir`: canonicalised the same way, gated by the
+   * library's not-ready envelope with no code of its own, and 404/400 on the
+   * same distinctions for the same reasons.
+   */
+  app.get('/api/models', async (c) => {
+    const path = c.req.query('path')
+    if (path === undefined || path === '') return c.json({ error: 'path is required' }, 400)
+    const libPath = canonicalLibPath(path)
+    const { models, complete } = await enumerateModels(library, libPath, snapshots)
+    applyDisplayNames(models, await overrides.store())
+    // The same annotation object a listing carries, from the same index by the
+    // same key lookup — never a second shape for the same fact.
+    annotate(models)
+    const body: ModelsListing = { path: libPath, entries: models, complete }
+    return c.json(body)
+  })
+
+  /**
+   * Freshness on demand (§6.6, design D9): run the incremental pass now for
+   * every cached root and say whether anything moved.
+   *
+   * No machinery of its own — it is `ListingCache.revalidate`, the seam built
+   * for exactly this, over the roots the store holds. Never a full re-walk: the
+   * cost is one `stat` per directory, the same check routine revalidation uses,
+   * and a root with no snapshot is nothing to reload rather than a reason to
+   * walk one.
+   *
+   * The derived layers go wholesale, because a reload is the user saying "what
+   * you have may be wrong" and the layers are the part of that the server cannot
+   * check for itself — there is no build identity to compare an index's poses
+   * against (design D7, review M9). The tree is *revalidated* instead of
+   * dropped, because for the tree there is such a check.
+   *
+   * A POST: it drops caches and rewrites snapshots. Sequential across roots, so
+   * a reload of a library with several cached trees does not put two passes on
+   * the same disk head — the contention `search-cancellation` recorded.
+   */
+  app.post('/api/reload', async (c) => {
+    layers.dropAll()
+    const roots = snapshots === undefined ? [] : await snapshots.roots()
+    let changed = false
+    for (const root of roots) {
+      if (await listings.revalidate(library, root)) changed = true
+    }
+    const body: ReloadResult = { ok: true, roots: roots.length, changed }
+    return c.json(body)
   })
 
   /**
@@ -403,8 +554,13 @@ export function createApp(
     // from the same seam the browse uses (library-overrides D7) — applied to
     // the posed-first ranking's output, since the ranking reorders entries and
     // never renames them.
-    const entries = await posedFirstPeek(library, libPath, n)
+    const { entries, collectionRootFs } = await posedFirstPeek(library, libPath, n)
+    // Recorded **before** the naming pass, so an override name a later request
+    // removes cannot survive inside the layer: what is kept is the choice — the
+    // models and their order — never how they were labelled on one request.
+    layers.recordPreview(collectionRootFs, libPath, n, entries)
     applyDisplayNames(entries, await overrides.store())
+    annotate(entries)
     return c.json(entries)
   })
 
@@ -592,7 +748,13 @@ export function createApp(
     // the client asks about next, and a spelling taken in verbatim (`//kit`,
     // `/kit/.`) would key it under names no tile carries.
     const libPath = canonicalLibPath(path)
-    const body: PosesResponse = { poses: await posesForDir(library, libPath) }
+    const poses = await posesForDir(library, libPath)
+    // The pose layer is filled from the answers that already pass through this
+    // server (§6.1) — never by asking the index on the layer's own account. The
+    // next listing that includes these models carries their orientations inline,
+    // and the client's wave shrinks to what remains unknown.
+    layers.recordPoses(await collectionRoot(), poses)
+    const body: PosesResponse = { poses }
     return c.json(body)
   })
 
@@ -658,7 +820,9 @@ export function createApp(
         if (!(err instanceof LibraryError) && !(err instanceof VPathError)) throw err
       }
     }
-    const answer: PosesResponse = { poses: await posesForListing(library, canonical) }
+    const poses = await posesForListing(library, canonical)
+    layers.recordPoses(await collectionRoot(), poses)
+    const answer: PosesResponse = { poses }
     return c.json(answer)
   })
 

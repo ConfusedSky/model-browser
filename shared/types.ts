@@ -18,6 +18,86 @@ export interface DirEntry {
    * not name, and for every library that has no store.
    */
   displayName?: string
+  /**
+   * What the server's caches already knew about this entry when the listing was
+   * emitted (`listing-tree-cache` §6.3). All three are **additive and absent by
+   * default**: a lookup in a derived layer either hits or it does not, emission
+   * never waits on the semantic index or the filesystem for them, and a library
+   * with no layer content emits listings byte-identical to one from before this
+   * capability existed.
+   *
+   * Absent does not mean "no". It means "this server has not derived it", and
+   * the client asks for it exactly as it did before — the pose wave for `pose`,
+   * `/api/thumb` for `thumb`, `/api/peek` for `preview`.
+   */
+  thumb?: ThumbInfo
+  /** The index's orientation for this model, when the pose layer holds one. */
+  pose?: IndexPose
+  /** Directories only: the contact sheet a peek already derived for this folder. */
+  preview?: DirEntry[]
+}
+
+/**
+ * One render's cached state as a listing annotation carries it
+ * (`thumbnail-image-serving` D2, adopted by `listing-tree-cache` 6.3 — one
+ * shape, on a listing and on an enumeration alike).
+ *
+ * `state` is **derived at emission** from the sidecar's stored mtime for this
+ * render against the entry's own mtime, never stored as a verdict: a file
+ * edited since the last read would otherwise keep reading `hit`. The labels are
+ * the ones the client's usability test compares — `RIG_VERSION` and
+ * `POSE_VERSION` are client constants the server stores and echoes but never
+ * interprets.
+ */
+export interface ThumbRenderInfo {
+  state: ThumbStatus
+  lighting?: LightingMode
+  rig?: number
+  posed?: number
+}
+
+/**
+ * An entry's thumbnail state: the entry-level facts, then one block per
+ * occlusion variant (the store keys renders that way).
+ *
+ * The one thing this cannot vouch for is that the PNG is still on disk — the
+ * annotation is a memory lookup, and eviction removes pixels without asking it.
+ * A reader that acts on `state: 'hit'` must still tolerate a `/api/thumb` answer
+ * that disagrees; that fallback is `thumbnail-image-serving` D3's.
+ */
+export interface ThumbInfo {
+  /** The entry's write generation — the cache validator every read echoes. */
+  gen: number
+  /** A stored orientation exists: a camera **or** an axis (`bulk-thumbnail-jobs` M4). */
+  framed: boolean
+  camera?: CameraState
+  axis?: OrbitAxis
+  ao?: ThumbRenderInfo
+  noao?: ThumbRenderInfo
+}
+
+/**
+ * Every model beneath a library path, with the thumbnail facts a listing entry
+ * carries (`listing-tree-cache` §6.7). An **enumeration, not a listing**: no
+ * response cap applies, because a scope silently cut to a cap would be a
+ * different scope. `complete` is false when the traversal that produced it
+ * stopped against its work budget — the answer still carries what was found,
+ * and a caller that knows its scope was cut can say so.
+ */
+export interface ModelsListing {
+  path: string
+  entries: DirEntry[]
+  complete: boolean
+}
+
+/**
+ * What an explicit reload found (`listing-tree-cache` §6.6): how many cached
+ * roots it re-checked, and whether any of them had moved on disk.
+ */
+export interface ReloadResult {
+  ok: true
+  roots: number
+  changed: boolean
 }
 
 export interface DirListing {

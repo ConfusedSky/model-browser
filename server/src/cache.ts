@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { mkdir, readFile, readdir, realpath, rename, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, sep } from 'node:path'
-import { CAMERA_EPSILON, type CameraState, type LightingMode, type OrbitAxis, type ThumbGetResponse } from '../../shared/types'
+import { CAMERA_EPSILON, type CameraState, type LightingMode, type OrbitAxis, type ThumbGetResponse, type ThumbInfo, type ThumbRenderInfo, type ThumbStatus } from '../../shared/types'
 import { type Library, LibraryError } from './library'
 import { VPathError, joinVPath, parseVPath } from './vpath'
 
@@ -129,6 +129,68 @@ function hasLabels(labels: RenderLabels): boolean {
 }
 
 /**
+ * Is this render a hit, a stale one, or absent — the one predicate, extracted so
+ * the read path and the listing annotation cannot drift apart
+ * (`listing-tree-cache` §6.2, `thumbnail-image-serving` D2).
+ *
+ * Staleness is the render's stored `mtime` against the model's own. An entry
+ * holding **only** an axis is still a miss, as it was before renders split: an
+ * axis is not something to re-render from, while a camera is.
+ *
+ * `get` applies one more test this cannot — whether the PNG is actually on disk
+ * — and downgrades a hit to `stale` when it is not. The annotation is a memory
+ * lookup with no file to stat, so `hit` there means "the sidecar says these
+ * pixels were rendered against this mtime"; `thumbnail-image-serving` D3 owns
+ * the fallback for the case they have since been evicted.
+ */
+function statusFor(
+  labels: RenderLabels,
+  camera: CameraState | undefined,
+  mtime: number,
+): ThumbStatus {
+  if (labels.mtime === mtime) return 'hit'
+  return camera !== undefined || labels.mtime !== undefined ? 'stale' : 'miss'
+}
+
+/**
+ * One entry's cached state as a listing carries it, derived from the sidecar
+ * this process last read or wrote. `null` is a sidecar that was looked for and
+ * was not there — a true fact, and a useful one: nothing is cached for this
+ * model, and a reader can skip asking.
+ */
+function infoFor(meta: Meta | null, mtime: number): ThumbInfo {
+  if (meta === null) {
+    return { gen: 0, framed: false, ao: { state: 'miss' }, noao: { state: 'miss' } }
+  }
+  const info: ThumbInfo = {
+    gen: meta.gen ?? 0,
+    // The definition `bulk-thumbnail-jobs`' reset derivation shares (its review
+    // M4): a stored orientation is a camera **or** an axis.
+    framed: meta.camera !== undefined || meta.axis !== undefined,
+    ao: renderInfo(meta, meta.camera, mtime),
+    noao: renderInfo(renderLabels(meta.noao), meta.camera, mtime),
+  }
+  if (meta.camera !== undefined) info.camera = meta.camera
+  // Undefined is information here for the same reason it is in `get`: "nothing
+  // stored" and "stored as y" are different facts, and defaulting made a model
+  // framed at an index-supplied pose report an axis it never had.
+  if (meta.axis !== undefined) info.axis = meta.axis
+  return info
+}
+
+function renderInfo(
+  labels: RenderLabels,
+  camera: CameraState | undefined,
+  mtime: number,
+): ThumbRenderInfo {
+  const out: ThumbRenderInfo = { state: statusFor(labels, camera, mtime) }
+  if (labels.lighting !== undefined) out.lighting = labels.lighting
+  if (labels.rig !== undefined) out.rig = labels.rig
+  if (labels.posed !== undefined) out.posed = labels.posed
+  return out
+}
+
+/**
  * The last write generation handed out, process-wide. Module-level rather than
  * per-cache so that two `ThumbCache` instances over one directory — which is
  * what the test suite builds, and what any future second reader would be —
@@ -213,6 +275,28 @@ export class ThumbCache {
   private maintaining = false
   /** The legacy scan is a once-per-process event (D5), not once per sweep. */
   private migrated = false
+  /**
+   * What this process has learned about each entry, by library path
+   * (`listing-tree-cache` §6.2): the sidecar as it was last read or written, or
+   * `null` for one that was looked for and was not there.
+   *
+   * Maintained on this cache's **own** reads and writes and on its sweep —
+   * every path through `readMeta`/`writeMeta` is one of those — so a listing
+   * costs a `Map` get per entry and never a directory scan. That is the whole
+   * point: the annotation must be affordable on a grid of hundreds of tiles.
+   *
+   * Consequently it knows only about entries this process has touched, and an
+   * entry it has not is simply absent from a listing's annotation rather than
+   * reported as a miss. The startup `maintain()` sweep already reads every
+   * sidecar in the library's directory, so a server that has swept knows the
+   * lot without a scan of its own.
+   *
+   * Unbounded, deliberately: one small record per entry the cache has seen
+   * (~200 bytes; the measured 18,705-entry library is a few MB), against a
+   * 2 GB pixel budget beside it. Entries the sweep deletes are dropped here too,
+   * so it cannot outgrow the store it describes.
+   */
+  private readonly facts = new Map<string, Meta | null>()
 
   constructor(
     readonly dir: string = process.env.MODEL_BROWSER_CACHE ?? join(homedir(), '.cache', 'model-browser'),
@@ -267,6 +351,34 @@ export class ThumbCache {
   private async writeMeta(dir: string, key: string, meta: Meta): Promise<void> {
     await mkdir(dir, { recursive: true })
     await writeFile(this.metaFile(dir, key), JSON.stringify(meta))
+    // Every write path in this class lands here — `put`, the size cap's
+    // write-back, the migration — so recording at this one point is what makes
+    // the index track the store by construction rather than by an enumeration
+    // of call sites that a later writer could fall out of.
+    this.remember(meta.path, meta)
+  }
+
+  /**
+   * What the index now knows about one entry. A copy, because the caller's
+   * object goes on to be JSON'd, spread and re-merged: sharing it would let a
+   * later merge mutate what a listing is about to report.
+   */
+  private remember(path: string, meta: Meta | null): void {
+    this.facts.set(path, meta === null ? null : { ...meta })
+  }
+
+  /**
+   * This entry's cached state for a listing to carry (§6.2/§6.3), or undefined
+   * when this process has learned nothing about the path.
+   *
+   * A `Map` get and a pure derivation: **no I/O**, so emission never waits on
+   * the filesystem, and undefined is "not known here", never "not cached" — the
+   * client asks `/api/thumb` for those exactly as it did before.
+   */
+  annotate(path: string, mtime: number): ThumbInfo | undefined {
+    const meta = this.facts.get(path)
+    if (meta === undefined) return undefined
+    return infoFor(meta, mtime)
   }
 
 
@@ -284,6 +396,10 @@ export class ThumbCache {
     const dir = await this.entryDir()
     const key = this.key(path)
     const meta = await this.readMeta(dir, key)
+    // Both answers are facts worth keeping (§6.2): the sidecar, or that there
+    // is none. A read is where this cache learns about an entry it has not
+    // written, which is most of them after a restart.
+    this.remember(path, meta)
     // An entry that does not exist has answered nothing, so it has issued no
     // generation: 0. The number still rides along, because the caller's cache
     // policy is decided from it uniformly and a miss is `no-store` anyway.
@@ -304,7 +420,10 @@ export class ThumbCache {
     // or the model has an orientation stored, and either way the client has
     // something to re-render from. An axis alone is not enough — an entry
     // holding only an axis is still a miss, as it was before renders split.
-    if (labels.mtime !== mtime) return { status: meta.camera !== undefined || labels.mtime !== undefined ? 'stale' : 'miss', camera: meta.camera, axis, lighting, rig, posed, gen }
+    // The predicate is `statusFor`, shared with the listing annotation so the
+    // two can never come to disagree about what a cached render is.
+    const status = statusFor(labels, meta.camera, mtime)
+    if (status !== 'hit') return { status, camera: meta.camera, axis, lighting, rig, posed, gen }
     let png
     try {
       png = await readFile(this.pngFile(dir, key, ao))
@@ -523,8 +642,16 @@ export class ThumbCache {
         await rm(this.metaFile(dir, key), { force: true })
         await rm(this.pngFile(dir, key, true), { force: true })
         await rm(this.pngFile(dir, key, false), { force: true })
+        // The entry is gone, so the index must not go on describing it (§6.2).
+        // Dropped rather than remembered as `null`: the model itself no longer
+        // exists, so no listing can ever ask about this path again.
+        this.facts.delete(meta.path)
         continue
       }
+      // The sweep already has every sidecar in its hand, so this is where a
+      // freshly started server learns the whole library's thumbnail state
+      // without a scan of its own — `index.ts` runs `maintain()` at startup.
+      this.remember(meta.path, meta)
       for (const ao of [true, false]) {
         const pngStat = await stat(this.pngFile(dir, key, ao)).catch(() => null)
         if (pngStat === null) continue // that render is not cached: nothing to evict

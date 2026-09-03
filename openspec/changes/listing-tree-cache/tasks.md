@@ -196,13 +196,32 @@
 
 ## 6. Derived layers and explicit freshness (added 2026-09-02 — see design D7–D9; build after §4, the layers hang off the snapshot and its revalidation)
 
-- [ ] 6.1 Pose and preview-choice layers beside the snapshot module: per-path entries
+- [x] 6.1 Pose and preview-choice layers beside the snapshot module: per-path entries
       keyed against the tree plus the index generation and pose version; populated when
       the server's semantic proxy answers (poses) and when a peek derives a choice
       (previews); never consulted-and-blocked-on at emission — a lookup hits or the field
       is absent. Preview re-derivation on directory change covers the changed directory
       **and its ancestors** (D7's stated subtlety)
-- [ ] 6.2 Thumbnail-state index: `ThumbCache` exposes an in-memory per-path index —
+      — landed 2026-09-02 as `server/src/layers.ts` (`DerivedLayers`, `LAYER_VERSION`),
+      held by `ListingCache` because the event that invalidates a preview choice is
+      discovered by the pass that class owns. **Both layers are in-memory**, settled at
+      this stage's check-in and recorded in D7 and the delta (`7c9d280`): with no
+      observable index build identity, a persisted pose could outlive a re-classification
+      indefinitely, so a restart is a third drop point rather than a loss. Populated from
+      answers that already flow — the two `/api/semantic/poses` routes, and `peek`, whose
+      `posedFirstPeek` now hands its **own** `probeStatus` result back
+      (`{entries, collectionRootFs}`) rather than letting the route probe again: the first
+      cut did probe again and cost two pre-existing peek *count* cells
+      (`expected 7 to be less than or equal to 6`, `expected 2 to be 3`), both green again
+      untouched. The collection root is recorded on **every** pose answer including an
+      empty one — gating it on a non-empty answer made a repoint undetectable, since the
+      root comes from `/status` and a repointed collection is exactly what answers empty
+      (falsified: the repoint cell failed `expected { up: [ +0, 1, +0 ], …(4) } to be
+      undefined`). Ancestors come from the pass, which now reports **which** directories
+      moved; falsified by dropping the changed dir alone → `/ should be re-derived:
+      expected [ { name: 'x.stl', …(4) } ] to be undefined`
+
+- [x] 6.2 Thumbnail-state index: `ThumbCache` exposes an in-memory per-path index —
       presence, staleness against the snapshot's mtime, the sidecar's write
       generation, and `framed` (a stored camera OR axis exists — the definition
       `bulk-thumbnail-jobs`' reset shares, review M4; presence/staleness are per
@@ -212,7 +231,22 @@
       the immutable-thumbnail-serving change consumes and `framed` one
       `bulk-thumbnail-jobs` consumes (its reset counts/derivation); keep the shape
       additive
-- [ ] 6.3 Emission: additive `DirEntry` fields (`shared/types.ts`) attached in `app.ts`
+      — landed 2026-09-02. `ThumbCache.facts` (a `Map<libPath, Meta | null>`) plus
+      `annotate(path, mtime)`, a Map get and a pure derivation with **no I/O**. Recorded
+      at `readMeta`'s call sites and inside `writeMeta`, which is *every* write path this
+      class has — `put`, the size cap's write-back, the migration — so the index tracks
+      the store by construction rather than by an enumeration a later writer could fall
+      out of; the sweep both populates it (it already holds every sidecar, which is how a
+      restarted server knows the library without a scan of its own) and deletes what it
+      reaps. `null` is a real answer: looked for, not there. Staleness is **derived at
+      emission** through `statusFor`, extracted so `get` and the annotation cannot drift;
+      `framed` is camera **or** axis (review M4). Falsified: no recording on writes →
+      `expected undefined to deeply equal { gen: 1788394018769, …(4) }`; none on reads →
+      `expected undefined to deeply equal { gen: +0, framed: false, …(2) }`; `framed`
+      camera-only → the per-variant cell's `toDeeply equal` diff; a stored verdict instead
+      of a derivation → `expected 'hit' to be 'stale'`, which also fails a **pre-existing**
+      `cache.test.ts` cell, so the extraction is load-bearing in both directions
+- [x] 6.3 Emission: additive `DirEntry` fields (`shared/types.ts`) attached in `app.ts`
       beside `applyDisplayNames`, same in-place caveat as the preamble's `displayName`
       note — cached snapshot entries must not bake annotations in; serve copies. A
       library with no layer content emits byte-identical listings (pin with the
@@ -224,16 +258,66 @@
       gen/framed plus the recipe labels and stored camera/axis the client's
       usability test reads. Adopt it here or amend it there — one shape, not
       two; that change's proposal says the same
+      — landed 2026-09-02. One `annotate(entries)` pass in `createApp`, called beside
+      `applyDisplayNames` at all three of its sites (`/api/dir` flat and browse,
+      `/api/peek`) and on 6.7's enumeration. **Three fields, because the delta's
+      annotation requirement names three**: `thumb` (D2's shape verbatim, adopted
+      unchanged — `ThumbInfo`/`ThumbRenderInfo` in `shared/types.ts`), `pose` (6.4's
+      client narrowing needs entries to carry it) and `preview` (a directory's choice;
+      the requirement's scenario pins only poses+thumb, so all three are emitted and this
+      is recorded rather than assumed). No copy is made here and that was **verified, not
+      presumed**: `wire` mints an entry per emission on the walked path and `partition`
+      does on the cached one, so the snapshot's own objects never reach a route — the
+      preamble's rule, already discharged upstream, and copying again would only hide a
+      regression in it. Falsified: no pose attached → 7 cells including
+      `expected undefined to deeply equal { up: [ +0, 1, +0 ], …(4) }`; the kind guard
+      removed so a model entry takes a preview →
+      `expected [ { name: 'forged.stl', …(4) } ] to be undefined`.
+      **One pre-existing cell changed, escalated first and adjudicated**: `poses.test.ts`
+      › "an index that is silent selects exactly as it did before poses" (absent/warming/
+      wedged) compared the peek route's JSON with `peek()`'s byte for byte, and the layer
+      now legitimately annotates a model an earlier cell in that file taught it — which
+      is the delta's "carrying whatever annotations the layers already held" while the
+      index is down. Verified against the archived normative text before touching it: the
+      requirement it pins is `directory-browsing`'s *Folder tiles preview their contents*,
+      whose words are about **selection** ("SHALL be chosen entirely by a bounded,
+      deterministic walk"; Determinism: "the same models … in the same order") and never
+      about wire bytes — no contradiction, so the helper now strips exactly the three
+      additive fields and still compares serialised key order. Falsified as asked by
+      un-stripping `pose`: all three fail on the annotation, not the selection
+      (`expected '[{"name":"a.stl","path":"/mixed/a.stl…' to be '…'`)
 - [ ] 6.4 Client: the pose wave asks only for entries whose listing carried no pose
       (`semanticPosesFor` callers in `App`); everything else about the wave — background,
       chunked, silent-failure — unchanged
-- [ ] 6.5 Startup revalidation (D8): when the library resolves ready and a snapshot
+- [x] 6.5 Startup revalidation (D8): when the library resolves ready and a snapshot
       exists, start the incremental pass; no snapshot → nothing at startup. Reuses the
       library-ready hook `library-overrides`' eager store load established in `index.ts`
-- [ ] 6.6 Reload endpoint (D9): runs the same pass now, answers whether anything moved;
+      — landed 2026-09-02 inside `index.ts`'s existing `library.state()` ready branch,
+      beside the eager override load and the two sweeps. Iterates
+      `SnapshotStore.roots()` — new, and the only way to recover a root, since the store
+      is keyed by a hash; it does **not** bump the LRU clock `load` bumps, because a
+      census is not a serve. One root at a time, so two passes never contend for the same
+      disk head. A library with no snapshot yields no roots and nothing is walked — the
+      census reads the cache directory, never the library (asserted). `createApp` grew a
+      trailing `listings?: ListingCache` for this: the pass **must** run on the instance
+      the app serves from, or the app would still believe every root unchecked and run a
+      duplicate pass behind the first listing. Falsified by making `roots()` find nothing
+      → 3 cells, `expected [ '/tmp/mb-ly-13kECF/top/kit/a', …(1) ] to deeply equal [ ]`
+      and `expected { ok: true, roots: +0, changed: false } to deeply equal
+      { ok: true, roots: 1, changed: false }`
+- [x] 6.6 Reload endpoint (D9): runs the same pass now, answers whether anything moved;
       client affordance minimal (the stale-marker reconciliation already covers how
       corrections land)
-- [ ] 6.7 Scope enumeration (added 2026-09-02 — the seam `bulk-thumbnail-jobs` waits on;
+      — `POST /api/reload` → `{ ok, roots, changed }` (`ReloadResult`). No machinery of
+      its own: `ListingCache.revalidate` over `store.roots()`, sequentially. That method
+      now **returns** whether the tree moved (it swallowed the fact before) and the
+      in-flight map carries the answer, so a reload joining a pass already running reports
+      what that pass found; no pre-existing cell asserted the old `void`. The derived
+      layers are dropped wholesale while the tree is *revalidated* rather than dropped —
+      for the tree there is a check, for the layers there is none (D7/M9). Falsified: no
+      `dropAll` → `expected { up: [ +0, 1, +0 ], …(4) } to be undefined`; the pass never
+      reporting movement → `expected false to be true` in two cells
+- [x] 6.7 Scope enumeration (added 2026-09-02 — the seam `bulk-thumbnail-jobs` waits on;
       its review finding S2, settled with Masa by ordering rather than by a walk of that
       change's own): a read-only route answering **every model beneath a library path** —
       the whole subtree, archive contents included, with no response cap
@@ -249,6 +333,29 @@
       names (`DirEntry.thumb`) — the same object on a listing and on an enumeration,
       never two. Cell: a 600-model fixture enumerates 600 (a flat listing of it caps at
       500); a snapshot-served enumeration opens no directory and no archive (instrument)
+      — landed 2026-09-02 as `GET /api/models?path=` → `{ path, entries, complete }`
+      (`ModelsListing`), the shape this task names; `/under` was weighed and declined as
+      another process's noun (it is mini-classify's route, not this server's). A path
+      route like `/api/dir`: canonicalised the same way, so the library gate answers
+      `missing` before it and `path is required`/404 come free. `enumerateModels`
+      (`listing.ts`) answers three ways, cheapest first — this root's snapshot, the
+      nearest **ancestor** root's (the common case: the library tab enumerates what
+      browsing already walked), else a gather on the **search** budget persisted only if
+      complete (§4.1a). All three go through one `modelsUnder`, which re-derives each
+      `name` from its path so a snapshot-served answer is indistinguishable from a walk of
+      that path, and which prefixes on both `/` and `!/` so enumerating an archive is not
+      silently empty. Uncapped means uncapped; the step budget still bounds the *work*,
+      and the route's comment says why that is not a cap on the *answer*. Falsified:
+      applying `MODEL_BROWSER_FLAT_CAP` where all three paths pass →
+      `expected [ …(500) ] to have a length of 600 but got 500` (the first attempt patched
+      only the walking branch and **nothing failed**, because the cell is snapshot-served
+      — the patch was misplaced, not the cell weak); always claiming complete →
+      `expected true to be false`; handing back an ancestor snapshot's names unchanged →
+      `expected [ 'a/bracket.stl', 'a/deep/part.stl' ] to deeply equal [ 'bracket.stl',
+      'deep/part.stl' ]`. The incomplete cell needed **two** folders under the root: the
+      root level is uncharged and `walkFsLevel` abandons the level it was reading when the
+      budget goes, so a single over-budget folder answers zero models and "what was found
+      still comes back" would have asserted nothing
 
 ## 7. Tests
 
@@ -305,6 +412,29 @@
       with none (instrument, don't time); no-layer listings byte-identical. Client: the
       wave requests only unposed entries; a reload surfaces an external change without
       restart
+      <br>**Server half landed 2026-09-02 — `server/test/layers.test.ts`, 23 cells.**
+      Left unchecked: the two client cells are the later client worker's.
+      All four server cells are there. The first is written against the identity the
+      server can actually observe: an *index-generation bump* is not one — review M9, and
+      D7 turns on it — so what is driven is the **collection root** moving and the
+      `LAYER_VERSION` half (a layer built for another version is inert: it records
+      nothing and answers nothing), both with the tree still serving beside them.
+      "As fast as with none" is instrumented, never timed: the index is stubbed at `fetch`
+      and the emission that carries a pose makes **zero** calls. Byte-identity is pinned
+      against a server constructed with no store at all — the pre-change app — on the flat
+      and the browse paths, and is followed by its own control: each of the three layers,
+      seeded alone, makes the bytes differ, so the cell can fail.
+      Two findings worth inheriting. **A route-driven cell cannot falsify a "serves
+      copies" defect** — `c.json` serialises, so what a test mutates is its own
+      deserialised object and no shared reference is reachable; three separate copy
+      defects (hand out the held array, keep the caller's array, share the pose object)
+      were introduced and *nothing failed*. The coverage now lives in an in-process cell
+      against `DerivedLayers`, which fails on both array defects
+      (`expected [ { …(5) }, …(1) ] to deeply equal [ { name: 'x.stl', …(4) } ]`); this is
+      stage 2's own recorded finding met one layer up. And the pose object is handed out
+      **by reference on purpose** — a small record nothing here writes to, against one
+      copy per model per listing on a 500-tile grid — which is stated at `poseFor` rather
+      than covered by a cell that could not fail.
 
 ## 8. Verification
 

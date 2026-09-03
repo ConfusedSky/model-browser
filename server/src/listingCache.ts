@@ -30,6 +30,7 @@
  */
 
 import type { DirListing } from '../../shared/types'
+import { DerivedLayers } from './layers'
 import type { Library } from './library'
 import { revalidateTree, walkFlat } from './listing'
 import type { SnapshotStore } from './snapshot'
@@ -37,10 +38,26 @@ import type { SnapshotStore } from './snapshot'
 export class ListingCache {
   /** Roots this process has checked against the filesystem. */
   private readonly validated = new Set<string>()
-  /** The revalidation pass running for a root, so two never run at once. */
-  private readonly inFlight = new Map<string, Promise<void>>()
+  /**
+   * The revalidation pass running for a root, so two never run at once. Carries
+   * the pass's answer — whether anything moved — so a reload (§6.6) that joins
+   * a pass already in flight reports what that pass found rather than nothing.
+   */
+  private readonly inFlight = new Map<string, Promise<boolean>>()
 
-  constructor(private readonly store?: SnapshotStore) {}
+  constructor(
+    private readonly store?: SnapshotStore,
+    /**
+     * The pose and preview-choice layers (§6.1). Held here, and not beside the
+     * routes that read them, because the event that invalidates a preview
+     * choice — a directory whose contents moved — is discovered by the
+     * revalidation pass this class owns and by nothing else.
+     *
+     * Independent of `store`: a server with no tree cache still annotates from
+     * what its own proxy answers and peeks have derived.
+     */
+    readonly layers: DerivedLayers = new DerivedLayers(),
+  ) {}
 
   /**
    * A flat listing, served from the snapshot where there is one. The returned
@@ -80,15 +97,19 @@ export class ListingCache {
   }
 
   /**
-   * Run the incremental pass for a root now, joining one already in flight.
+   * Run the incremental pass for a root now, joining one already in flight, and
+   * report whether the tree had moved.
    *
    * The seam startup revalidation (§6.5) and the reload endpoint (§6.6) work
-   * through; here it is what a test drives to reach the "validated" half of the
-   * marker's lifecycle without racing a background task.
+   * through; here it is also what a test drives to reach the "validated" half of
+   * the marker's lifecycle without racing a background task.
+   *
+   * `false` for a store-less cache and for a root with no snapshot: neither has
+   * anything that *could* have moved, and neither is an error.
    */
-  async revalidate(library: Library, root: string): Promise<void> {
-    if (this.store === undefined) return
-    await (this.inFlight.get(root) ?? this.start(library, root))
+  async revalidate(library: Library, root: string): Promise<boolean> {
+    if (this.store === undefined) return false
+    return await (this.inFlight.get(root) ?? this.start(library, root))
   }
 
   /** Whether this process has checked `root` against the filesystem. */
@@ -96,7 +117,7 @@ export class ListingCache {
     return this.validated.has(root)
   }
 
-  private start(library: Library, root: string): Promise<void> {
+  private start(library: Library, root: string): Promise<boolean> {
     // Joined, not raced: `list()`'s in-flight check and its call here are
     // separated by a whole walk's worth of awaits, so two first requests for
     // one root can both arrive — without this, the second would overwrite the
@@ -107,8 +128,10 @@ export class ListingCache {
     const run = this.run(library, root)
       // Never rejects: `run` handles its own failures, and this is the belt to
       // that brace — a rejection here would be unhandled, since the serving
-      // path deliberately does not await it.
-      .catch(() => undefined)
+      // path deliberately does not await it. A pass that failed reports "nothing
+      // moved", which is what a reload should say about a root it could not
+      // check: the corrections it would have made are not there to announce.
+      .catch(() => false)
       .finally(() => {
         this.inFlight.delete(root)
       })
@@ -116,27 +139,41 @@ export class ListingCache {
     return run
   }
 
-  private async run(library: Library, root: string): Promise<void> {
+  private async run(library: Library, root: string): Promise<boolean> {
     const store = this.store
-    if (store === undefined) return
+    if (store === undefined) return false
     // A library whose volume is not present never reaches revalidation: that is
     // the `missing` state, answered before any listing (`/api/dir` is behind
     // `createApp`'s library gate), and the snapshot is neither served nor
     // discarded (D6). The check is repeated here because this pass runs
     // *after* a response, so the volume can leave between the two.
-    if (!(await isReady(library))) return
+    if (!(await isReady(library))) return false
+    let moved: boolean
     try {
-      await revalidateTree(library, root, store)
+      const pass = await revalidateTree(library, root, store)
+      moved = pass.changed
+      // The preview layer's re-derivation (§6.1, design D7's subtlety): a
+      // sheet is drawn from a directory's whole subtree while a directory's
+      // freshness signal does not propagate upward, so each changed directory
+      // takes its ancestors' choices down with it. An unchanged sibling branch
+      // keeps what it had — which is why this is driven from the pass's own
+      // list rather than by dropping the layer whenever anything moved.
+      for (const dir of pass.changedDirs) this.layers.noteDirChanged(dir)
     } catch {
       // A pass that could not be completed against a root that is *there*
       // invalidates: the filesystem is authoritative and the cache loses
       // (§4.3). A pass that failed because the volume went away is the other
       // case entirely, and leaves the snapshot alone — and leaves the root
       // unvalidated, so the pass runs again when the volume is back.
-      if (!(await isReady(library))) return
+      if (!(await isReady(library))) return false
       await store.invalidate(root).catch(() => undefined)
+      // The snapshot is gone rather than corrected, so there is no "what moved"
+      // to report — and the root is still marked validated below, because this
+      // process has now checked it and the next serve is a walk.
+      moved = false
     }
     this.validated.add(root)
+    return moved
   }
 }
 

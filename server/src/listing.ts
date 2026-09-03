@@ -960,20 +960,30 @@ function sameEntries(a: readonly SnapshotEntry[], b: readonly SnapshotEntry[]): 
  * re-walk** — that would reintroduce the cold cost this change exists to
  * remove, off the critical path where nobody can see it.
  *
- * Returns whether anything moved. Raises `RevalidationError` when the pass
- * cannot be completed against a root that is present — a recorded directory
- * that has become unreadable, or a tree that has outgrown the walk budget — and
- * the caller then invalidates rather than going on serving contradicted
- * entries (§4.3, D6). A root with no snapshot is nothing to revalidate, not a
- * reason to walk one.
+ * Returns whether anything moved, and **which directories** it was that moved
+ * (§6.1): a preview choice is derived from a directory's subtree, so the layer
+ * above re-derives the changed directory's and each of its ancestors'. That
+ * list is a by-product of the pass — `levelFor` has already stat'd every
+ * recorded directory and knows which mtimes it found unchanged — so reporting it
+ * costs a comparison rather than a second look.
+ *
+ * A directory the snapshot recorded and this pass did **not** reach is not in
+ * the list, and needs not be: it is gone, and something removed it, which moved
+ * its parent's mtime and put the parent in the list instead.
+ *
+ * Raises `RevalidationError` when the pass cannot be completed against a root
+ * that is present — a recorded directory that has become unreadable, or a tree
+ * that has outgrown the walk budget — and the caller then invalidates rather
+ * than going on serving contradicted entries (§4.3, D6). A root with no
+ * snapshot is nothing to revalidate, not a reason to walk one.
  */
 export async function revalidateTree(
   library: Library,
   root: string,
   store: SnapshotStore,
-): Promise<boolean> {
+): Promise<{ changed: boolean; changedDirs: string[] }> {
   const snapshot = await store.load(root)
-  if (snapshot === null) return false
+  if (snapshot === null) return { changed: false, changedDirs: [] }
   const g = await gatherFlat(
     library,
     root,
@@ -987,8 +997,123 @@ export async function revalidateTree(
   if (g.budgetExhausted) throw new RevalidationError(`revalidation did not finish: ${root}`)
   const entries = snapshotEntries(g)
   const changed = !sameEntries(snapshot.entries, entries)
+  // A directory whose mtime is not the one recorded — including one the
+  // snapshot never recorded at all, which is a folder that has just appeared.
+  const before = new Map(snapshot.dirs.map((d) => [d.path, d.mtime]))
+  const changedDirs = [...g.dirMtimes]
+    .filter(([path, mtime]) => before.get(path) !== mtime)
+    .map(([path]) => path)
   await store.save({ root, walkedAt: Date.now(), entries, dirs: dirRecords(g.dirMtimes) })
-  return changed
+  return { changed, changedDirs }
+}
+
+/**
+ * Every model beneath a library path, with no response cap (§6.7, design D7's
+ * enumeration note).
+ *
+ * **Uncapped is not unbounded.** `MODEL_BROWSER_FLAT_CAP` bounds a *listing* —
+ * how many tiles an answer may carry — and this is not one: a scope cut to a cap
+ * would silently be a different scope, and the caller is about to act on every
+ * model in it. The walk's step *budget* still applies, because that bounds the
+ * work rather than the answer; a traversal it stops is reported as incomplete
+ * rather than refused, and nothing is cached for it (§4.1a).
+ *
+ * Three ways to answer, cheapest first:
+ *
+ * 1. A snapshot for this exact path — filter and hand back, no filesystem I/O.
+ * 2. A snapshot for an **ancestor** root, which already holds this subtree: the
+ *    common case, since the library tab enumerates the root that browsing has
+ *    walked. Entries are re-named relative to the path asked about, so this
+ *    answer is indistinguishable from a walk of it.
+ * 3. No snapshot: walk it as a listing miss walks, on the search budget, and
+ *    persist only a traversal that saw the whole tree.
+ */
+export async function enumerateModels(
+  library: Library,
+  libPath: string,
+  store?: SnapshotStore,
+): Promise<{ models: DirEntry[]; complete: boolean; fromSnapshot: boolean }> {
+  if (store !== undefined) {
+    const exact = await store.load(libPath)
+    if (exact !== null) {
+      return { models: modelsUnder(partition(exact.entries).models, libPath), complete: true, fromSnapshot: true }
+    }
+    // Longest first: the nearest enclosing root holds the fewest entries to
+    // filter, and every one of them holds this subtree identically.
+    const roots = (await store.roots())
+      .filter((root) => encloses(root, libPath))
+      .sort((a, b) => b.length - a.length)
+    for (const root of roots) {
+      const snapshot = await store.load(root)
+      if (snapshot === null) continue
+      return { models: modelsUnder(partition(snapshot.entries).models, libPath), complete: true, fromSnapshot: true }
+    }
+  }
+  const g = await gatherFlat(
+    library,
+    libPath,
+    // The search budget, not the browse one: an enumeration is a deliberate
+    // action over a whole subtree, and the smaller budget is sized for the
+    // tiles one screen shows.
+    envLimit('MODEL_BROWSER_SEARCH_BUDGET', 200_000),
+    store?.archiveCache(),
+  )
+  const complete = !g.budgetExhausted
+  if (store !== undefined && complete) {
+    await store.save({
+      root: libPath,
+      walkedAt: Date.now(),
+      entries: snapshotEntries(g),
+      dirs: dirRecords(g.dirMtimes),
+    })
+  }
+  // Through the same filter as the two cached paths, though a fresh walk's
+  // models are all under the root already and already named that way: one rule,
+  // so the three answers cannot differ in their naming or in whether they hand
+  // out objects the walk still holds.
+  return { models: modelsUnder(g.models, libPath), complete, fromSnapshot: false }
+}
+
+/** Is `root` at or above `libPath`? Segment-wise, so `/kit` never encloses `/kit2`. */
+function encloses(root: string, libPath: string): boolean {
+  return root === libPath || libPath.startsWith(root === '/' ? '/' : `${root}/`)
+}
+
+/**
+ * The models of a gathered set that lie beneath `libPath`, each named the way a
+ * walk rooted *there* would name it — by its path relative to that root.
+ *
+ * Re-naming is what makes a snapshot-served enumeration and a walked one the
+ * same answer: a snapshot's names are relative to the root it was walked from,
+ * which for an ancestor root is one level too high. Deriving the name from the
+ * path is exact rather than approximate — that is precisely how the walk builds
+ * it, on both the filesystem side (`${rel}${name}`) and the archive side
+ * (`${namePrefix}${rest}`).
+ */
+function modelsUnder(models: readonly DirEntry[], libPath: string): DirEntry[] {
+  // Two separators, because a root can be an archive: everything inside
+  // `/kit/box.zip` is addressed `/kit/box.zip!/…`, and a `/` prefix would match
+  // none of it — the enumeration of an archive would come back empty, which is
+  // a wrong answer rather than a missing feature.
+  const prefixes = libPath === '/' ? ['/'] : [`${libPath}/`, `${libPath}!/`]
+  const out: DirEntry[] = []
+  for (const m of models) {
+    if (m.kind !== 'model') continue
+    const prefix = prefixes.find((p) => m.path.startsWith(p))
+    if (prefix === undefined) continue
+    // A fresh object, never the stored one: emission annotates entries in place
+    // (the `applyDisplayNames` hazard the delta's copies rule names).
+    const copy: DirEntry = {
+      name: m.path.slice(prefix.length),
+      path: m.path,
+      kind: m.kind,
+      size: m.size,
+      mtime: m.mtime,
+    }
+    if (m.format !== undefined) copy.format = m.format
+    out.push(copy)
+  }
+  return out
 }
 
 /**

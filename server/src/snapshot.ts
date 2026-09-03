@@ -265,6 +265,41 @@ export class SnapshotStore {
   }
 
   /**
+   * Every root this library has a usable snapshot for.
+   *
+   * What startup revalidation (§6.5) and the reload endpoint (§6.6) iterate:
+   * both mean "the trees this library has cached", and only the files know
+   * which those are — the store is keyed by a hash, so a root cannot be read
+   * back out of a file name.
+   *
+   * Deliberately does **not** bump the LRU clock the way `load` does. This is a
+   * census, not a serve: a root nobody has listed for a month should not be
+   * defended from the size cap by the fact that a reload counted it.
+   *
+   * An absent store directory is an empty list, on `maintain`'s reasoning: a
+   * cache from before this change has no `snapshots/`, and neither does a
+   * library nothing has walked.
+   */
+  async roots(): Promise<string[]> {
+    const dir = await this.storeDir()
+    let names: string[]
+    try {
+      names = await readdir(dir)
+    } catch {
+      return []
+    }
+    const id = await this.libraryId()
+    const out: string[] = []
+    for (const name of names) {
+      if (!name.startsWith('tree-') || !name.endsWith('.json')) continue
+      const parsed = await readJson<TreeFile>(join(dir, name))
+      if (parsed === null || parsed.version !== SNAPSHOT_VERSION || parsed.library !== id) continue
+      if (typeof parsed.root === 'string') out.push(parsed.root)
+    }
+    return out
+  }
+
+  /**
    * Persist a snapshot for its root, replacing any previous one.
    *
    * The caller owns the rule this store cannot check: **only a traversal that

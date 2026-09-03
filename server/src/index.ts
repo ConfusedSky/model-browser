@@ -4,6 +4,7 @@ import { ThumbCache } from './cache'
 import { ALL_FEATURES, createApp } from './app'
 import { ZipTempStore, createLauncher } from './launch'
 import { createLibrary } from './library'
+import { ListingCache } from './listingCache'
 import { createOverrideHolder } from './overrides'
 import { SnapshotStore } from './snapshot'
 
@@ -15,6 +16,11 @@ const cache = new ThumbCache(undefined, undefined, undefined, library)
 // by its own knob (`listing-tree-cache` D2). Built here rather than inside
 // `createApp` for `cache`'s reason: the startup sweep below needs it.
 const snapshots = new SnapshotStore(undefined, undefined, library)
+// The listing cache, built here rather than left to `createApp`'s default for
+// the same reason the two above are: the startup pass below must run on the
+// **instance the app serves from**, or the app would still believe every root
+// unchecked and re-run the pass behind the first listing (§6.5).
+const listings = new ListingCache(snapshots)
 // Built here rather than left to `createApp`'s default so the eager load below
 // can use it: a malformed store then reports beside the startup line rather
 // than on whichever request happened to ask first (library-overrides D1).
@@ -33,10 +39,35 @@ void library.state().then((s) => {
     // The startup sweep resolves every cached path through the library, so it
     // has nothing to say until there is one.
     void cache.maintain()
-    // The snapshot store's sweep is its own — one location, two bounds (D2) —
-    // and runs beside it for the same reason: it is filed per library, so it
-    // has nothing to sweep until the library has resolved.
-    void snapshots.maintain()
+    // Startup revalidation (§6.5, design D8): every root this library has a
+    // snapshot for is re-checked at once, so a change made while the app was
+    // closed is usually found before anyone lists anything.
+    //
+    // **Never a startup walk.** A root with no snapshot is not walked here: an
+    // eager cold walk would grind a spinning, sometimes-absent volume at every
+    // launch for a listing nobody asked for. What runs is the incremental pass
+    // — one `stat` per directory — and it runs one root at a time, because two
+    // passes at once contend for the same disk head with whatever the user is
+    // actually waiting for.
+    //
+    // A library that resolves ready only *later* is covered by its first
+    // request's ordinary revalidation: this hook fires once at process start,
+    // which is the shape the requirement binds and the shape the eager override
+    // load above already has.
+    void (async () => {
+      // The snapshot store's sweep is its own — one location, two bounds (D2) —
+      // and runs here for the reason the thumbnail sweep runs above: it is
+      // filed per library, so it has nothing to sweep until the library has
+      // resolved.
+      //
+      // **Awaited, so the sweep finishes before the pass starts writing.** The
+      // sweep reaps stray `.tmp` files and every `save` the pass makes writes
+      // one, so a pass running *into* a sweep is the reaper-versus-live-save
+      // race the stage-1/2 review names (finding 8). Fixing that race is the
+      // fix round's; this only declines to build it into the startup ordering.
+      await snapshots.maintain()
+      for (const root of await snapshots.roots()) await listings.revalidate(library, root)
+    })()
   } else console.log(`library: ${s.state}`)
 })
 
@@ -52,6 +83,7 @@ const app = createApp(
   overrides,
   ALL_FEATURES,
   snapshots,
+  listings,
 )
 
 export default {

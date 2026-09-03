@@ -884,14 +884,39 @@ describe('an index that is silent selects exactly as it did before poses', () =>
    * library, libPath, n))` verbatim. Compared as serialised JSON rather than
    * with `toEqual`, so key order counts too — this is the requirement's
    * "exactly today's selection", not "the same models".
+   *
+   * **Two requirements meet here, and the strip below is the seam between
+   * them.** `directory-browsing`'s *Folder tiles preview their contents* is
+   * about what is **chosen**: with the index silent the models "SHALL be chosen
+   * entirely by a bounded, deterministic walk", and its Determinism scenario
+   * asks for "the same models … in the same order". That is what these cells
+   * pin, and this change does not touch it. `listing-cache`'s *Derived
+   * annotations ride the listing* then attaches additive fields to those entries
+   * from what this server's own caches already hold — expressly including while
+   * the index is down: "listings emit at full speed, carrying whatever
+   * annotations the layers already held and omitting the rest". An earlier cell
+   * in this file asks `/api/semantic/poses` about `/mixed`, and this file's `app`
+   * is one server for the whole run, so by the time these cells arrive the pose
+   * layer legitimately holds `/mixed/c.stl` and the sheet carries it.
+   *
+   * So exactly those three fields are removed before comparing, and nothing
+   * else is. A change to any entry's name, path, kind, size, mtime, format or
+   * order — an entry more, an entry fewer, or a fourth annotation nobody
+   * declared — still fails, which is the whole of what the archived requirement
+   * asks these cells to defend.
    */
+  const ANNOTATIONS = ['thumb', 'pose', 'preview'] as const
   const identical = async (path: string, n: number): Promise<void> => {
     const before = JSON.stringify(await peek(library, path, n))
     const res = await app.request(`/api/peek?path=${encodeURIComponent(path)}&n=${n}`, {
       headers: LOOPBACK,
     })
     expect(res.status).toBe(200)
-    expect(JSON.stringify(await res.json())).toBe(before)
+    const got = (await res.json()) as Record<string, unknown>[]
+    // Deleting a key leaves the rest in insertion order, so the serialisation
+    // below still compares key order — which is the point of stringifying.
+    for (const entry of got) for (const field of ANNOTATIONS) delete entry[field]
+    expect(JSON.stringify(got)).toBe(before)
   }
 
   for (const [label, stub] of [
