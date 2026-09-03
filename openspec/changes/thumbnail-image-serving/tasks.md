@@ -113,20 +113,32 @@
 
 ## 4. Far reads yield to pending lookups
 
-- [x] 4.1 *(`onSettle`; `pending` was built and then dropped — nothing in `client/src` read it, only `pendingNearerThanFar` (third review, R5); `running` is a Set so ranks of running jobs can be asked; a closed gate arms one timer for the bound's remainder, since a queue holding only far work has nothing else to pump it)* `RenderQueue`: `pending` counts live jobs (**not** `jobs.length +
-      running` — husks are spliced only inside `take`); `setFarGate(fn)`;
-      `take` skips `far`-ranked jobs while the gate says no, **unless the gate
-      has read closed for longer than `FAR_GATE_MAX_MS`** (a named constant,
-      tuned in 6.2 above the measured worst lookup of 3.7 s); `onSettle` fires **after** the decrement, on every finish; a public `poke()` re-pumps (D5). Since the second review the bound drains the whole backlog once passed, and the gate is read on the first far job a take meets
+- [x] 4.1 `RenderQueue`: `setFarGate(fn)`; `take` skips `far`-ranked jobs
+      while the gate says no, **unless the gate has read closed for longer
+      than `FAR_GATE_MAX_MS`** (a named constant, above the measured worst
+      lookup of 3.7 s), after which the whole backlog drains; the bound's
+      clock runs **only while a live far job is queued** — `syncHold` at
+      every point the queued far set can shrink (cancel, re-ranking, take
+      after its splice, the gate's timer); `onSettle` fires after every finish, after the
+      decrement; a public `poke()` re-pumps (D5). A general `pending` count
+      was built and dropped — nothing read it (third review, R5)
 - [x] 4.2 *(the lookup queue's `onSettle` fires after **every** lookup finishes, after the decrement; the hook's callback pokes the render queue, whose gate re-reads `pendingNearerThanFar`. An idle-only signal would have left far renders waiting on the last far lookup when the last *near* one had already settled)* The hook wires the render queue's gate to "a lookup ranked nearer
       than far is pending" (the lookup queue exposes that count, not just
       `pending`) and the lookup queue's `onSettle` to the render queue's `poke`;
       both cleared in the wiring effect's cleanup (0.3)
-- [x] 4.3 *(six cells under *RenderQueue far gate*)* `queue.test.ts` cells, DOM-free: with the gate closed a far job is
-      skipped while a near job runs; the gate opening plus `poke` starts the
-      far job with no new push; `pending` excludes cancelled husks; a gate
-      that never opens releases far work after the bound (fake timers); a
-      gate closed only by far-ranked lookups does not hold far renders
+- [x] 4.3 `queue.test.ts` cells, DOM-free, under *RenderQueue far gate*
+      (thirteen since the fourth review): far skipped while the gate is
+      closed and near runs beside it, and the gate opening plus `poke`
+      starts it with no push; only work nearer than far counts; the settle
+      fires after the decrement with a far lookup pending throughout; far
+      work released after the bound when the gate never opens; the whole
+      backlog drains once the bound has passed; the clock independent of
+      arrival order; the clock forgotten when the last far job is retired
+      under a saturated queue, when it is re-ranked nearer before *and*
+      after the timer fired, and when it is dispatched on an expired clock under a saturated
+      queue; removing the gate drops its
+      timer on a suspended queue; `clear` drops gate and settle callback.
+      Each falsified against its release removed
 
 ## 5. Tests
 

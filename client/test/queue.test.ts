@@ -396,6 +396,60 @@ describe('RenderQueue far gate', () => {
     }
   })
 
+  it('dispatching the last far job on an expired clock does not hand that clock to the next one', async () => {
+    // Fourth review, R1: the take that dispatched the last far job left the
+    // clock running; saturated, nothing took again until a slot freed, and
+    // the far job pushed meanwhile then rode the expired clock straight out.
+    vi.useFakeTimers()
+    try {
+      const queue = new RenderQueue(2)
+      const ran: string[] = []
+      queue.setFarGate(() => false)
+      queue.setRanking(ranking({ far1: 'far', far2: 'far', v1: 'visible' }))
+      const v1 = held(ran, 'v1')
+      queue.push(v1.run, 'v1')
+      const far1 = held(ran, 'far1')
+      queue.push(far1.run, 'far1') // held: one slot free, the clock starts
+      await vi.advanceTimersByTimeAsync(FAR_GATE_MAX_MS + 1) // expired: far1 dispatches, both slots busy
+      expect(ran).toEqual(['v1', 'far1'])
+      queue.push(recorder(ran, 'far2'), 'far2') // saturated: no take
+      far1.release()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(ran).toEqual(['v1', 'far1']) // far2 held for its own bound, not dispatched on far1's
+      await vi.advanceTimersByTimeAsync(FAR_GATE_MAX_MS + 1)
+      expect(ran).toEqual(['v1', 'far1', 'far2'])
+      v1.release()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a far job re-ranked nearer after the timer has fired does not keep the expired clock', async () => {
+    // Fourth review, R2: the timer is one-shot, so a re-rank after it fired
+    // had no observer left; the re-ranking keeps the invariant itself.
+    vi.useFakeTimers()
+    try {
+      const queue = new RenderQueue(1)
+      const ran: string[] = []
+      queue.setFarGate(() => false)
+      queue.setRanking(ranking({ j: 'far', v: 'visible', far2: 'far' }))
+      queue.push(recorder(ran, 'j'), 'j') // a free slot: met, held, the clock starts
+      await vi.advanceTimersByTimeAsync(1)
+      const v = held(ran, 'v')
+      queue.push(v.run, 'v') // runs, and now the queue is saturated
+      await vi.advanceTimersByTimeAsync(FAR_GATE_MAX_MS + 1) // timer fired; j still queued, no take
+      queue.setRanking(ranking({ j: 'near', v: 'visible', far2: 'far' })) // the last far job is now near
+      queue.push(recorder(ran, 'far2'), 'far2')
+      v.release()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(ran).toEqual(['v', 'j']) // far2 held afresh, not dispatched on j's expired clock
+      await vi.advanceTimersByTimeAsync(FAR_GATE_MAX_MS + 1)
+      expect(ran).toEqual(['v', 'j', 'far2'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('counts only work nearer than far — a queue holding far lookups alone opens the gate', async () => {
     const queue = new RenderQueue(1)
     const ran: string[] = []

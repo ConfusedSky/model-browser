@@ -587,7 +587,11 @@ export function useThumbnails(
     // The restart can only take the lookup path — the refusal just recorded
     // is what its annotation branch checks against — and a lookup never
     // answers synchronously, so this seed is raced by nothing `start` writes
-    // (D3's ordering, from the other side).
+    // (D3's ordering, from the other side). That rests on one invariant,
+    // kept by every writer of `slot.url`: a displayed non-`blob:` URL always
+    // carries its `urlGen` (`start`'s annotation branch sets both; `setThumb`
+    // and `refetch` clear both), so the refusal always matches the entry's
+    // word for the URL that failed.
     startRef.current(slot.entry, slot)
     setThumbs((prev) => {
       const next = new Map(prev)

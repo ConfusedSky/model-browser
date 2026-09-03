@@ -153,14 +153,9 @@ export class RenderQueue {
     return () => {
       if (job.started || job.cancelled) return false
       job.cancelled = true
-      // Retiring the last live far job ends the hold now, not at the next
-      // take: a saturated queue takes nothing, and a navigation retires far
-      // work exactly when its slots are busiest. Left to a take, the clock
-      // outlived the job it was started for and the next far job pushed
-      // dispatched at once under a closed gate (third review, R1).
-      if (this.gateClosedSince !== null && this.rankOf(job) === RANK.far && !this.hasLiveFar()) {
-        this.releaseHold()
-      }
+      // The job set changed: a retired far job may have been the last live
+      // one, and a saturated queue has no take coming to notice (D5).
+      this.syncHold()
       return true
     }
   }
@@ -172,6 +167,9 @@ export class RenderQueue {
    */
   setRanking(bands: ReadonlyMap<string, Band>): void {
     this.ranking = bands
+    // The far set changed: the last far job may have been ranked nearer, with
+    // no take coming to notice under a saturated queue (D5).
+    this.syncHold()
     // A re-ranking changes what runs next; pumping here costs nothing when
     // every slot is busy and lets a queue that emptied its runnable set
     // re-check without waiting for a push or a finish.
@@ -247,12 +245,7 @@ export class RenderQueue {
     if (this.gateTimer === null) {
       this.gateTimer = setTimeout(() => {
         this.gateTimer = null
-        // A saturated queue takes nothing, so a far job re-ranked nearer
-        // since the clock started has had no take to notice it (a cancel
-        // notices itself, in `push`'s handle): the clock must not outlive the
-        // last live far job, or the next one pushed dispatches at once under
-        // a closed gate (third review, R1).
-        if (!this.hasLiveFar()) this.releaseHold()
+        this.syncHold()
         this.pump()
       }, remaining)
     }
@@ -262,6 +255,22 @@ export class RenderQueue {
   private hasLiveFar(): boolean {
     for (const job of this.jobs) if (!job.cancelled && this.rankOf(job) === RANK.far) return true
     return false
+  }
+
+  /**
+   * The one invariant the bound's clock keeps: **it runs only while a live
+   * far job is queued.** Called wherever the queued far set can shrink — a
+   * cancel, a re-ranking, a take (after it has spliced its job out), the
+   * gate timer — because a saturated or suspended queue has no take coming
+   * to notice, and a clock that outlived its last far job let the next far
+   * job pushed dispatch at once under a closed gate. Three reviews found
+   * that hole through three doors (D9 R1, D11 R1, D12 R1–R2); one rule at
+   * every door is what closes it. A finish is not a door: a running job is
+   * not queued, and the take that dispatched it already synced. Cheap: a
+   * scan of the queue, skipped entirely while no clock is running.
+   */
+  private syncHold(): void {
+    if (this.gateClosedSince !== null && !this.hasLiveFar()) this.releaseHold()
   }
 
   /**
@@ -309,11 +318,15 @@ export class RenderQueue {
       }
       i++
     }
-    // No far job was met: nothing is being held, so the clock is not running.
-    if (verdict === null) this.releaseHold()
-    if (bestAt === -1) return undefined
+    if (bestAt === -1) {
+      this.syncHold()
+      return undefined
+    }
     const job = this.jobs[bestAt]!
     this.jobs.splice(bestAt, 1)
+    // After the splice: the job taken may have been the last live far job
+    // (dispatched on an expired clock), and the clock must not outlive it.
+    this.syncHold()
     return job
   }
 

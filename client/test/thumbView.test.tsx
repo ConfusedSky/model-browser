@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { DirEntry } from '../../shared/types'
 import Grid from '../src/components/Grid'
 import type { ThumbState } from '../src/hooks/useThumbnails'
-import { model } from './appHarness'
+import { dir, model } from './appHarness'
 
 vi.mock('../src/api/client', async () => (await import('./appHarness')).apiClientModule())
 vi.mock('../src/three/renderer', async (importOriginal) =>
@@ -97,6 +97,55 @@ describe('the tile image’s placeholder', () => {
     expect(img().getAttribute('src')).toBe(IMAGE_URL_6)
     expect(hidden()).toBe(false)
     expect(spinner()).toBe(false)
+  })
+
+  it('a folder sheet’s cell follows the same rule, keyed on its own entry', async () => {
+    // Fourth review, R6: `ContactSheet` carries its own copy of the key and
+    // the placeholder, pinned on the tile only until here.
+    const folder = dir('a')
+    const cell = model('a/m0.stl')
+    const cellUrl = '/api/thumb/image?path=%2Fmodels%2Fa%2Fm0.stl&mtime=1&gen=5'
+    const renderSheet = async (thumb: ThumbState, entry: DirEntry = cell): Promise<void> => {
+      if (root === null) {
+        host = document.createElement('div')
+        document.body.appendChild(host)
+        root = createRoot(host)
+      }
+      await act(async () => {
+        root!.render(
+          <Grid
+            entries={[folder]}
+            thumbs={new Map([[entry.path, thumb]])}
+            onEnter={() => {}}
+            onModelPointerDown={() => {}}
+            onModelOpen={() => {}}
+            onModelHover={() => {}}
+            onEntryMenu={() => {}}
+            onImageError={() => {}}
+            markedPath={null}
+            scoreFor={() => undefined}
+            scoreScale={null}
+            previews={new Map([[folder.path, [entry]]])}
+            onPeek={() => {}}
+            onBands={() => {}}
+            scrollRoot={{ current: document.body }}
+          />,
+        )
+      })
+    }
+    await renderSheet({ status: 'ready', url: cellUrl, gen: 5 })
+    const cellImg = (): HTMLImageElement => host.querySelector('[data-preview-cell] img')!
+    expect(cellImg().classList.contains('opacity-0')).toBe(true)
+    await act(async () => {
+      cellImg().dispatchEvent(new Event('load'))
+    })
+    expect(cellImg().classList.contains('opacity-0')).toBe(false)
+    // A new mtime is a different render: the cell starts over.
+    await renderSheet(
+      { status: 'ready', url: '/api/thumb/image?path=%2Fmodels%2Fa%2Fm0.stl&mtime=2&gen=7', gen: 7 },
+      { ...cell, mtime: 2 },
+    )
+    expect(cellImg().classList.contains('opacity-0')).toBe(true)
   })
 
   it('starts over for a same-path entry at a new mtime — a different render, not a later URL', async () => {

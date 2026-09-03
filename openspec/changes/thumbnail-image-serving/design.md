@@ -299,16 +299,20 @@ the clock would already have expired and the new job would dispatch at once
 under a closed gate, defeating the gate until some take happened to read it
 open (review R1, verified under Bun with a faked clock).
 
-**When the clock is forgotten.** On an open reading; on a take that meets no
-live far job (`take` scans to the end, never breaking at a visible job, so
-husks behind one are spliced and a far job behind one is met); when a
-cancel retires the last live far job — the cancel handle checks, because a
-saturated queue takes nothing and a navigation retires far work exactly
-when its slots are busiest; and from the gate's own timer when it fires
-with no live far job left, which covers a far job re-ranked nearer under
-that same saturation (third review, R1). A pinned
-far job — `bulk-thumbnail-jobs`' third `push` argument — is gated exactly as
-a ranked-far one, in `take` and in `pendingNearerThanFar` alike, so a bulk
+**When the clock is forgotten.** One invariant, kept at every door: the
+bound's clock runs only while a live far job is queued. `syncHold` checks
+it wherever the queued far set can shrink — a cancel, a re-ranking, a take
+after it has spliced its job out, the gate's own timer — because a
+saturated or suspended queue has no take coming to notice, and every
+case-by-case release before it left a door open: a retired far job under
+a saturated queue (D11 R1), the last far job dispatched on an expired clock,
+a re-rank after the timer had fired (D12 R1–R2). A finish is not a door: a
+running job is not queued, and the take that dispatched it already synced
+— which is also why "finished under suspension" (D12 R1's second
+reproduction) is closed by the take's sync, not by a hook on the finish. `take` scans to its end, never breaking at a visible job, so husks
+behind one are spliced and a far job behind one is met. A pinned far job —
+`bulk-thumbnail-jobs`' third `push` argument — is gated exactly as a
+ranked-far one, in `take` and in `pendingNearerThanFar` alike, so a bulk
 generate job advances in bound-sized bursts while the user browses (third
 review, R8; the pin's own doc asks for no better).
 
@@ -447,6 +451,17 @@ tile in a test knows where to look.
 | R6 | *Far lookups do not hold the drain*'s second WHEN clause read false | **Fixed** (delta): the far-ranked remainder of a toggle's storm |
 | R7 | `ThumbView`'s `everLoaded` survived a same-path new-mtime entry | **Fixed**: keyed on path and mtime; cell |
 | R8 | Pinned-far bulk renders are gated too, unsaid | **Recorded** (D5) |
+
+### D12: Fourth implementation review (2026-09-03, opus)
+
+| # | Finding | Disposition |
+|---|---|---|
+| R1 | The clock still escaped when the backlog emptied by dispatch (saturated), by a finish under suspension, or across an open-then-reclose between takes — reproduced | **Fixed** (D5 *When the clock is forgotten*): one invariant, `syncHold`, at every door — the take's post-splice sync covers both the dispatch and the suspended-finish shapes (a finish hook was built, found to pin nothing, and removed); cell for the dispatch shape. The open-then-reclose case is by design once the invariant holds: the far job was queued under a closed gate for the whole bound |
+| R2 | A re-rank after the one-shot timer had fired had no observer | **Fixed**: `setRanking` runs `syncHold`; cell |
+| R3 | `hasLiveFar` in every far cancel — measured ~µs at 500–2000 jobs | **No action**; recorded |
+| R4 | `reportImageError` discards `start`'s return under an unstated invariant | **Stated** at the call: a displayed non-`blob:` URL always carries `urlGen` (every writer keeps it). The re-seed branch D9 R5 removed as dead is not reinstated |
+| R5 | Tasks 4.1/4.3 still specified and claimed `pending`; 4.3 claimed six cells | **Fixed**: 4.1 states the invariant, 4.3 lists the cells that exist |
+| R6 | The sheet cell's `ThumbView` was uncelled | **Fixed**: `thumbView.test.tsx` renders the folder sheet |
 
 ## Risks / Trade-offs
 
