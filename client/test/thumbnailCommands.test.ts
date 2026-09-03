@@ -16,12 +16,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { setAoEnabled } from '../src/viewer/aoToggle'
 import type * as THREE from 'three'
 import type { CameraState, DirEntry, IndexPose, LightingMode, OrbitAxis } from '../../shared/types'
-import type { ApiClient, ThumbSave } from '../src/api/client'
+import { HttpError, type ApiClient, type ThumbSave } from '../src/api/client'
 import { useThumbnails } from '../src/hooks/useThumbnails'
 import type { MeshLru } from '../src/three/lru'
 import {
   ENTRY_COMMANDS,
   RENDER_FAILED,
+  renderEntryThumbnail,
   setOrbitAxis,
   type ActionHost,
 } from '../src/lib/entryActions'
@@ -557,5 +558,92 @@ describe('what the next visit makes of the pixels', () => {
     expect(states.at(-1)).toMatchObject({ status: 'ready', camera: undefined, axis: '-z' })
     await act(async () => root.unmount())
     el.remove()
+  })
+})
+
+// ─── the shared core (`bulk-thumbnail-jobs` D7/3.2) ────────────────────────
+// The three things the split added, which no command exercises: the
+// conditional write, what a refused one answers, and the job's
+// costs-one-GET skip. Everything above this line goes through the *command*,
+// which is what keeps the wrapper honest across the split.
+describe('the core the generate job runs directly', () => {
+  it('makes the write conditional on the generation the caller snapshotted', async () => {
+    const h = harness({ status: 'miss' })
+
+    const outcome = await renderEntryThumbnail(HERO, h.host, {
+      discardFraming: false,
+      pose: undefined,
+      ifGen: 11,
+    })
+
+    expect(outcome).toBe('done')
+    expect((h.putThumb.mock.calls[0]![0] as ThumbSave).ifGen).toBe(11)
+  })
+
+  it('leaves the write unconditional when no generation is offered — a press means it', async () => {
+    const h = harness({ status: 'miss' })
+
+    await renderEntryThumbnail(HERO, h.host, { discardFraming: false, pose: undefined })
+
+    expect((h.putThumb.mock.calls[0]![0] as ThumbSave).ifGen).toBeUndefined()
+  })
+
+  it('answers skipped when the entry moved under it, and touches the session’s map for nothing', async () => {
+    const h = harness({ status: 'miss' })
+    h.putThumb.mockRejectedValue(new HttpError(412, 'generation moved'))
+
+    const outcome = await renderEntryThumbnail(HERO, h.host, {
+      discardFraming: false,
+      pose: undefined,
+      ifGen: 3,
+    })
+
+    // Not a failure and not a throw: the user's own write stands (D4), and the
+    // tile's state belongs to whoever made it.
+    expect(outcome).toBe('skipped')
+    expect(h.setThumb).not.toHaveBeenCalled()
+  })
+
+  it('rethrows a refusal that is not a moved generation', async () => {
+    const h = harness({ status: 'miss' })
+    h.putThumb.mockRejectedValue(new HttpError(400, 'bad request'))
+
+    await expect(
+      renderEntryThumbnail(HERO, h.host, { discardFraming: false, pose: undefined, ifGen: 3 }),
+    ).rejects.toBeInstanceOf(HttpError)
+  })
+
+  it('answers current for an entry already drawn — no mesh, no render, no write', async () => {
+    const revoke = vi.spyOn(URL, 'revokeObjectURL')
+    const current = {
+      status: 'hit',
+      lighting: THUMB_LIGHTING,
+      rig: RIG_VERSION,
+      pngUrl: 'blob:cached',
+    }
+    const h = harness(current)
+
+    const outcome = await renderEntryThumbnail(HERO, h.host, {
+      discardFraming: false,
+      pose: undefined,
+      ifGen: 1,
+      skipIfCurrent: true,
+    })
+
+    expect(outcome).toBe('current')
+    expect(h.acquire).not.toHaveBeenCalled()
+    expect(renderThumbnail).not.toHaveBeenCalled()
+    expect(h.putThumb).not.toHaveBeenCalled()
+    // The lookup minted a URL for pixels this call did not want.
+    expect(revoke).toHaveBeenCalledWith('blob:cached')
+
+    // Opt-in, and only the job opts in: the same lookup without the flag is the
+    // re-render the user pressed for.
+    const pressed = harness(current)
+    expect(
+      await renderEntryThumbnail(HERO, pressed.host, { discardFraming: false, pose: undefined }),
+    ).toBe('done')
+    expect(renderThumbnail).toHaveBeenCalledTimes(1)
+    revoke.mockRestore()
   })
 })

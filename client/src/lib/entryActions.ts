@@ -37,7 +37,8 @@ import type {
   OrbitAxis,
 } from '../../../shared/types'
 import type { ApiClient } from '../api/client'
-import type { ThumbState } from '../hooks/useThumbnails'
+import { HttpError } from '../api/client'
+import { isCurrentRender, type ThumbState } from '../hooks/useThumbnails'
 import { expandLibraryPath } from './libraryPath'
 import type { Action } from '../state/reducer'
 import { indexCovers } from '../state/selectors'
@@ -140,11 +141,20 @@ export interface ActionHost extends Feedback, LibraryTop {
    */
   open: (entry: DirEntry, el: HTMLElement | null) => void
   /**
-   * The index's poses, from `state.result.poses` — the landed answer's own
-   * field, plumbed rather than read anywhere new (task 1.0). Populated by a
-   * meaning *or* a similarity landing (both ride `hitsToEntries`), so outside
-   * such a grid every model takes the no-pose branch. Read by both thumbnail
-   * commands, which resolve an orientation against it.
+   * The index's orientations for the **landed listing** — App's merged `poses`
+   * memo (`state.result?.poses ?? state.listingPoses`, the previews' poses
+   * folded in), plumbed rather than read anywhere new (task 1.0). Read by both
+   * thumbnail commands, which resolve an orientation against it.
+   *
+   * *This comment used to say the map is filled by a meaning or a similarity
+   * landing only, and that outside such a grid every model takes the no-pose
+   * branch. It is not: `listingPoses` is filled for plain listings too, by the
+   * second wave (`bulk-thumbnail-jobs` review M5 checked the code).* What is
+   * true is the narrower thing — the map covers **what is on screen**. A bulk
+   * job's scope mostly is not: a subtree launched from a tile's menu, or the
+   * whole library. That is why `renderEntryThumbnail` takes the pose as a
+   * parameter instead of reading a host (D7); this field is what the
+   * *command's* wrapper passes into it.
    */
   poses: Record<string, IndexPose>
   /**
@@ -359,10 +369,207 @@ export function framingAfterDiscard(
 }
 
 /**
+ * What one entry's render needs from the app, and nothing else.
+ *
+ * Narrower than `ActionHost` deliberately: the generate job holds no host — it
+ * has no feedback surface, no navigation and no landed listing — and taking one
+ * would have made it invent all three. `ActionHost` satisfies this
+ * structurally, so the command's wrapper below passes itself.
+ */
+export type RenderDeps = {
+  api: Pick<ApiClient, 'getThumb' | 'putThumb'>
+  lru: Pick<MeshLru<THREE.Object3D>, 'acquire'>
+  queue: Pick<RenderQueue, 'whenResumed'>
+  setThumb: ActionHost['setThumb']
+}
+
+/**
+ * Draw one model's thumbnail and file it — **one body, three callers** (D7).
+ *
+ * The two per-model commands reach it through `refreshThumbnail` below, which
+ * adds what is the *command's* and not the operation's: the queue push, the
+ * pose read from the landing, and the one-line failure report. The bulk
+ * generate job (`jobs/bulkJobs.ts`) calls it directly, pushes it at its own
+ * pinned band, and counts what comes back instead of saying it.
+ *
+ * The **pose is a parameter** for exactly that third caller. `ActionHost.poses`
+ * covers the listing that landed; a job's scope mostly is not on screen — a
+ * subtree launched from a tile's menu, the whole library — so a body that read
+ * a host would render every model outside the current grid at the default
+ * angle where the index would have framed it (review M5). The caller says
+ * which orientation it means.
+ *
+ * The lookup is kept for the job too, and that is a choice: the orientation
+ * rendered from is the one in force when the render *runs*, not when the scope
+ * was enumerated. One small GET per model, against work that is going to load
+ * a mesh and drive the GPU.
+ *
+ * What comes back:
+ * - `'done'` — pixels were rendered, written, and handed to the session's map.
+ * - `'skipped'` — the write was refused because the entry's generation had
+ *   moved (412): somebody wrote this entry after the caller read it, and their
+ *   write stands (D4). Nothing is handed to the session's map for it.
+ * - `'current'` — `skipIfCurrent` was asked for and the fresh lookup says the
+ *   stored render is already the one this build would draw. No mesh, no render,
+ *   no write.
+ *
+ * Anything else throws: a mesh that will not load, a render that fails, a write
+ * the server refused for any other reason. The caller decides whether that is a
+ * sentence or a counter.
+ */
+export async function renderEntryThumbnail(
+  entry: DirEntry,
+  deps: RenderDeps,
+  opts: {
+    discardFraming: boolean
+    /** The index's orientation for this model, from whatever the caller holds:
+     *  the landing's map for a command, the job's own wave for a job. */
+    pose: IndexPose | undefined
+    /** The generation the caller last saw, making the write conditional (D4).
+     *  Absent for a user's press, which is unconditional by definition. */
+    ifGen?: number
+    /** Answer `'current'` rather than re-render when the lookup says the stored
+     *  render is already current. The job asks for it; a command never does. */
+    skipIfCurrent?: boolean
+  },
+): Promise<'done' | 'skipped' | 'current'> {
+  const { discardFraming } = opts
+  // Every renderer-touching stage waits out a suspension first: `push`
+  // alone is not enough, because `suspend()` cannot stop a job that has
+  // already started (queue.ts's waiters gate), and there is exactly one
+  // WebGLRenderer app-wide (architecture D2/D3).
+  await deps.queue.whenResumed()
+  // The stored orientation, read from the cache rather than from the
+  // thumbs map: a tile whose lookup or render failed carries no camera at
+  // all, and both commands are offered exactly there (4b.7) — resolving
+  // from a blank would redraw a user's own orbit at the default. Read
+  // after the gate, so a lightbox that persisted a new camera on its way
+  // out is already in it. One lookup holding a render slot is not the 500
+  // the sweep's own limiter exists to keep out of them.
+  // The occlusion recipe this press looks up, draws and files under — one
+  // reading for all three, so the lookup, the pixels and the PUT cannot
+  // name two different renders (D4/D4a). Read after the gate for the same
+  // reason the lookup is: the pill sits in the corner and stays pressable
+  // while a lightbox holds the queue suspended, so a toggle made there is
+  // already in it. It also decides which render's LRU clock the lookup
+  // bumps — the one about to be rewritten, not its sibling.
+  const ao = aoEnabled()
+  const cached = await deps.api.getThumb(entry.path, entry.mtime, ao)
+
+  // The job derived this entry from a listing annotation — a memory read on
+  // the server, taken before the job's turn came round, and an entry can go
+  // current in between (another surface wrote it, the sweep drew it, or the
+  // annotation was simply older than the cache it describes). This fresh
+  // lookup is the last word, so a current entry costs one GET and no render
+  // at all. Asked for, never assumed: a user pressing *re-render* means it,
+  // whatever the cache says. Never on a discard either — that press is about
+  // the orientation, and "current" says nothing about whether the framing
+  // being given up is still stored.
+  if (
+    opts.skipIfCurrent === true &&
+    !discardFraming &&
+    cached.pngUrl !== undefined &&
+    isCurrentRender(
+      { state: cached.status, lighting: cached.lighting, rig: cached.rig, posed: cached.posed },
+      cached.camera,
+      cached.axis,
+      opts.pose,
+    )
+  ) {
+    URL.revokeObjectURL(cached.pngUrl)
+    return 'current'
+  }
+  // A hit mints an object URL; this read wanted the orientation, not the
+  // old pixels.
+  if (cached.pngUrl !== undefined) URL.revokeObjectURL(cached.pngUrl)
+
+  // The index's orientation for this model, for the re-render branch — the
+  // discard branch reads it through `framingAfterDiscard`, which is where
+  // "usable" is decided (D7/4b.3a).
+  const pose = cameraForPose(opts.pose, DEFAULT_CAMERA)
+  let camera: CameraState
+  let axis: OrbitAxis
+  let posed: boolean
+  if (discardFraming) {
+    // What the model resolves to once its own orientation is gone —
+    // resolved by the shared rule, which the lightbox panel's live reset
+    // reads too, so the two surfaces cannot disagree about the same model.
+    ;({ camera, axis, posed } = framingAfterDiscard(opts.pose, cached.axis ?? 'y'))
+  } else {
+    // Exactly the sweep's resolution (useThumbnails' dropStale): the stored
+    // camera/axis, else the pose when *both* are absent, else the default.
+    const fromPose = cached.camera === undefined && cached.axis === undefined ? pose : null
+    posed = fromPose !== null
+    camera = cached.camera ?? fromPose?.camera ?? DEFAULT_CAMERA
+    axis = cached.axis ?? fromPose?.axis ?? 'y'
+  }
+  // `posed` says a usable pose replaced the orientation, which is exactly
+  // when the stored axis goes with it.
+  const dropAxis = discardFraming && posed
+
+  const object = await deps.lru.acquire(entry.path)
+  await deps.queue.whenResumed()
+  const png = await renderThumbnail(object, camera, axis, ao)
+  const written = await deps.api
+    .putThumb({
+      path: entry.path,
+      mtime: entry.mtime,
+      png,
+      // The reading the lookup and the render already used.
+      ao,
+      // Pixels and the labels that say what drew them — never a viewpoint on
+      // re-render: a pose orients the model without becoming its stored
+      // camera (semantic-search), so a re-classification still governs it.
+      //
+      // `null` is the discard the store gained for this (4b.2); `undefined`
+      // still means keep. And the labels are not optional: `ThumbCache.put`
+      // clears every label a PNG-bearing PUT omits, so an unlabelled write
+      // fails the hit test forever and re-renders the tile on every visit.
+      camera: discardFraming ? null : undefined,
+      axis: dropAxis ? null : undefined,
+      lighting: THUMB_LIGHTING,
+      rig: RIG_VERSION,
+      posed: posed ? POSE_VERSION : undefined,
+      // The generation the caller last saw (D4). The server refuses the write
+      // — 412, nothing written — when the entry has moved past it.
+      ifGen: opts.ifGen,
+    })
+    .catch((err: unknown) => {
+      // The entry moved under us: the user orbited this model after the job
+      // launched, or another surface wrote it. Their write stands, and these
+      // pixels are for a state that no longer exists. `null` rather than a
+      // throw because this is not a failure — it is the outcome D4 designed.
+      if (err instanceof HttpError && err.status === 412) return null
+      throw err
+    })
+  // Nothing is handed to the session's map for a refused write either: the
+  // tile's state belongs to whoever *did* write, not to this render.
+  if (written === null) return 'skipped'
+  // The session's own copy, not only the server's: App sources the
+  // lightbox's camera and axis from this map, so a cache-only write would
+  // leave the viewer opening at the orientation just given up (4b.4).
+  deps.setThumb(entry.path, {
+    status: 'ready',
+    url: URL.createObjectURL(png),
+    camera: discardFraming ? undefined : cached.camera,
+    axis: dropAxis ? undefined : cached.axis,
+    // The PUT above moved the generation; the echo keeps the tile's next
+    // fetch cacheable (setThumb adopts absence as "re-learn").
+    gen: written.gen,
+  })
+  return 'done'
+}
+
+/**
  * The body behind both thumbnail commands (D7, §4b). They ask two different
  * questions — *re-render* keeps the model's orientation, *reset framing* gives
  * it up — and everything after that answer is identical, so they are one
  * function with one flag rather than two bodies that drift apart.
+ *
+ * A wrapper since the split: what is left here is the *command's* half — the
+ * queue push, the pose read from the landing that put this tile on screen, and
+ * the one sentence a failed press earns. Everything else is
+ * `renderEntryThumbnail` above, which the generate job runs too.
  *
  * Not `async`: a command returns nothing and the work belongs to the render
  * queue, which is where the job is put.
@@ -375,92 +582,11 @@ function refreshThumbnail(
   const { discardFraming } = opts
   host.queue.push(async () => {
     try {
-      // Every renderer-touching stage waits out a suspension first: `push`
-      // alone is not enough, because `suspend()` cannot stop a job that has
-      // already started (queue.ts's waiters gate), and there is exactly one
-      // WebGLRenderer app-wide (architecture D2/D3).
-      await host.queue.whenResumed()
-      // The stored orientation, read from the cache rather than from the
-      // thumbs map: a tile whose lookup or render failed carries no camera at
-      // all, and both commands are offered exactly there (4b.7) — resolving
-      // from a blank would redraw a user's own orbit at the default. Read
-      // after the gate, so a lightbox that persisted a new camera on its way
-      // out is already in it. One lookup holding a render slot is not the 500
-      // the sweep's own limiter exists to keep out of them.
-      // The occlusion recipe this press looks up, draws and files under — one
-      // reading for all three, so the lookup, the pixels and the PUT cannot
-      // name two different renders (D4/D4a). Read after the gate for the same
-      // reason the lookup is: the pill sits in the corner and stays pressable
-      // while a lightbox holds the queue suspended, so a toggle made there is
-      // already in it. It also decides which render's LRU clock the lookup
-      // bumps — the one about to be rewritten, not its sibling.
-      const ao = aoEnabled()
-      const cached = await host.api.getThumb(entry.path, entry.mtime, ao)
-      // A hit mints an object URL; this read wanted the orientation, not the
-      // old pixels.
-      if (cached.pngUrl !== undefined) URL.revokeObjectURL(cached.pngUrl)
-
-      // The index's orientation for this model, for the re-render branch — the
-      // discard branch reads it through `framingAfterDiscard`, which is where
-      // "usable" is decided (D7/4b.3a).
-      const pose = cameraForPose(host.poses[entry.path], DEFAULT_CAMERA)
-      let camera: CameraState
-      let axis: OrbitAxis
-      let posed: boolean
-      if (discardFraming) {
-        // What the model resolves to once its own orientation is gone —
-        // resolved by the shared rule, which the lightbox panel's live reset
-        // reads too, so the two surfaces cannot disagree about the same model.
-        ;({ camera, axis, posed } = framingAfterDiscard(
-          host.poses[entry.path],
-          cached.axis ?? 'y',
-        ))
-      } else {
-        // Exactly the sweep's resolution (useThumbnails' dropStale): the stored
-        // camera/axis, else the pose when *both* are absent, else the default.
-        const fromPose = cached.camera === undefined && cached.axis === undefined ? pose : null
-        posed = fromPose !== null
-        camera = cached.camera ?? fromPose?.camera ?? DEFAULT_CAMERA
-        axis = cached.axis ?? fromPose?.axis ?? 'y'
-      }
-      // `posed` says a usable pose replaced the orientation, which is exactly
-      // when the stored axis goes with it.
-      const dropAxis = discardFraming && posed
-
-      const object = await host.lru.acquire(entry.path)
-      await host.queue.whenResumed()
-      const png = await renderThumbnail(object, camera, axis, ao)
-      const written = await host.api.putThumb({
-        path: entry.path,
-        mtime: entry.mtime,
-        png,
-        // The reading the lookup and the render already used.
-        ao,
-        // Pixels and the labels that say what drew them — never a viewpoint on
-        // re-render: a pose orients the model without becoming its stored
-        // camera (semantic-search), so a re-classification still governs it.
-        //
-        // `null` is the discard the store gained for this (4b.2); `undefined`
-        // still means keep. And the labels are not optional: `ThumbCache.put`
-        // clears every label a PNG-bearing PUT omits, so an unlabelled write
-        // fails the hit test forever and re-renders the tile on every visit.
-        camera: discardFraming ? null : undefined,
-        axis: dropAxis ? null : undefined,
-        lighting: THUMB_LIGHTING,
-        rig: RIG_VERSION,
-        posed: posed ? POSE_VERSION : undefined,
-      })
-      // The session's own copy, not only the server's: App sources the
-      // lightbox's camera and axis from this map, so a cache-only write would
-      // leave the viewer opening at the orientation just given up (4b.4).
-      host.setThumb(entry.path, {
-        status: 'ready',
-        url: URL.createObjectURL(png),
-        camera: discardFraming ? undefined : cached.camera,
-        axis: dropAxis ? undefined : cached.axis,
-        // The PUT above moved the generation; the echo keeps the tile's next
-        // fetch cacheable (setThumb adopts absence as "re-learn").
-        gen: written.gen,
+      await renderEntryThumbnail(entry, host, {
+        discardFraming,
+        // The landing's map, which covers this tile by construction: the
+        // command is pressed on something on screen.
+        pose: host.poses[entry.path],
       })
     } catch {
       // The tile keeps whatever it was showing — a render that did not happen

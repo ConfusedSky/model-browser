@@ -518,18 +518,29 @@ export function useThumbnails(
             const cached = await (slot.thumbGen === undefined
               ? api.getThumb(entry.path, entry.mtime, ao)
               : api.getThumb(entry.path, entry.mtime, ao, slot.thumbGen))
-            // Learned before the liveness gate, and deliberately: the
-            // generation is a fact about the entry on the server, not about
-            // whether this pass still answers for the tile. A retired pass that
-            // discards it would make the replacement pass re-learn it, paying a
-            // revalidation for nothing.
-            if (cached.gen !== undefined) slot.thumbGen = cached.gen
             if (!alive()) {
               // The lookup already minted an object URL for a tile that no
               // longer exists — release it rather than leak the decoded PNG.
               if (cached.pngUrl !== undefined) URL.revokeObjectURL(cached.pngUrl)
               return
             }
+            // Adopted **after** the gate: only a pass that still answers for
+            // this tile may say what generation the tile is keyed at.
+            //
+            // The first version learned it before the gate, reasoning that a
+            // generation is a fact about the entry on the server rather than
+            // about the pass — which holds only while both passes see the same
+            // server state, and a write between them is exactly what breaks
+            // that. After a `refetch` (a bulk reset's in-memory half) the
+            // pre-write lookup can land *after* the restart's: adopting from a
+            // retired pass would overwrite the new number with the deleted
+            // entry's, the next fetch would ask under the stale one, and the
+            // browser's immutable cache would answer it for bytes the server
+            // has already deleted — without the server ever seeing the request
+            // (`bulk-thumbnail-jobs` Stage A2 review). The cost is what the old
+            // reasoning was protecting against: a replacement pass re-learns
+            // the number, paying one revalidation. That is the cheap side.
+            if (cached.gen !== undefined) slot.thumbGen = cached.gen
             // The one staleness test, shared with the bulk job and the
             // annotation readers — see `isCurrentRender`, which carries the
             // reasoning that used to live here.

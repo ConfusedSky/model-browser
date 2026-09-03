@@ -1986,4 +1986,59 @@ describe('refetch restarts one slot after a write the hook did not make', () => 
     expect(statuses()).toEqual(['ready'])
     expect(lastThumbs.get(path)!.url).toBe(afterAnswer.pngUrl)
   })
+
+  it('never lets the pre-write lookup hand its generation to the restart', async () => {
+    // The other order of the same race (`bulk-thumbnail-jobs` Stage A2 review).
+    // A generation used to be adopted *before* the liveness gate, on the
+    // reasoning that it is a fact about the entry rather than about the pass —
+    // which holds only while both passes see the same server state, and the
+    // reset's write between them is exactly what breaks it. Released
+    // new-then-old, the retired pass's number would land last, the next fetch
+    // would ask under it, and the browser's immutable cache would answer for
+    // bytes the server has already deleted. Falsify by moving the adoption back
+    // above the `alive()` gate: the last lookup then asks with 3.
+    const entries = models(1)
+    const path = entries[0]!.path
+    let releaseBefore = (): void => {}
+    let releaseAfter = (): void => {}
+    const first = new Promise<Record<string, unknown>>((resolve) => {
+      releaseBefore = () => resolve(freshHit({ gen: 3 }))
+    })
+    const second = new Promise<Record<string, unknown>>((resolve) => {
+      releaseAfter = () => resolve(freshHit({ gen: 7 }))
+    })
+    const asked: (number | undefined)[] = []
+    const api = {
+      getThumb: vi
+        .fn((_p: string, _m: number, _ao: boolean, gen?: number) => {
+          asked.push(gen)
+          return asked.length === 1 ? first : asked.length === 2 ? second : Promise.resolve(freshHit({ gen: 7 }))
+        }),
+      putThumb: vi.fn().mockResolvedValue({}),
+    } as unknown as ApiClient
+
+    await render(<Harness entries={entries} api={api} lru={mesh()} queue={new RenderQueue(2)} ao />)
+    await settle()
+    await act(async () => {
+      lastRefetch!(path)
+    })
+    await settle()
+
+    // The restart answers first and paints; the pre-write pass lands after it.
+    await act(async () => {
+      releaseAfter()
+    })
+    await settle()
+    await act(async () => {
+      releaseBefore()
+    })
+    await settle()
+    expect(statuses()).toEqual(['ready'])
+
+    // A toggle looks the same entry up again, under whatever the slot now
+    // holds. 7 is the restart's; 3 belongs to the entry the write deleted.
+    await rerender(<Harness entries={entries} api={api} lru={mesh()} queue={new RenderQueue(2)} ao={false} />)
+    await settle()
+    expect(asked[2]).toBe(7)
+  })
 })
