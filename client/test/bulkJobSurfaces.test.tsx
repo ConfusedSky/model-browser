@@ -48,9 +48,12 @@ const TAB_KEY = 'model-browser:panel-tab'
  *  do here". Spelled from the constants, never a literal, so a rig bump moves
  *  it with the app (client/test/CLAUDE.md). */
 const CURRENT: ThumbRenderInfo = { state: 'hit', lighting: THUMB_LIGHTING, rig: RIG_VERSION }
+/** A stored camera, spelled as the wire spells it beside `framed`. */
+const CAMERA = { az: 1, el: 0.2, distR: 3, target: [0, 0, 0] as [number, number, number] }
 /** An entry carrying a stored orientation — `framed` is the server's word for
- *  "a camera **or** an axis" (M4), and it is the whole reset derivation. */
-const framed = (): ThumbInfo => ({ gen: 1, framed: true, ao: CURRENT, noao: CURRENT })
+ *  "a camera **or** an axis" (M4), spelled with the camera as `infoFor` spells
+ *  it: the derivation reads the fields, and a bare flag is not a wire shape. */
+const framed = (): ThumbInfo => ({ gen: 1, framed: true, camera: CAMERA, ao: CURRENT, noao: CURRENT })
 
 /** A model beneath a scope, with whatever the enumeration says about it. */
 function beneath(scope: string, name: string, thumb?: ThumbInfo): DirEntry {
@@ -378,9 +381,8 @@ describe('the library tab', () => {
     // follow by arithmetic, not by another 7.8 MB derivation (Masa, 2026-09-02):
     // the tile held a camera before, none after, so the number drops by one.
     const withModel: DirListing = { path: '/models', entries: [dir('Alpha'), model('m.stl')] }
-    const camera = { az: 1, el: 0.2, distR: 3, target: [0, 0, 0] as [number, number, number] }
-    enumerated('/', [beneath('/models', 'm.stl', { ...framed(), camera })])
-    getThumb.mockResolvedValue({ status: 'hit', pngUrl: 'blob:cached', camera, lighting: THUMB_LIGHTING, rig: RIG_VERSION })
+    enumerated('/', [beneath('/models', 'm.stl', framed())])
+    getThumb.mockResolvedValue({ status: 'hit', pngUrl: 'blob:cached', camera: CAMERA, lighting: THUMB_LIGHTING, rig: RIG_VERSION })
     await mountApp('/models', withModel)
     await expandPanel()
     await click(tabButton('library')!)
@@ -394,6 +396,97 @@ describe('the library tab', () => {
     expect(libraryButtons()[1]!.textContent).toBe('Reset 0 framings')
     // One enumeration for the tab's opening, none for the hand change.
     expect(models).toHaveBeenCalledTimes(1)
+  })
+
+  it('reads the before-state from the discard’s own lookup when the tile is still loading', async () => {
+    // A tile whose sweep lookup has not answered shows `loading` and carries no
+    // framing; read as "unframed", a reset on it lost its −1 (the review's
+    // finding). The discard's own lookup knows the camera, and hands it over.
+    const withModel: DirListing = { path: '/models', entries: [dir('Alpha'), model('m.stl')] }
+    enumerated('/', [beneath('/models', 'm.stl', framed())])
+    // The sweep's lookup, held until the cell is done: a lookup left running
+    // forever would keep the far gate closed for every cell after this one.
+    let answerSweep = (): void => {}
+    getThumb
+      .mockReturnValueOnce(new Promise((r) => { answerSweep = () => r({ status: 'miss' }) }))
+      .mockResolvedValue({ status: 'hit', pngUrl: 'blob:cached', camera: CAMERA, lighting: THUMB_LIGHTING, rig: RIG_VERSION })
+    await mountApp('/models', withModel)
+    await expandPanel()
+    await click(tabButton('library')!)
+    await settle()
+    expect(libraryButtons()[1]!.textContent).toBe('Reset 1 framings')
+    await secondaryPress(tile('m.stl'))
+    await click(menuItem('resetFraming'))
+    await settle()
+    expect(libraryButtons()[1]!.textContent).toBe('Reset 0 framings')
+    expect(models).toHaveBeenCalledTimes(1)
+    answerSweep()
+    await settle()
+  })
+
+  it('adds a hand change made while the count was in flight', async () => {
+    // The server counts at request time; a framing given up before the answer
+    // lands is not in it. Reading the sum at landing swallowed it (the review).
+    const withModel: DirListing = { path: '/models', entries: [dir('Alpha'), model('m.stl')] }
+    let land = (): void => {}
+    const held = new Promise<void>((r) => {
+      land = r
+    })
+    const answer = { path: '/', complete: true, entries: [beneath('/models', 'm.stl', framed())] }
+    models.mockImplementation(() => held.then(() => answer))
+    getThumb.mockResolvedValue({ status: 'hit', pngUrl: 'blob:cached', camera: CAMERA, lighting: THUMB_LIGHTING, rig: RIG_VERSION })
+    await mountApp('/models', withModel)
+    await expandPanel()
+    await click(tabButton('library')!)
+    await settle()
+    expect(libraryButtons().map((b) => b.textContent)).toEqual(['Counting…', 'Counting…'])
+    await secondaryPress(tile('m.stl'))
+    await click(menuItem('resetFraming'))
+    await settle()
+    land()
+    await settle()
+    expect(libraryButtons()[1]!.textContent).toBe('Reset 0 framings')
+  })
+
+  it('recounts for the write a cancel could not recall', async () => {
+    // Cancel sets `cancelled` at once; the entry in flight still lands and is
+    // the job's only write. A recount keyed on the phase transition missed it
+    // (the review's finding); one keyed on the job settling does not.
+    enumerated('/', [beneath('/models/Alpha', 'a.stl', framed())])
+    let land = (): void => {}
+    putThumb.mockImplementationOnce(() => new Promise((r) => { land = () => r({ gen: 2 }) }))
+    await mountApp('/models', NESTED)
+    await expandPanel()
+    await click(tabButton('library')!)
+    await settle()
+    expect(models).toHaveBeenCalledTimes(1)
+    await launchFrom('Alpha', 'resetBeneath')
+    expect(models).toHaveBeenCalledTimes(2)
+    await click(chipButton('Reset')!)
+    await settle()
+    await click(chipButton('Cancel')!)
+    await settle()
+    expect(models).toHaveBeenCalledTimes(2)
+    land()
+    await settle()
+    expect(chipText()).toBe('Cancelled after 1 of 1 beneath Alpha')
+    expect(models).toHaveBeenCalledTimes(3)
+  })
+
+  it('does not recount for a generate that found everything current', async () => {
+    // The annotation said stale, the core's own fresh lookup said current: one
+    // GET per entry, no write, and nothing for the tab to re-derive.
+    enumerated('/', [beneath('/models/Alpha', 'a.stl', { ...framed(), ao: { state: 'stale' }, noao: { state: 'stale' } })])
+    getThumb.mockResolvedValue({ status: 'hit', pngUrl: 'blob:cached', lighting: THUMB_LIGHTING, rig: RIG_VERSION })
+    await mountApp('/models', NESTED)
+    await expandPanel()
+    await click(tabButton('library')!)
+    await settle()
+    await launchFrom('Alpha', 'generateBeneath')
+    await settle()
+    expect(chipText()).toBe('Generated 1 of 1 beneath Alpha')
+    expect(putThumb).not.toHaveBeenCalled()
+    expect(models).toHaveBeenCalledTimes(2)
   })
 
   it('does not recount for a launch that wrote nothing', async () => {

@@ -6,14 +6,14 @@
 The client SHALL offer bulk thumbnail work as jobs of two operations over a scope — a
 subtree or the whole library. *Generate* SHALL render and store a thumbnail for each
 model in scope whose thumbnail is missing or stale, touching no current entry. *Reset*
-SHALL apply, to each model in scope whose stored orientation the per-model rule would
-change — a stored camera, or a stored axis where an orientation source would replace
-it; an axis that rule keeps is neither touched nor counted, so a count never offers a
-reset that resets nothing — one definition shared by the derivation and the counts — the same
-give-up-the-orientation semantics the per-model action defines (`entry-actions`), and
-SHALL delete that model's cached renders rather than redraw them, so no image remains
-that was rendered from a discarded camera and the job renders nothing — redrawing is
-*generate*'s work, or the next visit's. A reset MAY leave an on-screen tile in its scope
+SHALL apply the same give-up-the-orientation semantics the per-model action defines
+(`entry-actions`) to each model in scope whose stored orientation that rule would
+change: a stored camera, or a stored axis where an orientation source would replace it.
+An axis that rule keeps is neither touched nor counted, so a count never offers a reset
+that resets nothing; the derivation and the counts SHALL share that one definition.
+Reset SHALL delete each such model's cached renders rather than redraw them, so no image
+remains that was rendered from a discarded camera and the job renders nothing —
+redrawing is *generate*'s work, or the next visit's. A reset MAY leave an on-screen tile in its scope
 without an image until the ordinary sweep redraws it: a scope cannot be redrawn in place
 the way one tile can. A job's work list SHALL be derived at launch from per-entry state —
 obtained by enumerating the scope's models together with their cached thumbnail facts

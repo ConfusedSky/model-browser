@@ -235,7 +235,23 @@
       covers axis-only models alone (design D8). Cells: "moves the reset count by hand
       without re-deriving the library" (falsified twice: signal muted, delta never
       applied), "does not recount for a launch that wrote nothing" (falsified: phase-keyed
-      recount made four enumerations for one press), "waves only over the axis-only models"
+      recount made four enumerations for one press), "waves only over the axis-only models".
+      **Opus review of the four main-side commits (2026-09-03), six should-fixes, all
+      applied:** the delta read a loading or errored tile as "unframed" (+1 on an orbit of
+      a framed model, −1 lost on a reset) — the discard now hands over its own lookup's
+      before-state and App falls back to the tile's ready state, then the annotation,
+      then silence; an unknown pose made an axis-only state read −1 and clamped the button
+      shut — silent now; the recount was keyed on the phase, which Cancel sets before the
+      in-flight write lands — the runner reports `settled` and `wrote`, and only a settled
+      job that wrote recounts (`'current'` no longer counts as a write); the panel's
+      baseline was read at landing, swallowing a hand change made while the count was in
+      flight — captured at request time; `resettable`'s `framed` parameter was dead on the
+      wire and load-bearing only for fixtures — dropped, fixtures spell the camera; the
+      detached JSDoc and three stale comments corrected. Cells: "reads the before-state from
+      the discard's own lookup when the tile is still loading", "adds a hand change made
+      while the count was in flight", "recounts for the write a cancel could not recall",
+      "does not recount for a generate that found everything current", and the runner's
+      `wrote`/`settled` cells — each falsified against its restored bug
 - [x] 2.3 The progress chip: app-level, survives navigation, shows
       operation/scope/done/total/failed/skipped, Cancel; dismiss hides without
       cancelling (D2)

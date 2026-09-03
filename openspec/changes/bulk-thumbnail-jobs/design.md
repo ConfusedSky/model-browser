@@ -240,13 +240,23 @@ enumeration in 0.47 s, and 15,357 of them with no pose in it — a full wave is
 sixteen index requests. So: the tab re-derives when it opens and when a job
 that *wrote something* ends (a launch passing through `deriving` and
 `confirming`, or a reset cancelled at its confirmation, changed nothing and
-recounts nothing). The user's own framing changes — a persisted orbit, a chosen
-axis, a framing given up from a tile or the viewer — move the reset count by
-**arithmetic**: each site reports the write in the PUT's own three states
-(`ActionHost.framingChanged`, before it updates the tile's map), App turns that
-into ±1 against the tile's pre-write state and the landed pose through the one
-rule (`resettable`), and the tab shows its derived count plus the change since
-that count landed; the next derivation absorbs the sum, which is where any drift
+recounts nothing). "Ends" is the runner's `settled`, not its phase: Cancel sets
+`cancelled` while the entry in flight may still land and be the job's only
+write, so the recount waits for the loop to finish and fires when `wrote > 0` —
+a generate that found every entry current on its own lookup wrote nothing and
+recounts nothing (the review's two findings). The user's own framing changes —
+a persisted orbit, a chosen axis, a framing given up from a tile or the viewer —
+move the reset count by **arithmetic**: each site reports the write in the PUT's
+own three states (`ActionHost.framingChanged`), with the before-state where the
+site read it (the discard's own lookup); otherwise App reads the tile's *ready*
+state, else the listing's annotation, else says nothing — a loading tile carries
+no framing, and reading it as "unframed" counted an orbit on a framed model +1
+(the review's finding). Where this session holds no pose for the model, an
+axis-only state cannot be judged and the change stays silent rather than guess.
+App turns the pair into ±1 through the one rule (`resettable`), and the tab
+shows its derived count plus the change since that count was *asked for* — the
+server counted then, so a change made while the answer was in flight is added,
+not swallowed; the next derivation absorbs the sum, which is where any drift
 from a concurrent writer heals. The wave is sized to the question: a *count*
 asks the index only about axis-only models, a *reset* launch about every model
 with a stored axis (the pose decides whether the axis goes with the camera), and

@@ -56,6 +56,19 @@ export interface JobState {
   failed: number
   /** Entries whose generation had moved: the user's write stands (D4). */
   skipped: number
+  /**
+   * Entries this job actually wrote — a landed PUT. `done` counts entries
+   * processed, which includes a generate finding its entry already current
+   * (one lookup, no write); the tab recounts only for a job that wrote.
+   */
+  wrote: number
+  /**
+   * The run loop has finished — its last entry landed, whether the job ended
+   * `done` or was cancelled. `cancelled` is set the instant the user presses
+   * Cancel, while the in-flight entry may still land and count; anything that
+   * wants "the job is over and its counters are final" waits for this.
+   */
+  settled: boolean
   /** The enumeration ran out of budget — this job covers what was found, and
    *  the chip says the scope was cut. */
   incomplete: boolean
@@ -145,7 +158,7 @@ function keeps(operation: JobOperation, c: JobEntry, ao: boolean): boolean {
     // reset left its models in the library's count, 2026-09-02). Kept exactly
     // when the discard changes something: a camera, or an axis a usable pose
     // replaces — asked of the shared rule, never restated.
-    return thumb !== undefined && resettable(thumb.camera, thumb.axis, c.pose, thumb.framed)
+    return thumb?.framed === true && resettable(thumb.camera, thumb.axis, c.pose)
   }
   // An absent annotation means nothing is cached, not "unknown": the server's
   // index is seeded by the startup sweep and learns every write, so an entry
@@ -220,8 +233,9 @@ export class BulkJobs {
 
   /**
    * The enumeration and the wave, once per ask; `keeps` applies an operation
-   * over the result. Every model beneath the scope is a candidate here — which
-   * ones a job touches is the operation's filter, not the scan's.
+   * over the result. Every model beneath the scope is a candidate; which ones
+   * a job touches is the operation's filter — and the wave is sized to the
+   * purpose, so the filter sees a pose exactly where its rule reads one.
    */
   private async enumerate(
     scope: JobScope,
@@ -303,6 +317,8 @@ export class BulkJobs {
       skipped: 0,
       incomplete: false,
       dismissed: false,
+      wrote: 0,
+      settled: false,
     }
     this.notify()
     void this.run(token, operation)
@@ -377,15 +393,18 @@ export class BulkJobs {
       derivation = await this.derive(operation, scope)
     } catch {
       // Not a per-entry failure: with no work list there is no job at all.
-      if (!token.cancelled) this.patchRun(token, { phase: 'done', failure: SCOPE_UNREADABLE })
+      if (!token.cancelled) this.patchRun(token, { phase: 'done', failure: SCOPE_UNREADABLE, settled: true })
       return
     }
-    if (token.cancelled) return
+    if (token.cancelled) {
+      this.patchRun(token, { settled: true })
+      return
+    }
     this.patchRun(token, { total: derivation.entries.length, incomplete: derivation.incomplete })
     if (derivation.entries.length === 0) {
       // An honest nothing: the scope was read and holds no work. Not a failure
       // — a generate over a fully warm folder ends here every time.
-      this.patchRun(token, { phase: 'done' })
+      this.patchRun(token, { phase: 'done', settled: true })
       return
     }
 
@@ -396,7 +415,10 @@ export class BulkJobs {
       await new Promise<void>((resolve) => {
         this.confirmWaiter = resolve
       })
-      if (token.cancelled) return
+      if (token.cancelled) {
+        this.patchRun(token, { settled: true })
+        return
+      }
     } else {
       this.patchRun(token, { phase: 'running' })
     }
@@ -404,6 +426,7 @@ export class BulkJobs {
     let done = 0
     let failed = 0
     let skipped = 0
+    let wrote = 0
     // Sequential, one entry in flight (1.2). The queue is two wide, so a single
     // pending job entry always leaves a slot for interactive work — and cancel
     // is instant, because there is never a backlog of the job's own pushes to
@@ -425,7 +448,10 @@ export class BulkJobs {
                   skipIfCurrent: true,
                 })
                 if (outcome === 'skipped') skipped++
-                else done++
+                else {
+                  done++
+                  if (outcome === 'done') wrote++
+                }
               } catch {
                 // Counted, never reported through a host: one sentence per
                 // failed model, fanned over a kit, is a wall of them (D7). The
@@ -463,6 +489,7 @@ export class BulkJobs {
             ifGen: job.gen,
           })
           done++
+          wrote++
           // The in-memory half: a tile on screen is showing pixels the server
           // no longer has.
           this.deps.refetch(job.entry.path)
@@ -472,13 +499,14 @@ export class BulkJobs {
         }
       }
       // Published per entry, so the chip's counters actually move.
-      this.patchRun(token, { done, failed, skipped })
+      this.patchRun(token, { done, failed, skipped, wrote })
     }
 
     const total = derivation.entries.length
     const failure = done === 0 && skipped === 0 && failed === total ? NOTHING_PROCESSED : undefined
     this.patchRun(token, {
       phase: token.cancelled ? 'cancelled' : 'done',
+      settled: true,
       ...(failure !== undefined ? { failure } : {}),
     })
   }

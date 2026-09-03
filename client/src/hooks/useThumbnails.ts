@@ -400,15 +400,18 @@ export function useThumbnails(
     // tier rather than letting an immutable-cached answer stand for bytes a
     // write just deleted.
     slot.thumbGen = undefined
-    setThumbs((prev) => {
-      const next = new Map(prev)
-      next.set(path, { status: 'loading' })
-      return next
-    })
     // The same per-slot start the reconciler runs for a new entry, so the
     // lookup and — on a miss — the queued render happen exactly as a visit's
-    // would, at the band the tile is in.
-    startRef.current?.(slot.entry, slot)
+    // would, at the band the tile is in. Whatever it seeds is what the tile
+    // shows — never a bare `loading` over a state the start already decided,
+    // which is the shape that left a tile hanging once (the refusal above
+    // makes a seed impossible today; this keeps it harmless if that changes).
+    const seeded = startRef.current?.(slot.entry, slot)
+    setThumbs((prev) => {
+      const next = new Map(prev)
+      next.set(path, seeded ?? { status: 'loading' })
+      return next
+    })
   }, [])
 
   /**

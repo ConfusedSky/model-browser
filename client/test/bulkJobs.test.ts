@@ -54,6 +54,8 @@ vi.mock('../src/lib/entryActions', async (importOriginal) => {
 
 const SCOPE: JobScope = { path: '/kit', label: 'kit' }
 const MESH = {} as THREE.Object3D
+/** A stored camera — what `framed` spells on the wire beside the flag. */
+const CAMERA = { az: 1, el: 0.2, distR: 3, target: [0, 0, 0] as [number, number, number] }
 
 /** A pose the app can express: file-space `up` (0,-1,0) is scene +Z, and
  *  `azimuth_zero` is perpendicular to it. */
@@ -219,7 +221,7 @@ describe('what a reset derivation keeps', () => {
   it('keeps exactly the models whose framing a reset would change', async () => {
     const h = harness(
       listing([
-        model('framed', { thumb: thumb({ framed: true }) }),
+        model('framed', { thumb: thumb({ framed: true, camera: CAMERA }) }),
         model('unframed', { thumb: thumb({ framed: false }) }),
         model('no-annotation'),
         // An axis alone, and no usable pose to replace it: the per-model rule
@@ -553,7 +555,7 @@ describe('one job at a time, cancelled at any instant', () => {
       Promise.resolve(
         path === '/a'
           ? listing([model('a1'), model('a2'), model('a3')])
-          : listing([model('b1', { pose: POSE, thumb: thumb({ framed: true }) })]),
+          : listing([model('b1', { pose: POSE, thumb: thumb({ framed: true, camera: CAMERA }) })]),
       ),
     )
     let release = (): void => {}
@@ -633,8 +635,8 @@ describe('counting a scope', () => {
       listing(
         [
           model('missing'),
-          model('framed', { thumb: thumb({ framed: true }) }),
-          model('framed-and-missing', { thumb: thumb({ framed: true, ao: { state: 'miss' } }) }),
+          model('framed', { thumb: thumb({ framed: true, camera: CAMERA }) }),
+          model('framed-and-missing', { thumb: thumb({ framed: true, camera: CAMERA, ao: { state: 'miss' } }) }),
         ],
         false,
       ),
@@ -691,5 +693,36 @@ describe('what a count asks the index about', () => {
     expect(h.posesFor).not.toHaveBeenCalled()
     await h.jobs.derive('reset', SCOPE)
     expect(h.posesFor.mock.calls.map((c) => c[0])).toEqual([['/kit/camera-and-axis.stl']])
+  })
+})
+
+describe('what a job reports it wrote', () => {
+  it('counts a landed write, not an entry found current or refused', async () => {
+    const h = harness(listing([model('missing'), model('current-on-lookup', { thumb: thumb({ ao: { state: 'miss' } }) })]))
+    // The first lookup misses (renders, writes); the second answers a current
+    // hit, so the core says 'current' — processed, but nothing written.
+    h.getThumb
+      .mockResolvedValueOnce({ status: 'miss' })
+      .mockResolvedValueOnce({ status: 'hit', pngUrl: 'blob:x', lighting: THUMB_LIGHTING, rig: RIG_VERSION })
+    h.jobs.launch('generate', SCOPE)
+    await settle()
+    expect(h.jobs.state).toMatchObject({ phase: 'done', settled: true, done: 2, wrote: 1 })
+  })
+
+  it('settles only when the in-flight entry has landed, cancelled or not', async () => {
+    let land = (): void => {}
+    const h = harness(listing([model('a', { thumb: thumb({ framed: true, camera: CAMERA }) }), model('b', { thumb: thumb({ framed: true, camera: CAMERA }) })]))
+    h.putThumb.mockImplementationOnce(() => new Promise((r) => { land = () => r({ gen: 2 }) }))
+    h.jobs.launch('reset', SCOPE)
+    await settle()
+    h.jobs.confirm()
+    await settle()
+    h.jobs.cancel()
+    expect(h.jobs.state).toMatchObject({ phase: 'cancelled', settled: false, wrote: 0 })
+    land()
+    await settle()
+    // The write a cancel could not recall is counted, and only then is the job over.
+    expect(h.jobs.state).toMatchObject({ phase: 'cancelled', settled: true, done: 1, wrote: 1 })
+    expect(h.putThumb).toHaveBeenCalledTimes(1)
   })
 })

@@ -214,11 +214,14 @@ export interface ActionHost extends Feedback, LibraryTop {
    * hand without re-deriving 18,000 entries per orbit (`bulk-thumbnail-jobs`
    * D5; measured 7.8 MB and a 16-request pose wave per recount, 2026-09-02).
    *
-   * Called after the write resolves and **before** the tile's map is updated:
-   * the map is where App reads the before-state from. A refused or failed
-   * write changed nothing and says nothing.
+   * `before` is the stored orientation the write replaced, where the site read
+   * it (the discard's own lookup); a site that did not read it passes nothing
+   * and App falls back to the tile's ready state or the listing's annotation —
+   * and to silence when it knows neither, since a wrong ±1 is worse than none
+   * until the next derivation. Called after the write resolves; a refused or
+   * failed write changed nothing and says nothing.
    */
-  framingChanged: (path: string, write: FramingWrite) => void
+  framingChanged: (path: string, write: FramingWrite, before?: StoredFraming) => void
 }
 
 /**
@@ -399,24 +402,6 @@ export const RENDER_FAILED = 'Could not re-render the thumbnail.'
  */
 export const JOB_BUSY = 'A job is already running — cancel it to start another.'
 
-/**
- * What a model resolves to once its own stored orientation is given up — the
- * one reading of D7's rule, for every surface that gives one up.
- *
- * A discarded orientation resolves the way an untouched model resolves, as far
- * as the view can know it: the index's pose where the view's landed answer
- * carries a usable one, the default otherwise. "Usable" is `cameraForPose`'s
- * answer and nothing else — a malformed pose (off-axis `up`, a non-perpendicular
- * `azimuth_zero`) is not usable, and a pose with no cached front view
- * deliberately *is*, since the thumbnail sweep applies that one too.
- *
- * `posed` carries both halves of what a caller does with the answer: it is the
- * label these pixels get, and it is exactly when the stored **axis** goes as
- * well. Half a pose is not a pose (`useThumbnails` offers one only when neither
- * a camera nor an axis is stored), and with no pose to replace it the axis
- * stays — framing the model by default about its own spindle rather than laying
- * a Z-up model on its side for a spindle nobody asked for.
- */
 /** The orientation half of a thumbnail write, in the write's own three states:
  *  a value sets, `null` discards, absence keeps. What `framingChanged` reports. */
 export type FramingWrite = Pick<ThumbSave, 'camera' | 'axis'>
@@ -437,19 +422,31 @@ export function resettable(
   camera: CameraState | undefined,
   axis: OrbitAxis | undefined,
   pose: IndexPose | undefined,
-  /**
-   * Whether *anything* is stored — the wire's `framed`, when the caller has an
-   * annotation, since an annotation may say `framed` without spelling the
-   * camera; derived from the fields otherwise (the tile's own map does spell
-   * them). The rule then excludes the one framed shape a reset leaves alone.
-   */
-  framed: boolean = camera !== undefined || axis !== undefined,
 ): boolean {
-  if (!framed) return false
-  const axisOnly = camera === undefined && axis !== undefined
-  return !axisOnly || cameraForPose(pose, DEFAULT_CAMERA) !== null
+  return camera !== undefined || (axis !== undefined && cameraForPose(pose, DEFAULT_CAMERA) !== null)
 }
 
+/** A model's stored orientation as a caller knows it: both fields, or absent. */
+export type StoredFraming = { camera: CameraState | undefined; axis: OrbitAxis | undefined }
+
+/**
+ * What a model resolves to once its own stored orientation is given up — the
+ * one reading of D7's rule, for every surface that gives one up.
+ *
+ * A discarded orientation resolves the way an untouched model resolves, as far
+ * as the view can know it: the index's pose where the view's landed answer
+ * carries a usable one, the default otherwise. "Usable" is `cameraForPose`'s
+ * answer and nothing else — a malformed pose (off-axis `up`, a non-perpendicular
+ * `azimuth_zero`) is not usable, and a pose with no cached front view
+ * deliberately *is*, since the thumbnail sweep applies that one too.
+ *
+ * `posed` carries both halves of what a caller does with the answer: it is the
+ * label these pixels get, and it is exactly when the stored **axis** goes as
+ * well. Half a pose is not a pose (`useThumbnails` offers one only when neither
+ * a camera nor an axis is stored), and with no pose to replace it the axis
+ * stays — framing the model by default about its own spindle rather than laying
+ * a Z-up model on its side for a spindle nobody asked for.
+ */
 export function framingAfterDiscard(
   pose: IndexPose | undefined,
   keptAxis: OrbitAxis,
@@ -645,9 +642,14 @@ export async function renderEntryThumbnail(
   // The session's own copy, not only the server's: App sources the
   // lightbox's camera and axis from this map, so a cache-only write would
   // leave the viewer opening at the orientation just given up (4b.4).
-  // Before the map is updated: that is where the before-state is read from.
+  // With the before-state this body read for itself — the one reading the
+  // delta can trust whatever the tile was showing.
   if (discardFraming) {
-    deps.framingChanged?.(entry.path, { camera: null, axis: dropAxis ? null : undefined })
+    deps.framingChanged?.(
+      entry.path,
+      { camera: null, axis: dropAxis ? null : undefined },
+      { camera: cached.camera, axis: cached.axis },
+    )
   }
   deps.setThumb(entry.path, {
     status: 'ready',
@@ -777,7 +779,7 @@ export function resetFramingLive(
       // what this map holds, so a cache-only discard would re-open the model
       // at the orientation just given up (4b.4).
       () => {
-        // The signal first, the map second: the before-state lives in the map.
+        // No lookup here to hand over a before-state; App reads the tile's.
         host.framingChanged(entry.path, { camera: null, axis: framing.posed ? null : undefined })
         host.discardThumbFraming(entry.path, framing.posed)
       },
@@ -936,7 +938,7 @@ export function setOrbitAxis(
       // The session's own copy, not only the server's: App opens the lightbox at
       // what this map holds, so a cache-only write would open the model about
       // the spindle just replaced (4b.4).
-      // The signal first, the map second: the before-state lives in the map.
+      // No lookup here to hand over a before-state; App reads the tile's.
       host.framingChanged(entry.path, { camera: null, axis })
       host.setThumb(entry.path, {
         status: 'ready',

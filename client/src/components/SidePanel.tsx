@@ -301,8 +301,8 @@ export default function SidePanel({
 
   /**
    * The two counts, derived when the tab is open and again whenever the
-   * launcher says they have gone stale (`recountKey` — App moves it as a job's
-   * phase moves). `null` is *counting*, which is what the buttons say until it
+   * launcher says they have gone stale (`recountKey` — App moves it when a job
+   * that wrote something settles; a hand's own change rides `resetAdjust`). `null` is *counting*, which is what the buttons say until it
    * lands; the panel never blocks on it (D5).
    *
    * Latest-wins by token, the same shape the neighbour count's debounce uses
@@ -318,19 +318,20 @@ export default function SidePanel({
   const countFn = library?.count
   const recountKey = library?.recountKey
   const resetAdjust = library?.resetAdjust ?? 0
-  // The hand-change sum as it stood when the shown count landed: what the
-  // button adds is the change *since* then, so a derivation absorbs the sum.
-  const resetAdjustRef = useRef(resetAdjust)
-  resetAdjustRef.current = resetAdjust
+  // The hand-change sum as it stood when the shown count was *asked for*: the
+  // server counted then, so a change made while the answer was in flight is
+  // not in it and must be added, not swallowed (the review's finding — the
+  // first version read the sum at landing). A derivation absorbs the sum.
   const adjustBaseRef = useRef(0)
   useEffect(() => {
     if (!showLibrary || countFn === undefined) return
     const token = ++countTokenRef.current
+    const base = resetAdjust
     setCounts(null)
     void countFn().then(
       (c) => {
         if (countTokenRef.current !== token) return
-        adjustBaseRef.current = resetAdjustRef.current
+        adjustBaseRef.current = base
         setCounts(c)
       },
       () => {
@@ -341,6 +342,9 @@ export default function SidePanel({
         setCounts('failed')
       },
     )
+    // `resetAdjust` is read at request time and deliberately not a dependency:
+    // a hand change must move the number, never re-ask for it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showLibrary, countFn, recountKey])
 
   // Answers "why are my results strange?" without opening the panel (D5).

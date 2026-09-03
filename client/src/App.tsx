@@ -5,6 +5,7 @@ import type {
   DirEntry,
   FeatureReport,
   IndexPose,
+  ThumbInfo,
   IndexScore,
   LibraryState,
   OrbitAxis,
@@ -18,7 +19,7 @@ import SidePanel from './components/SidePanel'
 import PathBar from './components/PathBar'
 import { SKELETON_DELAY_MS, useDelayedFlag } from './hooks/useDelayedFlag'
 import { useThumbnails, type ThumbState } from './hooks/useThumbnails'
-import { BulkJobs, useBulkJobState, type JobOperation, type JobPhase } from './jobs/bulkJobs'
+import { BulkJobs, useBulkJobState, type JobOperation, type JobState } from './jobs/bulkJobs'
 import {
   commandsFor,
   containingFolder,
@@ -26,6 +27,7 @@ import {
   JOB_BUSY,
   resettable,
   type FramingWrite,
+  type StoredFraming,
   LIGHTBOX_MENU_EXCLUDES,
   LIGHTBOX_PANEL_EXCLUDES,
   openEntryIn,
@@ -531,18 +533,44 @@ export default function App() {
   const [handDelta, setHandDelta] = useState(0)
   const thumbsRef = useRef<Map<string, ThumbState>>(new Map())
   const posesRef = useRef<Record<string, IndexPose>>({})
-  const noteFramingChanged = useCallback((path: string, write: FramingWrite) => {
-    const before = thumbsRef.current.get(path)
-    const pose = posesRef.current[path]
-    const was = resettable(before?.camera, before?.axis, pose)
-    const is = resettable(
-      write.camera === null ? undefined : (write.camera ?? before?.camera),
-      write.axis === null ? undefined : (write.axis ?? before?.axis),
-      pose,
-    )
-    const delta = (is ? 1 : 0) - (was ? 1 : 0)
-    if (delta !== 0) setHandDelta((d) => d + delta)
-  }, [])
+  const noteFramingChanged = useCallback(
+    (path: string, write: FramingWrite, known?: StoredFraming) => {
+      // The before-state, from the most authoritative reading available: the
+      // site's own lookup; else the tile's *ready* state (a loading or errored
+      // tile carries no framing at all, and reading it as "unframed" made an
+      // orbit on a framed model count +1 — the review's finding); else the
+      // listing's annotation; else nothing is known and nothing is said.
+      const shown = thumbsRef.current.get(path)
+      const before: StoredFraming | undefined =
+        known ??
+        (shown?.status === 'ready' ? { camera: shown.camera, axis: shown.axis } : undefined) ??
+        (entryThumbRef.current.has(path)
+          ? {
+              camera: entryThumbRef.current.get(path)?.camera,
+              axis: entryThumbRef.current.get(path)?.axis,
+            }
+          : undefined)
+      if (before === undefined) return
+      const after: StoredFraming = {
+        camera: write.camera === null ? undefined : (write.camera ?? before.camera),
+        axis: write.axis === null ? undefined : (write.axis ?? before.axis),
+      }
+      // The axis rule needs the index's opinion; where this session holds none
+      // for the model, an axis-only state cannot be judged — and a guess of
+      // "no usable pose" read a chosen axis as −1 and clamped the button shut.
+      // A derivation waves for exactly this; a hand change stays silent.
+      const pose = posesRef.current[path]
+      const axisOnlyUnknown = (s: StoredFraming): boolean =>
+        pose === undefined && s.camera === undefined && s.axis !== undefined
+      if (axisOnlyUnknown(before) || axisOnlyUnknown(after)) return
+      const delta =
+        (resettable(after.camera, after.axis, pose) ? 1 : 0) -
+        (resettable(before.camera, before.axis, pose) ? 1 : 0)
+      if (delta !== 0) setHandDelta((d) => d + delta)
+    },
+    [],
+  )
+  const entryThumbRef = useRef<Map<string, ThumbInfo | undefined>>(new Map())
   const [apps, setApps] = useState<AppsReport | null>(null)
   const [actionText, setActionText] = useState<{ text: string; tone: 'ok' | 'error' } | null>(null)
   const actionTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -1049,8 +1077,15 @@ export default function App() {
    * the runner on every press of the pill — discarding the running job's state
    * with it.
    */
-  thumbsRef.current = thumbs
-  posesRef.current = poses
+  // Mirrored after commit, not during render: a render React discards must not
+  // leave the delta reading state that never landed.
+  useEffect(() => {
+    thumbsRef.current = thumbs
+    posesRef.current = poses
+    const byPath = new Map<string, ThumbInfo | undefined>()
+    for (const e of thumbEntries) byPath.set(e.path, e.thumb)
+    entryThumbRef.current = byPath
+  }, [thumbs, poses, thumbEntries])
   const jobs = useMemo(
     () => new BulkJobs({ api, lru, queue, setThumb, refetch, ao: aoEnabled }),
     [api, lru, queue, setThumb, refetch],
@@ -2365,7 +2400,8 @@ export default function App() {
    * reaches the host through a ref for the same reason: `actionHost` is
    * rebuilt on every pose landing, and a `launch` keyed on it would have made
    * every landing re-enumerate the whole library. `recountKey` is the one
-   * deliberate trigger: a job ending is exactly when the numbers went stale.
+   * trigger for a *re-derivation*: a job that wrote is exactly when the numbers
+   * went stale by more than a hand's ±1, which `resetAdjust` carries instead.
    */
   const actionHostRef = useRef(actionHost)
   actionHostRef.current = actionHost
@@ -2380,22 +2416,23 @@ export default function App() {
     [rootScope],
   )
   /**
-   * How many jobs have ended having written something — the one moment a job
+   * How many jobs have settled having written something — the one moment a job
    * makes the tab's numbers stale. Not every phase: a launch passes through
    * `deriving` and `confirming` before it writes, and a reset cancelled at its
    * confirmation wrote nothing, so recounting on phase alone re-derived the
    * library twice per press of the very button whose count it was refreshing
-   * (Masa, 2026-09-02).
+   * (Masa, 2026-09-02). And not on the phase at all: Cancel sets `cancelled`
+   * while the in-flight entry may still land, so a write a cancel could not
+   * recall was missed by a phase transition (the review's finding). `settled`
+   * is the runner's word for "the loop is over and the counters are final",
+   * and `wrote` for what it actually wrote.
    */
   const [jobsEnded, setJobsEnded] = useState(0)
-  const lastPhaseRef = useRef<JobPhase | undefined>(undefined)
+  const settledRef = useRef<JobState | null>(null)
   useEffect(() => {
-    const phase = job?.phase
-    if (phase === lastPhaseRef.current) return
-    lastPhaseRef.current = phase
-    if ((phase === 'done' || phase === 'cancelled') && job !== null && job.done > 0) {
-      setJobsEnded((n) => n + 1)
-    }
+    if (job === null || !job.settled || settledRef.current === job) return
+    settledRef.current = job
+    if (job.wrote > 0) setJobsEnded((n) => n + 1)
   }, [job])
   const libraryJobs = useMemo(
     () =>
