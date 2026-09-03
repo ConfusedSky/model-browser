@@ -1,4 +1,5 @@
-import { readdir, realpath, stat } from 'node:fs/promises'
+import { constants as fsConstants } from 'node:fs'
+import { access, readdir, realpath, stat } from 'node:fs/promises'
 import { join, posix, sep } from 'node:path'
 import { baseName } from '../../shared/names'
 import type { DirEntry, DirListing } from '../../shared/types'
@@ -264,6 +265,23 @@ async function levelFor(
     throw new ListingError(404, `cannot read directory: ${libPath}`)
   }
   if (held !== undefined && held.mtime === s.mtimeMs) {
+    // **`chmod` moves no mtime** (review finding 4), so the stat above cannot
+    // see a directory that is still there, still stamped the same, and no
+    // longer readable — and the reuse branch would go on serving its recorded
+    // children forever. `walkFsLevel`'s `realpath` catches only the case where
+    // a *subdirectory* is what became unreadable; a folder of models under a
+    // revoked directory has no subdirectory to trip over, and neither does a
+    // walked root whose `r` bit was dropped while `x` stayed.
+    //
+    // Present-but-unreadable is D6's case, so this is a contradiction rather
+    // than a folder to skip. Costs one `access` per *reused* directory — the
+    // pass already pays one `stat` there, so it stays proportional to the
+    // tree's shape (2,318 directories here) and not to its entries.
+    const reachable = await access(fsDir, fsConstants.R_OK | fsConstants.X_OK).then(
+      () => true,
+      () => false,
+    )
+    if (!reachable) throw new RevalidationError(`cannot read directory: ${libPath}`)
     walk.dirMtimes.set(libPath, s.mtimeMs)
     return reusedLevel(held, fsDir)
   }
@@ -598,10 +616,11 @@ async function walkFsLevel(
       if (real === null || !within(realTop, real)) {
         // Revalidation (§4.3): a directory the snapshot recorded whose real
         // path can no longer even be established is the pass failing against a
-        // root that is *present* — the case D6 gives to the filesystem. This is
-        // also the only way an unreadable **root** surfaces, since `chmod` does
-        // not move a directory's mtime: the root's own level is then reused
-        // unchanged and it is the children whose `realpath` raises EACCES.
+        // root that is *present* — the case D6 gives to the filesystem. It used
+        // to be the *only* way an unreadable root surfaced, since `chmod` does
+        // not move a directory's mtime; `levelFor`'s reuse branch now checks
+        // `access` directly, which reaches the cases this cannot — a
+        // models-only folder, and a root left executable but not readable.
         if (real === null && walk.reuse?.has(e.path) === true) {
           throw new RevalidationError(`cannot reach directory: ${e.path}`)
         }
@@ -616,7 +635,8 @@ async function walkFsLevel(
       // which names exist. Guarded on `rel !== ''` because the root's own level
       // is `listFlat`'s containers, and pushing here too would return one
       // folder as two identical tiles.
-      if (rel !== '') walk.dirs.push({ ...e, name: `${rel}${e.name}` })
+      const pushed = rel !== '' ? { ...e, name: `${rel}${e.name}` } : undefined
+      if (pushed !== undefined) walk.dirs.push(pushed)
       if (walk.visited.has(real)) continue
       walk.visited.add(real)
       let sub
@@ -629,6 +649,26 @@ async function walkFsLevel(
         // the user simply cannot see.
         if (err instanceof RevalidationError) throw err
         continue // unreadable subdirectory: skipped, only an unreadable root fails
+      }
+      // The directory's **own** entry, refreshed from the stat `levelFor` just
+      // made (review finding 5, secondary half). On the revalidation path this
+      // entry came out of the parent's *reused* level and carries the mtime the
+      // snapshot recorded; the pass has since discovered a different one and
+      // re-read the directory on the strength of it. Writing it back is what
+      // keeps the saved snapshot internally consistent — the directory's
+      // recorded `dirs` mtime and its entry's `mtime` are the same fact, and a
+      // tile served from the snapshot would otherwise report a stamp the pass
+      // knew was wrong. Free: no extra syscall, `levelFor` already recorded it.
+      //
+      // Mutation in place is safe and deliberate — `reusedLevel` and
+      // `listFsDir` both mint fresh objects per call — and it is what carries
+      // the correction into `gatherFlat`'s `containers`, which is this same
+      // array filtered. On an ordinary walk `dirMtimes` holds the caller's own
+      // `e.mtime`, so nothing moves.
+      const fresh = walk.dirMtimes.get(e.path)
+      if (fresh !== undefined && fresh !== e.mtime) {
+        e.mtime = fresh
+        if (pushed !== undefined) pushed.mtime = fresh
       }
       await walkFsLevel(sub, `${rel}${e.name}/`, walk, realTop)
     } else {
@@ -736,12 +776,18 @@ async function walkZip(
  * Positive-integer knob from the environment. A missing, malformed, or
  * non-positive value falls back: `Number('20k')` is NaN, and a NaN limit
  * silently disables every comparison that bounds the walk.
+ *
+ * The floor is applied **before** the positivity test, not after (review
+ * finding 10): `0.5` is finite and greater than zero, and flooring it
+ * afterwards yields a budget of 0 — every walk instantly exhausted, every
+ * listing empty and truncated. A fractional knob is malformed, and malformed
+ * falls back.
  */
 function envLimit(name: string, fallback: number): number {
   const raw = process.env[name]
   if (raw === undefined || raw.trim() === '') return fallback
-  const n = Number(raw)
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback
+  const n = Math.floor(Number(raw))
+  return Number.isFinite(n) && n > 0 ? n : fallback
 }
 
 /**
@@ -1201,12 +1247,26 @@ export async function walkFlat(
     // line, so nothing is written and the store's archive layer stays unflushed
     // in memory, which is the same rule stated once.
     if (store !== undefined && !budgetExhausted) {
-      await store.save({
-        root: libPath,
-        walkedAt: Date.now(),
-        entries: snapshotEntries(g),
-        dirs: dirRecords(g.dirMtimes),
-      })
+      // **Best-effort, on the request path** (review finding 3). This walk has
+      // already produced the listing the user asked for; the save is an
+      // optimisation for the *next* request. A full disk, a read-only cache
+      // directory or a permission change would otherwise turn a perfectly good
+      // listing into a 500 — and into one carrying an errno and the cache's
+      // filesystem path in its body, which is a probe of the machine besides.
+      // The cost of swallowing it is one uncached walk, paid again next time.
+      //
+      // Deliberately **not** the rule inside `revalidateTree`, whose own save
+      // must still reject: the pass's failure taxonomy distinguishes "the store
+      // could not be written" from "the filesystem contradicted the cache", and
+      // it can only do that if the first one reaches it.
+      await store
+        .save({
+          root: libPath,
+          walkedAt: Date.now(),
+          entries: snapshotEntries(g),
+          dirs: dirRecords(g.dirMtimes),
+        })
+        .catch(() => undefined)
     }
   }
   let containers = gathered.containers

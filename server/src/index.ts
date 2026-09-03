@@ -63,8 +63,9 @@ void library.state().then((s) => {
       // **Awaited, so the sweep finishes before the pass starts writing.** The
       // sweep reaps stray `.tmp` files and every `save` the pass makes writes
       // one, so a pass running *into* a sweep is the reaper-versus-live-save
-      // race the stage-1/2 review names (finding 8). Fixing that race is the
-      // fix round's; this only declines to build it into the startup ordering.
+      // race the stage-1/2 review names (finding 8). The sweep now reaps only
+      // temps older than a minute, which is the actual fix; the ordering here
+      // is kept because it costs nothing and does not depend on that age.
       await snapshots.maintain()
       for (const root of await snapshots.roots()) await listings.revalidate(library, root)
     })()

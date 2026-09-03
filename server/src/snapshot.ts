@@ -64,6 +64,14 @@ export const ARCHIVES_FILE = 'archives.json'
 const DEFAULT_CAP = 64 * 1024 ** 2
 
 /**
+ * How old a `.tmp` must be before the sweep reaps it. Sized against the race it
+ * exists for, not against the files: a `writeAtomic` temp lives for one write —
+ * milliseconds — and the startup sweep runs concurrently with the revalidation
+ * pass's first saves, so anything younger than this is presumed live.
+ */
+const TMP_REAP_MS = 60_000
+
+/**
  * One entry as the walk saw it.
  *
  * Deliberately **not** `DirEntry`. The two carry the same walk facts, but
@@ -142,12 +150,17 @@ interface ArchivesFile {
  * silently unbounds the store. `Number('64MB')` is NaN, and a NaN cap makes
  * `total <= cap` false forever — a malformed knob that evicts everything on
  * every sweep, which is what this shape exists to refuse.
+ *
+ * The floor runs **before** the positivity test, not after (review finding 10,
+ * and `envLimit` carries the same correction): `0.5` is finite and positive,
+ * and flooring it afterwards gives a cap of 0 — which is the "evicts everything
+ * on every sweep" failure above, reached by a different door.
  */
 function envCap(): number {
   const raw = process.env.MODEL_BROWSER_SNAPSHOT_CAP
   if (raw === undefined || raw.trim() === '') return DEFAULT_CAP
-  const n = Number(raw)
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_CAP
+  const n = Math.floor(Number(raw))
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_CAP
 }
 
 /**
@@ -443,8 +456,23 @@ export class SnapshotStore {
       library: await this.libraryId(),
       archives: Object.fromEntries(this.archives),
     }
-    await writeAtomic(dir, ARCHIVES_FILE, JSON.stringify(file))
+    const text = JSON.stringify(file)
+    // **Clean before the await, against the serialised copy above** (review
+    // finding 9). `writeAtomic` is several awaits long and a walk's `set`s land
+    // between them: clearing the flag *after* the write would clear a flag that
+    // a later `set` had raised, and that archive's directory — already read,
+    // already paid for — would never be persisted, so the next process opens
+    // the archive again. Marking clean first means such a `set` re-dirties and
+    // the following flush carries it, at the cost of one redundant write.
     this.archivesDirty = false
+    try {
+      await writeAtomic(dir, ARCHIVES_FILE, text)
+    } catch (err) {
+      // A write that did not happen leaves the layer unpersisted, which is
+      // exactly what dirty means.
+      this.archivesDirty = true
+      throw err
+    }
   }
 
   // ---- maintenance ----
@@ -469,15 +497,20 @@ export class SnapshotStore {
     } catch {
       return
     }
-    const files: { path: string; size: number; lastRead: number }[] = []
+    const files: { path: string; size: number; lastRead: number; evictable: boolean }[] = []
     for (const name of names) {
       const path = join(dir, name)
       const info = await stat(path).catch(() => null)
       if (info === null || !info.isFile()) continue
       // A stray temp file from an interrupted write is nobody's snapshot and
-      // will never be read; it is the one thing swept on sight.
+      // will never be read — but **only once it is stale** (review finding 8).
+      // The startup sweep (`index.ts`) runs beside the revalidation pass's own
+      // saves, and `writeAtomic`'s temp exists for the length of one write:
+      // reaping on sight unlinks a live one out from under the `rename` that
+      // was about to commit it. A minute is orders of magnitude longer than any
+      // write here and orders shorter than the interval between sweeps.
       if (name.endsWith('.tmp')) {
-        await rm(path, { force: true })
+        if (Date.now() - info.mtimeMs > TMP_REAP_MS) await rm(path, { force: true })
         continue
       }
       // Reaped here rather than on read, so a read stays pure: a file this
@@ -485,23 +518,34 @@ export class SnapshotStore {
       // against the cap and will never be served.
       if (!(await this.usable(name, path))) {
         await rm(path, { force: true })
+        // The reaped archive layer must be dropped from memory too, or the next
+        // flush writes the file this sweep just deleted straight back — the
+        // write-back loop the eviction branch below used to guard against, met
+        // here instead, since eviction no longer reaches this file at all.
+        if (name === ARCHIVES_FILE) {
+          this.archives = new Map()
+          this.archivesDirty = false
+        }
         continue
       }
-      files.push({ path, size: info.size, lastRead: info.mtimeMs })
+      // `archives.json` counts against the cap but is never *evicted* (review
+      // finding 9). It is one small file per library, self-bounding in the only
+      // way that matters — an archive it records that is gone is answered by
+      // `{mtime, size}` and re-read once — and it holds what the walk learned
+      // most expensively (6.7 s of zip-tail seeks, measured). Evicting it to
+      // reclaim its ~1.5 MB was the pathological case: the sweep would throw
+      // away every archive directory in the library to free a fraction of a
+      // percent of a 64 MB cap, and the next walk would re-read all 409 tails.
+      files.push({ path, size: info.size, lastRead: info.mtimeMs, evictable: name !== ARCHIVES_FILE })
     }
     let total = files.reduce((sum, f) => sum + f.size, 0)
     if (total <= this.sizeCap) return
     files.sort((a, b) => a.lastRead - b.lastRead)
     for (const f of files) {
       if (total <= this.sizeCap) break
+      if (!f.evictable) continue
       await rm(f.path, { force: true })
       total -= f.size
-      // The in-memory archive layer would otherwise write the evicted file
-      // straight back on the next flush.
-      if (f.path.endsWith(ARCHIVES_FILE)) {
-        this.archives = new Map()
-        this.archivesDirty = false
-      }
     }
   }
 

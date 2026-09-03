@@ -248,6 +248,17 @@ describe('bounding', () => {
     expect(body.truncated).toBeUndefined()
   })
 
+  it('a fractional limit falls back too, rather than flooring to a budget of zero', async () => {
+    // `Number('0.5')` is finite and greater than zero, so it passes the
+    // positivity test and *then* floors to 0 — a budget the first entry
+    // exhausts, which makes every listing empty and truncated (review finding
+    // 10). Malformed is malformed whichever side of one it sits on.
+    process.env.MODEL_BROWSER_FLAT_BUDGET = '0.5'
+    const body = await flat(root)
+    expect(body.entries.map((e) => e.name)).toEqual([...CONTAINERS, ...MODELS])
+    expect(body.truncated).toBeUndefined()
+  })
+
   it('an empty limit falls back too, rather than reading as zero', async () => {
     process.env.MODEL_BROWSER_FLAT_BUDGET = ''
     const body = await flat(root)

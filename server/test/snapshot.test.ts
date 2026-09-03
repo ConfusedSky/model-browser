@@ -41,8 +41,19 @@ import { libraryFor, realTempDir, stlBytes } from './helpers'
  * commits, so failing it is the one simulation that asks the question the
  * requirement asks: does a failure between "the new bytes exist" and "they are
  * the snapshot" leave a torn file?
+ *
+ * `onRename` is the interposition the mid-write cell needs. A `set` landing
+ * *while* a flush is in flight is the whole of review finding 9's first half,
+ * and the rename is the one point inside `writeAtomic` a test can reach — it
+ * happens exactly once per write, after the bytes are down and before the flag
+ * is cleared. Fired once and disarmed, so it cannot recurse through its own
+ * write.
  */
-const fs = vi.hoisted(() => ({ failRename: false, opens: [] as string[] }))
+const fs = vi.hoisted(() => ({
+  failRename: false,
+  opens: [] as string[],
+  onRename: null as null | (() => Promise<void>),
+}))
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>()
   return {
@@ -53,6 +64,9 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     }) as typeof actual.open,
     rename: (async (...args: Parameters<typeof actual.rename>) => {
       if (fs.failRename) throw new Error('simulated rename failure')
+      const hook = fs.onRename
+      fs.onRename = null
+      if (hook !== null) await hook()
       return actual.rename(...args)
     }) as typeof actual.rename,
   }
@@ -66,6 +80,7 @@ afterEach(() => {
 
 beforeEach(() => {
   fs.failRename = false
+  fs.onRename = null
   fs.opens.length = 0
 })
 
@@ -459,6 +474,25 @@ describe('the size bound', () => {
     }
   })
 
+  it('treats a fractional knob as malformed rather than flooring it to zero', () => {
+    const before = process.env.MODEL_BROWSER_SNAPSHOT_CAP
+    try {
+      const DEFAULT = 64 * 1024 ** 2
+      // `Number('0.5')` is finite and greater than zero, so a floor applied
+      // *after* the positivity test yields a cap of 0 — which is the
+      // evicts-everything-on-every-sweep failure the knob's shape exists to
+      // refuse, reached by a different door (review finding 10).
+      process.env.MODEL_BROWSER_SNAPSHOT_CAP = '0.5'
+      expect(new SnapshotStore('/tmp/unused').sizeCap).toBe(DEFAULT)
+      // A fractional value above one is still a number, and still floored.
+      process.env.MODEL_BROWSER_SNAPSHOT_CAP = '4096.7'
+      expect(new SnapshotStore('/tmp/unused').sizeCap).toBe(4096)
+    } finally {
+      if (before === undefined) delete process.env.MODEL_BROWSER_SNAPSHOT_CAP
+      else process.env.MODEL_BROWSER_SNAPSHOT_CAP = before
+    }
+  })
+
   it('evicts oldest-read-first until it is under the cap', async () => {
     const base = cacheRoot()
     const big: SnapshotEntry[] = Array.from({ length: 200 }, (_, i) => ({
@@ -499,6 +533,134 @@ describe('the size bound', () => {
     await store.save(snapshotOf('/kits'))
     await store.maintain()
     expect(await store.load('/kits')).toEqual(snapshotOf('/kits'))
+  })
+})
+
+describe('the sweep and a write in flight (review finding 8)', () => {
+  it('reaps a stale temp file and leaves a live one alone', async () => {
+    const base = cacheRoot()
+    const store = new SnapshotStore(base, undefined, libraryFor(makeLibraryTree('lib-tmp')))
+    await store.save(snapshotOf('/kits'))
+    const dir = join(base, 'lib-tmp', SNAPSHOT_DIR)
+
+    // The race, made concrete: the startup sweep runs beside the revalidation
+    // pass's first saves, and every `save` writes one of these. Reaping on
+    // sight unlinks the temp out from under the `rename` about to commit it.
+    const live = `.${ARCHIVES_FILE}.1234.5678.abcdef.tmp`
+    const stale = `.${ARCHIVES_FILE}.9999.1111.fedcba.tmp`
+    writeFileSync(join(dir, live), 'a write that is still happening')
+    writeFileSync(join(dir, stale), 'a write that died an hour ago')
+    const anHourAgo = Date.now() / 1000 - 3600
+    utimesSync(join(dir, stale), anHourAgo, anHourAgo)
+
+    await store.maintain()
+
+    const left = readdirSync(dir)
+    expect(left).toContain(live)
+    expect(left).not.toContain(stale)
+    // And neither one was counted as a snapshot: the tree file is untouched.
+    expect(await store.load('/kits')).toEqual(snapshotOf('/kits'))
+  })
+})
+
+describe('the archive layer survives its own flush and the sweep (review finding 9)', () => {
+  /** A marked library holding `count` archives, each with one model inside. */
+  function libraryWithArchives(id: string, count: number): { top: string; zips: string[] } {
+    const top = makeLibraryTree(id)
+    const zips: string[] = []
+    for (let i = 0; i < count; i++) {
+      const path = join(top, `kit-${i}.zip`)
+      writeFileSync(path, zipSync({ [`part-${i}.stl`]: new Uint8Array(stlBytes(i + 1)) }))
+      zips.push(path)
+    }
+    return { top, zips }
+  }
+
+  it('persists an archive learned while the previous flush was still writing', async () => {
+    const base = cacheRoot()
+    const { top, zips } = libraryWithArchives('lib-midflush', 2)
+    const [first, late] = zips as [string, string]
+    const store = new SnapshotStore(base, undefined, libraryFor(top))
+    await listZipEntries(first, store.archiveCache())
+
+    // A walk does not stop while a flush runs: this `set` lands after the copy
+    // being written was taken and before the flag is cleared. Clearing the flag
+    // *after* the write would clear this one, and that archive's directory —
+    // already read, already paid for — would never reach disk.
+    fs.onRename = async () => {
+      await listZipEntries(late, store.archiveCache())
+    }
+    await store.flush()
+    await store.flush()
+
+    const onDisk = JSON.parse(
+      readFileSync(join(base, 'lib-midflush', SNAPSHOT_DIR, ARCHIVES_FILE), 'utf8'),
+    )
+    expect(Object.keys(onDisk.archives).sort()).toEqual(['/kit-0.zip', '/kit-1.zip'])
+  })
+
+  it('never evicts the archive layer, whatever the cap says', async () => {
+    const base = cacheRoot()
+    const { top, zips } = libraryWithArchives('lib-keep-layer', 1)
+    const library = libraryFor(top)
+    const big: SnapshotEntry[] = Array.from({ length: 200 }, (_, i) => ({
+      ...ENTRY,
+      name: `m-${i}.stl`,
+      path: `/kits/a/m-${i}.stl`,
+    }))
+    const writer = new SnapshotStore(base, 64 * 1024 ** 2, library)
+    await writer.save(snapshotOf('/one', big))
+    await writer.save(snapshotOf('/two', big))
+    await listZipEntries(zips[0]!, writer.archiveCache())
+    await writer.flush()
+
+    const dir = join(base, 'lib-keep-layer', SNAPSHOT_DIR)
+    // The layer is made the *oldest* file, so oldest-first eviction reaches it
+    // before either tree — the pathological case: throwing away every archive
+    // directory in the library to reclaim a fraction of a percent of the cap.
+    const stamp = (file: string, seconds: number): void => utimesSync(file, seconds, seconds)
+    stamp(join(dir, ARCHIVES_FILE), 1_000)
+    stamp(treeFileOf(base, 'lib-keep-layer', '/one'), 2_000)
+    stamp(treeFileOf(base, 'lib-keep-layer', '/two'), 3_000)
+
+    const each = statSync(treeFileOf(base, 'lib-keep-layer', '/one')).size
+    await new SnapshotStore(base, each + 1024, library).maintain()
+
+    // The cap did bite — a tree went — and the layer is still there.
+    expect(readdirSync(dir)).toContain(ARCHIVES_FILE)
+    expect(await new SnapshotStore(base, 0, library).load('/one')).toBeNull()
+    expect(await new SnapshotStore(base, 0, library).load('/two')).not.toBeNull()
+    // Still usable, not merely present: a later process answers the archive
+    // without opening it.
+    fs.opens.length = 0
+    await listZipEntries(zips[0]!, new SnapshotStore(base, 0, library).archiveCache())
+    expect(opensOf(zips[0]!)).toBe(0)
+  })
+
+  it('drops the layer from memory when the sweep reaps its file', async () => {
+    const base = cacheRoot()
+    const { top, zips } = libraryWithArchives('lib-reap-layer', 2)
+    const [flushed, learnedSince] = zips as [string, string]
+    const store = new SnapshotStore(base, undefined, libraryFor(top))
+    await listZipEntries(flushed, store.archiveCache())
+    await store.flush()
+    // Learned after that flush, so the layer is *dirty* when the sweep runs —
+    // which is the write-back loop: the reaped file goes straight back on the
+    // next flush, still carrying the version this build refused.
+    await listZipEntries(learnedSince, store.archiveCache())
+
+    const file = join(base, 'lib-reap-layer', SNAPSHOT_DIR, ARCHIVES_FILE)
+    writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), version: 99 }))
+    await store.maintain()
+    expect(readdirSync(join(base, 'lib-reap-layer', SNAPSHOT_DIR))).not.toContain(ARCHIVES_FILE)
+
+    await store.flush()
+    expect(readdirSync(join(base, 'lib-reap-layer', SNAPSHOT_DIR))).not.toContain(ARCHIVES_FILE)
+    // And the in-memory half went with it: the archive is opened again rather
+    // than answered from a layer whose file the sweep has just condemned.
+    fs.opens.length = 0
+    await listZipEntries(flushed, store.archiveCache())
+    expect(opensOf(flushed)).toBeGreaterThan(0)
   })
 })
 

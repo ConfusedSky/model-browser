@@ -178,13 +178,18 @@
       Owned by **`server/src/listingCache.ts`**, a new module holding the one genuinely
       new decision this stage makes: validation state is per **(process, root)**, since a
       snapshot is durable but "has this process checked it" is not and cannot be read off
-      the file. A cache-serve for an unvalidated root answers at once, marked, and starts
-      the incremental pass single-flighted per root; a request arriving while that pass is
-      in flight **awaits it and is served unmarked**, which is what makes §5.2's one
+      the file. A cache-serve for a root this process has not checked *recently* answers at
+      once, marked, and starts the incremental pass single-flighted per root; a request
+      arriving while that pass is in flight **awaits it**, which is what makes §5.2's one
       follow-up request terminate rather than loop on the marker — the worst wait is the
       ~5.6 s incremental pass, not the ~32 s walk. After a completed pass, serves are
-      unmarked for the process, and the pass has *applied* what it found, so the following
-      serve **is** the corrected listing. A fresh walk is never marked. Threaded through
+      unmarked, and the pass has *applied* what it found, so the following serve **is** the
+      corrected listing. A fresh walk is never marked.
+      **Corrected in the fix round below (findings 1 and 6), and this line said otherwise
+      when it was written**: validation is a *timestamp*, not a membership — it stands for
+      `REVALIDATE_TTL_MS` and then the root is unchecked again — and the awaiting request
+      is **not** served unmarked on principle, but re-takes the ordinary decision on the
+      stamp the pass left or did not leave. Threaded through
       `createApp` as a trailing `snapshots?: SnapshotStore` (the `features` precedent);
       **absent by default**, so with no store `ListingCache` is `listFlat` and nothing
       else and every pre-existing cell is untouched. Falsified: always marking a
@@ -405,6 +410,46 @@
       annotation stick — making `wire` hand back its input fails the three *identity*
       cells and leaves the copies cell green. It guards a future in-memory snapshot cache,
       not today's code, and should be read that way
+      <br>**Fix round 2026-09-02 (stage-1/2 review's confirmed findings) — 14 cells added
+      across `listingCache.test.ts` (8), `snapshot.test.ts` (5) and `flat.test.ts` (1),
+      for 589 server cells in all.** Closed here: **1** validation is a per-root
+      *timestamp* against `REVALIDATE_TTL_MS` (10 s), so a long-lived process re-marks and
+      re-runs the pass at a bounded cadence instead of never (driven through an injected
+      clock, not a ten-second sleep); **2** the pass's failure taxonomy — only a
+      `RevalidationError` invalidates, a failed invalidate leaves the root unvalidated with
+      the snapshot in place, and any other failure (the store's own `save` on ENOSPC)
+      neither invalidates nor stamps; **3** `walkFlat`'s request-path `save` is
+      best-effort, so a full or read-only cache answers the listing it computed rather than
+      a 500 carrying an errno and the cache's filesystem path (`revalidateTree`'s save
+      still rejects, or finding 2's taxonomy could not see it); **4** an `access(R_OK|X_OK)`
+      beside the reuse `stat`, since `chmod` moves no mtime and the reuse branch was blind
+      to a models-only folder revoked and to a root left executable but not readable — one
+      `access` per reused directory, still proportional to shape; **5** (secondary half) a
+      re-read directory's **own** entry is refreshed from the stat the pass already made,
+      so the saved snapshot's entry mtime and its `dirs` record are the same fact; **6** the
+      pending-await branch re-takes the ordinary decision instead of serving unmarked, so
+      an awaiter of a pass that exited through the volume-gone early return is marked;
+      **8** `.tmp` files are reaped only past 60 s, so the startup sweep cannot unlink a
+      live `writeAtomic` temp; **9** `flush()` marks clean *before* its await against a
+      serialised copy (a `set` landing mid-write re-dirties and is persisted by the next
+      flush), eviction skips `archives.json` entirely, and the reap-on-unusable branch now
+      also resets the in-memory map and dirty flag — the write-back loop the eviction
+      branch's comment used to guard; **10** `envCap` and `envLimit` floor *before* the
+      positivity test, so `0.5` falls back rather than becoming a cap of 0 (evicts
+      everything every sweep) or a budget of 0 (every walk instantly exhausted).
+      All thirteen defects were introduced, watched to fail, and unpatched — each one's
+      exact failure text is in the fix round's report. The primary half of finding 5
+      (in-place overwrites served at the recorded mtime) changed no code: it is
+      spec-resolved as a normative caveat in the delta and in D5's Risks bullet.
+      The review's cleanup list — dead `FlatWalk.capped`, the hand-copiers,
+      `writeAtomic`/`envCap` duplication, `revalidateTree`'s double load and unconditional
+      save — was deliberately **not** touched here and is left for a simplify pass.
+      One finding worth inheriting: **the mid-flush cell needs an interposition point
+      inside `writeAtomic`**, and `rename` is the only one a test can reach — it fires
+      exactly once per write, after the bytes are down and before the flag is cleared. The
+      suite's existing `node:fs/promises` mock grew a one-shot `onRename` hook for it;
+      without an interposition, "a `set` during the write is not lost" has no falsification
+      at all and would have looked like coverage
 - [ ] 7.2 Client: a stale-marked listing renders immediately with the refreshing affordance and reconciles on the follow-up; an unmarked listing shows no affordance; a superseded reconciliation is discarded by latest-wins
 - [ ] 7.3 Layers (server): an index-generation bump stops pose/preview answers while the
       tree keeps serving; a deep directory change re-derives its ancestors' preview

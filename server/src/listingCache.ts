@@ -9,18 +9,22 @@
  * snapshot is durable; whether *this* process has checked it against the disk
  * is not, and cannot be read off the file. So:
  *
- * - A cache-serve for a root this process has not revalidated answers
- *   **immediately** and is marked `stale`, and the incremental pass starts in
- *   the background, single-flighted per root.
- * - A request arriving while that pass is in flight **awaits it** and is served
- *   unmarked. This is what makes the client's one follow-up request (§5.2)
- *   terminate instead of looping on the marker, and the worst wait is the
- *   incremental pass (one `stat` per directory, ~5.6 s measured cold on the
- *   spinning volume) rather than the ~32 s walk it replaces.
- * - After a completed pass, serves for that root are unmarked for the life of
- *   the process. The pass **applies** what it found — changed directories
- *   re-read, entries replaced, the snapshot saved — so the following serve *is*
- *   the corrected listing rather than a promise of one.
+ * - A cache-serve for a root this process has not revalidated **recently**
+ *   answers **immediately** and is marked `stale`, and the incremental pass
+ *   starts in the background, single-flighted per root.
+ * - A request arriving while that pass is in flight **awaits it**, and is then
+ *   answered by the ordinary decision below rather than unmarked on principle:
+ *   a pass that exited through the volume-gone early return validated nothing,
+ *   and its awaiter must not pretend otherwise. This is what makes the client's
+ *   one follow-up request (§5.2) terminate instead of looping on the marker,
+ *   and the worst wait is the incremental pass (one `stat` per directory,
+ *   ~5.6 s measured cold on the spinning volume) rather than the ~32 s walk it
+ *   replaces.
+ * - After a completed pass, serves for that root are unmarked **until the stamp
+ *   ages past `REVALIDATE_TTL_MS`** — validation is time-bounded, never
+ *   once-per-process (review finding 1). The pass **applies** what it found —
+ *   changed directories re-read, entries replaced, the snapshot saved — so the
+ *   following serve *is* the corrected listing rather than a promise of one.
  * - A walk carries no marker at all: it just read the disk.
  *
  * Constructed without a store, every method is the pre-change behaviour
@@ -32,12 +36,32 @@
 import type { DirListing } from '../../shared/types'
 import { DerivedLayers } from './layers'
 import type { Library } from './library'
-import { revalidateTree, walkFlat } from './listing'
+import { RevalidationError, revalidateTree, walkFlat } from './listing'
 import type { SnapshotStore } from './snapshot'
 
+/**
+ * How long a completed pass's verdict stands before the root is treated as
+ * unchecked again — the bounded staleness cadence (review finding 1).
+ *
+ * Validation is a fact about the *disk*, and the disk moves under a server that
+ * is not watching it: without this, a process left running for a week would
+ * serve its first-hour snapshot unmarked forever, and nothing but a restart or
+ * an explicit reload would ever look again. Ten seconds is the order of
+ * magnitude the library's own `NESTED_RECHECK_MS` (5 s) already set for
+ * "re-ask the filesystem, but not per request": the cost of being wrong is one
+ * incremental pass (one `stat` per directory), and the cost of asking too often
+ * is the same pass on a spinning volume, so the constant sits an order of
+ * magnitude below a human's patience and an order above a request burst.
+ */
+export const REVALIDATE_TTL_MS = 10_000
+
 export class ListingCache {
-  /** Roots this process has checked against the filesystem. */
-  private readonly validated = new Set<string>()
+  /**
+   * When this process last completed a pass for a root — a *timestamp*, not a
+   * membership: a stamp older than `REVALIDATE_TTL_MS` is no better than never
+   * having checked, and is served marked while a fresh pass runs.
+   */
+  private readonly validatedAt = new Map<string, number>()
   /**
    * The revalidation pass running for a root, so two never run at once. Carries
    * the pass's answer — whether anything moved — so a reload (§6.6) that joins
@@ -57,6 +81,13 @@ export class ListingCache {
      * what its own proxy answers and peeks have derived.
      */
     readonly layers: DerivedLayers = new DerivedLayers(),
+    /**
+     * The clock the TTL is measured on. A seam, not a knob: the cadence is only
+     * observable by letting time pass, and a suite that slept ten seconds per
+     * cell would be paying the constant rather than testing it. Production
+     * passes nothing.
+     */
+    private readonly now: () => number = Date.now,
   ) {}
 
   /**
@@ -74,23 +105,28 @@ export class ListingCache {
     if (store === undefined) return (await walkFlat(library, libPath, query, opts)).listing
 
     const pending = this.inFlight.get(libPath)
-    if (pending !== undefined) {
-      // Someone else is already asking the disk. Waiting costs the incremental
-      // pass and buys a *checked* answer, which is strictly better than
-      // answering stale and starting a second pass behind it.
-      await pending
-      return (await walkFlat(library, libPath, query, opts, store)).listing
-    }
+    // Someone else is already asking the disk. Waiting costs the incremental
+    // pass and buys a *checked* answer, which is strictly better than answering
+    // stale and starting a second pass behind it.
+    //
+    // Awaited, then dropped through to the ordinary decision below rather than
+    // served unmarked outright (review finding 6): a pass can end without
+    // validating anything — the volume-gone early return, a failed invalidate —
+    // and the stamp is the only thing that knows which happened. Falling
+    // through is also why this is not a loop: the decision below either serves
+    // (fresh stamp) or marks and kicks a new pass (no stamp), and never waits
+    // again.
+    if (pending !== undefined) await pending
 
     const walked = await walkFlat(library, libPath, query, opts, store)
     if (!walked.fromSnapshot) {
       // A walk that saw the whole tree has just checked the disk, and is what
       // wrote the snapshot; nothing is owed. A truncated one wrote nothing, so
       // there is no snapshot to be stale about either.
-      if (!walked.budgetExhausted) this.validated.add(libPath)
+      if (!walked.budgetExhausted) this.stamp(libPath)
       return walked.listing
     }
-    if (this.validated.has(libPath)) return walked.listing
+    if (this.isValidated(libPath)) return walked.listing
     void this.start(library, libPath)
     walked.listing.stale = true
     return walked.listing
@@ -112,9 +148,19 @@ export class ListingCache {
     return await (this.inFlight.get(root) ?? this.start(library, root))
   }
 
-  /** Whether this process has checked `root` against the filesystem. */
+  /**
+   * Whether this process has checked `root` against the filesystem *recently
+   * enough* — within `REVALIDATE_TTL_MS`. An older stamp is not a weaker yes:
+   * it is a no, and the serve that reads it is marked and re-runs the pass.
+   */
   isValidated(root: string): boolean {
-    return this.validated.has(root)
+    const at = this.validatedAt.get(root)
+    return at !== undefined && this.now() - at < REVALIDATE_TTL_MS
+  }
+
+  /** Record that the disk has just been checked for `root`. */
+  private stamp(root: string): void {
+    this.validatedAt.set(root, this.now())
   }
 
   private start(library: Library, root: string): Promise<boolean> {
@@ -159,20 +205,41 @@ export class ListingCache {
       // keeps what it had — which is why this is driven from the pass's own
       // list rather than by dropping the layer whenever anything moved.
       for (const dir of pass.changedDirs) this.layers.noteDirChanged(dir)
-    } catch {
-      // A pass that could not be completed against a root that is *there*
-      // invalidates: the filesystem is authoritative and the cache loses
-      // (§4.3). A pass that failed because the volume went away is the other
-      // case entirely, and leaves the snapshot alone — and leaves the root
-      // unvalidated, so the pass runs again when the volume is back.
+    } catch (err) {
+      // Three failures, three answers (review finding 2). Ordered so the
+      // cheapest-to-be-wrong-about is decided first.
+      //
+      // 1. The volume went away. Not a contradiction at all: the snapshot is
+      //    left alone and the root left unvalidated, so the pass runs again
+      //    when the volume is back. Tested before the taxonomy below because a
+      //    departing volume *can* raise `RevalidationError` — a recorded
+      //    directory that is suddenly gone is exactly what an unmount looks
+      //    like from inside `levelFor`.
       if (!(await isReady(library))) return false
-      await store.invalidate(root).catch(() => undefined)
+      // 2. Anything else that is not a `RevalidationError` — the store's own
+      //    `save` failing on ENOSPC, a bug — is not the filesystem
+      //    contradicting the cache and must not be read as one. Nothing is
+      //    invalidated and nothing is stamped: the snapshot stays, serves
+      //    marked, and the pass is retried at the next cadence.
+      if (!(err instanceof RevalidationError)) return false
+      // 3. A pass that could not be completed against a root that is *there*
+      //    invalidates: the filesystem is authoritative and the cache loses
+      //    (§4.3).
+      try {
+        await store.invalidate(root)
+      } catch {
+        // The invalidate itself failed, so the contradicted snapshot is still
+        // on disk. Never stamp over that — a stamp would serve those very
+        // entries unmarked. Unvalidated means it is re-checked at the next
+        // serve and served marked until it can be.
+        return false
+      }
       // The snapshot is gone rather than corrected, so there is no "what moved"
-      // to report — and the root is still marked validated below, because this
-      // process has now checked it and the next serve is a walk.
+      // to report — and the root is stamped below, because this process has now
+      // checked it and the next serve is a walk.
       moved = false
     }
-    this.validated.add(root)
+    this.stamp(root)
     return moved
   }
 }

@@ -1,4 +1,12 @@
-import { chmodSync, mkdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  mkdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 import { zipSync } from 'fflate'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -7,8 +15,8 @@ import { ALL_FEATURES, createApp } from '../src/app'
 import { ThumbCache } from '../src/cache'
 import type { Library } from '../src/library'
 import { walkFlat } from '../src/listing'
-import { ListingCache } from '../src/listingCache'
-import { SnapshotStore } from '../src/snapshot'
+import { ListingCache, REVALIDATE_TTL_MS } from '../src/listingCache'
+import { SnapshotStore, type TreeSnapshot } from '../src/snapshot'
 import { listZipEntries } from '../src/zip'
 import { LOOPBACK, libraryFor, realTempDir, stlBytes } from './helpers'
 
@@ -602,6 +610,236 @@ describe('the staleness marker (§5.1)', () => {
       const res = await app.request(`/api/dir?path=${ROOT}&flat=true`, { headers: LOOPBACK })
       expect(((await res.json()) as DirListing).stale).toBeUndefined()
     }
+  })
+})
+
+describe('the validation stamp is time-bounded (§5.1, review finding 1)', () => {
+  it('re-marks and re-runs the pass once the stamp ages past the TTL', async () => {
+    const f = await fixture('lc-ttl')
+    await walkFlat(f.library, ROOT, undefined, {}, f.store)
+    // The clock is injected rather than slept through: the cadence is only
+    // observable by letting time pass, and ten seconds a cell is the constant
+    // being paid rather than tested.
+    let now = 1_000_000
+    const cache = new ListingCache(f.store, undefined, () => now)
+
+    expect((await cache.list(f.library, ROOT)).stale).toBe(true)
+    await cache.revalidate(f.library, ROOT)
+    expect((await cache.list(f.library, ROOT)).stale).toBeUndefined()
+
+    // Just inside the window: the pass's verdict still stands.
+    now += REVALIDATE_TTL_MS - 1
+    expect((await cache.list(f.library, ROOT)).stale).toBeUndefined()
+
+    // Past it, a stamp is no better than never having checked. The marker comes
+    // back and the pass runs again — which is the whole point of the cadence: a
+    // change made outside this process converges without a restart or a reload.
+    now += 1
+    writeFileSync(join(f.kit, 'a', 'late.stl'), stlBytes(12))
+    expect((await cache.list(f.library, ROOT)).stale).toBe(true)
+
+    await cache.revalidate(f.library, ROOT)
+    const after = await cache.list(f.library, ROOT)
+    expect(after.stale).toBeUndefined()
+    expect(after.entries.map((e) => e.name)).toContain('a/late.stl')
+  })
+})
+
+/**
+ * A store whose two write paths can be made to reject on demand — the failures
+ * §4.3's taxonomy has to tell apart, which no fixture on disk produces: a full
+ * disk and a read-only cache directory are not things a test can arrange.
+ * Subclassed rather than hand-rolled so everything not being failed is the real
+ * store, doing real I/O.
+ */
+class FlakyStore extends SnapshotStore {
+  failSave = false
+  failInvalidate = false
+
+  override async save(snapshot: TreeSnapshot): Promise<void> {
+    if (this.failSave) {
+      throw Object.assign(new Error('ENOSPC: no space left on device, open'), { code: 'ENOSPC' })
+    }
+    await super.save(snapshot)
+  }
+
+  override async invalidate(root: string): Promise<void> {
+    if (this.failInvalidate) {
+      throw Object.assign(new Error('EROFS: read-only file system, unlink'), { code: 'EROFS' })
+    }
+    await super.invalidate(root)
+  }
+}
+
+describe("the pass's failure taxonomy (§4.3, review finding 2)", () => {
+  it('keeps the snapshot and stamps nothing when the store itself cannot be written', async () => {
+    const f = await fixture('lc-ensopc')
+    const store = new FlakyStore(f.base, undefined, f.library)
+    await walkFlat(f.library, ROOT, undefined, {}, store)
+    const cache = new ListingCache(store)
+
+    // A full disk is not the filesystem contradicting the cache. The pass saw
+    // the tree perfectly well; it is the *store* that failed, and reading that
+    // as a contradiction would throw away a correct snapshot on an ENOSPC.
+    store.failSave = true
+    expect(await cache.revalidate(f.library, ROOT)).toBe(false)
+    store.failSave = false
+
+    expect(await store.load(ROOT)).not.toBeNull()
+    // And unstamped, so the serve is still marked and the pass is retried at
+    // the next cadence rather than being declared done.
+    expect(cache.isValidated(ROOT)).toBe(false)
+    expect((await cache.list(f.library, ROOT)).stale).toBe(true)
+  })
+
+  it('leaves a root unvalidated when the invalidate it needed itself failed', async () => {
+    const f = await fixture('lc-erofs')
+    const store = new FlakyStore(f.base, undefined, f.library)
+    await walkFlat(f.library, ROOT, undefined, {}, store)
+    const cache = new ListingCache(store)
+
+    // A genuine contradiction — a recorded folder that changed and can no
+    // longer be read — whose invalidate cannot land.
+    fs.failReaddir = join(f.kit, 'a')
+    writeFileSync(join(f.kit, 'a', 'added.stl'), stlBytes(9))
+    store.failInvalidate = true
+    try {
+      await cache.revalidate(f.library, ROOT)
+    } finally {
+      fs.failReaddir = null
+      store.failInvalidate = false
+    }
+
+    // The contradicted snapshot is still on disk, because the removal failed.
+    // Stamping over that would serve those very entries unmarked; unvalidated
+    // is what keeps them marked until the removal can be retried.
+    expect(await store.load(ROOT)).not.toBeNull()
+    expect(cache.isValidated(ROOT)).toBe(false)
+  })
+
+  it('answers the listing it computed when the request-path save fails', async () => {
+    const f = await fixture('lc-save-500')
+    const store = new FlakyStore(f.base, undefined, f.library)
+    store.failSave = true
+    const app = createApp(
+      new ThumbCache(tempDir('mb-lc-thumbs-')),
+      undefined,
+      undefined,
+      f.library,
+      undefined,
+      ALL_FEATURES,
+      store,
+    )
+
+    const res = await app.request(`/api/dir?path=${ROOT}&flat=true`, { headers: LOOPBACK })
+    // Not a 500 — and not a 500 whose body carries an errno and the cache
+    // directory's filesystem path, which is a probe of the machine besides.
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as DirListing
+    // Complete, not merely present: the walk had already finished when the
+    // save failed, so nothing about the answer is owed to the cache.
+    const control = await walkFlat(f.library, ROOT)
+    expect(body.entries.map((e) => e.name)).toEqual(control.listing.entries.map((e) => e.name))
+    expect(body.truncated).toBeUndefined()
+  })
+})
+
+describe('a permission change moves no mtime (§4.3, review finding 4)', () => {
+  /** `access` always succeeds for root, so these two cells assert nothing there. */
+  const asRoot = process.getuid?.() === 0
+
+  it.skipIf(asRoot)('detects a recorded models-only folder that has become unreadable', async () => {
+    const f = await fixture('lc-chmod-leaf')
+    await walkFlat(f.library, ROOT, undefined, {}, f.store)
+    const cache = new ListingCache(f.store)
+
+    // `z` holds one model and no subdirectory, so there is nothing inside it
+    // for `walkFsLevel`'s `realpath` to trip over — and `chmod` moves no mtime,
+    // so the reuse branch would serve its recorded child forever.
+    const leaf = join(f.kit, 'z')
+    chmodSync(leaf, 0o000)
+    try {
+      await cache.revalidate(f.library, ROOT)
+    } finally {
+      chmodSync(leaf, 0o755)
+    }
+    expect(await f.store.load(ROOT)).toBeNull()
+  })
+
+  it.skipIf(asRoot)('detects a walked root left executable but no longer readable', async () => {
+    const f = await fixture('lc-chmod-root')
+    await walkFlat(f.library, ROOT, undefined, {}, f.store)
+    const cache = new ListingCache(f.store)
+
+    // The other half of the same blindness: with `x` intact every child's
+    // `realpath` still resolves, so the existing chmod-000 cell's detection
+    // path is not reached — only the root's own `readdir` would fail, and the
+    // reuse branch never makes one.
+    chmodSync(f.kit, 0o311)
+    try {
+      await cache.revalidate(f.library, ROOT)
+    } finally {
+      chmodSync(f.kit, 0o755)
+    }
+    expect(await f.store.load(ROOT)).toBeNull()
+  })
+})
+
+describe('the pass keeps the snapshot internally consistent (review finding 5)', () => {
+  it("refreshes a changed directory's own entry, not just the directory record", async () => {
+    const f = await fixture('lc-dir-entry-mtime')
+    await walkFlat(f.library, ROOT, undefined, {}, f.store)
+    const cache = new ListingCache(f.store)
+    const before = (await f.store.load(ROOT))!.entries.find((e) => e.name === 'a')!.mtime
+
+    // Far enough apart that the two stamps cannot coincide, so the cell is not
+    // vacuously green on a coarse clock.
+    await new Promise((r) => setTimeout(r, 20))
+    writeFileSync(join(f.kit, 'a', 'added.stl'), stlBytes(9))
+    await cache.revalidate(f.library, ROOT)
+
+    const stored = await f.store.load(ROOT)
+    const entry = stored!.entries.find((e) => e.name === 'a')!
+    expect(entry.mtime).not.toBe(before)
+    // The tile's own mtime and the directory record are the same fact, and the
+    // pass has just stat'd it: a snapshot that carried the old one in the entry
+    // and the new one in `dirs` would serve a stamp it knew was wrong.
+    expect(entry.mtime).toBe(statSync(join(f.kit, 'a')).mtimeMs)
+    expect(stored!.dirs.find((d) => d.path === '/kit/a')!.mtime).toBe(entry.mtime)
+  })
+})
+
+describe('a request that waited on a pass takes the ordinary decision (review finding 6)', () => {
+  it('is marked when the pass it waited for exited through the volume-gone return', async () => {
+    const f = await fixture('lc-await-nopass')
+    await walkFlat(f.library, ROOT, undefined, {}, f.store)
+    const cache = new ListingCache(f.store)
+
+    // The pass is held at the readiness check it makes before touching the
+    // disk, and then told the volume is gone — the early return that leaves the
+    // snapshot alone and validates nothing.
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const gated = delegate(f.library, {
+      state: async () => {
+        await gate
+        return { state: 'missing', root: f.top }
+      },
+    })
+
+    const first = await cache.list(gated, ROOT)
+    expect(first.stale).toBe(true)
+
+    const second = cache.list(gated, ROOT)
+    await new Promise((r) => setTimeout(r, 20))
+    release()
+
+    // Serving this unmarked would be the awaiter claiming a check that never
+    // happened, and the client's follow-up would stop asking.
+    expect((await second).stale).toBe(true)
+    expect(cache.isValidated(ROOT)).toBe(false)
   })
 })
 
