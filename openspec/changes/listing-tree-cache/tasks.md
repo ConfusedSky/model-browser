@@ -418,6 +418,18 @@
       falsified by removing the branch: `expected "spy" to not be called at
       all, but actually been called 1 times`
 
+- [x] 6.8a Review of 6.8 (288f55a, low round): three fixes landed — nested preview
+      cells now take display names (`applyDisplayNames` recurses into
+      `entry.preview`, and BOTH /api/dir branches annotate before naming, since
+      naming-first walked a preview that did not exist yet; route-level cell
+      falsified `expected undefined to be 'Kindle Cleric'`); the carried land is
+      inlined and keeps its in-flight marker (the synchronous delete opened a
+      same-batch re-entry window — churn, not I/O; per-listing clearing resets
+      the marker); the per-peek O(listing) find is a WeakMap memo per listing
+      identity. Finding "carried cells stripped of pose/thumb" was REFUTED
+      against source: a5ed10d's emission-side `annotate(preview)` attaches both.
+      Carried-choice staleness accepted as the recorded layer-lifecycle class
+
 ## 7. Tests
 
 - [x] 7.1 Server: cached and walked responses are entry-for-entry identical on an unchanged tree (including ordering and truncation); one cached tree serves several different queries and both settings of the folder-matching option without re-traversing (instrument the walk, do not infer from timing); a second walk opens no archives; adding, removing, and renaming a model is picked up; a present-but-unreadable root invalidates rather than serving; the same tree reached at a different mountpoint under the same library is a **hit**; an unmounted library answers `missing` and leaves the snapshot in place; the on-disk format version invalidates a stale snapshot

@@ -437,13 +437,19 @@ export function createApp(
       // and owns the `stale` marker; with no store behind it this is `listFlat`
       // and nothing else.
       const listing = await listings.list(library, libPath, q, { folderMatching })
-      applyDisplayNames(listing.entries, await overrides.store())
+      // Annotation first, names second: `annotate` may attach a dir entry's
+      // preview cells, which are model tiles the naming pass must also reach
+      // (it recurses into `entry.preview`) — named before annotation, a carried
+      // sheet would show raw filenames where a fresh peek shows the stored
+      // name (288f55a's review, finding 1).
       annotate(listing.entries)
+      applyDisplayNames(listing.entries, await overrides.store())
       return c.json(listing)
     }
     const listing = await listDir(library, libPath)
-    applyDisplayNames(listing.entries, await overrides.store())
+    // Same order as the flat branch, for its reason.
     annotate(listing.entries)
+    applyDisplayNames(listing.entries, await overrides.store())
     return c.json(listing)
   })
 

@@ -528,6 +528,24 @@ describe('display names ride the listing', () => {
     expect(named(entries, '/kit/sub/y.stl').displayName).toBeUndefined()
   })
 
+  it('labels the cells of a carried preview like the models beside their folder', async () => {
+    // The preview annotation carries model tiles, and the layer records them
+    // pre-naming on purpose — so the naming pass must reach the nested array
+    // at emission, or a carried sheet shows the raw filename where a fresh
+    // peek shows the stored name (288f55a's review, finding 1).
+    resetIndexStatus()
+    const libTop = fixtureLibrary()
+    storeAt(libTop, NAMES)
+    const app = appOn(libTop)
+    // The peek derives and records the choice; the next listing carries it.
+    await app.request('/api/peek?path=/kit', { headers: LOOPBACK })
+    const res = await app.request('/api/dir?path=/', { headers: LOOPBACK })
+    const listing = (await res.json()) as DirListing
+    const kit = named(listing.entries, '/kit')
+    expect(kit.preview).toBeDefined()
+    expect(named(kit.preview!, '/kit/x.stl').displayName).toBe('Kindle Cleric')
+  })
+
   it('labels an entry inside an archive', async () => {
     const libTop = fixtureLibrary()
     storeAt(libTop, NAMES)

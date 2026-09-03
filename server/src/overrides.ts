@@ -288,6 +288,14 @@ export function applyDisplayNames(entries: DirEntry[], store: OverrideStore): vo
   for (const entry of entries) {
     const name = displayNameOf(store, entry.path)
     if (name !== undefined) entry.displayName = name
+    // A dir entry may carry its contact sheet inline (`listing-tree-cache`
+    // 6.3's preview annotation), and those cells are model tiles the client
+    // labels exactly like the models beside their folder — `displayName ??
+    // name`, library-overrides D7. The layer records pre-naming copies on
+    // purpose ("never how they were labelled on one request"), so the naming
+    // pass is this one, here, or a carried sheet shows the raw filename where
+    // a fresh `/api/peek` answer shows the stored name (288f55a's review).
+    if (entry.preview !== undefined) applyDisplayNames(entry.preview, store)
   }
 }
 
