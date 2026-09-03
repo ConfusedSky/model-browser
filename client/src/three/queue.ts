@@ -94,8 +94,25 @@ export class RenderQueue {
   /** Install (or clear, with null) the gate far work is taken under. */
   setFarGate(open: (() => boolean) | null): void {
     this.farGate = open
-    this.gateClosedSince = null
+    this.releaseHold()
     this.pump()
+  }
+
+  /**
+   * Far work is not being held right now: forget the bound's clock and the
+   * timer that would have re-pumped at its end. Called whenever a take passes
+   * without skipping a far job — the gate read open, or there was no far job
+   * to hold — so the clock measures a *contiguous* run of held far work. Left
+   * running across a gap (far work retired by a navigation, new far work
+   * pushed later), the clock would already have expired and the next far job
+   * would dispatch at once with a nearer lookup still pending (review R1).
+   */
+  private releaseHold(): void {
+    this.gateClosedSince = null
+    if (this.gateTimer !== null) {
+      clearTimeout(this.gateTimer)
+      this.gateTimer = null
+    }
   }
 
   /**
@@ -159,11 +176,7 @@ export class RenderQueue {
     this.ranking = new Map()
     this.farGate = null
     this.settleFn = null
-    this.gateClosedSince = null
-    if (this.gateTimer !== null) {
-      clearTimeout(this.gateTimer)
-      this.gateTimer = null
-    }
+    this.releaseHold()
   }
 
   suspend(): void {
@@ -201,7 +214,7 @@ export class RenderQueue {
    */
   private farAllowed(): boolean {
     if (this.farGate === null || this.farGate()) {
-      this.gateClosedSince = null
+      this.releaseHold()
       return true
     }
     const now = Date.now()
@@ -250,6 +263,9 @@ export class RenderQueue {
       }
       i++
     }
+    // Nothing far was held this pass — there was no far job to hold, or the
+    // gate let it through — so the bound's clock is not running.
+    if (farAllowed !== false) this.releaseHold()
     if (bestAt === -1) return undefined
     const job = this.jobs[bestAt]!
     this.jobs.splice(bestAt, 1)

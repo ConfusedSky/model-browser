@@ -411,7 +411,7 @@ export class ThumbCache {
    */
   async image(path: string, mtime: number, ao = true): Promise<{ gen: number; png?: Buffer }> {
     const { body, png } = await this.read(path, mtime, ao)
-    return png === undefined ? { gen: body.gen ?? 0 } : { gen: body.gen ?? 0, png }
+    return { gen: body.gen ?? 0, png }
   }
 
   /** The read both `get` and `image` are: the answer, and the raw bytes on a hit. */

@@ -444,12 +444,14 @@ export function useThumbnails(
     slot.refusedGen = slot.entry.thumb?.gen
     slot.url = undefined
     retire(slot)
-    // The lookup path never answers synchronously, so this seed is not raced
-    // by anything `start` writes (D3's ordering, from the other side).
-    const seeded = startRef.current(slot.entry, slot)
+    // The restart can only take the lookup path — the refusal just recorded
+    // is what its annotation branch checks against — and a lookup never
+    // answers synchronously, so this seed is raced by nothing `start` writes
+    // (D3's ordering, from the other side).
+    startRef.current(slot.entry, slot)
     setThumbs((prev) => {
       const next = new Map(prev)
-      next.set(path, seeded ?? { status: 'loading' })
+      next.set(path, { status: 'loading' })
       return next
     })
   }, [])
@@ -764,10 +766,11 @@ export function useThumbnails(
         // Removals first: a same-path new-mtime entry is a removal *then* an
         // addition on one key, and the addition has to win.
         for (const path of removed) next.delete(path)
+        for (const path of added) next.set(path, { status: 'loading' })
         // The listing's own answers land in this same updater, after the
-        // placeholders, so nothing can seed `loading` over a tile the
-        // listing has already drawn (D3/F1).
-        for (const path of added) next.set(path, answered.get(path) ?? { status: 'loading' })
+        // placeholders — added entries and restarted survivors alike — so
+        // nothing can seed `loading` over a tile the listing has already
+        // drawn (D3/F1).
         for (const [path, state] of answered) next.set(path, state)
         return next
       })

@@ -277,6 +277,21 @@ time-bounded inside the queue: once it has read closed for `FAR_GATE_MAX_MS`
 (a few seconds — tuned in 6.2, above the measured worst lookup of 3.7 s)
 `take` dispatches far work regardless, and the bound is stated in the spec.
 
+**The reset window.** Every navigation applies an empty ranking to both
+queues (D4), so until the grid publishes its first bands every pending
+lookup is *unreported* — nearer than far by definition — and the gate reads
+"any lookup pending" for exactly the window in which a fresh listing's
+cached tiles are filling. F8's nearer-than-far refinement bites only once
+bands are in; that is the right order (review R10).
+
+**Contiguous hold.** The bound's clock measures a contiguous run of held far
+work: it resets whenever a take passes without holding a far job — the gate
+read open, or there was nothing far to hold. Left running across a gap (a
+navigation retires the far jobs; new far work is pushed after the bound),
+the clock would already have expired and the new job would dispatch at once
+under a closed gate, defeating the gate until some take happened to read it
+open (review R1, verified under Bun with a faked clock).
+
 **Mechanics.** `pending` counts live jobs — husks are spliced only inside
 `take`, so it must not be `jobs.length + running`. The settle signal is
 `onSettle`, fired after **every** job finishes and after the decrement, not
@@ -356,7 +371,30 @@ tile in a test knows where to look.
 | F24 | *(found implementing §0)* Holding far lookups contradicts main's "consulted at once whatever its position" — a far tile would keep its old recipe until approached; a cell failed on it | **Decided** (D0): ranked last, not held; the disk reads are D1–D3's to remove |
 | — | Blocking understated | **Fixed** (tasks header): which halves can start today |
 
+### D9: Implementation review (2026-09-02, opus, on `a5ed10d`/`7c42aad`/`f65299f`)
+
+| # | Finding | Disposition |
+|---|---|---|
+| R1 | The far gate's bound clock survived a gap in held far work; new far work pushed after the bound dispatched at once under a closed gate | **Fixed** (D5 *Contiguous hold*): `releaseHold` on every take that holds nothing; cell "the bound measures a contiguous hold" |
+| R2 | The image route is the first cross-origin-embeddable resource; `guard.ts` said none existed — a foreign page's `<img>` as an existence oracle | **Fixed**: `Cross-Origin-Resource-Policy: same-origin` on the image response, asserted in its cell; `guard.ts`'s rationale amended |
+| R3 | The delta's "a different generation SHALL be re-evaluated" was the literal rule D3 rejected | **Fixed** (delta): the implemented rule, absence included |
+| R4 | 6.2's "4 lookups" depends on a warm server: the fact index is per process | **Recorded** (6.2 precondition, Risks) |
+| R5 | `reportImageError`'s re-seed branch was dead | **Fixed**: `start` called for its side effect, `loading` written |
+| R6 | The sweep's batch wrote answered states twice | **Fixed** |
+| R7 | `persistPut.test.tsx` still stubbed `URL` as a spread copy, firing four spurious image errors per run | **Fixed**: subclass form |
+| R8 | Five test comments falsified by the subclass stub | **Fixed** where found (`viewerCredits`, `viewerMenu`, `viewerPanelActions`) |
+| R9 | `gateTimer` survived `setFarGate(null)` | **Fixed**: `releaseHold` on gate removal |
+| R10 | Task 4.3's fifth cell pinned counting, not wiring; the reset window makes the gate "any lookup pending" until bands publish | **Fixed**: the settle cell carries a pending far lookup; D5 *The reset window* |
+| R11 | `image`'s conditional spread; `new Uint8Array(png)` copied every PNG | **Fixed**: `{ gen, png }`, `c.body(png)` |
+| R12 | `ThumbView` hid good pixels behind a spinner when a tile moved from `blob:` back to an image URL | **Fixed**: the placeholder only until the first picture this view has shown |
+
 ## Risks / Trade-offs
+
+- [The fact index is per process] → the first listing of a directory after
+  a server start, before the startup sweep has read its sidecars, costs the
+  full lookup storm; the annotation appears once that process has read the
+  entries (review R4). Recorded, not mitigated: warming is
+  `listing-tree-cache`'s sweep, and a persisted index is its D7's note.
 
 - [An entry evicted between emission and fetch] → 404; `onImageError(path)`
   demotes the entry to the lookup path once per generation (D3).

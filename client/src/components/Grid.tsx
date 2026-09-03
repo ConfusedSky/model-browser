@@ -390,12 +390,16 @@ function ThumbView({
   path: string
   onImageError?: (path: string) => void
 }) {
-  // Which image URL has arrived. An image drawn from the listing is fetched
-  // lazily by the browser, so until its `load` the placeholder stays up over
-  // the declared box — a visible cached tile shows a spinner then the
-  // picture, never a blank square. A `blob:` URL is bytes the client already
-  // holds and draws at once, exactly as before.
-  const [loaded, setLoaded] = useState<string | null>(null)
+  // Whether this view has ever shown a picture. An image drawn from the
+  // listing is fetched lazily by the browser, so until its `load` the
+  // placeholder stays up over the declared box — a visible cached tile shows
+  // a spinner then the picture, never a blank square. Only until the *first*
+  // picture, though: once one is up, a later URL — a `blob:` re-render, a
+  // re-vouched image URL at a new generation — replaces it when it arrives
+  // and the browser keeps the old pixels showing meanwhile, so hiding them
+  // behind a spinner would discard a picture already on screen (review R12).
+  // A `blob:` URL is bytes the client already holds and draws at once.
+  const [everLoaded, setEverLoaded] = useState(false)
   if (thumb?.status === 'error') {
     return (
       <span className="text-2xl" title="Failed to load model">
@@ -405,7 +409,7 @@ function ThumbView({
   }
   if (thumb?.url !== undefined) {
     const url = thumb.url
-    const pending = !url.startsWith('blob:') && loaded !== url
+    const pending = !url.startsWith('blob:') && !everLoaded
     return (
       // The box is declared — a square the height of the content area — so
       // `overlayRectFor` measures a real rect before a lazy image has any
@@ -418,7 +422,7 @@ function ThumbView({
           draggable={false}
           loading="lazy"
           decoding="async"
-          onLoad={() => setLoaded(url)}
+          onLoad={() => setEverLoaded(true)}
           onError={() => onImageError?.(path)}
           className={`aspect-square h-full max-w-full object-contain${pending ? ' opacity-0' : ''}`}
         />

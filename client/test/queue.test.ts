@@ -274,23 +274,58 @@ describe('RenderQueue far gate', () => {
   })
 
   it('settles after the decrement, so a gate read from the settle sees the job gone', async () => {
-    const lookups = new RenderQueue(1)
+    const lookups = new RenderQueue(2)
     const renders = new RenderQueue(1)
     const ran: string[] = []
-    lookups.setRanking(ranking({ look: 'near' }))
+    lookups.setRanking(ranking({ look: 'near', farLook: 'far' }))
     renders.setRanking(ranking({ far: 'far' }))
     renders.setFarGate(() => lookups.pendingNearerThanFar() === 0)
     lookups.onSettle(() => renders.poke())
     const look = held(ran, 'look')
+    // A far-ranked lookup pending throughout: nobody's wait, so it must not
+    // hold the drain (the delta's *Far lookups do not hold the drain*).
+    const farLook = held(ran, 'farLook')
     lookups.push(look.run, 'look')
+    lookups.push(farLook.run, 'farLook')
     await tick()
     renders.push(recorder(ran, 'far'), 'far')
     await tick()
-    expect(ran).toEqual(['look']) // held: a nearer lookup is pending
+    expect(ran).toEqual(['look', 'farLook']) // held: a nearer lookup is pending
     look.release()
     await tick()
     await tick()
-    expect(ran).toEqual(['look', 'far']) // resumed on its own, no push, no scroll
+    // Resumed on its own — no push, no scroll — with the far lookup still
+    // pending.
+    expect(ran).toEqual(['look', 'farLook', 'far'])
+    farLook.release()
+  })
+
+  it('the bound measures a contiguous hold: far work retired and pushed again later is held afresh', async () => {
+    // Review R1. The clock started when far work was first held; if it kept
+    // running across a gap — the far job retired by a navigation, new far
+    // work pushed after the bound — the new job would dispatch at once with
+    // a nearer lookup still pending, and the gate would be defeated until
+    // some take happened to read it open.
+    vi.useFakeTimers()
+    try {
+      const queue = new RenderQueue(1)
+      const ran: string[] = []
+      queue.setFarGate(() => false)
+      queue.setRanking(ranking({ far1: 'far', far2: 'far' }))
+      const cancel = queue.push(recorder(ran, 'far1'), 'far1')
+      await vi.advanceTimersByTimeAsync(FAR_GATE_MAX_MS / 2)
+      expect(ran).toEqual([])
+      cancel() // retired; the next take finds nothing far to hold
+      queue.poke()
+      await vi.advanceTimersByTimeAsync(FAR_GATE_MAX_MS)
+      queue.push(recorder(ran, 'far2'), 'far2')
+      await vi.advanceTimersByTimeAsync(FAR_GATE_MAX_MS - 1)
+      expect(ran).toEqual([]) // held for its own full bound, not the remainder of a stale one
+      await vi.advanceTimersByTimeAsync(2)
+      expect(ran).toEqual(['far2'])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('releases far work after the bound when the gate never opens', async () => {

@@ -738,6 +738,9 @@ describe('thumbnail cacheability', () => {
       expect(res.status).toBe(200)
       expect(res.headers.get('content-type')).toBe('image/png')
       expect(res.headers.get('x-content-type-options')).toBe('nosniff')
+      // The first embeddable resource this server serves: a foreign page's
+      // `<img>` must not be able to use it as an existence oracle.
+      expect(res.headers.get('cross-origin-resource-policy')).toBe('same-origin')
       const bytes = Buffer.from(await res.arrayBuffer())
       expect(bytes.equals(Buffer.from(json.png!, 'base64'))).toBe(true)
     })

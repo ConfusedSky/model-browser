@@ -1162,7 +1162,19 @@ export function createApp(
     if (thumbHitTiers(c, gen)) return c.body(null, 304)
     c.header('Content-Type', 'image/png')
     c.header('X-Content-Type-Options', 'nosniff')
-    return c.body(new Uint8Array(png))
+    // The one resource this server serves that a foreign page *could* embed:
+    // an `<img src>` sends no Origin, so the same-origin guard lets it
+    // through, and unlike model bytes this is a real image type. Without this
+    // header any page the user visits could use `onload`/`onerror` on a
+    // guessed URL as an existence oracle for a cached thumbnail (the pixels
+    // stay unreadable — the canvas taints). Browsers enforce it on no-cors
+    // loads, which is exactly the case the guard cannot see (`guard.ts`).
+    c.header('Cross-Origin-Resource-Policy', 'same-origin')
+    // A view over the Buffer's own bytes, not a copy (review R11): Hono's body
+    // types take a `Uint8Array<ArrayBuffer>`, and a Node Buffer is one — its
+    // backing store is never shared — but `tsc` types `.buffer` as
+    // `ArrayBufferLike`, hence the cast.
+    return c.body(new Uint8Array(png.buffer as ArrayBuffer, png.byteOffset, png.byteLength))
   })
 
   app.put('/api/thumb', async (c) => {

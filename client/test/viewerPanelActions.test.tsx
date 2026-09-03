@@ -496,7 +496,8 @@ describe('a panel action that changes the view', () => {
 describe('reset framing from the panel', () => {
   /**
    * Deep-linked rather than pointer-opened: this lightbox closes without
-   * `history.back`, which the harness's stubbed URL cannot survive.
+   * `history.back`, which the suite plays by hand rather than through the
+   * browser (client/test/CLAUDE.md).
    */
   async function openStoredModel(beforeMount: () => void = () => {}): Promise<void> {
     await unmountApp()

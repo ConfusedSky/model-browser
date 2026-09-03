@@ -1,6 +1,6 @@
 # Tasks — thumbnail-image-serving
 
-> **Landed:** §0 (2026-09-02, `5bf35a5`); §1 and 5.2 (`a5ed10d`); §2, §4, §5 (`7c42aad`); 6.2/6.3 measured. Nothing open but the review. **What can start today:** §1.1–1.2 and §4 depend on nothing unlanded
+> **Landed:** §0 (2026-09-02, `5bf35a5`); §1 and 5.2 (`a5ed10d`); §2, §4, §5 (`7c42aad`); 6.2/6.3 measured. Reviewed (design D9), findings folded in. **What can start today:** §1.1–1.2 and §4 depend on nothing unlanded
 > — only `immutable-thumbnail-serving` (archived 2026-09-02). **What waits on
 > `listing-tree-cache` §6:** 1.3, 1.4, 2.2's annotation branch, 2.5, 5.1's
 > annotated cells, 5.3, and 6.2's revisit measurement. That change's 6.3
@@ -192,7 +192,14 @@
         not in a loop (the tile and its folder-sheet twin, plus React's
         development double-mount) — recorded, not tuned
       `FAR_GATE_MAX_MS` stays **5000 ms**: the worst lookup this run saw was
-      far below it and the baseline's 3.7 s worst is the figure it clears
+      far below it and the baseline's 3.7 s worst is the figure it clears.
+      **Precondition (review R4):** every number above is against a server
+      process that had already read those entries — `ThumbCache`'s fact
+      index is per process and warmed only by its own reads, writes and the
+      startup `maintain()` sweep, so the first listing after a `bun run dev`
+      whose sweep has not yet covered the directory still costs the full
+      lookup storm. "A revisit costs zero bytes" is a browser revisit against
+      a warm server
 - [x] 6.3 With the far drain running — `/Bestarium` flat, 448 models of
       which 231 plain STLs up to 125 MB and almost none cached: 3 PUTs and
       5 mesh reads in its first 12 s, i.e. renders in flight — the cached
@@ -204,4 +211,8 @@
       fake-timer cell in `queue.test.ts` ("releases far work after the bound
       when the gate never opens"); it has no natural browser reproduction —
       a toggle that would re-issue lookups also retires every queued far
-      render — and is not claimed here
+      render — and is not claimed here. Review R1 found the bound's clock
+      surviving a gap in held far work (a navigation retires the far jobs;
+      new ones pushed after the bound dispatched at once under a closed
+      gate); the clock now resets whenever a take holds nothing, pinned by
+      "the bound measures a contiguous hold"
