@@ -4,7 +4,7 @@
 
 ### Requirement: One configuration file describes the deployment
 The server SHALL read a single configuration file describing the deployment it is part
-of — which library it opens, which capabilities it offers, which origin it answers, and
+of — which library it opens, which capabilities it offers, which origins it answers, and
 where it listens — from the location the `library` capability already names for the
 root, so that a deployment is described in one place rather than assembled from several.
 The file SHALL be read once at server start, as every configuration in this app is. It

@@ -7,10 +7,9 @@ The report SHALL carry a field per withholdable surface rather than one field st
 for several, so that a deployment states what it offers rather than which kind of
 deployment it is. It SHALL carry, beside the acceptance of thumbnail writes it already
 declares: whether the platform launcher is offered, whether the chat tab is offered,
-whether the operation of the semantic index is the viewer's concern, and whether the
-machine the server runs on is the viewer's concern — the last governing whether any
-route or surface may name a filesystem location or offer a remedy only an operator can
-perform. Each field SHALL
+whether the machine the server runs on is the viewer's concern — governing whether any
+route or surface may name a location on that machine or offer a remedy only an operator
+can perform — and whether maintenance operations against the library are offered. Each field SHALL
 carry its own default rather than every field defaulting on, and the defaults together
 SHALL be the configuration this project maintains (see `public-deployment`). The chat
 tab's default SHALL be off while the chat has no backend, so that an unfinished surface
@@ -53,6 +52,28 @@ wrong". Refusals SHALL NOT depend on any client having read the report.
 - **WHEN** a deployment's configuration is read
 - **THEN** the report it publishes and the refusals its routes make come from that one value
 
+### Requirement: A deployment may withhold maintenance operations
+Where a deployment declares that maintenance operations against the library are not
+offered, every route that performs one SHALL refuse. A maintenance operation is one that
+acts on the server's own derived state rather than answering a question about the library
+— dropping or rebuilding caches, revalidating what was walked, generating or resetting
+renders in bulk. These SHALL be refused at the routes rather than merely withheld from the
+client, because each is expensive, each acts for every viewer at once, and none of them is
+a thing a visitor has any standing to ask for. The client SHALL withhold the surfaces that
+launch them, as it withholds any surface a capability declares off.
+
+#### Scenario: A reload is refused
+- **WHEN** a request arrives to drop or revalidate the server's caches on such a deployment
+- **THEN** it is refused and no cache is dropped and no tree re-walked
+
+#### Scenario: The surfaces that launch them are absent
+- **WHEN** a viewer opens a surface that would offer a bulk or maintenance operation
+- **THEN** the offer is absent rather than present and inert
+
+#### Scenario: A personal installation keeps them
+- **WHEN** a deployment does not declare this
+- **THEN** every maintenance operation is available exactly as it is today
+
 ### Requirement: A deployment may declare its host none of the viewer's business
 Where a deployment declares that the machine it runs on is not the viewer's concern, no
 route and no surface SHALL name **a location on the machine the server runs on** — its
@@ -63,7 +84,11 @@ a library path names an entry within the library rather than a place on anyone's
 top, the locations named by a not-ready library state, any explanation an external
 service supplies verbatim, and any instruction to start, mount or re-run something on
 the host — because each of them describes a machine the viewer cannot reach and directs
-them to a repair that is not theirs. The declaration SHALL default to the host being the
+them to a repair that is not theirs. It SHALL therefore also govern how the conditions of
+a service the server depends on are reported, since those conditions are named by their
+remedies: conditions whose repair is an operator's SHALL be presented as one
+unavailability rather than told apart for someone who can act on none of them (see
+`semantic-search`). The declaration SHALL default to the host being the
 viewer's concern, since on a personal installation the viewer is the operator and these
 details are exactly what makes the app useful.
 

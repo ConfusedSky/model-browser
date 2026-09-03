@@ -40,10 +40,11 @@ reaches the client (design D6).
   still chooses which file is read.
 - **The guard takes its origin from configuration**, loopback remaining the default, and
   the bind host and port stop being literals in `index.ts`.
-- **Five capability fields, one per surface, each with its own default**: thumbnail
-  writes (on), the launcher (on), the chat tab (**off** — a placeholder with no backend),
-  the semantic states a visitor can do nothing about (collapsed), and whether the machine
-  the server runs on is the viewer's concern (it is, by default). The built-in set is
+- **Five capability fields, each with its own default**: `thumbWrites` (on), `appLaunch`
+  (on), `chatTab` (**off** — a placeholder with no backend), `hostDetails` (on) and
+  `maintenance` (on). A field is per *question a deployment answers*, not per widget:
+  `hostDetails` covers host locations, operator remedies and the index-state collapse
+  together, because an index condition is named by its remedy. The built-in set is
   the *maintained* configuration, whose audience is the distributed Electron app;
   authoring flags is the exceptional path.
 - **Every field is paired with refusal at the routes it describes**, from one source, as
@@ -66,6 +67,10 @@ reaches the client (design D6).
   printed, and nothing tells a viewer to start a service, mount a volume or run the
   classifier. Each of those is right for the user whose disk it is and wrong for a
   stranger; the default keeps today's behaviour.
+- **`POST /api/reload` stops being reachable by anyone.** It drops every cached layer and
+  revalidates each snapshot root, and nothing gates it; `listing-tree-cache` added it after
+  this change first enumerated the routes. It refuses under `maintenance`, the field
+  `bulk-thumbnail-jobs` will join rather than adding one of its own.
 - **`/api/apps` stops being a read.** It execs `xdg-mime` per model type on every request
   and reads the machine's application entries for their names, and it is ungated — so a
   withheld launcher must short-circuit it, not filter its result.
@@ -108,7 +113,8 @@ reaches the client (design D6).
   condition when the default preserves the base requirement, but here the unmodified
   requirement would be false for the shipped app.
 - `app-launch`: the launcher is withheld *and* its routes refuse.
-- `semantic-search`: the index states a visitor cannot act on are collapsed into one.
+- `semantic-search`: the index states a visitor cannot act on are collapsed into one,
+  under `hostDetails` rather than a field of its own.
 
 ## Impact
 
@@ -124,7 +130,8 @@ index-state rendering in `SidePanel`. All I/O continues through `ApiClient` (D1)
 surface learns a deployment kind, only capabilities.
 
 **Shared.** `FeatureReport` in `shared/types.ts` grows four fields; the library state's
-`top` becomes optional there.
+`top` becomes optional there. The configuration type carries a **list** of allowed
+origins, since one deployment may answer more than one name.
 
 **Ordering.** Hard ordering after `thumbnail-image-serving` (design D6).
 `bulk-thumbnail-jobs` also touches

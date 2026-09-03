@@ -41,8 +41,27 @@
       the built-in set being the supported/tested configuration rather than merely the
       initial one (chat off — see the `tabStore` fallback it breaks), preview paths on dir entries as
       the bake shape, and `models.masamaeda.com`.
-      Still open and carried as design questions, not blockers: the landing page's contents
-      (2.2), and the origin/CDN and host choices that gate 3.3
+      **Drafted 2026-09-02 as `public-deployment`** (commits `abe4fc3`, `5dd6096`,
+      `bd6b982`: two review rounds applied), which is the first of what is now six changes
+      — the others are 1.4–1.8 below. Still open and carried as design questions, not
+      blockers: the landing page's contents (2.2), and the origin/CDN and host choices
+      that gate 3.3
+
+- [ ] 1.4 the deployment's own infrastructure — reverse proxy, TLS, the container
+      definition, and how `deploy/demo/config.json` reaches the box (Masa, 2026-09-03: its
+      own ticket, separable from `public-deployment` and **writable and testable earlier**,
+      since it depends on nothing in the app). Not the app's configuration, which
+      `public-deployment` owns
+- [ ] 1.5 the landing page — its first task is Masa deciding the contents (2.2 settled
+      only that one exists)
+- [ ] 1.6 the context-menu actions — Download replacing Open-in/Open-with, Copy path
+      becoming Copy link. Note `native-context-menu-bypass` (another session's, active)
+      MODIFIES *A context menu on grid tiles*; declare ordering when this is drafted
+- [ ] 1.7 the corpus bake — preview paths attached to dir entries (the decided shape);
+      rides `listing-tree-cache` and `bulk-thumbnail-jobs`
+- [ ] 1.8 the credits page — go-live gate 3.2. `public-deployment`'s design recommends it
+      stand alone rather than ride the landing page, since CC-BY attribution should not
+      wait on copy decisions; **not yet confirmed**
 
 ## 2. Decisions to record in `docs/web-demo-notes.md` (answer + date on the item)
 
