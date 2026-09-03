@@ -514,7 +514,7 @@
       by driving the control, so it is a property of the app-mount harness and not of this
       change. The cell reads `poses[viewer.entry.path]` at the viewer handoff instead, which
       is the one place a carried pose and a wave-supplied one could differ and do not
-- [ ] 7.3 Layers (server): an index-generation bump stops pose/preview answers while the
+- [x] 7.3 Layers (server): an index-generation bump stops pose/preview answers while the
       tree keeps serving; a deep directory change re-derives its ancestors' preview
       choices and not an unchanged sibling's; emission with a wedged index is as fast as
       with none (instrument, don't time); no-layer listings byte-identical. Client: the
@@ -558,5 +558,22 @@
 
 ## 8. Verification
 
-- [ ] 8.1 `bun run typecheck` and `bun run test` pass across workspaces
-- [ ] 8.2 Re-run the proposal's measurement on **both** volumes with `vm.drop_caches` between runs, and record the numbers here: cold search on the spinning exfat volume should land near its warm figure (~0.8s) rather than ~32s. Report the revalidation cost separately — that is the one that scales with directory count and is the honest recurring price
+- [x] 8.1 `bun run typecheck` and `bun run test` pass across workspaces
+      — 2026-09-02 on the fully merged main (c27a99a): server 589 (18 files), client
+      685 (55 files), both typechecks exit 0, `openspec validate` clean
+- [x] 8.2 Re-run the proposal's measurement on **both** volumes with `vm.drop_caches` between runs, and record the numbers here: cold search on the spinning exfat volume should land near its warm figure (~0.8s) rather than ~32s. Report the revalidation cost separately — that is the one that scales with directory count and is the honest recurring price
+
+      — run 2026-09-02 (coordinator, curl against the hot-reloaded dev instance; page
+      cache dropped per volume by udisksctl unmount/mount, which needs no root — the
+      earlier sda2 numbers were discarded as wrong-volume, the library is on /dev/sdb1
+      ext4 USB): **cold bare search walk 1.33 s; cold WITH snapshot 46 ms to the
+      stale-marked answer (~29x), follow-up awaiting the cold incremental pass 0.70 s;
+      warm walk 49 ms; browse-after served unmarked from the search's snapshot in
+      56 ms** — that last one is the recorded budget asymmetry live (a browse whose own
+      walk is budget-truncated serves complete from the snapshot). The spinning-exfat
+      column is MISSING and recorded so per the preamble's rule: the configured library
+      does not live on that volume today (it holds an unrelated tree), so the ~32 s
+      motivating case could not be re-measured against a real configured library; the
+      1.1 exfat mtime validation on that volume stands separately. Revalidation cost
+      scales with this tree's directory count; re-measure on the exfat library when one
+      is configured there.
