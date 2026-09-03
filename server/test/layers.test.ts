@@ -15,12 +15,12 @@ import { join } from 'node:path'
 import { zipSync } from 'fflate'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DirEntry, DirListing, IndexPose, ModelsListing, ReloadResult } from '../../shared/types'
-import { ANNOTATION_BUDGET_MS, createApp } from '../src/app'
+import { ANNOTATION_BUDGET_MS, FILL_PREVIEW_MAX, createApp } from '../src/app'
 import { ThumbCache } from '../src/cache'
 import { DerivedLayers, LAYER_VERSION, POSE_ANNOTATION_TTL_MS } from '../src/layers'
 import type { Library } from '../src/library'
 import { ListingCache, REVALIDATE_TTL_MS } from '../src/listingCache'
-import { resetIndexStatus } from '../src/semantic'
+import { posesAsked, resetIndexStatus } from '../src/semantic'
 import { SnapshotStore } from '../src/snapshot'
 import { LOOPBACK, libraryFor, realTempDir, stlBytes } from './helpers'
 
@@ -248,11 +248,31 @@ describe('the pose layer rides the listing (§6.1, §6.3)', () => {
     // make a batch of its own. That is the feature, and asserting its absence
     // would have pinned the shape the revision removed. The claim that survives
     // — and the one the delta still makes — is per fact, not per listing.
-    for (const call of index.mock.calls.slice(asked)) {
-      const url = String(call[0])
-      if (!url.endsWith('/poses')) continue
-      const body = String((call[1] as RequestInit | undefined)?.body ?? '')
+    const after = index.mock.calls
+      .slice(asked)
+      .filter((c) => String(c[0]).endsWith('/poses'))
+      .map((c) => String((c[1] as RequestInit | undefined)?.body ?? ''))
+    // **Unconditional** (round-3 review, finding 7). A `for` loop over the
+    // batches this listing sent asserts nothing when there were none, and "there
+    // were none" is exactly what a fill that stopped running looks like — so the
+    // cell would have gone on passing over the feature's own corpse. The
+    // listing's other models are unposed, so a working fill sends batches, and
+    // this says so before it inspects them.
+    expect(after.length).toBeGreaterThan(0)
+    for (const body of after) {
+      // Two needles (finding 7), and their standing is not the same — recorded
+      // rather than glossed. The **real** path is the falsifiable one: it is
+      // what a `/poses` body carries, so a fill that re-asked about a model the
+      // layer already answered for puts it right here. The **library** path is
+      // the spelling the layer, the annotation and the client key this model
+      // under, and no defect could be built that fires it *alone*: this stub
+      // answers by realpath, so any batch that went out spelled the other way
+      // comes back empty and the carried-pose assertion above trips first
+      // (`expected null to deeply equal { up: … }`, both attempts). It is kept
+      // as the assertion that stays true rather than as coverage that was
+      // falsified — the honest label, since the two are not the same claim.
       expect(body).not.toContain(join(f.kit, 'loose.stl'))
+      expect(body).not.toContain(`${ROOT}/loose.stl`)
     }
     // The zero-call claim still has a home: it belongs to the states where the
     // probe gate is what stops the fill, and the two cells below are it.
@@ -291,7 +311,14 @@ describe('the pose layer rides the listing (§6.1, §6.3)', () => {
     await askPoses(s, ROOT)
 
     const listing = await listFlat(s)
-    expect(entryFor(listing, 'loose.stl').pose).toBeUndefined()
+    // The pose derived from the old collection is gone, which is this cell's
+    // claim. What stands in its place is `null` rather than nothing, and that is
+    // the round-3 revision showing through (finding 6): emission re-asked under
+    // the new root, the model resolves outside that collection — a settled "no"
+    // no round trip would change — so the answer recorded and emitted is "asked,
+    // and it has none". `toBeUndefined` was the old spelling of the same fact
+    // back when a recorded negative could not reach the wire at all.
+    expect(entryFor(listing, 'loose.stl').pose).toBeNull()
     // …and the tree is untouched: the snapshot is a function of the root alone,
     // so an index repoint has no bearing on it (D1/D7).
     expect(listing.entries.map((e) => e.name)).toEqual(
@@ -996,6 +1023,8 @@ describe('emission fills what the layers lack, under a budget (§6.9)', () => {
       spy.mock.calls
         .filter((c) => String(c[0]).endsWith(route))
         .map((c) => String((c[1] as RequestInit | undefined)?.body ?? ''))
+    const route = (name: string): number =>
+      spy.mock.calls.filter((c) => String(c[0]).endsWith(name)).length
     return {
       control,
       calls: (): number => spy.mock.calls.length,
@@ -1003,6 +1032,11 @@ describe('emission fills what the layers lack, under a budget (§6.9)', () => {
       posesAbout: (real: string): number => bodies('/poses').filter((b) => b.includes(real)).length,
       /** `/under` asks that named this folder — one per preview derivation. */
       underAbout: (real: string): number => bodies('/under').filter((b) => b.includes(real)).length,
+      /** Every `/under` ask: one per preview derivation *started*. */
+      underCalls: (): number => route('/under'),
+      /** Every `/status` probe, which the fill path must never take itself. */
+      statusCalls: (): number => route('/status'),
+      posesBodies: (): string[] => bodies('/poses'),
     }
   }
 
@@ -1031,10 +1065,24 @@ describe('emission fills what the layers lack, under a budget (§6.9)', () => {
     expect(entryFor(listing, 'a').preview?.map((e) => e.name)).toEqual(['bracket.stl', 'part.stl'])
     expect(entryFor(listing, 'z').preview?.map((e) => e.name)).toEqual(['bracket.stl'])
     // Nothing on this listing is left for a follow-up to fetch: every model has
-    // its pose and every folder its sheet.
+    // its pose answer and every folder its sheet — **and every cell inside those
+    // sheets has its pose answer too** (round-3 findings 3 and 7). That last
+    // clause is what the client's *preview* wave used to exist for: the sheet
+    // arrived, the cells arrived bare, and a second round trip went and asked
+    // about them. The derivation that chose those cells already knew.
+    //
+    // `not.toBeUndefined`, not `toBeDefined`: the answer for a model the index
+    // holds nothing for is an explicit `null`, and `toBeDefined` would reject the
+    // very state finding 6 added. Absent is the only failure — it means this
+    // server derived nothing and the client must go and ask.
     for (const entry of listing.entries) {
-      if (entry.kind === 'model') expect(entry.pose, entry.path).toBeDefined()
-      if (entry.kind === 'dir') expect(entry.preview, entry.path).toBeDefined()
+      if (entry.kind === 'model') expect(entry.pose, entry.path).not.toBeUndefined()
+      if (entry.kind === 'dir') {
+        expect(entry.preview, entry.path).toBeDefined()
+        for (const cell of entry.preview ?? []) {
+          expect(cell.pose, `${entry.path} → ${cell.path}`).not.toBeUndefined()
+        }
+      }
     }
   })
 
@@ -1122,20 +1170,275 @@ describe('emission fills what the layers lack, under a budget (§6.9)', () => {
     await warmProbe(s)
     const model = join(f.kit, 'loose.stl')
 
-    expect(entryFor(await listDir(s, ROOT), 'loose.stl').pose).toBeUndefined()
+    // `null`, not absent (round-3 finding 6): the index was asked and holds no
+    // orientation, and *that* is what rides the wire. An absent field would tell
+    // the client "this server has not derived it", which is the instruction that
+    // sends the pose wave — so the negative would stop a listing re-asking while
+    // still costing a wave per landing, half the loop closed.
+    expect(entryFor(await listDir(s, ROOT), 'loose.stl').pose).toBeNull()
     expect(index.posesAbout(model)).toBe(1)
 
     // The second listing asks nothing about it. "Asked, and it has none" is an
     // answer the layer holds, and reading it as an absence is what would put a
     // `/poses` batch on every listing of this folder for as long as the server
     // runs.
-    expect(entryFor(await listDir(s, ROOT), 'loose.stl').pose).toBeUndefined()
+    expect(entryFor(await listDir(s, ROOT), 'loose.stl').pose).toBeNull()
     expect(index.posesAbout(model)).toBe(1)
 
     // Past the horizon it is asked again: a negative converges on the same
     // clock as a positive, because the index may learn a pose it did not have.
     now += POSE_ANNOTATION_TTL_MS
     await listDir(s, ROOT)
+    expect(index.posesAbout(model)).toBe(2)
+  })
+
+  it('starts at most FILL_PREVIEW_MAX derivations, and leaves the rest to the client', async () => {
+    const f = await fixture('ly-fill-launch-bound')
+    // A folder-of-folders the size a kit library actually reaches. The budget
+    // cannot bound this: expiry stops emission *waiting*, and thirty queued
+    // derivations would go on marching through the queue afterwards.
+    for (let i = 0; i < 30; i++) mkdirSync(join(f.kit, `sub-${i}`))
+    const s = serverFor(f)
+    const index = stubFillIndex(f.top, {})
+    await warmProbe(s)
+
+    const listing = await listDir(s, ROOT)
+    // Counted at the upstream seam: one `/under` per derivation *started*.
+    expect(index.underCalls()).toBeLessThanOrEqual(FILL_PREVIEW_MAX)
+    // …and it really is the bound doing the work rather than an empty pass:
+    // without one this listing would have started 32 (thirty new, plus `a` and
+    // `z`).
+    expect(index.underCalls()).toBeGreaterThan(0)
+
+    const dirs = listing.entries.filter((e) => e.kind === 'dir')
+    expect(dirs.length).toBe(32)
+    const carried = dirs.filter((e) => e.preview !== undefined)
+    expect(carried.length).toBeLessThanOrEqual(FILL_PREVIEW_MAX)
+    // The folders past the bound are not broken, they are unchanged: no sheet
+    // rides the listing and the client peeks for them as they scroll into view,
+    // exactly as it did before emission filled anything.
+    expect(dirs.length - carried.length).toBeGreaterThanOrEqual(20)
+  })
+
+  it('joins a concurrent fill for the same listing rather than repeating it', async () => {
+    const f = await fixture('ly-fill-single-flight')
+    const s = serverFor(f)
+    const index = stubFillIndex(f.top, { [join(f.kit, 'loose.stl')]: POSE })
+    await warmProbe(s)
+
+    // Gated so the two requests are provably overlapping: the first fill is
+    // still inside its `/poses` when the second arrives, which is the only
+    // arrangement where a join is observable rather than lucky.
+    let release: () => void = () => {}
+    index.control.gate = new Promise<void>((r) => {
+      release = r
+    })
+
+    const [a, b] = await Promise.all([listDir(s, ROOT), listDir(s, ROOT)])
+    // One batch about the model, not two. Two requests for one listing both
+    // found the layers empty and both ran the whole pass — the same `/poses`
+    // and the same preview derivations, at an index that serves one request at
+    // a time.
+    expect(index.posesAbout(join(f.kit, 'loose.stl'))).toBe(1)
+    // And one derivation per folder rather than two.
+    expect(index.underAbout(join(f.kit, 'a'))).toBe(1)
+    // Both answers are still whole listings; joining is invisible on the wire.
+    expect(a.entries.map((e) => e.name)).toEqual(b.entries.map((e) => e.name))
+
+    release()
+    await settle(20)
+  })
+
+  it('records the poses its preview derivations learn, so sheet cells arrive posed', async () => {
+    const f = await fixture('ly-fill-sheet-poses')
+    const s = serverFor(f)
+    const bracket = join(f.kit, 'a', 'bracket.stl')
+    // The pose belongs to a model *inside* a folder tile's sheet — never a
+    // listing entry of `/kit` itself — so nothing but the preview derivation's
+    // own `/poses` batch could have supplied it.
+    const index = stubFillIndex(f.top, { [bracket]: POSE })
+    await warmProbe(s)
+
+    const sheet = entryFor(await listDir(s, ROOT), 'a').preview
+    expect(sheet?.map((e) => e.name)).toEqual(['bracket.stl', 'part.stl'])
+    expect(sheet?.find((e) => e.name === 'bracket.stl')?.pose).toEqual(POSE)
+    // The unposed cell carries the negative rather than nothing: the index was
+    // asked about it in the same batch and had none.
+    expect(sheet?.find((e) => e.name === 'part.stl')?.pose).toBeNull()
+    // Asked once, by the derivation, and never again by anybody: the client's
+    // preview wave has nothing left to fetch, which is the round trip this
+    // finding deletes.
+    expect(index.posesAbout(bracket)).toBe(1)
+    await listDir(s, ROOT)
+    expect(index.posesAbout(bracket)).toBe(1)
+  })
+
+  it('fills on a stale-but-ready memo, and still takes no probe of its own', async () => {
+    const f = await fixture('ly-fill-stale-memo')
+    const s = serverFor(f)
+    const index = stubFillIndex(f.top, { [join(f.kit, 'loose.stl')]: POSE })
+    await warmProbe(s)
+
+    // Only `Date` is faked — the budget's `setTimeout` stays real, since the
+    // fill has to actually race something. Forty-five seconds is past
+    // `TTL_MS.ready` (30 s), which is where the gate used to give up.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(Date.now() + 45_000)
+      const probes = index.statusCalls()
+      const listing = await listDir(s, ROOT)
+
+      // The requirement's words are "an index whose memoised probe is not
+      // ready" — a state, not a freshness. Reading the TTL here switched the
+      // feature off half a minute after the client's startup probe, in a
+      // browse-only session where nothing else ever probes again.
+      expect(entryFor(listing, 'loose.stl').pose).toEqual(POSE)
+      // And it did *not* buy that by probing: an old memo must not become a
+      // `/status` fetch on the browse path, which is what `posedFirstPeek`'s own
+      // `probeStatus` would have done for every folder tile once the memo aged.
+      expect(index.statusCalls()).toBe(probes)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('declines after a failed ask, which is what limits a wedge now', async () => {
+    const f = await fixture('ly-fill-failed-ask')
+    const s = serverFor(f)
+    const index = stubFillIndex(f.top, {})
+    await warmProbe(s)
+
+    // The index stops answering. Every way it can fail routes through
+    // `askIndex`'s `notAnswering`, which forgets the probe memo.
+    index.control.posesFail = true
+    await listDir(s, ROOT)
+    await settle(50)
+
+    // With the gate no longer reading the TTL, *this* is what stops a wedged
+    // index being asked once per listing forever: the memo is cold, so the next
+    // fill declines until something allowed to probe looks again. It was an
+    // accident when 6.9 landed (task 6.9a) and is the designed limiter now.
+    const after = index.calls()
+    await listDir(s, ROOT)
+    await listDir(s, ROOT)
+    expect(index.calls()).toBe(after)
+  })
+
+  it('fills nothing through a layers instance that is not live', async () => {
+    const f = await fixture('ly-fill-inert')
+    // A layer built for another `LAYER_VERSION` records nothing and answers
+    // nothing. Every method on it already declines; what this pins is that the
+    // *asking* stops too — otherwise a version bump would buy a `/poses` batch
+    // and a derivation per folder on every listing, for answers dropped on
+    // arrival, at an index that serves one request at a time.
+    const inert = new DerivedLayers(LAYER_VERSION - 1)
+    const s = serverFor(f, { listings: new ListingCache(f.store, inert) })
+    const index = stubFillIndex(f.top, { [join(f.kit, 'loose.stl')]: POSE })
+    await warmProbe(s)
+
+    const before = index.calls()
+    const listing = await listDir(s, ROOT)
+    // Zero, counted at the seam, exactly as the not-ready gate is counted.
+    expect(index.calls()).toBe(before)
+    expect(entryFor(listing, 'loose.stl').pose).toBeUndefined()
+    expect(entryFor(listing, 'a').preview).toBeUndefined()
+  })
+
+  it('drops a late answer whose collection root moved under it', async () => {
+    const f = await fixture('ly-fill-repoint-race')
+    const s = serverFor(f)
+    const index = stubFillIndex(f.top, { [join(f.kit, 'loose.stl')]: POSE })
+    await warmProbe(s)
+
+    let release: () => void = () => {}
+    index.control.gate = new Promise<void>((r) => {
+      release = r
+    })
+    const listing = await listDir(s, ROOT)
+    expect(entryFor(listing, 'loose.stl').pose).toBeUndefined()
+
+    // The index is repointed at another collection while the fill's answer is
+    // still on the wire. It is about the *old* collection, and `recordPoses`
+    // takes the root it is handed as the observation — so recording it now would
+    // re-adopt the collection the index has left, dropping the layer that was
+    // just built for the new one and re-installing facts derived from neither.
+    const other = tempDir('mb-ly-other-')
+    stubFillIndex(other, {})
+    await warmProbe(s)
+
+    release()
+    await settle(40)
+
+    // The stale answer is gone rather than filed. This is the one case where a
+    // late continuation must *not* record: the budget cell beside it pins that
+    // every other late answer does.
+    expect(s.listings.layers.poseFor(`${ROOT}/loose.stl`)).toBeUndefined()
+  })
+
+  it('does not stamp a negative when nothing about the index was learned', async () => {
+    const f = await fixture('ly-fill-transient')
+    // Straight at `posesAsked`, because no route can produce a transient
+    // exclusion: `listDir` drops a dangling symlink and an unstat-able entry
+    // before either reaches a listing. The seam that owns the distinction is
+    // the seam where it is observable.
+    const missing = `${ROOT}/gone.stl`
+    const inZip = `${ROOT}/box.zip!/box.stl`
+
+    // Transient — this server failed to *look*. Nothing was asked, so nothing
+    // about the index was learned, and `answered` says so.
+    const gone = await posesAsked(f.library, [missing], f.top)
+    expect(gone).toEqual({ poses: {}, answered: false })
+    // Structural — a settled fact about the tree that no round trip would
+    // change. Nothing was asked either, and that *is* an answer.
+    const zipped = await posesAsked(f.library, [inZip], f.top)
+    expect(zipped).toEqual({ poses: {}, answered: true })
+    // Neither reached the index at all, which is what makes the difference a
+    // property of the scoping rather than of a reply.
+    expect(fetch).toBeDefined()
+
+    // The consequence, applied exactly as `fillPoses` applies it. Collapsing the
+    // two exclusion kinds stamps a horizon of "the index has none" on a folder
+    // whose models the index was never asked about — a filesystem hiccup
+    // silencing every pose in the folder for five minutes.
+    const layers = new DerivedLayers()
+    layers.recordPoses(f.top, gone.poses, gone.answered ? [missing] : [])
+    expect(layers.poseKnown(missing)).toBe(false)
+    layers.recordPoses(f.top, zipped.poses, zipped.answered ? [inZip] : [])
+    expect(layers.poseKnown(inZip)).toBe(true)
+  })
+
+  it('restamps a negative when the wave re-confirms it', async () => {
+    const f = await fixture('ly-fill-restamp')
+    let now = 3_000_000
+    const layers = new DerivedLayers(LAYER_VERSION, () => now)
+    const s = serverFor(f, { listings: new ListingCache(f.store, layers) })
+    const index = stubFillIndex(f.top, {})
+    await warmProbe(s)
+    const model = join(f.kit, 'loose.stl')
+
+    // The fill stamps the negative.
+    expect(entryFor(await listDir(s, ROOT), 'loose.stl').pose).toBeNull()
+    expect(index.posesAbout(model)).toBe(1)
+
+    // Just short of the horizon, the client's wave asks about it — a flat
+    // listing, a search, a tile the layer had nothing for — and the index still
+    // holds nothing.
+    now += POSE_ANNOTATION_TTL_MS - 1000
+    const res = await s.app.request('/api/semantic/poses', {
+      method: 'POST',
+      headers: { ...LOOPBACK, 'content-type': 'application/json' },
+      body: JSON.stringify({ paths: [`${ROOT}/loose.stl`] }),
+    })
+    expect(res.status).toBe(200)
+    expect(index.posesAbout(model)).toBe(2)
+
+    // Past where the *original* stamp would have expired. The wave's answer
+    // restamped it, so the listing still carries the negative and no third batch
+    // was ever sent. Without the restamp the entry ages out here and the fill
+    // re-asks — the horizon measured from the first time the index said so
+    // rather than the last.
+    now += 2000
+    expect(entryFor(await listDir(s, ROOT), 'loose.stl').pose).toBeNull()
     expect(index.posesAbout(model)).toBe(2)
   })
 

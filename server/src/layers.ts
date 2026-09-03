@@ -299,9 +299,33 @@ export class DerivedLayers {
   }
 
   /**
-   * The pose held for a model, or undefined — undefined also once the entry is
-   * older than `POSE_ANNOTATION_TTL_MS`, which is where the annotation's
-   * convergence bound is actually applied. A Map get: no I/O, no waiting.
+   * Is this layer the live one — built for the current `LAYER_VERSION` — or the
+   * inert kind that records nothing and answers nothing?
+   *
+   * Read by emission-time filling, which must not *ask* the index on behalf of a
+   * layer that would throw the answer away (§6.9, round-3 finding 8). Every
+   * method below already declines on its own; this is the one question a caller
+   * has to be able to put *before* spending a round trip.
+   */
+  get isLive(): boolean {
+    return this.live
+  }
+
+  /**
+   * What this model's pose annotation is, with the horizon applied — an
+   * orientation, an explicit `null` for a recorded negative, or `undefined` for
+   * "never asked, or asked longer ago than `POSE_ANNOTATION_TTL_MS`", which is
+   * where the annotation's convergence bound is actually applied. A Map get: no
+   * I/O, no waiting.
+   *
+   * The three states are the wire's three states (`DirEntry.pose`), and this is
+   * the one place they are produced. A recorded negative used to read as
+   * `undefined` here, which meant emission could not tell the client "asked, and
+   * it has none" — so a never-embedded folder paid a pose wave on every landing
+   * even though this server already knew the answer (round-3 finding 6).
+   * `poseKnown` remains the fill's question and is now `poseFor(p) !== undefined`
+   * exactly; it stays a method of its own because *that* is the question the fill
+   * asks, and spelling it out at each call site is how the two drifted before.
    *
    * Handed out **by reference**, unlike a preview choice, and that is a
    * deliberate difference rather than an oversight. A pose is a small record
@@ -312,12 +336,12 @@ export class DerivedLayers {
    * `applyDisplayNames` is about to rename in place, which is a writer that
    * does exist — so that one is copied on the way in and on the way out.
    */
-  poseFor(path: string): IndexPose | undefined {
-    // A recorded negative is `undefined` here, and deliberately so: what
-    // emission attaches is an orientation or nothing, never a `null` the client
-    // would have to test for. `poseKnown` is where the difference is visible,
-    // and it has exactly one caller.
-    return this.held(path)?.pose ?? undefined
+  poseFor(path: string): IndexPose | null | undefined {
+    const held = this.held(path)
+    // `?? undefined` would collapse the recorded negative back into "unknown",
+    // which is the defect this signature exists to remove: `held.pose` is
+    // already `IndexPose | null`, and both halves of it are answers.
+    return held === undefined ? undefined : held.pose
   }
 
   /**

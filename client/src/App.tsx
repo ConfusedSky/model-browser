@@ -933,6 +933,12 @@ export default function App() {
         // about (listing-tree-cache §6.4): `carriedPoses` already feeds it to
         // the sweep. Checked before the asked-set is marked, so the entry is
         // simply never a question rather than a question recorded as answered.
+        //
+        // `!== undefined` covers the explicit `null` too, and that is the
+        // point rather than an accident (§6.9, round-3 finding 6): `null` is
+        // the server saying it asked the index and there is no orientation, so
+        // the cell is *known* unposed and asking again would buy nothing. The
+        // test is already right; it has a cell so it stays right.
         if (e.kind !== 'model' || e.pose !== undefined || askedPreviewPoses.current.has(e.path)) {
           continue
         }
@@ -1002,7 +1008,13 @@ export default function App() {
   const carriedPoses = useMemo(() => {
     let found: Record<string, IndexPose> | null = null
     for (const e of thumbEntries) {
-      if (e.pose === undefined) continue
+      // `== null` catches both wire states that are *not* an orientation
+      // (listing-tree-cache §6.9): absent, meaning the server has not derived
+      // one, and an explicit `null`, meaning it asked and the index has none.
+      // The two waves treat both as settled and neither asks; this map is only
+      // for orientations, and a `null` filed here would reach the sweep and the
+      // viewer as if it were one.
+      if (e.pose == null) continue
       found ??= {}
       found[e.path] = e.pose
     }
@@ -1376,6 +1388,13 @@ export default function App() {
             // listing where the layer knew every model asks nothing at all,
             // which is the shrink D7 describes; where it knew none, this is the
             // set it always was.
+            //
+            // `=== undefined` and not a truth test, deliberately (§6.9,
+            // round-3 finding 6): an entry carrying `pose: null` is one the
+            // server asked the index about and the index had no orientation
+            // for, so it is settled and drops out of the wave here. That is
+            // what keeps a never-embedded folder from costing a wave on every
+            // landing for as long as the app is open.
             .filter((e) => e.kind === 'model' && e.pose === undefined)
             .map((e) => e.path),
     [waveEntries],

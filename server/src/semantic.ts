@@ -355,9 +355,27 @@ export async function probeStatus(
  * costs a listing *nothing*, "nothing" including the probe. A cold memo is not
  * a ready index here; it is no answer, and the fill declines.
  *
- * The TTL is honoured, so a memo the probe would refuse to reuse is refused
- * here too. Reading does not refresh it — a listing must not extend the life of
- * a verdict it declined to take.
+ * **A state gate, not a freshness gate** (round-3 review, finding 4). The
+ * requirement's words are "an index whose memoised probe is not ready" — a
+ * property of the last known *state*, not of the memo's age — and this used to
+ * apply `TTL_MS` as well, so a `ready` verdict older than 30 s made every
+ * listing decline to fill until some other surface happened to re-probe. In a
+ * browse-only session nothing else probes at all: the client asks
+ * `/api/semantic/status` at startup and then the user browses, so the feature
+ * switched itself off half a minute in and the pop-in it deletes came back.
+ * Honouring the TTL here would only be safe if this reader could *refresh* the
+ * memo, and refreshing is exactly what it may not do.
+ *
+ * **What limits a wedge, then, is the answer rather than the age.** Every way
+ * the index can fail to answer a call routes through `askIndex`'s
+ * `notAnswering`, which calls `resetIndexStatus` — so one failed ask drops the
+ * memo to cold and the *next* fill declines, and goes on declining until
+ * something that is allowed to probe takes a fresh look. That was noted as a
+ * happy accident when 6.9 landed (task 6.9a); it is the designed wedge-limiter
+ * now, it is what this reader leans on in place of the TTL, and it has a cell.
+ *
+ * Reading does not refresh the memo — a listing must not extend the life of a
+ * verdict it declined to take, and with the TTL gone there is no life to extend.
  *
  * The consequence, stated so nobody reads it as a bug: emission fills nothing
  * until something else has probed, so the very first listing of a cold server
@@ -373,7 +391,6 @@ export function memoisedStatus():
   | { status: IndexAvailability; collectionRootFs: string | undefined }
   | undefined {
   if (cached === null) return undefined
-  if (Date.now() - cached.at >= TTL_MS[cached.status.state]) return undefined
   return { status: cached.status, collectionRootFs: cached.status.collectionRoot }
 }
 
@@ -396,6 +413,15 @@ export async function indexStatus(
  * running, and would otherwise write its pre-reset answer into the cache when it
  * settles — the very answer this call exists to forget. The generation bump is
  * what makes the forgetting stick.
+ *
+ * **`askIndex`'s call of this is emission-time filling's wedge-limiter** (§6.9,
+ * round-3 finding 4). `memoisedStatus` gates the fill on the last known *state*
+ * and no longer on the memo's age, so this is what stops a wedged or vanished
+ * index being asked once per listing forever: one failed call forgets the
+ * `ready` verdict, and the next fill declines until a surface that is allowed to
+ * probe looks again. It was noted as an accident when 6.9 landed (task 6.9a) and
+ * is a designed property now — do not "tidy" the reset out of `notAnswering`
+ * without moving the limit somewhere else first.
  */
 export function resetIndexStatus(): void {
   generation++
@@ -439,21 +465,51 @@ export async function scopeWithin(
   libPath: string,
   collectionRoot: string,
 ): Promise<string | null> {
-  if (libPath.includes('!/')) return null
+  return (await scopeDetail(library, libPath, collectionRoot)).real
+}
+
+/**
+ * Why a path was excluded, for the one caller that has to tell the two kinds
+ * apart (`posesAsked`, §6.9 / round-3 finding 5).
+ *
+ * - **`structural`** — the exclusion is a settled fact about the tree and this
+ *   collection root, and no round trip and no retry would change it: a virtual
+ *   path (nothing inside an archive is embedded, D7), or a model that resolves
+ *   cleanly to somewhere outside the collection. "The index has nothing for
+ *   this" is a true statement about such a path, so recording it as a negative
+ *   is honest and is exactly the standing cost §6.9 removes.
+ * - **`transient`** — the exclusion is this server failing to *look*: the
+ *   library refused the path (`LibraryError`, which `resolve` also raises while
+ *   the library itself is not ready — an unplugged volume), or the `realpath`
+ *   did not come back. Nothing about the index was learned, so nothing about the
+ *   index may be written down.
+ *
+ * The distinction is invisible to every other caller, which is why `scopeWithin`
+ * keeps its `string | null` shape: to a peek or a search hit, out of scope is out
+ * of scope.
+ */
+type ScopeMiss = 'structural' | 'transient'
+
+async function scopeDetail(
+  library: Library,
+  libPath: string,
+  collectionRoot: string,
+): Promise<{ real: string | null; miss?: ScopeMiss }> {
+  if (libPath.includes('!/')) return { real: null, miss: 'structural' }
   let fsPath: string
   try {
     fsPath = (await library.resolve(libPath)).fsPath
   } catch (err) {
-    if (err instanceof LibraryError) return null
+    if (err instanceof LibraryError) return { real: null, miss: 'transient' }
     throw err
   }
   const [real, root] = await Promise.all([
     realpath(fsPath).catch(() => null),
     realpath(collectionRoot).catch(() => collectionRoot),
   ])
-  if (real === null) return null
-  if (real !== root && !real.startsWith(`${root}/`)) return null
-  return real
+  if (real === null) return { real: null, miss: 'transient' }
+  if (real !== root && !real.startsWith(`${root}/`)) return { real: null, miss: 'structural' }
+  return { real }
 }
 
 export interface Hit {
@@ -934,9 +990,26 @@ export async function posesForPaths(
  * having a bad second.
  *
  * `answered` is true when the index was asked and replied, and also when there
- * was nothing to ask — every path refused by `scopeWithin` (a zip entry, a
- * symlink out of the collection) is a settled "no" that no round trip would
+ * was nothing to ask **and nothing went wrong asking it** — a zip entry or a
+ * symlink out of the collection is a settled "no" that no round trip would
  * change, and re-asking it per listing is the standing cost §6.9 removes.
+ *
+ * That second clause is narrower than it was (round-3 review, finding 5).
+ * `scopeWithin` collapses two different failures into one `null`: a path
+ * *structurally* out of scope, and a path this server merely failed to look at —
+ * the library refused it, or its `realpath` did not come back, both of which
+ * happen to every path at once when a removable volume blinks. A batch that was
+ * entirely the second kind used to report `answered: true`, and the fill would
+ * then stamp a negative on every model in the folder on the strength of a
+ * filesystem hiccup: no pose for a horizon, from a listing that never reached
+ * the index at all. So the kinds are counted (`scopeDetail`), and an *empty*
+ * result carrying any transient exclusion answers `false`.
+ *
+ * Only the empty case. A batch that reached the index still reports `true`
+ * whatever fell out of it on the way, which is `askPoses`' partial-chunk blur
+ * (below) applied to the same trade for the same reason: a horizon of
+ * self-correcting negatives, not a second error channel through a routine whose
+ * contract is that a pose never fails anything.
  *
  * The one blur it keeps is `askPoses`' own: a batch split across chunks where
  * some chunks failed and others did not reports `true`, since the call as a
@@ -953,16 +1026,22 @@ export async function posesAsked(
   if (libPaths.length === 0) return { poses, answered: true }
   // Resolved in parallel, joined in the caller's order: what goes on the wire
   // must not depend on which `realpath` happened to finish first.
-  const reals = await Promise.all(libPaths.map((p) => scopeWithin(library, p, collectionRoot)))
+  const reals = await Promise.all(libPaths.map((p) => scopeDetail(library, p, collectionRoot)))
   const byReal = new Map<string, string[]>()
+  let transient = 0
   libPaths.forEach((libPath, i) => {
-    const real = reals[i]
-    if (real === undefined || real === null) return
-    const named = byReal.get(real)
-    if (named === undefined) byReal.set(real, [libPath])
+    const detail = reals[i]
+    if (detail === undefined || detail.real === null) {
+      if (detail?.miss === 'transient') transient++
+      return
+    }
+    const named = byReal.get(detail.real)
+    if (named === undefined) byReal.set(detail.real, [libPath])
     else named.push(libPath)
   })
-  if (byReal.size === 0) return { poses, answered: true }
+  // Nothing to ask about. That is an answer when every exclusion was structural
+  // and a non-answer when any of them was this server failing to look.
+  if (byReal.size === 0) return { poses, answered: transient === 0 }
   let answered: Record<string, IndexPose | null>
   try {
     answered = await askPoses([...byReal.keys()])
@@ -1004,9 +1083,34 @@ export async function posesForListing(
   libPaths: readonly string[],
   opts: { fresh?: boolean } = {},
 ): Promise<Record<string, IndexPose>> {
+  return (await posesListingAsked(library, libPaths, opts)).poses
+}
+
+/**
+ * `posesForListing`, plus `posesAsked`' `answered` — for the caller that records
+ * what the answer implies rather than only what it says (round-3 finding 6).
+ *
+ * The pose wave's POST route is that caller: a model the wave asked about and
+ * the index did not name is a recorded negative, so the *next* listing carries
+ * `pose: null` and the wave stops asking. Without `answered` reaching the route
+ * it would stamp those negatives on an unusable index too — an unavailable index
+ * would silence poses for a horizon, which is the one thing the pose layer may
+ * never do.
+ *
+ * An index that is not `ready`, or that reports no collection root, is
+ * `answered: false` and not merely an empty map: nothing was asked, so nothing
+ * about the index was learned.
+ */
+export async function posesListingAsked(
+  library: Library,
+  libPaths: readonly string[],
+  opts: { fresh?: boolean } = {},
+): Promise<{ poses: Record<string, IndexPose>; answered: boolean }> {
   const { status, collectionRootFs } = await probeStatus(library, opts)
-  if (status.state !== 'ready' || collectionRootFs === undefined) return {}
-  return posesForPaths(library, libPaths, collectionRootFs)
+  if (status.state !== 'ready' || collectionRootFs === undefined) {
+    return { poses: {}, answered: false }
+  }
+  return posesAsked(library, libPaths, collectionRootFs)
 }
 
 /**
@@ -1183,6 +1287,18 @@ export async function modelsUnder(
  * stats is dropped and the next one takes its cell — a model can be deleted
  * after it is embedded, and two independently-cached views of one removable
  * volume drift by construction (D3).
+ *
+ * **`poses` is the second half of the answer, and used to be thrown away**
+ * (round-3 review, finding 3). `/under` reports each model's orientation beside
+ * its path, and this routine is the only place in the server that can key that
+ * orientation by *library* path — the join runs through a `realpath` and a
+ * relative-path arithmetic nobody upstream can repeat. Returning it lets the
+ * caller record what the derivation already learned, so a contact sheet's cells
+ * carry their poses and the client's preview wave has nothing left to ask about.
+ * Keyed like every `poses` map in this server, and holding `null` for a model
+ * `/under` named without an orientation: that is a recorded negative, not a gap.
+ * Only the models that reached a cell are in it — the rest were never resolved
+ * to a library path, so there is nothing to key them by.
  */
 export async function entriesUnder(
   library: Library,
@@ -1190,10 +1306,11 @@ export async function entriesUnder(
   dirReal: string,
   dirLibPath: string,
   n: number,
-): Promise<DirEntry[]> {
+): Promise<{ entries: DirEntry[]; poses: Record<string, IndexPose | null> }> {
   const posed = models.filter((m) => m.pose !== null)
   const unposed = models.filter((m) => m.pose === null)
   const out: DirEntry[] = []
+  const poses: Record<string, IndexPose | null> = {}
   // The base every candidate is measured against, resolved once. `scopeWithin`
   // already hands a realpath, so this is normally `dirReal` itself; taking it
   // anyway is what stops the test depending on how the caller spelled it.
@@ -1202,7 +1319,7 @@ export async function entriesUnder(
   // assumed: a directory outside the library cannot lend its inside to
   // anything.
   const realTop = library.realTop()
-  if (dirTop !== realTop && !dirTop.startsWith(realTop + sep)) return out
+  if (dirTop !== realTop && !dirTop.startsWith(realTop + sep)) return { entries: out, poses }
   const seen = new Set<string>()
   for (const m of [...posed, ...unposed]) {
     if (out.length >= n) break
@@ -1231,6 +1348,10 @@ export async function entriesUnder(
     if (entry === null) continue
     seen.add(libPath)
     out.push(entry)
+    // Recorded against the cell, not against the candidate: `libPath` is the
+    // spelling the walk would have produced for this file, which is the key the
+    // pose layer and the client both look a tile up under.
+    poses[libPath] = m.pose
   }
-  return out
+  return { entries: out, poses }
 }

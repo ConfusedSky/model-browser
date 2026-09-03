@@ -1114,6 +1114,10 @@ describe('the sheet asks the index before it walks', () => {
     // proved the library holds). The premise is checked rather than assumed,
     // and here is where it is observable: no route can hand `entriesUnder` such
     // a directory, so the boundary itself is what has to hold the line.
+    // Both halves empty: no cell, and — since `listing-tree-cache` §6.9 made
+    // this routine hand back what `/under` told it about poses — nothing for a
+    // caller to record either. A pose keyed by a library path this directory
+    // could not lend is the same escape as an entry named on the sheet.
     expect(
       await entriesUnder(
         library,
@@ -1122,7 +1126,7 @@ describe('the sheet asks the index before it walks', () => {
         '/links',
         4,
       ),
-    ).toEqual([])
+    ).toEqual({ entries: [], poses: {} })
   })
 
   it('takes the index’s answer in whatever spelling the index walked in', async () => {

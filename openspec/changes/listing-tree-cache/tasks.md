@@ -514,6 +514,139 @@
       index self-limits the fill after one failed call — a happy accident, not a
       designed property; do not lean on it without a cell
 
+- [x] 6.9b Round-3 review's findings applied to 6.9's emission-time filling
+      (2026-09-03). Ten findings, G1–G10; every behavioral one falsified before
+      being trusted, with the failure text recorded. Server 625 → 634 (19 files),
+      client 799 → 801 (59 files), both typechecks exit 0, `openspec validate
+      listing-tree-cache` → valid. Three pre-existing cells changed, each named
+      under the finding that changed it (two read a recorded negative as absent;
+      one is `entriesUnder`'s widened return).
+      <br>**G1 launch bound.** `FILL_PREVIEW_MAX = 12` (exported), applied as a
+      `slice` before the concurrency pool, plus a `stop.expired` flag the budget
+      timer sets and the pool reads before each derivation — so expiry stops
+      *starting* work as well as stopping the wait. Twelve is not a guess: it is
+      the first-paint peek count `folder-contact-sheets` measured live twice
+      (3.2, 297 dir tiles → 12; 3.4, the real library after a remount, 26 kit
+      folders → 12), cited at the constant. Cell: a 30-subdirectory listing
+      starts ≤ 12 derivations, counted as `/under` calls at the fetch seam, and
+      ≥ 20 folders ride without a sheet for the client to peek as before.
+      Falsified by removing the slice → `expected 32 to be less than or equal
+      to 12`.
+      <br>**G2 single-flight.** A `Map<key, Promise>` in `createApp`'s scope, the
+      `rawStatus` in-flight-probe shape (identity-guarded clear on settle). Key
+      is the *listing*, not the path — flat/`q`/folder-matching are folded in,
+      because `/api/dir?path=/kit` and `/api/dir?flat=true&path=/kit` put
+      different entries on screen and joining them would silently under-fill the
+      second. Cell: two concurrent `/api/dir` for one path over a gated `/poses`
+      → one batch and one derivation per folder. Falsified by dropping the join →
+      `expected 2 to be 1`.
+      <br>**G3 derivations record what they learn.** `entriesUnder` now returns
+      `{ entries, poses }` — it is the only place that can key `/under`'s
+      per-model orientation by *library* path — and `walkRanked` goes through
+      `posesAsked` instead of `posesForPaths` so it knows whether the index
+      replied. `posedFirstPeek` merges both into a `Learned` record and hands it
+      out; `fillPreviews` records it. **Deliberately not taken at `/api/peek`**:
+      recording there would make its `annotate` attach a `pose` to every cell,
+      which changes that route's wire shape and breaks
+      `pose-for-every-model` D5's two byte-identity cells (seen and reverted, not
+      argued). The listing's carried sheet is where the client's preview wave
+      reads from, so the loop closes anyway. Cell: a sheet cell inside a folder
+      tile carries the pose, its unposed sibling carries `null`, and the index is
+      asked once ever. Falsified by dropping the record → `expected undefined to
+      deeply equal { up: [ +0, 1, +0 ], …(4) }`.
+      <br>**G4 the gate is state-based.** `memoisedStatus` no longer applies
+      `TTL_MS`: the requirement's words are "an index whose memoised probe is not
+      **ready**". With the TTL the feature switched itself off 30 s after the
+      client's startup probe in any browse-only session. What limits a wedge
+      instead is `askIndex`'s `notAnswering` → `resetIndexStatus`, which 6.9a
+      recorded as an accident and which is **promoted to the designed limiter**,
+      documented at both `memoisedStatus` and `resetIndexStatus`. And because the
+      memo may now be stale, `posedFirstPeek` takes an optional pre-resolved
+      status so the fill's derivations cannot turn into a `/status` fetch on the
+      browse path (the `/api/peek` route passes nothing and probes as before).
+      Cells: a listing 45 s past the probe still fills **and** takes no `/status`
+      (one cell, `vi.useFakeTimers({ toFake: ['Date'] })` so the budget's real
+      `setTimeout` survives); a fill after a failed ask declines for two further
+      listings. Falsified: restore the TTL → `expected undefined to deeply equal
+      { up: … }`; drop the pre-resolution → `expected 2 to be 1`; drop
+      `resetIndexStatus` from `notAnswering` → `expected 8 to be 6`.
+      <br>**G5 transient vs structural exclusion.** `scopeWithin` collapsed "out
+      of scope" and "this server failed to look" into one `null`, so a batch that
+      was entirely the second kind reported `answered: true` and the fill stamped
+      a five-minute negative on every model in the folder over a filesystem
+      blink. New `scopeDetail` reports the kind — structural for `!/` and for a
+      clean resolve landing outside the collection, transient for a
+      `LibraryError` (which `resolve` also raises while the library is not ready)
+      and for a failed `realpath`. Only the **empty-map** case changes, as the
+      finding scoped it; a batch that reached the index still reports `true`.
+      Cell at `posesAsked`' own seam rather than through a route, and the reason
+      is recorded in it: no route can produce a transient exclusion, because
+      `listDir` drops a dangling symlink and an unstat-able entry before either
+      reaches a listing. Falsified by classing a failed `realpath` as structural →
+      `expected { poses: {}, answered: true } to deeply equal { poses: {},
+      answered: false }`.
+      <br>**G6 the negative closes on the wire.** `DirEntry.pose` becomes
+      `IndexPose | null | undefined` with the three states documented;
+      `DerivedLayers.poseFor` returns the recorded `null` instead of collapsing
+      it, and `annotate` attaches it. Client: **both** wave filters were already
+      correct — `e.pose === undefined` reads `null` as known, since `null !==
+      undefined` — so they got a cell and a comment rather than an edit, as the
+      finding asked. The one edit is `carriedPoses`, which filed `null` into the
+      orientation map and now guards with `== null`. Server half: the POST pose
+      route (the one the wave actually lands on — `ApiClient.semanticPoses`, the
+      GET, has no caller under `client/src`) passes its canonical list to
+      `recordPoses`, through a new `posesListingAsked` so an unusable index
+      cannot stamp negatives. **The GET keeps no asked-list, and that answers the
+      question the finding flagged**: its list is assembled inside `posesForDir`,
+      so supplying one means threading `answered` back out through two more
+      functions for a route nothing calls; the reasoning and the "if a caller
+      returns, do this" are recorded at the route. Cells: a null-posed entry
+      provokes no wave ask (client); a null pose is not filed as an orientation
+      (client); a wave answer restamps a negative's horizon (server). Falsified:
+      `!e.pose` in the wave filter → `expected "spy" to not be called at all, but
+      actually been called 1 times`; `=== undefined` in `carriedPoses` →
+      `expected null to be undefined`; drop the POST's asked-list → `expected 3
+      to be 2`.
+      <br>**G7 the amended count cell.** The `for` loop over "the batches this
+      listing sent" asserted nothing when there were none, which is what a fill
+      that stopped running looks like — so `expect(after.length)
+      .toBeGreaterThan(0)` now runs first. Disabling the fill makes it **fail**
+      (`expected 0 to be greater than 0`) where it used to pass. The
+      "nothing left for a follow-up" loop is extended to preview cells and
+      relaxed from `toBeDefined` to `not.toBeUndefined`, since `null` is now an
+      answer; falsified by dropping G3's record → `/kit/a → /kit/a/bracket.stl:
+      expected undefined not to be undefined`. **The library-path needle is
+      reported honestly and not counted as coverage**: no defect could be built
+      that fires it alone — the stub answers by realpath, so any batch spelled
+      the other way comes back empty and the carried-pose assertion trips first
+      (`expected null to deeply equal { up: … }`, both attempts). That is written
+      beside the assertion rather than left for a reader to discover.
+      <br>**G8 `layers.live` gates the asking.** New `isLive` getter; the fill
+      returns before touching the memo. Every method on an inert layer already
+      declined — what this stops is the round trips spent on answers dropped on
+      arrival. Cell through the app with a `LAYER_VERSION - 1` instance: zero
+      upstream calls. Falsified by dropping the check → `expected 6 to be 1`.
+      <br>**G9 the late continuation guards its root.** `rootUnmoved` re-peeks the
+      memo before `fillPoses` and each `fillPreviews` derivation records; a memo
+      holding nothing is not a move, for `reroot`'s own reason. Cell: the fill's
+      `/poses` is gated, the index is repointed and re-probed, the answer is then
+      released and dropped. Falsified by removing the guard → `expected { up: [
+      +0, 1, +0 ], …(4) } to be undefined` — and note what the defect does, which
+      is worse than a stale pose: `recordPoses` under the old root re-adopts it
+      and drops the layer just built for the new one.
+      <br>**G10 test doc and a measurement.** `server/test/CLAUDE.md` gains the
+      `/api/dir`-reaches-the-index rule, the state-not-age gate, and the
+      "answer every route the fill can reach" trap that made the annotation-TTL
+      cell pass for the wrong reason. `ANNOTATION_BUDGET_MS` carries its own
+      re-runnable sweep against the live index on :8077 (`embed-cache512`, root
+      `/run/media/masa/STLLibrary`), medians of 9 loopback POSTs, two runs on
+      2026-09-03: `/poses` n=1 0.8-0.9 ms, n=8 1.0-1.2, n=32 1.4, n=64 1.7-1.9;
+      `/under` limit=256 7.5-8.7 ms. So the budget is ~150x a full pose batch.
+      The script is in the comment, not the number alone — and it prints the
+      `named` count beside the timing, because the first draft of this
+      measurement quoted a run whose `find` filter differed from the one written
+      down and the two disagreed by 2x.
+
 ## 7. Tests
 
 - [x] 7.1 Server: cached and walked responses are entry-for-entry identical on an unchanged tree (including ordering and truncation); one cached tree serves several different queries and both settings of the folder-matching option without re-traversing (instrument the walk, do not infer from timing); a second walk opens no archives; adding, removing, and renaming a model is picked up; a present-but-unreadable root invalidates rather than serving; the same tree reached at a different mountpoint under the same library is a **hit**; an unmounted library answers `missing` and leaves the snapshot in place; the on-disk format version invalidates a stale snapshot

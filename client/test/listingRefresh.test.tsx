@@ -341,4 +341,41 @@ describe('the pose wave asks only about what the listing did not carry', () => {
     // other model only.
     expect(semanticPosesFor).toHaveBeenCalledWith(['/models/quiet.stl'])
   })
+
+  it('an explicit null pose is an answer, and provokes no ask', async () => {
+    // The third wire state (`listing-tree-cache` §6.9, round-3 finding 6):
+    // `pose: null` is the server saying it asked the index and there is no
+    // orientation for this model. A never-embedded folder used to cost a wave on
+    // *every* landing — the server knew the answer and had no way to say it — so
+    // this is the half of the loop that closes on the client.
+    //
+    // The filter that gets it right is `e.pose === undefined`, which reads a
+    // `null` as known because `null !== undefined`. It is code that was already
+    // correct; this cell is what keeps a later "tidy" to `!e.pose` from quietly
+    // reopening the loop.
+    await mountApp('/models', {
+      path: '/models',
+      entries: [POSED, { ...model('quiet.stl'), pose: null }],
+    })
+    await settle()
+    await settle()
+
+    expect(semanticPosesFor).not.toHaveBeenCalled()
+  })
+
+  it('does not file a null pose as an orientation', async () => {
+    // The guarded merge, and why it needs a guard rather than the filter's luck:
+    // `carriedPoses` builds the map the thumbnail sweep and the viewer read, and
+    // a `null` filed there would be handed on as if it were an orientation.
+    // `poses[path]` must stay absent for a known-unposed model — the same shape
+    // it has when nobody ever asked.
+    await mountAppAtCurrentUrl('/?path=%2Fmodels&model=%2Fmodels%2Fquiet.stl', {
+      path: '/models',
+      entries: [POSED, { ...model('quiet.stl'), pose: null }],
+    })
+    await settle()
+
+    expect(viewerProps.last).not.toBeNull()
+    expect(viewerProps.last!.pose).toBeUndefined()
+  })
 })

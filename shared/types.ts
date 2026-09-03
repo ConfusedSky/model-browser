@@ -31,8 +31,25 @@ export interface DirEntry {
    * `/api/thumb` for `thumb`, `/api/peek` for `preview`.
    */
   thumb?: ThumbInfo
-  /** The index's orientation for this model, when the pose layer holds one. */
-  pose?: IndexPose
+  /**
+   * The index's orientation for this model, when the pose layer holds an answer.
+   *
+   * Three states, not two (`listing-tree-cache` §6.9, round-3 review finding 6):
+   *
+   * - an `IndexPose` — the index holds this orientation;
+   * - **`null`** — the index was asked about this model and has no orientation
+   *   for it. A recorded answer, not a gap, and the client SHALL treat the model
+   *   as known-unposed rather than re-asking. Without this state a folder the
+   *   index has never embedded costs a pose wave on every landing forever: the
+   *   server knows the answer is "none" and had no way to say so;
+   * - **absent** — this server has not derived it. The client's wave is the fill,
+   *   exactly as before this capability existed.
+   *
+   * So the test for "has an orientation" is `pose != null`, and the test for
+   * "still unknown" is `pose === undefined`. A filter written as
+   * `pose === undefined` already reads a null as known, since `null !== undefined`.
+   */
+  pose?: IndexPose | null
   /** Directories only: the contact sheet a peek already derived for this folder. */
   preview?: DirEntry[]
 }

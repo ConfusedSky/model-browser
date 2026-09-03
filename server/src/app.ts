@@ -6,6 +6,8 @@ import { Hono, type Context } from 'hono'
 import type {
   DirEntry,
   FeatureReport,
+  IndexAvailability,
+  IndexPose,
   LightingMode,
   ModelsListing,
   OrbitAxis,
@@ -38,8 +40,7 @@ import {
   modelsUnder,
   posesAsked,
   posesForDir,
-  posesForListing,
-  posesForPaths,
+  posesListingAsked,
   probeStatus,
   query as indexQuery,
   scopeWithin,
@@ -82,11 +83,80 @@ const PEEK_MAX = 8
  * and `posedFirstPeek` its own budget. It is the moment emission stops caring,
  * and it applies to the fill as a whole rather than per call: two halves each
  * inside their own bound would still be two bounds deep in the worst case.
+ *
+ * **"Comfortably over a warm index's round trip" was an estimate until
+ * 2026-09-03; it is measured now** (round-3 review, finding 10). Against the
+ * mini-classify server on :8077 (`ready`, `embed-cache512`, collection root
+ * `/run/media/masa/STLLibrary`, CPU SigLIP2), medians of 9 loopback POSTs each,
+ * two runs of the script below on 2026-09-03:
+ *
+ * ```
+ *   /poses  n=1  0.8-0.9 ms   n=8  1.0-1.2 ms   n=32  1.4 ms   n=64  1.7-1.9 ms
+ *   /under  limit=256, 256 models              7.5-8.7 ms
+ * ```
+ *
+ * So a full 64-path batch is under 1 % of this budget and a preview derivation's
+ * `/under` about 3 %, on the machine this app is developed on. `/poses` is a
+ * lookup in a loaded cache, not an inference — the timing barely moves with how
+ * many of the batch are embedded (22 of those 64 were). Re-run it — the point of
+ * writing it down this way — with the index up:
+ *
+ * ```sh
+ *   python3 - <<'PY'
+ *   import json, subprocess, time, urllib.request
+ *   root = "/run/media/masa/STLLibrary"   # ask :8077/status for the real one
+ *   found = subprocess.run(["find", root, "-name", "*.stl"],
+ *                          capture_output=True, text=True).stdout.split()[:64]
+ *   for n in (1, 8, 32, len(found)):
+ *       body = json.dumps({"paths": found[:n]}).encode()
+ *       ts = []
+ *       for _ in range(9):
+ *           t = time.perf_counter()
+ *           req = urllib.request.Request("http://127.0.0.1:8077/poses", data=body,
+ *                                        headers={"content-type": "application/json"})
+ *           a = json.loads(urllib.request.urlopen(req, timeout=30).read())
+ *           ts.append((time.perf_counter() - t) * 1000)
+ *       print(n, len(a["poses"]), round(sorted(ts)[4], 1), "ms")
+ *   PY
+ * ```
+ *
+ * The set of paths matters to the *named* count and hardly at all to the timing,
+ * so re-runs land in the same place; `find`'s order is the filesystem's, which
+ * is why the numbers above are quoted as the range two runs gave rather than as
+ * one figure.
+ *
+ * What the margin buys is not the warm case, which is free: it is the cold one,
+ * where the index reads a model off the removable volume the fill is racing.
  */
 export const ANNOTATION_BUDGET_MS = 300
 
 /** The most preview derivations the fill runs at once (§6.9). */
 const FILL_PREVIEW_CONCURRENCY = 4
+
+/**
+ * The most preview derivations one listing may **start** (§6.9, round-3 review
+ * finding 1).
+ *
+ * The budget bounds *time*; this bounds *work*, and the two are not
+ * interchangeable. `ANNOTATION_BUDGET_MS` stops emission waiting, but it cannot
+ * un-launch what is already running or queued: a folder of 300 kits would have
+ * queued 300 `/under` asks plus their walks, and the ones the budget did not
+ * wait for would go on marching through the queue afterwards — a burst at the
+ * index and at a removable volume, on behalf of a listing that shipped long ago.
+ * With a bound, at most twelve start and the queue is abandoned when the budget
+ * expires.
+ *
+ * **Twelve, because that is what a first paint actually asks for.** The client's
+ * viewport-driven peek was measured on the demo corpus twice
+ * (`folder-contact-sheets` 3.2 and 3.4, both live Playwright runs): 297 dir tiles
+ * → **12 peeks on first paint**, and on the real library after a remount, 26 kit
+ * folders → **12 peeks** again. So twelve is the count that makes the fill cover
+ * the sheets a user is about to see, and the tiles below the fold keep the
+ * behaviour they have today — the client peeks for them as they scroll into
+ * view, which is the path this bound deliberately leaves in place rather than
+ * replacing.
+ */
+export const FILL_PREVIEW_MAX = 12
 
 /**
  * How an `IndexError` reaches the client — one mapping, shared by both scoring
@@ -152,24 +222,54 @@ function unreachable(value: never): never {
  * `n`: "prefer posed" is about the cells the user sees, and a sheet of three
  * whose posed model sat last would otherwise contradict the sheet of five
  * beside it.
+ *
+ * The batch's answer goes back out beside the ranking (`Learned`, round-3
+ * finding 3): this walk asks the index about every model it found, and throwing
+ * that away meant the same models were asked about again by the next listing's
+ * fill and by the client's preview wave after that. Through `posesAsked` rather
+ * than `posesForPaths` for the one thing the ranking does not need and the
+ * recording does — whether the index replied at all.
  */
 async function walkRanked(
   library: Library,
   libPath: string,
   collectionRootFs: string,
-): Promise<DirEntry[]> {
+): Promise<{ entries: DirEntry[]; learned: Learned }> {
   const finds = await peek(library, libPath, PEEK_MAX_FINDS)
-  if (finds.length === 0) return finds
-  const poses = await posesForPaths(
-    library,
-    finds.map((e) => e.path),
-    collectionRootFs,
-  )
+  if (finds.length === 0) return { entries: finds, learned: NOTHING_LEARNED }
+  const asked = finds.map((e) => e.path)
+  const { poses, answered } = await posesAsked(library, asked, collectionRootFs)
   const posed = finds.filter((e) => poses[e.path] !== undefined)
   // A stable partition, not a sort: both halves keep the walk's order, so the
   // answer is a function of the walk and the index's reply and of nothing else.
   const unposed = finds.filter((e) => poses[e.path] === undefined)
-  return [...posed, ...unposed]
+  return {
+    entries: [...posed, ...unposed],
+    learned: { poses, asked: answered ? asked : [] },
+  }
+}
+
+/**
+ * What a preview derivation found out about poses on its way to a sheet — the
+ * orientations, and the models it is entitled to record a negative for (§6.9,
+ * round-3 finding 3).
+ *
+ * `asked` is empty when the index did not answer, exactly as in `fillPoses`:
+ * "the index did not reply" is not "the index has nothing", and the two must not
+ * be written down the same way.
+ */
+interface Learned {
+  poses: Record<string, IndexPose>
+  asked: readonly string[]
+}
+
+const NOTHING_LEARNED: Learned = { poses: {}, asked: [] }
+
+/** The two sources a peek can learn poses from, in one record. */
+function mergeLearned(a: Learned, b: Learned): Learned {
+  if (a.asked.length === 0 && Object.keys(a.poses).length === 0) return b
+  if (b.asked.length === 0 && Object.keys(b.poses).length === 0) return a
+  return { poses: { ...a.poses, ...b.poses }, asked: [...a.asked, ...b.asked] }
 }
 
 /**
@@ -218,38 +318,75 @@ async function posedFirstPeek(
   library: Library,
   libPath: string,
   n: number,
-): Promise<{ entries: DirEntry[]; collectionRootFs: string | undefined }> {
+  /**
+   * The index's state, when the caller has already resolved it and this peek
+   * must not resolve it again (§6.9, round-3 finding 4).
+   *
+   * Emission-time filling is that caller. Its gate reads the probe *memo* and
+   * never takes a probe, and since the memo is now a state gate rather than a
+   * freshness one, the memo it read may be older than `TTL_MS` — at which point
+   * the `probeStatus` below would stop being a memo read and become a live
+   * `/status` fetch, on the browse path, on behalf of a pass whose whole
+   * contract is that it costs a listing nothing. So the fill hands its own
+   * answer down. `/api/peek` passes nothing and probes exactly as it always has:
+   * a peek is a request the client made, and paying for a look is what a request
+   * is allowed to do.
+   */
+  resolved?: { status: IndexAvailability; collectionRootFs: string | undefined },
+): Promise<{ entries: DirEntry[]; collectionRootFs: string | undefined; learned: Learned }> {
   // Handed back beside the sheet rather than re-probed by the caller: this
   // function already asks, the answer is what the preview layer records its
   // identity against (§6.1), and a second `probeStatus` at the route would be a
   // probe taken on the layer's behalf — which is exactly what "observe the
   // answers that already flow" rules out.
-  const { status, collectionRootFs } = await probeStatus(library)
-  if (status.state !== 'ready' || collectionRootFs === undefined) {
-    return { entries: await peek(library, libPath, n), collectionRootFs }
-  }
+  const { status, collectionRootFs } = resolved ?? (await probeStatus(library))
+  const walkOnly = async (): Promise<{
+    entries: DirEntry[]
+    collectionRootFs: string | undefined
+    learned: Learned
+  }> => ({ entries: await peek(library, libPath, n), collectionRootFs, learned: NOTHING_LEARNED })
+  if (status.state !== 'ready' || collectionRootFs === undefined) return walkOnly()
   // The collection's reach, asked about the folder rather than about its finds
   // — the same call, one level up. `null` is every way it can fail to reach:
   // outside the collection, a path the library refuses, or a virtual one (D7).
   const dirReal = await scopeWithin(library, libPath, collectionRootFs)
-  if (dirReal === null) return { entries: await peek(library, libPath, n), collectionRootFs }
+  if (dirReal === null) return walkOnly()
 
   // `null` is "ask the walk" — unindexed here, unreachable, or too slow. An
   // `"ok"` answer holding nothing is a real answer and lands as `[]`, which
   // fills from the walk by the same arithmetic; the two converge on purpose.
   const under = await modelsUnder(dirReal, UNDER_LIMIT)
-  const fromIndex =
-    under === null ? [] : await entriesUnder(library, under, dirReal, libPath, n)
-  if (fromIndex.length >= n) return { entries: fromIndex, collectionRootFs }
+  const answer =
+    under === null ? null : await entriesUnder(library, under, dirReal, libPath, n)
+  const fromIndex = answer?.entries ?? []
+  // `/under` named these models and said what it holds for each, so every one of
+  // them is asked-and-answered — the positives as poses, the rest as negatives.
+  const fromUnder: Learned =
+    answer === null
+      ? NOTHING_LEARNED
+      : {
+          poses: Object.fromEntries(
+            Object.entries(answer.poses).filter(
+              (e): e is [string, IndexPose] => e[1] !== null,
+            ),
+          ),
+          asked: Object.keys(answer.poses),
+        }
+  if (fromIndex.length >= n) return { entries: fromIndex, collectionRootFs, learned: fromUnder }
 
   const sheet = [...fromIndex]
   const seen = new Set(sheet.map((e) => e.path))
-  for (const entry of await walkRanked(library, libPath, collectionRootFs)) {
+  const walked = await walkRanked(library, libPath, collectionRootFs)
+  for (const entry of walked.entries) {
     if (sheet.length >= n) break
     if (seen.has(entry.path)) continue
     sheet.push(entry)
   }
-  return { entries: sheet, collectionRootFs }
+  return {
+    entries: sheet,
+    collectionRootFs,
+    learned: mergeLearned(fromUnder, walked.learned),
+  }
 }
 
 /**
@@ -340,6 +477,11 @@ export function createApp(
       const thumb = cache.annotate(entry.path, entry.mtime)
       if (thumb !== undefined) entry.thumb = thumb
       if (entry.kind === 'model') {
+        // `!== undefined`, not a truth test: `null` is a recorded negative and
+        // rides the wire as one (§6.9, round-3 finding 6). "The index was asked
+        // and has none" is what stops the client's wave asking again, and it can
+        // only travel as a value — an omitted field means "this server has not
+        // derived it", which is the opposite instruction.
         const pose = layers.poseFor(entry.path)
         if (pose !== undefined) entry.pose = pose
       } else if (entry.kind === 'dir') {
@@ -382,13 +524,58 @@ export function createApp(
    * take that probe, and until one has, listings emit exactly as they did
    * before this pass existed.
    *
-   * **The budget covers the whole pass, and expiry is not cancellation.** What
-   * is still in flight goes on running and still records, so the answer is not
-   * thrown away for having been slow: it lands in the layers and the next
-   * listing carries it. Failures are swallowed whole — the wave swallowed them
-   * too, and a listing may never be made to fail, or made noisy, by the index.
+   * **The budget covers the whole pass, and expiry is not cancellation of what
+   * is running.** What is still in flight goes on running and still records, so
+   * the answer is not thrown away for having been slow: it lands in the layers
+   * and the next listing carries it. What expiry *does* stop is anything not yet
+   * started — the preview queue, which would otherwise march on through a folder
+   * of hundreds long after the listing shipped. Failures are swallowed whole —
+   * the wave swallowed them too, and a listing may never be made to fail, or made
+   * noisy, by the index.
+   *
+   * **Single-flighted per listing** (round-3 finding 2). Two requests for the
+   * same listing arriving together — a reload beside a navigation, two tabs, the
+   * client's own retry — each found the layers empty and each ran the whole pass:
+   * the same `/poses` batch twice and the same preview derivations twice, at an
+   * index that serves one request at a time. The second joins the first instead
+   * and then annotates from the layers it filled, which is the same answer by the
+   * same path.
    */
-  async function fillAnnotations(entries: readonly DirEntry[]): Promise<void> {
+  const fills = new Map<string, Promise<void>>()
+
+  async function fillAnnotations(key: string, entries: readonly DirEntry[]): Promise<void> {
+    const running = fills.get(key)
+    if (running !== undefined) return running
+    const tracked: Promise<void> = fillOnce(entries).finally(() => {
+      // Identity-guarded like `rawStatus`' in-flight probe: a settling pass must
+      // not clear whatever pass replaced it.
+      if (fills.get(key) === tracked) fills.delete(key)
+    })
+    fills.set(key, tracked)
+    return tracked
+  }
+
+  /**
+   * The key `fillAnnotations` single-flights on: what makes two requests the
+   * *same* listing.
+   *
+   * Not the path alone. `/api/dir?path=/kit` and `/api/dir?flat=true&path=/kit`
+   * put different entries on screen — the second draws from the whole subtree —
+   * so joining them would silently under-fill whichever arrived second, for a
+   * saving of nothing: they are never issued together in practice, and the join
+   * exists for the case where they are literally the same request.
+   */
+  function fillKey(libPath: string, flat: boolean, q: string | undefined, folders: boolean): string {
+    return `${flat ? 'flat' : 'dir'} ${folders ? 'f' : ''} ${q ?? ''} ${libPath}`
+  }
+
+  async function fillOnce(entries: readonly DirEntry[]): Promise<void> {
+    // A layer built for another `LAYER_VERSION` records nothing and answers
+    // nothing, so filling it is a round trip spent on an answer that will be
+    // dropped on arrival (round-3 finding 8). The layer's own methods already
+    // decline; this is the check that stops the *asking*, which is the part
+    // that costs the index something.
+    if (!layers.isLive) return
     const memo = memoisedStatus()
     if (memo === undefined) return
     const { status, collectionRootFs } = memo
@@ -419,7 +606,15 @@ export function createApp(
     }
     if (unposed.length === 0 && unchosen.length === 0) return
 
-    const work = Promise.all([fillPoses(unposed, collectionRootFs), fillPreviews(unchosen)])
+    // Flipped by the budget's timer and read by the preview queue before each
+    // derivation. An object rather than a captured boolean so the workers see
+    // the write; an `AbortSignal` would be the same thing with a listener, and
+    // there is nothing here to cancel — only something to stop starting.
+    const stop = { expired: false }
+    const work = Promise.all([
+      fillPoses(unposed, collectionRootFs),
+      fillPreviews(unchosen, memo, stop),
+    ])
     // Never rejects — both halves swallow — but stated rather than assumed: an
     // unhandled rejection from a continuation nobody awaits would take the
     // process down on a fault this pass is supposed to be invisible to.
@@ -429,7 +624,10 @@ export function createApp(
     )
     let timer: ReturnType<typeof setTimeout> | undefined
     const budget = new Promise<void>((resolve) => {
-      timer = setTimeout(resolve, ANNOTATION_BUDGET_MS)
+      timer = setTimeout(() => {
+        stop.expired = true
+        resolve()
+      }, ANNOTATION_BUDGET_MS)
       // A listing's budget is not a reason for the process to stay alive, and
       // a server that exits between listings must not wait 300 ms to do it.
       timer.unref?.()
@@ -440,6 +638,24 @@ export function createApp(
       }),
       budget,
     ])
+  }
+
+  /**
+   * Has the index's collection root stayed put since a fill captured it?
+   *
+   * Asked by every late continuation before it records (§6.9, round-3 finding
+   * 9). A fill's answers can land after the index has been repointed at another
+   * collection, and `DerivedLayers.reroot` reads the root it is *handed* — so
+   * recording the old root there would re-adopt it, dropping the fresh layer and
+   * re-installing stale facts under a collection they were not derived from.
+   *
+   * A memo holding nothing is not a move, for `reroot`'s own reason: an index
+   * that is absent, warming or wedged reports no root, and treating that silence
+   * as a repoint would let a blip discard a perfectly valid layer.
+   */
+  function rootUnmoved(captured: string): boolean {
+    const now = memoisedStatus()?.collectionRootFs
+    return now === undefined || now === captured
   }
 
   /**
@@ -469,6 +685,7 @@ export function createApp(
     if (paths.length === 0) return
     try {
       const { poses, answered } = await posesAsked(library, paths, collectionRootFs)
+      if (!rootUnmoved(collectionRootFs)) return
       layers.recordPoses(collectionRootFs, poses, answered ? paths : [])
     } catch {
       // The listing already shipped, or is about to. Nothing to report to.
@@ -481,26 +698,54 @@ export function createApp(
    * never a second derivation, so a sheet the fill produced and a sheet a peek
    * produced are the same sheet.
    *
-   * Bounded to `FILL_PREVIEW_CONCURRENCY` at once. A folder listing can hold
-   * hundreds of subdirectories, and each derivation is an `/under` ask plus a
-   * walk the snapshot usually serves; all of them at once would be a burst at
-   * the index and at the disk on behalf of a budget that will have expired long
-   * before they land.
+   * Bounded three ways, and each bound covers what the others cannot.
+   * `FILL_PREVIEW_CONCURRENCY` bounds how many run *at once*, so a wide folder
+   * is not a burst at the index and at the disk. `FILL_PREVIEW_MAX` bounds how
+   * many are ever *started* for one listing, which is the bound the budget
+   * cannot provide — expiry stops emission waiting, it does not un-queue three
+   * hundred derivations. And `stop.expired` ends the queue when the budget does,
+   * so what has not started never starts: the work in flight finishes and
+   * records, everything behind it is abandoned, and the folders past the bound
+   * keep exactly the behaviour they have today — the client peeks for them as
+   * they scroll into view.
+   *
+   * The poses each derivation learned are recorded beside its sheet (round-3
+   * finding 3): `/under` reports an orientation per model and the ranking walk
+   * asks `/poses` about everything it found, so a sheet's own cells arrive posed
+   * and the client's preview wave has nothing left to ask about. That is the
+   * round trip §6.9 exists to delete, on the surface that was still paying it.
    */
-  async function fillPreviews(dirs: readonly string[]): Promise<void> {
+  async function fillPreviews(
+    dirs: readonly string[],
+    resolved: { status: IndexAvailability; collectionRootFs: string | undefined },
+    stop: { expired: boolean },
+  ): Promise<void> {
     if (dirs.length === 0) return
+    const wanted = dirs.slice(0, FILL_PREVIEW_MAX)
     let next = 0
     const derive = async (): Promise<void> => {
       for (;;) {
+        if (stop.expired) return
         const i = next++
-        const dirPath = dirs[i]
+        const dirPath = wanted[i]
         if (dirPath === undefined) return
         try {
-          const { entries, collectionRootFs } = await posedFirstPeek(library, dirPath, PEEK_DEFAULT)
+          // The memo the fill already read, handed down rather than re-probed:
+          // `posedFirstPeek`'s own `probeStatus` would fetch on a memo past its
+          // TTL, which is a `/status` call on the browse path (round-3 finding
+          // 4).
+          const { entries, collectionRootFs, learned } = await posedFirstPeek(
+            library,
+            dirPath,
+            PEEK_DEFAULT,
+            resolved,
+          )
+          if (collectionRootFs !== undefined && !rootUnmoved(collectionRootFs)) return
           // Recorded before any naming pass, for `/api/peek`'s reason: the
           // choice is the models and their order, never how one request
           // happened to label them.
           layers.recordPreview(collectionRootFs, dirPath, PEEK_DEFAULT, entries)
+          layers.recordPoses(collectionRootFs, learned.poses, learned.asked)
         } catch {
           // A folder that cannot be peeked simply has no sheet, exactly as
           // before this pass existed.
@@ -508,7 +753,7 @@ export function createApp(
       }
     }
     await Promise.all(
-      Array.from({ length: Math.min(FILL_PREVIEW_CONCURRENCY, dirs.length) }, derive),
+      Array.from({ length: Math.min(FILL_PREVIEW_CONCURRENCY, wanted.length) }, derive),
     )
   }
 
@@ -625,7 +870,7 @@ export function createApp(
       // Fill first, annotate second (§6.9): the fill's only job is putting more
       // in the layers before the pass below reads them, so a fact it fetched
       // and a fact a peek recorded reach the wire by the same path.
-      await fillAnnotations(listing.entries)
+      await fillAnnotations(fillKey(libPath, true, q, folderMatching), listing.entries)
       // Annotation first, names second: `annotate` may attach a dir entry's
       // preview cells, which are model tiles the naming pass must also reach
       // (it recurses into `entry.preview`) — named before annotation, a carried
@@ -637,7 +882,7 @@ export function createApp(
     }
     const listing = await listDir(library, libPath)
     // Same order as the flat branch, for its reason — fill, annotate, name.
-    await fillAnnotations(listing.entries)
+    await fillAnnotations(fillKey(libPath, false, undefined, folderMatching), listing.entries)
     annotate(listing.entries)
     applyDisplayNames(listing.entries, await overrides.store())
     return c.json(listing)
@@ -780,6 +1025,13 @@ export function createApp(
     // from the same seam the browse uses (library-overrides D7) — applied to
     // the posed-first ranking's output, since the ranking reorders entries and
     // never renames them.
+    // `learned` deliberately dropped here, where `fillPreviews` records it
+    // (round-3 finding 3). This route's answer is pinned byte-for-byte against
+    // the bare walk's when the index is unindexed (`pose-for-every-model` D5's
+    // determinism cells), and recording would make the `annotate` below attach a
+    // `pose` to every cell — a wire change to a shape another capability owns.
+    // The fill's own derivations record, so a *listing's* carried sheet arrives
+    // posed either way, which is where the client's preview wave reads from.
     const { entries, collectionRootFs } = await posedFirstPeek(library, libPath, n)
     // Recorded **before** the naming pass, so an override name a later request
     // removes cannot survive inside the layer: what is kept is the choice — the
@@ -979,6 +1231,17 @@ export function createApp(
     // server (§6.1) — never by asking the index on the layer's own account. The
     // next listing that includes these models carries their orientations inline,
     // and the client's wave shrinks to what remains unknown.
+    //
+    // **No asked-list, unlike the POST beside it** (round-3 finding 6, resolved
+    // here). This route's question is a *directory* and the models in it are
+    // enumerated inside `posesForDir`, which lists the directory itself — so the
+    // list the negatives would be stamped against does not exist at this layer,
+    // and manufacturing one would mean threading `answered` back out through
+    // `posesForDir` and `posesForListing` for a route **nothing under
+    // `client/src` calls** (see `ApiClient.semanticPoses`: the wave asks by path
+    // and lands on the POST). The negative loop is closed where the wave
+    // actually goes. If a client-side caller ever returns, widen `posesForDir`
+    // the way `posesListingAsked` widens `posesForListing` and pass its list.
     layers.recordPoses(await collectionRoot(), poses)
     const body: PosesResponse = { poses }
     return c.json(body)
@@ -1046,8 +1309,24 @@ export function createApp(
         if (!(err instanceof LibraryError) && !(err instanceof VPathError)) throw err
       }
     }
-    const poses = await posesForListing(library, canonical)
-    layers.recordPoses(await collectionRoot(), poses)
+    const { poses, answered } = await posesListingAsked(library, canonical)
+    // The asked-list goes in, which closes the negative loop on the wire (§6.9,
+    // round-3 finding 6). This is the route the client's pose **wave** lands on,
+    // so a model the wave asked about and the index did not name is recorded as
+    // "asked, none" here — and the next listing carries `pose: null`, which the
+    // wave reads as known and does not ask about again. Without it a folder the
+    // index has never embedded costs a wave on every landing forever: the answer
+    // was in this server's hands and it threw it away.
+    //
+    // `answered` gates it for `fillPoses`' reason, restated because this route's
+    // failure mode is the visible one: an index that is down answers `{}` too,
+    // and stamping negatives on that would silence poses for a whole horizon
+    // over a service the pose layer is meant to be independent of.
+    //
+    // A wave answer also **restamps** what it re-confirms, positives and
+    // negatives alike: `recordPoses` writes `recordedAt` on every path it is
+    // handed, so the horizon is measured from the last time the index said so.
+    layers.recordPoses(await collectionRoot(), poses, answered ? canonical : [])
     const answer: PosesResponse = { poses }
     return c.json(answer)
   })
