@@ -81,7 +81,7 @@ not this capability's.
 
 #### Scenario: The count follows the user's own hand
 - **WHEN** the library tab is open and the user orbits a model, chooses its axis, or gives its framing up from its tile or the viewer
-- **THEN** the reset count is re-derived and moves accordingly, without a job having run
+- **THEN** the reset count moves accordingly at once, by the change that hand made — not by re-deriving the scope, which happens only when the tab opens or a job that wrote something ends
 
 #### Scenario: The button is honest
 - **WHEN** the user opens the library tab

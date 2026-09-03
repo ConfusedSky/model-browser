@@ -26,7 +26,7 @@ import type * as THREE from 'three'
 import type { DirEntry, IndexPose } from '../../../shared/types'
 import { HttpError, type ApiClient } from '../api/client'
 import { isCurrentRender } from '../hooks/useThumbnails'
-import { framingAfterDiscard, renderEntryThumbnail, type ActionHost } from '../lib/entryActions'
+import { framingAfterDiscard, renderEntryThumbnail, resettable, type ActionHost } from '../lib/entryActions'
 import type { MeshLru } from '../three/lru'
 import type { RenderQueue } from '../three/queue'
 
@@ -145,9 +145,7 @@ function keeps(operation: JobOperation, c: JobEntry, ao: boolean): boolean {
     // reset left its models in the library's count, 2026-09-02). Kept exactly
     // when the discard changes something: a camera, or an axis a usable pose
     // replaces — asked of the shared rule, never restated.
-    if (thumb?.framed !== true) return false
-    if (thumb.camera !== undefined || thumb.axis === undefined) return true
-    return framingAfterDiscard(c.pose, thumb.axis).posed
+    return thumb !== undefined && resettable(thumb.camera, thumb.axis, c.pose, thumb.framed)
   }
   // An absent annotation means nothing is cached, not "unknown": the server's
   // index is seeded by the startup sweep and learns every write, so an entry
@@ -210,7 +208,7 @@ export class BulkJobs {
    * numbers that are two filters over one answer.
    */
   async count(scope: JobScope): Promise<{ generate: number; reset: number; incomplete: boolean }> {
-    const scan = await this.enumerate(scope)
+    const scan = await this.enumerate(scope, 'count')
     let generate = 0
     let reset = 0
     for (const c of scan.candidates) {
@@ -227,14 +225,25 @@ export class BulkJobs {
    */
   private async enumerate(
     scope: JobScope,
+    purpose: 'derive' | 'count' = 'derive',
   ): Promise<{ candidates: JobEntry[]; incomplete: boolean; ao: boolean }> {
     const listing = await this.deps.api.models(scope.path)
     const models = listing.entries.filter((e) => e.kind === 'model')
+    // A *count* waves only over the models whose rule needs a pose it does not
+    // have: an axis alone, which resets exactly when a usable pose replaces it.
+    // Measured on the real library (2026-09-02): 18,737 models, 15,357 with no
+    // pose in the enumeration, so the full wave is sixteen index requests per
+    // opening of the tab for numbers the pose layer mostly already answers.
+    // The cost is honest and small: the generate count can miss a render whose
+    // `posed` is behind for a model the layer has not learned yet; the launch's
+    // derivation still waves in full and finds it.
+    const needsPose = (e: DirEntry): boolean =>
+      purpose === 'derive' || (e.thumb?.axis !== undefined && e.thumb.camera === undefined)
     // Only the models the enumeration could not answer for. The tree cache's
     // pose layer rides an enumeration as it rides a listing, so asking about a
     // model that already carries one would be asking the library what the index
     // has already said (D8, the 6.4 rule). No unknowns, no round trip at all.
-    const unknown = models.filter((e) => e.pose === undefined).map((e) => e.path)
+    const unknown = models.filter((e) => e.pose === undefined && needsPose(e)).map((e) => e.path)
     // Failure is silence — the listing wave's own contract. A wave that did not
     // land leaves every model it covered unposed, which is exactly what an
     // index that has no opinion looks like, and is the state the per-entry

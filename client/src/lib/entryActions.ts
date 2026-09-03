@@ -37,7 +37,7 @@ import type {
   IndexPose,
   OrbitAxis,
 } from '../../../shared/types'
-import type { ApiClient } from '../api/client'
+import type { ApiClient, ThumbSave } from '../api/client'
 import { HttpError } from '../api/client'
 import { isCurrentRender, type ThumbState } from '../hooks/useThumbnails'
 // Type-only, and it must stay that way: `bulkJobs` imports `ActionHost` and
@@ -206,13 +206,19 @@ export interface ActionHost extends Feedback, LibraryTop {
    */
   launchJob: (operation: JobOperation, scope: JobScope) => void
   /**
-   * Say that a model's stored framing just changed — a camera or axis set or
-   * given up by something the user pressed. App counts these so the library
-   * tab's "Reset N framings" moves with the user's own hand, not only with a
-   * job's end (`bulk-thumbnail-jobs` D5: honest counts). Called after the
-   * write resolves, never before; a refused or failed write changed nothing.
+   * Say that a model's stored framing just changed by the user's own hand — a
+   * camera or axis set or given up — spelled exactly as the write spelled it:
+   * a value sets, `null` discards, absence keeps (`ThumbSave`'s own three
+   * states). App turns that into a signed change of the library tab's "Reset N
+   * framings" against what the tile held before, so the number moves with the
+   * hand without re-deriving 18,000 entries per orbit (`bulk-thumbnail-jobs`
+   * D5; measured 7.8 MB and a 16-request pose wave per recount, 2026-09-02).
+   *
+   * Called after the write resolves and **before** the tile's map is updated:
+   * the map is where App reads the before-state from. A refused or failed
+   * write changed nothing and says nothing.
    */
-  framingChanged: () => void
+  framingChanged: (path: string, write: FramingWrite) => void
 }
 
 /**
@@ -411,6 +417,39 @@ export const JOB_BUSY = 'A job is already running — cancel it to start another
  * stays — framing the model by default about its own spindle rather than laying
  * a Z-up model on its side for a spindle nobody asked for.
  */
+/** The orientation half of a thumbnail write, in the write's own three states:
+ *  a value sets, `null` discards, absence keeps. What `framingChanged` reports. */
+export type FramingWrite = Pick<ThumbSave, 'camera' | 'axis'>
+
+/**
+ * Whether a reset would change this model's stored framing — the one rule the
+ * bulk reset's derivation, the library tab's count and the hand-change delta
+ * all ask, so a button can never offer a reset that resets nothing.
+ *
+ * A stored camera is always given up. A stored axis is given up only where a
+ * usable index orientation replaces it (D7 — "usable" is `cameraForPose`'s
+ * answer); an axis the rule keeps is not a framing a reset can touch, and a
+ * model holding only such an axis is not "resettable" however `framed` it
+ * reads on the wire (found live: a subtree reset that left its models in the
+ * library's count, 2026-09-02).
+ */
+export function resettable(
+  camera: CameraState | undefined,
+  axis: OrbitAxis | undefined,
+  pose: IndexPose | undefined,
+  /**
+   * Whether *anything* is stored — the wire's `framed`, when the caller has an
+   * annotation, since an annotation may say `framed` without spelling the
+   * camera; derived from the fields otherwise (the tile's own map does spell
+   * them). The rule then excludes the one framed shape a reset leaves alone.
+   */
+  framed: boolean = camera !== undefined || axis !== undefined,
+): boolean {
+  if (!framed) return false
+  const axisOnly = camera === undefined && axis !== undefined
+  return !axisOnly || cameraForPose(pose, DEFAULT_CAMERA) !== null
+}
+
 export function framingAfterDiscard(
   pose: IndexPose | undefined,
   keptAxis: OrbitAxis,
@@ -434,7 +473,7 @@ export function framingAfterDiscard(
 export type RenderDeps = {
   /** Optional: the discard branch reports a framing change through it when
    *  given (the commands pass their host; the generate job never discards). */
-  framingChanged?: () => void
+  framingChanged?: ActionHost['framingChanged']
   api: Pick<ApiClient, 'getThumb' | 'putThumb'>
   lru: Pick<MeshLru<THREE.Object3D>, 'acquire'>
   queue: Pick<RenderQueue, 'whenResumed'>
@@ -606,6 +645,10 @@ export async function renderEntryThumbnail(
   // The session's own copy, not only the server's: App sources the
   // lightbox's camera and axis from this map, so a cache-only write would
   // leave the viewer opening at the orientation just given up (4b.4).
+  // Before the map is updated: that is where the before-state is read from.
+  if (discardFraming) {
+    deps.framingChanged?.(entry.path, { camera: null, axis: dropAxis ? null : undefined })
+  }
   deps.setThumb(entry.path, {
     status: 'ready',
     url: URL.createObjectURL(png),
@@ -615,7 +658,6 @@ export async function renderEntryThumbnail(
     // fetch cacheable (setThumb adopts absence as "re-learn").
     gen: written.gen,
   })
-  if (discardFraming) deps.framingChanged?.()
   return 'done'
 }
 
@@ -735,8 +777,9 @@ export function resetFramingLive(
       // what this map holds, so a cache-only discard would re-open the model
       // at the orientation just given up (4b.4).
       () => {
+        // The signal first, the map second: the before-state lives in the map.
+        host.framingChanged(entry.path, { camera: null, axis: framing.posed ? null : undefined })
         host.discardThumbFraming(entry.path, framing.posed)
-        host.framingChanged()
       },
       () => host.report(RESET_FAILED),
     )
@@ -893,6 +936,8 @@ export function setOrbitAxis(
       // The session's own copy, not only the server's: App opens the lightbox at
       // what this map holds, so a cache-only write would open the model about
       // the spindle just replaced (4b.4).
+      // The signal first, the map second: the before-state lives in the map.
+      host.framingChanged(entry.path, { camera: null, axis })
       host.setThumb(entry.path, {
         status: 'ready',
         url: URL.createObjectURL(png),
@@ -901,7 +946,6 @@ export function setOrbitAxis(
         // As in the re-render command: the echo, so the next fetch stays keyed.
         gen: written.gen,
       })
-      host.framingChanged()
     } catch {
       host.report(RENDER_FAILED)
     }

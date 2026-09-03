@@ -17,6 +17,7 @@ import {
   container,
   dir,
   features,
+  getThumb,
   listDir,
   model,
   models,
@@ -371,14 +372,15 @@ describe('the library tab', () => {
     expect(chipText()).toBe('Generated 2 of 2 in the library')
   })
 
-  it('recounts when the user gives a framing up by hand', async () => {
+  it('moves the reset count by hand without re-deriving the library', async () => {
     // The tab says one framing; the user resets that model from its own tile
-    // (the per-model command, not a job); the count must follow — a job's end
-    // is not the only moment the numbers go stale (Masa, live, 2026-09-02).
+    // (the per-model command, not a job). The count must follow — and it must
+    // follow by arithmetic, not by another 7.8 MB derivation (Masa, 2026-09-02):
+    // the tile held a camera before, none after, so the number drops by one.
     const withModel: DirListing = { path: '/models', entries: [dir('Alpha'), model('m.stl')] }
-    const framedAnswer = { path: '/', complete: true, entries: [beneath('/models', 'm.stl', framed())] }
-    const clearedAnswer = { path: '/', complete: true, entries: [beneath('/models', 'm.stl')] }
-    models.mockResolvedValueOnce(framedAnswer).mockResolvedValue(clearedAnswer)
+    const camera = { az: 1, el: 0.2, distR: 3, target: [0, 0, 0] as [number, number, number] }
+    enumerated('/', [beneath('/models', 'm.stl', { ...framed(), camera })])
+    getThumb.mockResolvedValue({ status: 'hit', pngUrl: 'blob:cached', camera, lighting: THUMB_LIGHTING, rig: RIG_VERSION })
     await mountApp('/models', withModel)
     await expandPanel()
     await click(tabButton('library')!)
@@ -388,11 +390,30 @@ describe('the library tab', () => {
     await secondaryPress(tile('m.stl'))
     await click(menuItem('resetFraming'))
     await settle()
-    // The sweep's own render of the missing tile also wrote; the discard is
-    // the last write, and it is the one that moved the count.
     expect(putThumb.mock.calls.at(-1)![0]).toMatchObject({ camera: null })
-    expect(models).toHaveBeenCalledTimes(2)
     expect(libraryButtons()[1]!.textContent).toBe('Reset 0 framings')
+    // One enumeration for the tab's opening, none for the hand change.
+    expect(models).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not recount for a launch that wrote nothing', async () => {
+    // Pressing the tab's own Reset derives the job (one enumeration, D1) and
+    // waits at the chip's confirmation; cancelling there wrote nothing, so the
+    // buttons keep their numbers rather than re-deriving them (Masa, 2026-09-02).
+    enumerated('/', [beneath('', '/c.stl', framed())])
+    await mountApp('/models', NESTED)
+    await expandPanel()
+    await click(tabButton('library')!)
+    await settle()
+    expect(models).toHaveBeenCalledTimes(1)
+    await click(libraryButtons()[1]!)
+    await settle()
+    expect(chipText()).toBe('Reset 1 framings in the library?')
+    expect(models).toHaveBeenCalledTimes(2)
+    await click(chipButton('Cancel')!)
+    await settle()
+    expect(models).toHaveBeenCalledTimes(2)
+    expect(libraryButtons()[1]!.textContent).toBe('Reset 1 framings')
   })
 
   it('counts once per opening, not once per landing', async () => {

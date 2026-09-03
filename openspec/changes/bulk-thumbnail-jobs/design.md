@@ -234,6 +234,23 @@ walk and the wave twice for two filters over one answer. The seam is keyed on
 the scope and the runner alone — never on the action host, which is rebuilt on
 every pose landing — or every landing re-enumerated the library.
 
+**A recount is expensive here, so it happens at two moments only (settled
+with Masa, 2026-09-02).** Measured on the real library: 18,737 models, a 7.8 MB
+enumeration in 0.47 s, and 15,357 of them with no pose in it — a full wave is
+sixteen index requests. So: the tab re-derives when it opens and when a job
+that *wrote something* ends (a launch passing through `deriving` and
+`confirming`, or a reset cancelled at its confirmation, changed nothing and
+recounts nothing). The user's own framing changes — a persisted orbit, a chosen
+axis, a framing given up from a tile or the viewer — move the reset count by
+**arithmetic**: each site reports the write in the PUT's own three states
+(`ActionHost.framingChanged`, before it updates the tile's map), App turns that
+into ±1 against the tile's pre-write state and the landed pose through the one
+rule (`resettable`), and the tab shows its derived count plus the change since
+that count landed; the next derivation absorbs the sum, which is where any drift
+from a concurrent writer heals. A count's wave is narrowed to the axis-only
+models, the one shape its rule needs the index for — it may miss a pose-stale
+render the layer has not learned, which the launch's full wave still finds.
+
 An enumeration that reports itself incomplete (a root with no snapshot whose walk
 stopped against its budget) is still a job, over what was found; the chip says the
 scope was cut, and the next launch — over a tree the walk may since have completed

@@ -224,9 +224,18 @@
       exactly the models whose framing a reset would change", falsified against the
       bare `framed`). And the count moved only when a job ended: `ActionHost.framingChanged`
       is now called by the four hand-written framing sites — App's `persist`, the axis
-      command, the lightbox's live reset, the core's discard — and feeds the tab's
-      `recountKey` beside the job phase (cell "recounts when the user gives a framing up
-      by hand", falsified by muting the core's call)
+      command, the lightbox's live reset, the core's discard. **Then Masa's second
+      objection, same day:** re-deriving per hand change was 7.8 MB and sixteen index
+      requests per orbit on the real library (18,737 models, measured), and the phase-keyed
+      recount re-derived twice per press of the tab's own Reset before anything was written.
+      Now: the sites report the write in the PUT's three states, App turns it into ±1
+      against the tile's pre-write state through `resettable` (the one rule, shared with
+      the derivation), the tab shows its derived count plus the change since it landed, and
+      re-derives only on opening and when a job that wrote something ends; a count's wave
+      covers axis-only models alone (design D8). Cells: "moves the reset count by hand
+      without re-deriving the library" (falsified twice: signal muted, delta never
+      applied), "does not recount for a launch that wrote nothing" (falsified: phase-keyed
+      recount made four enumerations for one press), "waves only over the axis-only models"
 - [x] 2.3 The progress chip: app-level, survives navigation, shows
       operation/scope/done/total/failed/skipped, Cancel; dismiss hides without
       cancelling (D2)

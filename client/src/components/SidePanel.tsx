@@ -159,10 +159,18 @@ export default function SidePanel({
     count: () => Promise<{ generate: number; reset: number; incomplete: boolean }>
     launch: (op: JobOperation) => void
     /**
-     * Recount when this changes. App moves it as a job's phase moves, which is
-     * exactly when the numbers on these buttons stopped being true.
+     * Recount when this changes. App moves it when a job that wrote something
+     * ends — the one moment the numbers on these buttons stopped being true and
+     * only a derivation can say by how much.
      */
     recountKey: unknown
+    /**
+     * The running sum of the user's own framing changes (App's `handDelta`).
+     * The reset button shows its derived count plus the change since that
+     * count landed: an orbit moves the number at once without re-deriving the
+     * library, and the next derivation absorbs the sum.
+     */
+    resetAdjust: number
   } | null
   /** The directory in view — meaning search only covers part of the filesystem. */
   path: string
@@ -309,6 +317,12 @@ export default function SidePanel({
   const showLibrary = tab === 'library' && library !== null
   const countFn = library?.count
   const recountKey = library?.recountKey
+  const resetAdjust = library?.resetAdjust ?? 0
+  // The hand-change sum as it stood when the shown count landed: what the
+  // button adds is the change *since* then, so a derivation absorbs the sum.
+  const resetAdjustRef = useRef(resetAdjust)
+  resetAdjustRef.current = resetAdjust
+  const adjustBaseRef = useRef(0)
   useEffect(() => {
     if (!showLibrary || countFn === undefined) return
     const token = ++countTokenRef.current
@@ -316,6 +330,7 @@ export default function SidePanel({
     void countFn().then(
       (c) => {
         if (countTokenRef.current !== token) return
+        adjustBaseRef.current = resetAdjustRef.current
         setCounts(c)
       },
       () => {
@@ -725,7 +740,7 @@ export default function SidePanel({
                     ? null
                     : op === 'generate'
                       ? counts.generate
-                      : counts.reset
+                      : Math.max(0, counts.reset + (resetAdjust - adjustBaseRef.current))
                 return (
                   <button
                     key={op}

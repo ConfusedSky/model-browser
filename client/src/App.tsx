@@ -17,13 +17,15 @@ import JobChip from './components/JobChip'
 import SidePanel from './components/SidePanel'
 import PathBar from './components/PathBar'
 import { SKELETON_DELAY_MS, useDelayedFlag } from './hooks/useDelayedFlag'
-import { useThumbnails } from './hooks/useThumbnails'
-import { BulkJobs, useBulkJobState, type JobOperation } from './jobs/bulkJobs'
+import { useThumbnails, type ThumbState } from './hooks/useThumbnails'
+import { BulkJobs, useBulkJobState, type JobOperation, type JobPhase } from './jobs/bulkJobs'
 import {
   commandsFor,
   containingFolder,
   DEFAULT_ORBIT_AXIS,
   JOB_BUSY,
+  resettable,
+  type FramingWrite,
   LIGHTBOX_MENU_EXCLUDES,
   LIGHTBOX_PANEL_EXCLUDES,
   openEntryIn,
@@ -512,16 +514,35 @@ export default function App() {
    */
   const [features, setFeatures] = useState<FeatureReport | null>(null)
   /**
-   * How many times the user's own hand has changed a stored framing this
-   * session — an orbit persisted, an axis chosen, a framing given up. Read by
-   * nothing but the library tab's recount key: the tab's "Reset N framings"
-   * must move when the user frames a model, not only when a job ends
-   * (`bulk-thumbnail-jobs` D5). A counter rather than the writes themselves,
-   * because the count is re-derived server-side and only needs to know that
-   * *something* moved.
+   * The library tab's "Reset N framings", moved by the user's own hand: the
+   * running sum of how many models became or stopped being resettable through
+   * a persisted orbit, a chosen axis, or a framing given up from a tile or the
+   * viewer. The tab adds the change since its last derivation to the number it
+   * derived (`bulk-thumbnail-jobs` D5) — never re-deriving on a hand change,
+   * which on the real library is 7.8 MB and sixteen index requests per orbit
+   * (measured 2026-09-02, Masa's objection). The full derivation stays the
+   * truth at the moments it already runs, so any drift heals there.
+   *
+   * The before-state is read from the thumbs map, which is why every caller
+   * signals *before* it updates the map; the pose from the landed answer, the
+   * same one the derivation would resolve against. Both through refs so this
+   * callback, and every host and persist that closes over it, stay stable.
    */
-  const [framingVersion, setFramingVersion] = useState(0)
-  const noteFramingChanged = useCallback(() => setFramingVersion((v) => v + 1), [])
+  const [handDelta, setHandDelta] = useState(0)
+  const thumbsRef = useRef<Map<string, ThumbState>>(new Map())
+  const posesRef = useRef<Record<string, IndexPose>>({})
+  const noteFramingChanged = useCallback((path: string, write: FramingWrite) => {
+    const before = thumbsRef.current.get(path)
+    const pose = posesRef.current[path]
+    const was = resettable(before?.camera, before?.axis, pose)
+    const is = resettable(
+      write.camera === null ? undefined : (write.camera ?? before?.camera),
+      write.axis === null ? undefined : (write.axis ?? before?.axis),
+      pose,
+    )
+    const delta = (is ? 1 : 0) - (was ? 1 : 0)
+    if (delta !== 0) setHandDelta((d) => d + delta)
+  }, [])
   const [apps, setApps] = useState<AppsReport | null>(null)
   const [actionText, setActionText] = useState<{ text: string; tone: 'ok' | 'error' } | null>(null)
   const actionTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -1028,6 +1049,8 @@ export default function App() {
    * the runner on every press of the pill — discarding the running job's state
    * with it.
    */
+  thumbsRef.current = thumbs
+  posesRef.current = poses
   const jobs = useMemo(
     () => new BulkJobs({ api, lru, queue, setThumb, refetch, ao: aoEnabled }),
     [api, lru, queue, setThumb, refetch],
@@ -2356,18 +2379,30 @@ export default function App() {
     },
     [rootScope],
   )
+  /**
+   * How many jobs have ended having written something — the one moment a job
+   * makes the tab's numbers stale. Not every phase: a launch passes through
+   * `deriving` and `confirming` before it writes, and a reset cancelled at its
+   * confirmation wrote nothing, so recounting on phase alone re-derived the
+   * library twice per press of the very button whose count it was refreshing
+   * (Masa, 2026-09-02).
+   */
+  const [jobsEnded, setJobsEnded] = useState(0)
+  const lastPhaseRef = useRef<JobPhase | undefined>(undefined)
+  useEffect(() => {
+    const phase = job?.phase
+    if (phase === lastPhaseRef.current) return
+    lastPhaseRef.current = phase
+    if ((phase === 'done' || phase === 'cancelled') && job !== null && job.done > 0) {
+      setJobsEnded((n) => n + 1)
+    }
+  }, [job])
   const libraryJobs = useMemo(
     () =>
       features?.thumbWrites === true && rootScope !== null
-        ? {
-            count: countLibrary,
-            launch: launchLibrary,
-            // A job ending and a framing changed by hand are the two moments
-            // the numbers went stale; one key carries both.
-            recountKey: `${job?.phase ?? 'idle'}:${framingVersion}`,
-          }
+        ? { count: countLibrary, launch: launchLibrary, recountKey: jobsEnded, resetAdjust: handDelta }
         : null,
-    [features?.thumbWrites, rootScope, countLibrary, launchLibrary, job?.phase, framingVersion],
+    [features?.thumbWrites, rootScope, countLibrary, launchLibrary, jobsEnded, handDelta],
   )
 
   function goUp(): void {
@@ -2448,6 +2483,10 @@ export default function App() {
             ao,
           }),
         ])
+        // A persisted orbit is the user framing a model by hand — the library
+        // tab's reset count has to know (D5). Not for a pixels-only persist,
+        // and before the map is updated: that is where the before-state is.
+        if (opts.camera !== false) noteFramingChanged(entry.path, { camera: state, axis })
         setThumb(entry.path, {
           status: 'ready',
           url,
@@ -2459,9 +2498,6 @@ export default function App() {
           // "unknown, re-learn").
           gen: written.gen,
         })
-        // A persisted orbit is the user framing a model by hand — the library
-        // tab's reset count has to know (D5). Not for a pixels-only persist.
-        if (opts.camera !== false) noteFramingChanged()
       } catch {
         // persistence is best-effort; the orbit itself already happened
       }

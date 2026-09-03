@@ -413,9 +413,8 @@ describe('the reset run', () => {
       { path: '/kit/posed.stl', mtime: 7, camera: null, axis: null, png: null, ifGen: 1 },
       { path: '/kit/poseless.stl', mtime: 7, camera: null, axis: undefined, png: null, ifGen: 1 },
     ])
-    // The discard rule is asked, never restated: `entry-actions` owns it — once
-    // by the derivation for the axis-only entry, then once per entry by the run.
-    expect(framingAfterDiscard.mock.calls.map((c) => c[0])).toEqual([POSE, POSE, POSE_OFF_AXIS])
+    // The discard rule is asked, never restated: `entry-actions` owns it.
+    expect(framingAfterDiscard.mock.calls.map((c) => c[0])).toEqual([POSE, POSE_OFF_AXIS])
     expect(h.jobs.state).toMatchObject({ phase: 'done', total: 2, done: 2 })
   })
 
@@ -641,11 +640,40 @@ describe('counting a scope', () => {
       ),
     )
     expect(await h.jobs.count(SCOPE)).toEqual({ generate: 2, reset: 2, incomplete: true })
-    // One walk, one wave — the two numbers are two filters over one answer.
+    // One walk — the two numbers are two filters over one answer — and no wave
+    // at all: nothing here is axis-only, which is the one shape a count needs
+    // the index for.
     expect(h.models).toHaveBeenCalledTimes(1)
-    expect(h.posesFor).toHaveBeenCalledTimes(1)
+    expect(h.posesFor).not.toHaveBeenCalled()
     // And the same filters the work list uses: a count is a derivation's size.
     expect((await h.jobs.derive('generate', SCOPE)).entries).toHaveLength(2)
     expect((await h.jobs.derive('reset', SCOPE)).entries).toHaveLength(2)
+  })
+})
+
+describe('what a count asks the index about', () => {
+  it('waves only over the axis-only models whose rule needs a pose, and a derivation over all the unknown', async () => {
+    const h = harness(
+      listing([
+        model('unposed-plain'),
+        model('unposed-axis-only', { thumb: thumb({ framed: true, axis: 'z' }) }),
+        model('unposed-camera', { thumb: thumb({ framed: true, camera: { az: 1, el: 0.2, distR: 3, target: [0, 0, 0] } }) }),
+        model('posed-axis-only', { pose: POSE, thumb: thumb({ framed: true, axis: 'z' }) }),
+      ]),
+    )
+    await h.jobs.count(SCOPE)
+    // One request, naming exactly the model a count cannot judge without the index.
+    expect(h.posesFor.mock.calls.map((c) => c[0])).toEqual([['/kit/unposed-axis-only.stl']])
+    h.posesFor.mockClear()
+    await h.jobs.derive('generate', SCOPE)
+    expect(h.posesFor.mock.calls.map((c) => c[0])).toEqual([
+      ['/kit/unposed-plain.stl', '/kit/unposed-axis-only.stl', '/kit/unposed-camera.stl'],
+    ])
+  })
+
+  it('makes no request at all when nothing axis-only is unposed', async () => {
+    const h = harness(listing([model('unposed-plain'), model('unposed-camera', { thumb: thumb({ framed: true, camera: { az: 1, el: 0.2, distR: 3, target: [0, 0, 0] } }) })]))
+    await h.jobs.count(SCOPE)
+    expect(h.posesFor).not.toHaveBeenCalled()
   })
 })
