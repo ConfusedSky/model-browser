@@ -57,6 +57,21 @@ A request answered from the snapshot returns at once and is marked as such; reva
 
 How the corrected listing reaches the client is deliberately left to apply: the cheapest shape consistent with D1 of the architecture (the Hono app must run on Node unchanged, so no new transport) is a second ordinary request the client issues when it sees the stale marker. The existing latest-wins guard and skeleton already handle a later response landing.
 
+*Review corrections, 2026-09-02 (stage-1/2 review, findings 1/2/6 — the first was the
+coordinator's own lifecycle pin over-solving the follow-up loop):* validation is **not**
+once-per-process. A completed pass stamps the root with a time, and a cache-serve whose
+stamp is older than `REVALIDATE_TTL_MS` (10 s, a constant — the library's 5 s `nested`
+memo is the precedent for the order of magnitude) is served **marked** again and re-runs
+the pass, so a long-lived process converges on external changes at a bounded cadence
+instead of never. The pass's failure taxonomy is explicit: only a `RevalidationError`
+(the pass saw the tree and was contradicted) invalidates; an invalidate that itself
+fails leaves the root UNVALIDATED (never stamp over a failed invalidate — a contradicted
+snapshot must not be served unmarked); any other failure — the store's own write failing,
+ENOSPC — leaves snapshot and stamp alone and retries at the next cadence. And the
+pending-await serve path re-checks the stamp after awaiting rather than serving
+unconditionally unmarked: a pass that exited through the volume-gone early-return
+validated nothing, and its awaiter must not pretend otherwise.
+
 ### D6: A cache that disagrees with the disk loses
 
 Nothing is served from the snapshot that revalidation has contradicted, and a revalidation that cannot be completed against a root that is *there* — present but unreadable, permissions changed — invalidates rather than persists.
@@ -113,7 +128,7 @@ An explicit reload endpoint (mini-classify's reload is the precedent) runs the s
 
 ## Risks / Trade-offs
 
-- [The snapshot goes stale in ways mtime cannot see — a file edited in place, a same-name replacement within the mtime granularity] → names are what this indexes, and a replaced file keeps its name; the thumbnail cache already keys on `path + mtime` independently, so a stale entry produces a re-render rather than a wrong image.
+- [The snapshot goes stale in ways mtime cannot see — a file edited in place, a same-name replacement within the mtime granularity] → **corrected 2026-09-02 (review finding 5): the original mitigation claim was false once listings themselves serve the recorded mtime.** A file overwritten in place keeps its name AND, in snapshot-served flat listings, its old mtime — so the client's `getThumb(path, mtime)` hits the *old* render: a wrong image, not a re-render, until a name change in that directory, a reload, or eviction re-walks it. Accepted as D4's own in-place blindness reaching the wire, with its heals named: the non-flat folder view is uncached and always true, the TTL cadence re-walks *changed* directories only (not this one, whose mtime never moved), and the reload endpoint is the manual heal. Recorded in the delta as a normative caveat rather than left as a claim the code contradicts.
 - [Removable volume mounted at a different path] → rebased on `library-root` (2026-08-29): the cache keys on the library's identity plus the root's library path and lives under `<cache>/<library-id>/`, so a remount elsewhere is a hit; an unmounted volume is the library's `missing` state, answered before any listing, and neither serves nor discards the snapshot. (Before the rebase this bullet read the opposite — a remount was a miss — which `library-root` made false.)
 - [Cache size on a very large library] → entries are metadata; the measured 18,705-entry library is trivial next to a 2 GB thumbnail budget. It shares that budget and eviction sweep, so growth is bounded by an existing mechanism rather than a new one.
 - [exfat directory mtime unreliable] → D4's stated risk, with the readdir-fingerprint fallback; must be tested on the real volume before the design is trusted.
