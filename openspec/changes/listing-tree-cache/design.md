@@ -72,6 +72,14 @@ pending-await serve path re-checks the stamp after awaiting rather than serving
 unconditionally unmarked: a pass that exited through the volume-gone early-return
 validated nothing, and its awaiter must not pretend otherwise.
 
+*D5's "immediately", re-priced 2026-09-03 (round-3 review, finding 9):* the 6.9 revision
+put up to `ANNOTATION_BUDGET_MS` of emission-time filling ahead of a snapshot serve whose
+cold-layer case recurs every `POSE_ANNOTATION_TTL_MS` horizon, not just at process start.
+The ~46 ms stale-serve measurement predates it; a first-sight-whole serve is ~46 ms + the
+fill (bounded at 300 ms). This is the deliberate trade the revision chose — whole over
+instant, for first sights only — and a reviewer measuring against "returns at once" should
+read this paragraph, not file a bug.
+
 ### D6: A cache that disagrees with the disk loses
 
 Nothing is served from the snapshot that revalidation has contradicted, and a revalidation that cannot be completed against a root that is *there* — present but unreadable, permissions changed — invalidates rather than persists.
