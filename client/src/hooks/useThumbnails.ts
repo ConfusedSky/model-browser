@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type * as THREE from 'three'
-import type { CameraState, DirEntry, IndexPose, OrbitAxis } from '../../../shared/types'
+import type {
+  CameraState,
+  DirEntry,
+  IndexPose,
+  LightingMode,
+  OrbitAxis,
+} from '../../../shared/types'
 import type { ApiClient } from '../api/client'
 import { DEFAULT_CAMERA } from '../three/camera'
 import type { MeshLru } from '../three/lru'
@@ -54,6 +60,36 @@ export function resetLookupQueueForTests(): void {
 }
 
 /**
+ * Release a URL a tile was showing — if it is one this hook can release. Only
+ * an object URL is (`thumbnail-image-serving` D3): an image URL is a string
+ * naming the server's route, owned by nobody, and revoking it is a no-op the
+ * browser would only log. Decided by scheme, because a tile holds either over
+ * its life — drawn from the listing at an image URL, re-rendered to a `blob:`.
+ */
+function release(url: string): void {
+  if (url.startsWith('blob:')) URL.revokeObjectURL(url)
+}
+
+/**
+ * The client's usability test for a cached render — the one predicate,
+ * applied to a `getThumb` answer and to a listing entry's annotation alike,
+ * so the two cannot drift (`thumbnail-image-serving` D2/D3). The labels are
+ * compared against the client's own constants, which the server never
+ * interprets; `poseStale` is the pose's own rule: only where nothing of the
+ * user's is stored does the index's opinion make an un-posed render stale.
+ */
+function usable(
+  labels: { lighting?: LightingMode; rig?: number; posed?: number },
+  camera: CameraState | undefined,
+  axis: OrbitAxis | undefined,
+  pose: IndexPose | undefined,
+): boolean {
+  const poseStale =
+    pose !== undefined && camera === undefined && axis === undefined && labels.posed !== POSE_VERSION
+  return labels.lighting === THUMB_LIGHTING && labels.rig === RIG_VERSION && !poseStale
+}
+
+/**
  * One entry's lifecycle, held in a ref that outlives the sweep effect.
  *
  * It cannot live in the effect's closure: React runs an effect's cleanup before
@@ -99,13 +135,23 @@ interface EntrySlot {
    */
   thumbGen: number | undefined
   /**
-   * The object URL the tile is displaying, and which this hook owns — including
-   * URLs minted *outside* the hook and handed in through `setThumb` (`App`'s
-   * `persist`, `entryActions`' re-render). Ownership lives here rather than in a
-   * hook-private list precisely so those cannot leak while the hook revokes its
-   * own superseded ones.
+   * The URL the tile is displaying. An object URL here is one this hook owns —
+   * including URLs minted *outside* the hook and handed in through `setThumb`
+   * (`App`'s `persist`, `entryActions`' re-render) — and ownership lives here
+   * rather than in a hook-private list precisely so those cannot leak while
+   * the hook revokes its own superseded ones. An image URL (drawn from the
+   * listing) is held the same way and released by `release`, which knows the
+   * difference.
    */
   url: string | undefined
+  /**
+   * The listing generation whose image URL this tile asked for and could not
+   * load (`thumbnail-image-serving` D3) — an entry evicted between emission
+   * and fetch, or a pulled disk. Remembered so the next `start` for this slot
+   * (a pose wave, a toggle) does not rebuild the same URL and fail again; a
+   * listing naming a *different* generation is a new fact and is tried.
+   */
+  refusedGen: number | undefined
 }
 
 /**
@@ -208,13 +254,13 @@ export function useThumbnails(
     // URL it carries is revoked by nothing (disposal walks slots too). Release
     // what it minted and leave the state alone.
     if (slot === undefined) {
-      if (state.url !== undefined) URL.revokeObjectURL(state.url)
+      if (state.url !== undefined) release(state.url)
       return
     }
     // Revoke the URL this state displaces, whoever minted it — the hook's own
     // renders and the two outside writers alike. Safe against the tile's <img>
     // still pointing at it for one commit: the image is already decoded.
-    if (slot.url !== undefined && slot.url !== state.url) URL.revokeObjectURL(slot.url)
+    if (slot.url !== undefined && slot.url !== state.url) release(slot.url)
     slot.url = state.url
     // The generation travels with the write, absence included: an external
     // writer that did not (or could not) plumb its PUT echo leaves `undefined`
@@ -291,7 +337,7 @@ export function useThumbnails(
     // image. The LRU loader mints the preview and keeps no handle of its own
     // (`App`'s `MeshLru` factory), so returning without revoking leaks it.
     if (slot === undefined || slot.url !== undefined) {
-      URL.revokeObjectURL(url)
+      release(url)
       return
     }
     // Joins the slot's ownership like any other displayed URL, so the render
@@ -360,6 +406,54 @@ export function useThumbnails(
     [applyRanking],
   )
 
+  /**
+   * Far renders yield to pending lookups for nearer tiles (D5): the render
+   * queue's far gate reads the lookup queue, and every lookup that settles
+   * pokes the render queue in case it was the last nearer one. Both cleared
+   * on unmount so a module-level queue never points at a dead render queue.
+   */
+  useEffect(() => {
+    queue.setFarGate(() => lookupQueue.pendingNearerThanFar() === 0)
+    lookupQueue.onSettle(() => queue.poke())
+    return () => {
+      queue.setFarGate(null)
+      lookupQueue.onSettle(null)
+    }
+  }, [queue])
+
+  /**
+   * The current sweep's `start`, for the image-error path below, which runs
+   * from an `<img>` event long after the effect that defined `start` ran.
+   */
+  const startRef = useRef<((entry: DirEntry, slot: EntrySlot) => ThumbState | undefined) | null>(null)
+
+  /**
+   * A tile drawn from the listing could not load its image (D3): the entry
+   * was evicted between emission and fetch, or the library is unmounted. The
+   * tile goes back to loading and the entry takes the lookup path, with the
+   * refused generation remembered on the slot so nothing rebuilds the same
+   * URL. Never the error state: a 404 for an image is not a failed model.
+   *
+   * Only an image URL can fail this way. An error reported for a `blob:` URL
+   * — or for a tile whose state has already moved on — is not this path's.
+   */
+  const reportImageError = useCallback((path: string) => {
+    const slot = slotsRef.current.get(path)
+    if (slot === undefined || slot.url === undefined || slot.url.startsWith('blob:')) return
+    if (startRef.current === null) return
+    slot.refusedGen = slot.entry.thumb?.gen
+    slot.url = undefined
+    retire(slot)
+    // The lookup path never answers synchronously, so this seed is not raced
+    // by anything `start` writes (D3's ordering, from the other side).
+    const seeded = startRef.current(slot.entry, slot)
+    setThumbs((prev) => {
+      const next = new Map(prev)
+      next.set(path, seeded ?? { status: 'loading' })
+      return next
+    })
+  }, [])
+
   useEffect(() => {
     const slots = slotsRef.current
     // A new listing starts unreported: the previous listing's verdicts must
@@ -373,8 +467,21 @@ export function useThumbnails(
     const wanted = new Map(models.map((e) => [e.path, e]))
     const removed: string[] = []
     const added: string[] = []
+    /**
+     * Tiles the listing itself answered (D3): their state is seeded in the
+     * same updater as the added-entry placeholders, never through `setThumb`
+     * — that batch would overwrite a synchronous write, and with nothing
+     * pushed to any queue the tile would then spin forever.
+     */
+    const answered = new Map<string, ThumbState>()
 
-    function start(entry: DirEntry, slot: EntrySlot): void {
+    /**
+     * Start (or restart) this slot's pass. Returns the tile's state when the
+     * listing's annotation answers it outright — a render the entry vouches
+     * for, usable under the client's own constants — and then pushes nothing;
+     * otherwise pushes the lookup and returns undefined.
+     */
+    function start(entry: DirEntry, slot: EntrySlot): ThumbState | undefined {
       const generation = slot.generation
       const pose = slot.pose
       /**
@@ -384,6 +491,26 @@ export function useThumbnails(
        */
       const alive = (): boolean =>
         slotsRef.current.get(entry.path) === slot && slot.generation === generation
+
+      // The listing's answer, where it has one (D2/D3): the recipe-in-force
+      // variant reads `hit`, the client's predicate passes, and this slot has
+      // not already been refused an image at this generation. The URL names
+      // the entry's generation, so the browser can pin it; the slot learns
+      // the generation exactly as a lookup would teach it.
+      const info = entry.thumb
+      const variant = info === undefined ? undefined : ao ? info.ao : info.noao
+      if (
+        info !== undefined &&
+        variant?.state === 'hit' &&
+        info.gen !== slot.refusedGen &&
+        usable(variant, info.camera, info.axis, pose)
+      ) {
+        const url = api.thumbImageUrl(entry.path, entry.mtime, ao, info.gen)
+        if (slot.url !== undefined && slot.url !== url) release(slot.url)
+        slot.url = url
+        slot.thumbGen = info.gen
+        return { status: 'ready', url, camera: info.camera, axis: info.axis, gen: info.gen }
+      }
 
       slot.cancels.push(
         lookupQueue.push(async () => {
@@ -409,7 +536,7 @@ export function useThumbnails(
             if (!alive()) {
               // The lookup already minted an object URL for a tile that no
               // longer exists — release it rather than leak the decoded PNG.
-              if (cached.pngUrl !== undefined) URL.revokeObjectURL(cached.pngUrl)
+              if (cached.pngUrl !== undefined) release(cached.pngUrl)
               return
             }
             // A pose is an input to the pixels that path+mtime does not carry —
@@ -418,25 +545,17 @@ export function useThumbnails(
             // forever, and the orientation appears only once the user opens the
             // model and the lightbox's close persists a posed snapshot.
             //
-            // Only where nothing of the user's is stored, because that is the
-            // only case the re-render below poses: with a stored camera or
-            // axis it computes `posed = null` and PUTs unlabelled pixels, so
-            // the label could never arrive and every visit re-rendered and
-            // re-uploaded the same picture. A stored camera wins over the
-            // index's opinion anyway (semantic-search D5) — there is nothing
-            // stale about pixels that already show it.
-            const wantsPose = pose !== undefined
-            const poseStale =
-              wantsPose &&
-              cached.camera === undefined &&
-              cached.axis === undefined &&
-              cached.posed !== POSE_VERSION
+            // Only where nothing of the user's is stored (`usable`), because
+            // that is the only case the re-render below poses: with a stored
+            // camera or axis it computes `posed = null` and PUTs unlabelled
+            // pixels, so the label could never arrive and every visit
+            // re-rendered and re-uploaded the same picture. A stored camera
+            // wins over the index's opinion anyway (semantic-search D5) —
+            // there is nothing stale about pixels that already show it.
             if (
               cached.status === 'hit' &&
               cached.pngUrl !== undefined &&
-              cached.lighting === THUMB_LIGHTING &&
-              cached.rig === RIG_VERSION &&
-              !poseStale
+              usable(cached, cached.camera, cached.axis, pose)
             ) {
               setThumb(entry.path, {
                 status: 'ready',
@@ -454,7 +573,7 @@ export function useThumbnails(
             let staleUrl = cached.pngUrl
             const dropStale = () => {
               if (staleUrl !== undefined) {
-                URL.revokeObjectURL(staleUrl)
+                release(staleUrl)
                 staleUrl = undefined
               }
             }
@@ -572,7 +691,9 @@ export function useThumbnails(
           }
         }, entry.path),
       )
+      return undefined
     }
+    startRef.current = start
 
     // Entries that left — or came back at a new mtime, which is a different
     // cache key and so a different entry. Only a removal revokes.
@@ -580,7 +701,7 @@ export function useThumbnails(
       const entry = wanted.get(path)
       if (entry !== undefined && entry.mtime === slot.entry.mtime) continue
       retire(slot)
-      if (slot.url !== undefined) URL.revokeObjectURL(slot.url)
+      if (slot.url !== undefined) release(slot.url)
       slots.delete(path)
       removed.push(path)
     }
@@ -598,15 +719,33 @@ export function useThumbnails(
           cancels: [],
           url: undefined,
           thumbGen: undefined,
+          refusedGen: undefined,
         }
         slots.set(entry.path, fresh)
         added.push(entry.path)
-        start(entry, fresh)
+        const seeded = start(entry, fresh)
+        if (seeded !== undefined) answered.set(entry.path, seeded)
         continue
       }
+      // The listing's annotation is an input to the pixels (D3): a listing
+      // naming a generation this slot has not seen — not the one its own
+      // lookup or PUT taught it, not the one its previous entry carried — is
+      // another writer's work (another tab, a lightbox persist, a bulk job),
+      // and a tile pinned `immutable` at the old number would otherwise show
+      // wrong pixels with no request that could ever discover it. A listing
+      // that carries *no* annotation is not a new fact: the server has simply
+      // not learned this entry, and the slot keeps what it knows.
+      const newGen =
+        entry.thumb !== undefined &&
+        entry.thumb.gen !== slot.thumbGen &&
+        entry.thumb.gen !== slot.entry.thumb?.gen
+      // The survivor answers for the new entry object either way — its mtime
+      // is the same (the removal loop above is what decides that), and its
+      // annotation is what the next reconcile compares against.
+      slot.entry = entry
       // A survivor whose inputs are unchanged keeps its state, its image and
       // its work in flight — a peek landing beside it must not restart it.
-      if (slot.ao === ao && samePose(slot.pose, pose)) continue
+      if (slot.ao === ao && samePose(slot.pose, pose) && !newGen) continue
       // Retirement, not a reset: cancel what is running and look this entry up
       // again under the new recipe, while the tile keeps the image and the
       // state it is showing until the replacement lands (D3). The fresh
@@ -615,16 +754,21 @@ export function useThumbnails(
       retire(slot)
       slot.ao = ao
       slot.pose = pose
-      start(entry, slot)
+      const seeded = start(entry, slot)
+      if (seeded !== undefined) answered.set(entry.path, seeded)
     }
 
-    if (removed.length > 0 || added.length > 0) {
+    if (removed.length > 0 || added.length > 0 || answered.size > 0) {
       setThumbs((prev) => {
         const next = new Map(prev)
         // Removals first: a same-path new-mtime entry is a removal *then* an
         // addition on one key, and the addition has to win.
         for (const path of removed) next.delete(path)
-        for (const path of added) next.set(path, { status: 'loading' })
+        // The listing's own answers land in this same updater, after the
+        // placeholders, so nothing can seed `loading` over a tile the
+        // listing has already drawn (D3/F1).
+        for (const path of added) next.set(path, answered.get(path) ?? { status: 'loading' })
+        for (const [path, state] of answered) next.set(path, state)
         return next
       })
     }
@@ -662,7 +806,7 @@ export function useThumbnails(
       for (const slot of slots.values()) {
         slot.generation++
         for (const cancel of slot.cancels) cancel()
-        if (slot.url !== undefined) URL.revokeObjectURL(slot.url)
+        if (slot.url !== undefined) release(slot.url)
       }
       // Cleared, as an invariant. `main.tsx` renders under <StrictMode>, which
       // simulates unmount→remount on the same instance with refs preserved: a
@@ -673,5 +817,5 @@ export function useThumbnails(
     }
   }, [])
 
-  return { thumbs, setThumb, setPlaceholder, discardThumbFraming, setBands }
+  return { thumbs, setThumb, setPlaceholder, discardThumbFraming, setBands, reportImageError }
 }

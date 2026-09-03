@@ -11,6 +11,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { vi } from 'vitest'
 import type { DirEntry, DirListing } from '../../shared/types'
+import { thumbImageUrl } from '../src/api/thumbUrl'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -130,6 +131,9 @@ export function apiClientModule(): Record<string, unknown> {
       peek = peek
       overrides = overrides
       getThumb = getThumb
+      // The real builder, not a copy: an image URL a cell asserts must be the
+      // one the app would fetch.
+      thumbImageUrl = thumbImageUrl
       putThumb = putThumb
       indexAvailability = indexAvailability
       library = library
@@ -260,7 +264,16 @@ export function deepButton(): HTMLButtonElement {
 }
 
 async function mount(initial: DirListing): Promise<void> {
-  vi.stubGlobal('URL', { ...URL, createObjectURL: () => 'blob:m', revokeObjectURL: () => {} })
+  // A real constructor with two statics overridden — not a spread copy. happy-dom
+  // parses every `<img src>` with the global `URL`, and a stub that is not a
+  // constructor makes that parse throw, which happy-dom answers by firing the
+  // image's `error` synchronously on mount: every listing-drawn tile would
+  // demote itself to the lookup before the cell could look (found landing
+  // `thumbnail-image-serving` 5.3). Browsers do no such thing.
+  vi.stubGlobal(
+    'URL',
+    Object.assign(class extends URL {}, { createObjectURL: () => 'blob:m', revokeObjectURL: () => {} }),
+  )
   listDir.mockReset()
   listDir.mockResolvedValue(initial)
   getThumb.mockClear()

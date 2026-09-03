@@ -191,9 +191,15 @@ lookup where `posed` predates it), the state is `ready` at
 absence included since `a2c5c28`, so omitting it would wipe the key that
 makes later fetches immutable. Every other case takes the lookup path.
 
-**Survivors re-read it.** The annotation is a new input to the pixels, so the
-survivor test becomes `slot.ao === ao && samePose(...) && slot.entry.thumb?.gen === entry.thumb?.gen`,
-and a survivor's `slot.entry` is updated. Without that, a tile pinned
+**Survivors re-read it.** The annotation is a new input to the pixels, so a
+survivor restarts when the listing names a generation the slot has not seen
+— neither the one its own lookup or PUT taught it (`slot.thumbGen`) nor the
+one its previous entry carried — and a survivor's `slot.entry` is updated
+either way. Not the literal `slot.entry.thumb?.gen === entry.thumb?.gen`
+first drafted: that restarts a tile whose own PUT it just watched, the moment
+a listing names the number it already knows, re-fetching bytes the client
+holds (the Non-Goal above). A listing carrying no annotation is not a new
+fact either — the server has simply not learned the entry. Without that, a tile pinned
 `immutable` at gen N would ignore a listing naming N+1 — another tab, a
 lightbox persist elsewhere, `bulk-thumbnail-jobs` — and show wrong pixels
 with no request that could ever discover it. The cost is one restart per
@@ -272,11 +278,15 @@ time-bounded inside the queue: once it has read closed for `FAR_GATE_MAX_MS`
 `take` dispatches far work regardless, and the bound is stated in the spec.
 
 **Mechanics.** `pending` counts live jobs — husks are spliced only inside
-`take`, so it must not be `jobs.length + running`; `onIdle` fires *after* the
-decrement that makes `pending` zero, or the `poke` it triggers runs against a
-closed gate and far work waits for the next push; `poke` re-pumps. Nearer
-work is unaffected: a visible tile's render runs beside a pending lookup for
-a tile the user also wants.
+`take`, so it must not be `jobs.length + running`. The settle signal is
+`onSettle`, fired after **every** job finishes and after the decrement, not
+an idle-only `onIdle`: the gate reads "nearer than far pending", and the last
+*near* lookup can settle while far lookups still run — an idle signal would
+then leave far renders waiting on the last far lookup. The hook's callback
+pokes the render queue, whose gate re-reads the count; a closed gate arms one
+timer for the bound's remainder, since a queue holding only far work has
+nothing else to pump it. Nearer work is unaffected: a visible tile's render
+runs beside a pending lookup for a tile the user also wants.
 
 ### D6: Rollback and coexistence
 
@@ -303,6 +313,18 @@ Two things here touch that:
   the browser's copy is also gone; the size-cap sweep is the only reader of
   the clock. The requirement's word "read" is not amended; this paragraph is
   where its meaning under browser caching is written down.
+
+### D7a: What the test DOM does with an image
+
+happy-dom (20.x) loads no image URL — `enableImageFileLoading` is off — so it
+fires no `load`, and a cell about a picture arriving synthesizes the event.
+It *does* fire `error`, synchronously on `src` assignment, whenever the global
+`URL` cannot parse the source; and both harnesses stubbed `URL` with a spread
+copy that was not a constructor, so every listing-drawn tile demoted itself
+before a cell could look. The stubs are subclasses with two statics
+overridden now (`client/test/CLAUDE.md`). Task 5.1's premise that neither
+event fires was half right; recorded here so the next reader of a spinning
+tile in a test knows where to look.
 
 ### D8: Review disposition (2026-09-02, fresh opus reviewer on the draft)
 

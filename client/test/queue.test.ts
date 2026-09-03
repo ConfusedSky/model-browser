@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { RenderQueue } from '../src/three/queue'
+import { describe, expect, it, vi } from 'vitest'
+import { FAR_GATE_MAX_MS, RenderQueue } from '../src/three/queue'
 
 const tick = () => new Promise((r) => setTimeout(r, 0))
 
@@ -196,5 +196,131 @@ describe('RenderQueue priority', () => {
     queue.resume()
     await tick()
     expect(ran).toEqual(['v'])
+  })
+})
+
+/**
+ * Far dispatch yields to pending lookups for nearer tiles
+ * (`thumbnail-image-serving` D5): a gate on another queue holds far-ranked
+ * work, for at most `FAR_GATE_MAX_MS`, and never holds nearer work.
+ */
+describe('RenderQueue far gate', () => {
+  /** A job that records its start and stays running until released. */
+  function held(ran: string[], name: string): { run: () => Promise<void>; release: () => void } {
+    let release!: () => void
+    const done = new Promise<void>((r) => (release = r))
+    return {
+      run: async () => {
+        ran.push(name)
+        await done
+      },
+      release,
+    }
+  }
+  const ranking = (bands: Record<string, 'visible' | 'near' | 'far'>) => new Map(Object.entries(bands))
+
+  it('skips far work while the gate is closed, and runs nearer work beside it', async () => {
+    const queue = new RenderQueue(2)
+    const ran: string[] = []
+    let open = false
+    queue.setFarGate(() => open)
+    queue.setRanking(ranking({ far: 'far', near: 'near' }))
+    queue.push(recorder(ran, 'far'), 'far')
+    queue.push(recorder(ran, 'near'), 'near')
+    await tick()
+    expect(ran).toEqual(['near']) // two slots free, one job taken: far waited
+    open = true
+    queue.poke() // no push, no finish: the gate's opening is enough
+    await tick()
+    expect(ran).toEqual(['near', 'far'])
+  })
+
+  it('pending counts live jobs — running and queued — and never a cancelled husk', async () => {
+    const queue = new RenderQueue(1)
+    const ran: string[] = []
+    const a = held(ran, 'a')
+    queue.push(a.run, 'a')
+    const cancelB = queue.push(recorder(ran, 'b'), 'b')
+    queue.push(recorder(ran, 'c'), 'c')
+    await tick()
+    expect(queue.pending).toBe(3) // a running, b and c queued
+    cancelB()
+    expect(queue.pending).toBe(2) // the husk is not live, spliced or not
+    a.release()
+    await tick()
+    expect(queue.pending).toBe(0)
+  })
+
+  it('counts only work nearer than far — a queue holding far lookups alone opens the gate', async () => {
+    const queue = new RenderQueue(1)
+    const ran: string[] = []
+    const blocker = held(ran, 'blocker')
+    queue.setRanking(ranking({ blocker: 'visible', f1: 'far', f2: 'far', n1: 'near' }))
+    queue.push(blocker.run, 'blocker')
+    queue.push(recorder(ran, 'f1'), 'f1')
+    queue.push(recorder(ran, 'f2'), 'f2')
+    await tick()
+    expect(queue.pendingNearerThanFar()).toBe(1) // the running visible one
+    queue.push(recorder(ran, 'n1'), 'n1')
+    expect(queue.pendingNearerThanFar()).toBe(2)
+    const unreported = queue.push(recorder(ran, 'u'), 'u')
+    expect(queue.pendingNearerThanFar()).toBe(3) // unreported is nearer than far
+    unreported()
+    expect(queue.pendingNearerThanFar()).toBe(2)
+    blocker.release()
+    await tick()
+    await tick()
+    expect(queue.pendingNearerThanFar()).toBe(0) // only f1/f2 could be left, and they are far
+  })
+
+  it('settles after the decrement, so a gate read from the settle sees the job gone', async () => {
+    const lookups = new RenderQueue(1)
+    const renders = new RenderQueue(1)
+    const ran: string[] = []
+    lookups.setRanking(ranking({ look: 'near' }))
+    renders.setRanking(ranking({ far: 'far' }))
+    renders.setFarGate(() => lookups.pendingNearerThanFar() === 0)
+    lookups.onSettle(() => renders.poke())
+    const look = held(ran, 'look')
+    lookups.push(look.run, 'look')
+    await tick()
+    renders.push(recorder(ran, 'far'), 'far')
+    await tick()
+    expect(ran).toEqual(['look']) // held: a nearer lookup is pending
+    look.release()
+    await tick()
+    await tick()
+    expect(ran).toEqual(['look', 'far']) // resumed on its own, no push, no scroll
+  })
+
+  it('releases far work after the bound when the gate never opens', async () => {
+    vi.useFakeTimers()
+    try {
+      const queue = new RenderQueue(1)
+      const ran: string[] = []
+      queue.setFarGate(() => false)
+      queue.setRanking(ranking({ far: 'far' }))
+      queue.push(recorder(ran, 'far'), 'far')
+      await vi.advanceTimersByTimeAsync(FAR_GATE_MAX_MS - 1)
+      expect(ran).toEqual([])
+      await vi.advanceTimersByTimeAsync(2)
+      expect(ran).toEqual(['far']) // the gate's own timer re-pumped
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('clear drops the gate and the settle callback with the jobs', async () => {
+    const queue = new RenderQueue(1)
+    const ran: string[] = []
+    let settled = 0
+    queue.setFarGate(() => false)
+    queue.onSettle(() => settled++)
+    queue.clear()
+    queue.setRanking(ranking({ far: 'far' }))
+    queue.push(recorder(ran, 'far'), 'far')
+    await tick()
+    expect(ran).toEqual(['far']) // no gate any more
+    expect(settled).toBe(0)
   })
 })

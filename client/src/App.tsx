@@ -938,7 +938,7 @@ export default function App() {
           : libraryMissingText(libraryState.root)
 
   const showSkeleton = useDelayedFlag(busy(state), SKELETON_DELAY_MS)
-  const { thumbs, setThumb, setPlaceholder, discardThumbFraming, setBands } = useThumbnails(
+  const { thumbs, setThumb, setPlaceholder, discardThumbFraming, setBands, reportImageError } = useThumbnails(
     thumbEntries,
     api,
     lru,
@@ -1916,7 +1916,11 @@ export default function App() {
     const img = el.querySelector('img')
     if (img !== null) {
       const r = img.getBoundingClientRect()
-      return { left: r.left, top: r.top, width: r.width, height: r.height }
+      // An `<img>` reporting no box is one whose lazily fetched image has not
+      // arrived and whose declared box the layout has not given it (a test
+      // DOM, a tile mid-layout): fall through to the content square rather
+      // than open the overlay at 0×0 (`thumbnail-image-serving` D3).
+      if (r.width > 0 && r.height > 0) return { left: r.left, top: r.top, width: r.width, height: r.height }
     }
     const content = el.querySelector('[data-tile-content]') ?? el
     return fitSquareBox(content.getBoundingClientRect())
@@ -2700,6 +2704,7 @@ export default function App() {
                   onModelOpen={openLightbox}
                   onModelHover={onModelHover}
                   onEntryMenu={onEntryMenu}
+                  onImageError={reportImageError}
                   markedPath={marked}
                   anchorPath={anchor?.path}
                   scoreFor={scoreFor}

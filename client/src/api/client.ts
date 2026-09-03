@@ -17,6 +17,7 @@ import type {
   ThumbStatus,
   PosesRequest,
 } from '../../../shared/types'
+import { thumbImageUrl } from './thumbUrl'
 
 /**
  * One render's answer. There is no `ao` field, deliberately: the request names
@@ -241,6 +242,13 @@ export interface ApiClient {
    * number so the caller re-keys (D2).
    */
   getThumb(path: string, mtime: number, ao?: boolean, gen?: number): Promise<ThumbResult>
+  /**
+   * The URL at which the server answers the same render as `image/png` bytes
+   * (`thumbnail-image-serving` D1) — for a tile whose listing entry vouches
+   * for the render to reference by `<img src>`, with no lookup. Same key as
+   * `getThumb`; a pure builder, no request.
+   */
+  thumbImageUrl(path: string, mtime: number, ao: boolean, gen?: number): string
   putThumb(save: ThumbSave): Promise<ThumbPutResult>
   /**
    * What the platform registry reports for the model types this app handles,
@@ -507,6 +515,10 @@ export class HttpApiClient implements ApiClient {
       gen: body.gen,
       pngUrl: body.png !== undefined ? base64ToBlobUrl(body.png) : undefined,
     }
+  }
+
+  thumbImageUrl(path: string, mtime: number, ao: boolean, gen?: number): string {
+    return thumbImageUrl(path, mtime, ao, gen)
   }
 
   async apps(): Promise<AppsReport> {

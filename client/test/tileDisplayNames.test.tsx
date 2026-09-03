@@ -65,6 +65,7 @@ async function renderGrid(
         onModelOpen={() => {}}
         onModelHover={() => {}}
         onEntryMenu={() => {}}
+        onImageError={() => {}}
         markedPath={null}
         scoreFor={() => undefined}
         scoreScale={null}
