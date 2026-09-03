@@ -1,6 +1,6 @@
 # Tasks — thumbnail-image-serving
 
-> **Landed:** §0 (2026-09-02, `5bf35a5`); §1 and 5.2 (2026-09-02, on `f88c6f0`). **What can start today:** §1.1–1.2 and §4 depend on nothing unlanded
+> **Landed:** §0 (2026-09-02, `5bf35a5`); §1 and 5.2 (`a5ed10d`); §2, §4, §5 (`7c42aad`); 6.2/6.3 measured. Nothing open but the review. **What can start today:** §1.1–1.2 and §4 depend on nothing unlanded
 > — only `immutable-thumbnail-serving` (archived 2026-09-02). **What waits on
 > `listing-tree-cache` §6:** 1.3, 1.4, 2.2's annotation branch, 2.5, 5.1's
 > annotated cells, 5.3, and 6.2's revisit measurement. That change's 6.3
@@ -164,18 +164,44 @@
 ## 6. Verification
 
 - [x] 6.1 `bun run typecheck` and `bun run test` pass across workspaces — 699 client, 596 server (2026-09-02)
-- [ ] 6.2 Re-run the proposal's profile against the real library, in stages,
+- [x] 6.2 Re-run the proposal's profile against the real library, in stages,
       recording whose run and the conditions beside the 2026-09-02 baseline
-      (618 lookups / 49.7 MB / 65 s): **after §0 alone — done 2026-09-02,
-      this session:** on the flat root's cached region, 16 visible tiles in
-      545 ms, their lookups completing at ranks 0–17 of the listing's — first,
-      as ranked; the remaining stages measure **after §1–§2** — lookups on
-      a fully annotated listing (target: zero), bytes on a second load of the
-      same listing (target: zero for cached tiles), and the listing's own
-      payload growth measured, not estimated; in the browser, that a 404
-      image fires `error` and the tile recovers. Tune and freeze
-      `FAR_GATE_MAX_MS` here, above the measured worst lookup
-- [ ] 6.3 With the far drain running (an uncached listing left open), confirm
-      a fresh listing's cached tiles fill at lookup speed, not disk-contention
-      speed — the gate's whole point, measured rather than asserted — and that
-      the drain resumes after the gate's bound when a lookup is made to hang
+      (618 lookups / 49.7 MB / 65 s). **After §0 alone — 2026-09-02, this
+      session:** on the flat root's cached region, 16 visible tiles in 545 ms,
+      their lookups completing at ranks 0–17 of the listing's. **After §1–§2 —
+      2026-09-02, this session, Playwright Chromium 150 headless, 1900×876,
+      flat root (500 tiles, 571 images with folder sheets), browser cache
+      cleared through CDP before each first visit, read from
+      `performance.getEntriesByType('resource')`:**
+      - first visit: **4 lookups** (the four un-vouched entries; 618 before),
+        118 image fetches for 16.7 MB — the screen and the browser's own
+        lazy-load band, the other 448 images unfetched with their spinners
+        up; the 40 visible model tiles all drawn **908 ms** after navigation
+      - revisit: **0 bytes** for images — 118 of 118 answered from the
+        browser's cache (`transferSize` 0), the same 4 lookups
+      - the listing itself: `/api/dir` 264 KB (encoded = decoded; not
+        compressed on loopback), 85 ms — the baseline recorded 434 ms and no
+        size, so the growth is the whole annotated payload; against 49.7 MB
+        removed, taken
+      - a lazily loaded image nobody has scrolled to reports a 143×143 box
+        with `naturalWidth` 0 — the declared square, so a press there opens
+        the overlay at the box (2.6's browser half)
+      - a forced 404 (one image URL routed to 404, page reloaded): the tile
+        recovered to a `blob:` URL through **one** lookup, never showed the
+        error state; the image URL was requested three times on that page,
+        not in a loop (the tile and its folder-sheet twin, plus React's
+        development double-mount) — recorded, not tuned
+      `FAR_GATE_MAX_MS` stays **5000 ms**: the worst lookup this run saw was
+      far below it and the baseline's 3.7 s worst is the figure it clears
+- [x] 6.3 With the far drain running — `/Bestarium` flat, 448 models of
+      which 231 plain STLs up to 125 MB and almost none cached: 3 PUTs and
+      5 mesh reads in its first 12 s, i.e. renders in flight — the cached
+      root was opened **in-app through the path bar** (a reload would drop
+      the drain): listing landed in 744 ms, the 40 visible vouched tiles all
+      drawn **1089 ms** after Enter, browser cache cold — against 908 ms with
+      no drain at all. Lookup speed, not contention speed (2026-09-02, this
+      session, same setup as 6.2). The wedged-lookup half is pinned by the
+      fake-timer cell in `queue.test.ts` ("releases far work after the bound
+      when the gate never opens"); it has no natural browser reproduction —
+      a toggle that would re-issue lookups also retires every queued far
+      render — and is not claimed here
