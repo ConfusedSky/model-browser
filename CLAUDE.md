@@ -140,6 +140,16 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
 - Scene teardown (renderThumbnail's finally, ViewerSession.close) disposes every
   DirectionalLight — shadow maps are VRAM; the model is LRU-owned and never disposed there
 
+## Tailwind
+
+- **Never glue a utility to a template-literal `${`.** Tailwind's scanner reads source
+  text and takes `object-contain${pending` as one candidate, so the utility never reaches
+  the stylesheet and the browser computes the property's default — `object-fit: fill`
+  stretched every folder-sheet cell (2026-09-03). Write whole class strings as literals
+  and pick between them (`pending ? 'a b c opacity-0' : 'a b c'`); a computed style
+  read in the browser (`getComputedStyle(el).objectFit`) is how a missing rule shows
+  itself, since vitest's happy-dom applies no Tailwind CSS at all
+
 ## Web demo (not yet a change)
 
 - docs/web-demo-notes.md records the 2026-08-28 exploration of a public demo over the

@@ -227,9 +227,16 @@ retire/start cycles.
 **The box is declared.** `overlayRectFor` measures the `<img>`'s own rect,
 and an `<img>` whose lazy resource has not loaded has no intrinsic size — a
 press on a listing-drawn tile would open the orbit overlay at 0×0. Thumbnails
-are always 512² at aspect 1 (the renderer's contract), so the tile image gets
-`width: 100%; aspect-ratio: 1 / 1`, and `overlayRectFor`'s fallback also
-covers an `<img>` reporting an empty rect. Until the lazy image's `load`,
+are always 512² at aspect 1 (the renderer's contract), so the image sits in
+a wrapper that is the largest square its host allows: `aspect-ratio: 1 / 1`
+with its width `min(100%, 100cqh)`, the host's smaller axis, both hosts
+(the tile's content box and a sheet cell) declared size containers so
+`cqh` resolves. A height-driven first cut (`h-full`, width clamped) was
+wrong in a sheet cell taller than wide — the clamp squashed the box, and
+with `object-contain` missing from the stylesheet the picture stretched
+into it (Masa, 2026-09-03; the missing rule was a utility glued to a
+template-literal `${`, now a root CLAUDE.md rule). `overlayRectFor`'s
+fallback also covers an `<img>` reporting an empty rect. Until the lazy image's `load`,
 `ThumbView` keeps its placeholder up over the box, so a visible cached tile
 shows a spinner then the picture, never a blank square.
 

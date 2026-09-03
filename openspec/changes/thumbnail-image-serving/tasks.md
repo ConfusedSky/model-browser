@@ -97,7 +97,7 @@
       once per generation, so a pose wave or toggle does not rebuild the same
       404 URL, and a pulled disk's 503s do not become 500 retire/start cycles
       (D3)
-- [x] 2.6 *(the box is a square the height of the content area, `aspect-square h-full`, wrapped so the placeholder can sit over it; the press-before-load cell is **not** writable in happy-dom, whose rects are all 0×0 either way — 6.2 measures it in the browser)* The tile `<img>` gets a declared square box (`width: 100%;
+- [x] 2.6 *(the box is the largest square its host allows — `aspect-square w-[min(100%,100cqh)]` on a wrapper the placeholder sits over, both hosts declared `[container-type:size]` — after a height-driven first cut squashed the box in a sheet cell taller than wide and, with `object-contain` missing from the stylesheet (a utility glued to a template literal; root CLAUDE.md), stretched the picture into it (Masa, 2026-09-03; measured square with `object-fit: contain` in every host afterwards: 1-cell 123², 2-cell 73², 3/4-cell 60², tile 145²). The press-before-load cell is **not** writable in happy-dom, whose rects are all 0×0 either way — 6.2 measures it in the browser)* The tile `<img>` gets a declared square box (`width: 100%;
       aspect-ratio: 1 / 1`), `loading="lazy"`, `decoding="async"`, and keeps
       `ThumbView`'s placeholder up until its `load` event when its URL is an
       image URL; `overlayRectFor`'s fallback also covers an `<img>` whose rect

@@ -411,11 +411,19 @@ function ThumbView({
     const url = thumb.url
     const pending = !url.startsWith('blob:') && !everLoaded
     return (
-      // The box is declared — a square the height of the content area — so
-      // `overlayRectFor` measures a real rect before a lazy image has any
-      // intrinsic size: thumbnails are always 512² at aspect 1 (the
-      // renderer's contract), so this is the box the picture will fill.
-      <span className="relative flex aspect-square h-full max-w-full items-center justify-center">
+      // The box is declared — the largest square the host allows, its side
+      // the host's smaller axis (`100cqh` needs the host to be a size
+      // container, which both hosts declare) — so `overlayRectFor` measures a
+      // real rect before a lazy image has any intrinsic size: thumbnails are
+      // always 512² at aspect 1 (the renderer's contract), so this is the box
+      // the picture will fill. Height-driven it was wrong in a sheet cell
+      // taller than wide, where the width clamp squashed the box and the
+      // picture stretched into it (Masa, 2026-09-03).
+      //
+      // Class strings are whole literals: Tailwind's scanner reads source
+      // text, and a utility glued to a `${` never reaches the stylesheet —
+      // which is how `object-contain` went missing (CLAUDE.md).
+      <span className="relative flex aspect-square w-[min(100%,100cqh)] items-center justify-center">
         <img
           src={url}
           alt="" // decorative: the button's aria-label names the model
@@ -424,7 +432,7 @@ function ThumbView({
           decoding="async"
           onLoad={() => setEverLoaded(true)}
           onError={() => onImageError?.(path)}
-          className={`aspect-square h-full max-w-full object-contain${pending ? ' opacity-0' : ''}`}
+          className={pending ? 'h-full w-full object-contain opacity-0' : 'h-full w-full object-contain'}
         />
         {pending ? (
           <span className="absolute size-6 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-400" />
@@ -477,10 +485,15 @@ function ContactSheet({
           // an entry the store does not name must be titled exactly as it was
           // before this capability existed.
           title={entry.displayName ?? entry.name}
-          className={`flex min-h-0 items-center justify-center overflow-hidden rounded${
+          // A size container, so the cell's image can take the cell's
+          // smaller axis as its side (`ThumbView`). The grid's rows stretch
+          // to the sheet's height, so the containment costs the rows nothing.
+          className={
             // The odd one out of three, given the full width below the pair.
-            preview.length === 3 && i === 2 ? ' col-span-2' : ''
-          }`}
+            preview.length === 3 && i === 2
+              ? 'flex min-h-0 items-center justify-center overflow-hidden rounded [container-type:size] col-span-2'
+              : 'flex min-h-0 items-center justify-center overflow-hidden rounded [container-type:size]'
+          }
         >
           <ThumbView
             // Keyed on the cache key, not the path alone: a same-path
@@ -758,7 +771,11 @@ const Tile = memo(function Tile({
       onPointerEnter={() => onModelHover(entry.path)}
       onPointerLeave={() => onModelHover(null)}
     >
-      <div data-tile-content className="relative flex min-h-0 w-full flex-1 items-center justify-center">
+      <div
+        data-tile-content
+        // A size container for the same reason as a sheet cell (`ThumbView`).
+        className="relative flex min-h-0 w-full flex-1 items-center justify-center [container-type:size]"
+      >
         <ThumbView
           key={`${entry.path}:${entry.mtime}`}
           thumb={thumb}
