@@ -33,6 +33,20 @@
 
 ## 1. The job runner
 
+- [ ] 1.0 Server: two additive fields on `PUT /api/thumb` (`app.ts`, `cache.ts`; the
+      delta's new `model-thumbnails` requirement, ADD-only — `thumbnail-image-serving`
+      and `public-deployment` both hold ADD-only deltas there with distinct titles,
+      checked against main 2026-09-02). `png: null` deletes both variants' PNGs and clears both
+      renders' labels, keeping the sidecar — camera and axis governed by the same write's
+      own fields, `gen` bumped through `allocateGen` as every write is, so the number
+      stays monotonic across the emptying. `ifGen: number` makes the write conditional:
+      a value other than the entry's current generation answers 412 with nothing
+      written (a missing entry's current generation is 0). Cells in `cache.test.ts` /
+      `api.test.ts`: a delete empties both variants and the next GET of each is a miss;
+      a delete keeps a camera the write did not discard; a matching `ifGen` writes and a
+      stale one 412s with the sidecar byte-identical; the 412 is distinguishable from a
+      400. `ApiClient.putThumb`'s `ThumbSave` grows both fields; the harness mock
+      extended additively
 - [ ] 1.1 A job module beside `useThumbnails`' queue plumbing: `(operation, scope)`. At
       launch, in order: enumerate the scope through `ApiClient` (the tree cache's 6.7
       route — the app's root for the library tab, the tile's path for a menu launch);
@@ -45,7 +59,7 @@
       whichever lands second reuses it). Reset keeps `framed` entries. Snapshot each kept
       entry's `gen` (D1, D4). An enumeration that reports itself incomplete still runs,
       over what it found, and the chip says the scope was cut. No persistence
-- [ ] 1.2 Entries feed the render queue through `RenderQueue.push` with the band
+- [ ] 1.2 Generate's entries feed the render queue through `RenderQueue.push` with the band
       **pinned to `far`** — a third, optional argument that bypasses the ranking lookup,
       because the job's key is a path the grid may rank *visible* and the spec says no
       better than far. One entry in flight at a time: the next is pushed when the
@@ -53,21 +67,26 @@
       cancel is instant. The queue's nearest-first draining is the rest of the preemption
       story (the sweep change's 26dcc18 rederivation: deferred work is outranked, never
       cancelled)
-- [ ] 1.3 Split `refreshThumbnail` (`entryActions.ts`) into a core —
-      `renderEntryThumbnail(entry, deps, { discardFraming, pose, expectGen })`, the
-      lookup, the resolution (`framingAfterDiscard` on discard, the sweep's rule
-      otherwise), the render, the PUT and the `setThumb`; answers `'done' | 'skipped'`,
-      throws on failure — and the command's wrapper, which keeps the queue push, the
-      pose read from `host.poses` and the `RENDER_FAILED` report. No behaviour change
-      for the two commands; their cells stay untouched. The job's per-entry op calls
-      the core with the wave's pose and the snapshotted `gen`: the core's own cache read
-      compares `cached.gen` to `expectGen` and answers `skipped` when it moved — D4
-      costs no second lookup. Reset passes `discardFraming: true`, generate `false` —
-      one definition, fanned out (D3, D7)
-- [ ] 1.4 Per-entry failure counted from the core's throw — never through
-      `host.report` — and the job continues; generation-moved entries skipped and
-      counted (D4); cancel stops un-started work at once (nothing further is pushed)
-      and lets the in-flight entry finish or fail
+- [ ] 1.3 Two per-entry ops. **Generate**: split `refreshThumbnail` (`entryActions.ts`)
+      into a core — `renderEntryThumbnail(entry, deps, { discardFraming, pose, ifGen })`,
+      the lookup, the resolution (`framingAfterDiscard` on discard, the sweep's rule
+      otherwise), the render, the PUT (forwarding `ifGen`) and the `setThumb`; answers
+      `'done' | 'skipped'` (a 412 is `skipped`), throws on failure — and the command's
+      wrapper, which keeps the queue push, the pose read from `host.poses` and the
+      `RENDER_FAILED` report. No behaviour change for the two commands; their cells stay
+      untouched. The job calls the core with `discardFraming: false`, the wave's pose and
+      the entry's snapshotted `gen` (D7). **Reset**: no render, no queue, no mesh — one
+      PUT per entry, `{ camera: null, axis, png: null, ifGen }` with `axis: null` exactly
+      where `framingAfterDiscard` (the shared reading of the discard rule, D3) reports a
+      usable pose replaced it against the wave's pose, else `undefined` (keep); then the
+      in-memory half — a tile on screen drops its image and re-looks-up through a new
+      `refetch(path)` on `useThumbnails` beside `setThumb` (the reconciler only starts
+      work on entry changes), a tile off screen is simply not in the map. A 412 is
+      `skipped`
+- [ ] 1.4 Per-entry failure counted from the core's throw or the PUT's rejection — never
+      through `host.report` — and the job continues; generation-moved entries (412)
+      skipped and counted (D4); cancel stops un-started work at once (nothing further is
+      pushed or sent) and lets the in-flight entry finish or fail
 - [ ] 1.5 One active job: a second launch surfaces the running chip (D2)
 
 ## 2. Surfaces
@@ -100,10 +119,13 @@
       second job; an incomplete enumeration still runs and is reported cut; every push
       carries the pinned `far` band and at most one job entry is in the queue at a time
       (hold both slots — `client/test/CLAUDE.md`'s render-order rule)
-- [ ] 3.2 Reset op: the job's per-entry call reaches the shared core with
-      `discardFraming: true` and the wave's pose (spy on the core, don't re-assert its
-      semantics — they are `entry-actions`' and already covered); the two commands'
-      existing cells pass unchanged through the split
+- [ ] 3.2 Reset op: one PUT per framed entry carrying `camera: null`, `png: null` and
+      the snapshotted `ifGen`, with `axis: null` exactly when `framingAfterDiscard`
+      reports a usable pose (spy on it — the rule is `entry-actions`' and already
+      covered); no render pushed, no mesh acquired, the wave asked first; a 412 counts as
+      skipped; an on-screen tile re-looks-up after the write. Generate op: the job's call
+      reaches the shared core with `discardFraming: false`; the two commands' existing
+      cells pass unchanged through the split
 - [ ] 3.3 Surfaces: menu entries only on containers, uncounted; reset confirm gates
       the launch and cancelling it launches nothing; library tab buttons state counts;
       chip persists across navigation and cancels the job; harness mocks extended
@@ -114,6 +136,7 @@
 - [ ] 4.1 `bun run test` / `bun run typecheck` clean from the workspace dirs
 - [ ] 4.2 Live: generate over a partly-rendered kit fills only its gaps while
       scrolling elsewhere stays responsive (visible tiles render first); reset over
-      an orbited subtree restores index framings except a model orbited mid-job,
-      which is skipped; cancel + relaunch continues; whole-library generate from the
-      library tab shows an honest count before and true progress during
+      an orbited subtree empties its renders in seconds — on-screen tiles refill
+      through the sweep, a model orbited mid-job is skipped — and a following generate
+      restores index framings; cancel + relaunch continues; whole-library generate from
+      the library tab shows an honest count before and true progress during

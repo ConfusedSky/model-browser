@@ -66,25 +66,44 @@ The chip is app-level — it survives navigation, shows operation, scope,
 done/total/failed, and Cancel — and is the same UI whichever launcher started
 the job. It is dismissible; dismissing hides it without cancelling.
 
-### D3: Reset is the existing action, fanned out
+### D3: Reset is the existing discard, fanned out — and the pixels go with it (revised 2026-09-02)
 
 The reset operation applies `entry-actions`' give-up-the-orientation semantics
 per model — camera always discarded, axis discarded only where an
-index-supplied orientation replaces it, then re-rendered at what the model
-resolves to. The delta does not restate those rules; it points at them. This
-keeps one definition of "reset framing" in the system (Masa: same semantics as
-the existing action), and it inherits that action's edge behavior — including
-what is and is not discarded when the index supplies nothing — without a second
-spelling that could drift.
+index-supplied orientation replaces it — and then, where the per-model action
+redraws the thumbnail in place, the job **deletes** the cached renders instead:
+both occlusion variants, since both were drawn under the orientation just given
+up. Nothing is rendered. A reset over a library is a few thousand small writes
+rather than a few thousand mesh loads and renders (settled with Masa,
+2026-09-02: this one should be quick; redrawing is what *generate* is for, and
+it is the next button). The redraw is left to whatever next looks at the model —
+the ordinary visit's sweep for a tile on screen, a generate job for the rest —
+both of which resolve a model with nothing stored exactly as the redraw would
+have.
+
+The discard rule is the per-model action's, pointed at rather than restated
+(Masa: same semantics), so the two cannot drift on *what* is discarded; the
+axis half needs the index's opinion, which is why the job's orientation wave
+(D8) runs for reset too. The per-model *Reset framing* keeps its
+redraw-in-place under the same name: on one tile, the old picture staying until
+the new one lands feels better than a placeholder, and one name for "give up
+the framing" was preferred to two spellings of it. The delta records the
+difference as what each does *after* the discard.
+
+*Alternative — the per-model action also deletes and lets the sweep refill:*
+one definition end to end, but the tile blanks for the second the sweep takes,
+against the thumbnails spec's keep-until-replaced promise; declined.
 
 ### D4: An entry the user touched mid-job is skipped
 
 At launch the job snapshots each derived entry's write generation (from the
-cache index). Before writing an entry, the job compares: a generation that
-moved since launch means the user (or another surface) wrote it mid-job — the
-job skips it and counts it as skipped, never overwriting a fresh orbit with a
-reset or a re-render. Last-write-wins is the fallback only where a race slips
-between check and write; the window is one queue job wide.
+enumeration, D8). Every job write carries it: the PUT's `ifGen` makes the
+server refuse a write to an entry whose generation has moved since (412,
+nothing written), and the job counts the refusal as skipped — the user (or
+another surface) wrote it mid-job, and a fresh orbit is never overwritten by a
+reset or a re-render. Server-side rather than compare-then-write on the client
+(the first version): the check and the write are one operation, so no race
+slips between them and there is no window to narrow.
 
 ### D5: Counts before consent
 
@@ -115,7 +134,9 @@ is not shown — the launcher empty-report precedent.
 ### D7: One per-entry body, three callers (added 2026-09-02 — review M5)
 
 `refreshThumbnail` (`entryActions.ts`) is the body both per-model thumbnail
-commands run, and D3 wanted to fan it out. Two things in it are the *command's*,
+commands run, and the first draft's D3 wanted to fan it out for reset; since
+D3's revision reset renders nothing, and the split serves *generate*, whose
+per-entry op is exactly the redraw. Two things in it are the *command's*,
 not the operation's: it reports every failure to the user
 (`host.report(RENDER_FAILED)` — one sentence per failed model, which fanned over a
 kit is a wall of them), and it resolves the model's orientation from `host.poses`,
@@ -125,17 +146,23 @@ model in it, discarding cameras and rendering at the default where the index wou
 have framed them.
 
 So the body is split, not shared. A core — `renderEntryThumbnail(entry, deps,
-{ discardFraming, pose, expectGen })` — does the lookup, the resolution
+{ discardFraming, pose, ifGen })` — does the lookup, the resolution
 (`framingAfterDiscard` on discard, the sweep's rule otherwise), the render, the
-PUT and the `setThumb`; it takes the pose as a parameter, answers
-`'done' | 'skipped'`, and throws on failure. The command's wrapper is what
-`refreshThumbnail` keeps: the queue push, the pose read from `host.poses`, the
-one-line report. The job's wrapper passes its own pose (D8's wave) and the `gen`
-it snapshotted at launch — the core's existing cache read compares and answers
-`skipped` when it moved, so D4 costs no second lookup — and counts a throw instead
-of saying it. One resolution rule, one PUT shape, and D3's promise (the same
-semantics as the per-model action) is true by construction rather than by two
-bodies agreeing.
+PUT (forwarding `ifGen`) and the `setThumb`; it takes the pose as a parameter,
+answers `'done' | 'skipped'` (a 412 is `skipped`), and throws on failure. The
+command's wrapper is what `refreshThumbnail` keeps: the queue push, the pose read
+from `host.poses`, the one-line report. The job's wrapper passes its own pose
+(D8's wave) and the `gen` it snapshotted at launch, and counts a throw instead
+of saying it. One resolution rule, one PUT shape, and the generate job renders
+exactly what the re-render command would.
+
+Reset's per-entry op is not a render and shares none of this: one PUT with
+`camera: null`, `axis: null` exactly where `framingAfterDiscard` — the shared
+reading of the discard rule, the one the lightbox's live reset uses too — says a
+usable pose replaced it, `png: null`, and `ifGen`. Then the in-memory half: a
+tile on screen drops its image and re-looks-up, which needs a per-path restart
+the hook does not have yet (`refetch(path)` beside `setThumb`; the reconciler
+only starts work on entry changes).
 
 *Alternative — call the command and catch its report:* the report goes through
 the host, not a return value, and the pose would still be the landing's. A flag on
@@ -167,8 +194,8 @@ the job and the sweep cannot disagree about what is stale. And because the test
 reads a pose, the job runs its own orientation wave over the enumerated models
 first — `semanticPosesFor`, chunked, failure is silence: the listing wave's
 contract — which is also what D7's core renders unowned models under, so a
-generate over a plain folder frames them as a visit would and a reset restores
-index framings rather than defaults. The library tab's counts are the same
+generate over a plain folder frames them as a visit would, and a reset discards
+the axis exactly where the per-model action would (D3). The library tab's counts are the same
 derivation, run when the tab opens, over the app's root — `LibraryState.root`,
 the viewpoint the app opens at, which is what "the library" means on screen.
 

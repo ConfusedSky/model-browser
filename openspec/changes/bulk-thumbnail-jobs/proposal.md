@@ -15,15 +15,19 @@ original mis-attribution to the notes).
 
 ## What Changes
 
-- **One job framework, two operations**, running through the render queue's lowest
-  priority band so interactive work always preempts:
+- **One job framework, two operations**:
   - *Generate thumbnails*: for each model in scope, render and store its thumbnail if
-    missing or stale; current entries are untouched.
+    missing or stale; current entries are untouched. Runs through the render queue's
+    lowest priority band so interactive work always preempts.
   - *Reset framings*: for each model in scope with a stored orientation, apply the
     existing per-model give-up-the-orientation semantics (`entry-actions`: camera always
-    discarded; axis discarded only where an index-supplied orientation replaces it),
-    then re-render — a discard alone would leave pixels rendered from the discarded
-    camera.
+    discarded; axis discarded only where an index-supplied orientation replaces it) and
+    **delete its cached renders** rather than redraw them — a discard alone would leave
+    pixels rendered from the discarded camera, and redrawing is what *generate* is for.
+    Nothing is rendered, so a reset over a library is seconds, not hours (settled with
+    Masa, 2026-09-02). The per-model *Reset framing* keeps its redraw-in-place — on one
+    tile, the old picture staying until the new one lands feels better — under the
+    same name; what differs is what each does *after* the discard.
 - **Jobs are re-derivable, so nothing tracks progress but the entries themselves**: the
   work list derives at launch from durable per-entry state (missing/stale for generate,
   has-a-stored-camera for reset), each completed entry drops out of the derivation, and
@@ -53,6 +57,12 @@ original mis-attribution to the notes).
   container entries (directories and zips), each applying the corresponding per-model
   semantics to the models in that subtree. ADD-only; no active change holds an
   `entry-actions` delta (checked 2026-09-02).
+- `model-thumbnails`: one ADDED requirement — the thumbnail write gains a deletion
+  state for the pixels (`png: null`, the `camera: null` precedent) and a generation
+  precondition (`ifGen`), the two fields the reset job and the mid-job skip need.
+  ADD-only with a distinct title: `thumbnail-image-serving` and `public-deployment`
+  both hold ADD-only deltas there (checked against main 2026-09-02, after
+  `immutable-thumbnail-serving` archived).
 
 ## Impact
 
@@ -60,8 +70,10 @@ original mis-attribution to the notes).
   table; `EntryMenu` only draws it (review M7), and `ActionHost` grows a job-launch
   capability; `SidePanel` (a fourth
   `library` tab), the job runner beside `useThumbnails`' queue plumbing, the chip.
-- Server: none beyond what other changes provide — the job PUTs through `/api/thumb` as
-  ordinary renders do, and enumerates its scope through the tree cache's route.
+- Server: two additive fields on `PUT /api/thumb` (`app.ts`, `cache.ts`) — `png: null`
+  deletes both variants' renders, `ifGen` refuses a write to an entry whose generation
+  moved. Otherwise the job PUTs through `/api/thumb` as ordinary renders do, and
+  enumerates its scope through the tree cache's route.
 - Hard ordering, all three ahead of this change: `thumbnail-sweep-priority` (the
   priority bands the job drains through; archived 2026-09-02), `listing-tree-cache` §6
   through 6.7 (the thumbnail-state index answering missing/stale/framed — the `framed`

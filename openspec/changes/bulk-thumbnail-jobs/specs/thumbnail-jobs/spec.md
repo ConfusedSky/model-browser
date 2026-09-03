@@ -9,8 +9,9 @@ model in scope whose thumbnail is missing or stale, touching no current entry. *
 SHALL apply, to each model in scope with a stored orientation — a stored camera or a
 stored axis, the definition the derivation and the counts share (review M4) — the same
 give-up-the-orientation semantics the per-model action defines (`entry-actions`), and
-then render its thumbnail, so no image remains that was rendered from a discarded
-camera. A job's work list SHALL be derived at launch from per-entry state — obtained by
+SHALL delete that model's cached renders rather than redraw them, so no image remains
+that was rendered from a discarded camera and the job renders nothing — redrawing is
+*generate*'s work, or the next visit's. A job's work list SHALL be derived at launch from per-entry state — obtained by
 enumerating the scope's models together with their cached thumbnail facts
 (`listing-cache`'s enumeration), never by walking the filesystem from the client and
 never cut to a listing's cap; a scope whose enumeration reports itself incomplete SHALL
@@ -26,7 +27,7 @@ record.
 
 #### Scenario: Reset leaves no lying pixels
 - **WHEN** a reset job processes a model with a stored camera
-- **THEN** the orientation is given up exactly as the per-model action would, and the thumbnail is re-rendered at what the model then resolves to
+- **THEN** the orientation is given up exactly as the per-model action would, its cached renders are deleted, nothing is rendered, and the next visit or generate job draws it at what it then resolves to
 
 #### Scenario: Generate is incremental by nature
 - **WHEN** a generate job runs over a folder where most thumbnails are current
