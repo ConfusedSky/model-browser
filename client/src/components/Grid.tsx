@@ -482,7 +482,15 @@ function ContactSheet({
             preview.length === 3 && i === 2 ? ' col-span-2' : ''
           }`}
         >
-          <ThumbView thumb={thumbs?.[i]} path={entry.path} onImageError={onImageError} />
+          <ThumbView
+            // Keyed on the cache key, not the path alone: a same-path
+            // new-mtime entry is a different render, and the view's "have I
+            // shown a picture" must start over for it (third review, R7).
+            key={`${entry.path}:${entry.mtime}`}
+            thumb={thumbs?.[i]}
+            path={entry.path}
+            onImageError={onImageError}
+          />
         </div>
       ))}
     </div>
@@ -751,7 +759,12 @@ const Tile = memo(function Tile({
       onPointerLeave={() => onModelHover(null)}
     >
       <div data-tile-content className="relative flex min-h-0 w-full flex-1 items-center justify-center">
-        <ThumbView thumb={thumb} path={entry.path} onImageError={onImageError} />
+        <ThumbView
+          key={`${entry.path}:${entry.mtime}`}
+          thumb={thumb}
+          path={entry.path}
+          onImageError={onImageError}
+        />
         {/* Over the image, never composited into it: a badge painted into the
             render would make the score part of the thumbnail's cache key, and
             every query change would re-render the grid (D5). `aria-hidden`

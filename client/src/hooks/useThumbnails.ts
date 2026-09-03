@@ -161,6 +161,12 @@ interface EntrySlot {
    * is `undefined` and the refusal would remember nothing (second review, R5).
    */
   urlGen: number | undefined
+  /** Which render that URL named — a refusal is per render, since the two
+   *  variants' PNGs are evicted independently (third review, R3). */
+  urlAo: boolean | undefined
+  /** The variant `refusedGen` refuses; undefined refuses both (a bulk reset's
+   *  `refetch` refuses the listing's whole word for the entry). */
+  refusedAo: boolean | undefined
 }
 
 /**
@@ -320,6 +326,7 @@ export function useThumbnails(
     slot.url = state.url
     // Not an image URL of the hook's building, so no generation to refuse.
     slot.urlGen = undefined
+    slot.urlAo = undefined
     // The generation travels with the write, absence included: an external
     // writer that did not (or could not) plumb its PUT echo leaves `undefined`
     // here, which demotes the entry's next fetch to the validator tier instead
@@ -394,6 +401,13 @@ export function useThumbnails(
     // same word `reportImageError` uses for an annotation the image route
     // contradicted, so the restart goes through the lookup.
     slot.refusedGen = slot.entry.thumb?.gen
+    // Both variants: the reset deleted the entry's renders, not one of them.
+    slot.refusedAo = undefined
+    // No URL is displayed any more, so nothing is left for an image error to
+    // be about (the invariant `reportImageError` rests on: a non-blob `url`
+    // always has its `urlGen`).
+    slot.urlGen = undefined
+    slot.urlAo = undefined
     // The entry's generation moved under us and the caller may not know where
     // to — the same reasoning as `setThumb`'s adoption of absence and
     // `discardThumbFraming`'s clearing. The next lookup rides the validator
@@ -565,8 +579,10 @@ export function useThumbnails(
     // The generation the failed URL named — the slot's own record of it, not
     // the entry's current word, which may be absent (see `urlGen`).
     slot.refusedGen = slot.urlGen
+    slot.refusedAo = slot.urlAo
     slot.url = undefined
     slot.urlGen = undefined
+    slot.urlAo = undefined
     retire(slot)
     // The restart can only take the lookup path — the refusal just recorded
     // is what its annotation branch checks against — and a lookup never
@@ -625,16 +641,21 @@ export function useThumbnails(
       // the generation exactly as a lookup would teach it.
       const info = entry.thumb
       const variant = info === undefined ? undefined : ao ? info.ao : info.noao
+      const refused =
+        info !== undefined &&
+        info.gen === slot.refusedGen &&
+        (slot.refusedAo === undefined || slot.refusedAo === ao)
       if (
         info !== undefined &&
         variant?.state === 'hit' &&
-        info.gen !== slot.refusedGen &&
+        !refused &&
         usable(variant, info.camera, info.axis, pose)
       ) {
         const url = api.thumbImageUrl(entry.path, entry.mtime, ao, info.gen)
         if (slot.url !== undefined && slot.url !== url) release(slot.url)
         slot.url = url
         slot.urlGen = info.gen
+        slot.urlAo = ao
         slot.thumbGen = info.gen
         return { status: 'ready', url, camera: info.camera, axis: info.axis, gen: info.gen }
       }
@@ -850,7 +871,9 @@ export function useThumbnails(
           url: undefined,
           thumbGen: undefined,
           refusedGen: undefined,
+          refusedAo: undefined,
           urlGen: undefined,
+          urlAo: undefined,
         }
         slots.set(entry.path, fresh)
         added.push(entry.path)

@@ -2300,6 +2300,44 @@ describe('a listing-known thumbnail is drawn without a lookup', () => {
     expect(urlOf('/models/m0.stl')).toBe('')
     expect(getThumb).toHaveBeenCalledTimes(2)
   })
+
+  it('a refusal is per render: the other variant’s image is still drawn from the listing', async () => {
+    // Third review, R3: the two variants' PNGs are evicted independently,
+    // and the generation is the entry's. A 404 on one must not send the
+    // other, whose pixels are fine, to the lookup on the next toggle.
+    // Falsify by refusing variant-blind (`refusedAo` never set).
+    const getThumb = vi.fn().mockResolvedValue({ status: 'miss' })
+    const api = fakeApi(getThumb)
+    const queue = new RenderQueue(2)
+    queue.suspend()
+    const both: Partial<NonNullable<DirEntry['thumb']>> = {
+      noao: { state: 'hit', lighting: THUMB_LIGHTING, rig: RIG_VERSION },
+    }
+    await render(<Harness entries={annotated(1, both)} api={api} lru={fakeLru()} queue={queue} ao />)
+    await settle()
+    expect(urlOf('/models/m0.stl')).not.toContain('ao=off')
+
+    await act(async () => {
+      lastReportImageError!('/models/m0.stl')
+    })
+    await settle()
+    expect(getThumb).toHaveBeenCalledTimes(1)
+
+    // The toggle: the unoccluded render at the same generation is not the
+    // one that failed, so the listing's word for it stands.
+    await rerender(<Harness entries={annotated(1, both)} api={api} lru={fakeLru()} queue={queue} ao={false} />)
+    await settle()
+    expect(urlOf('/models/m0.stl')).toContain('ao=off')
+    expect(getThumb).toHaveBeenCalledTimes(1)
+
+    // And back: the occluded render is still the refused one — the lookup is
+    // asked again, and the tile keeps the picture it has (the unoccluded
+    // image) until the replacement lands, as any restarted survivor does.
+    await rerender(<Harness entries={annotated(1, both)} api={api} lru={fakeLru()} queue={queue} ao />)
+    await settle()
+    expect(urlOf('/models/m0.stl')).toContain('ao=off')
+    expect(getThumb).toHaveBeenCalledTimes(2)
+  })
 })
 
 /**

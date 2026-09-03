@@ -74,18 +74,10 @@ export class RenderQueue {
   constructor(private concurrency = 2) {}
 
   /**
-   * Live jobs — queued and not cancelled, plus running. Cancelled husks are
-   * spliced only as `take` meets them, so `jobs.length` overcounts.
-   */
-  get pending(): number {
-    let n = this.running.size
-    for (const job of this.jobs) if (!job.cancelled) n++
-    return n
-  }
-
-  /**
    * Live jobs ranked nearer than far — what a gate on another queue asks
    * (D5): a far lookup is nobody's wait, so it must not hold far renders.
+   * Cancelled husks are spliced only as `take` meets them, so this walks
+   * `jobs` rather than reading its length.
    */
   pendingNearerThanFar(): number {
     let n = 0
@@ -161,6 +153,14 @@ export class RenderQueue {
     return () => {
       if (job.started || job.cancelled) return false
       job.cancelled = true
+      // Retiring the last live far job ends the hold now, not at the next
+      // take: a saturated queue takes nothing, and a navigation retires far
+      // work exactly when its slots are busiest. Left to a take, the clock
+      // outlived the job it was started for and the next far job pushed
+      // dispatched at once under a closed gate (third review, R1).
+      if (this.gateClosedSince !== null && this.rankOf(job) === RANK.far && !this.hasLiveFar()) {
+        this.releaseHold()
+      }
       return true
     }
   }
@@ -247,10 +247,21 @@ export class RenderQueue {
     if (this.gateTimer === null) {
       this.gateTimer = setTimeout(() => {
         this.gateTimer = null
+        // A saturated queue takes nothing, so a far job re-ranked nearer
+        // since the clock started has had no take to notice it (a cancel
+        // notices itself, in `push`'s handle): the clock must not outlive the
+        // last live far job, or the next one pushed dispatches at once under
+        // a closed gate (third review, R1).
+        if (!this.hasLiveFar()) this.releaseHold()
         this.pump()
       }, remaining)
     }
     return 'held'
+  }
+
+  private hasLiveFar(): boolean {
+    for (const job of this.jobs) if (!job.cancelled && this.rankOf(job) === RANK.far) return true
+    return false
   }
 
   /**
@@ -264,7 +275,12 @@ export class RenderQueue {
    * `[near, far]` never consulted the gate and reset the clock, `[far, near]`
    * consulted it and kept it, for one and the same state (second review, R6).
    * The clock measures "a far job is queued and the gate is closed", and is
-   * forgotten when a take finds no far job at all.
+   * forgotten when a take finds no far job at all — which is why the scan
+   * always runs to the end, never breaking at a visible job: a scan cut
+   * short would leave the clock unread past a retired far job (third
+   * review, R1), and would also leave cancelled husks behind the visible
+   * job unspliced. The saturated case, where no take runs at all, is the
+   * gate timer's (`farAllowed`).
    */
   private take(): Job | undefined {
     let bestAt = -1
@@ -290,14 +306,11 @@ export class RenderQueue {
       if (rank < bestRank) {
         bestRank = rank
         bestAt = i
-        if (rank === 0) break
       }
       i++
     }
     // No far job was met: nothing is being held, so the clock is not running.
-    // (A scan cut short by a visible job may not have met one — it then runs
-    // on, unread, until a take that scans past it.)
-    if (verdict === null && bestRank !== 0) this.releaseHold()
+    if (verdict === null) this.releaseHold()
     if (bestAt === -1) return undefined
     const job = this.jobs[bestAt]!
     this.jobs.splice(bestAt, 1)

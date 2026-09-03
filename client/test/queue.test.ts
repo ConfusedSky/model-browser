@@ -331,20 +331,69 @@ describe('RenderQueue far gate', () => {
     expect(ran).toEqual(['near', 'far'])
   })
 
-  it('pending counts live jobs — running and queued — and never a cancelled husk', async () => {
-    const queue = new RenderQueue(1)
-    const ran: string[] = []
-    const a = held(ran, 'a')
-    queue.push(a.run, 'a')
-    const cancelB = queue.push(recorder(ran, 'b'), 'b')
-    queue.push(recorder(ran, 'c'), 'c')
-    await tick()
-    expect(queue.pending).toBe(3) // a running, b and c queued
-    cancelB()
-    expect(queue.pending).toBe(2) // the husk is not live, spliced or not
-    a.release()
-    await tick()
-    expect(queue.pending).toBe(0)
+  it('retiring the last live far job forgets the clock at once, with no take to notice', async () => {
+    // Third review, R1: while both slots are busy no take runs, so a far job
+    // retired by a navigation left its clock running, and a far job pushed
+    // soon after dispatched at the *old* bound rather than waiting its own.
+    // The cancel handle ends the hold itself.
+    vi.useFakeTimers()
+    try {
+      const queue = new RenderQueue(2)
+      const ran: string[] = []
+      queue.setFarGate(() => false)
+      queue.setRanking(ranking({ far1: 'far', far2: 'far', v1: 'visible', v2: 'visible' }))
+      const cancelFar1 = queue.push(recorder(ran, 'far1'), 'far1')
+      await vi.advanceTimersByTimeAsync(1) // held: the clock starts, t≈1
+      const v1 = held(ran, 'v1')
+      const v2 = held(ran, 'v2')
+      queue.push(v1.run, 'v1')
+      queue.push(v2.run, 'v2')
+      await vi.advanceTimersByTimeAsync(1)
+      expect(ran).toEqual(['v1', 'v2'])
+      cancelFar1() // t≈2: the hold ends here, and nothing takes
+      await vi.advanceTimersByTimeAsync(2000)
+      queue.push(recorder(ran, 'far2'), 'far2') // t≈2002: its own hold starts at the next take
+      v1.release()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(ran).toEqual(['v1', 'v2'])
+      // On the stale clock far2 would run at t≈5001; on its own it runs at ≈7003.
+      await vi.advanceTimersByTimeAsync(FAR_GATE_MAX_MS - 2003 + 1)
+      expect(ran).toEqual(['v1', 'v2'])
+      await vi.advanceTimersByTimeAsync(2003)
+      expect(ran).toEqual(['v1', 'v2', 'far2'])
+      v2.release()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a far job re-ranked nearer under a saturated queue does not keep the clock past the timer', async () => {
+    // The other way a hold can end with no take to notice it: the job is
+    // still live but no longer far. The gate's timer forgets the clock when
+    // it fires with no live far job left.
+    vi.useFakeTimers()
+    try {
+      const queue = new RenderQueue(1)
+      const ran: string[] = []
+      queue.setFarGate(() => false)
+      queue.setRanking(ranking({ j: 'far', v: 'visible', far2: 'far' }))
+      queue.push(recorder(ran, 'j'), 'j')
+      await vi.advanceTimersByTimeAsync(1) // held: clock starts
+      const v = held(ran, 'v')
+      queue.push(v.run, 'v')
+      await vi.advanceTimersByTimeAsync(1)
+      expect(ran).toEqual(['v'])
+      queue.setRanking(ranking({ j: 'near', v: 'visible', far2: 'far' })) // no take: saturated
+      await vi.advanceTimersByTimeAsync(FAR_GATE_MAX_MS + 10) // the timer fires: no live far job
+      queue.push(recorder(ran, 'far2'), 'far2')
+      v.release()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(ran).toEqual(['v', 'j']) // far2 held afresh, not dispatched on the expired clock
+      await vi.advanceTimersByTimeAsync(FAR_GATE_MAX_MS + 1)
+      expect(ran).toEqual(['v', 'j', 'far2'])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('counts only work nearer than far — a queue holding far lookups alone opens the gate', async () => {

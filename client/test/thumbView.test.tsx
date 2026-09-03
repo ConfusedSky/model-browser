@@ -26,7 +26,7 @@ const ENTRY: DirEntry = model('one.stl')
 const IMAGE_URL = '/api/thumb/image?path=%2Fmodels%2Fone.stl&mtime=1&gen=5'
 const IMAGE_URL_6 = '/api/thumb/image?path=%2Fmodels%2Fone.stl&mtime=1&gen=6'
 
-async function renderTile(thumb: ThumbState): Promise<void> {
+async function renderTile(thumb: ThumbState, entry: DirEntry = ENTRY): Promise<void> {
   if (root === null) {
     host = document.createElement('div')
     document.body.appendChild(host)
@@ -35,7 +35,7 @@ async function renderTile(thumb: ThumbState): Promise<void> {
   await act(async () => {
     root!.render(
       <Grid
-        entries={[ENTRY]}
+        entries={[entry]}
         thumbs={new Map([[ENTRY.path, thumb]])}
         onEnter={() => {}}
         onModelPointerDown={() => {}}
@@ -97,5 +97,20 @@ describe('the tile image’s placeholder', () => {
     expect(img().getAttribute('src')).toBe(IMAGE_URL_6)
     expect(hidden()).toBe(false)
     expect(spinner()).toBe(false)
+  })
+
+  it('starts over for a same-path entry at a new mtime — a different render, not a later URL', async () => {
+    // Third review, R7: the tile is keyed by path, so the instance survived a
+    // same-path new-mtime entry (a removal then an addition on one key, by
+    // the hook's own rule) and drew its unloaded image at full opacity.
+    await renderTile({ status: 'ready', url: IMAGE_URL, gen: 5 })
+    await load()
+    expect(hidden()).toBe(false)
+    await renderTile(
+      { status: 'ready', url: '/api/thumb/image?path=%2Fmodels%2Fone.stl&mtime=2&gen=7', gen: 7 },
+      { ...ENTRY, mtime: 2 },
+    )
+    expect(hidden()).toBe(true)
+    expect(spinner()).toBe(true)
   })
 })

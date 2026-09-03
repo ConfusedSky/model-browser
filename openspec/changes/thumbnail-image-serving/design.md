@@ -214,8 +214,12 @@ whose path is not the tile's — and the hook demotes that entry to the lookup
 path. The refusal is **remembered on the slot as the generation the failed URL
 named** (`urlGen`, recorded when the URL is built — not the entry's current
 word, which a later un-annotated listing leaves `undefined`; second review
-R5). Nothing clears it: a listing naming a *different* generation simply
-passes the comparison: without memory, the
+R5). Per render, not per entry: the two variants' PNGs are evicted
+independently while the generation is the entry's, so the refusal carries
+the variant the failed URL named (`urlAo`/`refusedAo`) and a toggle to the
+other variant is still drawn from the listing (third review, R3); a bulk
+reset's `refetch` refuses both. Nothing clears it: a listing naming a
+*different* generation simply passes the comparison: without memory, the
 next `start` for that slot — a pose wave, a toggle — would rebuild the same
 URL and 404 again, and a pulled disk would turn 500 image 503s into 500
 retire/start cycles.
@@ -295,6 +299,19 @@ the clock would already have expired and the new job would dispatch at once
 under a closed gate, defeating the gate until some take happened to read it
 open (review R1, verified under Bun with a faked clock).
 
+**When the clock is forgotten.** On an open reading; on a take that meets no
+live far job (`take` scans to the end, never breaking at a visible job, so
+husks behind one are spliced and a far job behind one is met); when a
+cancel retires the last live far job — the cancel handle checks, because a
+saturated queue takes nothing and a navigation retires far work exactly
+when its slots are busiest; and from the gate's own timer when it fires
+with no live far job left, which covers a far job re-ranked nearer under
+that same saturation (third review, R1). A pinned
+far job — `bulk-thumbnail-jobs`' third `push` argument — is gated exactly as
+a ranked-far one, in `take` and in `pendingNearerThanFar` alike, so a bulk
+generate job advances in bound-sized bursts while the user browses (third
+review, R8; the pin's own doc asks for no better).
+
 **After the bound.** Once far work has been held for the whole bound, the
 clock is kept rather than reset: every far job then dispatches while the
 gate stays closed, so the backlog drains, and the clock is forgotten only
@@ -304,8 +321,9 @@ review, R7). And the gate is read on the first far job a take meets, whether
 or not a nearer job has already won that take, so the clock cannot depend on
 arrival order (R6).
 
-**Mechanics.** `pending` counts live jobs — husks are spliced only inside
-`take`, so it must not be `jobs.length + running`. The settle signal is
+**Mechanics.** `pendingNearerThanFar` walks the live jobs — husks are
+spliced only inside `take`, so it must not read `jobs.length` (a general
+`pending` count was built and dropped: nothing read it). The settle signal is
 `onSettle`, fired after **every** job finishes and after the decrement, not
 an idle-only `onIdle`: the gate reads "nearer than far pending", and the last
 *near* lookup can settle while far lookups still run — an idle signal would
@@ -416,6 +434,19 @@ tile in a test knows where to look.
 | R10 | 5.1's "keeps the entry's `gen` on its slot" was uncovered | **Fixed**: the demoted lookup's `gen` argument asserted |
 | R11 | `setFarGate(null)`'s timer disposal was unpinned | **Fixed**: cell with `vi.getTimerCount()` |
 | R12 | Stale counts in 6.1; two delta scenarios with no cell, unsaid | **Fixed**: 6.1 no longer carries a count; 5.1 names the two scenarios (in the tasks, not the delta — delta prose lands in main) |
+
+### D11: Third implementation review (2026-09-03, opus)
+
+| # | Finding | Disposition |
+|---|---|---|
+| R1 | The contiguous-hold clock escaped through a saturated queue (no take) and through the scan's break at a visible job — reproduced | **Fixed** (D5 *When the clock is forgotten*): the cancel handle ends the hold when it retires the last live far job; the gate timer forgets the clock when it fires with none left (a far job re-ranked nearer); the scan runs to the end so husks behind a visible job are spliced. Two cells, one per path, each falsified against its release removed |
+| R2 | 6.2's listing payload figure predated the sheet-cell annotation | **Re-measured** (6.2) |
+| R3 | The image refusal was entry-level while the failure is per variant | **Fixed** (D3): `urlAo`/`refusedAo`; cell with the toggled variant |
+| R4 | `refetch` cleared `url` but not `urlGen` | **Fixed**: cleared beside it, with `refusedAo` set to both |
+| R5 | `RenderQueue.pending` had no production reader | **Dropped**, with its cell and D5's paragraph |
+| R6 | *Far lookups do not hold the drain*'s second WHEN clause read false | **Fixed** (delta): the far-ranked remainder of a toggle's storm |
+| R7 | `ThumbView`'s `everLoaded` survived a same-path new-mtime entry | **Fixed**: keyed on path and mtime; cell |
+| R8 | Pinned-far bulk renders are gated too, unsaid | **Recorded** (D5) |
 
 ## Risks / Trade-offs
 

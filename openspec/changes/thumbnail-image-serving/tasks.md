@@ -113,7 +113,7 @@
 
 ## 4. Far reads yield to pending lookups
 
-- [x] 4.1 *(`onSettle`; `running` is a Set so ranks of running jobs can be asked; a closed gate arms one timer for the bound's remainder, since a queue holding only far work has nothing else to pump it)* `RenderQueue`: `pending` counts live jobs (**not** `jobs.length +
+- [x] 4.1 *(`onSettle`; `pending` was built and then dropped — nothing in `client/src` read it, only `pendingNearerThanFar` (third review, R5); `running` is a Set so ranks of running jobs can be asked; a closed gate arms one timer for the bound's remainder, since a queue holding only far work has nothing else to pump it)* `RenderQueue`: `pending` counts live jobs (**not** `jobs.length +
       running` — husks are spliced only inside `take`); `setFarGate(fn)`;
       `take` skips `far`-ranked jobs while the gate says no, **unless the gate
       has read closed for longer than `FAR_GATE_MAX_MS`** (a named constant,
@@ -189,7 +189,13 @@
       - the listing itself: `/api/dir` 264 KB (encoded = decoded; not
         compressed on loopback), 85 ms — the baseline recorded 434 ms and no
         size, so the growth is the whole annotated payload; against 49.7 MB
-        removed, taken
+        removed, taken. **Re-measured 2026-09-03 after `2824007`** (sheet
+        cells annotated, up to four `ThumbInfo` blocks per folder tile), by
+        `curl` against the dev server: the flat root **185 KB**, the plain
+        root listing with its 23 annotated sheets **13.5 KB**. Smaller than
+        the browser's 264 KB figure because the fact index had been read
+        into by a different set of entries at the time; the number to carry
+        is the order of magnitude, tens to hundreds of KB per listing
       - a lazily loaded image nobody has scrolled to reports a 143×143 box
         with `naturalWidth` 0 — the declared square, so a press there opens
         the overlay at the box (2.6's browser half)

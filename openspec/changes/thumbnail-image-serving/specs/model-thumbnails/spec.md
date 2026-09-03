@@ -88,7 +88,7 @@ This requirement qualifies *Client-side thumbnail rendering*'s rule that deferre
 - **THEN** no far render starts until that lookup has answered, while renders for on-screen and near tiles start as usual
 
 #### Scenario: Far lookups do not hold the drain
-- **WHEN** the only pending lookups are for tiles ranked far, or an occlusion toggle has issued a lookup for every tile
+- **WHEN** the only pending lookups are for tiles ranked far — the far-ranked remainder of an occlusion toggle's storm once the nearer ones have answered, or a far-only set from the start
 - **THEN** far renders are not held for them
 
 #### Scenario: A wedged lookup cannot freeze the drain
