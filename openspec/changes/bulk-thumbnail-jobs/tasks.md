@@ -16,14 +16,16 @@
 > meaning grid takes the no-pose branch corpus-wide)* is resolved in design D7: one core
 > body with the pose as a parameter, the command's wrapper and the job's around it, and
 > the job's own orientation wave over its scope. Both are folded into the tasks below.
-> **Nothing below starts before 6.7 is on main.**
+> **What can start today:** 1.0 (the PUT's two fields), 1.3's `refreshThumbnail` split,
+> and 1.2's pinned-band argument on `RenderQueue.push` — none touches what the
+> enumeration owns. **Everything else waits for 6.7 to be on main.**
 
 > Hard ordering, all three before this change: `thumbnail-sweep-priority` (archived
 > 2026-09-02 — the priority bands the job drains through), `listing-tree-cache` §6
 > through 6.7 (the thumbnail-state index — presence, staleness, generation, the `framed`
 > bit its 6.2 carries for this change — and the scope enumeration 6.7 adds for it),
 > `immutable-thumbnail-serving` (landed 2026-09-02 — the write generation D4's skip
-> reads). `thumbnail-image-serving` (drafted 2026-09-02, uncommitted at this writing)
+> reads). `thumbnail-image-serving` (committed 2026-09-02 in e787add, not started)
 > stacks on the same §6 and names the annotation shape (`DirEntry.thumb`) the
 > enumeration carries; whichever of it and this lands second reuses the other's
 > extraction of the hook's hit test (1.1). Re-read all of them against main before
@@ -36,29 +38,46 @@
 - [ ] 1.0 Server: two additive fields on `PUT /api/thumb` (`app.ts`, `cache.ts`; the
       delta's new `model-thumbnails` requirement, ADD-only — `thumbnail-image-serving`
       and `public-deployment` both hold ADD-only deltas there with distinct titles,
-      checked against main 2026-09-02). `png: null` deletes both variants' PNGs and clears both
-      renders' labels, keeping the sidecar — camera and axis governed by the same write's
-      own fields, `gen` bumped through `allocateGen` as every write is, so the number
-      stays monotonic across the emptying. `ifGen: number` makes the write conditional:
-      a value other than the entry's current generation answers 412 with nothing
-      written (a missing entry's current generation is 0). Cells in `cache.test.ts` /
-      `api.test.ts`: a delete empties both variants and the next GET of each is a miss;
-      a delete keeps a camera the write did not discard; a matching `ifGen` writes and a
-      stale one 412s with the sidecar byte-identical; the 412 is distinguishable from a
-      400. `ApiClient.putThumb`'s `ThumbSave` grows both fields; the harness mock
-      extended additively
+      checked against main 2026-09-02). `png: null` is its **own branch** in
+      `ThumbCache.put`, never a value fed through the `opts.png !== undefined` tests —
+      every one of them reads `null` as pixels: it would adopt the mtime, label a render
+      that has no bytes, and can trip `supersedes`, and `get` would then answer `stale`
+      rather than a miss. The branch: both PNGs `rm`'d, both renders' labels emptied, no
+      mtime adopted, the sidecar kept — camera and axis governed by the same write's own
+      fields, `gen` bumped through `allocateGen` as every write is, so the number stays
+      monotonic across the emptying. Both hops must tell `null` from absent:
+      `ApiClient.putThumb`'s png ternary (`save.png !== undefined ? … : undefined`)
+      drops a `null` on the wire today, and the route's `body.png !== undefined ?
+      Buffer.from(…)` would read one as bytes. `ifGen: number` makes the write
+      conditional: a value other than the entry's current generation answers 412 with
+      nothing written (a missing entry's current generation is 0). Cells in
+      `cache.test.ts` / `api.test.ts`: a delete that also discards the camera empties
+      both variants and the next GET of each is a miss (the reset job's own write); a
+      delete that keeps a camera answers `stale` with no pixels and the camera intact
+      (`get`'s camera-bearing rule); a matching `ifGen` writes and a stale one 412s with
+      the sidecar byte-identical; the 412 is distinguishable from a 400; a `null` png
+      survives `putThumb`'s serialization. `ApiClient.putThumb`'s `ThumbSave` grows both
+      fields; the harness mock extended additively
 - [ ] 1.1 A job module beside `useThumbnails`' queue plumbing: `(operation, scope)`. At
       launch, in order: enumerate the scope through `ApiClient` (the tree cache's 6.7
       route — the app's root for the library tab, the tile's path for a menu launch);
-      run the job's own orientation wave over the enumerated models (`semanticPosesFor`,
-      chunked as the listing wave is, failure is silence — D7/D8); then derive.
+      run the job's own orientation wave over only the enumerated models whose
+      annotation carries no pose — the tree cache's pose layer rides the enumeration as
+      it rides a listing, so this is 6.4's rule: ask the index about the unknowns, not
+      the library (`semanticPosesFor`, chunked as the listing wave is, failure is
+      silence — D7/D8); then derive.
       Generate keeps every model whose recipe-in-force variant fails the hook's own hit
       test — missing, stale, `lighting`/`rig` off the constants, or `posed` behind the
       pose the wave holds — through that predicate **extracted** from `useThumbnails`'
       hit branch, never restated (`thumbnail-image-serving` 2.2 extracts the same one;
       whichever lands second reuses it). Reset keeps `framed` entries. Snapshot each kept
       entry's `gen` (D1, D4). An enumeration that reports itself incomplete still runs,
-      over what it found, and the chip says the scope was cut. No persistence
+      over what it found, and the chip says the scope was cut. The enumeration reaches
+      the client through `ApiClient` — the method 6.7 adds, or one this change adds
+      beside `listDir` if 6.7 left the seam server-side — with the harness mock extended
+      additively. The library tab's buttons read "Counting…" until the derivation lands,
+      and a launch re-derives: a count is a derivation, not a reservation. No
+      persistence
 - [ ] 1.2 Generate's entries feed the render queue through `RenderQueue.push` with the band
       **pinned to `far`** — a third, optional argument that bypasses the ranking lookup,
       because the job's key is a path the grid may rank *visible* and the spec says no
@@ -66,22 +85,41 @@
       previous settles, so a two-wide queue always keeps a slot for interactive work and
       cancel is instant. The queue's nearest-first draining is the rest of the preemption
       story (the sweep change's 26dcc18 rederivation: deferred work is outranked, never
-      cancelled)
+      cancelled). The far gate `thumbnail-image-serving` D5 adds (its `setFarGate`,
+      bounded by `FAR_GATE_MAX_MS`) will hold a pinned-far job entry while a nearer
+      lookup is pending — with one entry in flight that stalls the whole job for as long
+      as the user is actively browsing, bounded by the gate's own timeout. Accepted and
+      stated here: that is the preemption the spec asks for, and an exemption would put
+      a mesh read ahead of a visible tile's lookup
 - [ ] 1.3 Two per-entry ops. **Generate**: split `refreshThumbnail` (`entryActions.ts`)
       into a core — `renderEntryThumbnail(entry, deps, { discardFraming, pose, ifGen })`,
-      the lookup, the resolution (`framingAfterDiscard` on discard, the sweep's rule
-      otherwise), the render, the PUT (forwarding `ifGen`) and the `setThumb`; answers
+      the lookup (kept, deliberately: the orientation rendered from is the one in force
+      when the render runs, not when the scope was enumerated — one small GET per model
+      against a render-bound job), the resolution (`framingAfterDiscard` on discard, the
+      sweep's rule otherwise), the render, the PUT (forwarding `ifGen`) and the
+      `setThumb`; answers
       `'done' | 'skipped'` (a 412 is `skipped`), throws on failure — and the command's
       wrapper, which keeps the queue push, the pose read from `host.poses` and the
       `RENDER_FAILED` report. No behaviour change for the two commands; their cells stay
-      untouched. The job calls the core with `discardFraming: false`, the wave's pose and
-      the entry's snapshotted `gen` (D7). **Reset**: no render, no queue, no mesh — one
-      PUT per entry, `{ camera: null, axis, png: null, ifGen }` with `axis: null` exactly
-      where `framingAfterDiscard` (the shared reading of the discard rule, D3) reports a
-      usable pose replaced it against the wave's pose, else `undefined` (keep); then the
+      untouched. While there, correct `ActionHost.poses`' doc comment: it says the map
+      is filled by a meaning or similarity landing only, but `App` hands it the merged
+      `poses` memo, which the listing wave fills for plain listings too (the review
+      caught this; D7). The job calls the core with `discardFraming: false`, the wave's
+      pose and the entry's snapshotted `gen` (D7). **Reset**: no render, no queue, no
+      mesh — one PUT per entry, `{ camera: null, axis, png: null, ifGen }` with
+      `axis: null` exactly where `framingAfterDiscard` (the shared reading of the
+      discard rule, D3) reports a usable pose replaced it against the wave's pose, else
+      `undefined` (keep). Its `keptAxis` argument is immaterial here — `posed` is
+      `cameraForPose(pose) !== null`, independent of the axis — which is exactly why the
+      axis rule can be evaluated without a render; pass the annotation's axis. Then the
       in-memory half — a tile on screen drops its image and re-looks-up through a new
-      `refetch(path)` on `useThumbnails` beside `setThumb` (the reconciler only starts
-      work on entry changes), a tile off screen is simply not in the map. A 412 is
+      `refetch(path)` on `useThumbnails` beside `setThumb` (nothing restarts a slot on
+      a server-side write: the sweep effect restarts one only on add, mtime, `ao` or a
+      pose change by value), a tile off screen is simply not in the map. Sequential,
+      one PUT in flight, cancel between two: a few thousand small writes at loopback
+      latency is seconds. An axis-only entry with no usable pose has nothing to discard
+      yet still loses its renders and moves its `gen` — one forced re-render, accepted
+      rather than special-cased: it was counted, and the user asked for it. A 412 is
       `skipped`
 - [ ] 1.4 Per-entry failure counted from the core's throw or the PUT's rejection — never
       through `host.report` — and the job continues; generation-moved entries (412)
@@ -138,5 +176,6 @@
       scrolling elsewhere stays responsive (visible tiles render first); reset over
       an orbited subtree empties its renders in seconds — on-screen tiles refill
       through the sweep, a model orbited mid-job is skipped — and a following generate
-      restores index framings; cancel + relaunch continues; whole-library generate from
+      draws them at the index's orientation, storing no framing; cancel + relaunch
+      continues; whole-library generate from
       the library tab shows an honest count before and true progress during

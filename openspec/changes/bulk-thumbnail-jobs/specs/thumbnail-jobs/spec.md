@@ -7,12 +7,14 @@ The client SHALL offer bulk thumbnail work as jobs of two operations over a scop
 subtree or the whole library. *Generate* SHALL render and store a thumbnail for each
 model in scope whose thumbnail is missing or stale, touching no current entry. *Reset*
 SHALL apply, to each model in scope with a stored orientation — a stored camera or a
-stored axis, the definition the derivation and the counts share (review M4) — the same
+stored axis, one definition shared by the derivation and the counts — the same
 give-up-the-orientation semantics the per-model action defines (`entry-actions`), and
 SHALL delete that model's cached renders rather than redraw them, so no image remains
 that was rendered from a discarded camera and the job renders nothing — redrawing is
-*generate*'s work, or the next visit's. A job's work list SHALL be derived at launch from per-entry state — obtained by
-enumerating the scope's models together with their cached thumbnail facts
+*generate*'s work, or the next visit's. A reset MAY leave an on-screen tile in its scope
+without an image until the ordinary sweep redraws it: a scope cannot be redrawn in place
+the way one tile can. A job's work list SHALL be derived at launch from per-entry state —
+obtained by enumerating the scope's models together with their cached thumbnail facts
 (`listing-cache`'s enumeration), never by walking the filesystem from the client and
 never cut to a listing's cap; a scope whose enumeration reports itself incomplete SHALL
 still run over what was found and SHALL say so on the progress affordance — and progress
@@ -37,10 +39,9 @@ record.
 At most one bulk job SHALL run at a time; launching while one runs SHALL surface the
 running job rather than starting a second. Job work SHALL rank no better than deferred
 far work — the render queue's lowest existing rank, with which it may tie — so
-on-screen, near, and unreported work always renders first. (A rank strictly below
-`far` does not exist and would contradict the sweep capability's exhaustive ordering;
-adding one is a `model-thumbnails` MODIFY stacked after that change archives, deferred
-until tying with far tiles proves insufficient — review S1.) An
+on-screen, near, and unreported work always renders first. (No rank below `far`
+exists; adding one would be a `model-thumbnails` change of its own, deferred until tying
+with far tiles proves insufficient — see the archived `bulk-thumbnail-jobs` change.) An
 entry whose stored state changed after the job's launch — detected by its write
 generation having moved — SHALL be skipped and counted, never overwritten. A per-entry
 failure SHALL be counted and reported without stopping the job; the job fails as a
@@ -63,7 +64,7 @@ A launcher's cost SHALL be stated where it can be delivered without re-shaping t
 surface that offers it: the `library` tab's buttons carry their counts (the tab renders
 asynchronously already); a context-menu entry is uncounted — the menu is measured,
 clamped and focus-seeded from its command list at mount, and a late-arriving count
-would move it (review M6) — and states its count at the next step instead. A reset
+would move it — and states its count at the next step instead. A reset
 SHALL require confirmation carrying the derived count, since it discards user-authored
 framings; a generate SHALL run without confirmation, its count appearing on the
 progress affordance as the job starts. A launched job SHALL be
@@ -77,7 +78,7 @@ this capability's).
 
 #### Scenario: The button is honest
 - **WHEN** the user opens the library tab
-- **THEN** the generate and reset buttons state how many entries each would touch, from the cache indexes, without walking the filesystem
+- **THEN** the generate and reset buttons state how many entries each would touch, from the cached tree where one exists — walking only a root that has never been walked, as a first listing of it would — and say that they are counting until then
 
 #### Scenario: Reset asks first
 - **WHEN** the user invokes a reset over a scope holding stored framings

@@ -34,7 +34,7 @@ original mis-attribution to the notes).
   resume-after-anything is "run it again". No job journal. Cancel plus re-run is pause.
 - **Two launchers per operation, one job**: context-menu entries on directory and zip
   tiles ("beneath this folder"), and a new `library` side-panel tab for whole-library
-  scope ("Generate all thumbnails", "Reset all framings") with honest counts from the
+  scope ("Generate N missing thumbnails", "Reset N framings") with honest counts from the
   cache indexes. A persistent, dismissible progress chip is the job's UI regardless of
   launcher; it survives navigation and reports per-entry failures without stopping.
 - **The job never overwrites what the user did mid-job**: an entry whose write

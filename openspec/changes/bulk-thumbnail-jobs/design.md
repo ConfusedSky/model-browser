@@ -11,7 +11,8 @@ the server never renders), through `App`'s `RenderQueue` — which
 `listing-tree-cache` §6 gives `ThumbCache` an in-memory per-path index
 (presence, staleness, generation — and `framed`, added to its 6.2 alongside this
 drafting) and, since this change's 2026-09-02 design pass, a scope enumeration
-over the snapshot carrying those facts per model (its 6.7 — D8 below). Per-model *refresh* and *give up the orientation* actions exist in
+over the snapshot carrying those facts per model (its 6.7 — D8 below).
+Per-model *refresh* and *give up the orientation* actions exist in
 `entry-actions`, with exact discard semantics this change reuses rather than
 restates. The always-on background warmer was weighed and declined in
 `docs/web-demo-notes.md` (2026-09-02): bulk work is explicit, scoped, and
@@ -79,7 +80,8 @@ rather than a few thousand mesh loads and renders (settled with Masa,
 it is the next button). The redraw is left to whatever next looks at the model —
 the ordinary visit's sweep for a tile on screen, a generate job for the rest —
 both of which resolve a model with nothing stored exactly as the redraw would
-have.
+have. The job sends the writes one at a time — cancel lands between two — and a
+few thousand small writes at loopback latency is still seconds.
 
 The discard rule is the per-model action's, pointed at rather than restated
 (Masa: same semantics), so the two cannot drift on *what* is discarded; the
@@ -91,8 +93,13 @@ the framing" was preferred to two spellings of it. The delta records the
 difference as what each does *after* the discard.
 
 *Alternative — the per-model action also deletes and lets the sweep refill:*
-one definition end to end, but the tile blanks for the second the sweep takes,
-against the thumbnails spec's keep-until-replaced promise; declined.
+one definition end to end; declined for the asymmetry that actually holds. One
+tile can be redrawn in place at once, so keeping the old picture until the new
+one lands costs nothing there; a scope cannot be redrawn quickly at all. The
+bulk reset therefore knowingly blanks any on-screen tile in its scope until the
+sweep refills it, and the delta says so — beside, not against, the thumbnails
+capability's keep-until-replaced rule, which governs refreshes and is not
+modified.
 
 ### D4: An entry the user touched mid-job is skipped
 
@@ -102,8 +109,10 @@ server refuse a write to an entry whose generation has moved since (412,
 nothing written), and the job counts the refusal as skipped — the user (or
 another surface) wrote it mid-job, and a fresh orbit is never overwritten by a
 reset or a re-render. Server-side rather than compare-then-write on the client
-(the first version): the check and the write are one operation, so no race
-slips between them and there is no window to narrow.
+(the first version): the window shrinks from a client round trip to `put`'s own
+read-modify-write — the unserialized span between its `readMeta` and its
+`writeMeta`, which its doc comment already records as accepted — and nothing
+narrower exists without locking.
 
 ### D5: Counts before consent
 
@@ -117,9 +126,10 @@ move the menu (the `AvailabilityContext` doc records exactly this hazard). The
 count appears at the next step instead — reset's confirmation dialog carries it
 before anything is discarded; generate's appears on the chip as the job starts.
 Reset confirms first: it destroys the user's curated framings, which no re-run can
-rederive. Counts come from the cache indexes (one lookup per entry in scope, no
-filesystem walk); a scope the index cannot yet enumerate states that instead of a
-number.
+rederive. Counts come from one enumeration of the scope (D8): a memory read
+where the tree is cached, and a walk exactly where it is not — the same walk a
+first listing of that root pays. The tab says "Counting…" until it lands and
+never blocks on it.
 
 ### D6: The `library` tab is the whole-library launcher, and the app's maintenance surface
 
@@ -134,21 +144,27 @@ is not shown — the launcher empty-report precedent.
 ### D7: One per-entry body, three callers (added 2026-09-02 — review M5)
 
 `refreshThumbnail` (`entryActions.ts`) is the body both per-model thumbnail
-commands run, and the first draft's D3 wanted to fan it out for reset; since
-D3's revision reset renders nothing, and the split serves *generate*, whose
-per-entry op is exactly the redraw. Two things in it are the *command's*,
-not the operation's: it reports every failure to the user
-(`host.report(RENDER_FAILED)` — one sentence per failed model, which fanned over a
-kit is a wall of them), and it resolves the model's orientation from `host.poses`,
-the current landing's answer — populated by a meaning or similarity landing only,
-so a reset launched from a plain folder would take the no-pose branch for every
-model in it, discarding cameras and rendering at the default where the index would
-have framed them.
+commands run. The first draft's D3 wanted to fan it out for reset; since D3's
+revision reset renders nothing, so the split serves *generate*, whose per-entry
+op is exactly the redraw. Two things in it are the *command's*, not the
+operation's: it reports every failure to the user (`host.report(RENDER_FAILED)`
+— one sentence per failed model, which fanned over a kit is a wall of them), and
+it resolves the model's orientation from `host.poses`, which covers the **landed
+listing** only — `App` hands it the merged `poses` memo, the listing wave's
+answer folded with the previews' — while a job's scope is mostly *not* on
+screen: a subtree launched from a tile's menu, or the library. Every model
+outside the listing would take the no-pose branch, rendering at the default
+where the index would have framed it. (The first version of this paragraph, and
+`ActionHost.poses`' own doc comment still, say the map is filled by a meaning or
+similarity landing only; the review checked the code — `listingPoses` is filled
+for plain listings by the second wave — and 1.3 corrects the comment.)
 
 So the body is split, not shared. A core — `renderEntryThumbnail(entry, deps,
-{ discardFraming, pose, ifGen })` — does the lookup, the resolution
-(`framingAfterDiscard` on discard, the sweep's rule otherwise), the render, the
-PUT (forwarding `ifGen`) and the `setThumb`; it takes the pose as a parameter,
+{ discardFraming, pose, ifGen })` — does the lookup (kept, deliberately: the
+orientation rendered from is the one in force when the render runs, not when
+the scope was enumerated — one small GET per model against a render-bound job),
+the resolution (`framingAfterDiscard` on discard, the sweep's rule otherwise),
+the render, the PUT (forwarding `ifGen`) and the `setThumb`; it takes the pose as a parameter,
 answers `'done' | 'skipped'` (a 412 is `skipped`), and throws on failure. The
 command's wrapper is what `refreshThumbnail` keeps: the queue push, the pose read
 from `host.poses`, the one-line report. The job's wrapper passes its own pose
@@ -161,8 +177,9 @@ Reset's per-entry op is not a render and shares none of this: one PUT with
 reading of the discard rule, the one the lightbox's live reset uses too — says a
 usable pose replaced it, `png: null`, and `ifGen`. Then the in-memory half: a
 tile on screen drops its image and re-looks-up, which needs a per-path restart
-the hook does not have yet (`refetch(path)` beside `setThumb`; the reconciler
-only starts work on entry changes).
+the hook does not have yet (`refetch(path)` beside `setThumb`; nothing restarts
+a slot on a server-side write — the sweep effect restarts one only on add,
+mtime, `ao` or a pose change by value).
 
 *Alternative — call the command and catch its report:* the report goes through
 the host, not a return value, and the pose would still be the landing's. A flag on
@@ -191,13 +208,17 @@ model whose recipe-in-force variant fails the hook's own hit test (`lighting`,
 `rig`, and `posed` against the pose the job holds); reset keeps `framed`. That
 predicate is extracted from `useThumbnails`' hit branch rather than restated, so
 the job and the sweep cannot disagree about what is stale. And because the test
-reads a pose, the job runs its own orientation wave over the enumerated models
-first — `semanticPosesFor`, chunked, failure is silence: the listing wave's
-contract — which is also what D7's core renders unowned models under, so a
-generate over a plain folder frames them as a visit would, and a reset discards
-the axis exactly where the per-model action would (D3). The library tab's counts are the same
-derivation, run when the tab opens, over the app's root — `LibraryState.root`,
-the viewpoint the app opens at, which is what "the library" means on screen.
+reads a pose, the job runs its own orientation wave first — over only the
+enumerated models whose annotation carries no pose, since the tree cache's pose
+layer rides the enumeration as it rides a listing (its 6.4 rule: ask the index
+about the unknowns, not the library); `semanticPosesFor`, chunked, failure is
+silence: the listing wave's contract — which is also what D7's core renders
+unowned models under, so a generate over a plain folder frames them as a visit
+would, and a reset discards the axis exactly where the per-model action would
+(D3). The library tab's counts are the same derivation, run when the tab opens —
+"Counting…" until it lands — and a launch re-derives, over the app's root —
+`LibraryState.root`, the viewpoint the app opens at, which is what "the library"
+means on screen.
 
 An enumeration that reports itself incomplete (a root with no snapshot whose walk
 stopped against its budget) is still a job, over what was found; the chip says the
