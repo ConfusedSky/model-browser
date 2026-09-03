@@ -59,9 +59,10 @@
       MODIFIES *A context menu on grid tiles*; declare ordering when this is drafted
 - [ ] 1.7 the corpus bake — preview paths attached to dir entries (the decided shape);
       rides `listing-tree-cache` and `bulk-thumbnail-jobs`
-- [ ] 1.8 the credits page — go-live gate 3.2. `public-deployment`'s design recommends it
-      stand alone rather than ride the landing page, since CC-BY attribution should not
-      wait on copy decisions; **not yet confirmed**
+- [ ] 1.8 the credits page — go-live gate 3.2, and **standing alone** rather than riding
+      the landing page (Masa, 2026-09-03): CC-BY attribution should not wait on that
+      change's copy decisions. The generator exists from `library-overrides`, so this is a
+      route and a rendering. Closes gate 3.2 when it lands
 
 ## 2. Decisions to record in `docs/web-demo-notes.md` (answer + date on the item)
 

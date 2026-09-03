@@ -16,7 +16,7 @@ a machine the viewer cannot reach.
 
 The decisions below were taken with Masa on 2026-09-02 and are recorded in
 `docs/web-demo-notes.md` (commit `097aeae`); this document is where they become
-implementable. Four remain open at the bottom.
+implementable. Everything it opened is answered at the bottom; nothing is left hanging.
 
 ## Goals / Non-Goals
 
@@ -415,16 +415,18 @@ of them happens to be one question too.
 
 ## Open Questions
 
-- **The credits page's home** — with the landing page, sharing one set of copy decisions,
-  or standing alone as a generated document with a route. **Recommended standalone, not yet
-  confirmed:** it is go-live gate 3.2 and CC-BY requires displayed attribution, while the
-  landing-page change opens with an unanswered question about its own contents — tying a
-  compliance item to a change gated on aesthetics is how compliance items slip. The
-  generator already exists from `library-overrides`; standalone it is a route and a
-  rendering.
+None remain. Every question this document opened has been answered — see below; the two
+that were reversed after argument say so on their own line, so a reader can tell a
+settled answer from an unchallenged one.
 
 ## Settled since drafting
 
+- **The credits page stands alone** (Masa, 2026-09-03), rather than riding the landing
+  page as this document first recommended. CC-BY attribution is go-live gate 3.2, and the
+  landing-page change opens with an unanswered question about its own copy; a compliance
+  item gated on aesthetics is how compliance items slip. The generator already exists from
+  `library-overrides`, so standalone it is a route and a rendering. Tracked as
+  `web-demo-backlog` 1.8.
 - **The field set and its names** — the table in D4 (Masa, 2026-09-03), including
   `maintenance` arriving early and the index field folding into `hostDetails`.
 - **The allowed origins are a set, not one value** (Masa, 2026-09-03), reversing this
