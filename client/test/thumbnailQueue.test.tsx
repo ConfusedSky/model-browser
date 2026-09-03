@@ -1910,6 +1910,47 @@ describe('refetch restarts one slot after a write the hook did not make', () => 
     expect(api.putThumb).toHaveBeenCalledTimes(1)
   })
 
+  it('goes through the lookup even when the listing still vouches for the render', async () => {
+    // Found live (2026-09-02): after a bulk reset deleted a tile's renders,
+    // the tile sat on "loading" forever. The entry's annotation was the
+    // listing's word from before the write, `start` trusted it first and
+    // seeded an image URL at pixels the server no longer had — and returned
+    // that seed to a caller that discards it.
+    const entries = models(1)
+    const path = entries[0]!.path
+    entries[0]!.thumb = {
+      gen: 5,
+      framed: true,
+      ao: { state: 'hit', lighting: THUMB_LIGHTING, rig: RIG_VERSION },
+      noao: { state: 'hit', lighting: THUMB_LIGHTING, rig: RIG_VERSION },
+    }
+    const api = {
+      thumbImageUrl: () => 'http://localhost/api/thumb/image?vouched',
+      getThumb: vi.fn().mockResolvedValue({ status: 'miss' }),
+      putThumb: vi.fn().mockResolvedValue({ gen: 6 }),
+    } as unknown as ApiClient
+    const lru = mesh()
+    const queue = new RenderQueue(2)
+
+    await render(<Harness entries={entries} api={api} lru={lru} queue={queue} ao />)
+    await settle()
+    // Listing-drawn: ready at the image URL, and no lookup was ever made.
+    expect(statuses()).toEqual(['ready'])
+    expect(api.getThumb).not.toHaveBeenCalled()
+
+    await act(async () => {
+      lastRefetch!(path)
+    })
+    await settle()
+    // The annotation is refused, the lookup runs, the miss renders, the tile
+    // comes back with real pixels — not with the vouched-for URL, and not
+    // stuck on loading.
+    expect(api.getThumb).toHaveBeenCalledTimes(1)
+    expect(statuses()).toEqual(['ready'])
+    expect(lastThumbs.get(path)!.url).toMatch(/^blob:/)
+    expect(api.putThumb).toHaveBeenCalledTimes(1)
+  })
+
   it('does nothing at all for a path this listing does not have', async () => {
     // A tile off screen is simply not in the map, and the reset job calls
     // `refetch` for every entry in its scope.

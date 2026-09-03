@@ -373,8 +373,17 @@ export function useThumbnails(
     // write replaced; a tail of it landing afterwards would paint the deleted
     // render back.
     retire(slot)
-    if (slot.url !== undefined) URL.revokeObjectURL(slot.url)
+    if (slot.url !== undefined) release(slot.url)
     slot.url = undefined
+    // The entry's annotation is the listing's word from BEFORE the write that
+    // brought us here, so it still says the render is there. `start` trusts an
+    // annotation first (the listing-drawn branch), and its seeded state would
+    // point an image URL at pixels the server just deleted — and be returned to
+    // a caller that has nothing to do with it, leaving the tile on "loading"
+    // forever (found live, 2026-09-02). Refuse the annotation's generation, the
+    // same word `reportImageError` uses for an annotation the image route
+    // contradicted, so the restart goes through the lookup.
+    slot.refusedGen = slot.entry.thumb?.gen
     // The entry's generation moved under us and the caller may not know where
     // to — the same reasoning as `setThumb`'s adoption of absence and
     // `discardThumbFraming`'s clearing. The next lookup rides the validator

@@ -267,7 +267,17 @@
       session's call. What 4.2 still owes, unchanged below; two things to look at first
       when it runs: the chip against the occlusion pill at `bottom-14`, and the library
       tab's count on the real 3,380-model library (one `/api/models` plus one pose wave
-      over the unposed — time it).
+      over the unposed — time it). **Masa's first live press found the bug the suite
+      could not** (2026-09-02): after a reset the tile sat on "loading" forever —
+      `refetch` restarted the slot through `start`, which since main's listing-drawn
+      branch trusts the entry's `thumb` annotation first; that annotation was the
+      listing's word from before the write, so `start` seeded an image URL at deleted
+      pixels and returned a state `refetch` discards. Fixed by refusing the annotation's
+      generation before the restart (`slot.refusedGen`, the word `reportImageError`
+      already uses); cell "goes through the lookup even when the listing still vouches
+      for the render", falsified (no lookup at all without the refusal). The hook-level
+      cells passed because their entries carried no annotation — a fixture gap 4.2 exists
+      to catch.
       Live: generate over a partly-rendered kit fills only its gaps while
       scrolling elsewhere stays responsive (visible tiles render first); reset over
       an orbited subtree empties its renders in seconds — on-screen tiles refill
