@@ -371,6 +371,30 @@ describe('the library tab', () => {
     expect(chipText()).toBe('Generated 2 of 2 in the library')
   })
 
+  it('recounts when the user gives a framing up by hand', async () => {
+    // The tab says one framing; the user resets that model from its own tile
+    // (the per-model command, not a job); the count must follow — a job's end
+    // is not the only moment the numbers go stale (Masa, live, 2026-09-02).
+    const withModel: DirListing = { path: '/models', entries: [dir('Alpha'), model('m.stl')] }
+    const framedAnswer = { path: '/', complete: true, entries: [beneath('/models', 'm.stl', framed())] }
+    const clearedAnswer = { path: '/', complete: true, entries: [beneath('/models', 'm.stl')] }
+    models.mockResolvedValueOnce(framedAnswer).mockResolvedValue(clearedAnswer)
+    await mountApp('/models', withModel)
+    await expandPanel()
+    await click(tabButton('library')!)
+    await settle()
+    expect(libraryButtons()[1]!.textContent).toBe('Reset 1 framings')
+
+    await secondaryPress(tile('m.stl'))
+    await click(menuItem('resetFraming'))
+    await settle()
+    // The sweep's own render of the missing tile also wrote; the discard is
+    // the last write, and it is the one that moved the count.
+    expect(putThumb.mock.calls.at(-1)![0]).toMatchObject({ camera: null })
+    expect(models).toHaveBeenCalledTimes(2)
+    expect(libraryButtons()[1]!.textContent).toBe('Reset 0 framings')
+  })
+
   it('counts once per opening, not once per landing', async () => {
     // A pose answer for the next folder's model rebuilds `poses`, and with it
     // the action host, on every landing. The tab's count is keyed on the scope

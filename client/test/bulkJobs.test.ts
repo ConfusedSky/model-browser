@@ -216,16 +216,30 @@ describe('what a generate derivation keeps', () => {
 })
 
 describe('what a reset derivation keeps', () => {
-  it('keeps exactly the models with a stored orientation', async () => {
+  it('keeps exactly the models whose framing a reset would change', async () => {
     const h = harness(
       listing([
         model('framed', { thumb: thumb({ framed: true }) }),
         model('unframed', { thumb: thumb({ framed: false }) }),
         model('no-annotation'),
+        // An axis alone, and no usable pose to replace it: the per-model rule
+        // keeps that axis, so a reset changes nothing here — not counted, or
+        // the button would offer a reset that resets nothing (found live).
+        model('axis-only-poseless', { pose: POSE_OFF_AXIS, thumb: thumb({ framed: true, axis: 'z' }) }),
+        // The same axis where a usable pose replaces it: given up, so counted.
+        model('axis-only-posed', { pose: POSE, thumb: thumb({ framed: true, axis: 'z' }) }),
+        // A camera is always given up.
+        model('camera', {
+          thumb: thumb({ framed: true, camera: { az: 1, el: 0.2, distR: 3, target: [0, 0, 0] } }),
+        }),
       ]),
     )
 
-    expect(paths((await h.jobs.derive('reset', SCOPE)).entries)).toEqual(['/kit/framed.stl'])
+    expect(paths((await h.jobs.derive('reset', SCOPE)).entries)).toEqual([
+      '/kit/framed.stl',
+      '/kit/axis-only-posed.stl',
+      '/kit/camera.stl',
+    ])
   })
 })
 
@@ -379,7 +393,12 @@ describe('the generate run', () => {
 describe('the reset run', () => {
   const framedListing = listing([
     model('posed', { pose: POSE, thumb: thumb({ framed: true, axis: '-x' }) }),
-    model('poseless', { pose: POSE_OFF_AXIS, thumb: thumb({ framed: true, axis: 'z' }) }),
+    // A camera beside the kept axis, so this one is in the derivation at all:
+    // an axis alone with no usable pose is exactly what a reset leaves alone.
+    model('poseless', {
+      pose: POSE_OFF_AXIS,
+      thumb: thumb({ framed: true, axis: 'z', camera: { az: 1, el: 0.2, distR: 3, target: [0, 0, 0] } }),
+    }),
   ])
 
   it('empties each entry with one write, dropping the axis exactly where a usable pose replaces it', async () => {
@@ -394,8 +413,9 @@ describe('the reset run', () => {
       { path: '/kit/posed.stl', mtime: 7, camera: null, axis: null, png: null, ifGen: 1 },
       { path: '/kit/poseless.stl', mtime: 7, camera: null, axis: undefined, png: null, ifGen: 1 },
     ])
-    // The discard rule is asked, never restated: `entry-actions` owns it.
-    expect(framingAfterDiscard.mock.calls.map((c) => c[0])).toEqual([POSE, POSE_OFF_AXIS])
+    // The discard rule is asked, never restated: `entry-actions` owns it — once
+    // by the derivation for the axis-only entry, then once per entry by the run.
+    expect(framingAfterDiscard.mock.calls.map((c) => c[0])).toEqual([POSE, POSE, POSE_OFF_AXIS])
     expect(h.jobs.state).toMatchObject({ phase: 'done', total: 2, done: 2 })
   })
 

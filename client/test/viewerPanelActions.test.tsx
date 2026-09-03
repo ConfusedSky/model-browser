@@ -861,6 +861,7 @@ describe('resetFramingLive', () => {
         api: { putThumb: put },
         discardThumbFraming: discard,
         report,
+        framingChanged: vi.fn(),
       } as unknown as ActionHost,
       view: { axis: 'y', reframe: vi.fn() },
     }

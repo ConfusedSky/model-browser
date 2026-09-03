@@ -101,6 +101,7 @@ function harness(
     lru: { acquire },
     queue,
     setThumb,
+    framingChanged: vi.fn(),
   } as unknown as ActionHost
   return { host, queue, getThumb, putThumb, setThumb, report, acquire }
 }
@@ -485,6 +486,7 @@ describe('what the next visit makes of the pixels', () => {
       lru,
       queue,
       setThumb: vi.fn(),
+      framingChanged: vi.fn(),
     } as unknown as ActionHost
 
     run('reRenderThumbnail', host)

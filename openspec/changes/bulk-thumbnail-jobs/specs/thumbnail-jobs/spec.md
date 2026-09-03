@@ -6,8 +6,10 @@
 The client SHALL offer bulk thumbnail work as jobs of two operations over a scope — a
 subtree or the whole library. *Generate* SHALL render and store a thumbnail for each
 model in scope whose thumbnail is missing or stale, touching no current entry. *Reset*
-SHALL apply, to each model in scope with a stored orientation — a stored camera or a
-stored axis, one definition shared by the derivation and the counts — the same
+SHALL apply, to each model in scope whose stored orientation the per-model rule would
+change — a stored camera, or a stored axis where an orientation source would replace
+it; an axis that rule keeps is neither touched nor counted, so a count never offers a
+reset that resets nothing — one definition shared by the derivation and the counts — the same
 give-up-the-orientation semantics the per-model action defines (`entry-actions`), and
 SHALL delete that model's cached renders rather than redraw them, so no image remains
 that was rendered from a discarded camera and the job renders nothing — redrawing is
@@ -76,6 +78,10 @@ every bulk-job surface are maintenance affordances — operations on the server'
 derived state — offered only where the server's feature report (`feature-report`)
 declares that capability on; which deployments withhold it is the report's business,
 not this capability's.
+
+#### Scenario: The count follows the user's own hand
+- **WHEN** the library tab is open and the user orbits a model, chooses its axis, or gives its framing up from its tile or the viewer
+- **THEN** the reset count is re-derived and moves accordingly, without a job having run
 
 #### Scenario: The button is honest
 - **WHEN** the user opens the library tab

@@ -205,6 +205,14 @@ export interface ActionHost extends Feedback, LibraryTop {
    * user is looking.
    */
   launchJob: (operation: JobOperation, scope: JobScope) => void
+  /**
+   * Say that a model's stored framing just changed — a camera or axis set or
+   * given up by something the user pressed. App counts these so the library
+   * tab's "Reset N framings" moves with the user's own hand, not only with a
+   * job's end (`bulk-thumbnail-jobs` D5: honest counts). Called after the
+   * write resolves, never before; a refused or failed write changed nothing.
+   */
+  framingChanged: () => void
 }
 
 /**
@@ -424,6 +432,9 @@ export function framingAfterDiscard(
  * structurally, so the command's wrapper below passes itself.
  */
 export type RenderDeps = {
+  /** Optional: the discard branch reports a framing change through it when
+   *  given (the commands pass their host; the generate job never discards). */
+  framingChanged?: () => void
   api: Pick<ApiClient, 'getThumb' | 'putThumb'>
   lru: Pick<MeshLru<THREE.Object3D>, 'acquire'>
   queue: Pick<RenderQueue, 'whenResumed'>
@@ -604,6 +615,7 @@ export async function renderEntryThumbnail(
     // fetch cacheable (setThumb adopts absence as "re-learn").
     gen: written.gen,
   })
+  if (discardFraming) deps.framingChanged?.()
   return 'done'
 }
 
@@ -722,7 +734,10 @@ export function resetFramingLive(
       // The tile's own copy, not only the server's: App opens the lightbox at
       // what this map holds, so a cache-only discard would re-open the model
       // at the orientation just given up (4b.4).
-      () => host.discardThumbFraming(entry.path, framing.posed),
+      () => {
+        host.discardThumbFraming(entry.path, framing.posed)
+        host.framingChanged()
+      },
       () => host.report(RESET_FAILED),
     )
   view?.reframe(framing.camera, framing.axis, framing.posed)
@@ -886,6 +901,7 @@ export function setOrbitAxis(
         // As in the re-render command: the echo, so the next fetch stays keyed.
         gen: written.gen,
       })
+      host.framingChanged()
     } catch {
       host.report(RENDER_FAILED)
     }

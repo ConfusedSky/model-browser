@@ -511,6 +511,17 @@ export default function App() {
    * job, and a client that ignored this would lose UX, never gain access.
    */
   const [features, setFeatures] = useState<FeatureReport | null>(null)
+  /**
+   * How many times the user's own hand has changed a stored framing this
+   * session — an orbit persisted, an axis chosen, a framing given up. Read by
+   * nothing but the library tab's recount key: the tab's "Reset N framings"
+   * must move when the user frames a model, not only when a job ends
+   * (`bulk-thumbnail-jobs` D5). A counter rather than the writes themselves,
+   * because the count is re-derived server-side and only needs to know that
+   * *something* moved.
+   */
+  const [framingVersion, setFramingVersion] = useState(0)
+  const noteFramingChanged = useCallback(() => setFramingVersion((v) => v + 1), [])
   const [apps, setApps] = useState<AppsReport | null>(null)
   const [actionText, setActionText] = useState<{ text: string; tone: 'ok' | 'error' } | null>(null)
   const actionTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -2096,8 +2107,10 @@ export default function App() {
       launchJob: (operation, scope) => {
         if (jobs.launch(operation, scope) === 'busy') say(JOB_BUSY, 'error')
       },
+      framingChanged: noteFramingChanged,
     }),
     [
+      noteFramingChanged,
       navigate,
       dispatch,
       enterEntry,
@@ -2346,9 +2359,15 @@ export default function App() {
   const libraryJobs = useMemo(
     () =>
       features?.thumbWrites === true && rootScope !== null
-        ? { count: countLibrary, launch: launchLibrary, recountKey: job?.phase ?? null }
+        ? {
+            count: countLibrary,
+            launch: launchLibrary,
+            // A job ending and a framing changed by hand are the two moments
+            // the numbers went stale; one key carries both.
+            recountKey: `${job?.phase ?? 'idle'}:${framingVersion}`,
+          }
         : null,
-    [features?.thumbWrites, rootScope, countLibrary, launchLibrary, job?.phase],
+    [features?.thumbWrites, rootScope, countLibrary, launchLibrary, job?.phase, framingVersion],
   )
 
   function goUp(): void {
@@ -2440,11 +2459,14 @@ export default function App() {
           // "unknown, re-learn").
           gen: written.gen,
         })
+        // A persisted orbit is the user framing a model by hand — the library
+        // tab's reset count has to know (D5). Not for a pixels-only persist.
+        if (opts.camera !== false) noteFramingChanged()
       } catch {
         // persistence is best-effort; the orbit itself already happened
       }
     },
-    [api, setThumb, viewer],
+    [api, setThumb, viewer, noteFramingChanged],
   )
 
   function closeViewer(): void {

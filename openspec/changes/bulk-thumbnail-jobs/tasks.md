@@ -215,7 +215,18 @@
       keyed on a closure rebuilt with the action host — every pose landing would have
       re-enumerated the library (cell "counts once per opening, not once per landing",
       falsified) — and a failed enumeration left the buttons counting forever; they now
-      read "Count failed" and reselecting the tab asks again
+      read "Count failed" and reselecting the tab asks again.
+      **Two more from Masa's live presses (2026-09-02, on main):** a subtree reset left
+      its models in the library's count — `framed` (camera OR axis) counts an axis the
+      per-model rule keeps when no usable pose replaces it, so a reset could never
+      clear it and the button offered a reset that reset nothing; `keeps('reset')` now
+      asks the shared rule and counts exactly what a discard would change (cell "keeps
+      exactly the models whose framing a reset would change", falsified against the
+      bare `framed`). And the count moved only when a job ended: `ActionHost.framingChanged`
+      is now called by the four hand-written framing sites — App's `persist`, the axis
+      command, the lightbox's live reset, the core's discard — and feeds the tab's
+      `recountKey` beside the job phase (cell "recounts when the user gives a framing up
+      by hand", falsified by muting the core's call)
 - [x] 2.3 The progress chip: app-level, survives navigation, shows
       operation/scope/done/total/failed/skipped, Cancel; dismiss hides without
       cancelling (D2)

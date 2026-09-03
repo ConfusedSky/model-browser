@@ -138,8 +138,16 @@ function keeps(operation: JobOperation, c: JobEntry, ao: boolean): boolean {
   const { thumb } = c.entry
   if (operation === 'reset') {
     // `framed` is the server's word for "a camera **or** an axis is stored"
-    // (M4) — one definition shared by the derivation and the tab's counts.
-    return thumb?.framed === true
+    // (M4). It overcounts one case a reset would not change: an axis alone
+    // where no usable pose would replace it — the per-model rule keeps that
+    // axis (D3), so such a model reads "framed" forever and a count that
+    // offered it promised a reset that resets nothing (Masa, live: a subtree
+    // reset left its models in the library's count, 2026-09-02). Kept exactly
+    // when the discard changes something: a camera, or an axis a usable pose
+    // replaces — asked of the shared rule, never restated.
+    if (thumb?.framed !== true) return false
+    if (thumb.camera !== undefined || thumb.axis === undefined) return true
+    return framingAfterDiscard(c.pose, thumb.axis).posed
   }
   // An absent annotation means nothing is cached, not "unknown": the server's
   // index is seeded by the startup sweep and learns every write, so an entry
