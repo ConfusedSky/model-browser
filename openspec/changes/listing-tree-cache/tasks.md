@@ -505,6 +505,15 @@
       files (no client file touched); `bun run typecheck` clean both workspaces;
       `openspec validate listing-tree-cache` → valid.
 
+- [x] 6.9a Two inherited notes from 6.9's landing (f6674ee), recorded so they
+      outlive the report: the pre-existing annotation-TTL cell passes partly by
+      accident — its index stub answers no `/under`, and the resulting askIndex
+      failure clears the probe memo, so later listings in that cell decline the
+      fill; a future stub that answers `/under` flips it (re-derive the cell's
+      gating then). And `askIndex`'s reset-on-network-failure means a wedged
+      index self-limits the fill after one failed call — a happy accident, not a
+      designed property; do not lean on it without a cell
+
 ## 7. Tests
 
 - [x] 7.1 Server: cached and walked responses are entry-for-entry identical on an unchanged tree (including ordering and truncation); one cached tree serves several different queries and both settings of the folder-matching option without re-traversing (instrument the walk, do not infer from timing); a second walk opens no archives; adding, removing, and renaming a model is picked up; a present-but-unreadable root invalidates rather than serving; the same tree reached at a different mountpoint under the same library is a **hit**; an unmounted library answers `missing` and leaves the snapshot in place; the on-disk format version invalidates a stale snapshot
