@@ -109,7 +109,13 @@ function sentence(state: JobState): string {
       // that says nothing about what went wrong.
       return state.failure !== undefined
         ? state.failure
-        : `${state.operation === 'generate' ? 'Generated' : 'Reset'} ${state.done} of ${state.total} ${phrase}${tail(state)}`
+        : state.operation === 'generate'
+          ? // "Generated" counts writes: an entry the job found already current
+            // on its own lookup was processed, not drawn, and says so.
+            `Generated ${state.wrote} of ${state.total} ${phrase}${
+              state.done - state.wrote > 0 ? ` · ${state.done - state.wrote} already current` : ''
+            }${tail(state)}`
+          : `Reset ${state.done} of ${state.total} ${phrase}${tail(state)}`
     case 'cancelled':
       // Cancelled during the derivation: there is no total to have got through,
       // so the sentence says what was interrupted instead of "0 of 0".

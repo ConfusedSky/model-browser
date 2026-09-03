@@ -473,6 +473,26 @@ describe('the library tab', () => {
     expect(models).toHaveBeenCalledTimes(3)
   })
 
+  it('does not recount again when the settled chip is dismissed', async () => {
+    // Every patch is a new state object, and × patches `dismissed`. Keyed on
+    // object identity, the recount fired twice for one job (the fresh review's
+    // finding); keyed on the run it fires once.
+    enumerated('/', [beneath('/models/Alpha', 'a.stl', framed())])
+    await mountApp('/models', NESTED)
+    await expandPanel()
+    await click(tabButton('library')!)
+    await settle()
+    await launchFrom('Alpha', 'resetBeneath')
+    await click(chipButton('Reset')!)
+    await settle()
+    expect(chipText()).toBe('Reset 1 of 1 beneath Alpha')
+    expect(models).toHaveBeenCalledTimes(3) // tab, the launch's derivation, the recount
+    await click(chipButton('Dismiss')!)
+    await settle()
+    expect(chip()).toBeNull()
+    expect(models).toHaveBeenCalledTimes(3)
+  })
+
   it('does not recount for a generate that found everything current', async () => {
     // The annotation said stale, the core's own fresh lookup said current: one
     // GET per entry, no write, and nothing for the tab to re-derive.
@@ -484,7 +504,7 @@ describe('the library tab', () => {
     await settle()
     await launchFrom('Alpha', 'generateBeneath')
     await settle()
-    expect(chipText()).toBe('Generated 1 of 1 beneath Alpha')
+    expect(chipText()).toBe('Generated 0 of 1 beneath Alpha · 1 already current')
     expect(putThumb).not.toHaveBeenCalled()
     expect(models).toHaveBeenCalledTimes(2)
   })

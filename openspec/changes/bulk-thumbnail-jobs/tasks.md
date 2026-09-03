@@ -251,7 +251,20 @@
       the discard's own lookup when the tile is still loading", "adds a hand change made
       while the count was in flight", "recounts for the write a cancel could not recall",
       "does not recount for a generate that found everything current", and the runner's
-      `wrote`/`settled` cells — each falsified against its restored bug
+      `wrote`/`settled` cells — each falsified against its restored bug.
+      **A fresh Opus review of that fix (2026-09-03), two should-fixes and seven nits,
+      all applied:** the recount was keyed on the state object, and every patch is a new
+      object, so × on a settled chip re-derived the library — keyed on `JobState.runId`
+      now (cell "does not recount again when the settled chip is dismissed", falsified);
+      the annotation fallback was stale in both directions after a reset's own refetch or
+      a failed render — dropped, the delta reads the site's lookup or the tile's ready
+      state and is otherwise silent; a derivation that threw while cancelled never
+      settled; the chip's "Generated N" counted entries found current — it counts writes
+      and says "· N already current"; the `wrote` cell's fixture was symmetric and could
+      not tell `wrote` from `done − wrote` — asymmetric now; the dead `framed` guard in
+      `keeps`, the detached runner JSDoc and the `framingChanged` doc's dropped ordering
+      clause corrected; the unindexed-library consequence of the silence rule recorded in
+      D8
 - [x] 2.3 The progress chip: app-level, survives navigation, shows
       operation/scope/done/total/failed/skipped, Cancel; dismiss hides without
       cancelling (D2)

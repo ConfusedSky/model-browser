@@ -698,15 +698,27 @@ describe('what a count asks the index about', () => {
 
 describe('what a job reports it wrote', () => {
   it('counts a landed write, not an entry found current or refused', async () => {
-    const h = harness(listing([model('missing'), model('current-on-lookup', { thumb: thumb({ ao: { state: 'miss' } }) })]))
-    // The first lookup misses (renders, writes); the second answers a current
-    // hit, so the core says 'current' — processed, but nothing written.
+    const h = harness(
+      listing([
+        model('missing-a'),
+        model('missing-b'),
+        model('current-on-lookup', { thumb: thumb({ ao: { state: 'miss' } }) }),
+      ]),
+    )
+    // Two lookups miss (render, write); the third answers a current hit, so
+    // the core says 'current' — processed, but nothing written. Asymmetric on
+    // purpose: one of each could not tell `wrote` from `done - wrote`.
     h.getThumb
+      .mockResolvedValueOnce({ status: 'miss' })
       .mockResolvedValueOnce({ status: 'miss' })
       .mockResolvedValueOnce({ status: 'hit', pngUrl: 'blob:x', lighting: THUMB_LIGHTING, rig: RIG_VERSION })
     h.jobs.launch('generate', SCOPE)
     await settle()
-    expect(h.jobs.state).toMatchObject({ phase: 'done', settled: true, done: 2, wrote: 1 })
+    expect(h.jobs.state).toMatchObject({ phase: 'done', settled: true, done: 3, wrote: 2, runId: 1 })
+    // A second launch is a new run.
+    h.jobs.launch('generate', SCOPE)
+    await settle()
+    expect(h.jobs.state).toMatchObject({ runId: 2 })
   })
 
   it('settles only when the in-flight entry has landed, cancelled or not', async () => {

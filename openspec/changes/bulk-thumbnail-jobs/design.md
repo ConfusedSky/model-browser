@@ -249,10 +249,17 @@ a persisted orbit, a chosen axis, a framing given up from a tile or the viewer �
 move the reset count by **arithmetic**: each site reports the write in the PUT's
 own three states (`ActionHost.framingChanged`), with the before-state where the
 site read it (the discard's own lookup); otherwise App reads the tile's *ready*
-state, else the listing's annotation, else says nothing — a loading tile carries
-no framing, and reading it as "unframed" counted an orbit on a framed model +1
-(the review's finding). Where this session holds no pose for the model, an
-axis-only state cannot be judged and the change stays silent rather than guess.
+state, else says nothing — a loading tile carries no framing, and reading it as
+"unframed" counted an orbit on a framed model +1 (one review's finding); the
+listing's annotation was tried as a third source and dropped, since after a
+reset's own refetch it still names a camera the server no longer holds (the
+next review's). Where this session holds no pose for the model, an axis-only
+state cannot be judged and the change stays silent rather than guess — which,
+on a library with no semantic index running, means an orbit on a model that
+held only an axis moves nothing until the next derivation counts it; the
+derivation reads "no pose" as "not resettable" and so counts the new camera +1.
+The recount is keyed on the run (`JobState.runId`), never on the state object,
+since every patch — a Dismiss included — is a new object.
 App turns the pair into ±1 through the one rule (`resettable`), and the tab
 shows its derived count plus the change since that count was *asked for* — the
 server counted then, so a change made while the answer was in flight is added,

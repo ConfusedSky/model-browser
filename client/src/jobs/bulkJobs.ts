@@ -47,6 +47,13 @@ export interface JobScope {
 export type JobPhase = 'deriving' | 'confirming' | 'running' | 'done' | 'cancelled'
 
 export interface JobState {
+  /**
+   * Which launch this state describes — a counter, new per `launch`. Every
+   * patch builds a new state object, so a reader that wants "once per job"
+   * (App's recount on a job that wrote) keys on this, not on object identity:
+   * keyed on identity, a Dismiss after the job settled re-fired the recount.
+   */
+  runId: number
   operation: JobOperation
   scope: JobScope
   phase: JobPhase
@@ -66,7 +73,11 @@ export interface JobState {
    * The run loop has finished — its last entry landed, whether the job ended
    * `done` or was cancelled. `cancelled` is set the instant the user presses
    * Cancel, while the in-flight entry may still land and count; anything that
-   * wants "the job is over and its counters are final" waits for this.
+   * wants "the job is over and its counters are final" waits for this. One
+   * write can still go unreported: a relaunch the instant after Cancel makes
+   * the abandoned run's landing patch stale (`patchRun` refuses it), so its
+   * `wrote` never reaches a reader — narrow, and cancel-plus-relaunch is
+   * "pause" by D1; the next derivation absorbs it.
    */
   settled: boolean
   /** The enumeration ran out of budget — this job covers what was found, and
@@ -157,8 +168,10 @@ function keeps(operation: JobOperation, c: JobEntry, ao: boolean): boolean {
     // offered it promised a reset that resets nothing (Masa, live: a subtree
     // reset left its models in the library's count, 2026-09-02). Kept exactly
     // when the discard changes something: a camera, or an axis a usable pose
-    // replaces — asked of the shared rule, never restated.
-    return thumb?.framed === true && resettable(thumb.camera, thumb.axis, c.pose)
+    // replaces — asked of the shared rule, never restated. (`framed` is not
+    // consulted: the server spells the camera and axis whenever either is
+    // stored, so the rule's own answer already implies it.)
+    return thumb !== undefined && resettable(thumb.camera, thumb.axis, c.pose)
   }
   // An absent annotation means nothing is cached, not "unknown": the server's
   // index is seeded by the startup sweep and learns every write, so an entry
@@ -172,6 +185,8 @@ export class BulkJobs {
   private current: JobState | null = null
   private listeners = new Set<() => void>()
   private token: RunToken | null = null
+  /** Launches so far — `JobState.runId`'s source. */
+  private runs = 0
   /** Resolves the `confirming` wait — by `confirm()`, and by `cancel()`, which
    *  has to release the loop so it can unwind rather than sit there forever. */
   private confirmWaiter: (() => void) | null = null
@@ -308,6 +323,7 @@ export class BulkJobs {
     const token: RunToken = { cancelled: false }
     this.token = token
     this.current = {
+      runId: ++this.runs,
       operation,
       scope,
       phase: 'deriving',
@@ -393,7 +409,11 @@ export class BulkJobs {
       derivation = await this.derive(operation, scope)
     } catch {
       // Not a per-entry failure: with no work list there is no job at all.
-      if (!token.cancelled) this.patchRun(token, { phase: 'done', failure: SCOPE_UNREADABLE, settled: true })
+      // Settled either way: a derivation that failed while cancelled is over too.
+      this.patchRun(
+        token,
+        token.cancelled ? { settled: true } : { phase: 'done', failure: SCOPE_UNREADABLE, settled: true },
+      )
       return
     }
     if (token.cancelled) {

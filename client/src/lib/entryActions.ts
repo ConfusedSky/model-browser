@@ -218,8 +218,10 @@ export interface ActionHost extends Feedback, LibraryTop {
    * it (the discard's own lookup); a site that did not read it passes nothing
    * and App falls back to the tile's ready state or the listing's annotation —
    * and to silence when it knows neither, since a wrong ±1 is worse than none
-   * until the next derivation. Called after the write resolves; a refused or
-   * failed write changed nothing and says nothing.
+   * until the next derivation. Called after the write resolves and **before**
+   * the tile's map is updated — that ready state is the fallback's source, and
+   * every site keeps to this order; a refused or failed write changed nothing
+   * and says nothing.
    */
   framingChanged: (path: string, write: FramingWrite, before?: StoredFraming) => void
 }

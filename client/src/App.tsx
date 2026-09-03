@@ -5,7 +5,6 @@ import type {
   DirEntry,
   FeatureReport,
   IndexPose,
-  ThumbInfo,
   IndexScore,
   LibraryState,
   OrbitAxis,
@@ -19,7 +18,7 @@ import SidePanel from './components/SidePanel'
 import PathBar from './components/PathBar'
 import { SKELETON_DELAY_MS, useDelayedFlag } from './hooks/useDelayedFlag'
 import { useThumbnails, type ThumbState } from './hooks/useThumbnails'
-import { BulkJobs, useBulkJobState, type JobOperation, type JobState } from './jobs/bulkJobs'
+import { BulkJobs, useBulkJobState, type JobOperation } from './jobs/bulkJobs'
 import {
   commandsFor,
   containingFolder,
@@ -525,10 +524,14 @@ export default function App() {
    * (measured 2026-09-02, Masa's objection). The full derivation stays the
    * truth at the moments it already runs, so any drift heals there.
    *
-   * The before-state is read from the thumbs map, which is why every caller
-   * signals *before* it updates the map; the pose from the landed answer, the
-   * same one the derivation would resolve against. Both through refs so this
-   * callback, and every host and persist that closes over it, stay stable.
+   * The before-state comes from the site's own lookup where it made one, else
+   * from the tile's *ready* state — which is why every caller signals before
+   * it updates the map — and from nothing else: a listing's annotation was
+   * tried as a third source and can be stale in both directions once anything
+   * has written the entry this session (the review's finding). The pose is the
+   * landed answer's, the same one the derivation would resolve against. Both
+   * through refs so this callback, and every host and persist that closes
+   * over it, stay stable.
    */
   const [handDelta, setHandDelta] = useState(0)
   const thumbsRef = useRef<Map<string, ThumbState>>(new Map())
@@ -538,18 +541,14 @@ export default function App() {
       // The before-state, from the most authoritative reading available: the
       // site's own lookup; else the tile's *ready* state (a loading or errored
       // tile carries no framing at all, and reading it as "unframed" made an
-      // orbit on a framed model count +1 — the review's finding); else the
-      // listing's annotation; else nothing is known and nothing is said.
+      // orbit on a framed model count +1 — one review's finding); else nothing
+      // is known and nothing is said. Not the listing's annotation: after a
+      // reset's own refetch, or a failed render, it still names a camera the
+      // server no longer holds, and a wrong ±1 clamps the button (the next
+      // review's finding).
       const shown = thumbsRef.current.get(path)
       const before: StoredFraming | undefined =
-        known ??
-        (shown?.status === 'ready' ? { camera: shown.camera, axis: shown.axis } : undefined) ??
-        (entryThumbRef.current.has(path)
-          ? {
-              camera: entryThumbRef.current.get(path)?.camera,
-              axis: entryThumbRef.current.get(path)?.axis,
-            }
-          : undefined)
+        known ?? (shown?.status === 'ready' ? { camera: shown.camera, axis: shown.axis } : undefined)
       if (before === undefined) return
       const after: StoredFraming = {
         camera: write.camera === null ? undefined : (write.camera ?? before.camera),
@@ -570,7 +569,7 @@ export default function App() {
     },
     [],
   )
-  const entryThumbRef = useRef<Map<string, ThumbInfo | undefined>>(new Map())
+
   const [apps, setApps] = useState<AppsReport | null>(null)
   const [actionText, setActionText] = useState<{ text: string; tone: 'ok' | 'error' } | null>(null)
   const actionTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -1059,6 +1058,12 @@ export default function App() {
   )
   placeholderRef.current = setPlaceholder
 
+  // Mirrored after commit, not during render: a render React discards must not
+  // leave the delta reading state that never landed.
+  useEffect(() => {
+    thumbsRef.current = thumbs
+    posesRef.current = poses
+  }, [thumbs, poses])
   /**
    * The one bulk-job runner for this app (`bulk-thumbnail-jobs` D2). One
    * instance, built once: it *is* the "one job at a time" rule — a second
@@ -1077,15 +1082,6 @@ export default function App() {
    * the runner on every press of the pill — discarding the running job's state
    * with it.
    */
-  // Mirrored after commit, not during render: a render React discards must not
-  // leave the delta reading state that never landed.
-  useEffect(() => {
-    thumbsRef.current = thumbs
-    posesRef.current = poses
-    const byPath = new Map<string, ThumbInfo | undefined>()
-    for (const e of thumbEntries) byPath.set(e.path, e.thumb)
-    entryThumbRef.current = byPath
-  }, [thumbs, poses, thumbEntries])
   const jobs = useMemo(
     () => new BulkJobs({ api, lru, queue, setThumb, refetch, ao: aoEnabled }),
     [api, lru, queue, setThumb, refetch],
@@ -2428,10 +2424,13 @@ export default function App() {
    * and `wrote` for what it actually wrote.
    */
   const [jobsEnded, setJobsEnded] = useState(0)
-  const settledRef = useRef<JobState | null>(null)
+  // Keyed on the run, never the state object: every patch — a Dismiss after
+  // the job settled included — builds a new object carrying the same
+  // `settled`/`wrote`, and keyed on identity the × re-derived the library.
+  const settledRunRef = useRef<number | null>(null)
   useEffect(() => {
-    if (job === null || !job.settled || settledRef.current === job) return
-    settledRef.current = job
+    if (job === null || !job.settled || settledRunRef.current === job.runId) return
+    settledRunRef.current = job.runId
     if (job.wrote > 0) setJobsEnded((n) => n + 1)
   }, [job])
   const libraryJobs = useMemo(
