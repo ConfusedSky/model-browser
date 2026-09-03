@@ -848,3 +848,93 @@ describe('thumbnail cacheability', () => {
     expect(named.headers.get('cache-control')).toBe('no-store')
   })
 })
+
+/**
+ * The two fields a bulk job writes with, over the wire (`bulk-thumbnail-jobs`
+ * D3/D4). A cache of its own, like the cacheability block above and for its
+ * reason: these cells reason about exact generation values.
+ */
+describe('PUT /api/thumb deletions and conditional writes', () => {
+  const cacheDir3 = mkdtempSync(join(tmpdir(), 'mb-cache-bulk-'))
+  const cache3 = new ThumbCache(cacheDir3)
+  const app3 = createApp(cache3, undefined, undefined, libraryFor(fx.dir))
+  const png3 = Buffer.from('bulk-fake-png').toString('base64')
+  const path3 = '/loose.stl'
+  const cam3 = { az: 1, el: 0.5, distR: 2, target: [0, 0, 0] as [number, number, number] }
+
+  const get3 = (q: string) => app3.request(`/api/thumb?${q}`, { headers: LOOPBACK })
+  const put3 = (body: Record<string, unknown>) =>
+    app3.request('/api/thumb', {
+      method: 'PUT',
+      headers: { ...LOOPBACK, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  const read3 = async (): Promise<ThumbGetResponse> =>
+    (await (await get3(`path=${encodeURIComponent(path3)}&mtime=111`)).json()) as ThumbGetResponse
+
+  afterAll(() => {
+    rmSync(cacheDir3, { recursive: true, force: true })
+  })
+
+  it('carries a deletion over the wire — null empties the entry, and is not bad pixels', async () => {
+    // The route is where the third state is most easily lost: the pixel field
+    // was read as `body.png !== undefined ? Buffer.from(body.png) : undefined`,
+    // which takes a `null` for bytes.
+    expect((await put3({ path: path3, mtime: 111, png: png3, camera: cam3 })).status).toBe(200)
+    expect((await read3()).status).toBe('hit')
+
+    const deleted = await put3({ path: path3, mtime: 111, png: null, camera: null })
+    expect(deleted.status).toBe(200)
+
+    const res = await get3(`path=${encodeURIComponent(path3)}&mtime=111`)
+    const body = (await res.json()) as ThumbGetResponse
+    expect(body.status).toBe('miss')
+    expect(body.png).toBeUndefined()
+    expect(body.camera).toBeUndefined()
+    // A miss is never cacheable, deletion or not — the tile that would stay
+    // empty forever is the same tile.
+    expect(res.headers.get('cache-control')).toBe('no-store')
+  })
+
+  it('refuses a write whose entry has moved, distinctly from a malformed one', async () => {
+    const written = (await (await put3({ path: path3, mtime: 111, png: png3 })).json()) as {
+      gen: number
+    }
+    const snapshot = written.gen
+    // Somebody else writes: the generation the job holds is now stale.
+    const moved = (await (await put3({ path: path3, mtime: 111, png: png3, camera: cam3 })).json()) as {
+      gen: number
+    }
+    expect(moved.gen).toBeGreaterThan(snapshot)
+
+    const refused = await put3({ path: path3, mtime: 111, png: null, camera: null, ifGen: snapshot })
+    expect(refused.status).toBe(412)
+    // The entry's *current* generation, so the caller re-keys from the refusal.
+    expect(await refused.json()).toEqual({ error: 'generation moved', gen: moved.gen })
+
+    // And nothing moved: same generation, same pixels, same camera.
+    const after = await read3()
+    expect(after.gen).toBe(moved.gen)
+    expect(after.status).toBe('hit')
+    expect(after.png).toBe(png3)
+    expect(after.camera).toEqual(cam3)
+
+    // The condition that *is* current writes, so 412 means only "the entry
+    // moved" and never "conditional writes are refused".
+    const ok = await put3({ path: path3, mtime: 111, png: png3, ifGen: moved.gen })
+    expect(ok.status).toBe(200)
+  })
+
+  it('reads a malformed condition or pixel field as a 400, never as a refusal', async () => {
+    // The distinction the job branches on: 412 is an entry it should skip, 400
+    // is its own bug, and a 400 read as a skip would count a broken job as a
+    // completed one.
+    const badGen = await put3({ path: path3, mtime: 111, ifGen: 'x' })
+    expect(badGen.status).toBe(400)
+    expect(await badGen.json()).toEqual({ error: 'invalid ifGen: x' })
+
+    const badPng = await put3({ path: path3, mtime: 111, png: 5 })
+    expect(badPng.status).toBe(400)
+    expect(await badPng.json()).toEqual({ error: 'invalid png: 5' })
+  })
+})

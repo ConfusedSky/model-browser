@@ -287,11 +287,38 @@ export interface ThumbPutResponse {
   gen: number
 }
 
+/**
+ * What `PUT /api/thumb` answers when it **refuses** a conditional write
+ * (`bulk-thumbnail-jobs` D4): 412, and nothing written. A shape of its own so
+ * the refusal is distinguishable from the 400 a malformed field gets — a bulk
+ * job counts a refusal as a skipped entry and carries on, while a malformed
+ * request is its own bug and must not be counted as one.
+ *
+ * `gen` is the entry's **current** generation, not the one the writer named, so
+ * a caller that wants to retry can re-key from the refusal itself rather than
+ * reading the entry back.
+ */
+export interface ThumbPutRefused {
+  error: string
+  gen: number
+}
+
 export interface ThumbPutRequest {
   path: string
   mtime: number
-  /** base64 PNG. */
-  png?: string
+  /**
+   * Three states, exactly as `camera` below has three: base64 pixels
+   * **replace** this render's bytes, absence **keeps** whatever is stored, and
+   * `null` **deletes** the entry's cached renders — both occlusion variants'
+   * pixels and recipe labels (`bulk-thumbnail-jobs` D3).
+   *
+   * The deletion is what a bulk reset writes: the renders were drawn under an
+   * orientation the same write gives up, so they go with it, and whatever next
+   * looks at the model draws it afresh. It governs the pixels only — the
+   * entry's stored orientation is this write's own `camera`/`axis` fields, on
+   * their own three-state rule, never the deletion's business.
+   */
+  png?: string | null
   /**
    * Three states, not two: a value **sets** the camera, absence **keeps**
    * whatever was stored, and `null` **discards** it. Silence has to go on
@@ -317,6 +344,23 @@ export interface ThumbPutRequest {
    * can only ever have meant this one.
    */
   ao?: boolean
+  /**
+   * The generation the writer last saw, which makes this write **conditional**:
+   * when it is given and is no longer the entry's current generation, the
+   * server refuses the write, changes nothing, and answers `ThumbPutRefused`
+   * (412). Absent is an unconditional write, which is every ordinary one.
+   *
+   * It exists for a bulk job's mid-job skip (`bulk-thumbnail-jobs` D4). A job
+   * snapshots each entry's generation when it derives its work list; an entry
+   * the user has orbited or re-rendered since is then skipped rather than
+   * overwritten, and a fresh orbit is never lost to a reset that was queued
+   * before it. Decided server-side rather than by a client-side
+   * read-then-write, which would leave the whole round trip open as a window.
+   *
+   * A missing entry's current generation is 0, so `ifGen: 0` reads as "only if
+   * nothing has ever been written here".
+   */
+  ifGen?: number
 }
 
 /**

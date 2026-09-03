@@ -86,6 +86,13 @@ export const similar = vi.fn()
 // requests it did not ask for. Shared and cleared per mount like `peek`, so
 // "one request per landing" is countable.
 export const semanticPoses = vi.fn().mockResolvedValue({ poses: {} })
+// Every model beneath a path with the caches' thumbnail facts — the scope a
+// bulk job derives from (`bulk-thumbnail-jobs` D8). Shared and cleared per
+// mount like `peek`, so "one launch, one enumeration" is countable. The default
+// is the answer for a path holding no models, complete: a test that has not
+// opted in sees the app it was written against and no entries it did not ask
+// for.
+export const models = vi.fn().mockResolvedValue({ path: '/', entries: [], complete: true })
 // What the wave actually calls: the landed models' poses by path (F2). The
 // directory form above stays on the client for a directory-shaped ask; nothing
 // in `src/` reaches for it since the wave stopped describing a grid by the
@@ -125,6 +132,7 @@ export function apiClientModule(): Record<string, unknown> {
     },
     HttpApiClient: class {
       listDir = listDir
+      models = models
       complete = vi.fn().mockResolvedValue([])
       fetchModel = fetchModel
       peek = peek
@@ -268,6 +276,9 @@ async function mount(initial: DirListing): Promise<void> {
   // Cleared before the render like the two above, so "this tile issued exactly
   // one peek" counts what this mount provoked and nothing left over.
   peek.mockClear()
+  // Cleared beside `peek` and for its reason: an enumeration count a test reads
+  // is the one this mount's launches provoked and nothing left over.
+  models.mockClear()
   // Cleared before the render for `peek`'s reason: the wave count a test reads
   // is the one this mount's landings provoked and nothing left over.
   semanticPoses.mockClear()
@@ -351,6 +362,10 @@ export async function unmountApp(): Promise<void> {
   // here, so the next file starts from the folder that previews nothing and the
   // model that loads as a one-facet STL.
   peek.mockResolvedValue([])
+  // Same rule as `peek`'s: a test that enumerated a scope, or made the read
+  // fail, hands the next file back a path with no models beneath it.
+  models.mockReset()
+  models.mockResolvedValue({ path: '/', entries: [], complete: true })
   // Same rule as `peek`'s: what a test chose is undone here, so the next file
   // starts from an index with no orientation to offer.
   semanticPoses.mockReset()

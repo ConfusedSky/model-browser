@@ -6,6 +6,7 @@ import type {
   FeatureReport,
   IndexAvailability,
   LibraryState,
+  ModelsListing,
   PosesResponse,
   SemanticListing,
   SemanticTuning,
@@ -58,7 +59,14 @@ export interface ThumbPutResult {
 export interface ThumbSave {
   path: string
   mtime: number
-  png?: Blob
+  /**
+   * Three states, like `camera` below: a Blob **replaces** this render's
+   * pixels, absence **keeps** what is stored, and `null` **deletes** the
+   * entry's cached renders — both occlusion variants (`bulk-thumbnail-jobs`
+   * D3). The deletion is what a bulk reset writes; the orientation it leaves is
+   * governed by this same save's `camera`/`axis`, never by the deletion.
+   */
+  png?: Blob | null
   /** Set / keep / discard: a value stores it, absence leaves what is stored,
    *  `null` gives it up (entry-context-menu D7). */
   camera?: CameraState | null
@@ -74,6 +82,12 @@ export interface ThumbSave {
    * value they rendered under, never a second reading of the preference (D4a).
    */
   ao?: boolean
+  /**
+   * The generation the writer last saw, making the write conditional: the
+   * server refuses it, changing nothing, when the entry has moved past that
+   * number (`bulk-thumbnail-jobs` D4). Absent is an unconditional write.
+   */
+  ifGen?: number
 }
 
 import { POSES_MAX } from '../../../shared/types'
@@ -97,6 +111,22 @@ export interface ApiClient {
     opts?: { flat?: boolean; q?: string; folderMatching?: boolean },
     signal?: AbortSignal,
   ): Promise<DirListing>
+  /**
+   * Every model beneath `path`, each carrying the caches' thumbnail facts —
+   * the enumeration `listing-tree-cache` 6.7 answers, drawn from the tree
+   * snapshot rather than a walk.
+   *
+   * **An enumeration, not a listing**: no response cap applies, because a scope
+   * silently cut to a cap would be a different scope, and `complete` states
+   * whether the traversal that produced it ran out of budget. Called by the
+   * bulk jobs' derivation (the scope they derive their work list from) and by
+   * the library tab's counts.
+   *
+   * **No `AbortSignal`**, like `peek` and unlike `listDir`: this answers an
+   * explicit action, not a scroll position, so nothing supersedes it in flight
+   * — a caller that has moved on drops the answer on arrival.
+   */
+  models(path: string): Promise<ModelsListing>
   complete(prefix: string): Promise<string[]>
   /**
    * The first few models found inside `path`, for the folder tile's contact
@@ -241,6 +271,12 @@ export interface ApiClient {
    * number so the caller re-keys (D2).
    */
   getThumb(path: string, mtime: number, ao?: boolean, gen?: number): Promise<ThumbResult>
+  /**
+   * A refused conditional write (`save.ifGen` naming a generation the entry has
+   * moved past) throws the ordinary `HttpError` with `status === 412` — no
+   * error class of its own, because the branch a caller makes on it is a status
+   * check. A bulk job counts that as a skipped entry (`bulk-thumbnail-jobs` D4).
+   */
   putThumb(save: ThumbSave): Promise<ThumbPutResult>
   /**
    * What the platform registry reports for the model types this app handles,
@@ -360,6 +396,11 @@ export class HttpApiClient implements ApiClient {
       { signal },
     )
     return jsonOrThrow<DirListing>(res)
+  }
+
+  async models(path: string): Promise<ModelsListing> {
+    const res = await this.fetchFn(`/api/models?path=${encodeURIComponent(path)}`)
+    return jsonOrThrow<ModelsListing>(res)
   }
 
   async indexAvailability(opts?: { fresh?: boolean }): Promise<IndexAvailability> {
@@ -547,15 +588,26 @@ export class HttpApiClient implements ApiClient {
       body: JSON.stringify({
         path: save.path,
         mtime: save.mtime,
-        png: save.png !== undefined ? await blobToBase64(save.png) : undefined,
+        // Three states on the wire, and `null` is the one that only survives if
+        // it is passed through deliberately: `JSON.stringify` drops an
+        // `undefined` field, which is exactly what "absence keeps" means, while
+        // `null` is the deletion and must be written. The `save.png !==
+        // undefined ? … : undefined` this replaced collapsed both into absence,
+        // so a reset's deletion never left the client (`bulk-thumbnail-jobs`
+        // D3).
+        png: save.png === null ? null : save.png === undefined ? undefined : await blobToBase64(save.png),
         camera: save.camera,
         axis: save.axis,
         lighting: save.lighting,
         rig: save.rig,
         posed: save.posed,
         ao: save.ao,
+        ifGen: save.ifGen,
       }),
     })
+    // A refused conditional write arrives here as any other failure does: an
+    // `HttpError` carrying 412, which is what a bulk job branches on to count
+    // the entry as skipped rather than failed (D4).
     if (!res.ok) throw await errorOf(res)
     // Parsed rather than discarded since this change: the answer carries the
     // generation this write landed under, which is what lets the writer key its

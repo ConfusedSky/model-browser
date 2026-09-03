@@ -63,6 +63,21 @@ interface Meta extends RenderLabels {
 }
 
 /**
+ * The merge for a three-state field: a value **sets** it, silence **keeps**
+ * what was there, `null` **discards** it. Silence cannot mean discard — every
+ * PNG write omits both orientation fields — and a written default is not a
+ * discard either: it is an orientation of the user's own, and it suppresses the
+ * index that would otherwise frame the model well (entry-context-menu D7).
+ *
+ * A function rather than two inline ternaries because `put` now applies it
+ * twice: once in its ordinary merge, once on the deletion branch, which governs
+ * the orientation by the same rule (`bulk-thumbnail-jobs` D3).
+ */
+function merged<T>(next: T | null | undefined, prev: T | undefined): T | undefined {
+  return next === null ? undefined : (next ?? prev)
+}
+
+/**
  * Is this write moving the shared orientation, rather than re-stating it?
  *
  * Absence keeps and cannot move anything. A `null` discards, which moves the
@@ -239,6 +254,20 @@ let lastGen = 0
 function allocateGen(prev: number | undefined): number {
   lastGen = Math.max(Date.now(), lastGen + 1, (prev ?? 0) + 1)
   return lastGen
+}
+
+/**
+ * A conditional write (`put`'s `ifGen`) whose named generation is no longer the
+ * entry's — `bulk-thumbnail-jobs` D4. **Nothing was written**: the sidecar is
+ * untouched, no PNG moved, and no generation was allocated.
+ *
+ * `gen` is the entry's current generation, so a caller can re-key from the
+ * throw itself rather than reading the entry back to find out what it lost to.
+ */
+export class StaleWriteError extends Error {
+  constructor(readonly gen: number) {
+    super(`generation moved to ${gen}`)
+  }
 }
 
 const DEFAULT_CAP = 2 * 1024 ** 3
@@ -489,8 +518,14 @@ export class ThumbCache {
    * (D1). A put that happens to change nothing observable still bumps; the cost
    * is one revalidation, and the alternative — deciding per field whether this
    * write mattered — is the shape that pins stale pixels the day it is wrong.
+   *
+   * Two options belong to a bulk job rather than to an ordinary write, and each
+   * is documented at the branch that reads it: `png: null` **deletes** the
+   * entry's renders (`bulk-thumbnail-jobs` D3), and `ifGen` makes the write
+   * conditional — it **throws `StaleWriteError`**, having written nothing, when
+   * the entry has moved past the generation the caller named (D4).
    */
-  async put(path: string, opts: { mtime: number; png?: Buffer; camera?: CameraState | null; axis?: OrbitAxis | null; lighting?: LightingMode; rig?: number; posed?: number; ao?: boolean }): Promise<number> {
+  async put(path: string, opts: { mtime: number; png?: Buffer | null; camera?: CameraState | null; axis?: OrbitAxis | null; lighting?: LightingMode; rig?: number; posed?: number; ao?: boolean; ifGen?: number }): Promise<number> {
     const dir = await this.entryDir()
     const key = this.key(path)
     const ao = opts.ao ?? true
@@ -506,6 +541,64 @@ export class ThumbCache {
     // camera write heals those. The window is one request round-trip wide and
     // needs a toggle racing a close on one model; recorded, not defended.
     const prev = await this.readMeta(dir, key)
+
+    // The precondition, first and before anything is merged, allocated or
+    // written (`bulk-thumbnail-jobs` D4): a writer that named a generation the
+    // entry has since moved past is refused outright. This path writes
+    // *nothing* — the sidecar's bytes are unchanged, no PNG is touched, no
+    // generation is allocated, and the maintenance counter does not move — so a
+    // refusal costs the entry exactly one read. A missing entry has issued no
+    // generation, which is 0, so `ifGen: 0` asks for "only if nothing has ever
+    // been written here".
+    //
+    // Honest about its reach: this narrows the window to `put`'s own
+    // unserialized read-modify-write — the span between this `readMeta` and the
+    // `writeMeta` below, which the note above already records as accepted — and
+    // does not close it. Two writes can still both pass their precondition
+    // against the same `prev` and the last one still wins. Closing it needs
+    // locking, and the point here is only to keep a job from overwriting a
+    // write it can see, not to serialize the store.
+    if (opts.ifGen !== undefined && opts.ifGen !== (prev?.gen ?? 0)) {
+      throw new StaleWriteError(prev?.gen ?? 0)
+    }
+
+    // Deletion (`bulk-thumbnail-jobs` D3) — a branch of its own, deliberately,
+    // never a `null` threaded through the `opts.png !== undefined` tests below.
+    // Every one of those would read `null` as pixels: it would adopt this
+    // write's mtime, label a render that has no bytes, and can trip
+    // `supersedes` into taking the sibling's PNG; `get` would then answer
+    // `stale` for an entry that holds nothing at all.
+    //
+    // Both renders go together, because both were drawn under the orientation
+    // the same write is giving up. What survives is the sidecar, emptied of
+    // every label — so `hasLabels` is false and `noao` is omitted exactly as on
+    // an entry that never had one — carrying whatever orientation this write's
+    // own `camera`/`axis` fields leave, on the same keep/set/discard rule as any
+    // other write. No mtime is adopted: nothing was rendered here.
+    //
+    // None of the sibling-invalidation rules below reach this branch, and there
+    // is nothing for them to do: `supersedes`, `moved` and the unowned-pose rule
+    // exist to stop a render being served at an angle the entry no longer
+    // claims, and after this there are no labels left to invalidate.
+    //
+    // The generation moves as it does on every write — the number stays
+    // monotonic across the emptying, so a browser holding the deleted pixels
+    // re-keys rather than serving them — and `writesSinceMaintain` does not:
+    // maintenance keeps the store under its cap, and this write put nothing in
+    // it.
+    if (opts.png === null) {
+      await rm(this.pngFile(dir, key, true), { force: true })
+      await rm(this.pngFile(dir, key, false), { force: true })
+      const gen = allocateGen(prev?.gen)
+      await this.writeMeta(dir, key, {
+        path,
+        camera: merged(opts.camera, prev?.camera),
+        axis: merged(opts.axis, prev?.axis),
+        gen,
+      })
+      return gen
+    }
+
     const prevMine = renderLabels(ao ? prev : prev?.noao)
     const prevTheirs = renderLabels(ao ? prev?.noao : prev)
 
@@ -533,13 +626,10 @@ export class ThumbCache {
       if (opts.png === undefined) mine = clearRecipe(mine)
     }
 
-    // Three states per field: a value sets it, silence keeps what was there,
-    // `null` discards it. Silence cannot mean discard — every PNG write omits
-    // both — and a written default is not a discard either: it is an
-    // orientation of the user's own, and it suppresses the index that would
-    // otherwise frame the model well (entry-context-menu D7).
-    const camera = opts.camera === null ? undefined : (opts.camera ?? prev?.camera)
-    const axis = opts.axis === null ? undefined : (opts.axis ?? prev?.axis)
+    // Three states per field — set / keep / discard; the rule itself lives in
+    // `merged`, which the deletion branch above applies to the same two fields.
+    const camera = merged(opts.camera, prev?.camera)
+    const axis = merged(opts.axis, prev?.axis)
 
     // An entry left *unowned* by this write's own merge — no camera and no axis
     // — has no stored orientation for both renders to be drawn under. Each is

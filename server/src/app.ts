@@ -11,9 +11,10 @@ import type {
   OrbitAxis,
   PosesResponse,
   ReloadResult,
+  ThumbPutRefused,
   ThumbPutRequest,
 } from '../../shared/types'
-import { ThumbCache } from './cache'
+import { StaleWriteError, ThumbCache } from './cache'
 import { guard } from './guard'
 import { LaunchError, type Launcher, ZipTempStore, createLauncher } from './launch'
 import { LibraryError, type Library, canonicalLibPath, createLibrary } from './library'
@@ -1165,6 +1166,20 @@ export function createApp(
     if (body.rig !== undefined && typeof body.rig !== 'number') {
       return c.json({ error: `invalid rig: ${String(body.rig)}` }, 400)
     }
+    // Three states here too, as on the axis: absence keeps the pixels, a string
+    // replaces them, `null` deletes both renders (`bulk-thumbnail-jobs` D3).
+    // This is the hop a deletion is most easily lost at — the `!== undefined`
+    // reading below would have handed `Buffer.from(null)` to the cache — so the
+    // third state is validated as one rather than falling through to it.
+    if (body.png !== undefined && body.png !== null && typeof body.png !== 'string') {
+      return c.json({ error: `invalid png: ${String(body.png)}` }, 400)
+    }
+    // A finite number or nothing. `Number.isFinite` refuses a string, a NaN and
+    // an infinity alike, which is what makes a malformed condition a 400 and
+    // keeps 412 meaning only "the entry moved" (D4).
+    if (body.ifGen !== undefined && !Number.isFinite(body.ifGen)) {
+      return c.json({ error: `invalid ifGen: ${String(body.ifGen)}` }, 400)
+    }
     // Absent is the occluded render, for the reason the GET says: an old client
     // never rendered an unoccluded thumbnail, so an absent `ao` can only ever
     // have meant this one. Anything but a boolean is a client bug, not a
@@ -1172,16 +1187,34 @@ export function createApp(
     if (body.ao !== undefined && typeof body.ao !== 'boolean') {
       return c.json({ error: `invalid ao: ${String(body.ao)}` }, 400)
     }
-    const gen = await cache.put(libPath, {
-      mtime: body.mtime,
-      png: body.png !== undefined ? Buffer.from(body.png, 'base64') : undefined,
-      camera: body.camera,
-      axis: body.axis,
-      lighting: body.lighting,
-      rig: body.rig,
-      posed: body.posed,
-      ao: body.ao,
-    })
+    let gen: number
+    try {
+      gen = await cache.put(libPath, {
+        mtime: body.mtime,
+        // `null` reaches the cache as `null`: it is the deletion, and reading it
+        // as bytes here is precisely the mistake the third state exists to
+        // prevent. Only a string is decoded.
+        png: body.png === null ? null : body.png === undefined ? undefined : Buffer.from(body.png, 'base64'),
+        camera: body.camera,
+        axis: body.axis,
+        lighting: body.lighting,
+        rig: body.rig,
+        posed: body.posed,
+        ao: body.ao,
+        ifGen: body.ifGen,
+      })
+    } catch (err) {
+      // Mapped here rather than in `app.onError`, deliberately: the refusal is
+      // this route's own protocol — 412 carrying the entry's *current*
+      // generation, so the caller re-keys from the answer — and it belongs
+      // beside the condition that produced it, where a reader of the handler
+      // can see that a conditional write has a second way to end (D4).
+      if (err instanceof StaleWriteError) {
+        const refused: ThumbPutRefused = { error: 'generation moved', gen: err.gen }
+        return c.json(refused, 412)
+      }
+      throw err
+    }
     // The generation this write landed under, so the writer can key its next
     // read from it without a round trip to discover what it just caused. Not
     // cacheable in any sense — a PUT's answer never is — so no header here.

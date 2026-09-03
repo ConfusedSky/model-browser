@@ -18,7 +18,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ThumbGetResponse } from '../../shared/types'
 import { createApp } from '../src/app'
-import { ThumbCache } from '../src/cache'
+import { StaleWriteError, ThumbCache } from '../src/cache'
 import { LOOPBACK, libraryFor, makeFixtures, realTempDir } from './helpers'
 
 const cleanups: string[] = []
@@ -1346,5 +1346,185 @@ describe('write generations', () => {
     // And the winner's number is the one that gets pinned.
     const winner = await ask(outer)
     expect(winner.headers.get('cache-control')).toBe('public, max-age=31536000, immutable')
+  })
+})
+
+/**
+ * Deleting an entry's renders, and refusing a write whose entry has moved
+ * (`bulk-thumbnail-jobs` D3/D4) — the two fields a bulk job writes with.
+ */
+describe('deletion and conditional writes', () => {
+  const pngsOf = (dir: string): string[] =>
+    readdirSync(dir)
+      .filter((f) => f.endsWith('.png'))
+      .sort()
+
+  /** An entry holding both renders' pixels and a camera — what a reset finds. */
+  async function seeded(cache: ThumbCache, path: string): Promise<number> {
+    await cache.put(path, { mtime: 1, png: PNG_A, camera: CAM, rig: 2, lighting: 'camera' })
+    return cache.put(path, { mtime: 1, png: PNG_B, ao: false, rig: 2, lighting: 'camera' })
+  }
+
+  it('empties both renders — pixels, labels and files — when a write deletes them', async () => {
+    const cache = tempCache()
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const path = join(fx.dir, 'loose.stl')
+    const before = await seeded(cache, path)
+    expect(pngsOf(cache.dir)).toHaveLength(2)
+
+    // The reset job's own write: give up the orientation and delete what was
+    // drawn under it.
+    const gen = await cache.put(path, { mtime: 1, png: null, camera: null })
+
+    // Both files are gone — not merely unreferenced, since a sidecar that
+    // forgot them would leave the pixels against the size cap forever.
+    expect(pngsOf(cache.dir)).toEqual([])
+    // A miss, not a stale: `stale` carries a camera to re-render from and this
+    // write gave the camera up, so there is nothing here at all. This is the
+    // cell that fails if `null` is threaded through the pixel merge instead of
+    // taking its own branch — the mtime would be adopted and both renders would
+    // read as hits over files that are not there.
+    for (const ao of [true, false]) {
+      const res = await cache.get(path, 1, ao)
+      expect(res.status).toBe('miss')
+      expect(res.png).toBeUndefined()
+      expect(res.rig).toBeUndefined()
+      expect(res.lighting).toBeUndefined()
+    }
+    // The listing annotation agrees at once, because the write went through
+    // `writeMeta` and so through `remember`: nothing framed, neither variant
+    // cached.
+    expect(cache.annotate(path, 1)).toEqual({
+      gen,
+      framed: false,
+      ao: { state: 'miss' },
+      noao: { state: 'miss' },
+    })
+    // A deletion is a write like any other: the number moves, so a browser
+    // holding the deleted pixels re-keys rather than serving them.
+    expect(gen).toBeGreaterThan(before)
+    // The sidecar itself stays — the entry still exists, it just holds nothing.
+    expect(jsons(cache.dir)).toHaveLength(1)
+  })
+
+  it('leaves the orientation to the same write: a kept camera, and a kept axis', async () => {
+    const cache = tempCache()
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const path = join(fx.dir, 'loose.stl')
+    await seeded(cache, path)
+
+    // No `camera` field: absence keeps, exactly as on any other write. The
+    // deletion governs the pixels and nothing else.
+    await cache.put(path, { mtime: 1, png: null })
+    const kept = await cache.get(path, 1)
+    // `get`'s camera-bearing rule: something to re-render from, no pixels.
+    expect(kept.status).toBe('stale')
+    expect(kept.camera).toEqual(CAM)
+    expect(kept.png).toBeUndefined()
+    expect(pngsOf(cache.dir)).toEqual([])
+
+    // And an entry whose whole orientation is an axis keeps it the same way.
+    const axial = join(fx.dir, 'other.stl')
+    writeFileSync(axial, 'x')
+    await cache.put(axial, { mtime: 1, png: PNG_A, axis: '-z', rig: 2 })
+    await cache.put(axial, { mtime: 1, png: null })
+    const still = await cache.get(axial, 1)
+    expect(still.axis).toBe('-z')
+    // An axis alone is not something to re-render from, so this one is a miss —
+    // the pre-split rule, unchanged by the deletion.
+    expect(still.status).toBe('miss')
+  })
+
+  it('writes as usual when `ifGen` names the generation the entry is at', async () => {
+    const cache = tempCache()
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const path = join(fx.dir, 'loose.stl')
+    const seen = await cache.put(path, { mtime: 1, png: PNG_A, camera: CAM, rig: 2 })
+
+    const gen = await cache.put(path, { mtime: 1, png: PNG_NEW, rig: 3, ifGen: seen })
+    expect(gen).toBeGreaterThan(seen)
+    const res = await cache.get(path, 1)
+    expect(res.status).toBe('hit')
+    expect(Buffer.from(res.png as string, 'base64')).toEqual(PNG_NEW)
+    expect(res.rig).toBe(3)
+
+    // A never-written path is at generation 0, so `ifGen: 0` reads as "only if
+    // nothing has ever been written here" — and here nothing has.
+    const fresh = join(fx.dir, 'other.stl')
+    writeFileSync(fresh, 'x')
+    await expect(cache.put(fresh, { mtime: 1, png: PNG_A, ifGen: 0 })).resolves.toBeGreaterThan(0)
+    expect((await cache.get(fresh, 1)).status).toBe('hit')
+  })
+
+  it('refuses a write whose entry has moved, and writes nothing at all', async () => {
+    const cache = tempCache()
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const path = join(fx.dir, 'loose.stl')
+    // What a job snapshots at launch...
+    const snapshot = await cache.put(path, { mtime: 1, png: PNG_A, camera: CAM, rig: 2 })
+    // ...and the write the user landed on it meanwhile.
+    const current = await cache.put(path, { mtime: 1, png: PNG_B, camera: CAM2, rig: 3 })
+
+    const metaFile = onlyFile(cache.dir, '.json')
+    const pngFile = join(cache.dir, `${createHash('sha256').update(path).digest('hex')}.png`)
+    const sidecarBefore = readFileSync(metaFile, 'utf8')
+    const pngBefore = readFileSync(pngFile)
+
+    // Both shapes of job write are refused — the reset's deletion and the
+    // generate's pixels — and the refusal carries the entry's *current*
+    // generation, so the caller re-keys from the throw rather than reading the
+    // entry back to find out what it lost to.
+    await expect(
+      cache.put(path, { mtime: 1, png: null, camera: null, ifGen: snapshot }),
+    ).rejects.toBeInstanceOf(StaleWriteError)
+    const err = await cache
+      .put(path, { mtime: 1, png: PNG_NEW, ifGen: snapshot })
+      .catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(StaleWriteError)
+    expect((err as StaleWriteError).gen).toBe(current)
+
+    // 0 against an entry that has a generation is the same refusal — it is not
+    // a spelling of "no condition".
+    await expect(cache.put(path, { mtime: 1, png: PNG_NEW, ifGen: 0 })).rejects.toBeInstanceOf(
+      StaleWriteError,
+    )
+
+    // Nothing was written: not the sidecar's bytes — so no generation was
+    // allocated into it and no field was merged — and not the pixels.
+    expect(readFileSync(metaFile, 'utf8')).toBe(sidecarBefore)
+    expect(readFileSync(pngFile)).toEqual(pngBefore)
+    const after = await cache.get(path, 1)
+    expect(after.gen).toBe(current)
+    expect(after.rig).toBe(3)
+    expect(Buffer.from(after.png as string, 'base64')).toEqual(PNG_B)
+  })
+
+  it('does not count a deletion toward maintenance — it added nothing to the store', async () => {
+    // Observed through the trigger itself rather than the private counter: a
+    // cache that maintains after every counted write, so one such write is one
+    // sweep. The sweep is stubbed because what is under test is whether it is
+    // *asked* for, not what it would do.
+    const maintain = vi.spyOn(ThumbCache.prototype, 'maintain').mockResolvedValue(undefined)
+    try {
+      const dir = mkdtempSync(join(tmpdir(), 'mb-cache-'))
+      cleanups.push(dir)
+      const cache = new ThumbCache(dir, CAP, 1) // maintain after every counted write
+      const fx = makeFixtures()
+      cleanups.push(fx.dir)
+      const path = join(fx.dir, 'loose.stl')
+      await cache.put(path, { mtime: 1, png: PNG_A })
+      expect(maintain).toHaveBeenCalledTimes(1) // pixels: counted
+      await cache.put(path, { mtime: 1, png: null })
+      await cache.put(path, { mtime: 1, png: null, camera: null })
+      // Maintenance is what keeps the store under its cap. A deletion only ever
+      // frees space, so counting it would spend a whole sweep on nothing.
+      expect(maintain).toHaveBeenCalledTimes(1)
+    } finally {
+      maintain.mockRestore()
+    }
   })
 })

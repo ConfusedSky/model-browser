@@ -360,4 +360,70 @@ describe('HttpApiClient contract', () => {
     const buf = await api.fetchModel('/m.stl')
     expect(new Uint8Array(buf)).toEqual(new Uint8Array([1, 2, 3]))
   })
+
+  // The pixel field has three states on the wire, and `null` is the one that
+  // survives only if it is passed through deliberately — `JSON.stringify` drops
+  // an `undefined` field, and the ternary this replaced turned a deletion into
+  // absence, which *keeps* the pixels (`bulk-thumbnail-jobs` D3). Asserted
+  // against the raw body string, because the bug was in the serialisation.
+  it('putThumb sends a deletion as null, and an absent png not at all', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ ok: true }))
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
+    await api.putThumb({ path: '/m.stl', mtime: 42, png: null, camera: null })
+    const [, init] = fetchFn.mock.calls[0] as [string, RequestInit]
+    expect(init.body as string).toContain('"png":null')
+    const body = JSON.parse(init.body as string) as Record<string, unknown>
+    expect(body.png).toBeNull()
+    expect(Object.hasOwn(body, 'png')).toBe(true)
+
+    fetchFn.mockClear()
+    await api.putThumb({ path: '/m.stl', mtime: 42, camera: CAM })
+    const [, plain] = fetchFn.mock.calls[0] as [string, RequestInit]
+    expect(plain.body as string).not.toContain('png')
+    expect(Object.hasOwn(JSON.parse(plain.body as string) as object, 'png')).toBe(false)
+  })
+
+  it('putThumb sends the generation it is conditional on, and only when it has one', async () => {
+    // Typed arguments so `mock.calls` is the pair this cell destructures; a
+    // fresh Response per call, since one cannot be read twice.
+    const fetchFn = vi.fn((_url: string, _init: RequestInit) =>
+      Promise.resolve(jsonResponse({ ok: true })),
+    )
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
+    await api.putThumb({ path: '/m.stl', mtime: 42, png: null, ifGen: 7 })
+    const [, conditional] = fetchFn.mock.calls[0] as [string, RequestInit]
+    expect((JSON.parse(conditional.body as string) as Record<string, unknown>).ifGen).toBe(7)
+
+    // Absent for every ordinary write, so a client that is not running a job
+    // sends the bytes it sent before this change and the write is unconditional.
+    fetchFn.mockClear()
+    await api.putThumb({ path: '/m.stl', mtime: 42, png: new Blob(['raw-png']) })
+    const [, plain] = fetchFn.mock.calls[0] as [string, RequestInit]
+    expect(Object.hasOwn(JSON.parse(plain.body as string) as object, 'ifGen')).toBe(false)
+  })
+
+  // A refused conditional write is an `HttpError` carrying 412 — no error class
+  // of its own, because what the job does with it is a status check (D4).
+  it('putThumb surfaces a refusal as a 412 HttpError', async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ error: 'generation moved', gen: 99 }, 412))
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
+    const err = await api
+      .putThumb({ path: '/m.stl', mtime: 42, png: null, ifGen: 7 })
+      .catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(HttpError)
+    expect((err as HttpError).status).toBe(412)
+    expect((err as HttpError).message).toBe('generation moved')
+  })
+
+  it('models asks for every model beneath one path, escaped', async () => {
+    const listing = { path: '/kit', entries: [], complete: true }
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse(listing))
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
+    // No second argument and no signal: an explicit action's scope is not
+    // superseded by scrolling, and a stale answer is dropped by the caller.
+    await expect(api.models('/kit')).resolves.toEqual(listing)
+    expect(fetchFn).toHaveBeenCalledWith(`/api/models?path=${encodeURIComponent('/kit')}`)
+  })
 })
