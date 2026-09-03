@@ -84,6 +84,9 @@ original mis-attribution to the notes).
   write generation the mid-job skip reads; landed 2026-09-02).
 - `SidePanel` is also touched by the future demo change's chat-tab hiding
   (`web-demo-backlog` 1.3) — additive on both sides, but declare the ordering when 1.3
-  is drafted. On the demo both operations are write actions: the planned feature report
-  (undrafted; notes' Defaults) empties the `library` tab and withholds the menu entries,
-  the launcher's empty-report precedent.
+  is drafted. On a public deployment both operations are maintenance of the server's
+  own derived state: the feature report (`server-feature-report`, archived 2026-09-02)
+  withholds them through the `maintenance` capability `public-deployment` defines —
+  the field `POST /api/reload` already gates under — emptying the `library` tab and
+  withholding the menu entries, the launcher's empty-report precedent. Until that field
+  lands the surfaces gate on `thumbWrites`, the report's one field today (tasks 5.1).

@@ -38,8 +38,10 @@
 > (4d3d5c1); Stage C — the surfaces (f47f3d0); the coordinator's review fixes
 > (652b05f); then a merge of main, which had landed `thumbnail-image-serving` §2/§4 in
 > the same files. Evidence per task is on its line. **4.2 is not run** — see its note.
-> `SidePanel` will also be touched by the demo change's chat-tab hiding
-> (`web-demo-backlog` 1.3, undrafted): additive on both sides, declare ordering there.
+> `SidePanel` is also touched by `public-deployment` (its chat-tab fallback): additive on
+> both sides, no hard ordering — whichever lands second rebases its tab list, as that
+> change's tasks declare too. Its `maintenance` field is what these surfaces gate on
+> once it exists (5.1).
 
 ## 1. The job runner
 
@@ -273,3 +275,19 @@
       draws them at the index's orientation, storing no framing; cancel + relaunch
       continues; whole-library generate from
       the library tab shows an honest count before and true progress during
+
+## 5. Follow-ups (2026-09-02)
+
+- [ ] 5.1 Gate the three surfaces — the two container menu rows (`applies` in
+      `ENTRY_COMMANDS`) and the `library` tab (`libraryJobs` in `App`) — on the report's
+      `maintenance` field once `public-deployment` lands it, instead of `thumbWrites`.
+      They are operations on the server's own derived state, the question that field
+      answers and `POST /api/reload` already gates under; two fields for one question
+      would collide at archive (design risks). Whichever change lands second does the
+      rebase; the cells in `entryActions.test.ts` and `bulkJobSurfaces.test.tsx` that
+      withhold under `thumbWrites: false` move to the new field with it
+- [ ] 5.2 Chip copy under the far gate: with `thumbnail-image-serving` D5 landed, a
+      generate job holds while the user browses (1.2's accepted stall). The chip's
+      "N of M" does not move for up to `FAR_GATE_MAX_MS` and reads as hung; say
+      "paused while you browse" when the queue reports the gate closed — a small
+      `RenderQueue` observation, not a runner change

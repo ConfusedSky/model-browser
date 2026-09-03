@@ -33,8 +33,8 @@ preemptible, or it fights the disk the user is using.
   scope enumeration is `listing-tree-cache`'s (its 6.7, D8), and the job is a
   client loop over per-entry operations.
 - The demo's hiding of these surfaces — that is the feature report's business
-  (undrafted; `web-demo-backlog` 1.3 and the notes' Defaults), declared here
-  only as a seam.
+  (`server-feature-report`, archived 2026-09-02; the `maintenance` capability
+  `public-deployment` adds to it), declared here only as a seam.
 - A queue of pending job scopes (v2; re-derivability makes it cheap later).
 
 ## Decisions
@@ -254,7 +254,11 @@ scope was cut, and the next launch — over a tree the walk may since have compl
   appeared entry is simply not in this job's derivation — the next launch picks
   it up. Consistent with D1: the derivation is a launch-time snapshot, not a
   live query.
-- [Feature report does not exist yet] → until it lands, the surfaces exist
-  unconditionally in the main app, which is correct there; only the demo needs
-  them withheld, and the demo does not exist yet either. The seam is declared
-  in the delta so 1.3 can gate without modifying this capability.
+- [The report's field for these surfaces is another change's] → the report
+  exists (`server-feature-report`, archived 2026-09-02) but its one field today
+  is `thumbWrites`, so the surfaces gate on that until `public-deployment` lands
+  `maintenance` — "operations on the server's own derived state", the field
+  `POST /api/reload` gates under, which is the same question these surfaces ask.
+  They join that field rather than adding one (two fields for one question
+  would collide at archive); the rebase is tasks 5.1, and the ordering with
+  that change is declared in its tasks as well as here.

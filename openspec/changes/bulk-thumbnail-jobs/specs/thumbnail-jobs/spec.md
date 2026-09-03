@@ -72,9 +72,10 @@ represented by one persistent, dismissible progress affordance, the same whichev
 launcher started it, surviving navigation, showing operation, scope, progress, and
 failures, and offering cancellation at any time. Dismissing it SHALL NOT cancel the
 job. Whole-library scope SHALL be offered from a `library` side-panel tab; that tab and
-every bulk-job surface are write affordances, expected to be withheld wholesale where
-the server does not accept thumbnail writes (the planned feature report's business, not
-this capability's).
+every bulk-job surface are maintenance affordances — operations on the server's own
+derived state — offered only where the server's feature report (`feature-report`)
+declares that capability on; which deployments withhold it is the report's business,
+not this capability's.
 
 #### Scenario: The button is honest
 - **WHEN** the user opens the library tab
