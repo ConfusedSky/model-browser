@@ -259,8 +259,10 @@ export class BulkJobs {
     const listing = await this.deps.api.models(scope.path)
     const models = listing.entries.filter((e) => e.kind === 'model')
     // Wave only over the models whose rule needs a pose it does not have.
-    // Measured on the real library (2026-09-02): 18,737 models, 15,357 with no
-    // pose in the enumeration, so a full wave is sixteen index requests — paid
+    // Measured on the real library (2026-09-02; re-run: `curl -s
+    // 'http://127.0.0.1:3177/api/models?path=/'` and count entries, entries
+    // without `pose`, bytes and time): 18,737 models, 7.8 MB in 0.47 s, 15,357
+    // with no pose in the enumeration, so a full wave is sixteen index requests — paid
     // once per opening of the tab and once per press of Reset before Masa
     // objected. Only *generate* needs the index's opinion of every unowned
     // model (a render whose `posed` is behind is stale). A *reset* consults a
