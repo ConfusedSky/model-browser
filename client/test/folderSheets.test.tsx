@@ -62,6 +62,14 @@ vi.mock('../src/three/models', async (importOriginal) => ({
  */
 class StubObserver {
   static live: StubObserver[] = []
+  /**
+   * Deliver an intersecting record the moment a tile is observed — inside the
+   * grid's own effect, before App's effects have run. A real observer reports
+   * asynchronously, but that is the *earliest* a report can arrive relative
+   * to App's per-listing reset, and the flat-toggle race is exactly a report
+   * arriving before the reset is visible to `requestPeek`'s guard.
+   */
+  static reportOnObserve = false
   readonly targets = new Set<Element>()
   private connected = true
   /** `options` identifies which of the grid's two observers this is: the band
@@ -75,6 +83,12 @@ class StubObserver {
   }
   observe(el: Element): void {
     this.targets.add(el)
+    if (StubObserver.reportOnObserve) {
+      this.callback(
+        [{ target: el, isIntersecting: true } as unknown as IntersectionObserverEntry],
+        this as unknown as IntersectionObserver,
+      )
+    }
   }
   unobserve(el: Element): void {
     this.targets.delete(el)
@@ -188,6 +202,7 @@ function found(n: number): DirEntry[] {
 
 beforeEach(() => {
   StubObserver.live = []
+  StubObserver.reportOnObserve = false
   vi.stubGlobal('IntersectionObserver', StubObserver)
   resetLookupQueueForTests()
 })
@@ -1077,6 +1092,36 @@ describe('bands rank work through the whole pipeline', () => {
  * no lookup, on the grid and in a folder's sheet alike, and a sheet cell's
  * failed image demotes the cell's own path.
  */
+describe('a listing that shares the last one’s folders', () => {
+  it('draws every sheet again even when the observers report before App’s effects run — the flat-toggle race', async () => {
+    // Masa's report, reproduced 2026-09-03 with the event order logged: after
+    // a rapid Flat on/off, the tree listing landed and every folder tile lost
+    // its sheet until the next landing. The grid's observers reported every
+    // tile the moment they were rebuilt, `requestPeek`'s guard read the
+    // previews map through a ref that lagged the effect's reset by a render,
+    // the previous listing (the flat one) shared every folder path, so every
+    // report returned as "already answered" and nothing was marked; then the
+    // reset landed on top. The reset now happens during render, and the
+    // stub's synchronous report on `observe` is the earliest a report can
+    // come. Falsify by moving the reset back into the effect.
+    const a = { ...dir('a'), preview: [model('a/m0.stl'), model('a/m1.stl')] }
+    await mountApp('/models', { path: '/models', entries: [a] })
+    await intersect(dirTile('/models/a'))
+    expect(cells('/models/a')).toHaveLength(2)
+    expect(peek).not.toHaveBeenCalled() // carried by the listing
+
+    // The next listing shares the folder and carries its preview too; its
+    // observers report on observe, inside the grid's effect.
+    StubObserver.reportOnObserve = true
+    listDir.mockResolvedValue({ path: '/models', entries: [{ ...a }] })
+    await click(flatButton())
+    await settle()
+    await settle()
+    expect(cells('/models/a')).toHaveLength(2)
+    expect(peek).not.toHaveBeenCalled()
+  })
+})
+
 describe('tiles drawn from the listing', () => {
   const vouched = (name: string, gen = 5): DirEntry => ({
     ...model(name),

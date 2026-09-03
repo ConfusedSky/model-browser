@@ -779,6 +779,28 @@ export default function App() {
   previewsRef.current = previews
   const listingRef = useRef(entries)
   listingRef.current = entries
+  /**
+   * One listing, one set of previews (D1) — reset **during the render that
+   * first sees the new listing**, not in an effect. The grid's observers
+   * report every tile the moment they are rebuilt, and that report can reach
+   * `requestPeek` in the window between an effect's `setPreviews(NO_PREVIEWS)`
+   * and the re-render that would refresh `previewsRef`: the guard then reads
+   * the *previous* listing's map, and when that listing shared this one's
+   * folders — a Flat toggle does — every report returns as "already
+   * answered", nothing is marked, the clear lands on top, and no sheet is
+   * drawn until the next landing (Masa's flat-toggle report, reproduced
+   * 2026-09-03 with the event order logged). Resetting here closes the
+   * window: the ref and the state move together, before anything is
+   * committed for an observer to report on. The same pattern
+   * `ViewerLayer`'s `prevViewerRef` uses to re-arm per viewer.
+   */
+  const previewsListingRef = useRef(entries)
+  if (previewsListingRef.current !== entries) {
+    previewsListingRef.current = entries
+    inFlightPeeks.current.clear()
+    previewsRef.current = NO_PREVIEWS
+    setPreviews(NO_PREVIEWS)
+  }
   /** The scroller `Grid`'s observers root at — a `RefObject`, never its
    *  `.current`, so its identity is stable in the observer effect's deps and
    *  its population (during commit, before passive effects) is never waited
@@ -859,8 +881,9 @@ export default function App() {
    * identity `useThumbnails` reconciles on.
    */
   useEffect(() => {
-    inFlightPeeks.current.clear()
-    setPreviews(NO_PREVIEWS)
+    // The previews map and the in-flight markers reset during render (above);
+    // the pose bookkeeping below is not read by any observer report, so an
+    // effect is early enough for it.
     askedPreviewPoses.current.clear()
     // Pruned, not reset: a preview model that survives into the new listing
     // (walking into the folder is the common case) must not see its pose go
