@@ -130,6 +130,24 @@ const NO_PREVIEWS: ReadonlyMap<string, DirEntry[]> = new Map()
 /** A folder with nothing to preview — an empty peek, or one that failed. One
  *  array for both, so a tile that draws the icon draws it from a stable value. */
 const NO_PREVIEW: DirEntry[] = []
+
+/**
+ * Per-listing memo of the previews a listing carried inline (path → cells).
+ * Keyed on the listing array's own identity in a WeakMap, so a large flat
+ * listing is scanned once per landing rather than once per folder tile
+ * crossing the park boundary (288f55a's review), and a superseded listing's
+ * map goes with it.
+ */
+const carriedPreviews = new WeakMap<DirEntry[], Map<string, DirEntry[]>>()
+function carriedPreviewsFor(entries: DirEntry[]): Map<string, DirEntry[]> {
+  let map = carriedPreviews.get(entries)
+  if (map === undefined) {
+    map = new Map()
+    for (const e of entries) if (e.preview !== undefined) map.set(e.path, e.preview)
+    carriedPreviews.set(entries, map)
+  }
+  return map
+}
 /** "Nothing is deferred", as a subject, so the banner branches on one union
  *  rather than on a null *and* a kind. */
 const NO_SUBJECT: Subject = { kind: 'none' }
@@ -748,9 +766,20 @@ export default function App() {
       // and the delta's "a revisit is one request" scenario made literal. An
       // entry the layer had nothing for carries no field and asks exactly as
       // before — absence changes nothing, per the annotation requirement.
-      const carried = asked.find((e) => e.path === path)?.preview
+      const carried = carriedPreviewsFor(asked).get(path)
       if (carried !== undefined) {
-        land(carried)
+        // Landed inline rather than through `land`: the generation check is
+        // trivially true (nothing awaited), and `land`'s marker delete would
+        // open a re-entry window — `previewsRef` lags a render behind this
+        // set, so a second observer report in the same batch would pass both
+        // guards and land again (288f55a's review). The marker stays; the
+        // per-listing clearing effect is what resets it, exactly as it resets
+        // everything else here.
+        setPreviews((prev) => {
+          const next = new Map(prev)
+          next.set(path, carried)
+          return next
+        })
         return
       }
       void api.peek(path).then(land, () => land(NO_PREVIEW))

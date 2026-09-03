@@ -56,7 +56,7 @@
       **sidecar's mtime** — `state` is derived at emission against the entry's
       mtime, never stored as a verdict (D2). Maintained on the same reads and
       writes, no extra I/O per listing
-- [x] 1.4 *(the listing sites landed with `listing-tree-cache`'s `annotate`; this change adds the two scoring routes and the similarity anchor, with a cell in `semantic.test.ts` falsified by removing the meaning route's call)* Emission attaches design D2's `thumb` shape to model
+- [x] 1.4 *(the listing sites landed with `listing-tree-cache`'s `annotate`; this change adds the two scoring routes, the similarity anchor, and — found by Masa as base64 folder sheets and by the second review — the cells of a directory entry's listing-carried `preview`, which the layer copies out without `thumb`; cells in `semantic.test.ts`, `layers.test.ts` and `folderSheets.test.tsx`, the first two falsified by removing the call)* Emission attaches design D2's `thumb` shape to model
       entries as an additive field on a **copy** of the cached entry, at
       **every** site that emits model entries — the directory and flat
       listings and `/api/peek` beside `applyDisplayNames`, and the two scoring

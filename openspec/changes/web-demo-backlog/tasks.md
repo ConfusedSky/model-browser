@@ -55,8 +55,9 @@
 - [ ] 1.5 the landing page — its first task is Masa deciding the contents (2.2 settled
       only that one exists)
 - [ ] 1.6 the context-menu actions — Download replacing Open-in/Open-with, Copy path
-      becoming Copy link. Note `native-context-menu-bypass` (another session's, active)
-      MODIFIES *A context menu on grid tiles*; declare ordering when this is drafted
+      becoming Copy link. `native-context-menu-bypass` **archived 2026-09-03** (`e41a06a`)
+      having MODIFIED *A context menu on grid tiles* — no ordering to declare, but rederive
+      against the applied spec rather than against what that requirement said before
 - [ ] 1.7 the corpus bake — preview paths attached to dir entries (the decided shape);
       rides `listing-tree-cache` and `bulk-thumbnail-jobs`
 - [ ] 1.8 the credits page — go-live gate 3.2, and **standing alone** rather than riding

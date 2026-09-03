@@ -314,7 +314,16 @@ export function createApp(
         // The sheet a tile draws by default. A tile asking for more cells still
         // asks `/api/peek`, which is the only place a wider sheet is derived.
         const preview = layers.previewFor(entry.path, PEEK_DEFAULT)
-        if (preview !== undefined) entry.preview = preview
+        if (preview !== undefined) {
+          // The cells are model tiles too, and carry what the caches know
+          // exactly as the models beside their folder do — or a revisit,
+          // where the sheet rides the listing, would cost a lookup per cell
+          // that the first visit's peek never did (`thumbnail-image-serving`
+          // D2, second review). Safe in place: `previewFor` copies out, and
+          // the copy strips whatever annotation the layer's own record held.
+          annotate(preview)
+          entry.preview = preview
+        }
       }
     }
   }
@@ -429,13 +438,19 @@ export function createApp(
       // and owns the `stale` marker; with no store behind it this is `listFlat`
       // and nothing else.
       const listing = await listings.list(library, libPath, q, { folderMatching })
-      applyDisplayNames(listing.entries, await overrides.store())
+      // Annotation first, names second: `annotate` may attach a dir entry's
+      // preview cells, which are model tiles the naming pass must also reach
+      // (it recurses into `entry.preview`) — named before annotation, a carried
+      // sheet would show raw filenames where a fresh peek shows the stored
+      // name (288f55a's review, finding 1).
       annotate(listing.entries)
+      applyDisplayNames(listing.entries, await overrides.store())
       return c.json(listing)
     }
     const listing = await listDir(library, libPath)
-    applyDisplayNames(listing.entries, await overrides.store())
+    // Same order as the flat branch, for its reason.
     annotate(listing.entries)
+    applyDisplayNames(listing.entries, await overrides.store())
     return c.json(listing)
   })
 

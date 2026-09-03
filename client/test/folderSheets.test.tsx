@@ -1107,6 +1107,26 @@ describe('tiles drawn from the listing', () => {
     expect(imgSrc(byTitle('two.stl'))).toBe(thumbImageUrl('/models/two.stl', 1, aoEnabled(), 5))
   })
 
+  it('a sheet carried on the listing draws its cells from the image route with no peek and no lookup', async () => {
+    // The listing-carried sheet (`listing-tree-cache` 6.8) is the revisit
+    // path, and it was the one that still bought a lookup per cell: the
+    // server annotated the peek's answer but not the listing's copies
+    // (second review, and Masa's report of base64 sheets).
+    await mountApp('/models', {
+      path: '/models',
+      entries: [{ ...dir('a'), preview: [vouched('a/m0.stl'), vouched('a/m1.stl')] }],
+    })
+    await intersect(dirTile('/models/a'))
+    await settle()
+    expect(peek).not.toHaveBeenCalled()
+    expect(getThumb).not.toHaveBeenCalled()
+    for (const p of ['/models/a/m0.stl', '/models/a/m1.stl']) {
+      expect(imgSrc(container.querySelector(`[data-preview-cell="${p}"]`))).toBe(
+        thumbImageUrl(p, 1, aoEnabled(), 5),
+      )
+    }
+  })
+
   it('a sheet cell’s image error demotes the cell’s path, not the folder’s', async () => {
     peek.mockResolvedValue([vouched('a/m0.stl'), vouched('a/m1.stl')])
     await mountApp('/models', ONE_FOLDER)
