@@ -70,7 +70,12 @@
 - [ ] 3.6 Under `hostDetails` (D11): `/api/library` omits
       `top` and the locations its `missing`/`nested` states carry, and the `missing`/
       `nested` envelopes in `createApp`'s gate middleware name no host location while
-      still naming the state. `top` becomes optional in
+      still naming the state. **`ready.root` stays** — it reads like a sibling of `top`
+      and is not: `shared/types.ts` documents it as "The configured root as a **library
+      path**", `/` at the top, and `bulk-thumbnail-jobs` uses it as its whole-library job
+      scope, so withholding it would break that change while protecting nothing.
+      `missing.root` and `nested.root`/`nested.library` *are* filesystem paths, verbatim,
+      and those are the ones that go. `top` becomes optional in
       `LibraryState`, so every client read of it is a compile error until handled
 
 - [ ] 3.7 Under `hostDetails`, the routes withhold the index's `detail`:
