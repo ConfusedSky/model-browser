@@ -121,9 +121,9 @@ None.
   `gen`; the survivor test includes the annotation's generation; object-URL
   ownership applies to `blob:` URLs only; an `onError` demotion remembered
   per slot and generation.
-- `client/src/three/queue.ts` — `pending` (live jobs, husks excluded), a
-  far gate with a liveness bound, `onSettle`, `poke`, and `setRanking`
-  re-pumping.
+- `client/src/three/queue.ts` — a far gate with a liveness bound whose clock
+  runs only while a far job is queued, `pendingNearerThanFar`, `onSettle`,
+  `poke` (which samples the gate), and `setRanking` re-pumping.
 - `client/src/components/Grid.tsx` — the tile `<img>` gets a declared square
   box (`aspect-ratio: 1/1`) so `overlayRectFor` measures a real rect before
   the lazy image loads, `loading="lazy"`/`decoding="async"`, a placeholder

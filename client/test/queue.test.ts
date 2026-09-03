@@ -450,6 +450,40 @@ describe('RenderQueue far gate', () => {
     }
   })
 
+  it('a poke samples the gate, so an open window between takes is not lost under a saturated queue', async () => {
+    // Fifth review, R1: only a take reads the gate, and a saturated queue
+    // takes nothing, so a gate that opened and re-closed between two takes
+    // was never observed and the bound spanned it. The hook pokes on every
+    // lookup settle — exactly when the gate may have opened — and the poke
+    // samples it.
+    vi.useFakeTimers()
+    try {
+      const queue = new RenderQueue(1)
+      const ran: string[] = []
+      let open = false
+      queue.setFarGate(() => open)
+      queue.setRanking(ranking({ far: 'far', v: 'visible' }))
+      queue.push(recorder(ran, 'far'), 'far')
+      await vi.advanceTimersByTimeAsync(1) // held: the clock starts
+      const v = held(ran, 'v')
+      queue.push(v.run, 'v') // saturated
+      await vi.advanceTimersByTimeAsync(2000)
+      open = true
+      queue.poke() // the settle that would have opened it: observed here
+      open = false
+      await vi.advanceTimersByTimeAsync(1)
+      v.release()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(ran).toEqual(['v']) // the far job's hold starts over from this take, not from t≈1
+      await vi.advanceTimersByTimeAsync(FAR_GATE_MAX_MS - 2)
+      expect(ran).toEqual(['v'])
+      await vi.advanceTimersByTimeAsync(3)
+      expect(ran).toEqual(['v', 'far'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('counts only work nearer than far — a queue holding far lookups alone opens the gate', async () => {
     const queue = new RenderQueue(1)
     const ran: string[] = []

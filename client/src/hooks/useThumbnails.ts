@@ -577,8 +577,14 @@ export function useThumbnails(
     if (slot === undefined || slot.url === undefined || slot.url.startsWith('blob:')) return
     if (startRef.current === null) return
     // The generation the failed URL named — the slot's own record of it, not
-    // the entry's current word, which may be absent (see `urlGen`).
-    slot.refusedGen = slot.urlGen
+    // the entry's current word, which may be absent (see `urlGen`). Three
+    // writers hand `setThumb` the slot's own image URL back with no `urlGen`
+    // (the lookup and render catches here, App's viewer failure) — always
+    // under `status: 'error'`, for which `ThumbView` draws no `<img>`, so no
+    // error event can arrive for them; the entry's word is the fallback all
+    // the same, so a restart can never rebuild a URL this slot just refused
+    // (fifth review, R3).
+    slot.refusedGen = slot.urlGen ?? slot.entry.thumb?.gen
     slot.refusedAo = slot.urlAo
     slot.url = undefined
     slot.urlGen = undefined
@@ -587,11 +593,9 @@ export function useThumbnails(
     // The restart can only take the lookup path — the refusal just recorded
     // is what its annotation branch checks against — and a lookup never
     // answers synchronously, so this seed is raced by nothing `start` writes
-    // (D3's ordering, from the other side). That rests on one invariant,
-    // kept by every writer of `slot.url`: a displayed non-`blob:` URL always
-    // carries its `urlGen` (`start`'s annotation branch sets both; `setThumb`
-    // and `refetch` clear both), so the refusal always matches the entry's
-    // word for the URL that failed.
+    // (D3's ordering, from the other side): the refusal recorded above is
+    // the failed URL's generation or, failing that, the entry's, so the
+    // annotation branch cannot pass.
     startRef.current(slot.entry, slot)
     setThumbs((prev) => {
       const next = new Map(prev)

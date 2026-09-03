@@ -89,7 +89,11 @@ export class RenderQueue {
   /** Install (or clear, with null) the gate far work is taken under. */
   setFarGate(open: (() => boolean) | null): void {
     this.farGate = open
-    this.releaseHold()
+    // No gate is nothing to hold for. A replaced gate keeps the clock the
+    // far job already has: re-installing one on a cadence under the bound
+    // would otherwise hold far work forever (fifth review, R8).
+    if (open === null) this.releaseHold()
+    else this.syncHold()
     this.pump()
   }
 
@@ -122,6 +126,11 @@ export class RenderQueue {
   /** Re-pump: something outside this queue — another queue's settle — may
    *  have opened the gate. Cheap when nothing changed. */
   poke(): void {
+    // Only a take reads the gate, and a saturated queue takes nothing — so an
+    // open window between takes would otherwise go unobserved and the bound
+    // could span it (fifth review, R1). The hook pokes on every lookup
+    // settle, which is exactly when the gate may have opened: sample it here.
+    if (this.farGate !== null && this.farGate()) this.releaseHold()
     this.pump()
   }
 
@@ -245,7 +254,6 @@ export class RenderQueue {
     if (this.gateTimer === null) {
       this.gateTimer = setTimeout(() => {
         this.gateTimer = null
-        this.syncHold()
         this.pump()
       }, remaining)
     }
@@ -259,15 +267,18 @@ export class RenderQueue {
 
   /**
    * The one invariant the bound's clock keeps: **it runs only while a live
-   * far job is queued.** Called wherever the queued far set can shrink — a
-   * cancel, a re-ranking, a take (after it has spliced its job out), the
-   * gate timer — because a saturated or suspended queue has no take coming
-   * to notice, and a clock that outlived its last far job let the next far
-   * job pushed dispatch at once under a closed gate. Three reviews found
-   * that hole through three doors (D9 R1, D11 R1, D12 R1–R2); one rule at
-   * every door is what closes it. A finish is not a door: a running job is
-   * not queued, and the take that dispatched it already synced. Cheap: a
-   * scan of the queue, skipped entirely while no clock is running.
+   * far job is queued.** Called at every door through which the queued far
+   * set can shrink — a cancel, a re-ranking, a take after it has spliced its
+   * job out, `clear`, a replaced gate — because a saturated or suspended
+   * queue has no take coming to notice, and a clock that outlived its last
+   * far job let the next far job pushed dispatch at once under a closed
+   * gate. Three reviews found that hole through three doors (D9 R1, D11 R1,
+   * D12 R1–R2); one rule at every door is what closes it. Not a door: a
+   * finish (a running job is not queued, and the take that dispatched it
+   * already synced), the gate timer, and a take that found nothing (both
+   * built, found unfalsifiable — nothing shrinks the set there — and
+   * removed, fifth review R2). Cheap: a scan of the queue, skipped entirely
+   * while no clock is running.
    */
   private syncHold(): void {
     if (this.gateClosedSince !== null && !this.hasLiveFar()) this.releaseHold()
@@ -318,10 +329,7 @@ export class RenderQueue {
       }
       i++
     }
-    if (bestAt === -1) {
-      this.syncHold()
-      return undefined
-    }
+    if (bestAt === -1) return undefined
     const job = this.jobs[bestAt]!
     this.jobs.splice(bestAt, 1)
     // After the splice: the job taken may have been the last live far job

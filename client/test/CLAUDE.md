@@ -17,6 +17,12 @@
 - Preference modules (`aoToggle.ts`, `lib/searchOptions.ts`) hold state in a
   module closure: `localStorage.clear()` does not reset them and tests inherit each other's
   settings. Reset via their setters in `beforeEach`, or re-import after `vi.resetModules()`
+- The thumbnail lookup queue is module-level and ranked (`useThumbnails`'
+  `lookupQueue`), and the render queue's far gate reads it: a lookup whose per-cell mock
+  never resolves stays pending for the life of the module and closes the gate in every
+  later cell of that file. Call `resetLookupQueueForTests()` in `beforeEach` of any
+  file that mounts App or the hook and asserts render order or far-gate behaviour
+  (`thumbnailQueue.test.tsx`, `folderSheets.test.tsx` do)
 - Lighting is no longer a preference: the rig is fixed in camera space and
   `THUMB_LIGHTING` (three/renderer.ts, beside `RIG_VERSION`) is the one value a client can
   write into a thumbnail's `lighting` label. Assert it through the constant, never a

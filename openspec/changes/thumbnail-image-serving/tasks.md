@@ -123,26 +123,29 @@
       decrement; a public `poke()` re-pumps (D5). A general `pending` count
       was built and dropped — nothing read it (third review, R5)
 - [x] 4.2 *(the lookup queue's `onSettle` fires after **every** lookup finishes, after the decrement; the hook's callback pokes the render queue, whose gate re-reads `pendingNearerThanFar`. An idle-only signal would have left far renders waiting on the last far lookup when the last *near* one had already settled)* The hook wires the render queue's gate to "a lookup ranked nearer
-      than far is pending" (the lookup queue exposes that count, not just
-      `pending`) and the lookup queue's `onSettle` to the render queue's `poke`;
+      than far is pending" (the lookup queue exposes that count,
+      `pendingNearerThanFar`) and the lookup queue's `onSettle` to the render queue's `poke`;
       both cleared in the wiring effect's cleanup (0.3)
-- [x] 4.3 `queue.test.ts` cells, DOM-free, under *RenderQueue far gate*
-      (thirteen since the fourth review): far skipped while the gate is
-      closed and near runs beside it, and the gate opening plus `poke`
-      starts it with no push; only work nearer than far counts; the settle
-      fires after the decrement with a far lookup pending throughout; far
-      work released after the bound when the gate never opens; the whole
-      backlog drains once the bound has passed; the clock independent of
-      arrival order; the clock forgotten when the last far job is retired
-      under a saturated queue, when it is re-ranked nearer before *and*
-      after the timer fired, and when it is dispatched on an expired clock under a saturated
-      queue; removing the gate drops its
-      timer on a suspended queue; `clear` drops gate and settle callback.
-      Each falsified against its release removed
+- [x] 4.3 `queue.test.ts` cells, DOM-free, under *RenderQueue far gate*: far
+      skipped while the gate is closed and near runs beside it, and the gate
+      opening plus `poke` starts it with no push; only work nearer than far
+      counts; the settle fires after the decrement with a far lookup pending
+      throughout; far work released after the bound when the gate never
+      opens; the bound measures a contiguous hold; the whole backlog drains
+      once the bound has passed; the clock independent of arrival order;
+      the clock forgotten when the last far job is retired under a saturated
+      queue, when it is re-ranked nearer (before the timer fires, and after —
+      both fall to `setRanking`'s sync, one door), and when it is dispatched
+      on an expired clock; a poke samples the gate under a saturated queue;
+      removing the gate drops its timer on a suspended queue; `clear` drops
+      gate and settle callback. The three doors — cancel, re-ranking, take
+      after its splice — each falsified against its sync removed; the timer
+      and empty-take syncs a fourth review added were unfalsifiable (nothing
+      shrinks the set there) and are gone (fifth review, R2)
 
 ## 5. Tests
 
-- [x] 5.1 *(five cells under *a listing-known thumbnail is drawn without a lookup*, falsified six ways. **Premise corrected:** happy-dom fires no `load` for an image URL, but it *does* fire `error` synchronously when the global `URL` cannot parse the src — which the harnesses' spread-copy `URL` stub guaranteed; the stubs are subclasses now, `client/test/CLAUDE.md`)* `thumbnailQueue.test.tsx` hook cells with annotated
+- [x] 5.1 *(seven cells under *a listing-known thumbnail is drawn without a lookup* — the two refusal cells joined in the second and third reviews — each falsified. **Premise corrected:** happy-dom fires no `load` for an image URL, but it *does* fire `error` synchronously when the global `URL` cannot parse the src — which the harnesses' spread-copy `URL` stub guaranteed; the stubs are subclasses now, `client/test/CLAUDE.md`)* `thumbnailQueue.test.tsx` hook cells with annotated
       entries: a listing whose entries all carry a current `hit` issues
       **zero** `getThumb` calls, every tile is `ready` at an image URL with the
       entry's camera/axis, and — the F1 cell — the state survives the sweep's

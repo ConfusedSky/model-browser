@@ -299,24 +299,36 @@ cached tiles are filling. F8's nearer-than-far refinement bites only once
 bands are in; that is the right order (review R10).
 
 **Contiguous hold.** The bound's clock measures a contiguous run of held far
-work: it resets whenever a take passes without holding a far job — the gate
-read open, or there was nothing far to hold. Left running across a gap (a
-navigation retires the far jobs; new far work is pushed after the bound),
-the clock would already have expired and the new job would dispatch at once
-under a closed gate, defeating the gate until some take happened to read it
-open (review R1, verified under Bun with a faked clock).
+work — from the first take that meets a far job under a closed gate until
+the queued far set is empty or the gate reads open (see *When the clock is
+forgotten*). Left running across a gap (a navigation retires the far jobs;
+new far work is pushed after the bound), the clock would already have
+expired and the new job would dispatch at once under a closed gate,
+defeating the gate until some take happened to read it open (review R1,
+verified under Bun with a faked clock).
 
 **When the clock is forgotten.** One invariant, kept at every door: the
 bound's clock runs only while a live far job is queued. `syncHold` checks
-it wherever the queued far set can shrink — a cancel, a re-ranking, a take
-after it has spliced its job out, the gate's own timer — because a
-saturated or suspended queue has no take coming to notice, and every
-case-by-case release before it left a door open: a retired far job under
-a saturated queue (D11 R1), the last far job dispatched on an expired clock,
-a re-rank after the timer had fired (D12 R1–R2). A finish is not a door: a
-running job is not queued, and the take that dispatched it already synced
-— which is also why "finished under suspension" (D12 R1's second
-reproduction) is closed by the take's sync, not by a hook on the finish. `take` scans to its end, never breaking at a visible job, so husks
+it at every door through which the queued far set can shrink — a cancel, a
+re-ranking, a take after it has spliced its job out, `clear`, a replaced
+gate — because a saturated or suspended queue has no take coming to notice,
+and every case-by-case release before it left a door open: a retired far
+job under a saturated queue (D11 R1), the last far job dispatched on an
+expired clock, a re-rank after the timer had fired (D12 R1–R2). Not doors:
+a finish (a running job is not queued, and the take that dispatched it
+already synced — which is why "finished under suspension" is closed by the
+take's sync), the gate timer and a take that found nothing (both built,
+found unfalsifiable, removed — D13 R2). The clock starts at the first take
+that *meets* the far job under a closed gate, not when the job began
+waiting: a far job pushed into a saturated queue waits its turn behind
+nearer work with no clock at all, then serves its full bound (D13 R10).
+
+**An open window between takes.** Only a take reads the gate, so a gate
+that opened and re-closed while the queue was saturated went unobserved and
+the bound spanned it (D13 R1 — the reason D12 gave for the open-then-reclose
+case was wrong under saturation). `poke` now samples the gate before it
+pumps, and the hook pokes on every lookup settle, which is exactly when the
+gate may have opened. `take` scans to its end, never breaking at a visible job, so husks
 behind one are spliced and a far job behind one is met. A pinned far job —
 `bulk-thumbnail-jobs`' third `push` argument — is gated exactly as a
 ranked-far one, in `take` and in `pendingNearerThanFar` alike, so a bulk
@@ -463,12 +475,27 @@ tile in a test knows where to look.
 
 | # | Finding | Disposition |
 |---|---|---|
-| R1 | The clock still escaped when the backlog emptied by dispatch (saturated), by a finish under suspension, or across an open-then-reclose between takes — reproduced | **Fixed** (D5 *When the clock is forgotten*): one invariant, `syncHold`, at every door — the take's post-splice sync covers both the dispatch and the suspended-finish shapes (a finish hook was built, found to pin nothing, and removed); cell for the dispatch shape. The open-then-reclose case is by design once the invariant holds: the far job was queued under a closed gate for the whole bound |
+| R1 | The clock still escaped when the backlog emptied by dispatch (saturated), by a finish under suspension, or across an open-then-reclose between takes — reproduced | **Fixed** (D5 *When the clock is forgotten*): one invariant, `syncHold`, at every door — the take's post-splice sync covers both the dispatch and the suspended-finish shapes (a finish hook was built, found to pin nothing, and removed); cell for the dispatch shape. The open-then-reclose case was first dispositioned as by design; D13 R1 showed that reasoning false under saturation and `poke` samples the gate now |
 | R2 | A re-rank after the one-shot timer had fired had no observer | **Fixed**: `setRanking` runs `syncHold`; cell |
 | R3 | `hasLiveFar` in every far cancel — measured ~µs at 500–2000 jobs | **No action**; recorded |
 | R4 | `reportImageError` discards `start`'s return under an unstated invariant | **Stated** at the call: a displayed non-`blob:` URL always carries `urlGen` (every writer keeps it). The re-seed branch D9 R5 removed as dead is not reinstated |
 | R5 | Tasks 4.1/4.3 still specified and claimed `pending`; 4.3 claimed six cells | **Fixed**: 4.1 states the invariant, 4.3 lists the cells that exist |
 | R6 | The sheet cell's `ThumbView` was uncelled | **Fixed**: `thumbView.test.tsx` renders the folder sheet |
+
+### D13: Fifth implementation review (2026-09-03, opus)
+
+| # | Finding | Disposition |
+|---|---|---|
+| R1 | D12's "by design" reason for open-then-reclose was false under saturation: a saturated queue takes nothing, so an open window between takes was never observed | **Fixed** (D5 *An open window between takes*): `poke` samples the gate; cell |
+| R2 | The timer's and the empty take's `syncHold` were unfalsifiable — nothing shrinks the far set there — and 4.3 overstated "one cell per door" | **Fixed**: both sites removed; 4.3 names the three doors and says which cells fall to which |
+| R3 | The invariant stated at `reportImageError` was false: three writers hand `setThumb` an image URL with no `urlGen`, protected only by their `error` status drawing no `<img>` | **Fixed** (D3): the real reason stated, and the refusal falls back to the entry's generation so the annotation branch can never pass |
+| R4 | `pending` still named in the proposal and task 4.2 | **Fixed** |
+| R5 | Stale cell counts in 4.3 and 5.1 | **Fixed** |
+| R6 | Delta scenario said "before this capability existed", which reads wrongly in main | **Fixed**: "before the image route existed" |
+| R7 | D3 cited a CSS literal the code no longer had | **Fixed** by `4ee0087`, which rewrote the box and D3 together |
+| R8 | `setFarGate` reset the bound on every install; a gate re-installed on a cadence under the bound would hold far work forever | **Fixed**: a replaced gate keeps the clock (`syncHold`); removal releases it |
+| R9 | `resetLookupQueueForTests` is called in two of the App-mounting suites; a never-resolving mock lookup closes the gate for the file | **Recorded** (`client/test/CLAUDE.md`) |
+| R10 | The clock starts at the first take that meets the far job, not when it starts waiting | **Recorded** (D5) |
 
 ## Risks / Trade-offs
 
