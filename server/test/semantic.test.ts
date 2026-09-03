@@ -41,7 +41,8 @@ symlinkSync(join(outside, 'dragon.stl'), join(root, 'escape.stl'))
 symlinkSync(join(root, 'kits', 'a.stl'), join(root, 'alias.stl'))
 const cacheDir = mkdtempSync(join(tmpdir(), 'mb-sem-cache-'))
 const library = libraryFor(root)
-const app = createApp(new ThumbCache(cacheDir), undefined, undefined, library)
+const cache = new ThumbCache(cacheDir)
+const app = createApp(cache, undefined, undefined, library)
 
 afterAll(() => {
   rmSync(root, { recursive: true, force: true })
@@ -223,6 +224,24 @@ describe('semantic query', () => {
     // against (the index's own `WEAK_Z`).
     expect(body.scores['/dragon.stl']).toEqual({ score: 0.16, z: 3.9 })
     expect(body.scope).toEqual({ path: null, status: 'partial', indexed: 2801, scanned: 3396, covers: ['stl'] })
+  })
+
+  it('a hit’s tile carries what the thumbnail cache knows, as a listing’s does', async () => {
+    // A meaning grid is a primary browsing mode (`thumbnail-image-serving`
+    // D2): its tiles get the listing annotation, or every one of them would
+    // keep the per-tile lookup the listing routes have shed. The entry's mtime
+    // is stat's, so the render is filed under that and read back as a hit.
+    stubIndex(READY, result)
+    const first = (await (await post({ text: 'dragon' })).json()) as { entries: { mtime: number }[] }
+    const mtime = first.entries[0]!.mtime
+    const gen = await cache.put('/dragon.stl', { mtime, png: Buffer.from('px'), lighting: 'camera', rig: 1 })
+    stubIndex(READY, result)
+    const body = (await (await post({ text: 'dragon' })).json()) as {
+      entries: { path: string; thumb?: { gen: number; ao?: { state: string; rig?: number } } }[]
+    }
+    expect(body.entries[0]!.thumb).toBeDefined()
+    expect(body.entries[0]!.thumb!.gen).toBe(gen)
+    expect(body.entries[0]!.thumb!.ao).toMatchObject({ state: 'hit', rig: 1 })
   })
 
   it('a hit whose pose is not a pose still becomes a tile, with no pose', async () => {

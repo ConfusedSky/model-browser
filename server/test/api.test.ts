@@ -1,7 +1,16 @@
-import { mkdtempSync, readdirSync, rmSync, unlinkSync } from 'node:fs'
+import {
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  unlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { DirEntry, DirListing, ThumbGetResponse } from '../../shared/types'
 import { createApp } from '../src/app'
 import { ThumbCache } from '../src/cache'
@@ -706,6 +715,102 @@ describe('thumbnail cacheability', () => {
     })
     expect(mismatched.status).toBe(200)
     expect(((await mismatched.json()) as ThumbGetResponse).png).toBe(png2)
+  })
+
+  /**
+   * The image route (`thumbnail-image-serving` D1): the same bytes as the JSON
+   * hit's `png`, under the same tiers, and 404 for anything but a hit.
+   */
+  describe('the image route', () => {
+    const img2 = (q: string, headers: Record<string, string> = LOOPBACK) =>
+      app2.request(`/api/thumb/image?${q}`, { headers })
+    const key2 = `path=${encodeURIComponent(path2)}&mtime=111`
+    // Its own write, so these cells stand alone under a `-t` filter rather
+    // than riding the PUT an earlier sibling happens to make.
+    beforeAll(async () => {
+      await put2({ path: path2, mtime: 111, png: png2 })
+    })
+
+    it('serves the hit’s pixels as image/png, byte-equal to the lookup’s decoded png', async () => {
+      const json = (await (await get2(key2)).json()) as ThumbGetResponse
+      expect(json.status).toBe('hit')
+      const res = await img2(key2)
+      expect(res.status).toBe(200)
+      expect(res.headers.get('content-type')).toBe('image/png')
+      expect(res.headers.get('x-content-type-options')).toBe('nosniff')
+      const bytes = Buffer.from(await res.arrayBuffer())
+      expect(bytes.equals(Buffer.from(json.png!, 'base64'))).toBe(true)
+    })
+
+    it('applies the lookup’s tiers: immutable at the current generation, no-cache with current bytes at a superseded one', async () => {
+      const cur = ((await (await get2(key2)).json()) as ThumbGetResponse).gen!
+      const pinned = await img2(`${key2}&gen=${cur}`)
+      expect(pinned.status).toBe(200)
+      expect(pinned.headers.get('cache-control')).toBe('public, max-age=31536000, immutable')
+
+      const superseded = await img2(`${key2}&gen=${cur - 1}`)
+      expect(superseded.status).toBe(200)
+      expect(superseded.headers.get('cache-control')).toBe('no-cache')
+      // The current bytes, never a refusal: a stale URL shows no stale pixels.
+      expect(Buffer.from(await superseded.arrayBuffer()).equals(Buffer.from(png2, 'base64'))).toBe(true)
+    })
+
+    it('gives a generation-less read the validator tier, and 304s a matching one', async () => {
+      const first = await img2(key2)
+      const cur = ((await (await get2(key2)).json()) as ThumbGetResponse).gen!
+      expect(first.headers.get('cache-control')).toBe('no-cache')
+      expect(first.headers.get('etag')).toBe(`"${cur}"`)
+      const revalidated = await img2(key2, { ...LOOPBACK, 'if-none-match': `"${cur}"` })
+      expect(revalidated.status).toBe(304)
+      expect(await revalidated.text()).toBe('')
+    })
+
+    it('answers not-found, uncacheable, for a miss and for a stale render alike', async () => {
+      const miss = await img2(`path=${encodeURIComponent('/nothing-here.stl')}&mtime=1`)
+      expect(miss.status).toBe(404)
+      expect(miss.headers.get('cache-control')).toBe('no-store')
+      expect(miss.headers.get('etag')).toBeNull()
+      // Stale: the entry has a render, at another mtime. The JSON route says
+      // `stale` with camera and labels and no pixels; this route has nothing.
+      const staleJson = (await (await get2(`path=${encodeURIComponent(path2)}&mtime=999`)).json()) as ThumbGetResponse
+      expect(staleJson.status).toBe('stale')
+      const stale = await img2(`path=${encodeURIComponent(path2)}&mtime=999`)
+      expect(stale.status).toBe(404)
+      expect(stale.headers.get('cache-control')).toBe('no-store')
+    })
+
+    it('bumps the render’s LRU clock exactly as the lookup hit does (D7)', async () => {
+      const pngPath = readdirSync(cacheDir2)
+        .filter((f) => f.endsWith('.png'))
+        .map((f) => join(cacheDir2, f))[0]!
+      const then = new Date(Date.now() - 60 * 60 * 1000)
+      utimesSync(pngPath, then, then)
+      const before = statSync(pngPath).mtimeMs
+      const res = await img2(key2)
+      expect(res.status).toBe(200)
+      expect(statSync(pngPath).mtimeMs).toBeGreaterThan(before + 60 * 60 * 1000 - 5000)
+    })
+
+    it('is confined as the lookup is: a path the library refuses gets no pixels even when the cache holds them', async () => {
+      // A symlink out of the library, with pixels filed for it straight into
+      // the cache — the one way to hold bytes for a path the library refuses,
+      // since the PUT route is confined too. The lookup refuses it; the image
+      // route must answer exactly as the lookup does, not serve the bytes.
+      const outside = mkdtempSync(join(tmpdir(), 'mb-outside-'))
+      writeFileSync(join(outside, 'escape.stl'), 'solid x endsolid x')
+      symlinkSync(join(outside, 'escape.stl'), join(fx.dir, 'escape.stl'))
+      try {
+        await cache2.put('/escape.stl', { mtime: 5, png: Buffer.from('escaped') })
+        const json = await get2(`path=${encodeURIComponent('/escape.stl')}&mtime=5`)
+        const image = await img2(`path=${encodeURIComponent('/escape.stl')}&mtime=5`)
+        expect(json.status).not.toBe(200)
+        expect(image.status).toBe(json.status)
+        expect(image.headers.get('content-type')).not.toBe('image/png')
+      } finally {
+        unlinkSync(join(fx.dir, 'escape.stl'))
+        rmSync(outside, { recursive: true, force: true })
+      }
+    })
   })
 
   it('moves the generation on every write, whatever the write carried', async () => {

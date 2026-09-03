@@ -1,6 +1,6 @@
 # Tasks — thumbnail-image-serving
 
-> **Landed:** §0 (2026-09-02). **What can start today:** §1.1–1.2 and §4 depend on nothing unlanded
+> **Landed:** §0 (2026-09-02, `5bf35a5`); §1 and 5.2 (2026-09-02, on `f88c6f0`). **What can start today:** §1.1–1.2 and §4 depend on nothing unlanded
 > — only `immutable-thumbnail-serving` (archived 2026-09-02). **What waits on
 > `listing-tree-cache` §6:** 1.3, 1.4, 2.2's annotation branch, 2.5, 5.1's
 > annotated cells, 5.3, and 6.2's revisit measurement. That change's 6.3
@@ -41,22 +41,22 @@
 
 ## 1. Server: the image route and the annotation's fields
 
-- [ ] 1.1 Extract the JSON route's cache-tier logic (`immutable` when the
+- [x] 1.1 Extract the JSON route's cache-tier logic (`immutable` when the
       request names the current `gen`, `ETag`/304 otherwise, `no-store` on a
       miss) into one helper in `app.ts`, and re-point `/api/thumb` at it with no
       behaviour change — its `api.test.ts` cells must pass untouched (D1)
-- [ ] 1.2 `GET /api/thumb/image?path&mtime[&ao=off][&gen]`: same key, same
+- [x] 1.2 `GET /api/thumb/image?path&mtime[&ao=off][&gen]`: same key, same
       helper, `image/png` body; 404 + `no-store` for **anything but a hit**
       (`stale` has no pixels); a superseded `gen` answers the current bytes
       under `no-cache`; confined exactly as the lookup route is; **bumps the
       PNG's LRU clock** exactly as `ThumbCache.get`'s hit does (D1, D7)
-- [ ] 1.3 *(after §6)* `ThumbCache`'s in-memory index (`listing-tree-cache`
+- [x] 1.3 *(landed with `listing-tree-cache` at `f88c6f0` — verified: `infoFor`/`renderInfo` in `cache.ts` carry the labels, camera and axis, and `statusFor` derives `state` at emission)* `ThumbCache`'s in-memory index (`listing-tree-cache`
       6.2) exposes, beside presence/`gen`/`framed`, the per-variant labels
       (`lighting`, `rig`, `posed`), the entry-level `camera`/`axis`, and the
       **sidecar's mtime** — `state` is derived at emission against the entry's
       mtime, never stored as a verdict (D2). Maintained on the same reads and
       writes, no extra I/O per listing
-- [ ] 1.4 *(after §6)* Emission attaches design D2's `thumb` shape to model
+- [x] 1.4 *(the listing sites landed with `listing-tree-cache`'s `annotate`; this change adds the two scoring routes and the similarity anchor, with a cell in `semantic.test.ts` falsified by removing the meaning route's call)* Emission attaches design D2's `thumb` shape to model
       entries as an additive field on a **copy** of the cached entry, at
       **every** site that emits model entries — the directory and flat
       listings and `/api/peek` beside `applyDisplayNames`, and the two scoring
@@ -143,7 +143,7 @@
       and pins the wiring and the once-per-generation memory (falsify by
       forgetting the refusal → a second `start` rebuilds the 404 URL); the
       premise that a 404 image fires `error` is 6.2's to prove in a browser
-- [ ] 5.2 `api.test.ts` server cells: the image route's bytes equal the
+- [x] 5.2 *(done — six cells under *the image route*, each falsified: tiers skipped, clock not bumped, miss answering 200, confinement removed)* `api.test.ts` server cells: the image route's bytes equal the
       lookup's decoded `png` for the same key; `immutable` when `gen` matches,
       `no-cache` with current bytes when superseded, 404 `no-store` on a miss
       **and on a stale entry**; the route bumps the PNG's mtime as the JSON hit

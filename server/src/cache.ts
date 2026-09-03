@@ -393,6 +393,30 @@ export class ThumbCache {
    * orientation the other one is already drawn at.
    */
   async get(path: string, mtime: number, ao = true): Promise<ThumbGetResponse> {
+    const { body, png } = await this.read(path, mtime, ao)
+    return png === undefined ? body : { ...body, png: png.toString('base64') }
+  }
+
+  /**
+   * One render's pixels, for the image route (`thumbnail-image-serving` D1):
+   * the entry's generation, and the PNG bytes exactly when the render is a hit
+   * with its file on disk. Anything else — miss, stale, a hit whose PNG the
+   * size cap has since taken — is `png: undefined`, and the route answers
+   * not-found; the JSON route is what says *why*. The same read as `get`, so
+   * the two cannot disagree about what a hit is, and the same LRU bump (D7):
+   * a cold-browser view of the image counts as a read.
+   */
+  async image(path: string, mtime: number, ao = true): Promise<{ gen: number; png?: Buffer }> {
+    const { body, png } = await this.read(path, mtime, ao)
+    return png === undefined ? { gen: body.gen ?? 0 } : { gen: body.gen ?? 0, png }
+  }
+
+  /** The read both `get` and `image` are: the answer, and the raw bytes on a hit. */
+  private async read(
+    path: string,
+    mtime: number,
+    ao: boolean,
+  ): Promise<{ body: Omit<ThumbGetResponse, 'png'>; png?: Buffer }> {
     const dir = await this.entryDir()
     const key = this.key(path)
     const meta = await this.readMeta(dir, key)
@@ -403,7 +427,7 @@ export class ThumbCache {
     // An entry that does not exist has answered nothing, so it has issued no
     // generation: 0. The number still rides along, because the caller's cache
     // policy is decided from it uniformly and a miss is `no-store` anyway.
-    if (meta === null) return { status: 'miss', gen: 0 }
+    if (meta === null) return { body: { status: 'miss', gen: 0 } }
     const gen = meta.gen ?? 0
     const labels: RenderLabels = (ao ? meta : meta.noao) ?? {}
     // Not defaulted here: the *absence* of a stored axis is information a
@@ -423,12 +447,12 @@ export class ThumbCache {
     // The predicate is `statusFor`, shared with the listing annotation so the
     // two can never come to disagree about what a cached render is.
     const status = statusFor(labels, meta.camera, mtime)
-    if (status !== 'hit') return { status, camera: meta.camera, axis, lighting, rig, posed, gen }
+    if (status !== 'hit') return { body: { status, camera: meta.camera, axis, lighting, rig, posed, gen } }
     let png
     try {
       png = await readFile(this.pngFile(dir, key, ao))
     } catch {
-      return { status: 'stale', camera: meta.camera, axis, lighting, rig, posed, gen }
+      return { body: { status: 'stale', camera: meta.camera, axis, lighting, rig, posed, gen } }
     }
     // LRU clock for size-cap eviction is the png file's mtime. Bumping it via
     // utimes (instead of rewriting the meta json) keeps reads race-free
@@ -437,7 +461,7 @@ export class ThumbCache {
     // clock, so reading one never defends the other from the cap (D3).
     const now = new Date()
     await utimes(this.pngFile(dir, key, ao), now, now).catch(() => {})
-    return { status: 'hit', camera: meta.camera, axis, lighting, rig, posed, gen, png: png.toString('base64') }
+    return { body: { status: 'hit', camera: meta.camera, axis, lighting, rig, posed, gen }, png }
   }
 
   /**

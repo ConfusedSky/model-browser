@@ -2,7 +2,7 @@ import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { relative, resolve as resolvePath } from 'node:path'
 import { Readable } from 'node:stream'
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import type {
   DirEntry,
   FeatureReport,
@@ -883,6 +883,10 @@ export function createApp(
       throw err
     }
     const { entries, poses, scores } = await hitsToEntries(library, result.results, collectionRootFs)
+    // A meaning grid is a primary browsing mode: its tiles carry what the
+    // caches know exactly as a listing's do (`thumbnail-image-serving` D2), or
+    // it would keep the full lookup cost the listing routes have shed.
+    annotate(entries)
     return c.json({
       // A library path, like every other path on the wire (D2): the scope's,
       // else the collection's. A collection the library does not hold has no
@@ -971,6 +975,9 @@ export function createApp(
     // the tree, stat'd once per returned hit, never the index's description of a
     // model (D3).
     const { entries, poses, scores } = await hitsToEntries(library, result.results, collectionRootFs)
+    // As on the meaning route: a similarity grid's tiles carry what the caches
+    // know (`thumbnail-image-serving` D2).
+    annotate(entries)
     // The model the neighbours were computed *from*, resolved into a tile of its
     // own. The index excludes the query model from its own ranking by design (it
     // scores 1.0 against itself and skews the z), so if the question is to be
@@ -990,6 +997,9 @@ export function createApp(
       library.libPathOf(model),
       relative(collectionRootFs, model),
     )
+    // The anchor is a tile too, and carries what the caches know like the
+    // neighbours beside it.
+    if (anchor !== null) annotate([anchor])
     // Deliberately without the index's `scope` dict. A similarity view reads
     // none of the meaning residue — `weak`, `capped`, the scope's coverage
     // counts are all facts about a *phrase's* result — and forwarding it would
@@ -1015,27 +1025,86 @@ export function createApp(
     return c.json(await complete(library, prefix))
   })
 
-  app.get('/api/thumb', async (c) => {
+  /**
+   * The key both thumbnail reads take — `path`, `mtime`, and which render —
+   * validated the same way, or the 400 that says what was wrong. One parser so
+   * the JSON route and the image route cannot come to key differently
+   * (`thumbnail-image-serving` D1).
+   *
+   * Validated, not translated: the cache keys on the library path itself, so
+   * what the library decides here is only whether this path is one the server
+   * will speak about at all. Canonical, though — the key *is* the string, and
+   * `/kit/../kit/a.stl` must not be a second entry beside `/kit/a.stl`.
+   * Which render is wanted. Absent is `on`: that is what every request meant
+   * before renders were keyed by occlusion, so a client from before this
+   * change reads exactly what it always read (ao-as-recipe-dimension D2).
+   */
+  function thumbKeyOf(c: Context): { libPath: string; mtime: number; ao: boolean } | Response {
     const path = c.req.query('path')
     const mtime = Number(c.req.query('mtime'))
     if (path === undefined || Number.isNaN(mtime)) {
       return c.json({ error: 'path and mtime are required' }, 400)
     }
-    // Validated, not translated: the cache keys on the library path itself, so
-    // what the library decides here is only whether this path is one the server
-    // will speak about at all. Canonical, though — the key *is* the string, and
-    // `/kit/../kit/a.stl` must not be a second entry beside `/kit/a.stl`.
-    // Which render is wanted. Absent is `on`: that is what every request meant
-    // before renders were keyed by occlusion, so a client from before this
-    // change reads exactly what it always read (ao-as-recipe-dimension D2).
     const aoParam = c.req.query('ao')
     if (aoParam !== undefined && aoParam !== 'on' && aoParam !== 'off') {
       return c.json({ error: `invalid ao: ${aoParam}` }, 400)
     }
-    const libPath = canonicalLibPath(path)
-    await library.resolve(libPath)
-    const body = await cache.get(libPath, mtime, aoParam !== 'off')
-    const gen = body.gen ?? 0
+    return { libPath: canonicalLibPath(path), mtime, ao: aoParam !== 'off' }
+  }
+
+  /**
+   * The cache tiers a thumbnail **hit** is served under, applied to the
+   * response headers; returns whether the request is a revalidation the tiers
+   * answer with 304 and no body. Extracted so the JSON route and the image
+   * route apply exactly one policy (`thumbnail-image-serving` D1) — a miss is
+   * each route's own to answer, `no-store`, before reaching here.
+   *
+   * Tier 1 — the reader named a generation. `path + mtime + ao + gen` names
+   * these exact bytes, so if the number is current the answer can be pinned
+   * for as long as the browser cares to keep it: any later write moves the
+   * entry to a different `gen`, and this URL is simply never requested again
+   * (`immutable-thumbnail-serving` D2). A number that is *not* current lost a
+   * race with a write; it gets the current bytes and the current `gen` in the
+   * body, uncacheable, so it re-keys on its next fetch rather than being
+   * redirected or refused.
+   *
+   * `public` is deliberate and inert here: on loopback there is no
+   * intermediary to act on it. It is written for the demo, where an edge
+   * cache is exactly what should be allowed to hold these tiles.
+   *
+   * Tier 2 — the reader could not know the generation (a fresh session,
+   * before anything has told it one). Validator caching: it stores the body
+   * against this tag, and an unchanged entry then costs a 304 with no body
+   * instead of the base64 PNG.
+   *
+   * The tag is the **entry's** generation even though this URL names one AO
+   * variant. A write to either render moves it, so a write to one variant
+   * makes the other revalidate once for nothing. That is deliberate
+   * conservatism: the alternative is a per-render counter, and a reader keyed
+   * on one render's number can be handed the other render's write without
+   * noticing. One wasted 304 against never serving stale pixels.
+   *
+   * Exact match only. Every client that gets a tag here echoes back the bytes
+   * it was given, so the list and weak-comparison forms of `If-None-Match`
+   * cannot arise from this route's own tags.
+   */
+  function thumbHitTiers(c: Context, gen: number): boolean {
+    const named = c.req.query('gen')
+    if (named !== undefined) {
+      c.header('Cache-Control', named === String(gen) ? 'public, max-age=31536000, immutable' : 'no-cache')
+      return false
+    }
+    const etag = `"${gen}"`
+    c.header('Cache-Control', 'no-cache')
+    c.header('ETag', etag)
+    return c.req.header('if-none-match') === etag
+  }
+
+  app.get('/api/thumb', async (c) => {
+    const key = thumbKeyOf(c)
+    if (key instanceof Response) return key
+    await library.resolve(key.libPath)
+    const body = await cache.get(key.libPath, key.mtime, key.ao)
 
     // A response that is not a hit is never cacheable, in any tier
     // (`immutable-thumbnail-serving` D3). A cached miss outlives the render
@@ -1045,43 +1114,34 @@ export function createApp(
       c.header('Cache-Control', 'no-store')
       return c.json(body)
     }
-
-    // Tier 1 — the reader named a generation. `path + mtime + ao + gen` names
-    // these exact bytes, so if the number is current the answer can be pinned
-    // for as long as the browser cares to keep it: any later write moves the
-    // entry to a different `gen`, and this URL is simply never requested again
-    // (D2). A number that is *not* current lost a race with a write; it gets
-    // the current bytes and the current `gen` in the body, uncacheable, so it
-    // re-keys on its next fetch rather than being redirected or refused.
-    //
-    // `public` is deliberate and inert here: on loopback there is no
-    // intermediary to act on it. It is written for the demo, where an edge
-    // cache is exactly what should be allowed to hold these tiles.
-    const named = c.req.query('gen')
-    if (named !== undefined) {
-      c.header('Cache-Control', named === String(gen) ? 'public, max-age=31536000, immutable' : 'no-cache')
-      return c.json(body)
-    }
-
-    // Tier 2 — the reader could not know the generation (a fresh session,
-    // before anything has told it one). Validator caching: it stores the body
-    // against this tag, and an unchanged entry then costs a 304 with no body
-    // instead of the base64 PNG.
-    //
-    // The tag is the **entry's** generation even though this URL names one AO
-    // variant. A write to either render moves it, so a write to one variant
-    // makes the other revalidate once for nothing. That is deliberate
-    // conservatism: the alternative is a per-render counter, and a reader keyed
-    // on one render's number can be handed the other render's write without
-    // noticing. One wasted 304 against never serving stale pixels.
-    const etag = `"${gen}"`
-    c.header('Cache-Control', 'no-cache')
-    c.header('ETag', etag)
-    // Exact match only. Every client that gets a tag here echoes back the bytes
-    // it was given, so the list and weak-comparison forms of `If-None-Match`
-    // cannot arise from this route's own tags.
-    if (c.req.header('if-none-match') === etag) return c.body(null, 304)
+    if (thumbHitTiers(c, body.gen ?? 0)) return c.body(null, 304)
     return c.json(body)
+  })
+
+  /**
+   * The same render as `image/png` bytes, for a tile to reference by URL
+   * (`thumbnail-image-serving` D1): same key, same tiers, so a listing that
+   * says "cached at generation N" can point an `<img>` here and the browser's
+   * own cache answers the revisit. Anything but a hit — a miss, a stale
+   * render, a hit whose PNG the size cap has taken since the listing was
+   * emitted — is 404 and `no-store`: there are no pixels to serve, and the
+   * tile recovers through the JSON lookup, which is what says why. Confined
+   * exactly as the lookup is, and bumping the render's LRU clock exactly as a
+   * lookup hit does (D7).
+   */
+  app.get('/api/thumb/image', async (c) => {
+    const key = thumbKeyOf(c)
+    if (key instanceof Response) return key
+    await library.resolve(key.libPath)
+    const { gen, png } = await cache.image(key.libPath, key.mtime, key.ao)
+    if (png === undefined) {
+      c.header('Cache-Control', 'no-store')
+      return c.json({ error: 'no cached thumbnail' }, 404)
+    }
+    if (thumbHitTiers(c, gen)) return c.body(null, 304)
+    c.header('Content-Type', 'image/png')
+    c.header('X-Content-Type-Options', 'nosniff')
+    return c.body(new Uint8Array(png))
   })
 
   app.put('/api/thumb', async (c) => {
