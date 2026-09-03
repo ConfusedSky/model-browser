@@ -69,12 +69,31 @@ export interface Inflight {
   /** A listing standing in for a deferred meaning query: it renders, but it
    *  does not rename the view. */
   standIn?: true
+  /**
+   * The one follow-up a stale-marked listing asks for (`listing-tree-cache`
+   * §5.2). An ordinary request in every other respect — no new transport (the
+   * Hono app must run on Node unchanged, architecture D1) — and it lands
+   * through the same `accepts` guard, so a navigation started over it wins.
+   *
+   * What the flag buys is that it renders nothing of its own: `busy` skips it,
+   * so the cached listing already on screen stays there instead of being
+   * replaced by the skeleton for the length of the server's revalidation pass
+   * (~5.6s cold). "Present cached results immediately" is the requirement; a
+   * skeleton over them is the opposite of it.
+   */
+  followUp?: true
 }
 
 /** What landed. The semantic residue is optional because only a meaning answer has it. */
 export interface Landed {
   entries: DirEntry[]
   truncated?: boolean
+  /**
+   * The server answered from a cached tree it has not yet checked against the
+   * filesystem (`DirListing.stale`, `listing-tree-cache` §5.1). Absent means
+   * fresh-or-validated; it is never `false` on the wire.
+   */
+  stale?: boolean
   scope?: SemanticScope
   weak?: boolean
   capped?: boolean
@@ -107,6 +126,21 @@ export interface Result extends Landed {
   forView: View
   source: Source
   truncated: boolean
+  /** Normalised from the wire's `stale?: true` — the affordance reads it. */
+  stale: boolean
+  /**
+   * This answer IS the follow-up §5.2 asked for, which is the whole once-guard:
+   * a follow-up that comes back stale again — the pass failed, or the root is
+   * still unvalidated after the TTL window (design D5's corrections paragraph)
+   * — shows the affordance and asks nothing more. The next user-driven request
+   * tries again.
+   *
+   * It lives on the *answer* rather than in a ref because that is what keys it
+   * to a listing: a landing replaces the result wholesale (R5), so navigating
+   * away and back gets its own single follow-up, where a boolean held beside
+   * the state would have survived the navigation and suppressed it.
+   */
+  followUp?: true
   /**
    * The asking event this answers — `Inflight.id`, kept past the landing that
    * cleared the request. `accepts` can compare a *response* against the
@@ -218,6 +252,13 @@ export type Action =
    * what drops one that answers about a view the user has left.
    */
   | { type: 'listingPoses'; id: number; poses: Record<string, IndexPose> }
+  /**
+   * Ask the answer on screen again, because it said it was stale
+   * (`listing-tree-cache` §5.2). `id` is the answer it is for — `Result.id`,
+   * the `listingPoses` rule — so a dispatch about a listing the user has left
+   * does nothing.
+   */
+  | { type: 'revalidate'; id: number }
 
 export function initialState(view: View, index: IndexAvailability | null = null): SearchState {
   return {
@@ -250,10 +291,17 @@ export function liveView(state: SearchState): View {
 }
 
 /** Ask `view`, from `source`. The asked view and the assert view start equal;
- *  only fetchless patches part them. */
-function ask(state: SearchState, view: View, source: Source, standIn?: true): SearchState {
+ *  only fetchless patches part them. `kind` carries the two flags that say what
+ *  a request is *for* — a stand-in, a stale listing's follow-up — spread rather
+ *  than taken as positional booleans, which two of them would make unreadable. */
+function ask(
+  state: SearchState,
+  view: View,
+  source: Source,
+  kind?: { standIn?: true; followUp?: true },
+): SearchState {
   const id = state.lastId + 1
-  return { ...state, lastId: id, inflight: { asked: view, view, id, source, standIn } }
+  return { ...state, lastId: id, inflight: { asked: view, view, id, source, ...kind } }
 }
 
 /**
@@ -312,7 +360,7 @@ function defer(state: SearchState, view: View, source: Source, probed: boolean):
     inflight: null,
     failure: null,
   }
-  return probed ? ask(held, standInOf(view), source, true) : held
+  return probed ? ask(held, standInOf(view), source, { standIn: true }) : held
 }
 
 /** Whether the placeholder is already on screen — derived, not remembered
@@ -583,6 +631,13 @@ export function reducer(state: SearchState, action: Action): SearchState {
         id: f.id,
         entries: action.landed.entries,
         truncated: action.landed.truncated === true,
+        // Normalised here for the same reason `truncated` is: the wire omits
+        // the field rather than sending `false`, and the render reads a
+        // boolean. The follow-up marker comes off the REQUEST, not the answer —
+        // the server has no idea which of its answers is a second ask — and is
+        // what stops a stale follow-up asking a third time.
+        stale: action.landed.stale === true,
+        ...(f.followUp === true ? { followUp: true as const } : {}),
         scope: action.landed.scope,
         weak: action.landed.weak,
         capped: action.landed.capped,
@@ -630,7 +685,7 @@ export function reducer(state: SearchState, action: Action): SearchState {
       }
       // Cannot answer yet: stand in with the location's own contents, once.
       if (known.inflight !== null || stoodIn(known)) return known
-      return ask(known, standInOf(known.view), source, true)
+      return ask(known, standInOf(known.view), source, { standIn: true })
     }
 
     case 'modelOpen':
@@ -654,6 +709,29 @@ export function reducer(state: SearchState, action: Action): SearchState {
       // whole grid for a value that did not change.
       if (state.result === null || state.result.id !== action.id) return state
       return { ...state, listingPoses: action.poses }
+    }
+
+    case 'revalidate': {
+      const r = state.result
+      // The answer this is about must still be the one on screen, it must have
+      // said it was stale, and it must not itself be the follow-up — that last
+      // clause is the whole of "one follow-up per landed stale answer". Without
+      // it a server that keeps answering marked (a failed pass, a root still
+      // unvalidated past the TTL) would be asked forever.
+      if (r === null || r.id !== action.id || r.stale !== true || r.followUp === true) return state
+      // Never over a request the user is already waiting on. The effect that
+      // dispatches this runs after the landing commits, which is exactly when a
+      // click may have already asked for somewhere else — and re-asking the old
+      // view here would throw that navigation away.
+      if (state.inflight !== null) return state
+      // Asked as the answer on screen was asked, including its stand-in-ness:
+      // a placeholder listing under a deferred search is marked stale like any
+      // other, and re-asking it without the flag would let the follow-up's
+      // landing rename the view and silently end the deferral.
+      return ask(state, r.forView, r.source, {
+        followUp: true,
+        ...(stoodIn(state) ? { standIn: true as const } : {}),
+      })
     }
   }
 }

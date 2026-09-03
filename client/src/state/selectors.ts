@@ -35,10 +35,17 @@ export function dest(state: SearchState): string {
  * flight, so nothing was going to clear it, and the skeleton this drives
  * replaces the grid — the error, the banner and the way out all sat behind a
  * spinner that would never stop.
+ *
+ * A stale listing's follow-up (`listing-tree-cache` §5.2) is the one request
+ * that owes the user nothing: the answer it corrects is already on screen and
+ * stays there while it runs. Counting it would hand the skeleton the whole
+ * length of the server's revalidation pass — ~5.6s cold — and blank exactly the
+ * cached listing that feature exists to keep visible. The "refreshing"
+ * affordance in the results header says it is happening instead.
  */
 export function busy(state: SearchState): boolean {
   return (
-    state.inflight !== null ||
+    (state.inflight !== null && state.inflight.followUp !== true) ||
     (state.phase !== 'idle' && state.result === null && state.failure === null)
   )
 }

@@ -607,6 +607,14 @@ export default function App() {
   const labelModel = label.subject.kind === 'similar' ? label.subject.model : null
   const scope = state.result?.scope ?? null
   const truncated = state.result?.truncated === true
+  /**
+   * The answer on screen came from a tree the server had not checked against
+   * the filesystem yet (listing-tree-cache §5.1/§5.2). Read off the ANSWER like
+   * `truncated` beside it, never off what is in flight: the line belongs to the
+   * listing being shown, so it stays up when a follow-up comes back marked
+   * again and there is nothing further to ask.
+   */
+  const refreshing = state.result?.stale === true
   const entries = state.result?.entries ?? NO_ENTRIES
   /**
    * The index's orientations for the LISTING on screen — the answer's own
@@ -795,7 +803,13 @@ export default function App() {
     const want: string[] = []
     for (const found of previews.values()) {
       for (const e of found) {
-        if (e.kind !== 'model' || askedPreviewPoses.current.has(e.path)) continue
+        // A sheet cell whose entry arrived with its orientation is not asked
+        // about (listing-tree-cache §6.4): `carriedPoses` already feeds it to
+        // the sweep. Checked before the asked-set is marked, so the entry is
+        // simply never a question rather than a question recorded as answered.
+        if (e.kind !== 'model' || e.pose !== undefined || askedPreviewPoses.current.has(e.path)) {
+          continue
+        }
         askedPreviewPoses.current.add(e.path)
         want.push(e.path)
       }
@@ -813,18 +827,6 @@ export default function App() {
       () => {},
     )
   }, [previews, libraryState?.state, api])
-  /**
-   * What the thumbnail sweep reads: the listing's poses with the previews'
-   * folded in, landed answers winning a shared path. Identity discipline
-   * holds — with no preview poses this IS `listingPoses` (same reference), and
-   * when the merge does rebuild, the sweep compares each entry's pose by value
-   * (`ao-refreshes-thumbnails` 2.1), so an unchanged path re-evaluates nothing.
-   */
-  const poses = useMemo(
-    () =>
-      previewPoses === NO_POSES ? listingPoses : { ...previewPoses, ...listingPoses },
-    [listingPoses, previewPoses],
-  )
   // The anchor needs a thumbnail like any tile, so it goes to useThumbnails —
   // memoized because that effect reconciles its per-entry state against
   // `entries` on any identity change (D2), and a fresh array per render would
@@ -856,6 +858,46 @@ export default function App() {
     // has.
     return extra.length === 0 ? base : [...base, ...extra]
   }, [entries, anchor, previews])
+  /**
+   * The orientations the *listing itself* carried (listing-tree-cache §6.3):
+   * the server's pose layer already held them, so it attached them at emission
+   * and neither wave asks about them (§6.4).
+   *
+   * Read off `thumbEntries` rather than off `entries`, because that is the set
+   * the sweep draws — tiles, a similarity anchor, and the models inside folder
+   * contact sheets, all of which are annotated the same way by the same layer.
+   * One shape reaches the sweep either way: a pose is a pose whether the server
+   * volunteered it or a wave went and asked.
+   *
+   * `NO_POSES` when nothing carried one, which is every library whose server
+   * has no layer content — so the identity discipline below is untouched for
+   * them, and `poses` stays the very reference it was before this existed.
+   */
+  const carriedPoses = useMemo(() => {
+    let found: Record<string, IndexPose> | null = null
+    for (const e of thumbEntries) {
+      if (e.pose === undefined) continue
+      found ??= {}
+      found[e.path] = e.pose
+    }
+    return found ?? NO_POSES
+  }, [thumbEntries])
+  /**
+   * What the thumbnail sweep reads: the poses the listing carried, the
+   * previews' wave, and the listing's own wave — in that precedence, an asked
+   * answer winning a shared path over an emitted one. Identity discipline
+   * holds — with nothing carried and no preview poses this IS `listingPoses`
+   * (same reference), and when the merge does rebuild, the sweep compares each
+   * entry's pose by value (`ao-refreshes-thumbnails` 2.1), so an unchanged path
+   * re-evaluates nothing.
+   */
+  const poses = useMemo(
+    () =>
+      carriedPoses === NO_POSES && previewPoses === NO_POSES
+        ? listingPoses
+        : { ...carriedPoses, ...previewPoses, ...listingPoses },
+    [listingPoses, previewPoses, carriedPoses],
+  )
   // The subject a deferral is holding — a phrase or a model, and the banner
   // says a different sentence for each. Read off `view` rather than the answer,
   // like the projection: while a stand-in listing is on screen the *answer* is
@@ -1108,7 +1150,14 @@ export default function App() {
           },
           controller.signal,
         )
-        .then((res) => land({ entries: res.entries, truncated: res.truncated }), fail)
+        .then(
+          // `stale` rides the landing so the answer carries its own freshness
+          // (listing-tree-cache §5.1): the affordance and the one follow-up
+          // below both read it off the result, which is what keys them to a
+          // listing rather than to a moment.
+          (res) => land({ entries: res.entries, truncated: res.truncated, stale: res.stale }),
+          fail,
+        )
     }
     return () => controller.abort()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1160,7 +1209,18 @@ export default function App() {
     () =>
       waveEntries === null
         ? NO_PATHS
-        : waveEntries.filter((e) => e.kind === 'model').map((e) => e.path),
+        : waveEntries
+            // Only what the listing did NOT carry (listing-tree-cache §6.4).
+            // An entry the server's pose layer already knew about arrives with
+            // `pose` attached at emission, and `carriedPoses` above hands it
+            // straight to the sweep — asking again would spend a round trip to
+            // be told what the landing already said. Everything else about the
+            // wave is unchanged: background, chunked, silent on failure. A
+            // listing where the layer knew every model asks nothing at all,
+            // which is the shrink D7 describes; where it knew none, this is the
+            // set it always was.
+            .filter((e) => e.kind === 'model' && e.pose === undefined)
+            .map((e) => e.path),
     [waveEntries],
   )
   const libraryReady = libraryState?.state === 'ready'
@@ -1182,6 +1242,40 @@ export default function App() {
       () => {},
     )
   }, [waveId, wavePaths, libraryReady, api, dispatch])
+
+  /**
+   * The one follow-up a stale-marked listing asks for (listing-tree-cache
+   * §5.2, design D5).
+   *
+   * The server answered from a cached tree it has not checked yet; it is
+   * checking now, and the corrected listing is available from an ordinary
+   * second request. No new transport, because there is none to add — the Hono
+   * app must run on Node unchanged (architecture D1) — so this is `listDir`
+   * again, through the same fetch layer, landing through the same `accepts`
+   * guard. A navigation started in between simply wins.
+   *
+   * **Exactly once per landed stale answer**, and the dependency is what
+   * enforces it: `staleId` is the answering event's own id, so it changes only
+   * when a *different* answer lands. The reducer refuses a second one anyway
+   * (`revalidate`'s `followUp` clause), which is what keeps a server that goes
+   * on answering marked — a failed pass, a root still unvalidated past the
+   * revalidation TTL — from being asked in a loop. When the follow-up is itself
+   * stale the affordance stays up and nothing more is asked; the next request
+   * the user drives tries again.
+   *
+   * A failed follow-up is not retried either, and for the same reason: nothing
+   * about `staleId` changed, so this does not re-run. Silence is the right
+   * outcome — the listing on screen is the one the user asked for, and it is
+   * the server's own marker saying it may be behind.
+   */
+  const staleId =
+    state.result !== null && state.result.stale && state.result.followUp !== true
+      ? state.result.id
+      : null
+  useEffect(() => {
+    if (staleId === null) return
+    dispatch({ type: 'revalidate', id: staleId })
+  }, [staleId, dispatch])
 
   const navigate = useCallback(
     (path: string) => {
@@ -2233,7 +2327,7 @@ export default function App() {
    * the second a caveat about it, and giving them opposite ends stops a long
    * query pushing the caveat off screen.
    */
-  const noticeBar = (labelText: string, caveat: string, narrow = false) => (
+  const noticeBar = (labelText: string, caveat: string, narrow = false, stale = false) => (
     <div className="flex h-8 shrink-0 items-baseline justify-between gap-4 px-4 pt-3 text-xs">
       <div className="flex min-w-0 items-baseline gap-2">
         {/* The find control is otherwise Ctrl-F-or-nothing, which is invisible
@@ -2275,6 +2369,17 @@ export default function App() {
           >
             ✕ Dismiss
           </button>
+        )}
+        {/* The whole of §5.2's affordance: the cached listing is already
+            rendered beside it, and this says the server is checking that tree
+            against the disk. Deliberately not a panel, an overlay or a spinner
+            — it is the same weight as the caveat opposite, in the one region
+            that already carries what-is-true-about-this-listing.
+            Copy and placement are not frozen (the tune-then-freeze rule). */}
+        {stale && (
+          <p aria-live="polite" className="shrink-0 text-zinc-500">
+            Refreshing…
+          </p>
         )}
       </div>
       <p className="shrink-0 text-amber-400">{caveat}</p>
@@ -2581,7 +2686,7 @@ export default function App() {
                   )}
                 </p>
               )}
-              {noticeBar(resultsLabel, omittedNotice, entries.length > 0)}
+              {noticeBar(resultsLabel, omittedNotice, entries.length > 0, refreshing)}
               {/* The grid is replaced by a sentence only when there is nothing
                   left to show. A similarity view's subject is something: it
                   stays on screen above its own "nothing similar", which is the

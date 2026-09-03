@@ -197,7 +197,37 @@
       awaiting the in-flight pass and never starting one (`expected true to be false`,
       and the wire cell's `expected undefined to be defined` — it polls to convergence
       rather than assuming a timing)
-- [ ] 5.2 Client: present cached results immediately with a "refreshing" affordance, and reconcile the corrected listing when it arrives — no new transport (the Hono app must run on Node unchanged, architecture D1), so the client issues an ordinary follow-up request on seeing the marker; the existing latest-wins guard and skeleton already cover a later response landing
+- [x] 5.2 Client: present cached results immediately with a "refreshing" affordance, and reconcile the corrected listing when it arrives — no new transport (the Hono app must run on Node unchanged, architecture D1), so the client issues an ordinary follow-up request on seeing the marker; the existing latest-wins guard and skeleton already cover a later response landing
+      — landed 2026-09-02. `stale` rides the landing (`Landed`/`Result` in
+      `state/reducer.ts`, normalised to a boolean the way `truncated` is), and two flags
+      carry the follow-up: `Inflight.followUp` on the request, stamped onto `Result.followUp`
+      at landing. The follow-up is an ordinary `listDir` through the existing fetch effect,
+      so `accepts` and the effect's abort handle a superseded one with no new machinery.
+      **One correction to this task's own last clause**: the skeleton does *not* already
+      cover it — `busy` counts any `inflight`, so a follow-up would have blanked the grid
+      after `SKELETON_DELAY_MS` for the length of the ~5.6 s revalidation pass, which is the
+      inverse of "present cached results immediately". `busy` now skips a `followUp`
+      request; that is the only pre-existing selector touched and nothing else can set the
+      flag. The once-guard is `Result.followUp`, read by App's `staleId` — the ANSWER's
+      identity, not a boolean beside the state, so navigating away and back gets its own
+      single follow-up (cell). `revalidate` also refuses while anything is in flight, so the
+      effect firing just as the user clicks cannot overwrite that navigation, and it carries
+      `standIn` through, or a stale placeholder listing's follow-up would rename the view and
+      end the deferral. A failed follow-up is not retried: `staleId` did not change.
+      Falsified: no dispatch → 5 cells, `expected 1 to be 2`; `busy` counting it →
+      `expected <div …(1)></div> to be null` (the skeleton, over the grid it is meant to
+      keep); the affordance unwired → 4 cells, `expected undefined to be 'Refreshing…'`;
+      **both halves of the once-guard removed → `expected 7 to be 2` and a second cell
+      hitting `Test timed out in 5000ms`** — a real runaway, since each answer re-asks in a
+      microtask and starves the timer. Recorded: either half alone still stops the loop (the
+      reducer refuses, or `staleId` never moves), so the guard is deliberately doubled
+- [ ] 5.2a Judge the affordance's pixels, then freeze (the tune-then-freeze rule; the code
+      above is landed and tested, the copy and placement are not). Today it is a small
+      `Refreshing…` in the results-header notice bar, beside the label and opposite the
+      truncation caveat — no panel, no spinner, `aria-live="polite"`. Open questions for the
+      eye: whether it belongs on the caveat's side instead, and whether it should read
+      differently when the follow-up has come back marked again and nothing further is being
+      asked (it stays up in that state deliberately — the server's pass is still running)
 
 ## 6. Derived layers and explicit freshness (added 2026-09-02 — see design D7–D9; build after §4, the layers hang off the snapshot and its revalidation)
 
@@ -291,9 +321,24 @@
       additive fields and still compares serialised key order. Falsified as asked by
       un-stripping `pose`: all three fail on the annotation, not the selection
       (`expected '[{"name":"a.stl","path":"/mixed/a.stl…' to be '…'`)
-- [ ] 6.4 Client: the pose wave asks only for entries whose listing carried no pose
+- [x] 6.4 Client: the pose wave asks only for entries whose listing carried no pose
       (`semanticPosesFor` callers in `App`); everything else about the wave — background,
       chunked, silent-failure — unchanged
+      — landed 2026-09-02. **Both** `semanticPosesFor` call sites narrow: the listing
+      wave's `wavePaths` memo (`e.kind === 'model' && e.pose === undefined`) and the
+      previews' wave, which skips a carried entry *before* marking it asked, so it is never
+      a question rather than a question recorded as answered. Nothing else about either
+      moved. The other half is `carriedPoses`, a memo over `thumbEntries` — tiles, the
+      similarity anchor and sheet cells, all annotated by the same layer — folded into the
+      `poses` memo at LOWEST precedence, so an asked answer still wins a shared path.
+      Identity discipline is preserved on purpose: with nothing carried the memo returns the
+      `NO_POSES` constant and `poses` is the very reference it was before, so no library
+      whose server has no layer content pays the sweep's reconcile walk for this
+      (`ao-refreshes-thumbnails` 2.1). The `poses` memo moved below `thumbEntries` to read
+      it; nothing between the two positions used it. Falsified: the filter dropped → 3
+      cells, `expected "spy" to be called with arguments: [ [ '/models/quiet.stl' ] ]` and
+      `expected "spy" to not be called at all, but actually been called 1 times`; the merge
+      dropped → `expected undefined to deeply equal { up: [ +0, 1, +0 ], …(4) }`
 - [x] 6.5 Startup revalidation (D8): when the library resolves ready and a snapshot
       exists, start the incremental pass; no snapshot → nothing at startup. Reuses the
       library-ready hook `library-overrides`' eager store load established in `index.ts`
@@ -450,7 +495,25 @@
       suite's existing `node:fs/promises` mock grew a one-shot `onRename` hook for it;
       without an interposition, "a `set` during the write is not lost" has no falsification
       at all and would have looked like coverage
-- [ ] 7.2 Client: a stale-marked listing renders immediately with the refreshing affordance and reconciles on the follow-up; an unmarked listing shows no affordance; a superseded reconciliation is discarded by latest-wins
+- [x] 7.2 Client: a stale-marked listing renders immediately with the refreshing affordance and reconciles on the follow-up; an unmarked listing shows no affordance; a superseded reconciliation is discarded by latest-wins
+      — landed 2026-09-02 as `client/test/listingRefresh.test.tsx`, 9 cells (6 here, 3 for
+      §6.4 below). All three this line names are there, plus the two the review of §5.1's
+      wording made necessary: the **one-follow-up** cell (a stale→stale sequence, counting
+      requests) and a **no-skeleton** cell, since the follow-up's whole point is that the
+      cached grid stays visible. The stale fixtures are additive on the harness's shared
+      `listDir` — every one of the 668 pre-existing client cells passes untouched (677
+      after).
+      Two findings worth inheriting. **The loop cell's mock has a floor** — marked for six
+      answers, then unmarked — and the floor is the mock's, not the client's: an unguarded
+      client re-asks in a microtask chain that starves the macrotask timer, so the
+      falsification arrives as `Test timed out in 5000ms` rather than as a diff. The floor
+      turns it into `expected 7 to be 2`, which says what went wrong. And **"the carried
+      pose reached the sweep" is not observable through a render at mount**: the thumbnail
+      pipeline reaches `fetchModel` and stops short of `renderThumbnail` in this
+      environment, and it does so identically for a pose delivered by the *wave* — verified
+      by driving the control, so it is a property of the app-mount harness and not of this
+      change. The cell reads `poses[viewer.entry.path]` at the viewer handoff instead, which
+      is the one place a carried pose and a wave-supplied one could differ and do not
 - [ ] 7.3 Layers (server): an index-generation bump stops pose/preview answers while the
       tree keeps serving; a deep directory change re-derives its ancestors' preview
       choices and not an unchanged sibling's; emission with a wedged index is as fast as
@@ -480,6 +543,18 @@
       **by reference on purpose** — a small record nothing here writes to, against one
       copy per model per listing on a 500-tile grid — which is stated at `poseFor` rather
       than covered by a cell that could not fail.
+      <br>**Client half, 2026-09-02.** *The wave requests only unposed entries* is landed —
+      three cells in `client/test/listingRefresh.test.tsx` (the narrowed ask; a listing
+      whose models all carry poses asking nothing at all; and the carried pose reaching the
+      same consumer a wave-supplied one does, which is what makes not-asking safe rather
+      than merely cheaper). Falsification texts are on §6.4.
+      *A reload surfaces an external change without restart* is **not** landed here, and is
+      not blocked so much as relocated: the reload cell travels with the affordance, whose
+      recorded home is `bulk-thumbnail-jobs`' library tab (its design D6, which names that
+      tab "the natural later home for listing-tree-cache's reload affordance (its 6.6)").
+      The endpoint and its server cells are landed here; the surface and its cell land
+      there. 6.6's "client affordance minimal" half-clause should have cited D6 and did not
+      — that is the line to read alongside this one.
 
 ## 8. Verification
 
