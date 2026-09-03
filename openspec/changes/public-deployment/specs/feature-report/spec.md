@@ -55,8 +55,11 @@ wrong". Refusals SHALL NOT depend on any client having read the report.
 
 ### Requirement: A deployment may declare its host none of the viewer's business
 Where a deployment declares that the machine it runs on is not the viewer's concern, no
-route and no surface SHALL name a filesystem location or offer a remedy only an operator
-can perform. This SHALL hold wherever such a detail is composed today — the library's
+route and no surface SHALL name **a location on the machine the server runs on** — its
+filesystem paths, its configuration and cache directories, and those of any service it
+talks to — or offer a remedy only an operator can perform. Library paths are not such
+locations and are unaffected: the `library` capability already draws that distinction, and
+a library path names an entry within the library rather than a place on anyone's disk. This SHALL hold wherever such a detail is composed today — the library's
 top, the locations named by a not-ready library state, any explanation an external
 service supplies verbatim, and any instruction to start, mount or re-run something on
 the host — because each of them describes a machine the viewer cannot reach and directs
@@ -64,9 +67,17 @@ them to a repair that is not theirs. The declaration SHALL default to the host b
 viewer's concern, since on a personal installation the viewer is the operator and these
 details are exactly what makes the app useful.
 
-#### Scenario: No filesystem location reaches a viewer
+#### Scenario: No host location reaches a viewer
 - **WHEN** any route answers on a deployment declaring this
-- **THEN** no filesystem location appears in what it returns
+- **THEN** nothing in what it returns names the library's top, the configured root, an enclosed library's location, or a directory belonging to the server or to a service it talks to
+
+#### Scenario: Library paths are untouched
+- **WHEN** a route answers with library paths, archive virtual paths, or an error naming a library path
+- **THEN** they are unchanged, since a library path names an entry rather than a place on the host
+
+#### Scenario: A service's own words are not a way around it
+- **WHEN** an external service supplies explanatory text and the deployment declares this
+- **THEN** that text does not reach the client, rather than being withheld from one surface while another route still returns it
 
 #### Scenario: No operator remedy is offered
 - **WHEN** a condition arises whose repair is an operator's — a service to start, a volume to mount, a tool to re-run

@@ -10,15 +10,15 @@ The root SHALL be read from the `MODEL_BROWSER_ROOT` environment variable, else 
 - **THEN** it serves, reports `unconfigured`, and the UI says a root must be set instead of showing an empty grid
 
 #### Scenario: The volume is not mounted
-- **WHEN** the configured root does not exist when a listing is requested
+- **WHEN** the configured root does not exist when a listing is requested, on a deployment where the host is the viewer's concern
 - **THEN** the response reports `missing` with the configured root, and the UI shows that the library at that location is not present
 
 #### Scenario: The volume is unplugged mid-session
-- **WHEN** the library was serving and its top stops being present under the running server
+- **WHEN** the library was serving and its top stops being present under the running server, on a deployment where the host is the viewer's concern
 - **THEN** every path route reports `missing` with the configured root, rather than reporting that each path in it is not found; and when the same tree returns at the same location it is the same library again, with its identifier and its cache intact
 
 #### Scenario: A root above an existing library
-- **WHEN** the configured root has no marker at or above it but encloses one within reach of a bounded search below it
+- **WHEN** the configured root has no marker at or above it but encloses one within reach of a bounded search below it, on a deployment where the host is the viewer's concern
 - **THEN** the root is refused as `nested`, naming that library's location; no marker is written; and nothing is served until the root is repointed at it or inside it
 
 #### Scenario: A read-only library
@@ -57,7 +57,7 @@ Every path the server accepts or emits — listings, file bytes, thumbnails, cam
 - **THEN** every listing, thumbnail, camera state and deep link that worked before resolves unchanged
 
 #### Scenario: A copied path is a filesystem path
-- **WHEN** the user copies an entry's path, or reads it in the lightbox's file details
+- **WHEN** the user copies an entry's path, or reads it in the lightbox's file details, on a deployment where the host is the viewer's concern
 - **THEN** the text is the entry's filesystem path — the library's top joined to its library path, with `!/` kept for archive entries — which another program can open
 
 #### Scenario: A filesystem path is refused

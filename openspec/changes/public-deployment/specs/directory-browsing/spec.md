@@ -9,7 +9,9 @@ Which origin *is* the app's own SHALL come from the deployment's configuration
 (see `public-deployment`), and SHALL default to loopback: requests carrying an `Origin`
 header that is not an allowed origin SHALL be refused, requests whose `Host` header is
 not an allowed host SHALL be refused, and CORS headers SHALL never be emitted. The
-listening address SHALL likewise be configured and SHALL default to loopback. Binding
+listening address SHALL likewise be configured and SHALL default to loopback. Loopback
+SHALL remain allowed whatever else is configured, so that a health check or an operator's
+own request from the machine itself is not refused by the deployment it is checking. Binding
 alone is NOT sufficient, since on a loopback deployment any page open in the user's
 browser can reach a localhost port, and on a public deployment any client anywhere can
 reach the address at all. A deployment that answers a public origin SHALL therefore
@@ -42,3 +44,7 @@ trusted user. Because no-cors subresource embeds (`<img src>`, `<script src>`) c
 #### Scenario: A public deployment answers its own origin and no other
 - **WHEN** a deployment configures a public origin and a request arrives from a different public origin
 - **THEN** the request is refused, and a request from the configured origin is served
+
+#### Scenario: The machine can always ask itself
+- **WHEN** a request arrives from loopback on a deployment that has configured a public origin
+- **THEN** it is served, so a health check against the bound port is not refused

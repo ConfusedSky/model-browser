@@ -38,5 +38,9 @@ The UI SHALL show a collapsible panel on the right edge hosting **tabs**: a sear
 - **THEN** it opens on the search tab, and its recorded value is not rewritten
 
 #### Scenario: Offered where declared
-- **WHEN** a deployment declares the chat tab offered
+- **WHEN** a deployment declares the chat tab offered and the report is known
 - **THEN** the panel behaves exactly as it did before this capability was declarable, including which tab a profile opens on
+
+#### Scenario: Before the report arrives
+- **WHEN** the report has not yet resolved
+- **THEN** the chat tab is withheld as any gated surface is, so a profile that recorded it opens on the search tab until the report says the tab is offered

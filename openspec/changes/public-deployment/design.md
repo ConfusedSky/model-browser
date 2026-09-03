@@ -96,6 +96,15 @@ one. The volume-mounted-later behaviour, the only one anything relies on, is unt
 the configuration gets exactly one moment at which it can be found malformed; and the
 code comes to match what both D4 and CLAUDE.md already claimed.
 
+Two loose ends the wording must not leave (found in verification). `refresh()` has no
+caller outside `library.ts` today, so "gains an explicit re-read" is a seam with no
+consumer — it stays a seam, named for Electron, not built speculatively. And a re-read of a
+file that has become malformed since start cannot mean "fail to start", since the server is
+already running: it keeps what it read at start and reports, which is the only answer that
+does not turn an editing slip into an outage. Note also that `compute`'s missing-to-ready
+recovery calls `evaluate` on a library that *was* ready, so the rule is "re-evaluation
+re-asks the filesystem", not "re-evaluation happens only while not ready".
+
 Alternatives: keep the re-read and load only the deployment keys once (rejected — it
 needs a rule for what a mid-flight malformed file means, and no answer is good, since the
 origin was baked at start regardless); load everything once with no filesystem
@@ -147,10 +156,12 @@ capability forbids by construction. Four fields whose consumers exist today: thu
 writes, the launcher, the chat tab, and whether index operation is the viewer's concern.
 
 The fifth field — the bulk-job surfaces — is deliberately absent. Its consumer does not
-exist until `bulk-thumbnail-jobs` lands, and that change's design already declares the gating
-seam without building it — the demo's hiding of those surfaces is named there as the
-feature report's business, declared only as a seam. Whichever of the two lands second
-adds one field and one gate.
+exist until `bulk-thumbnail-jobs` lands, and that change's design already says "The seam is
+declared in the delta so 1.3 can gate without modifying this capability." Whichever of the
+two lands second adds one field and one gate. (The first review round called this
+quotation non-verbatim and it was paraphrased away; the verification round found it
+verbatim in that change's Risks, so it is restored — a reminder that a reviewer's citation
+check is itself a citation.)
 
 **The defaults are the maintained configuration**, not a pile of initial values, and
 their audience is the eventual Electron distribution (D1's seam). The chat tab's default
@@ -272,9 +283,19 @@ remedies is worse than useless — it also describes the operator's machine to a
 What does **not** collapse: *warming*, because a container's boot is a real wait and
 "come back in a moment" is honest; and *outside the collection*, because that is a fact
 about where the viewer is browsing, which they can act on. And the server keeps every
-distinction internally — the operator's own diagnosis depends on them. Only the sentence
-the viewer reads collapses, which puts this change in `SidePanel`'s state description and
-nowhere near `semantic.ts`.
+distinction internally — the operator's own diagnosis depends on them. What the viewer *reads* collapses in `SidePanel`'s state
+description.
+
+**But the collapse is not only a client concern, and the first draft of this decision said
+it was** (found in the verification round). `indexStatus` composes `detail` from the
+index's own `failure.reason` and `hint` — mini-classify's free text, able to name its cache
+directory — and that string leaves the server on three routes: `/api/semantic/status`
+answers the status object wholesale, and both `POST /api/semantic` and
+`/api/semantic/similar` put it in their 503. A client-side collapse leaves `curl` returning
+what the sentence was rewritten to hide, which is the very argument D5 makes against
+client-side gating. So under the host field the routes withhold `detail`; the server keeps
+composing and logging it, because the operator's diagnosis depends on it. `semantic.ts`'s
+own reasoning is untouched — what changes is what the routes put on the wire.
 
 ### D10: The shipped deployment's configuration is committed and tested
 
@@ -311,10 +332,12 @@ context-menu change, and the top is withheld **only where the deployment declare
 copy-path keeps yielding a filesystem path everywhere else, which is what makes it useful.
 
 That makes five fields, not four. It sits slightly against the "one field per surface"
-rule, since this one governs several surfaces; it earns its place because those surfaces
-share one question, and splitting it would let a deployment withhold index states while
-leaking `top`, which is incoherent rather than merely odd. Flagged in Open Questions in
-case the rule should win instead.
+rule, since this one governs several surfaces. **Kept whole (Masa, 2026-09-03), and that
+is the settled answer, not a lean:** those surfaces share one question, and splitting it
+would let a deployment withhold index states while leaking `top` — incoherent rather than
+merely odd. The rule the fifth field refines: a field is per *question a deployment
+answers*, not per widget; the four others are one-to-one with a surface only because each
+of them happens to be one question too.
 
 ## Risks / Trade-offs
 
@@ -340,6 +363,12 @@ case the rule should win instead.
   written: `snapshots` was appended to `createApp` after its signature was read, and
   `native-context-menu-bypass` appeared mid-draft. Re-read every cited symbol immediately
   before implementing rather than trusting this document's account of it.
+- [`POST /api/reload` is reachable by anyone] → Added by `listing-tree-cache` after this
+  change's routes were first enumerated, and gated by nothing: it drops every cached layer
+  and revalidates each snapshot root. Reloading a server's caches is an operator's act on
+  the operator's machine, so it refuses under the host field — the same field that stops
+  the app describing that machine. Named here because a route added by another change in
+  flight is exactly what a fixed list of routes misses.
 - [A viewer drives the expensive routes directly] → The guard admits requests with no
   `Origin` by design (curl, same-origin GETs), so a script reaches anything a capability
   does not refuse. `POST /api/semantic` and a flat `GET /api/dir` — whose walk budget runs
@@ -366,8 +395,8 @@ case the rule should win instead.
 
 ## Open Questions
 
-- **Field names.** The four want names that read as capabilities, not as modes.
-  `thumbWrites` exists; the other three are unnamed. Not blocking implementation, but
+- **Field names.** The five want names that read as capabilities, not as modes.
+  `thumbWrites` exists; the other four are unnamed. Not blocking implementation, but
   worth settling before the type is exported, since renaming a published field later
   costs a compatibility note.
 - **Where the shipped deployment's `config.json` lives in the repo** (D10), and how the
@@ -381,7 +410,4 @@ case the rule should win instead.
   misconfigure. The health-check point in D8 settles half of it — loopback is always in
   the allowed set — so what remains is whether a deployment may name more than one public
   origin. Leaning single-plus-loopback.
-- **Whether the host capability should be split** (D11). It governs several surfaces
-  where every other field governs one. Kept whole because those surfaces share one
-  question; splitting it would let a deployment withhold index states while leaking the
-  library's top.
+

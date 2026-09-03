@@ -67,9 +67,21 @@
       result: `report()` execs `xdg-mime` per handled type and reads the machine's
       application entries, so filtering afterwards still spawns and still reads (D5)
 - [ ] 3.6 Where the host is declared not the viewer's concern (D11): `/api/library` omits
-      `top`, and the `missing`/`nested` envelopes in `createApp`'s gate middleware name no
-      filesystem location while still naming the state. `top` becomes optional in
+      `top` and the locations its `missing`/`nested` states carry, and the `missing`/
+      `nested` envelopes in `createApp`'s gate middleware name no host location while
+      still naming the state. `top` becomes optional in
       `LibraryState`, so every client read of it is a compile error until handled
+
+- [ ] 3.7 Under the host field, the routes withhold the index's `detail`:
+      `/api/semantic/status` answers the status object without it, and the 503s from
+      `POST /api/semantic` and `/api/semantic/similar` omit it. It is mini-classify's free
+      text and can name its cache directory, and a client-side collapse leaves `curl`
+      returning what the sentence was rewritten to hide (D9). The server keeps composing
+      and logging it — the operator's diagnosis depends on it
+- [ ] 3.8 `POST /api/reload` refuses under the host field (D11 risks): it drops every
+      cached layer and revalidates each snapshot root, which is an operator's act on the
+      operator's machine. Added by `listing-tree-cache` after this change first enumerated
+      the routes — re-enumerate before implementing rather than trusting this list
 
 ## 4. Client consumers
 
@@ -90,11 +102,8 @@
       one, and does not rewrite the recorded value (D7)
 - [ ] 4.4 `SidePanel`'s index-state description collapses the operator-repairable
       conditions into one unavailability where the deployment declares index operation
-      not the viewer's concern; `warming` and outside-the-collection stay distinct, and
-      `semantic.ts` is untouched (D9). The index's own `detail` is **withheld** in the
-      collapsed states — it is rendered beside the sentence today and is mini-classify's
-      free text, able to name its cache directory, so leaving it restores what the
-      collapse removed
+      not the viewer's concern; `warming` and outside-the-collection stay distinct (D9).
+      `indexStatus`'s reasoning is untouched — what changes is what reaches the client
 - [ ] 4.5 The find-similar copy for an unembedded model stops telling the viewer to run
       the classifier where the host is not their concern (D11) — the notes flagged this
       copy as needing a visitor-facing form
@@ -107,7 +116,7 @@
       neither is answered with the client's entry document so a cold deep link resolves,
       and a server with no built client serves its API exactly as before
 - [ ] 5.2 `/api/` is reserved: a 404 under it is final and never falls through to the
-      entry document (D8)
+      entry document (D8), as the delta now requires
 - [ ] 5.3 Cache headers (D8): the hashed bundle assets `immutable` with a long max-age,
       the entry document `no-cache`. The trip-reduction thread names static-bundle caching
       as this change's concern, and the first draft dropped it
@@ -134,15 +143,20 @@
       (assert no command runs, not merely that the body is empty); `/api/open` and
       `/api/open-with` refuse and spawn nothing
 - [ ] 7.4a Server: with the host declared not the viewer's concern, no response from any
-      route contains a filesystem location — `/api/library` in every state, the not-ready
-      envelopes, and an error path. Assert over the response bodies rather than per field,
-      so a future field cannot reintroduce the leak silently
+      route contains a location on the host — assert the absence of the specific strings
+      (the real library top, the configured root, an enclosed library's location, the
+      config and cache directories, the index's cache directory), not of anything
+      path-shaped: library paths, archive virtual paths and errors naming them are
+      unaffected and must still be asserted *present*. Cover `/api/library` in every
+      state, the not-ready envelopes, `/api/semantic/status`, both semantic 503s, and an
+      error path
 - [ ] 7.5 Client: with writes declared off, an orbit release stores locally and sends
       nothing, a read prefers the local orientation, and one browser's framing does not
       reach another; with the report unknown or failed, writes still go to the server
 - [ ] 7.6 Client: a profile with no recorded tab, and one recording `chat`, both open on
       search when the chat tab is withheld, and neither has its recorded value rewritten;
-      with chat declared on, the panel behaves exactly as today
+      with chat declared on **and the report known**, the panel behaves exactly as today;
+      while the report is in flight the tab is withheld like any gated surface
 - [ ] 7.7 Client: the collapsed index states say one thing for the three operator-only
       conditions, while `warming` and outside-the-collection still say their own; `detail`
       is absent in the collapsed states and still preferred in the uncollapsed ones
@@ -161,8 +175,10 @@
       refuses another; thumbnail writes, launches and the chooser are refused; the built
       client is served and a cold deep link resolves
 - [ ] 8.4 Update `CLAUDE.md`'s `config.json` bullet — the new keys, fail-loud, and
-      `MODEL_BROWSER_ROOT` no longer suppressing the file. Its present claim that "no
-      route re-reads the file" is **false today** and becomes true only with 1.2a
+      `MODEL_BROWSER_ROOT` no longer suppressing the file. The read-once half is already
+      corrected there (`5dd6096` replaced the false "no route re-reads the file" with what
+      the code actually does and a pointer to 1.2a); once 1.2a lands, that passage
+      collapses back to the simple claim
 - [ ] 8.5 Update `docs/platform-surface.md`'s user-dirs bullet, which names `config.json`
       as holding the library root — the house rule is that a change extending a
       `~/.config` file extends that bullet as part of the change

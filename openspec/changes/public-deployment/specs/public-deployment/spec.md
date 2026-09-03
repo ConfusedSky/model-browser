@@ -69,7 +69,13 @@ The server SHALL be able to serve the built client application alongside its API
 that a deployment is one process rather than requiring a separate static host, and so
 that the client and the API share an origin. Requests that do not name an API route
 SHALL be answered from the built client, with a request for no particular document
-answered by the client's entry document so that a deep link opened directly resolves.
+answered by the client's entry document so that a deep link opened directly resolves. The
+API's own prefix SHALL be reserved: a request under it that names no route SHALL answer as
+a missing route and SHALL NOT fall through to the entry document, so that a client's bad
+request is never answered with a page and a success status. Because the built client is
+content-hashed, its assets SHALL be served as immutable for a long lifetime while its
+entry document SHALL NOT be cached, so that a visitor far from the server fetches each
+asset once and still sees a new deployment on their next visit.
 Serving the built client SHALL NOT be required: a server started without one SHALL
 continue to answer its API.
 
@@ -80,6 +86,14 @@ continue to answer its API.
 #### Scenario: A deep link opened cold
 - **WHEN** a URL naming a path inside the app is opened directly
 - **THEN** the client's entry document is served and the client resolves the location itself
+
+#### Scenario: A bad API request is not answered with a page
+- **WHEN** a request names no route under the API's prefix
+- **THEN** it is answered as a missing route rather than with the client's entry document
+
+#### Scenario: The bundle is fetched once
+- **WHEN** a visitor returns to a deployment whose build has not changed
+- **THEN** the hashed assets are served from their own cache without being re-fetched, while the entry document is revalidated so a new build is picked up
 
 #### Scenario: No built client present
 - **WHEN** the server runs with no built client available
