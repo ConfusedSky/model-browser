@@ -351,6 +351,28 @@ describe('the preview layer and its ancestors (§6.1, §7.3)', () => {
     }
   }
 
+  it('a sheet carried on the listing has cells annotated as the models beside its folder are', async () => {
+    // `thumbnail-image-serving` D2, second review: the layer copies previews
+    // out and the copy strips `thumb`, so a revisit — where the sheet rides
+    // the listing rather than a peek — cost a lookup per cell that the first
+    // visit never did. The cells are annotated at emission like every other
+    // model entry.
+    const f = await fixture('ly-sheet-thumb')
+    const s = serverFor(f)
+    await listFlat(s)
+    const cell: DirEntry = { name: 'bracket.stl', path: `${ROOT}/a/bracket.stl`, kind: 'model', size: 1, mtime: 2 }
+    s.listings.layers.recordPreview(f.top, `${ROOT}/a`, 4, [cell])
+    const gen = await s.cache.put(cell.path, { mtime: 2, png: Buffer.from('px'), lighting: 'camera', rig: 1 })
+
+    const sheet = entryFor(await listDir(s, ROOT), 'a').preview
+    expect(sheet).toHaveLength(1)
+    expect(sheet![0]!.thumb?.gen).toBe(gen)
+    expect(sheet![0]!.thumb?.ao?.state).toBe('hit')
+    // The layer's own record is untouched by the annotation: a later emission
+    // derives `state` afresh rather than reading a stored verdict.
+    expect(s.listings.layers.previewFor(`${ROOT}/a`, 4)![0]!.thumb).toBeUndefined()
+  })
+
   it('re-derives the changed directory and every ancestor, and no unchanged sibling', async () => {
     const f = await fixture('ly-ancestors')
     const listings = new ListingCache(f.store)

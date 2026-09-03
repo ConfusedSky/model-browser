@@ -313,7 +313,16 @@ export function createApp(
         // The sheet a tile draws by default. A tile asking for more cells still
         // asks `/api/peek`, which is the only place a wider sheet is derived.
         const preview = layers.previewFor(entry.path, PEEK_DEFAULT)
-        if (preview !== undefined) entry.preview = preview
+        if (preview !== undefined) {
+          // The cells are model tiles too, and carry what the caches know
+          // exactly as the models beside their folder do — or a revisit,
+          // where the sheet rides the listing, would cost a lookup per cell
+          // that the first visit's peek never did (`thumbnail-image-serving`
+          // D2, second review). Safe in place: `previewFor` copies out, and
+          // the copy strips whatever annotation the layer's own record held.
+          annotate(preview)
+          entry.preview = preview
+        }
       }
     }
   }
