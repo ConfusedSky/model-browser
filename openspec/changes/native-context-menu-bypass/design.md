@@ -205,6 +205,17 @@ press-without-drag simply ends, since opening the lightbox is exactly what
 the scenario forbids. The overlay then stands as after any release, and the
 persist hold applies as it does after any release.
 
+`endGesture` lives in the component body and is reached by both callers
+through a ref (`endGestureRef`), not directly. The implementation review
+(D9 R1) measured why: the window listeners are installed once — the effect
+runs on `tracker`, which App holds for its lifetime — so a direct call from
+`onUp` kept the *mount render's* function, whose `onPersist` closed over the
+mount render's `viewer`. A viewer swapped in during a held dismissal (the
+path `orbitHandoff.test.tsx`'s "replaced during a hold" cell exercises) then
+had its pixels persisted under the old tile's path. Pre-existing, but the
+bypass — re-created per render — was the first caller to see the props in
+force, which made the two paths disagree. The ref closes both.
+
 What happens to that overlay under the browser's menu is the browser's:
 if Chrome delivers `pointerleave` when its menu opens, `dismissAfterPersist`
 runs and the overlay goes as it would on any leave. Observed in 4.2, not
@@ -220,11 +231,17 @@ surface where the gesture silently does nothing; worse than ending cleanly.
 Both `secondaryPress` helpers dispatch `pointerdown` with `button: 2` and
 then a `contextmenu` with **no button** — happy-dom defaults it to `0`, so
 D2's predicate would never fire in a cell. Both helpers gain `button: 2` on
-the `contextmenu` (which is what Chrome sends) and a `shift` option; the
-viewer helper also dispatches the `pointerup` (`button: 2`) so D5's release
-path is exercised. `entryMenu.test.tsx`'s helper returns whether the app
-took the event, the `!dispatchEvent(...)` reading `viewerMenu.test.tsx`'s
-already has.
+the `contextmenu` (which is what Chrome sends), a `shift` option, and the
+`pointerup` (`button: 2`, on window) so D5's release path is exercised.
+`entryMenu.test.tsx`'s helper returns whether the app took the event, the
+`!dispatchEvent(...)` reading `viewerMenu.test.tsx`'s already has.
+
+The added release silently strengthens one *pre-existing* cell: with
+`onUp`'s button guard removed, `viewerMenu.test.tsx`'s "a secondary press on
+the orbiting model raises the tile's whole menu" now fails beside the new
+release-guard cell, because its press ends in a secondary release that used
+to be invisible. Recorded (D9 R6) so a later edit to the helper is not taken
+as free.
 
 ### D8: Review findings, 2026-09-02 (opus), and their disposition
 
@@ -244,6 +261,20 @@ already has.
 | F12 | "App's one entry point" — there are two callbacks | **Fixed** (Context) |
 | F13 | The Why's "Save image as…" holds only on tiles; grid-only was the simpler scope | **Declined on scope** (Masa: every surface, for Inspect and extension items); the Why now says which items each surface yields |
 | F14 | 4.2 records Chrome but Firefox cannot exercise the app path | **Adopted**: 4.2 gains the Firefox line |
+
+### D9: Implementation review, 2026-09-02 (opus, on `d84a59b`), and its disposition
+
+| # | Finding | Disposition |
+|---|---|---|
+| R1 | `onUp` (installed once) held the mount render's `endGesture` while the bypass called the current one — non-uniform staleness, and a measured pre-existing wrong-entry persist after a viewer swap during a hold | **Adopted** (D6): `endGestureRef`, both callers read it; a cell in `orbitHandoff.test.tsx` pins the fresh `onPersist` |
+| R2 | The spec's carried "no thumbnail work is started" clause contradicted "settled and kept" for an ended drag | **Fixed**: the clause carries the exception |
+| R3 | "Settled and kept" over-claimed for a press before the drag threshold | **Fixed**: "where one was moved" |
+| R4 | Code took a boolean where D6 and the tasks specified `{ promote }` | **Fixed** in code: the object, as specified |
+| R5 | Task 1.3 was ticked against a placement it did not take | **Fixed**: the line records the body-plus-ref placement |
+| R6 | The viewer helper's added release strengthened an old cell unrecorded; the grid helper sent no release | **Adopted**: D7 records it; the grid helper sends the release too |
+| R7 | Task 4.1 read as if every `pointerup` in the suite were now explicit | **Fixed**: the line says one cell |
+| R8 | Do not archive with 4.2b open | 4.2b done — Firefox verified by Masa, 2026-09-02 |
+| R9 | `dismissAfterPersist` can run twice for one gesture (outside-rect branch, then `onPointerLeave`) — pre-existing, unchanged | **Noted**, not this change's. After R1 both callers reach the current closure, so a repeat `onDismiss` reads the already-closed state rather than a stale viewer; whether App's `closeViewer` is harmless twice (it re-dispatches `modelClose` and re-patches the URL) is not verified here and no cell is added |
 
 ## Risks / Trade-offs
 

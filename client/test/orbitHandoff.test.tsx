@@ -193,6 +193,45 @@ describe('orbit → thumbnail handoff', () => {
     expect(props.onPromote).toHaveBeenCalled() // gesture state was re-armed
   })
 
+  it('a release persists through the props in force, not the ones the listeners were installed with', async () => {
+    // The window pointerup listener is installed once and used to hold the
+    // mount render's release path, whose `onPersist` closed over the mount
+    // render's viewer: a viewer swapped in during a held dismissal had its
+    // pixels persisted under the *old* tile's path. Found in review
+    // (native-context-menu-bypass), pre-existing; the release now reaches the
+    // current render's function through a ref. Falsify by calling
+    // `endGesture` directly from the effect again: `stale` takes the call.
+    const { props, resolvePersist } = makeProps()
+    await render(props)
+    await dragAndReleaseOutside() // hold pending on tile A, through the mount's onPersist
+    const stale = props.onPersist
+    expect(stale).toHaveBeenCalledTimes(1)
+
+    const viewerB: ViewerState = {
+      mode: 'orbit',
+      entry: { ...ENTRY, name: 'b.stl', path: '/models/b.stl' },
+      rect: { left: 200, top: 0, width: 100, height: 100 },
+      originEl: null,
+    }
+    // App re-creates `persist` for the new viewer; the layer is not remounted.
+    const fresh = vi.fn(() => Promise.resolve())
+    props.tracker.start(250, 50)
+    await act(async () => {
+      root!.render(<ViewerLayer {...props} viewer={viewerB} onPersist={fresh} />)
+    })
+    resolvePersist()
+    await settle()
+
+    await act(async () => {
+      pointer('pointermove', 280, 50) // a drag on tile B…
+      pointer('pointermove', 290, 60)
+      pointer('pointerup', 290, 60) // …released inside it
+    })
+    await settle()
+    expect(fresh).toHaveBeenCalledTimes(1)
+    expect(stale).toHaveBeenCalledTimes(1) // no second call through the mount's copy
+  })
+
   it('a failed or slow persist cannot wedge the overlay (timeout fallback)', async () => {
     const { props } = makeProps() // persist gate never resolves
     await render(props)

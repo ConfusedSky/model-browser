@@ -19,11 +19,13 @@
       "fix" the missing `preventDefault` (D2)
 - [x] 1.3 `ViewerLayer.tsx`, the release path (D5): `onUp` returns on
       `e.button !== 0` before touching `pointer.current` — the secondary
-      button's release is not the primary's. Extract `onUp`'s body into
-      `endGesture(e, { promote }: { promote: boolean })` inside the same
-      `useLayoutEffect` (or a ref-held function the effect and
-      `raiseEntryMenu` both reach — the settle/persist chain must stay the
-      one `dismissAfterPersist` awaits); `onUp` calls it with `promote: true`
+      button's release is not the primary's. `onUp`'s body became
+      `endGesture(at, { promote })` in the component body, reached by both
+      callers through `endGestureRef` (D6, D9 R1): the effect installs its
+      listeners once, so a direct call would keep the mount render's copy —
+      and did, before the ref, persisting a swapped-in viewer's pixels under
+      the old path. The settle/persist chain is still the one
+      `dismissAfterPersist` awaits; `onUp` calls with `promote: true`
 - [x] 1.4 `ViewerLayer.tsx`, the bypass (D2/D6): `raiseEntryMenu` returns
       when `nativeMenuRequested(e)`, first calling `endGesture(e, { promote:
       false })` if `pointer.current.down`; its doc comment gains the exception
@@ -97,11 +99,14 @@
 ## 4. Verification
 
 - [x] 4.1 `bun run typecheck` and `cd client && bunx vitest run` pass —
-      676 client, 552 server (2026-09-02). One pre-existing cell needed a
-      fidelity fix: `viewerLayer.test.tsx`'s "errored orbit overlay still
-      promotes" dispatched a bare `new Event('pointerup')` with no button,
-      which no browser sends and which the release guard reads as not the
-      primary's; it now dispatches a `PointerEvent` with `button: 0`
+      686 client, 589 server (2026-09-02, after the review fold-in, on a main
+      that also carries the peer's `listing-tree-cache`). One pre-existing cell
+      needed a fidelity fix:
+      `viewerLayer.test.tsx`'s "errored orbit overlay still promotes"
+      dispatched a bare `new Event('pointerup')` — no `button` at all, which
+      no browser sends and which the release guard reads as not the primary's;
+      it now dispatches a `PointerEvent`. The suite's other `pointerup`s rely
+      on happy-dom's default `button: 0`, which is fine and unchanged
 - [x] 4.2 **Done 2026-09-02, this session, Playwright Chromium 150 headless
       against the dev instance on the real library (flat root), read through
       a window bubble `contextmenu` listener — `defaultPrevented` is the
@@ -120,10 +125,7 @@
       press:** the overlay stays mounted through the press and goes when the
       pointer leaves the tile, as after any release (D6: recorded, either was
       acceptable). Firefox: see below
-- [ ] 4.2b **Firefox, open — a manual check** (no Playwright Firefox build
-      on this machine; the system Firefox is installed): Shift+right-click on
-      a tile, the overlay and the lightbox shows the browser's menu (the
-      browser's own doing — no `contextmenu` reaches the page), and plain
-      right-click still raises the app's menu on every surface. The app's
-      code takes the unshifted path unchanged, so a failure here would be a
-      browser difference, not a regression of this change
+- [x] 4.2b **Firefox — verified by Masa, 2026-09-02, on the system Firefox:**
+      Shift+right-click shows the browser's menu and plain right-click still
+      raises the app's menu (no Playwright Firefox build here, so this half
+      was a manual check; the app takes the unshifted path unchanged)

@@ -94,6 +94,11 @@ async function secondaryPress(
         shiftKey,
       }),
     )
+    // The release too, on window as the viewer's listeners hear it — the whole
+    // press, so a grid cell models what the browser sends.
+    window.dispatchEvent(
+      new PointerEvent('pointerup', { bubbles: true, button: 2, clientX: x, clientY: y, shiftKey }),
+    )
   })
   return taken
 }

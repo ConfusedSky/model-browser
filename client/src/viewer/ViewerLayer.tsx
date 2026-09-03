@@ -508,8 +508,16 @@ export default function ViewerLayer({
    * primary's own release, and `raiseEntryMenu` declining a shifted secondary
    * press mid-gesture, which ends the orbit here because the browser's menu
    * takes the primary's release and `onUp` would never run.
+   *
+   * Reached through `endGestureRef`, never directly: the window listeners are
+   * installed once (the effect below runs on `tracker`, which App holds for
+   * the app's lifetime) and would otherwise keep the mount render's copy —
+   * whose `onPersist` closes over the mount render's `viewer`. A viewer swapped
+   * in during a held dismissal then persisted the new tile's pixels under the
+   * old tile's path (found in review, pre-existing; the bypass path, which is
+   * re-created per render, was the first caller to see the props in force).
    */
-  function endGesture(at: { clientX: number; clientY: number }, promote: boolean): void {
+  function endGesture(at: { clientX: number; clientY: number }, { promote }: { promote: boolean }): void {
     if (!pointer.current.down) return
     pointer.current.down = false
     if (!tracker.isDrag) {
@@ -542,6 +550,8 @@ export default function ViewerLayer({
       if (!inside) void dismissAfterPersist()
     }
   }
+  const endGestureRef = useRef(endGesture)
+  endGestureRef.current = endGesture
 
   // Global gesture handling: the press that opened the overlay is already in
   // progress, so listeners live on window — and must attach synchronously
@@ -572,7 +582,7 @@ export default function ViewerLayer({
       // gesture as if the primary had let go, and a right-click without a
       // drag opened the lightbox under the menu it had just raised.
       if (e.button !== 0) return
-      endGesture(e, true)
+      endGestureRef.current(e, { promote: true })
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
@@ -701,7 +711,7 @@ export default function ViewerLayer({
    */
   function raiseEntryMenu(e: React.MouseEvent): void {
     if (nativeMenuRequested(e)) {
-      endGesture(e, false)
+      endGestureRef.current(e, { promote: false })
       return
     }
     e.preventDefault()
