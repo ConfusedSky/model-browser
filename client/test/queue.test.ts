@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { RenderQueue } from '../src/three/queue'
+import { RenderQueue, type Band } from '../src/three/queue'
 
 const tick = () => new Promise((r) => setTimeout(r, 0))
 
@@ -196,5 +196,101 @@ describe('RenderQueue priority', () => {
     queue.resume()
     await tick()
     expect(ran).toEqual(['v'])
+  })
+})
+
+
+// ─── bulk-thumbnail-jobs 1.2 ────────────────────────────────────────────────
+// A third argument on `push` pins the band, bypassing the ranking. Bulk job
+// work must rank no better than deferred far work whatever the grid says about
+// the same path — and the grid may well say `visible`, since the job's key is
+// an ordinary model path. Every cell below stages a push order that
+// *contradicts* the rank it asserts and holds the only slot across the pushes
+// (`client/test/CLAUDE.md`'s render-order rule), so it can only pass if rank
+// decided.
+describe('a pinned band', () => {
+  it('outranks nothing: a pinned far job waits for a later-pushed near one, though the ranking calls its key visible', async () => {
+    const queue = new RenderQueue(1)
+    const ran: string[] = []
+    queue.suspend()
+    queue.push(recorder(ran, 'job'), 'p', 'far')
+    queue.push(recorder(ran, 'near'), 'n')
+    queue.setRanking(
+      new Map<string, Band>([
+        ['p', 'visible'],
+        ['n', 'near'],
+      ]),
+    )
+    queue.resume()
+    await tick()
+    // Pushed first and ranked visible, and still last: the pin is what decided.
+    expect(ran).toEqual(['near', 'job'])
+  })
+
+  it('ties with a ranked far job, insertion order deciding — in either order', async () => {
+    // The spec's "the render queue's lowest existing rank, with which it may
+    // tie". The pinned job's key is ranked *visible* in both halves, so a
+    // rankOf that consulted the ranking would put it first whichever way round
+    // the pushes went, and exactly one half would fail.
+    for (const pinnedFirst of [true, false]) {
+      const queue = new RenderQueue(1)
+      const ran: string[] = []
+      queue.suspend()
+      if (pinnedFirst) {
+        queue.push(recorder(ran, 'pinned'), 'p', 'far')
+        queue.push(recorder(ran, 'ranked'), 'r')
+      } else {
+        queue.push(recorder(ran, 'ranked'), 'r')
+        queue.push(recorder(ran, 'pinned'), 'p', 'far')
+      }
+      queue.setRanking(
+        new Map<string, Band>([
+          ['p', 'visible'],
+          ['r', 'far'],
+        ]),
+      )
+      queue.resume()
+      await tick()
+      expect(ran).toEqual(pinnedFirst ? ['pinned', 'ranked'] : ['ranked', 'pinned'])
+    }
+  })
+
+  it('survives a re-ranking that would have promoted its key', async () => {
+    // The grid scrolls the job's model into view mid-job. `setRanking` moves
+    // every ordinary job it covers; a pinned one it cannot reach at all.
+    const queue = new RenderQueue(1)
+    const ran: string[] = []
+    queue.suspend()
+    queue.push(recorder(ran, 'pinned'), 'p', 'far')
+    queue.push(recorder(ran, 'other'), 'o')
+    queue.setRanking(
+      new Map<string, Band>([
+        ['p', 'far'],
+        ['o', 'far'],
+      ]),
+    )
+    queue.setRanking(
+      new Map<string, Band>([
+        ['p', 'visible'],
+        ['o', 'near'],
+      ]),
+    )
+    queue.resume()
+    await tick()
+    expect(ran).toEqual(['other', 'pinned'])
+  })
+
+  it('is general, not far-only: a pinned visible job runs ahead of unreported work', async () => {
+    // The argument pins a band, it does not spell "bulk". `p` is absent from
+    // the ranking, so without the pin it would be unreported and lose to the
+    // earlier-pushed `u`.
+    const queue = new RenderQueue(1)
+    const ran: string[] = []
+    queue.suspend()
+    queue.push(recorder(ran, 'unreported'), 'u')
+    queue.push(recorder(ran, 'pinned'), 'p', 'visible')
+    queue.resume()
+    await tick()
+    expect(ran).toEqual(['pinned', 'unreported'])
   })
 })

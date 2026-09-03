@@ -68,7 +68,7 @@ function Harness({
   ao?: boolean
   poses?: Record<string, IndexPose>
 }) {
-  const { thumbs, setThumb, setPlaceholder, setBands } = useThumbnails(
+  const { thumbs, setThumb, refetch, setPlaceholder, setBands } = useThumbnails(
     entries,
     api,
     lru,
@@ -78,6 +78,7 @@ function Harness({
   )
   lastThumbs = thumbs
   lastSetThumb = setThumb
+  lastRefetch = refetch
   lastSetPlaceholder = setPlaceholder
   lastSetBands = setBands
   // One line per committed render, so a cell can assert what the grid *passed
@@ -100,6 +101,7 @@ function Harness({
 
 /** The hook's own setters, for the cells that write through them from outside. */
 let lastSetThumb: ((path: string, state: ThumbState) => void) | null = null
+let lastRefetch: ((path: string) => void) | null = null
 let lastSetPlaceholder: ((path: string, url: string) => void) | null = null
 let lastSetBands: ((bands: ReadonlyMap<string, Band>) => void) | null = null
 let lastThumbs = new Map<string, ThumbState>()
@@ -169,6 +171,7 @@ afterEach(async () => {
   container = null
   vi.unstubAllGlobals()
   lastSetThumb = null
+  lastRefetch = null
   lastSetPlaceholder = null
   // The renderThumbnail spy lives in the module mock, so its calls accumulate
   // across this file — a render *count* assertion reads the whole file's
@@ -1840,5 +1843,147 @@ describe('lookups are ranked with renders', () => {
     await gate.release('/models/m0.stl') // a slot frees on the *old* instance
 
     expect(gate.asked).toHaveLength(8) // m8/m9 were dropped, not dispatched
+  })
+})
+
+
+// ─── bulk-thumbnail-jobs 1.3 ────────────────────────────────────────────────
+// `refetch(path)` is the in-memory half of a write somebody else made to the
+// entry on the server — the bulk reset's. Nothing else restarts a slot on such
+// a write: the sweep effect restarts one only on an add, an mtime change, an
+// `ao` change or a pose change by value, and a reset moves none of them.
+describe('refetch restarts one slot after a write the hook did not make', () => {
+  it('blanks the tile, forgets the generation, and runs the whole pipeline again', async () => {
+    const entries = models(1)
+    const path = entries[0]!.path
+    const api = {
+      getThumb: vi
+        .fn()
+        .mockResolvedValueOnce(freshHit({ gen: 42 }))
+        .mockResolvedValueOnce({ status: 'miss' }),
+      putThumb: vi.fn().mockResolvedValue({ gen: 43 }),
+    } as unknown as ApiClient
+    const lru = mesh()
+    const queue = new RenderQueue(2)
+
+    await render(<Harness entries={entries} api={api} lru={lru} queue={queue} ao />)
+    await settle()
+    expect(statuses()).toEqual(['ready'])
+    expect(lru.acquire).not.toHaveBeenCalled() // a hit: nothing rendered yet
+    const shown = lastThumbs.get(path)!.url!
+
+    const pushed = vi.spyOn(queue, 'push')
+    // Held so the blank is observable: without it the refill lands inside the
+    // same settle and the tile is only ever seen `ready`.
+    queue.suspend()
+    await act(async () => {
+      lastRefetch!(path)
+    })
+    await settle()
+
+    // Blanked, not kept — the opposite of this hook's keep-until-replaced rule
+    // and deliberately so (D3): those pixels were deleted for lying.
+    expect(statuses()).toEqual(['loading'])
+    expect(lastThumbs.get(path)!.url).toBeUndefined()
+    expect(vi.mocked(URL.revokeObjectURL).mock.calls.filter((c) => c[0] === shown)).toHaveLength(1)
+    // One new lookup, riding the validator tier: the entry's generation moved
+    // under the hook, so 42 is no longer a number worth asking under. Exactly
+    // three arguments — the call a slot that has learned nothing makes.
+    expect(vi.mocked(api.getThumb).mock.calls).toHaveLength(2)
+    expect(vi.mocked(api.getThumb).mock.calls[1]).toEqual([path, entries[0]!.mtime, true])
+    // The miss queued a render keyed by the path and at *no* pinned band — the
+    // tile's own place in the ranking, exactly as a visit's render is.
+    expect(pushed).toHaveBeenCalledWith(expect.any(Function), path)
+
+    await act(async () => {
+      queue.resume()
+    })
+    await settle()
+    expect(statuses()).toEqual(['ready'])
+    expect(api.putThumb).toHaveBeenCalledTimes(1)
+  })
+
+  it('does nothing at all for a path this listing does not have', async () => {
+    // A tile off screen is simply not in the map, and the reset job calls
+    // `refetch` for every entry in its scope.
+    const api = {
+      getThumb: vi.fn().mockResolvedValue(freshHit()),
+      putThumb: vi.fn().mockResolvedValue({}),
+    } as unknown as ApiClient
+    const queue = new RenderQueue(2)
+
+    await render(<Harness entries={models(1)} api={api} lru={mesh()} queue={queue} ao />)
+    await settle()
+    const before = statuses()
+    const commits = renderLog.length
+    const revokes = vi.mocked(URL.revokeObjectURL).mock.calls.length
+    vi.mocked(api.getThumb).mockClear()
+
+    await act(async () => {
+      lastRefetch!('/models/not-here.stl')
+    })
+    await settle()
+
+    expect(api.getThumb).not.toHaveBeenCalled()
+    expect(vi.mocked(URL.revokeObjectURL).mock.calls).toHaveLength(revokes)
+    expect(statuses()).toEqual(before)
+    // Not even a commit: `refetch` returns before it touches state.
+    expect(renderLog).toHaveLength(commits)
+  })
+
+  it('retires the pass already in flight, so its answer never paints', async () => {
+    // The reset's PUT and the tile's own first lookup race by construction —
+    // the job writes while the grid is still filling. `retire` is what keeps
+    // the pre-write answer off the tile, and **both** lookups have to be
+    // parked for this cell to say so: released after the restart has painted,
+    // the stale pass is stopped by `setThumb`'s own retirement instead and the
+    // cell would pass with `refetch`'s removed (checked — it did).
+    const entries = models(1)
+    const path = entries[0]!.path
+    // Built up front so the URL each answer would put on the tile is known.
+    const beforeAnswer = freshHit({ gen: 1 })
+    const afterAnswer = freshHit({ gen: 2 })
+    let releaseBefore = (): void => {}
+    let releaseAfter = (): void => {}
+    const first = new Promise<Record<string, unknown>>((resolve) => {
+      releaseBefore = () => resolve(beforeAnswer)
+    })
+    const second = new Promise<Record<string, unknown>>((resolve) => {
+      releaseAfter = () => resolve(afterAnswer)
+    })
+    const api = {
+      getThumb: vi.fn().mockReturnValueOnce(first).mockReturnValueOnce(second),
+      putThumb: vi.fn().mockResolvedValue({}),
+    } as unknown as ApiClient
+
+    await render(<Harness entries={entries} api={api} lru={mesh()} queue={new RenderQueue(2)} ao />)
+    await settle()
+    expect(statuses()).toEqual(['loading']) // the first lookup is parked
+
+    await act(async () => {
+      lastRefetch!(path)
+    })
+    await settle()
+    expect(vi.mocked(api.getThumb)).toHaveBeenCalledTimes(2)
+
+    // The pre-refetch answer lands while the restart is still in flight —
+    // the one ordering where nothing but `refetch`'s retirement can stop it.
+    await act(async () => {
+      releaseBefore()
+    })
+    await settle()
+    expect(statuses()).toEqual(['loading'])
+    expect(lastThumbs.get(path)!.url).toBeUndefined()
+    // Released rather than leaked: the lookup minted a PNG for a pass that no
+    // longer answers for this tile.
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith(beforeAnswer.pngUrl)
+
+    // The restart's own answer is the one that paints.
+    await act(async () => {
+      releaseAfter()
+    })
+    await settle()
+    expect(statuses()).toEqual(['ready'])
+    expect(lastThumbs.get(path)!.url).toBe(afterAnswer.pngUrl)
   })
 })

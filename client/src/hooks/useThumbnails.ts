@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type * as THREE from 'three'
-import type { CameraState, DirEntry, IndexPose, OrbitAxis } from '../../../shared/types'
+import type {
+  CameraState,
+  DirEntry,
+  IndexPose,
+  OrbitAxis,
+  ThumbRenderInfo,
+} from '../../../shared/types'
 import type { ApiClient } from '../api/client'
 import { DEFAULT_CAMERA } from '../three/camera'
 import type { MeshLru } from '../three/lru'
@@ -157,6 +163,54 @@ function sameBands(a: ReadonlyMap<string, Band>, b: ReadonlyMap<string, Band>): 
 }
 
 /**
+ * Whether a cached render is the one this build would draw — **the** staleness
+ * test, and the only one.
+ *
+ * Extracted rather than restated because three readers ask it and they must
+ * never disagree about what is stale: the sweep's own hit branch below, the
+ * bulk generate job's derivation over an enumerated scope
+ * (`bulk-thumbnail-jobs` D8), and the listing-annotation branch
+ * `thumbnail-image-serving` 2.2 adds. It deliberately reads the client's
+ * constants — `THUMB_LIGHTING`, `RIG_VERSION`, `POSE_VERSION` — which the
+ * server stores and echoes but never interprets, so the judgement stays where
+ * the recipe is.
+ *
+ * The pose clause is the one that needs saying. A pose is an input to the
+ * pixels that path+mtime does not carry — the same shape as a RIG_VERSION
+ * bump. Without it, a thumbnail rendered before the index had an opinion keeps
+ * its default angle forever, and the orientation appears only once the user
+ * opens the model and the lightbox's close persists a posed snapshot. It
+ * applies only where nothing of the user's is stored, because that is the only
+ * case a re-render poses: with a stored camera or axis the render computes
+ * `posed = null` and PUTs unlabelled pixels, so the label could never arrive
+ * and every visit re-rendered and re-uploaded the same picture. A stored
+ * camera wins over the index's opinion anyway (semantic-search D5) — there is
+ * nothing stale about pixels that already show it.
+ *
+ * `camera` and `axis` are the entry's stored orientation, not the render's;
+ * `render` is the one variant in force (the occlusion recipe being asked
+ * about). An absent render is not current, which is what a `miss` on an
+ * annotation that carries no block for the variant means.
+ */
+export function isCurrentRender(
+  render: ThumbRenderInfo | undefined,
+  camera: CameraState | undefined,
+  axis: OrbitAxis | undefined,
+  pose: IndexPose | undefined,
+): boolean {
+  if (render === undefined) return false
+  const wantsPose = pose !== undefined
+  const poseStale =
+    wantsPose && camera === undefined && axis === undefined && render.posed !== POSE_VERSION
+  return (
+    render.state === 'hit' &&
+    render.lighting === THUMB_LIGHTING &&
+    render.rig === RIG_VERSION &&
+    !poseStale
+  )
+}
+
+/**
  * Per-tile thumbnail pipeline: check the server cache (own concurrency limit),
  * and on miss/stale run load → parse → render → PUT through the render queue.
  * Meshes load through the LRU, so thumbnail bytes seed later orbits.
@@ -196,6 +250,19 @@ export function useThumbnails(
 ) {
   const [thumbs, setThumbs] = useState<Map<string, ThumbState>>(new Map())
   const slotsRef = useRef<Map<string, EntrySlot>>(new Map())
+  /**
+   * The sweep effect's own `start`, published so one slot can be restarted
+   * from outside the effect (`refetch` below).
+   *
+   * A ref rather than a hoist into `useCallback`, deliberately: `start` closes
+   * over the effect's `api`, `ao`, `lru`, `queue` and `setThumb`, and lifting
+   * it would move all five out of the effect's dependency array. This keeps
+   * the effect, its closure and its re-run set exactly as they are, and the
+   * ref always holds the latest run's closure — which is the one whose `ao`
+   * and `api` are in force. Null until the first run, which is harmless: slots
+   * are created by that run, and a path with no slot is a no-op anyway.
+   */
+  const startRef = useRef<((entry: DirEntry, slot: EntrySlot) => void) | null>(null)
 
   const setThumb = useCallback((path: string, state: ThumbState) => {
     const slot = slotsRef.current.get(path)
@@ -245,6 +312,57 @@ export function useThumbnails(
       next.set(path, state)
       return next
     })
+  }, [])
+
+  /**
+   * Start this path's pipeline over from scratch, blank tile and all — the
+   * in-memory half of a write somebody else made to the entry on the server
+   * (`bulk-thumbnail-jobs` 1.3's reset).
+   *
+   * It exists because **nothing restarts a slot on a server-side write**. The
+   * sweep effect reconciles entries, so it restarts one only on an add, an
+   * mtime change, an `ao` change or a pose change by value — a bulk reset
+   * changes none of those, and an on-screen tile in its scope would otherwise
+   * sit showing pixels the server has already deleted, until the next
+   * navigation.
+   *
+   * It blanks rather than keeps the image, which is the opposite of the
+   * keep-until-replaced rule the rest of this hook follows, and that is
+   * accepted rather than accidental (`bulk-thumbnail-jobs` D3): those pixels
+   * were just deleted for lying — they were drawn under a framing that has
+   * been discarded — so leaving them up would be showing a picture the write
+   * has ruled false. One tile can be redrawn in place; a scope cannot, so the
+   * blank is what a bulk reset costs an on-screen tile until the lookup below
+   * refills it.
+   *
+   * A path with no slot is a no-op: a tile off screen is simply not in the
+   * map, and inventing a slot would start work for an entry this listing does
+   * not have.
+   */
+  const refetch = useCallback((path: string) => {
+    const slot = slotsRef.current.get(path)
+    if (slot === undefined) return
+    // Everything in flight for this entry was started against the state the
+    // write replaced; a tail of it landing afterwards would paint the deleted
+    // render back.
+    retire(slot)
+    if (slot.url !== undefined) URL.revokeObjectURL(slot.url)
+    slot.url = undefined
+    // The entry's generation moved under us and the caller may not know where
+    // to — the same reasoning as `setThumb`'s adoption of absence and
+    // `discardThumbFraming`'s clearing. The next lookup rides the validator
+    // tier rather than letting an immutable-cached answer stand for bytes a
+    // write just deleted.
+    slot.thumbGen = undefined
+    setThumbs((prev) => {
+      const next = new Map(prev)
+      next.set(path, { status: 'loading' })
+      return next
+    })
+    // The same per-slot start the reconciler runs for a new entry, so the
+    // lookup and — on a miss — the queued render happen exactly as a visit's
+    // would, at the band the tile is in.
+    startRef.current?.(slot.entry, slot)
   }, [])
 
   /**
@@ -412,31 +530,25 @@ export function useThumbnails(
               if (cached.pngUrl !== undefined) URL.revokeObjectURL(cached.pngUrl)
               return
             }
-            // A pose is an input to the pixels that path+mtime does not carry —
-            // the same shape as a RIG_VERSION bump. Without this, a thumbnail
-            // rendered before the index had an opinion keeps its default angle
-            // forever, and the orientation appears only once the user opens the
-            // model and the lightbox's close persists a posed snapshot.
-            //
-            // Only where nothing of the user's is stored, because that is the
-            // only case the re-render below poses: with a stored camera or
-            // axis it computes `posed = null` and PUTs unlabelled pixels, so
-            // the label could never arrive and every visit re-rendered and
-            // re-uploaded the same picture. A stored camera wins over the
-            // index's opinion anyway (semantic-search D5) — there is nothing
-            // stale about pixels that already show it.
-            const wantsPose = pose !== undefined
-            const poseStale =
-              wantsPose &&
-              cached.camera === undefined &&
-              cached.axis === undefined &&
-              cached.posed !== POSE_VERSION
+            // The one staleness test, shared with the bulk job and the
+            // annotation readers — see `isCurrentRender`, which carries the
+            // reasoning that used to live here.
             if (
-              cached.status === 'hit' &&
-              cached.pngUrl !== undefined &&
-              cached.lighting === THUMB_LIGHTING &&
-              cached.rig === RIG_VERSION &&
-              !poseStale
+              isCurrentRender(
+                {
+                  state: cached.status,
+                  lighting: cached.lighting,
+                  rig: cached.rig,
+                  posed: cached.posed,
+                },
+                cached.camera,
+                cached.axis,
+                pose,
+              ) &&
+              // Not part of currency: this says the lookup actually minted a
+              // URL to show, which is about the answer this pass got, not
+              // about whether the render on the server is the current one.
+              cached.pngUrl !== undefined
             ) {
               setThumb(entry.path, {
                 status: 'ready',
@@ -574,6 +686,10 @@ export function useThumbnails(
       )
     }
 
+    // Published for `refetch`, on every run, so the closure it can reach is
+    // always the newest one's.
+    startRef.current = start
+
     // Entries that left — or came back at a new mtime, which is a different
     // cache key and so a different entry. Only a removal revokes.
     for (const [path, slot] of slots) {
@@ -673,5 +789,5 @@ export function useThumbnails(
     }
   }, [])
 
-  return { thumbs, setThumb, setPlaceholder, discardThumbFraming, setBands }
+  return { thumbs, setThumb, refetch, setPlaceholder, discardThumbFraming, setBands }
 }

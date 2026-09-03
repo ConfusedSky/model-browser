@@ -10,6 +10,9 @@ interface Job {
   /** The path this render is for, or undefined for keyless work — a render the
    *  user pressed for, which belongs to no slot and is never re-ranked. */
   key: string | undefined
+  /** The band the pusher pinned, or undefined for the ordinary case where the
+   *  ranking decides. See `push`. */
+  band: Band | undefined
 }
 
 /**
@@ -56,9 +59,20 @@ export class RenderQueue {
    * loses its fallback simply errors into the image it already shows. The
    * answer is kept because it is the honest contract of a cancel, and pinned
    * in `queue.test.ts`.
+   *
+   * `band` pins the job's rank instead of asking the ranking for it, and the
+   * pin is permanent: `setRanking` cannot move a pinned job, because the
+   * ranking is never consulted for one. It exists for bulk-job work
+   * (`bulk-thumbnail-jobs` 1.2), which must rank no better than deferred far
+   * work whatever the grid says about the same path — and the grid may well
+   * say `visible`, since a bulk job's key is an ordinary model path and its
+   * model may be on screen. Only the pusher knows the work is bulk; by the
+   * time a key reaches the ranking that fact is gone, so the pin is the one
+   * layer that can carry it. A key is still worth passing alongside: it is
+   * what a reader of the queue sees the job as being for.
    */
-  push(run: () => Promise<void>, key?: string): () => boolean {
-    const job: Job = { run, cancelled: false, started: false, key }
+  push(run: () => Promise<void>, key?: string, band?: Band): () => boolean {
+    const job: Job = { run, cancelled: false, started: false, key, band }
     this.jobs.push(job)
     this.pump()
     return () => {
@@ -115,6 +129,11 @@ export class RenderQueue {
   }
 
   private rankOf(job: Job): number {
+    // A pinned band is the pusher's own verdict and the ranking is not
+    // consulted at all — not even for a key it covers, which is the whole
+    // point: the grid's opinion of a bulk job's path is about the tile, not
+    // about the job.
+    if (job.band !== undefined) return RANK[job.band]
     if (job.key === undefined) return RANK.visible
     const band = this.ranking.get(job.key)
     return band === undefined ? UNREPORTED : RANK[band]
