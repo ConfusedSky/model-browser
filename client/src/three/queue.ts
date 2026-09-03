@@ -226,36 +226,50 @@ export class RenderQueue {
   }
 
   /**
-   * Whether far work may be taken right now. Reads the gate; a closed reading
-   * starts the bound's clock (and a timer to re-pump when it expires, since
-   * nothing else may happen to pump a queue holding only far work), an open
-   * reading resets it.
+   * What the gate says about far work right now. `open`: the gate reads open
+   * (or there is none) and the bound's clock is forgotten. `held`: closed and
+   * within the bound — the clock starts on the first such reading, with a
+   * timer to re-pump when it expires, since nothing else may happen to pump
+   * a queue holding only far work. `expired`: closed, but held for the whole
+   * bound already — far work is taken, and the clock is deliberately *kept*,
+   * so the whole backlog drains rather than one job per bound (second
+   * review, R7); the clock is forgotten again only when the gate reads open.
    */
-  private farAllowed(): boolean {
+  private farAllowed(): 'open' | 'held' | 'expired' {
     if (this.farGate === null || this.farGate()) {
       this.releaseHold()
-      return true
+      return 'open'
     }
     const now = Date.now()
     if (this.gateClosedSince === null) this.gateClosedSince = now
     const remaining = FAR_GATE_MAX_MS - (now - this.gateClosedSince)
-    if (remaining <= 0) return true
+    if (remaining <= 0) return 'expired'
     if (this.gateTimer === null) {
       this.gateTimer = setTimeout(() => {
         this.gateTimer = null
         this.pump()
       }, remaining)
     }
-    return false
+    return 'held'
   }
 
-  /** The best-ranked pending job, ties by insertion order — `jobs` is kept in
-   *  arrival order, so the first of the best rank is the oldest of them. Far
-   *  work is skipped while the gate says so (D5). */
+  /**
+   * The best-ranked pending job, ties by insertion order — `jobs` is kept in
+   * arrival order, so the first of the best rank is the oldest of them. Far
+   * work is skipped while the gate says so (D5).
+   *
+   * The gate is read once per take, on the first far job the scan meets —
+   * whether or not a nearer job has already won the take. Reading it only when
+   * far was the best so far made the bound's clock depend on arrival order:
+   * `[near, far]` never consulted the gate and reset the clock, `[far, near]`
+   * consulted it and kept it, for one and the same state (second review, R6).
+   * The clock measures "a far job is queued and the gate is closed", and is
+   * forgotten when a take finds no far job at all.
+   */
   private take(): Job | undefined {
     let bestAt = -1
     let bestRank = Number.POSITIVE_INFINITY
-    let farAllowed: boolean | null = null
+    let verdict: 'open' | 'held' | 'expired' | null = null
     for (let i = 0; i < this.jobs.length; ) {
       const job = this.jobs[i]!
       if (job.cancelled) {
@@ -266,25 +280,24 @@ export class RenderQueue {
         continue
       }
       const rank = this.rankOf(job)
-      if (rank < bestRank) {
-        // The gate is asked once per take and only when a far job is the
-        // best so far — a queue with nearer work never consults it.
-        if (rank === RANK.far) {
-          if (farAllowed === null) farAllowed = this.farAllowed()
-          if (!farAllowed) {
-            i++
-            continue
-          }
+      if (rank === RANK.far) {
+        if (verdict === null) verdict = this.farAllowed()
+        if (verdict === 'held') {
+          i++
+          continue
         }
+      }
+      if (rank < bestRank) {
         bestRank = rank
         bestAt = i
         if (rank === 0) break
       }
       i++
     }
-    // Nothing far was held this pass — there was no far job to hold, or the
-    // gate let it through — so the bound's clock is not running.
-    if (farAllowed !== false) this.releaseHold()
+    // No far job was met: nothing is being held, so the clock is not running.
+    // (A scan cut short by a visible job may not have met one — it then runs
+    // on, unread, until a take that scans past it.)
+    if (verdict === null && bestRank !== 0) this.releaseHold()
     if (bestAt === -1) return undefined
     const job = this.jobs[bestAt]!
     this.jobs.splice(bestAt, 1)

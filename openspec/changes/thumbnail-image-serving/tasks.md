@@ -27,7 +27,8 @@
       `RenderQueue.clear()` drops pending jobs and the ranking, and the hook
       exports `resetLookupQueueForTests`, called in `beforeEach` in
       `thumbnailQueue.test.tsx` and `folderSheets.test.tsx`. The far gate and
-      `onIdle` cleanup this task also named land with §4, which creates them
+      settle-callback cleanup this task also named land with §4, which creates
+      them (`onSettle`; the draft called it `onIdle`)
 - [x] 0.4 Cells (`thumbnailQueue.test.tsx`, *lookups are ranked with
       renders*): a far tile's lookup runs after everything nearer **and does
       run** (falsified against an unranked lookup queue — m8 first — and
@@ -112,16 +113,14 @@
 
 ## 4. Far reads yield to pending lookups
 
-- [x] 4.1 *(`onSettle`, not `onIdle` — see 4.2; `running` is a Set so ranks of running jobs can be asked; a closed gate arms one timer for the bound's remainder, since a queue holding only far work has nothing else to pump it)* `RenderQueue`: `pending` counts live jobs (**not** `jobs.length +
+- [x] 4.1 *(`onSettle`; `running` is a Set so ranks of running jobs can be asked; a closed gate arms one timer for the bound's remainder, since a queue holding only far work has nothing else to pump it)* `RenderQueue`: `pending` counts live jobs (**not** `jobs.length +
       running` — husks are spliced only inside `take`); `setFarGate(fn)`;
       `take` skips `far`-ranked jobs while the gate says no, **unless the gate
       has read closed for longer than `FAR_GATE_MAX_MS`** (a named constant,
-      tuned in 6.2 above the measured worst lookup of 3.7 s); `onIdle` fires
-      **after** the decrement that makes `pending` zero; a public `poke()`
-      re-pumps (D5)
+      tuned in 6.2 above the measured worst lookup of 3.7 s); `onSettle` fires **after** the decrement, on every finish; a public `poke()` re-pumps (D5). Since the second review the bound drains the whole backlog once passed, and the gate is read on the first far job a take meets
 - [x] 4.2 *(the lookup queue's `onSettle` fires after **every** lookup finishes, after the decrement; the hook's callback pokes the render queue, whose gate re-reads `pendingNearerThanFar`. An idle-only signal would have left far renders waiting on the last far lookup when the last *near* one had already settled)* The hook wires the render queue's gate to "a lookup ranked nearer
       than far is pending" (the lookup queue exposes that count, not just
-      `pending`) and the lookup queue's `onIdle` to the render queue's `poke`;
+      `pending`) and the lookup queue's `onSettle` to the render queue's `poke`;
       both cleared in the wiring effect's cleanup (0.3)
 - [x] 4.3 *(six cells under *RenderQueue far gate*)* `queue.test.ts` cells, DOM-free: with the gate closed a far job is
       skipped while a near job runs; the gate opening plus `poke` starts the
@@ -147,7 +146,15 @@
       fires neither `load` nor `error`, so the cell dispatches `onImageError`
       and pins the wiring and the once-per-generation memory (falsify by
       forgetting the refusal → a second `start` rebuilds the 404 URL); the
-      premise that a 404 image fires `error` is 6.2's to prove in a browser
+      premise that a 404 image fires `error` is 6.2's to prove in a browser.
+      **Two scenarios have no cell anywhere and say so here, not in the delta
+      (delta prose lands in main):** *A pressed tile has a box before its
+      image loads* — happy-dom's rects are all 0×0, so 6.2 measured the
+      declared box in the browser and never pressed; and *A revisit costs no
+      bytes* — 6.2's browser run only. The hook's own far-gate wiring, the
+      placeholder-until-load and the refusal-by-URL-generation each have a
+      cell since the second review (`thumbnailQueue.test.tsx`,
+      `thumbView.test.tsx`)
 - [x] 5.2 *(done — six cells under *the image route*, each falsified: tiers skipped, clock not bumped, miss answering 200, confinement removed)* `api.test.ts` server cells: the image route's bytes equal the
       lookup's decoded `png` for the same key; `immutable` when `gen` matches,
       `no-cache` with current bytes when superseded, 404 `no-store` on a miss
@@ -163,7 +170,7 @@
 
 ## 6. Verification
 
-- [x] 6.1 `bun run typecheck` and `bun run test` pass across workspaces — 699 client, 596 server (2026-09-02)
+- [x] 6.1 `bun run typecheck` and `bun run test` pass across workspaces (counts move under other changes landing; the commit messages carry each run's)
 - [x] 6.2 Re-run the proposal's profile against the real library, in stages,
       recording whose run and the conditions beside the 2026-09-02 baseline
       (618 lookups / 49.7 MB / 65 s). **After §0 alone — 2026-09-02, this

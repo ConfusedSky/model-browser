@@ -122,8 +122,8 @@ None.
   ownership applies to `blob:` URLs only; an `onError` demotion remembered
   per slot and generation.
 - `client/src/three/queue.ts` — `pending` (live jobs, husks excluded), a
-  far gate with a liveness bound, `onIdle`, `poke`, and a held-far mode for
-  the lookup instance.
+  far gate with a liveness bound, `onSettle`, `poke`, and `setRanking`
+  re-pumping.
 - `client/src/components/Grid.tsx` — the tile `<img>` gets a declared square
   box (`aspect-ratio: 1/1`) so `overlayRectFor` measures a real rect before
   the lazy image loads, `loading="lazy"`/`decoding="async"`, a placeholder

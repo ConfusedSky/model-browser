@@ -441,6 +441,83 @@ describe('RenderQueue far gate', () => {
     }
   })
 
+  it('drains the whole backlog once the bound has passed, not one job per bound', async () => {
+    // Second review, R7: releasing the clock on the expired path meant the
+    // next far job started a fresh bound — twelve renders a minute under a
+    // wedged lookup, which is not "a listing left open warms itself".
+    vi.useFakeTimers()
+    try {
+      const queue = new RenderQueue(1)
+      const ran: string[] = []
+      queue.setFarGate(() => false)
+      queue.setRanking(ranking({ f1: 'far', f2: 'far', f3: 'far', f4: 'far' }))
+      for (const name of ['f1', 'f2', 'f3', 'f4']) queue.push(recorder(ran, name), name)
+      await vi.advanceTimersByTimeAsync(FAR_GATE_MAX_MS + 10)
+      expect(ran).toEqual(['f1', 'f2', 'f3', 'f4'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('the clock does not depend on where a nearer job sits in arrival order', async () => {
+    // Second review, R6: reading the gate only when far was the best so far
+    // made `[near, far]` skip the read — the clock started only once the
+    // near job had run — while `[far, near]` read it at once. The gate is
+    // read on the first far job the scan meets, whichever side of a nearer
+    // job it sits: here `near` is pushed first, runs for two seconds, and
+    // the far job's bound still counts from the take that first met it.
+    vi.useFakeTimers()
+    try {
+      const queue = new RenderQueue(1)
+      const ran: string[] = []
+      const blocker = held(ran, 'blocker')
+      const near = held(ran, 'near')
+      queue.setFarGate(() => false)
+      queue.setRanking(ranking({ blocker: 'visible', near: 'near', far: 'far' }))
+      queue.push(blocker.run, 'blocker')
+      await vi.advanceTimersByTimeAsync(1)
+      queue.push(near.run, 'near') // arrival order: near, then far
+      queue.push(recorder(ran, 'far'), 'far')
+      blocker.release()
+      await vi.advanceTimersByTimeAsync(1) // the take meets far behind near: clock starts now
+      expect(ran).toEqual(['blocker', 'near'])
+      await vi.advanceTimersByTimeAsync(2000)
+      near.release()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(ran).toEqual(['blocker', 'near'])
+      // Under the old read the bound would count from here (+5 s); under the
+      // new one it has 3 s left.
+      await vi.advanceTimersByTimeAsync(FAR_GATE_MAX_MS - 2000)
+      expect(ran).toEqual(['blocker', 'near', 'far'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('removing the gate drops its timer with it', async () => {
+    // Second review, R9/R11: the one handle the class otherwise disposes.
+    vi.useFakeTimers()
+    try {
+      const queue = new RenderQueue(1)
+      const ran: string[] = []
+      queue.setFarGate(() => false)
+      queue.setRanking(ranking({ far: 'far' }))
+      queue.push(recorder(ran, 'far'), 'far')
+      await vi.advanceTimersByTimeAsync(1)
+      expect(vi.getTimerCount()).toBe(1) // the bound's re-pump
+      // Suspended, as an unmount under an open overlay leaves it: the removal
+      // cannot lean on the next take to tidy up, since there is none.
+      queue.suspend()
+      queue.setFarGate(null)
+      expect(vi.getTimerCount()).toBe(0)
+      queue.resume()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(ran).toEqual(['far'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('clear drops the gate and the settle callback with the jobs', async () => {
     const queue = new RenderQueue(1)
     const ran: string[] = []

@@ -24,7 +24,8 @@ mkdirSync(join(root, 'Kits'), { recursive: true })
 writeFileSync(join(root, 'Kits', 'anchor.stl'), stlBytes(3))
 writeFileSync(join(root, 'Kits', 'near.stl'), stlBytes(4))
 const cacheDir = mkdtempSync(join(tmpdir(), 'mb-sim-cache-'))
-const app = createApp(new ThumbCache(cacheDir), undefined, undefined, libraryFor(root))
+const cache = new ThumbCache(cacheDir)
+const app = createApp(cache, undefined, undefined, libraryFor(root))
 
 afterAll(() => {
   rmSync(root, { recursive: true, force: true })
@@ -135,6 +136,28 @@ describe('a model’s neighbours', () => {
     // The whole collection is what the view is about, and the answer says so —
     // as a library path, like every other path on the wire (D2).
     expect(body.path).toBe('/')
+  })
+
+  it('the neighbours and the anchor carry what the thumbnail cache knows, as a listing’s tiles do', async () => {
+    // `thumbnail-image-serving` D2, second review R4: the meaning route's
+    // annotation was pinned and this route's was not. Both the joined hits
+    // and the anchor are tiles, and get the listing annotation.
+    stubIndex(READY, RESULT)
+    const first = (await (await post({ path: '/hero.stl', k: 16 })).json()) as {
+      entries: { path: string; mtime: number }[]
+      anchor: { path: string; mtime: number }
+    }
+    const neighbourGen = await cache.put('/base.stl', { mtime: first.entries[0]!.mtime, png: Buffer.from('n'), lighting: 'camera', rig: 1 })
+    const anchorGen = await cache.put('/hero.stl', { mtime: first.anchor.mtime, png: Buffer.from('a'), lighting: 'camera', rig: 1 })
+    stubIndex(READY, RESULT)
+    const body = (await (await post({ path: '/hero.stl', k: 16 })).json()) as {
+      entries: { path: string; thumb?: { gen: number; ao?: { state: string } } }[]
+      anchor: { path: string; thumb?: { gen: number; ao?: { state: string } } }
+    }
+    expect(body.entries[0]!.thumb?.gen).toBe(neighbourGen)
+    expect(body.entries[0]!.thumb?.ao?.state).toBe('hit')
+    expect(body.anchor.thumb?.gen).toBe(anchorGen)
+    expect(body.anchor.thumb?.ao?.state).toBe('hit')
   })
 
   it('drops a hit that no longer resolves, without failing the request', async () => {

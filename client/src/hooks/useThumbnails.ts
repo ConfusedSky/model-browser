@@ -153,6 +153,14 @@ interface EntrySlot {
    * listing naming a *different* generation is a new fact and is tried.
    */
   refusedGen: number | undefined
+  /**
+   * The generation the image URL this tile displays was built for — what an
+   * image error is *about*. Not `slot.entry.thumb?.gen`: a later listing can
+   * carry no annotation at all (a server restart empties the fact index) and
+   * the survivor keeps its URL, so when that URL then fails the entry's word
+   * is `undefined` and the refusal would remember nothing (second review, R5).
+   */
+  urlGen: number | undefined
 }
 
 /**
@@ -310,6 +318,8 @@ export function useThumbnails(
     // still pointing at it for one commit: the image is already decoded.
     if (slot.url !== undefined && slot.url !== state.url) release(slot.url)
     slot.url = state.url
+    // Not an image URL of the hook's building, so no generation to refuse.
+    slot.urlGen = undefined
     // The generation travels with the write, absence included: an external
     // writer that did not (or could not) plumb its PUT echo leaves `undefined`
     // here, which demotes the entry's next fetch to the validator tier instead
@@ -549,8 +559,11 @@ export function useThumbnails(
     const slot = slotsRef.current.get(path)
     if (slot === undefined || slot.url === undefined || slot.url.startsWith('blob:')) return
     if (startRef.current === null) return
-    slot.refusedGen = slot.entry.thumb?.gen
+    // The generation the failed URL named — the slot's own record of it, not
+    // the entry's current word, which may be absent (see `urlGen`).
+    slot.refusedGen = slot.urlGen
     slot.url = undefined
+    slot.urlGen = undefined
     retire(slot)
     // The restart can only take the lookup path — the refusal just recorded
     // is what its annotation branch checks against — and a lookup never
@@ -618,6 +631,7 @@ export function useThumbnails(
         const url = api.thumbImageUrl(entry.path, entry.mtime, ao, info.gen)
         if (slot.url !== undefined && slot.url !== url) release(slot.url)
         slot.url = url
+        slot.urlGen = info.gen
         slot.thumbGen = info.gen
         return { status: 'ready', url, camera: info.camera, axis: info.axis, gen: info.gen }
       }
@@ -833,6 +847,7 @@ export function useThumbnails(
           url: undefined,
           thumbGen: undefined,
           refusedGen: undefined,
+          urlGen: undefined,
         }
         slots.set(entry.path, fresh)
         added.push(entry.path)

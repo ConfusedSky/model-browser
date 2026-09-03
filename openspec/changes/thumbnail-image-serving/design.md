@@ -211,8 +211,11 @@ does an unmounted library (`/api/*` answers 503, which `<img>` reports as
 `error`). The tile's `<img>` reports the failure through an `onImageError(path)`
 callback — the *path*, because `ThumbView` is shared with folder-sheet cells
 whose path is not the tile's — and the hook demotes that entry to the lookup
-path. The refusal is **remembered on the slot as the generation it refused**
-(cleared when a listing delivers a different `gen`): without memory, the
+path. The refusal is **remembered on the slot as the generation the failed URL
+named** (`urlGen`, recorded when the URL is built — not the entry's current
+word, which a later un-annotated listing leaves `undefined`; second review
+R5). Nothing clears it: a listing naming a *different* generation simply
+passes the comparison: without memory, the
 next `start` for that slot — a pose wave, a toggle — would rebuild the same
 URL and 404 again, and a pulled disk would turn 500 image 503s into 500
 retire/start cycles.
@@ -252,10 +255,10 @@ verdict for a survivor path and holds its fresh lookup — the exact regression
 that reset exists to prevent, reintroduced on the lookup side.
 
 **Module-level state needs an owner.** A module-level queue that carries a
-ranking and an `onIdle` pointing at whichever render queue was mounted last
+ranking and an `onSettle` pointing at whichever render queue was mounted last
 contaminates tests (a leaked pending lookup in one test closes the far gate
 in the next) and dangles on unmount. So: the hook's wiring effect clears the
-gate and `onIdle` in its cleanup, and the module exports a test reset the
+gate and `onSettle` in its cleanup, and the module exports a test reset the
 suite calls in `beforeEach`, beside the preference-module resets the client
 test conventions already document.
 
@@ -291,6 +294,15 @@ navigation retires the far jobs; new far work is pushed after the bound),
 the clock would already have expired and the new job would dispatch at once
 under a closed gate, defeating the gate until some take happened to read it
 open (review R1, verified under Bun with a faked clock).
+
+**After the bound.** Once far work has been held for the whole bound, the
+clock is kept rather than reset: every far job then dispatches while the
+gate stays closed, so the backlog drains, and the clock is forgotten only
+when the gate next reads open. Resetting on the expired path dispatched one
+far job per bound — twelve renders a minute under a wedged lookup (second
+review, R7). And the gate is read on the first far job a take meets, whether
+or not a nearer job has already won that take, so the clock cannot depend on
+arrival order (R6).
 
 **Mechanics.** `pending` counts live jobs — husks are spliced only inside
 `take`, so it must not be `jobs.length + running`. The settle signal is
@@ -385,8 +397,25 @@ tile in a test knows where to look.
 | R8 | Five test comments falsified by the subclass stub | **Fixed** where found (`viewerCredits`, `viewerMenu`, `viewerPanelActions`) |
 | R9 | `gateTimer` survived `setFarGate(null)` | **Fixed**: `releaseHold` on gate removal |
 | R10 | Task 4.3's fifth cell pinned counting, not wiring; the reset window makes the gate "any lookup pending" until bands publish | **Fixed**: the settle cell carries a pending far lookup; D5 *The reset window* |
-| R11 | `image`'s conditional spread; `new Uint8Array(png)` copied every PNG | **Fixed**: `{ gen, png }`, `c.body(png)` |
+| R11 | `image`'s conditional spread; `new Uint8Array(png)` copied every PNG | **Fixed**: `{ gen, png }`; the body is a `Uint8Array` view over the Buffer's own bytes (offset and length kept — Bun may pool), since Hono's types refuse a Buffer |
 | R12 | `ThumbView` hid good pixels behind a spinner when a tile moved from `blob:` back to an image URL | **Fixed**: the placeholder only until the first picture this view has shown |
+
+### D10: Second implementation review (2026-09-03, opus)
+
+| # | Finding | Disposition |
+|---|---|---|
+| R1 | The hook's far-gate wiring was unpinned — a no-op gate left every cell green | **Fixed**: cell *the hook gates far renders on nearer lookups* (`thumbnailQueue.test.tsx`) |
+| R2 | The placeholder-until-load and R12's fix were unpinned in both directions | **Fixed**: `thumbView.test.tsx`, three cells with a synthesized `load` |
+| R3 | Listing-carried sheet cells were never annotated — the revisit cost a lookup per cell (Masa's base64 sheets) | **Fixed** (`2824007`): `annotate` recurses into `preview`; cells in `layers.test.ts` and `folderSheets.test.tsx` |
+| R4 | The similarity route's annotation was unpinned | **Fixed**: cell in `similar.test.ts`, entries and anchor |
+| R5 | The image-error refusal recorded the entry's current generation, lost after an un-annotated listing | **Fixed** (D3): `urlGen` recorded when the URL is built; cell falsified against the old record |
+| R6 | The bound's clock depended on arrival order | **Fixed** (D5): the gate is read on the first far job met; cell |
+| R7 | After the bound, one far job per bound | **Fixed** (D5 *After the bound*): the backlog drains; cell |
+| R8 | `onIdle` named in tasks and proposal, never built | **Fixed**: `onSettle` everywhere |
+| R9 | D9's R11 quoted a body call that did not land | **Fixed** (D9) |
+| R10 | 5.1's "keeps the entry's `gen` on its slot" was uncovered | **Fixed**: the demoted lookup's `gen` argument asserted |
+| R11 | `setFarGate(null)`'s timer disposal was unpinned | **Fixed**: cell with `vi.getTimerCount()` |
+| R12 | Stale counts in 6.1; two delta scenarios with no cell, unsaid | **Fixed**: 6.1 no longer carries a count; 5.1 names the two scenarios (in the tasks, not the delta — delta prose lands in main) |
 
 ## Risks / Trade-offs
 

@@ -2236,6 +2236,11 @@ describe('a listing-known thumbnail is drawn without a lookup', () => {
     await settle()
     expect(statuses()).toEqual(['loading']) // not 'error': a missing image is not a failed model
     expect(getThumb).toHaveBeenCalledTimes(1)
+    // Under the generation the annotation taught the slot — the demoted
+    // lookup names it, so it rides the immutable tier where it can rather
+    // than the validator tier (task 5.1; falsify by dropping `slot.thumbGen`
+    // from the annotation branch).
+    expect(getThumb).toHaveBeenCalledWith('/models/m0.stl', 1, true, 5)
 
     // A restart at the same generation — the pose wave, a toggle — must not
     // rebuild the refused URL: the annotation is skipped and the lookup asked
@@ -2254,5 +2259,79 @@ describe('a listing-known thumbnail is drawn without a lookup', () => {
     )
     await settle()
     expect(urlOf('/models/m0.stl')).toContain('gen=7')
+  })
+
+  it('the refusal remembers the generation the failed URL named, not the entry’s current word', async () => {
+    // Second review, R5: a later listing can carry no annotation at all (a
+    // server restart empties the fact index) while the survivor keeps its
+    // image URL. When that URL then fails, the entry's word is `undefined`;
+    // recording *that* would remember nothing, and the next listing naming
+    // gen 5 again would rebuild the same 404 URL.
+    const getThumb = vi.fn().mockResolvedValue({ status: 'miss' })
+    const api = fakeApi(getThumb)
+    const queue = new RenderQueue(2)
+    queue.suspend()
+    await render(<Harness entries={annotated(1)} api={api} lru={fakeLru()} queue={queue} />)
+    await settle()
+    expect(urlOf('/models/m0.stl')).toContain('gen=5')
+
+    // The same entry, un-annotated: not a new fact, the tile keeps its URL.
+    await rerender(<Harness entries={models(1)} api={api} lru={fakeLru()} queue={queue} />)
+    await settle()
+    expect(urlOf('/models/m0.stl')).toContain('gen=5')
+    expect(getThumb).not.toHaveBeenCalled()
+
+    await act(async () => {
+      lastReportImageError!('/models/m0.stl')
+    })
+    await settle()
+    expect(getThumb).toHaveBeenCalledTimes(1)
+
+    // Gen 5 again, from a server that has read the entry once more, landing
+    // with a pose wave so the survivor restarts and reaches the annotation
+    // branch: refused, still — the lookup is asked, the URL is not rebuilt.
+    // Falsify by recording `slot.entry.thumb?.gen` at the error: the URL
+    // comes back and no second lookup is made.
+    const pose: IndexPose = { up: [0, 1, 0], azimuth_zero: [1, 0, 0], source: 'siglip', confidence: 0.9, front: null }
+    await rerender(
+      <Harness entries={annotated(1)} api={api} lru={fakeLru()} queue={queue} poses={{ '/models/m0.stl': pose }} />,
+    )
+    await settle()
+    expect(urlOf('/models/m0.stl')).toBe('')
+    expect(getThumb).toHaveBeenCalledTimes(2)
+  })
+})
+
+/**
+ * Far reads yield to pending lookups — the *hook's* wiring of it, not the
+ * queue's own (second review, R1): the render queue App passes in is gated on
+ * the module-level lookup queue, so a far render does not start while a
+ * lookup for a nearer tile is pending, and starts on its own when it settles.
+ */
+describe('the hook gates far renders on nearer lookups', () => {
+  it('a far render waits for a pending near lookup and resumes when it settles', async () => {
+    // Nine models, all misses: eight lookups fill the lookup queue's slots and
+    // park; m8's lookup queues. Then a far-ranked render is pushed straight
+    // into the render queue App would hold. With m8 ranked near and pending,
+    // the far render must not start; once every lookup has settled — the
+    // misses' own renders are far too, and the queue has two slots — it does.
+    const gate = gateLookups()
+    const queue = new RenderQueue(2)
+    await render(<Harness entries={models(9)} api={gate.api} lru={fakeLru()} queue={queue} ao />)
+    await settle()
+    expect(gate.asked).toHaveLength(8)
+    const far = Object.fromEntries([...models(9).map((e) => [e.path, 'far' as const]), ['/models/other.stl', 'far' as const]])
+    await bands({ ...far, '/models/m8.stl': 'near' })
+
+    const ran: string[] = []
+    queue.push(async () => {
+      ran.push('far-render')
+    }, '/models/other.stl')
+    await settle()
+    expect(ran).toEqual([]) // held: m8's lookup, ranked near, is pending
+
+    for (const e of models(9)) await gate.release(e.path)
+    await settle()
+    expect(ran).toEqual(['far-render']) // resumed by the lookup queue's settle, no push
   })
 })
