@@ -30,12 +30,20 @@
 > enumeration carries; whichever of it and this lands second reuses the other's
 > extraction of the hook's hit test (1.1). Re-read all of them against main before
 > starting — active and parallel-owned.
+
+> **Implemented 2026-09-02** (foreman run: opus workers in isolated worktrees, one per
+> stage, every diff line-reviewed by the coordinator on a different model, every
+> behavioural cell falsified before trusted). Stage A — server PUT fields and the
+> hook/queue seams (28a9393, c2270f3); Stage B — the runner and the per-entry ops
+> (4d3d5c1); Stage C — the surfaces (f47f3d0); the coordinator's review fixes
+> (652b05f); then a merge of main, which had landed `thumbnail-image-serving` §2/§4 in
+> the same files. Evidence per task is on its line. **4.2 is not run** — see its note.
 > `SidePanel` will also be touched by the demo change's chat-tab hiding
 > (`web-demo-backlog` 1.3, undrafted): additive on both sides, declare ordering there.
 
 ## 1. The job runner
 
-- [ ] 1.0 Server: two additive fields on `PUT /api/thumb` (`app.ts`, `cache.ts`; the
+- [x] 1.0 Server: two additive fields on `PUT /api/thumb` (`app.ts`, `cache.ts`; the
       delta's new `model-thumbnails` requirement, ADD-only — `thumbnail-image-serving`
       and `public-deployment` both hold ADD-only deltas there with distinct titles,
       checked against main 2026-09-02). `png: null` is its **own branch** in
@@ -58,7 +66,16 @@
       the sidecar byte-identical; the 412 is distinguishable from a 400; a `null` png
       survives `putThumb`'s serialization. `ApiClient.putThumb`'s `ThumbSave` grows both
       fields; the harness mock extended additively
-- [ ] 1.1 A job module beside `useThumbnails`' queue plumbing: `(operation, scope)`. At
+      — landed 2026-09-02 (28a9393, worker A1): the deletion is its own early-return
+      branch in `ThumbCache.put` (`merged` helper for the orientation fields);
+      `StaleWriteError` carries the current gen and the route answers
+      `ThumbPutRefused` at 412 from a local try/catch; `putThumb` serialises `null`
+      and sends `ifGen`; `ApiClient.models` added beside `listDir`. Cells: both variants
+      miss after a delete-with-discard; a kept camera answers `stale`; a stale `ifGen`
+      leaves the sidecar byte-identical; 412 ≠ 400; `"png":null` on the raw body.
+      Falsified ×3 (the client ternary, the precondition, `null` through the pixel
+      path)
+- [x] 1.1 A job module beside `useThumbnails`' queue plumbing: `(operation, scope)`. At
       launch, in order: enumerate the scope through `ApiClient` (the tree cache's 6.7
       route — the app's root for the library tab, the tile's path for a menu launch);
       run the job's own orientation wave over only the enumerated models whose
@@ -78,7 +95,13 @@
       additively. The library tab's buttons read "Counting…" until the derivation lands,
       and a launch re-derives: a count is a derivation, not a reservation. No
       persistence
-- [ ] 1.2 Generate's entries feed the render queue through `RenderQueue.push` with the band
+      — landed 2026-09-02 (4d3d5c1, worker B1; 652b05f, coordinator): `BulkJobs` in
+      `client/src/jobs/bulkJobs.ts`, `derive`/`count` over one private `enumerate`
+      (one walk, one wave — the review found the tab paying two), `keeps` the shared
+      filter. Cells: what generate keeps and drops (each label, the ao variant in
+      force, unowned-behind-pose vs owned), reset keeps `framed`, the wave asks only
+      the unposed, a rejected wave derives silent, `incomplete`, `count` walks once
+- [x] 1.2 Generate's entries feed the render queue through `RenderQueue.push` with the band
       **pinned to `far`** — a third, optional argument that bypasses the ranking lookup,
       because the job's key is a path the grid may rank *visible* and the spec says no
       better than far. One entry in flight at a time: the next is pushed when the
@@ -91,7 +114,16 @@
       as the user is actively browsing, bounded by the gate's own timeout. Accepted and
       stated here: that is the preemption the spec asks for, and an exemption would put
       a mesh read ahead of a visible tile's lookup
-- [ ] 1.3 Two per-entry ops. **Generate**: split `refreshThumbnail` (`entryActions.ts`)
+      — landed 2026-09-02 (c2270f3, worker A2): `RenderQueue.push(run, key?, band?)`,
+      `rankOf` reads a pinned band before the ranking. Cells under the render-order
+      rule: pinned far waits for a later near though its key ranks visible; ties with
+      ranked far in insertion order both ways; survives a promoting re-rank; a pinned
+      visible outruns unreported work. Falsified (rankOf ignoring the pin: all four
+      fail). One entry in flight is the runner's loop (4d3d5c1, cell "at most one entry
+      is in the queue at a time" holding both slots). The far gate landed on main in
+      the same day (`thumbnail-image-serving` 4.x) — the interaction stated above holds
+      as written
+- [x] 1.3 Two per-entry ops. **Generate**: split `refreshThumbnail` (`entryActions.ts`)
       into a core — `renderEntryThumbnail(entry, deps, { discardFraming, pose, ifGen })`,
       the lookup (kept, deliberately: the orientation rendered from is the one in force
       when the render runs, not when the scope was enumerated — one small GET per model
@@ -121,35 +153,80 @@
       yet still loses its renders and moves its `gen` — one forced re-render, accepted
       rather than special-cased: it was counted, and the user asked for it. A 412 is
       `skipped`
-- [ ] 1.4 Per-entry failure counted from the core's throw or the PUT's rejection — never
+      — landed 2026-09-02 (4d3d5c1, worker B1): `renderEntryThumbnail(entry, deps,
+      { discardFraming, pose, ifGen?, skipIfCurrent? })` answers `'done' | 'skipped' |
+      'current'` — the third value was added at implementation (a job's derivation
+      reads an annotation that may be older than the cache; the core's own fresh read
+      is the last word, so a current entry costs one GET and no render; D7 updated) —
+      and `refreshThumbnail` is the wrapper; the reset op is the plain PUT with
+      `framingAfterDiscard` spied in its cell. `refetch(path)` on `useThumbnails`
+      (c2270f3) blanks, forgets the gen, restarts through the effect's own `start` via a
+      ref — and B1 moved the hook's gen adoption below the `alive()` gate after A2's
+      review found a late pre-reset lookup could hand its deleted-entry gen to the
+      restart (cell "never lets the pre-write lookup hand its generation to the
+      restart"). `ActionHost.poses`' comment corrected. The two commands' cells pass
+      unchanged through the split
+- [x] 1.4 Per-entry failure counted from the core's throw or the PUT's rejection — never
       through `host.report` — and the job continues; generation-moved entries (412)
       skipped and counted (D4); cancel stops un-started work at once (nothing further is
       pushed or sent) and lets the in-flight entry finish or fail
-- [ ] 1.5 One active job: a second launch surfaces the running chip (D2)
+      — landed 2026-09-02 (4d3d5c1). Cells: 412 counts skipped, a thrown render counts
+      failed and the job reaches `done`; all-failed sets `NOTHING_PROCESSED`; an
+      unreadable scope sets `SCOPE_UNREADABLE`; cancel mid-run pushes nothing further
+      and still counts the in-flight entry. **An all-skipped job ends `done` with
+      "0 of N · N skipped"** — the pin kept, since every skip is the user's own
+      later write and the chip shows exactly that
+- [x] 1.5 One active job: a second launch surfaces the running chip (D2)
+      — landed 2026-09-02 (4d3d5c1). The coordinator's review found the hole the pin
+      did not name: a run cancelled mid-entry and replaced by a new launch settled its
+      last patches onto the *new* job's state. `RunToken` is now a run's identity and
+      every patch from `run` goes through `patchRun(token, …)`; cell "lets a stale run
+      report nothing onto the job that replaced it", falsified against the bare patch
 
 ## 2. Surfaces
 
-- [ ] 2.1 `ENTRY_COMMANDS` + `commandsFor` (`entryActions.ts` — the one per-kind
+- [x] 2.1 `ENTRY_COMMANDS` + `commandsFor` (`entryActions.ts` — the one per-kind
       table; `EntryMenu` only draws it, review M7; new `CommandId`s, `applies` on
       containers, the ASCII per-kind table in the doc comment updated, and a
       job-launch capability on `ActionHost`): on dir and zip entries, "Generate
       thumbnails beneath" and "Reset framings beneath" — **uncounted** labels (D5,
       review M6); absent on model entries. Reset confirms with the derived count before
       anything is discarded; generate's count appears on the chip as the job starts (D5)
-- [ ] 2.2 `SidePanel`: fourth tab `library` with "Generate N missing thumbnails" and
+      — landed 2026-09-02 (f47f3d0, worker C): rows between `findSimilar` and
+      `reRenderThumbnail`, `applies` on containers gated on
+      `ctx.features?.thumbWrites === true` (`AvailabilityContext.features` added; the
+      offer rule); `ActionHost.launchJob`; `JOB_BUSY` beside `RENDER_FAILED`. Eight
+      pre-existing exact-list assertions widened (entryMenu, openInApps,
+      orbitAxisMenu, thumbnailActions, similarTuning ×4) — semantics-is-the-point, each
+      named in the worker's report, and falsified once with `thumbWrites: false`
+- [x] 2.2 `SidePanel`: fourth tab `library` with "Generate N missing thumbnails" and
       "Reset N framings" for the whole library; counts from the index, no walk. Tab
       does NOT join the stored-tab rules — it follows `similar`'s exclusion instead:
       a tab the feature report can empty is a tab that can be absent, which is the
       condition `StoredTab` exists to exclude, and the `tabStore` parser must not
       learn a value that can name a missing tab (review M8, overturning this line's
       first version)
-- [ ] 2.3 The progress chip: app-level, survives navigation, shows
+      — landed 2026-09-02 (f47f3d0; 652b05f): `library` last in the strip, only with a
+      non-null `library` prop; `StoredTab` excludes it, the parser unchanged; leaving-
+      only fallback to `chat`; one token-guarded count per opening and per job end
+      (`recountKey`). The coordinator's review fixed two things: the count seam was
+      keyed on a closure rebuilt with the action host — every pose landing would have
+      re-enumerated the library (cell "counts once per opening, not once per landing",
+      falsified) — and a failed enumeration left the buttons counting forever; they now
+      read "Count failed" and reselecting the tab asks again
+- [x] 2.3 The progress chip: app-level, survives navigation, shows
       operation/scope/done/total/failed/skipped, Cancel; dismiss hides without
       cancelling (D2)
+      — landed 2026-09-02 (f47f3d0; 652b05f): `JobChip`, pure props, five phases,
+      buttons named Cancel/Reset/Dismiss; sits at `bottom-14 left-3` because the
+      occlusion pill owns `bottom-3 left-3` and drew over it (the worker's own
+      finding). Cells: survives navigation and Cancel there stops the job; Dismiss
+      does not cancel (two-entry scope, falsified); a second launch keeps one job and
+      says `JOB_BUSY`
 
 ## 3. Tests
 
-- [ ] 3.1 Runner: derivation picks exactly missing/stale (generate) and framed (reset)
+- [x] 3.1 Runner: derivation picks exactly missing/stale (generate) and framed (reset)
       from a mocked enumeration; the wave asks poses for exactly the enumerated models,
       and an unowned entry whose `posed` is behind the wave's pose counts as stale;
       relaunch after cancel derives the remainder; generation-moved entry skipped and
@@ -157,22 +234,39 @@
       second job; an incomplete enumeration still runs and is reported cut; every push
       carries the pinned `far` band and at most one job entry is in the queue at a time
       (hold both slots — `client/test/CLAUDE.md`'s render-order rule)
-- [ ] 3.2 Reset op: one PUT per framed entry carrying `camera: null`, `png: null` and
+      — `client/test/bulkJobs.test.ts`, 29 cells (2026-09-02)
+- [x] 3.2 Reset op: one PUT per framed entry carrying `camera: null`, `png: null` and
       the snapshotted `ifGen`, with `axis: null` exactly when `framingAfterDiscard`
       reports a usable pose (spy on it — the rule is `entry-actions`' and already
       covered); no render pushed, no mesh acquired, the wave asked first; a 412 counts as
       skipped; an on-screen tile re-looks-up after the write. Generate op: the job's call
       reaches the shared core with `discardFraming: false`; the two commands' existing
       cells pass unchanged through the split
-- [ ] 3.3 Surfaces: menu entries only on containers, uncounted; reset confirm gates
+      — `client/test/thumbnailCommands.test.ts` (+5) and the reset cells in
+      `bulkJobs.test.ts` (2026-09-02)
+- [x] 3.3 Surfaces: menu entries only on containers, uncounted; reset confirm gates
       the launch and cancelling it launches nothing; library tab buttons state counts;
       chip persists across navigation and cancels the job; harness mocks extended
       additively (every pre-existing test unchanged)
+      — `client/test/bulkJobSurfaces.test.tsx` (11 cells) and `entryActions.test.ts`
+      (+4), 2026-09-02. "Every pre-existing test unchanged" was false as written: the
+      harness's all-on report is the app's real default, so eight exact-list
+      assertions had to widen (2.1's note)
 
 ## 4. Verification
 
-- [ ] 4.1 `bun run test` / `bun run typecheck` clean from the workspace dirs
-- [ ] 4.2 Live: generate over a partly-rendered kit fills only its gaps while
+- [x] 4.1 `bun run test` / `bun run typecheck` clean from the workspace dirs
+      — 2026-09-02 on the merged tree (this branch + main's `thumbnail-image-serving`
+      §2/§4): client 770 passed, server 617 passed, typecheck 0 in both;
+      `indexContract.test.ts`'s live-index cell flaked once in the full run and passed
+      alone (the known flake in `server/test/CLAUDE.md`)
+- [ ] 4.2 **Not run (2026-09-02).** A dev instance from another session held 3177/5173
+      throughout, serving main rather than this branch, and stopping it was not this
+      session's call. What 4.2 still owes, unchanged below; two things to look at first
+      when it runs: the chip against the occlusion pill at `bottom-14`, and the library
+      tab's count on the real 3,380-model library (one `/api/models` plus one pose wave
+      over the unposed — time it).
+      Live: generate over a partly-rendered kit fills only its gaps while
       scrolling elsewhere stays responsive (visible tiles render first); reset over
       an orbited subtree empties its renders in seconds — on-screen tiles refill
       through the sweep, a model orbited mid-job is skipped — and a following generate

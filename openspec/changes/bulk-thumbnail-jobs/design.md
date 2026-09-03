@@ -114,6 +114,12 @@ read-modify-write — the unserialized span between its `readMeta` and its
 `writeMeta`, which its doc comment already records as accepted — and nothing
 narrower exists without locking.
 
+One consequence, found by the implementing worker: every accepted write moves
+the generation, so a job that wrote one entry twice under its launch snapshot
+would refuse its own second write and count it as the user's. Each op here
+writes once; an op that ever writes twice must re-key from the PUT's answered
+`gen`, never from the snapshot.
+
 ### D5: Counts before consent
 
 A launcher states its cost where the surface can deliver it (review M6 narrowed the
@@ -165,7 +171,11 @@ orientation rendered from is the one in force when the render runs, not when
 the scope was enumerated — one small GET per model against a render-bound job),
 the resolution (`framingAfterDiscard` on discard, the sweep's rule otherwise),
 the render, the PUT (forwarding `ifGen`) and the `setThumb`; it takes the pose as a parameter,
-answers `'done' | 'skipped'` (a 412 is `skipped`), and throws on failure. The
+answers `'done' | 'skipped' | 'current'` (a 412 is `skipped`; `'current'` is the
+`skipIfCurrent` answer, added at implementation — the job's derivation read an
+annotation that may be older than the cache, so the core's own fresh read is the
+last word and a current entry costs one GET and no render), and throws on
+failure. The
 command's wrapper is what `refreshThumbnail` keeps: the queue push, the pose read
 from `host.poses`, the one-line report. The job's wrapper passes its own pose
 (D8's wave) and the `gen` it snapshotted at launch, and counts a throw instead
@@ -216,9 +226,13 @@ silence: the listing wave's contract — which is also what D7's core renders
 unowned models under, so a generate over a plain folder frames them as a visit
 would, and a reset discards the axis exactly where the per-model action would
 (D3). The library tab's counts are the same derivation, run when the tab opens —
-"Counting…" until it lands — and a launch re-derives, over the app's root —
-`LibraryState.root`, the viewpoint the app opens at, which is what "the library"
-means on screen.
+"Counting…" until it lands, "Count failed" if it cannot — and a launch
+re-derives, over the app's root — `LibraryState.root`, the viewpoint the app
+opens at, which is what "the library" means on screen. Both counts come from
+**one** scan (`BulkJobs.count`): the review found the first version paying the
+walk and the wave twice for two filters over one answer. The seam is keyed on
+the scope and the runner alone — never on the action host, which is rebuilt on
+every pose landing — or every landing re-enumerated the library.
 
 An enumeration that reports itself incomplete (a root with no snapshot whose walk
 stopped against its budget) is still a job, over what was found; the chip says the
