@@ -70,7 +70,7 @@ Cached content SHALL never be served once revalidation has contradicted it, and 
 - **THEN** it is absent from the corrected listing and is not served from cache again
 
 ### Requirement: Derived annotations ride the listing
-The server SHALL attach to listing entries, at emission, the derived per-entry facts its caches already hold — a model's pose, a directory's preview choice (the entries its contact sheet shows), and a model's thumbnail state (cached, stale, or absent, with the cached image's write generation) — as additive fields resolved by key lookup alone. Emission SHALL NOT wait on the semantic index or any other service: a fact the caches cannot answer is simply absent from that entry, and a library with no derived-layer content SHALL emit listings byte-identical to one where these layers do not exist. What the client does with an absent fact — asking the index directly, rendering without it — is unchanged by this capability.
+The server SHALL attach to listing entries, at emission, the derived per-entry facts its caches already hold — a model's pose, a directory's preview choice (the entries its contact sheet shows), and a model's thumbnail state (cached, stale, or absent, with the cached image's write generation) — as additive fields resolved by key lookup alone. When the index reports itself ready, emission MAY spend a bounded annotation budget filling what its layers lack — one batched pose ask for the listing's unposed models, preview derivations for its unchosen directories under a concurrency cap — so a first sight arrives whole instead of popping in through client follow-ups (revised 2026-09-03, Masa: the round trips were the problem, not the caching; the layers cache exactly as before, populated server-side). Emission SHALL NOT wait beyond that budget, SHALL NOT consult an index whose memoised probe is not ready (a warming or absent index costs a listing nothing), and answers landing after the budget SHALL still be recorded in the layers so the next listing carries them. A fact neither the layers nor the budget produced is simply absent from that entry — the client's wave and peek remain the fill for exactly those — and a library with no derived-layer content and no ready index SHALL emit listings byte-identical to one where these layers do not exist. What the client does with an absent fact — asking the index directly, rendering without it — is unchanged by this capability.
 
 #### Scenario: A revisit is one request
 - **WHEN** a root whose entries' poses and thumbnail states are already cached is listed again
@@ -78,7 +78,11 @@ The server SHALL attach to listing entries, at emission, the derived per-entry f
 
 #### Scenario: The index being down does not slow a listing
 - **WHEN** the semantic index is absent, warming, or wedged
-- **THEN** listings emit at full speed, carrying whatever annotations the layers already held and omitting the rest
+- **THEN** the memoised probe gates emission-time filling entirely: listings emit at full speed with no index call made, carrying whatever annotations the layers already held and omitting the rest
+
+#### Scenario: A first sight arrives whole
+- **WHEN** a ready index knows poses and preview choices the layers have not yet recorded, and a listing containing those entries is emitted
+- **THEN** the listing carries them, fetched within the annotation budget at emission, and the client issues no follow-up wave or peek for what arrived
 
 #### Scenario: No layers, byte-identical
 - **WHEN** a library has no cached poses, preview choices, or thumbnails

@@ -84,6 +84,20 @@ The cache also holds what the walk cannot see but the server repeatedly re-asks 
 
 The structural rule protects D1: the tree snapshot is a function of the root alone, and that invariant is what lets one snapshot serve every query. Poses and preview choices are functions of root *plus index state*, so they are separate layers, the way the zip-directory layer is keyed against archive identity. Their validity key must be something the server can itself observe — review finding M9: `IndexAvailability` carries no build identity, the `generation` in `semantic.ts` is a probe-memo counter that moves on user retries, and `POSE_VERSION` is a client constant the server deliberately never interprets — so the layers carry the server's own layer-version constant and are dropped wholesale on a reload (D9) and when the index's reported `collectionRoot` changes. Thumbnail state is not persisted here at all — the thumbnail store is already durable; this layer is an in-memory index over it, exposing presence, staleness and the write generation **per render** (presence is per occlusion variant, since the store keys renders that way — the seam the immutable-thumbnail-serving change and the bulk jobs' "missing or stale" derivation consume).
 
+*Emission-time filling (revised 2026-09-03, Masa — supersedes the "never asks anyone
+anything" absolutism below for the ready-index case):* the layers still never block
+emission on an unhealthy index — the memoised probe gates every emission-time call, so
+absent/warming/wedged costs zero — but a READY index is now consulted at emission for
+what the layers lack, under `ANNOTATION_BUDGET_MS`: one batched `/poses` ask for the
+listing's unposed models, preview derivations (the existing posed-first peek pipeline,
+whose walk half the snapshot now serves for free) under a small concurrency cap for its
+unchosen directories. Beyond the budget the listing ships with what arrived; the
+in-flight answers still land in the layers, so the next listing carries them. Root
+problem this solves: the client-side fill produced a round trip and visible pop-in per
+first sight — "have dir make the poses and under calls; you can still cache as before,
+just do the calls on the server side." The client's wave and peek remain as the fill
+path for budget-missed and probe-gated cases, unchanged.
+
 *Persistence settled 2026-09-02 (stage-3 worker's check-in, adjudicated):* both derived
 layers are **in-memory**, not persisted. The deciding reason is M9's own finding turned
 around: the server has no observable index build identity (`IndexAvailability` carries

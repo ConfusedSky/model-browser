@@ -430,6 +430,24 @@
       against source: a5ed10d's emission-side `annotate(preview)` attaches both.
       Carried-choice staleness accepted as the recorded layer-lifecycle class
 
+- [ ] 6.9 Emission-time filling (added 2026-09-03, Masa — see the delta's revised
+      annotation requirement and D7's emission-time note): when the memoised probe
+      says ready, `annotate`'s pass fills what the layers lack within
+      `ANNOTATION_BUDGET_MS` (exported const, ~300 ms) — ONE batched `/poses` ask
+      for the listing's unposed models; preview derivation via the existing
+      posed-first peek pipeline (snapshot-served walk) for unchosen dirs, concurrency
+      ≤4 — attaching what returns in time; late answers still `record*` into the
+      layers (fire-and-forget continuation, errors swallowed like the wave's). Probe
+      not ready → zero index calls, zero added latency. Client untouched: the wave
+      and peek stay the fill for what emission missed. Cells: a ready fast index →
+      first listing carries pose+preview and (instrumented) the client-visible
+      answer needed no follow-up; a gated slow index → listing ships within budget
+      without the fact, the late answer lands in the layer, the NEXT listing carries
+      it; probe not-ready → no upstream call (count at the fetch seam) and emission
+      latency unchanged; falsify each (drop the budget → hang; drop the probe gate →
+      warming index slows a listing; drop the late-record → second listing still
+      bare)
+
 ## 7. Tests
 
 - [x] 7.1 Server: cached and walked responses are entry-for-entry identical on an unchanged tree (including ordering and truncation); one cached tree serves several different queries and both settings of the folder-matching option without re-traversing (instrument the walk, do not infer from timing); a second walk opens no archives; adding, removing, and renaming a model is picked up; a present-but-unreadable root invalidates rather than serving; the same tree reached at a different mountpoint under the same library is a **hit**; an unmounted library answers `missing` and leaves the snapshot in place; the on-disk format version invalidates a stale snapshot
