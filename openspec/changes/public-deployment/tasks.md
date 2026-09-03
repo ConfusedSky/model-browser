@@ -87,6 +87,14 @@
 
 ## 4. Client consumers
 
+> **Where the client reads the report.** `bulk-thumbnail-jobs` adds `features:
+> FeatureReport | null` to `AvailabilityContext` (`entryActions.ts`) and threads it into
+> all four contexts from `App` — on its branch, not on main, where that interface carries
+> `apps` and no `features`. If it lands first, 4.1–4.6 read the report there rather than
+> adding a second plumb; if this change lands first, it adds the plumb and that change
+> rebases onto it. Either way there is one path, not two (coordinated with that change's
+> session, 2026-09-03).
+
 - [ ] 4.1 Decorate `ApiClient`'s thumbnail read and write when a known report declares
       writes off (D6): the write drops the PNG and stores camera and axis in this
       browser, answering as a write would; the read overlays a locally-stored orientation
@@ -109,7 +117,8 @@
 - [ ] 4.5 The find-similar copy for an unembedded model stops telling the viewer to run
       the classifier under `hostDetails` (D11) — the notes flagged this
       copy as needing a visitor-facing form
-- [ ] 4.6 Where `top` is withheld under `hostDetails` (D11), copy-path and the lightbox's file details show
+- [ ] 4.6 Where `top` is withheld under `hostDetails` (D11) — read off
+      `AvailabilityContext` per the note above, since copy-path is built there — copy-path and the lightbox's file details show
       the library path instead of composing a filesystem path
 
 ## 5. Serving the built client
