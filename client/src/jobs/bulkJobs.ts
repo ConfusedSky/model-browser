@@ -123,6 +123,30 @@ interface RunToken {
   cancelled: boolean
 }
 
+/**
+ * Whether an operation touches this model — the derivation's one filter,
+ * shared by `derive` (the work list) and `count` (the buttons), so the button
+ * cannot promise a different number from the one the job touches.
+ *
+ * The judgement stays client-side (D8). The server states facts per model —
+ * presence and labels per variant, `gen`, `framed` — and the recipe constants
+ * that decide what those facts *mean* live here, so generate asks
+ * `isCurrentRender`, the very predicate the sweep's hit branch asks, rather
+ * than a second reading of it.
+ */
+function keeps(operation: JobOperation, c: JobEntry, ao: boolean): boolean {
+  const { thumb } = c.entry
+  if (operation === 'reset') {
+    // `framed` is the server's word for "a camera **or** an axis is stored"
+    // (M4) — one definition shared by the derivation and the tab's counts.
+    return thumb?.framed === true
+  }
+  // An absent annotation means nothing is cached, not "unknown": the server's
+  // index is seeded by the startup sweep and learns every write, so an entry
+  // it holds nothing for has no stored render.
+  return thumb === undefined || !isCurrentRender(ao ? thumb.ao : thumb.noao, thumb.camera, thumb.axis, c.pose)
+}
+
 export class BulkJobs {
   /** Null until the first launch; the last job's state stays readable after it
    *  ends, because the chip outlives the work it reported on. */
@@ -164,6 +188,38 @@ export class BulkJobs {
    * than a second reading of it.
    */
   async derive(operation: JobOperation, scope: JobScope): Promise<Derivation> {
+    const scan = await this.enumerate(scope)
+    return {
+      entries: scan.candidates.filter((c) => keeps(operation, c, scan.ao)),
+      incomplete: scan.incomplete,
+    }
+  }
+
+  /**
+   * Both operations' counts from **one** enumeration and one wave — what the
+   * library tab's buttons show (D5). Two `derive` calls would walk the same
+   * scope twice and ask the index about the same unknowns twice, for two
+   * numbers that are two filters over one answer.
+   */
+  async count(scope: JobScope): Promise<{ generate: number; reset: number; incomplete: boolean }> {
+    const scan = await this.enumerate(scope)
+    let generate = 0
+    let reset = 0
+    for (const c of scan.candidates) {
+      if (keeps('generate', c, scan.ao)) generate++
+      if (keeps('reset', c, scan.ao)) reset++
+    }
+    return { generate, reset, incomplete: scan.incomplete }
+  }
+
+  /**
+   * The enumeration and the wave, once per ask; `keeps` applies an operation
+   * over the result. Every model beneath the scope is a candidate here — which
+   * ones a job touches is the operation's filter, not the scan's.
+   */
+  private async enumerate(
+    scope: JobScope,
+  ): Promise<{ candidates: JobEntry[]; incomplete: boolean; ao: boolean }> {
     const listing = await this.deps.api.models(scope.path)
     const models = listing.entries.filter((e) => e.kind === 'model')
     // Only the models the enumeration could not answer for. The tree cache's
@@ -182,39 +238,20 @@ export class BulkJobs {
             .semanticPosesFor(unknown)
             .then((r) => r.poses)
             .catch(() => ({}) as Record<string, IndexPose>)
-    // Read once for the whole derivation: a preference toggled mid-derivation
-    // must not have half the scope judged against one variant and half the
-    // other.
+    // Read once for the whole scan: a preference toggled mid-derivation must
+    // not have half the scope judged against one variant and half the other.
     const ao = this.deps.ao()
-
-    const entries: JobEntry[] = []
-    for (const entry of models) {
-      const pose = entry.pose ?? wave[entry.path]
-      const keep =
-        operation === 'generate'
-          ? // An absent annotation means nothing is cached, not "unknown": the
-            // server's index is seeded by the startup sweep and learns every
-            // write, so an entry it holds nothing for has no stored render.
-            entry.thumb === undefined ||
-            !isCurrentRender(
-              ao ? entry.thumb.ao : entry.thumb.noao,
-              entry.thumb.camera,
-              entry.thumb.axis,
-              pose,
-            )
-          : // `framed` is the server's word for "a camera **or** an axis is
-            // stored" (M4) — one definition shared by this derivation and the
-            // tab's counts, so the button cannot promise a different number
-            // from the one the job touches.
-            entry.thumb?.framed === true
-      // A missing annotation is generation zero, which is what the server calls
-      // an entry it has never written: the conditional write then refuses if
-      // anything wrote it between the enumeration and the job's turn.
-      if (keep) entries.push({ entry, gen: entry.thumb?.gen ?? 0, pose })
-    }
-    // The enumeration's order is the job's order: the answer is the tree's own
+    // A missing annotation is generation zero, which is what the server calls
+    // an entry it has never written: the conditional write then refuses if
+    // anything wrote it between the enumeration and the job's turn. The
+    // enumeration's order is the job's order: the answer is the tree's own
     // traversal, which is the order a user would have walked it in.
-    return { entries, incomplete: !listing.complete }
+    const candidates = models.map((entry) => ({
+      entry,
+      gen: entry.thumb?.gen ?? 0,
+      pose: entry.pose ?? wave[entry.path],
+    }))
+    return { candidates, incomplete: !listing.complete, ao }
   }
 
   /**

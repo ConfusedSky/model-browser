@@ -2256,41 +2256,45 @@ export default function App() {
    * The label is the one string the chip's scope phrasing keys off
    * (`JobChip`'s `scopePhrase`), so it is spelled here and nowhere else.
    */
+  /**
+   * Whole-library scope is the app's root — `LibraryState.root`, the viewpoint
+   * the app opens at, which is what "the library" means on screen (D8). Memoized
+   * on the primitive, not the state object: the library is re-probed, and a
+   * scope that changed identity per probe would recount the library each time.
+   */
+  const rootPath = libraryState?.state === 'ready' ? libraryState.root : null
   const rootScope = useMemo(
-    () =>
-      libraryState?.state === 'ready'
-        ? { path: libraryState.root, label: 'the library' }
-        : null,
-    [libraryState],
+    () => (rootPath === null ? null : { path: rootPath, label: 'the library' }),
+    [rootPath],
   )
   /**
-   * The library tab's launcher, or `null` for no tab at all (D6).
-   *
-   * Withheld on two conditions and they are different in kind. The feature
-   * report is the **offer** rule (feature-report D3): every occupant of that
-   * tab is a write affordance, so it is withheld unless a known report says
-   * thumbnail writes are accepted — unknown included. The library not being
-   * ready is simply nothing to point at.
-   *
-   * Memoized, because the panel counts in an effect keyed on this object's
-   * `count`: a new function per render would re-derive the whole library on
-   * every keystroke in the search box. `recountKey` is the job's phase, which
-   * is exactly when the numbers on those buttons stopped being true — a job
-   * that has just finished generating has changed both of them.
+   * The library tab's seam, and why its two closures are keyed on so little.
+   * The panel recounts whenever `count` changes identity — that is its
+   * contract, and the right one, since a new scope is a new count — so the
+   * closure must be rebuilt only when the scope or the runner is. `launch`
+   * reaches the host through a ref for the same reason: `actionHost` is
+   * rebuilt on every pose landing, and a `launch` keyed on it would have made
+   * every landing re-enumerate the whole library. `recountKey` is the one
+   * deliberate trigger: a job ending is exactly when the numbers went stale.
    */
+  const actionHostRef = useRef(actionHost)
+  actionHostRef.current = actionHost
+  const countLibrary = useCallback(
+    () => (rootScope === null ? Promise.reject(new Error('no library')) : jobs.count(rootScope)),
+    [jobs, rootScope],
+  )
+  const launchLibrary = useCallback(
+    (op: JobOperation) => {
+      if (rootScope !== null) actionHostRef.current.launchJob(op, rootScope)
+    },
+    [rootScope],
+  )
   const libraryJobs = useMemo(
     () =>
       features?.thumbWrites === true && rootScope !== null
-        ? {
-            count: (op: JobOperation) =>
-              jobs
-                .derive(op, rootScope)
-                .then((d) => ({ n: d.entries.length, incomplete: d.incomplete })),
-            launch: (op: JobOperation) => actionHost.launchJob(op, rootScope),
-            recountKey: job?.phase ?? null,
-          }
+        ? { count: countLibrary, launch: launchLibrary, recountKey: job?.phase ?? null }
         : null,
-    [features?.thumbWrites, rootScope, jobs, actionHost, job?.phase],
+    [features?.thumbWrites, rootScope, countLibrary, launchLibrary, job?.phase],
   )
 
   function goUp(): void {

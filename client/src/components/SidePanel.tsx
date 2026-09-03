@@ -156,7 +156,7 @@ export default function SidePanel({
    * only after the launch has derived it.
    */
   library: {
-    count: (op: JobOperation) => Promise<{ n: number; incomplete: boolean }>
+    count: () => Promise<{ generate: number; reset: number; incomplete: boolean }>
     launch: (op: JobOperation) => void
     /**
      * Recount when this changes. App moves it as a job's phase moves, which is
@@ -302,11 +302,9 @@ export default function SidePanel({
    * slower one landing second would put a stale number under a button that
    * launches the fresh derivation.
    */
-  const [counts, setCounts] = useState<{
-    generate: number
-    reset: number
-    incomplete: boolean
-  } | null>(null)
+  const [counts, setCounts] = useState<
+    { generate: number; reset: number; incomplete: boolean } | null | 'failed'
+  >(null)
   const countTokenRef = useRef(0)
   const showLibrary = tab === 'library' && library !== null
   const countFn = library?.count
@@ -315,22 +313,17 @@ export default function SidePanel({
     if (!showLibrary || countFn === undefined) return
     const token = ++countTokenRef.current
     setCounts(null)
-    void Promise.all([countFn('generate'), countFn('reset')]).then(
-      ([generate, reset]) => {
+    void countFn().then(
+      (c) => {
         if (countTokenRef.current !== token) return
-        setCounts({
-          generate: generate.n,
-          reset: reset.n,
-          // Either derivation reading its scope as cut is enough: they are the
-          // same enumeration, and a floor is a floor.
-          incomplete: generate.incomplete || reset.incomplete,
-        })
+        setCounts(c)
       },
       () => {
-        // A scope that could not be enumerated leaves the buttons counting
-        // rather than promising a number nobody has. The failure the user acts
-        // on arrives on the chip if they launch anyway.
+        // A scope that could not be enumerated says so rather than counting
+        // forever — a button with no way out is a surface, not an affordance.
+        // Reselecting the tab asks again.
         if (countTokenRef.current !== token) return
+        setCounts('failed')
       },
     )
   }, [showLibrary, countFn, recountKey])
@@ -727,7 +720,12 @@ export default function SidePanel({
                   are not (D5): this surface renders asynchronously already, so
                   a number arriving a moment later reshapes nothing. */}
               {(['generate', 'reset'] as const).map((op) => {
-                const n = counts === null ? null : op === 'generate' ? counts.generate : counts.reset
+                const n =
+                  counts === null || counts === 'failed'
+                    ? null
+                    : op === 'generate'
+                      ? counts.generate
+                      : counts.reset
                 return (
                   <button
                     key={op}
@@ -736,8 +734,10 @@ export default function SidePanel({
                     onClick={() => library.launch(op)}
                     className="w-full rounded-lg border border-zinc-800 px-3 py-2 text-left text-zinc-300 hover:border-zinc-500 disabled:opacity-40 disabled:hover:border-zinc-800"
                   >
-                    {n === null
-                      ? 'Counting…'
+                    {counts === 'failed'
+                      ? 'Count failed'
+                      : n === null
+                        ? 'Counting…'
                       : op === 'generate'
                         ? `Generate ${n} missing thumbnails`
                         : `Reset ${n} framings`}
@@ -747,7 +747,10 @@ export default function SidePanel({
               {/* An enumeration that ran out of budget found *some* of the
                   scope, so the numbers above are true as far as they go and
                   false as a total. Saying which is the honest button (D8). */}
-              {counts?.incomplete === true && (
+              {counts === 'failed' && (
+                <p className="text-zinc-600">The library could not be counted — reopen the tab to try again.</p>
+              )}
+              {counts !== null && counts !== 'failed' && counts.incomplete && (
                 <p className="text-zinc-600">The scope was cut short — counts are a floor.</p>
               )}
             </div>

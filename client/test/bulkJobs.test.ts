@@ -607,3 +607,25 @@ describe('the state the chip subscribes to', () => {
     expect(seen[seen.length - 1]).toBe(h.jobs.state)
   })
 })
+
+describe('counting a scope', () => {
+  it('answers both counts from one enumeration and one wave', async () => {
+    const h = harness(
+      listing(
+        [
+          model('missing'),
+          model('framed', { thumb: thumb({ framed: true }) }),
+          model('framed-and-missing', { thumb: thumb({ framed: true, ao: { state: 'miss' } }) }),
+        ],
+        false,
+      ),
+    )
+    expect(await h.jobs.count(SCOPE)).toEqual({ generate: 2, reset: 2, incomplete: true })
+    // One walk, one wave — the two numbers are two filters over one answer.
+    expect(h.models).toHaveBeenCalledTimes(1)
+    expect(h.posesFor).toHaveBeenCalledTimes(1)
+    // And the same filters the work list uses: a count is a derivation's size.
+    expect((await h.jobs.derive('generate', SCOPE)).entries).toHaveLength(2)
+    expect((await h.jobs.derive('reset', SCOPE)).entries).toHaveLength(2)
+  })
+})

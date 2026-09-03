@@ -23,6 +23,7 @@ import {
   mountApp,
   putThumb,
   renderThumbnail,
+  semanticPosesFor,
   settle,
   tiles,
   unmountApp,
@@ -127,7 +128,7 @@ const selectedTab = (): string | undefined =>
 /** The library tab's two buttons, in the order the tab draws them. */
 const libraryButtons = (): HTMLButtonElement[] =>
   Array.from(container.querySelectorAll<HTMLButtonElement>('aside button')).filter((b) =>
-    /^(Counting…|Generate |Reset )/.test(b.textContent ?? ''),
+    /^(Counting…|Count failed|Generate |Reset )/.test(b.textContent ?? ''),
   )
 
 /** Hold every render open, and hand back the release. The job then sits in
@@ -368,6 +369,46 @@ describe('the library tab', () => {
     await click(libraryButtons()[0]!)
     await settle()
     expect(chipText()).toBe('Generated 2 of 2 in the library')
+  })
+
+  it('counts once per opening, not once per landing', async () => {
+    // A pose answer for the next folder's model rebuilds `poses`, and with it
+    // the action host, on every landing. The tab's count is keyed on the scope
+    // and the runner, not on the host — or every landing would re-enumerate
+    // the whole library (the coordinator's review of Stage C).
+    enumerated('/', [beneath('', '/a.stl')])
+    const withModel: DirListing = { path: '/models/Beta', entries: [beneath('/models/Beta', 'x.stl')] }
+    semanticPosesFor.mockResolvedValue({
+      poses: {
+        '/models/Beta/x.stl': {
+          up: [0, -1, 0],
+          azimuth_zero: [1, 0, 0],
+          source: 'test',
+          confidence: 1,
+          front: null,
+        },
+      },
+    })
+    await mountApp('/models', NESTED)
+    listDir.mockImplementation((p: string) => Promise.resolve(p === '/models/Beta' ? withModel : NESTED))
+    await expandPanel()
+    await click(tabButton('library')!)
+    await settle()
+    expect(models).toHaveBeenCalledTimes(1)
+    await click(tile('Beta'))
+    await settle()
+    expect(semanticPosesFor).toHaveBeenCalled()
+    expect(models).toHaveBeenCalledTimes(1)
+  })
+
+  it('says the count failed rather than counting forever', async () => {
+    models.mockRejectedValue(new Error('enumeration refused'))
+    await mountApp('/models', NESTED)
+    await expandPanel()
+    await click(tabButton('library')!)
+    await settle()
+    expect(libraryButtons().map((b) => b.textContent)).toEqual(['Count failed', 'Count failed'])
+    expect(libraryButtons().every((b) => b.disabled)).toBe(true)
   })
 
   it('is never what the profile records, and a stored one opens on chat', async () => {

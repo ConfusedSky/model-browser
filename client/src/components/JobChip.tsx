@@ -34,7 +34,9 @@ export default function JobChip({
     <div
       role="status"
       aria-live="polite"
-      className="fixed bottom-3 left-3 z-20 flex max-w-sm items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900/95 px-3 py-2 text-xs text-zinc-200"
+      // Above the occlusion pill, which owns the corner itself (`fixed bottom-3
+      // left-3` in App): the two would otherwise overlap exactly, the pill on top.
+      className="fixed bottom-14 left-3 z-20 flex max-w-sm items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900/95 px-3 py-2 text-xs text-zinc-200"
     >
       <p className="min-w-0 flex-1">{sentence(state)}</p>
       {state.phase === 'confirming' && (
