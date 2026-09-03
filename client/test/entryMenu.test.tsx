@@ -315,13 +315,18 @@ describe("the menu's contents", () => {
     })
 
     await secondaryPress(tile('Alpha'))
-    expect(items()).toEqual(['open', 'reveal', 'copyPath'])
+    // The two container rows are the bulk-job launchers (`bulk-thumbnail-jobs`
+    // 2.1): the subtree analogue of the two per-model thumbnail commands,
+    // offered here because the harness's default feature report is a known
+    // all-on one — what today's server answers.
+    expect(items()).toEqual(['open', 'reveal', 'copyPath', 'generateBeneath', 'resetBeneath'])
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     })
 
     await secondaryPress(tile('kit.zip'))
-    expect(items()).toEqual(['open', 'reveal', 'copyPath'])
+    // An archive is a container too — same two rows, same reason.
+    expect(items()).toEqual(['open', 'reveal', 'copyPath', 'generateBeneath', 'resetBeneath'])
   })
 
   it('withholds find similar while the index is not answering, without asking it', async () => {

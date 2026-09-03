@@ -13,14 +13,17 @@ import { HttpApiClient, HttpError } from './api/client'
 import EntryMenu from './components/EntryMenu'
 import FindBar from './components/FindBar'
 import Grid from './components/Grid'
+import JobChip from './components/JobChip'
 import SidePanel from './components/SidePanel'
 import PathBar from './components/PathBar'
 import { SKELETON_DELAY_MS, useDelayedFlag } from './hooks/useDelayedFlag'
 import { useThumbnails } from './hooks/useThumbnails'
+import { BulkJobs, useBulkJobState, type JobOperation } from './jobs/bulkJobs'
 import {
   commandsFor,
   containingFolder,
   DEFAULT_ORBIT_AXIS,
+  JOB_BUSY,
   LIGHTBOX_MENU_EXCLUDES,
   LIGHTBOX_PANEL_EXCLUDES,
   openEntryIn,
@@ -938,7 +941,7 @@ export default function App() {
           : libraryMissingText(libraryState.root)
 
   const showSkeleton = useDelayedFlag(busy(state), SKELETON_DELAY_MS)
-  const { thumbs, setThumb, setPlaceholder, discardThumbFraming, setBands } = useThumbnails(
+  const { thumbs, setThumb, refetch, setPlaceholder, discardThumbFraming, setBands } = useThumbnails(
     thumbEntries,
     api,
     lru,
@@ -953,6 +956,30 @@ export default function App() {
     entries,
   )
   placeholderRef.current = setPlaceholder
+
+  /**
+   * The one bulk-job runner for this app (`bulk-thumbnail-jobs` D2). One
+   * instance, built once: it *is* the "one job at a time" rule — a second
+   * instance would be a second job, whatever the chip said.
+   *
+   * Every dependency is referentially stable across renders, which is what
+   * keeps that promise: `api`, `queue` and `lru` are App's own memos, and
+   * `setThumb`/`refetch` are `useCallback([], …)` in `useThumbnails`.
+   *
+   * `ao` is `aoToggle`'s module reader, **not** the `ao` state cell one screen
+   * up — and the difference is deliberate rather than incidental. The two hold
+   * the same value; the state cell exists to re-run the sweep over the grid on
+   * screen when it changes. A job derives once at launch and reads the
+   * preference in force at that moment (`JobDeps.ao`), which is the same
+   * reading the per-model commands take. Closing over the cell would rebuild
+   * the runner on every press of the pill — discarding the running job's state
+   * with it.
+   */
+  const jobs = useMemo(
+    () => new BulkJobs({ api, lru, queue, setThumb, refetch, ao: aoEnabled }),
+    [api, lru, queue, setThumb, refetch],
+  )
+  const job = useBulkJobState(jobs)
 
   /**
    * The one URL writer (design R3): serialize the asserted view and commit it.
@@ -2008,6 +2035,13 @@ export default function App() {
       // The launch half: App holds the session's report, so App is who can read
       // it again. The *when* belongs to the command — see `openEntryWith`.
       refreshApps,
+      // The bulk half. The runner answers `'busy'` when a job is already alive
+      // — and un-dismisses its chip on the way out, which is D2's substantive
+      // answer to a second press — so all that is left here is the sentence,
+      // routed to wherever the user is looking like every other one.
+      launchJob: (operation, scope) => {
+        if (jobs.launch(operation, scope) === 'busy') say(JOB_BUSY, 'error')
+      },
     }),
     [
       navigate,
@@ -2023,6 +2057,8 @@ export default function App() {
       setThumb,
       discardThumbFraming,
       refreshApps,
+      jobs,
+      say,
     ],
   )
 
@@ -2127,9 +2163,9 @@ export default function App() {
    */
   const menuOpenIn = useMemo(() => {
     if (menu === null) return null
-    const list = openInApps(menu.entry, { index: state.index, apps }, menuExcludes(menu.surface))
+    const list = openInApps(menu.entry, { index: state.index, apps, features }, menuExcludes(menu.surface))
     return list.length === 0 ? null : list
-  }, [menu, state.index, apps])
+  }, [menu, state.index, apps, features])
   /** A pill pressed: the shared body, through the one host — a launch and
    *  nothing else, so unlike an axis pick there is no current value to hand it. */
   const onChooseApp = useCallback(
@@ -2147,8 +2183,8 @@ export default function App() {
     () =>
       menu === null
         ? []
-        : commandsFor(menu.entry, { index: state.index, apps }, menuExcludes(menu.surface)),
-    [menu, state.index, apps],
+        : commandsFor(menu.entry, { index: state.index, apps, features }, menuExcludes(menu.surface)),
+    [menu, state.index, apps, features],
   )
 
   /**
@@ -2162,8 +2198,8 @@ export default function App() {
     () =>
       viewer === null
         ? []
-        : commandsFor(viewer.entry, { index: state.index, apps }, LIGHTBOX_PANEL_EXCLUDES),
-    [viewer, state.index, apps],
+        : commandsFor(viewer.entry, { index: state.index, apps, features }, LIGHTBOX_PANEL_EXCLUDES),
+    [viewer, state.index, apps, features],
   )
   /**
    * The panel's open-in row (L10, reversed 2026-08-25): the same question the
@@ -2175,9 +2211,9 @@ export default function App() {
    */
   const panelOpenIn = useMemo(() => {
     if (viewer === null) return null
-    const list = openInApps(viewer.entry, { index: state.index, apps }, LIGHTBOX_PANEL_EXCLUDES)
+    const list = openInApps(viewer.entry, { index: state.index, apps, features }, LIGHTBOX_PANEL_EXCLUDES)
     return list.length === 0 ? null : list
-  }, [viewer, state.index, apps])
+  }, [viewer, state.index, apps, features])
   /** A panel pill pressed: the shared launch body through the one host — a
    *  launch and nothing else, exactly as the menu's press (the entry read from
    *  `viewerRef` the way `onViewerCommand` reads it, so the callback is stable). */
@@ -2209,6 +2245,52 @@ export default function App() {
       runCommand(id, entry, actionHost)
     },
     [actionHost],
+  )
+
+  /**
+   * The whole-library scope (D8): the **app's root**, which is the viewpoint
+   * this app opens at and therefore what "the library" means on screen — not
+   * the library's top, which the root may sit below. `null` until the library
+   * is ready, because there is no path to enumerate before then.
+   *
+   * The label is the one string the chip's scope phrasing keys off
+   * (`JobChip`'s `scopePhrase`), so it is spelled here and nowhere else.
+   */
+  const rootScope = useMemo(
+    () =>
+      libraryState?.state === 'ready'
+        ? { path: libraryState.root, label: 'the library' }
+        : null,
+    [libraryState],
+  )
+  /**
+   * The library tab's launcher, or `null` for no tab at all (D6).
+   *
+   * Withheld on two conditions and they are different in kind. The feature
+   * report is the **offer** rule (feature-report D3): every occupant of that
+   * tab is a write affordance, so it is withheld unless a known report says
+   * thumbnail writes are accepted — unknown included. The library not being
+   * ready is simply nothing to point at.
+   *
+   * Memoized, because the panel counts in an effect keyed on this object's
+   * `count`: a new function per render would re-derive the whole library on
+   * every keystroke in the search box. `recountKey` is the job's phase, which
+   * is exactly when the numbers on those buttons stopped being true — a job
+   * that has just finished generating has changed both of them.
+   */
+  const libraryJobs = useMemo(
+    () =>
+      features?.thumbWrites === true && rootScope !== null
+        ? {
+            count: (op: JobOperation) =>
+              jobs
+                .derive(op, rootScope)
+                .then((d) => ({ n: d.entries.length, incomplete: d.incomplete })),
+            launch: (op: JobOperation) => actionHost.launchJob(op, rootScope),
+            recountKey: job?.phase ?? null,
+          }
+        : null,
+    [features?.thumbWrites, rootScope, jobs, actionHost, job?.phase],
   )
 
   function goUp(): void {
@@ -2717,6 +2799,7 @@ export default function App() {
         <SidePanel
           query={liveQuery}
           similar={liveSimilar}
+          library={libraryJobs}
           onSimilarTuning={setSimilarTuning}
           path={target}
           folderMatching={live.folderMatching}
@@ -2731,6 +2814,19 @@ export default function App() {
           onMode={setMode}
         />
       </div>
+      {/* The running job, outside the body row so it outlives every listing the
+          user navigates through (D2). One chip whichever launcher started it;
+          `dismissed` hides it without cancelling anything, and the runner keeps
+          the last job's state readable after it ends because the chip is what
+          reports the outcome. */}
+      {job !== null && !job.dismissed && (
+        <JobChip
+          state={job}
+          onConfirm={() => jobs.confirm()}
+          onCancel={() => jobs.cancel()}
+          onDismiss={() => jobs.dismiss()}
+        />
+      )}
       {/* Corner pill: the SHIPPED ssao preference. The experimental picker it
           was built around is gone with the retired spindle-aligned rig — one
           orientation leaves nothing to choose — and the container outlived it. */}

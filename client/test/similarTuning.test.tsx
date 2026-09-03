@@ -270,13 +270,15 @@ describe('the Similar tab itself (6.4)', () => {
     await mountApp('/models', NESTED)
     await settle()
     await expandPanel()
-    expect(tabNames()).toEqual(['chat', 'search'])
+    // `library` is the app's maintenance surface, present because the harness's
+    // default feature report is a known all-on one (`bulk-thumbnail-jobs` D6).
+    expect(tabNames()).toEqual(['chat', 'search', 'library'])
 
     listDir.mockResolvedValue({ path: '/models', entries: [model('widget.stl')] })
     await type(searchInput(), 'widget')
     await pressEnter(searchInput())
     await settle()
-    expect(tabNames()).toEqual(['chat', 'search'])
+    expect(tabNames()).toEqual(['chat', 'search', 'library'])
   })
 
   it('appears under a similarity view', async () => {
@@ -285,7 +287,10 @@ describe('the Similar tab itself (6.4)', () => {
     await mountAppAtCurrentUrl(LINK, NESTED)
     await settle()
     await expandPanel()
-    expect(tabNames()).toEqual(['chat', 'search', 'similar'])
+    // Library sits LAST, after Similar: the three tabs before it describe the
+    // view on screen and this one does not (D6). The order is asserted here
+    // rather than left to the strip's construction, so the rule has an owner.
+    expect(tabNames()).toEqual(['chat', 'search', 'similar', 'library'])
   })
 
   it('is selected on arrival from the search tab, and never from chat', async () => {
@@ -333,7 +338,9 @@ describe('the Similar tab itself (6.4)', () => {
     listDir.mockResolvedValue({ path: '/models', entries: [dir('Alpha')] })
     await click(dismissButton()!)
     await settle()
-    expect(tabNames()).toEqual(['chat', 'search'])
+    // `library` is the app's maintenance surface, present because the harness's
+    // default feature report is a known all-on one (`bulk-thumbnail-jobs` D6).
+    expect(tabNames()).toEqual(['chat', 'search', 'library'])
     expect(selectedTab()).toBe('search')
   })
 

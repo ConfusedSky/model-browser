@@ -170,7 +170,17 @@ describe('which entries offer the open-in row', () => {
     expect(pills()).toHaveLength(0)
     // And the chooser item goes with it: both are model-only, whatever the
     // report says about the machine.
-    expect(commandIds()).toEqual(['open', 'reveal', 'copyPath'])
+    // The two container rows are the bulk-job launchers (`bulk-thumbnail-jobs`
+    // 2.1): the subtree analogue of the two per-model thumbnail commands,
+    // offered here because the harness's default feature report is a known
+    // all-on one — what today's server answers.
+    expect(commandIds()).toEqual([
+      'open',
+      'reveal',
+      'copyPath',
+      'generateBeneath',
+      'resetBeneath',
+    ])
     await escape()
 
     await secondaryPress(tile('kit.zip'))

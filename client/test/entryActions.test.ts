@@ -3,7 +3,7 @@
 // on, D6's per-kind table, and the menu's viewport clamp. Everything here is a
 // pure function — the wiring is entryMenu.test.tsx's job.
 import { describe, expect, it, vi } from 'vitest'
-import type { DirEntry, IndexAvailability } from '../../shared/types'
+import type { DirEntry, FeatureReport, IndexAvailability } from '../../shared/types'
 import { clampToViewport } from '../src/components/EntryMenu'
 import {
   commandsFor,
@@ -11,6 +11,8 @@ import {
   copyEntryPath,
   COPY_FAILED,
   ENTRY_COMMANDS,
+  runCommand,
+  type ActionHost,
 } from '../src/lib/entryActions'
 
 const model = (path: string): DirEntry => ({
@@ -37,8 +39,18 @@ const READY: IndexAvailability = { state: 'ready', collectionRoot: '/m' }
 // `apps: null` is a machine whose registry has not answered — no chooser, so no
 // *Open with…*, which is what every case in this file is about. The launch
 // actions' own cases are in openInApps.test.tsx, where a report exists.
-const ids = (entry: DirEntry, index: IndexAvailability | null): string[] =>
-  commandsFor(entry, { index, apps: null }).map((c) => c.id)
+// A **known** report saying this server takes thumbnail writes — what today's
+// server answers, and the only shape under which the two container *beneath*
+// rows are offered at all.
+const WRITES: FeatureReport = { thumbWrites: true }
+// The default is `null` — the report not known — for `apps: null`'s reason:
+// every case written before the bulk rows existed is about the rest of the
+// table, and an unknown report withholds exactly those two.
+const ids = (
+  entry: DirEntry,
+  index: IndexAvailability | null,
+  features: FeatureReport | null = null,
+): string[] => commandsFor(entry, { index, apps: null, features }).map((c) => c.id)
 
 describe('containingFolder', () => {
   it('is the parent directory of an ordinary path', () => {
@@ -119,6 +131,77 @@ describe("D6's per-kind table", () => {
     ])
   })
 
+  it('offers both bulk commands on a container and on nothing else', () => {
+    // The container analogues of the two thumbnail commands, under the mirror
+    // of their rule: a subtree is what a container has instead of a thumbnail,
+    // and a model's own per-model actions already cover it.
+    for (const id of ['generateBeneath', 'resetBeneath']) {
+      expect(ids(dir('/m/d'), READY, WRITES)).toContain(id)
+      expect(ids(zip('/m/z.zip'), READY, WRITES)).toContain(id)
+      expect(ids(model('/m/a.stl'), READY, WRITES)).not.toContain(id)
+    }
+    // Not the index's actions either: a container's bulk work has nothing to do
+    // with whether meaning search is answering.
+    expect(ids(dir('/m/d'), null, WRITES)).toEqual([
+      'open',
+      'reveal',
+      'copyPath',
+      'generateBeneath',
+      'resetBeneath',
+    ])
+  })
+
+  it('withholds both unless a KNOWN report says thumbnail writes are accepted', () => {
+    // The offer half of feature-report D3. `null` is *not known* — in flight,
+    // or the read failed — and both read the same here, so nothing renders and
+    // then vanishes a round trip later, and nothing opens on error.
+    for (const entry of [dir('/m/d'), zip('/m/z.zip')]) {
+      for (const report of [null, { thumbWrites: false }] as (FeatureReport | null)[]) {
+        expect(ids(entry, READY, report)).not.toContain('generateBeneath')
+        expect(ids(entry, READY, report)).not.toContain('resetBeneath')
+      }
+    }
+  })
+
+  it('labels both without a count, and without any digit at all', () => {
+    // D5/M6: `EntryMenu` measures, clamps and focus-seeds from its command list
+    // at mount, so a count arriving a round trip later would move the menu out
+    // from under the pointer. The cost is stated at the next step — the chip's
+    // confirmation for reset, the chip itself for generate.
+    const label = (id: string): string =>
+      commandsFor(dir('/m/d'), { index: READY, apps: null, features: WRITES }).find(
+        (c) => c.id === id,
+      )!.label
+    expect(label('generateBeneath')).toBe('Generate thumbnails beneath')
+    expect(label('resetBeneath')).toBe('Reset framings beneath')
+    for (const id of ['generateBeneath', 'resetBeneath']) expect(label(id)).not.toMatch(/[0-9]/)
+    // And no `labelFor`: a per-entry label is resolved at `commandsFor` time,
+    // which is the one hook a count could have arrived through.
+    for (const id of ['generateBeneath', 'resetBeneath']) {
+      expect(ENTRY_COMMANDS.find((c) => c.id === id)!.labelFor).toBeUndefined()
+    }
+  })
+
+  it('launches the scope the tile names, preferring the displayed name', () => {
+    // The command asks and nothing else: no confirmation here (the chip's, once
+    // it has a count) and no report of a refusal (App's — see `JOB_BUSY`).
+    const launchJob = vi.fn()
+    const host = { launchJob } as unknown as ActionHost
+    const folder: DirEntry = { ...dir('/m/Kits/Baal'), displayName: 'Baal — primed' }
+    runCommand('resetBeneath', folder, host)
+    expect(launchJob).toHaveBeenCalledWith('reset', {
+      path: '/m/Kits/Baal',
+      label: 'Baal — primed',
+    })
+    runCommand('generateBeneath', dir('/m/Kits/Plain'), host)
+    // No override, so the entry's own name — the label is display only, and the
+    // chip names the scope the way the tile the user pressed named it.
+    expect(launchJob).toHaveBeenLastCalledWith('generate', {
+      path: '/m/Kits/Plain',
+      label: 'Plain',
+    })
+  })
+
   it('labels open for what it does to this entry, resolved by commandsFor', () => {
     // The 4.3 naming decision (2026-08-25): "Open" was only ever accurate on a
     // model — a directory or archive is browsed into, no lightbox involved.
@@ -126,13 +209,13 @@ describe("D6's per-kind table", () => {
     // per-entry list is built: consumers keep rendering a plain `label`
     // string and never learn about entry kinds.
     const label = (entry: DirEntry): string =>
-      commandsFor(entry, { index: READY, apps: null }).find((c) => c.id === 'open')!.label
+      commandsFor(entry, { index: READY, apps: null, features: null }).find((c) => c.id === 'open')!.label
     expect(label(model('/m/a.stl'))).toBe('Open lightbox')
     expect(label(dir('/m/d'))).toBe('Open folder')
     expect(label(zip('/m/z.zip'))).toBe('Open archive')
     // Every other command's label is one string for every entry.
     for (const entry of [model('/m/a.stl'), dir('/m/d'), zip('/m/z.zip')]) {
-      for (const c of commandsFor(entry, { index: READY, apps: null })) {
+      for (const c of commandsFor(entry, { index: READY, apps: null, features: null })) {
         if (c.id === 'open') continue
         expect(c.label).toBe(ENTRY_COMMANDS.find((t) => t.id === c.id)!.label)
       }

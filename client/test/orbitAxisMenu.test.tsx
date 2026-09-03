@@ -228,7 +228,11 @@ describe('the group is offered on model tiles and nowhere else', () => {
     await settle()
 
     await secondaryPress(tile('Alpha'))
-    expect(items()).toEqual(['open', 'reveal', 'copyPath'])
+    // The two container rows are the bulk-job launchers (`bulk-thumbnail-jobs`
+    // 2.1): the subtree analogue of the two per-model thumbnail commands,
+    // offered here because the harness's default feature report is a known
+    // all-on one — what today's server answers.
+    expect(items()).toEqual(['open', 'reveal', 'copyPath', 'generateBeneath', 'resetBeneath'])
     expect(axes()).toHaveLength(0)
     expect(flip()).toBeNull()
     await escape()

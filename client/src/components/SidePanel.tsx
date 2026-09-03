@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { MAX_RESULT_COUNT, type IndexAvailability, type SemanticScope } from '../../../shared/types'
+import type { JobOperation } from '../jobs/bulkJobs'
 import type { SearchKinds, SearchMode, Tuning } from '../lib/searchOptions'
 import { clampCount, POOLS, TUNING_DEFAULTS } from '../lib/searchOptions'
 import { stored } from '../lib/stored'
@@ -9,7 +10,7 @@ import { indexCovers } from '../state/selectors'
 const COLLAPSE_KEY = 'model-browser:chat-collapsed'
 const TAB_KEY = 'model-browser:panel-tab'
 
-type Tab = 'chat' | 'search' | 'similar'
+type Tab = 'chat' | 'search' | 'similar' | 'library'
 
 /**
  * What to say about an index that cannot serve *this path*, which is not the
@@ -58,8 +59,18 @@ function indexStateSentence(index: IndexAvailability, path: string): string {
  * would open on a tab that is not there. Excluding it from the store's type is
  * what makes that a rule rather than a habit — `tabStore.write('similar')` does
  * not compile.
+ *
+ * **Library is excluded for exactly that condition, arrived at from the other
+ * direction** (`bulk-thumbnail-jobs` review M8, which overturned this tab's
+ * first design): a tab the feature report can empty is a tab that can be
+ * absent, and *can be absent* is the whole condition this type exists to
+ * exclude. Its every occupant is a write affordance, so a deployment that
+ * refuses thumbnail writes has no library tab at all — and a profile restored
+ * onto a recorded `library` would open on nothing. The `tabStore` parser below
+ * must therefore never learn the value either: a type that forbids writing it
+ * is not a guarantee about what a *read* can produce.
  */
-type StoredTab = Exclude<Tab, 'similar'>
+type StoredTab = Exclude<Tab, 'similar' | 'library'>
 
 /**
  * How long a typed neighbour count waits before it becomes a question. The
@@ -80,7 +91,9 @@ const collapseStore = stored(
   (v) => (v ? '1' : '0'),
 )
 /** Anything that is not `search` reads as `chat` — which is already how a
- *  profile that somehow holds `similar` degrades, so old profiles need nothing. */
+ *  profile that somehow holds `similar` or `library` degrades, so old profiles
+ *  need nothing, and a hand-edited one naming a tab that may not exist opens on
+ *  one that always does. */
 const tabStore = stored<StoredTab>(
   TAB_KEY,
   (raw) => (raw === 'search' ? 'search' : 'chat'),
@@ -106,6 +119,7 @@ const tabStore = stored<StoredTab>(
 export default function SidePanel({
   query,
   similar,
+  library,
   path,
   folderMatching,
   kinds,
@@ -128,6 +142,28 @@ export default function SidePanel({
    * rather than an absent block.
    */
   similar: { model: string; k: number; pool?: Tuning['pool'] } | null
+  /**
+   * The whole-library bulk-job launcher, or `null` when there is none to offer
+   * — the server does not accept thumbnail writes, the report has not landed,
+   * or the library is not ready (`bulk-thumbnail-jobs` D6). The tab is absent
+   * for a null, by the same absent-rather-than-inert rule the Similar tab and
+   * the options inside these tabs follow.
+   *
+   * The panel neither derives nor launches: `count` is the runner's own
+   * derivation run without launching anything (a count is a count, not a
+   * reservation), and `launch` is App's one call into the runner. Reset's
+   * confirmation is the **chip's**, not this panel's (D5) — the count exists
+   * only after the launch has derived it.
+   */
+  library: {
+    count: (op: JobOperation) => Promise<{ n: number; incomplete: boolean }>
+    launch: (op: JobOperation) => void
+    /**
+     * Recount when this changes. App moves it as a job's phase moves, which is
+     * exactly when the numbers on these buttons stopped being true.
+     */
+    recountKey: unknown
+  } | null
   /** The directory in view — meaning search only covers part of the filesystem. */
   path: string
   folderMatching: boolean
@@ -201,9 +237,10 @@ export default function SidePanel({
 
   function selectTab(next: Tab): void {
     setTab(next)
-    // Selecting Similar is a move within one view, not a preference about how
-    // this profile opens — see `StoredTab`.
-    if (next !== 'similar') tabStore.write(next)
+    // Selecting Similar is a move within one view, and selecting Library is a
+    // move on a tab that may not be there next time — neither is a preference
+    // about how this profile opens. See `StoredTab`.
+    if (next !== 'similar' && next !== 'library') tabStore.write(next)
   }
 
   /**
@@ -230,6 +267,73 @@ export default function SidePanel({
     if (hasSimilar) setTab((t) => (t === 'search' ? 'similar' : t))
     else setTab((t) => (t === 'similar' ? 'search' : t))
   }, [hasSimilar])
+
+  /**
+   * The Library tab's half of the same rule — the leaving half only.
+   *
+   * Leaving: the tab can stop existing under the user (a feature report that
+   * lands late and says no, a library that stops being ready), and a tab that
+   * is gone cannot stay selected. It falls back to `chat`, the one tab that is
+   * always there — `search` is too, but this tab is nobody's search: the user
+   * was doing maintenance, and dropping them into the options for a search they
+   * never asked about would be the panel taking a decision it was not offered.
+   *
+   * There is deliberately **no arriving half**. Similar arrives because a
+   * find-similar reshapes the very view the panel is describing; a feature
+   * report resolving is not a thing the user did, and stealing a half-typed
+   * chat message for it would be worse than a tab they can click.
+   *
+   * Writes no store, like the Similar rule: a tab the app selected is not a tab
+   * the user chose, and neither of these two is ever recorded anyway.
+   */
+  const hasLibrary = library !== null
+  useEffect(() => {
+    if (!hasLibrary) setTab((t) => (t === 'library' ? 'chat' : t))
+  }, [hasLibrary])
+
+  /**
+   * The two counts, derived when the tab is open and again whenever the
+   * launcher says they have gone stale (`recountKey` — App moves it as a job's
+   * phase moves). `null` is *counting*, which is what the buttons say until it
+   * lands; the panel never blocks on it (D5).
+   *
+   * Latest-wins by token, the same shape the neighbour count's debounce uses
+   * one field down: two derivations can be in flight across a recount, and the
+   * slower one landing second would put a stale number under a button that
+   * launches the fresh derivation.
+   */
+  const [counts, setCounts] = useState<{
+    generate: number
+    reset: number
+    incomplete: boolean
+  } | null>(null)
+  const countTokenRef = useRef(0)
+  const showLibrary = tab === 'library' && library !== null
+  const countFn = library?.count
+  const recountKey = library?.recountKey
+  useEffect(() => {
+    if (!showLibrary || countFn === undefined) return
+    const token = ++countTokenRef.current
+    setCounts(null)
+    void Promise.all([countFn('generate'), countFn('reset')]).then(
+      ([generate, reset]) => {
+        if (countTokenRef.current !== token) return
+        setCounts({
+          generate: generate.n,
+          reset: reset.n,
+          // Either derivation reading its scope as cut is enough: they are the
+          // same enumeration, and a floor is a floor.
+          incomplete: generate.incomplete || reset.incomplete,
+        })
+      },
+      () => {
+        // A scope that could not be enumerated leaves the buttons counting
+        // rather than promising a number nobody has. The failure the user acts
+        // on arrives on the chip if they launch anyway.
+        if (countTokenRef.current !== token) return
+      },
+    )
+  }, [showLibrary, countFn, recountKey])
 
   // Answers "why are my results strange?" without opening the panel (D5).
   const nonDefault = !folderMatching || kinds !== 'both'
@@ -258,7 +362,14 @@ export default function SidePanel({
   const showIndexState = !meaningRunnable && (mode === 'meaning' || index.state !== 'absent')
   // A tab with nothing to be about is absent, not greyed — the same rule the
   // options inside these tabs follow.
-  const tabs: Tab[] = hasSimilar ? ['chat', 'search', 'similar'] : ['chat', 'search']
+  // Library goes last: it is the app's maintenance surface (D6), not one of the
+  // three tabs that describe the view on screen.
+  const tabs: Tab[] = [
+    'chat',
+    'search',
+    ...(hasSimilar ? (['similar'] as const) : []),
+    ...(hasLibrary ? (['library'] as const) : []),
+  ]
 
   return (
     <aside
@@ -601,6 +712,43 @@ export default function SidePanel({
                   configuration. */}
               {similar.pool === undefined && (
                 <p className="text-zinc-600">Pooled however the index is configured to.</p>
+              )}
+            </div>
+          ) : /* `library !== null` narrows, and covers the render between a
+                 launcher disappearing and the effect above moving off this
+                 tab — the Similar branch's own guard, for its reason. */
+          tab === 'library' && library !== null ? (
+            <div className="flex-1 space-y-2 overflow-auto p-3 text-xs">
+              <p className="text-zinc-500">
+                Bulk thumbnail work over the whole library. Jobs run behind whatever you are
+                looking at; cancel and relaunch to pause.
+              </p>
+              {/* Counted labels, which the context menu's entries deliberately
+                  are not (D5): this surface renders asynchronously already, so
+                  a number arriving a moment later reshapes nothing. */}
+              {(['generate', 'reset'] as const).map((op) => {
+                const n = counts === null ? null : op === 'generate' ? counts.generate : counts.reset
+                return (
+                  <button
+                    key={op}
+                    type="button"
+                    disabled={n === null || n === 0}
+                    onClick={() => library.launch(op)}
+                    className="w-full rounded-lg border border-zinc-800 px-3 py-2 text-left text-zinc-300 hover:border-zinc-500 disabled:opacity-40 disabled:hover:border-zinc-800"
+                  >
+                    {n === null
+                      ? 'Counting…'
+                      : op === 'generate'
+                        ? `Generate ${n} missing thumbnails`
+                        : `Reset ${n} framings`}
+                  </button>
+                )
+              })}
+              {/* An enumeration that ran out of budget found *some* of the
+                  scope, so the numbers above are true as far as they go and
+                  false as a total. Saying which is the honest button (D8). */}
+              {counts?.incomplete === true && (
+                <p className="text-zinc-600">The scope was cut short — counts are a floor.</p>
               )}
             </div>
           ) : (

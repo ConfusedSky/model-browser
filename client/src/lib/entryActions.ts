@@ -32,6 +32,7 @@ import type {
   AppsReport,
   CameraState,
   DirEntry,
+  FeatureReport,
   IndexAvailability,
   IndexPose,
   OrbitAxis,
@@ -39,6 +40,10 @@ import type {
 import type { ApiClient } from '../api/client'
 import { HttpError } from '../api/client'
 import { isCurrentRender, type ThumbState } from '../hooks/useThumbnails'
+// Type-only, and it must stay that way: `bulkJobs` imports `ActionHost` and
+// `renderEntryThumbnail` from here, so a value import back would close the
+// cycle. Types are erased, so this edge costs nothing at runtime.
+import type { JobOperation, JobScope } from '../jobs/bulkJobs'
 import { expandLibraryPath } from './libraryPath'
 import type { Action } from '../state/reducer'
 import { indexCovers } from '../state/selectors'
@@ -55,6 +60,8 @@ export type CommandId =
   | 'reveal'
   | 'copyPath'
   | 'findSimilar'
+  | 'generateBeneath'
+  | 'resetBeneath'
   | 'reRenderThumbnail'
   | 'resetFraming'
   | 'openWith'
@@ -186,6 +193,18 @@ export interface ActionHost extends Feedback, LibraryTop {
   /** The same map's framing-only discard, for the one command that gives an
    *  orientation up without drawing anything (`resetFramingLive`). */
   discardThumbFraming: (path: string, dropAxis: boolean) => void
+  /**
+   * App's one call into the job runner (`bulk-thumbnail-jobs` D2): start
+   * `(operation, scope)`, or surface the job already running.
+   *
+   * The commands here only ask. A refusal is **App's to say**, not the
+   * command's: `BulkJobs.launch` answers `'busy'`, and turning that into a
+   * sentence on the path bar is the same routing decision `report` already
+   * carries — a command that read the answer and reported it would be a second
+   * place the busy sentence lives, on a surface that does not know where the
+   * user is looking.
+   */
+  launchJob: (operation: JobOperation, scope: JobScope) => void
 }
 
 /**
@@ -206,6 +225,22 @@ export interface ActionHost extends Feedback, LibraryTop {
 export interface AvailabilityContext {
   index: IndexAvailability | null
   apps: AppsReport | null
+  /**
+   * What this server accepts and offers, as App holds it (feature-report D3).
+   *
+   * `null` is **not known** — still in flight, or the read failed — and the two
+   * are deliberately not distinguished here, because the rule for an *offer*
+   * treats them the same: an offer is withheld unless a **known** report
+   * declares its capability on. Withheld while unknown, so nothing renders and
+   * then vanishes a round trip later; withheld on a failed read, so nothing
+   * opens on error. (A *behavior* with an existing default follows the other
+   * half of that split and keeps its default until a known report says
+   * otherwise — no row here is one.)
+   *
+   * Like `index` and `apps`, this is state the app already holds and never a
+   * probe issued when a menu opens.
+   */
+  features: FeatureReport | null
 }
 
 /** The failure sentence for a clipboard write that did not land. One string, so
@@ -337,6 +372,18 @@ function similarApplies(entry: DirEntry, ctx: AvailabilityContext): boolean {
  *  string for both commands and every surface, like `COPY_FAILED`: they differ
  *  in what they give up, not in how a render that never happened is reported. */
 export const RENDER_FAILED = 'Could not re-render the thumbnail.'
+
+/**
+ * What App says when a launch found a job already running (D2).
+ *
+ * Here rather than in App for `RENDER_FAILED`'s reason — the sentence a failure
+ * reports is not per-surface — even though the *saying* is App's: every
+ * launcher (a container's menu entry, the library tab's buttons) goes through
+ * one `ActionHost.launchJob`, so there is one sentence to spell and one place
+ * to spell it. The chip is un-dismissed by the runner on the same press, which
+ * is the substantive half of D2's answer; this is the word that goes with it.
+ */
+export const JOB_BUSY = 'A job is already running — cancel it to start another.'
 
 /**
  * What a model resolves to once its own stored orientation is given up — the
@@ -1012,30 +1059,41 @@ export interface EntryCommand {
  * at each call site:
  *
  * ```
- * model tile           dir tile        zip tile
- * ──────────           ────────        ────────
- * Open lightbox        Open folder     Open archive
- * Reveal in app        Reveal in app   Reveal in app
- * Copy path            Copy path       Copy path
- * Find similar         —               —
- * Re-render thumbnail  —               —
- * Reset framing        —               —
- * Open with…           —               —
- * Orbit axis ×6        —               —
- * open in <app> …      —               —
+ * model tile                   dir tile                       zip tile
+ * ──────────                   ────────                       ────────
+ * Open lightbox                Open folder                    Open archive
+ * Reveal in app                Reveal in app                  Reveal in app
+ * Copy path                    Copy path                      Copy path
+ * Find similar                 —                              —
+ * —                            Generate thumbnails beneath    Generate thumbnails beneath
+ * —                            Reset framings beneath         Reset framings beneath
+ * Re-render thumbnail          —                              —
+ * Reset framing                —                              —
+ * Open with…                   —                              —
+ * Orbit axis ×6                —                              —
+ * open in <app> …              —                              —
  * ```
  *
  * The last two rows are the groups, not commands, and have no entry in the
  * table below — `orbitAxisApplies` and `openInApps` answer for them, under the
  * same model-only rule and the same per-surface filter (6.7, L3).
  *
- * Two rows carry a second condition the table cannot show, and both are the
- * same shape: a facility outside this app may not be there. *Find similar* is
- * absent when the index is not answering — the degradation `semantic-search`
+ * The two *beneath* rows are the container analogues of the two thumbnail
+ * commands, and sit where they do for that reason: a subtree is the thing a
+ * container has instead of a thumbnail (`bulk-thumbnail-jobs` 2.1). They are
+ * the only rows in this table that are **not** offered on a model — the
+ * per-model actions cover it already, and a scope of one is not a job.
+ *
+ * Four rows carry a second condition the table cannot show, and they are all
+ * the same shape: a facility outside this app may not be there. *Find similar*
+ * is absent when the index is not answering — the degradation `semantic-search`
  * designs for, arriving here. *Open with…* is absent when the machine has no
  * chooser configured (L4), which is every machine until someone configures one:
  * the pill row still covers the associated applications, and an item that
- * cannot hand off to anything is not offered inert.
+ * cannot hand off to anything is not offered inert. The two *beneath* rows are
+ * absent unless the **feature report is known and says thumbnail writes are
+ * accepted** — both are write affordances, and a deployment that refuses the
+ * write must not offer a button for it (`AvailabilityContext.features`).
  */
 export const ENTRY_COMMANDS: readonly EntryCommand[] = [
   {
@@ -1078,6 +1136,35 @@ export const ENTRY_COMMANDS: readonly EntryCommand[] = [
     label: 'Find similar',
     applies: similarApplies,
     run: (entry, host) => host.dispatch({ type: 'similar', model: entry.path }),
+  },
+  // The two container rows, between *Find similar* and the two per-model
+  // thumbnail commands they are the analogue of.
+  //
+  // **Both labels are uncounted, deliberately** (D5, review M6): `label` is a
+  // plain string resolved at `commandsFor` time, and `EntryMenu` measures,
+  // clamps and focus-seeds from its command list at mount — so a count that
+  // arrived a round trip later would visibly move the menu out from under the
+  // pointer and jump the keyboard's focus. The cost is stated at the next step
+  // instead: reset's on the chip's confirmation, before anything is discarded;
+  // generate's on the chip as the job starts.
+  {
+    id: 'generateBeneath',
+    label: 'Generate thumbnails beneath',
+    applies: (entry, ctx) => entry.kind !== 'model' && ctx.features?.thumbWrites === true,
+    // `displayName` first: the chip names the scope the way the tile the user
+    // pressed named it (library-overrides D7), falling back to the real name.
+    run: (entry, host) =>
+      host.launchJob('generate', { path: entry.path, label: entry.displayName ?? entry.name }),
+  },
+  {
+    id: 'resetBeneath',
+    label: 'Reset framings beneath',
+    applies: (entry, ctx) => entry.kind !== 'model' && ctx.features?.thumbWrites === true,
+    // No confirmation here: the runner derives first and parks in `confirming`
+    // with the count, which is the chip's to state (D5). A dialog raised by the
+    // command would have to state a number nobody has counted yet.
+    run: (entry, host) =>
+      host.launchJob('reset', { path: entry.path, label: entry.displayName ?? entry.name }),
   },
   {
     id: 'reRenderThumbnail',
@@ -1170,6 +1257,11 @@ export const LIGHTBOX_MENU_EXCLUDES: readonly MenuItemId[] = [
   'reRenderThumbnail',
   'orbitAxis',
 ]
+
+// Neither list names `generateBeneath` or `resetBeneath`, and neither needs to:
+// both lists filter the *lightbox*, which only ever opens a model, and both
+// rows are container-only — a filter for something the table already refuses
+// would be an entry that never does any work.
 
 /**
  * What the lightbox's **info panel** withholds — the other set of affordances on

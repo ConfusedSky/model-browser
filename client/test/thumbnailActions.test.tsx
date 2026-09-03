@@ -131,7 +131,11 @@ describe('offered wherever there is a thumbnail to act on', () => {
   it('offers neither on a directory tile', async () => {
     await mountApp('/models', NESTED)
     await secondaryPress(tile('Alpha'))
-    expect(items()).toEqual(['open', 'reveal', 'copyPath'])
+    // The two container rows are the bulk-job launchers (`bulk-thumbnail-jobs`
+    // 2.1): the subtree analogue of the two per-model thumbnail commands,
+    // offered here because the harness's default feature report is a known
+    // all-on one — what today's server answers.
+    expect(items()).toEqual(['open', 'reveal', 'copyPath', 'generateBeneath', 'resetBeneath'])
   })
 })
 
