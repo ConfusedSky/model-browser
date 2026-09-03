@@ -1,10 +1,15 @@
 # Tasks — public-deployment
 
-> Change "A" of the five `web-demo-backlog` 1.3 became. No hard ordering against any
-> change in flight. `bulk-thumbnail-jobs` also touches `SidePanel` — additive on both
-> sides (it adds a tab, this changes the fallback), so whichever lands first, the other
-> rebases its tab list; that change's proposal asked for the ordering to be declared
-> here, and this is it.
+> Change "A" of the five `web-demo-backlog` 1.3 became. **Hard ordering: after
+> `thumbnail-image-serving`** — it introduces a second path by which a stored camera
+> reaches the client, which task 4.1's overlay must cover (design D6).
+> `bulk-thumbnail-jobs` also touches `SidePanel` — additive on both sides (it adds a tab,
+> this changes the fallback), so whichever lands first, the other rebases its tab list;
+> that change's proposal asked for the ordering to be declared here, and this is it.
+>
+> The tree moved twice under the drafting of this change (`snapshots` appended to
+> `createApp`; `native-context-menu-bypass` appearing). Re-read every symbol named below
+> before editing it.
 >
 > Cite code by symbol name, never `file.ts:123` (CLAUDE.md). Bun-only APIs stay in
 > `server/src/index.ts` (D1). No thumbnail pixel output changes, so no `RIG_VERSION` bump.
@@ -18,6 +23,11 @@
       returns the whole file, and have `configuredRoot` take the root from it —
       `MODEL_BROWSER_ROOT` overriding the `root` key alone and no longer returning before
       the file is read (D2). `MODEL_BROWSER_CONFIG` keeps selecting the file
+- [ ] 1.2a Parse the file exactly once at start (D2). `evaluate` keeps re-asking the
+      *filesystem* while the library is unsettled — that is why it re-runs, and a volume
+      mounted later must still need no restart — but stops re-reading the file. Give
+      `refresh()` an explicit re-read and correct its comment, which today calls itself
+      "Re-evaluate config, marker and probe from scratch"
 - [ ] 1.3 Absent file stays silent and means the defaults; a present file that cannot be
       parsed (including unreadable-for-permissions) raises a startup failure naming the
       file and the parse error, and the server does not start (D2). Today's
@@ -39,10 +49,10 @@
 
 ## 3. Capability fields and their refusals
 
-- [ ] 3.1 Add three fields to `FeatureReport` beside `thumbWrites` — the launcher, the
-      chat tab, and whether index operation is the viewer's concern — each with its own
-      default, chat's being off (D4). Names are an open design question; settle before
-      exporting the type
+- [ ] 3.1 Add four fields to `FeatureReport` beside `thumbWrites` — the launcher, the
+      chat tab, whether index operation is the viewer's concern, and whether the host is
+      the viewer's concern — each with its own default, chat's being off (D4, D11). Names
+      are an open design question; settle before exporting the type
 - [ ] 3.2 Rename and re-document `ALL_FEATURES`: it is the supported/default set, not
       "every capability on" (D4). Update `createApp`'s parameter comment and `index.ts`'s
       construction comment, which currently promises this change replaces the value with
@@ -52,8 +62,14 @@
 - [ ] 3.4 `PUT /api/thumb` refuses when thumbnail writes are declared off — it consults
       nothing today. Refusal answers distinguishably from a failure (D5)
 - [ ] 3.5 `/api/open` and `/api/open-with` refuse when the launcher is declared off, and
-      `/api/apps` answers an empty report — no applications, no configured chooser.
-      Refusal is at the route: these spawn detached processes on the host (D5)
+      `/api/apps` answers an empty report — no applications, no configured chooser. The
+      `/api/apps` short-circuit is **before** `launcher.report()`, not a filter over its
+      result: `report()` execs `xdg-mime` per handled type and reads the machine's
+      application entries, so filtering afterwards still spawns and still reads (D5)
+- [ ] 3.6 Where the host is declared not the viewer's concern (D11): `/api/library` omits
+      `top`, and the `missing`/`nested` envelopes in `createApp`'s gate middleware name no
+      filesystem location while still naming the state. `top` becomes optional in
+      `LibraryState`, so every client read of it is a compile error until handled
 
 ## 4. Client consumers
 
@@ -61,7 +77,11 @@
       writes off (D6): the write drops the PNG and stores camera and axis in this
       browser, answering as a write would; the read overlays a locally-stored orientation
       onto the server's answer. Precedence: local, then server, then an orientation
-      source, then default. The five existing `putThumb` call sites are untouched
+      source, then default. The five existing `putThumb` call sites are untouched.
+      **Cover both arrival paths**: after `thumbnail-image-serving`, a listing entry
+      carries the stored camera and the tile is drawn with no lookup at all, so an overlay
+      that lives only on the lookup answer misses every baked tile — apply it where the
+      tile state is seeded
 - [ ] 4.2 Install the decorator **only** on a known report explicitly declaring writes
       off — unknown and failed reports keep writing to the server, which the
       feature-report capability requires normatively (D6)
@@ -71,13 +91,26 @@
 - [ ] 4.4 `SidePanel`'s index-state description collapses the operator-repairable
       conditions into one unavailability where the deployment declares index operation
       not the viewer's concern; `warming` and outside-the-collection stay distinct, and
-      `semantic.ts` is untouched (D9)
+      `semantic.ts` is untouched (D9). The index's own `detail` is **withheld** in the
+      collapsed states — it is rendered beside the sentence today and is mini-classify's
+      free text, able to name its cache directory, so leaving it restores what the
+      collapse removed
+- [ ] 4.5 The find-similar copy for an unembedded model stops telling the viewer to run
+      the classifier where the host is not their concern (D11) — the notes flagged this
+      copy as needing a visitor-facing form
+- [ ] 4.6 Where `top` is withheld (D11), copy-path and the lightbox's file details show
+      the library path instead of composing a filesystem path
 
 ## 5. Serving the built client
 
 - [ ] 5.1 Serve `client/dist` from `index.ts` (D8): API routes win, a request matching
       neither is answered with the client's entry document so a cold deep link resolves,
       and a server with no built client serves its API exactly as before
+- [ ] 5.2 `/api/` is reserved: a 404 under it is final and never falls through to the
+      entry document (D8)
+- [ ] 5.3 Cache headers (D8): the hashed bundle assets `immutable` with a long max-age,
+      the entry document `no-cache`. The trip-reduction thread names static-bundle caching
+      as this change's concern, and the first draft dropped it
 
 ## 6. The shipped deployment's configuration
 
@@ -97,8 +130,13 @@
 - [ ] 7.3 Server: per field, assert the **pairing** — the report declares it off and the
       route refuses, from one configuration — rather than testing the report and the
       routes separately (D5's drift risk)
-- [ ] 7.4 Server: `/api/apps` empty under a withheld launcher; `/api/open` and
+- [ ] 7.4 Server: `/api/apps` empty under a withheld launcher **and spawning nothing**
+      (assert no command runs, not merely that the body is empty); `/api/open` and
       `/api/open-with` refuse and spawn nothing
+- [ ] 7.4a Server: with the host declared not the viewer's concern, no response from any
+      route contains a filesystem location — `/api/library` in every state, the not-ready
+      envelopes, and an error path. Assert over the response bodies rather than per field,
+      so a future field cannot reintroduce the leak silently
 - [ ] 7.5 Client: with writes declared off, an orbit release stores locally and sends
       nothing, a read prefers the local orientation, and one browser's framing does not
       reach another; with the report unknown or failed, writes still go to the server
@@ -106,7 +144,8 @@
       search when the chat tab is withheld, and neither has its recorded value rewritten;
       with chat declared on, the panel behaves exactly as today
 - [ ] 7.7 Client: the collapsed index states say one thing for the three operator-only
-      conditions, while `warming` and outside-the-collection still say their own
+      conditions, while `warming` and outside-the-collection still say their own; `detail`
+      is absent in the collapsed states and still preferred in the uncollapsed ones
 - [ ] 7.8 Falsify every behavioural cell before trusting it — remove the guard's origin
       check, the refusal in each route, the decorator's install condition, the tab
       fallback — and confirm the corresponding cell fails
@@ -121,6 +160,14 @@
       non-loopback `Host`/`Origin` via curl): the guard admits the configured origin and
       refuses another; thumbnail writes, launches and the chooser are refused; the built
       client is served and a cold deep link resolves
-- [ ] 8.4 After archiving, write the `public-deployment` capability's `## Purpose` in
+- [ ] 8.4 Update `CLAUDE.md`'s `config.json` bullet — the new keys, fail-loud, and
+      `MODEL_BROWSER_ROOT` no longer suppressing the file. Its present claim that "no
+      route re-reads the file" is **false today** and becomes true only with 1.2a
+- [ ] 8.5 Update `docs/platform-surface.md`'s user-dirs bullet, which names `config.json`
+      as holding the library root — the house rule is that a change extending a
+      `~/.config` file extends that bullet as part of the change
+- [ ] 8.6 Point `docs/web-demo-notes.md` at this change where it supersedes the notes'
+      Defaults section, as that file's own rule requires
+- [ ] 8.7 After archiving, write the `public-deployment` capability's `## Purpose` in
       `openspec/specs/public-deployment/spec.md` — a new capability lands with a `TBD`
       placeholder otherwise (`chat-panel` still carries one)

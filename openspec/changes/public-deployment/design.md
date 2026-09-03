@@ -71,6 +71,39 @@ so `bun run dev` has never parsed `config.json`. That must invert: the environme
 variable overrides the `root` key alone, `MODEL_BROWSER_CONFIG` still selects the file,
 and everything else in it takes effect regardless.
 
+**The file is not read once today, and that has to be fixed rather than inherited**
+(found in review). `configuredRoot` is called from `evaluate`, and `compute` calls
+`evaluate` on *every* `state()` while the library is unsettled — so an unconfigured
+server re-parses `config.json` on every request. That is not a config-reload feature:
+`evaluate`'s own comment says "every not-ready state is a question about the filesystem
+right now, and is asked again every time", and it exists so a volume mounted after start
+needs no restart. Re-reading the file is a side effect of re-running `evaluate` whole.
+Two things say so: `library-root`'s D4 states the intent as "Read once at start; the
+`Library` object exposes `refresh()` so a later change can repoint without a restart",
+and CLAUDE.md tells the reader "no route re-reads the file". The documentation and the
+code already disagreed; nothing depended on it, so nobody noticed.
+
+Once this file also carries capabilities, an origin and a bind address, its keys have two
+lifetimes — those are settled at start by construction, while `root` is currently
+re-derived per request — and "malformed fails loudly at startup" has no meaning for a
+file that goes malformed at request #400.
+
+**Decided (Masa): split the two questions.** The file is parsed exactly once, at start,
+for every key. A not-ready re-evaluation keeps re-asking the *filesystem* — is the root
+present, does a marker stand above it — without re-reading the file. `refresh()` keeps
+re-probing the filesystem and gains an explicit re-read when Electron's file dialog needs
+one. The volume-mounted-later behaviour, the only one anything relies on, is untouched;
+the configuration gets exactly one moment at which it can be found malformed; and the
+code comes to match what both D4 and CLAUDE.md already claimed.
+
+Alternatives: keep the re-read and load only the deployment keys once (rejected — it
+needs a rule for what a mid-flight malformed file means, and no answer is good, since the
+origin was baked at start regardless); load everything once with no filesystem
+re-evaluation (rejected — that discards the mounted-later behaviour, which is the actual
+reason the re-evaluation exists). The price of the decision: writing `root` into
+`config.json` under a running unconfigured server now needs a restart, which is what
+CLAUDE.md already instructs.
+
 Today's comment — "Absent, unreadable or malformed all mean the same thing: no root
 here" — becomes wrong the moment that file carries the guard's origin. **Absent stays
 silent** (running unconfigured is the ordinary case). **Present-but-unparseable stops the
@@ -114,9 +147,10 @@ capability forbids by construction. Four fields whose consumers exist today: thu
 writes, the launcher, the chat tab, and whether index operation is the viewer's concern.
 
 The fifth field — the bulk-job surfaces — is deliberately absent. Its consumer does not
-exist until `bulk-thumbnail-jobs` lands, and that change's design already says "the seam
-is declared in the delta so 1.3 can gate without modifying this capability". Whichever of
-the two lands second adds one field and one gate.
+exist until `bulk-thumbnail-jobs` lands, and that change's design already declares the gating
+seam without building it — the demo's hiding of those surfaces is named there as the
+feature report's business, declared only as a seam. Whichever of the two lands second
+adds one field and one gate.
 
 **The defaults are the maintained configuration**, not a pile of initial values, and
 their audience is the eventual Electron distribution (D1's seam). The chat tab's default
@@ -135,13 +169,23 @@ app. It stays valuable and stays true; it just stopped being a picture of anythi
 
 The feature-report capability requires this pairing and assigns it to whoever turns a
 field off — this change. The value already flows: `createApp` takes the report as its
-last parameter and `index.ts` constructs it. Routes read that same object; nothing
+`features` parameter and `index.ts` constructs it. Routes read that same object; nothing
 re-derives capabilities from configuration a second time.
 
 Refusal must be at the route rather than in the client, and the reason is not
 theoretical. `PUT /api/thumb` consults nothing today, and its cache is keyed by path
 alone for cameras — so an accepted anonymous write re-frames the model *every later
 visitor* sees. `/api/open` and `/api/open-with` spawn detached processes on the host.
+
+**All three launcher routes run commands, not two** (found in review). `/api/apps` looks
+like a read, but `report()` loops the handled model types calling `queryDefault`, whose
+builtin execs `xdg-mime` and then reads the machine's application entries for their
+names — deliberately per request, since a chooser can rewrite the registry mid-session.
+It is also in `UNGATED`, so it answers before the library is ready. On a public origin
+that is a stranger triggering process spawns and receiving a list of the operator's
+installed applications. Its refusal must short-circuit before `report()`, not filter
+what `report()` returned.
+
 A client-side gate protects only clients that run our JavaScript.
 
 A refusal answers distinguishably from a failure, so the client can tell "not offered
@@ -166,6 +210,22 @@ Installed **only** on a known report declaring writes off. The feature-report ca
 is explicit that not knowing must never relocate where a user's data is stored, so an
 unresolved or failed report keeps writing to the server.
 
+**Hard ordering: after `thumbnail-image-serving`** (found in review; Masa's call). That
+change's *A listing-known thumbnail is drawn without a lookup* has the listing entry carry
+"the write generation and the stored camera and axis", and has the client draw the tile
+"carrying the entry's camera, axis and generation as a lookup would have" — without
+issuing a lookup at all. So the server's camera reaches the client by a second path that
+does not pass through `getThumb`, and on a deployment whose thumbnails are all baked that
+path is *every* tile: the decorator's overlay would never run, and a visitor's stored
+orbit would be ignored exactly where it matters. This change therefore lands after that
+one and applies the overlay where the tile state is seeded, covering both arrivals. The
+proposal's earlier claim that nothing here touches what `thumbnail-image-serving` adds was
+true of the spec text and false of the mechanism.
+
+Rejected alternative: relocate the overlay now to the seeding function and land in either
+order. That function is being rewritten by the change in question, so writing against it
+today means writing against a moving target.
+
 Alternatives: gate each call site (rejected — five copies of one rule, and the next call
 site added forgets it); a separate camera store the sites consult first (rejected —
 that is the decorator with extra steps, and it splits the precedence rule across two
@@ -188,8 +248,18 @@ deployment withholding it must not come home with its preference erased.
 
 Serving files is adapter-specific, so under D1 it belongs in `index.ts` and not in the
 Hono app, which must keep running on Node unchanged for the Electron seam. API routes
-win over static ones; a request matching neither is answered with the client's entry
-document so a deep link opened cold resolves in the client. A server with no built client
+win over static ones, and `/api/` is **reserved**: a 404 under it is final and must never
+fall through to the entry document, or a client bug becomes an HTML body with a 200. A
+request matching neither is answered with the client's entry document so a deep link
+opened cold resolves in the client.
+
+Two details the trip-reduction thread already asked of this change and the first draft
+dropped (found in review). The built bundle is immutable and hashed, so its assets are
+served `immutable` with a long max-age while the entry document is `no-cache` — the notes
+name long-lived caching of static bundles as a first-class concern for an origin a visitor
+may be far from. And the allowed host set must always retain loopback alongside any
+configured origin, or a same-box health check against the bound port is refused by the
+guard; a reverse proxy that rewrites `Host` is the case a local curl cannot simulate. A server with no built client
 serves its API exactly as before — the local development loop, where Vite serves the
 client, must not start depending on a build.
 
@@ -216,6 +286,36 @@ hand-authored on the box, and the suite exercises that exact combination as a se
 named configuration. Two tested configurations, and "you are on your own" applies only to
 configurations nobody ships.
 
+### D11: The host is a capability of its own, and the leak is wider than the index
+
+Found in review, and the sharpest finding against the draft: D9's reasoning — a remedy
+that is not the viewer's, describing the operator's machine to a stranger — was applied
+only to the semantic index, while the same leak runs through four other paths.
+`shared/types.ts` documents the library state's `top` as "The **filesystem** path of the
+library's top", which `App.tsx` holds and hands to the lightbox and copy-path, because the
+`library` capability *requires* a copied path to be a filesystem path. The not-ready
+envelopes in `createApp`'s gate middleware name the configured root for `missing` and both
+locations for `nested` — on every path route, to anyone — because the same capability
+requires naming them, mounting being the remedy. `SidePanel` prints the index's own
+`detail` beside the state sentence, and that text is mini-classify's, free to name its
+cache directory. And the find-similar copy tells the reader to "run the classifier over
+it". Each is correct for the user whose disk it is, and wrong for a stranger.
+
+So the rule is stated once, as a capability of its own — **whether the machine the server
+runs on is the viewer's concern** — rather than patched into four places. Default: the
+host *is* the viewer's concern, since on a personal installation the viewer is the
+operator and these details are the point.
+
+Masa's call on scope: this change takes it rather than handing it to the sibling
+context-menu change, and the top is withheld **only where the deployment declares it** —
+copy-path keeps yielding a filesystem path everywhere else, which is what makes it useful.
+
+That makes five fields, not four. It sits slightly against the "one field per surface"
+rule, since this one governs several surfaces; it earns its place because those surfaces
+share one question, and splitting it would let a deployment withhold index states while
+leaking `top`, which is incoherent rather than merely odd. Flagged in Open Questions in
+case the rule should win instead.
+
 ## Risks / Trade-offs
 
 - [A malformed `config.json` now takes a dev machine's server down, where it was
@@ -236,6 +336,19 @@ configurations nobody ships.
   tab added there, a fallback changed here); that change's proposal asks for the ordering
   to be declared here, so: no hard ordering, whichever lands first rebases the other's
   tab list.
+- [The tree moves under a long-lived draft] → Already happened twice while this one was
+  written: `snapshots` was appended to `createApp` after its signature was read, and
+  `native-context-menu-bypass` appeared mid-draft. Re-read every cited symbol immediately
+  before implementing rather than trusting this document's account of it.
+- [A viewer drives the expensive routes directly] → The guard admits requests with no
+  `Origin` by design (curl, same-origin GETs), so a script reaches anything a capability
+  does not refuse. `POST /api/semantic` and a flat `GET /api/dir` — whose walk budget runs
+  to 200k steps — are the compute-heavy pair. Rate limiting is a stated non-goal, handled
+  at the reverse proxy; noted here so the flat walk is in that bucket explicitly and not
+  only the semantic route.
+- [An error message carries a filesystem path out] → `app.onError` answers `err.message`
+  on a 500. The typed errors in listing, zip and library do not carry one, but a raw
+  `ENOENT` would; a probe for it belongs in the live verification rather than in trust.
 - [Static serving makes the app depend on a build in development] → Explicitly not
   required; a missing `client/dist` leaves the API unchanged.
 - [A capability field is added later without its refusal] → The feature-report delta
@@ -265,4 +378,10 @@ configurations nobody ships.
   settle it.
 - **Whether the allowed origin is one value or a list.** A list costs nothing to
   implement and covers an apex-plus-subdomain deployment; a single value is harder to
-  misconfigure. Leaning single, with the loopback default remaining a set internally.
+  misconfigure. The health-check point in D8 settles half of it — loopback is always in
+  the allowed set — so what remains is whether a deployment may name more than one public
+  origin. Leaning single-plus-loopback.
+- **Whether the host capability should be split** (D11). It governs several surfaces
+  where every other field governs one. Kept whole because those surfaces share one
+  question; splitting it would let a deployment withhold index states while leaking the
+  library's top.

@@ -6,8 +6,11 @@
 The report SHALL carry a field per withholdable surface rather than one field standing
 for several, so that a deployment states what it offers rather than which kind of
 deployment it is. It SHALL carry, beside the acceptance of thumbnail writes it already
-declares: whether the platform launcher is offered, whether the chat tab is offered, and
-whether the operation of the semantic index is the viewer's concern. Each field SHALL
+declares: whether the platform launcher is offered, whether the chat tab is offered,
+whether the operation of the semantic index is the viewer's concern, and whether the
+machine the server runs on is the viewer's concern — the last governing whether any
+route or surface may name a filesystem location or offer a remedy only an operator can
+perform. Each field SHALL
 carry its own default rather than every field defaulting on, and the defaults together
 SHALL be the configuration this project maintains (see `public-deployment`). The chat
 tab's default SHALL be off while the chat has no backend, so that an unfinished surface
@@ -49,3 +52,26 @@ wrong". Refusals SHALL NOT depend on any client having read the report.
 #### Scenario: The declaration and the refusal cannot disagree
 - **WHEN** a deployment's configuration is read
 - **THEN** the report it publishes and the refusals its routes make come from that one value
+
+### Requirement: A deployment may declare its host none of the viewer's business
+Where a deployment declares that the machine it runs on is not the viewer's concern, no
+route and no surface SHALL name a filesystem location or offer a remedy only an operator
+can perform. This SHALL hold wherever such a detail is composed today — the library's
+top, the locations named by a not-ready library state, any explanation an external
+service supplies verbatim, and any instruction to start, mount or re-run something on
+the host — because each of them describes a machine the viewer cannot reach and directs
+them to a repair that is not theirs. The declaration SHALL default to the host being the
+viewer's concern, since on a personal installation the viewer is the operator and these
+details are exactly what makes the app useful.
+
+#### Scenario: No filesystem location reaches a viewer
+- **WHEN** any route answers on a deployment declaring this
+- **THEN** no filesystem location appears in what it returns
+
+#### Scenario: No operator remedy is offered
+- **WHEN** a condition arises whose repair is an operator's — a service to start, a volume to mount, a tool to re-run
+- **THEN** the viewer is told the state without being told to perform that repair
+
+#### Scenario: A personal installation is unchanged
+- **WHEN** a deployment does not declare this
+- **THEN** filesystem paths and operator remedies appear exactly as they do today
