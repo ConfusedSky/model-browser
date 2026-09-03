@@ -599,6 +599,41 @@ describe('the archive layer survives its own flush and the sweep (review finding
     expect(Object.keys(onDisk.archives).sort()).toEqual(['/kit-0.zip', '/kit-1.zip'])
   })
 
+  it('serializes concurrent flushes, so the older write cannot land last', async () => {
+    const base = cacheRoot()
+    const { top, zips } = libraryWithArchives('lib-flushrace', 2)
+    const [first, late] = zips as [string, string]
+    const store = new SnapshotStore(base, undefined, libraryFor(top))
+    await listZipEntries(first, store.archiveCache())
+
+    // Two flushes overlapping — what a server answering several roots at once
+    // does routinely, since every completing `save` calls one. The first is held
+    // at its `rename`, which is where an atomic write commits, and the second is
+    // started behind it with a newer archive already recorded.
+    //
+    // Unserialized, the second write runs to completion while the first is held
+    // — its own rename hook has been disarmed — and then the first commits the
+    // serialization it took *before* the second archive existed, over the top of
+    // it. Atomicity makes each write whole; it says nothing about which whole
+    // write wins, and the loser here is the newer state, permanently (round-2
+    // finding 10).
+    let second!: Promise<void>
+    fs.onRename = async () => {
+      await listZipEntries(late, store.archiveCache())
+      second = store.flush()
+      // Long enough for an unchained second flush to finish its whole write
+      // before this one is allowed to commit. Chained, it has not started.
+      await new Promise((r) => setTimeout(r, 20))
+    }
+    await store.flush()
+    await second
+
+    const onDisk = JSON.parse(
+      readFileSync(join(base, 'lib-flushrace', SNAPSHOT_DIR, ARCHIVES_FILE), 'utf8'),
+    )
+    expect(Object.keys(onDisk.archives).sort()).toEqual(['/kit-0.zip', '/kit-1.zip'])
+  })
+
   it('never evicts the archive layer, whatever the cap says', async () => {
     const base = cacheRoot()
     const { top, zips } = libraryWithArchives('lib-keep-layer', 1)

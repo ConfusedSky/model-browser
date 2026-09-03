@@ -3,8 +3,10 @@
 ## ADDED Requirements
 
 ### Requirement: Where the index is not the viewer's to operate, its states collapse
-Where a deployment declares that operating the semantic index is not the viewer's
-concern (see `feature-report`), the distinctions *The index's absence costs nothing*
+Where a deployment declares that the machine it runs on is not the viewer's concern (see
+`feature-report`) — the same declaration that stops any surface naming a host location or
+offering an operator's remedy, since an index condition is named by its remedy — the
+distinctions *The index's absence costs nothing*
 draws between index conditions SHALL be presented to the viewer as a single
 unavailability. Those distinctions exist because each names a different repair — start
 the service, plug the volume in, restart the wedged process — and a viewer of such a

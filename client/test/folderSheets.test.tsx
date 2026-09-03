@@ -33,6 +33,8 @@ import {
 } from './appHarness'
 import { RIG_VERSION, THUMB_LIGHTING } from '../src/three/renderer'
 import { resetLookupQueueForTests } from '../src/hooks/useThumbnails'
+import { thumbImageUrl } from '../src/api/thumbUrl'
+import { aoEnabled } from '../src/viewer/aoToggle'
 import { DEFAULT_CAMERA } from '../src/three/camera'
 import { cameraForPose } from '../src/three/pose'
 
@@ -208,6 +210,26 @@ describe('folder contact sheets', () => {
     // reaches `requestPeek`, and its guard is the only thing refusing it.
     await intersect(dirTile('/models/a'))
     expect(peek).toHaveBeenCalledTimes(1)
+  })
+
+  it('draws a listing-carried preview and asks the server for nothing', async () => {
+    // The derived annotation (`listing-tree-cache` 6.3/6.8): a dir entry whose
+    // listing already carries `preview` lands it through the same map and
+    // once-per-listing discipline the peek path uses — the delta's "a revisit
+    // is one request" scenario, made literal. The first cell above is the
+    // absent control: no `preview` field, exactly one peek, unchanged.
+    peek.mockResolvedValue(found(4))
+    const annotated: DirListing = {
+      path: '/models',
+      entries: [{ ...dir('a'), preview: found(2) }],
+    }
+    await mountApp('/models', annotated)
+    await intersect(dirTile('/models/a'))
+    await settle()
+    // The carried choice is drawn — two cells, the sheet's own layout rules —
+    // and the peek mock's four-model answer proves no request decided this.
+    expect(peek).not.toHaveBeenCalled()
+    expect(cells('/models/a')).toHaveLength(2)
   })
 
   it('reuses the map for a tile scrolled away and back inside one listing', async () => {
@@ -1046,5 +1068,63 @@ describe('bands rank work through the whole pipeline', () => {
     // heard half it would be `near` too and keep its head start.
     const order = renderedAfterBlockers()
     expect(order.indexOf('/models/y.stl')).toBeLessThan(order.indexOf('/models/x.stl'))
+  })
+})
+
+/**
+ * Listing-known thumbnails through the app (`thumbnail-image-serving` 5.3):
+ * a tile whose entry vouches for its render draws from the image route with
+ * no lookup, on the grid and in a folder's sheet alike, and a sheet cell's
+ * failed image demotes the cell's own path.
+ */
+describe('tiles drawn from the listing', () => {
+  const vouched = (name: string, gen = 5): DirEntry => ({
+    ...model(name),
+    thumb: {
+      gen,
+      framed: false,
+      // Both variants vouched: the app reads whichever the occlusion
+      // preference names (off in a fresh profile), and a cell about "the
+      // listing vouches for this render" must not depend on that default.
+      ao: { state: 'hit', lighting: THUMB_LIGHTING, rig: RIG_VERSION },
+      noao: { state: 'hit', lighting: THUMB_LIGHTING, rig: RIG_VERSION },
+    },
+  })
+  // The URL names the variant the app's occlusion preference selects — off
+  // in a fresh profile — exactly as the lookup would have.
+  const imgSrc = (el: Element | null | undefined): string | null =>
+    el?.querySelector('img')?.getAttribute('src') ?? null
+
+  it('mounts a vouched listing with no lookup traffic, and looks up the one entry it cannot vouch for', async () => {
+    await mountApp('/models', {
+      path: '/models',
+      entries: [vouched('one.stl'), vouched('two.stl'), model('plain.stl')],
+    })
+    await settle()
+    expect(getThumb.mock.calls.map((c) => c[0])).toEqual(['/models/plain.stl'])
+    const byTitle = (t: string) => tiles().find((b) => b.getAttribute('title') === t)
+    expect(imgSrc(byTitle('one.stl'))).toBe(thumbImageUrl('/models/one.stl', 1, aoEnabled(), 5))
+    expect(imgSrc(byTitle('two.stl'))).toBe(thumbImageUrl('/models/two.stl', 1, aoEnabled(), 5))
+  })
+
+  it('a sheet cell’s image error demotes the cell’s path, not the folder’s', async () => {
+    peek.mockResolvedValue([vouched('a/m0.stl'), vouched('a/m1.stl')])
+    await mountApp('/models', ONE_FOLDER)
+    await intersect(dirTile('/models/a'))
+    await settle()
+    expect(getThumb).not.toHaveBeenCalled()
+    const cell = container.querySelector('[data-preview-cell="/models/a/m0.stl"]')
+    expect(imgSrc(cell)).toBe(thumbImageUrl('/models/a/m0.stl', 1, aoEnabled(), 5))
+
+    await act(async () => {
+      cell!.querySelector('img')!.dispatchEvent(new Event('error'))
+    })
+    await settle()
+    expect(getThumb.mock.calls.map((c) => c[0])).toEqual(['/models/a/m0.stl'])
+    // The sibling cell was never touched, and the folder itself is not a thing
+    // that is looked up.
+    expect(imgSrc(container.querySelector('[data-preview-cell="/models/a/m1.stl"]'))).toBe(
+      thumbImageUrl('/models/a/m1.stl', 1, aoEnabled(), 5),
+    )
   })
 })

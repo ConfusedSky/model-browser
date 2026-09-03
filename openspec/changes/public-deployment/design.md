@@ -16,7 +16,7 @@ a machine the viewer cannot reach.
 
 The decisions below were taken with Masa on 2026-09-02 and are recorded in
 `docs/web-demo-notes.md` (commit `097aeae`); this document is where they become
-implementable. Four remain open at the bottom.
+implementable. Everything it opened is answered at the bottom; nothing is left hanging.
 
 ## Goals / Non-Goals
 
@@ -152,13 +152,32 @@ and refusal (`feature-report`) are what stop the visitor.
 ### D4: One field per surface, each with its own default
 
 Masa's call. One coarse flag would be a mode name in disguise, which the feature-report
-capability forbids by construction. Four fields whose consumers exist today: thumbnail
-writes, the launcher, the chat tab, and whether index operation is the viewer's concern.
+capability forbids by construction. Five fields, named for the thing they govern, `true` meaning offered, following
+`thumbWrites`:
 
-The fifth field — the bulk-job surfaces — is deliberately absent. Its consumer does not
-exist until `bulk-thumbnail-jobs` lands, and that change's design already says "The seam is
-declared in the delta so 1.3 can gate without modifying this capability." Whichever of the
-two lands second adds one field and one gate. (The first review round called this
+| field | default | governs |
+|---|---|---|
+| `thumbWrites` | on | writes to the thumbnail cache |
+| `appLaunch` | on | all three launcher routes |
+| `chatTab` | **off** | the placeholder tab |
+| `hostDetails` | on | host locations, operator remedies, and how a dependency's conditions are reported |
+| `maintenance` | on | operations on the server's own derived state |
+
+**`maintenance` is the field that was going to be deferred, arriving early.** The plan was
+to leave the bulk-job surfaces' field to `bulk-thumbnail-jobs`, whose design says "The seam
+is declared in the delta so 1.3 can gate without modifying this capability." Then
+`POST /api/reload` turned up ungated (verification round), and dropping caches and running
+bulk renders are the same question — *may a viewer act on this server's derived state?* So
+the field exists now with `reload` as its first consumer, and that change joins it rather
+than adding a sixth.
+
+**`hostDetails` absorbed what was going to be a separate index field** (Masa, 2026-09-03).
+They were one rule written twice: the host rule already forbids offering "a remedy only an
+operator can perform", and an index condition is *named by* its remedy — start the service,
+mount the volume. The same rule already covered the index's `detail` under "any explanation
+an external service supplies verbatim". Keeping them apart would have let a deployment
+collapse index states while leaking the library's top, which is the same incoherence that
+argued for keeping `hostDetails` whole in D11. (The first review round called this
 quotation non-verbatim and it was paraphrased away; the verification round found it
 verbatim in that change's Risks, so it is restored — a reminder that a reviewer's citation
 check is itself a citation.)
@@ -274,7 +293,7 @@ guard; a reverse proxy that rewrites `Host` is the case a local curl cannot simu
 serves its API exactly as before — the local development loop, where Vite serves the
 client, must not start depending on a build.
 
-### D9: Only the viewer's account of the index collapses
+### D9: Only the viewer's account of the index collapses — under the host field, not one of its own
 
 The states exist because each names a different repair: start the service, plug in the
 volume, restart a wedged process. A visitor can perform none of them, so offering those
@@ -366,9 +385,10 @@ of them happens to be one question too.
 - [`POST /api/reload` is reachable by anyone] → Added by `listing-tree-cache` after this
   change's routes were first enumerated, and gated by nothing: it drops every cached layer
   and revalidates each snapshot root. Reloading a server's caches is an operator's act on
-  the operator's machine, so it refuses under the host field — the same field that stops
-  the app describing that machine. Named here because a route added by another change in
-  flight is exactly what a fixed list of routes misses.
+  the operator's machine, so it refuses under `maintenance` — gating an action under a
+  disclosure field, as the first fix did, was a category error (Masa). This is why that
+  field exists now rather than being deferred. Named here because a route added by another
+  change in flight is exactly what a fixed list of routes misses.
 - [A viewer drives the expensive routes directly] → The guard admits requests with no
   `Origin` by design (curl, same-origin GETs), so a script reaches anything a capability
   does not refuse. `POST /api/semantic` and a flat `GET /api/dir` — whose walk budget runs
@@ -395,19 +415,25 @@ of them happens to be one question too.
 
 ## Open Questions
 
-- **Field names.** The five want names that read as capabilities, not as modes.
-  `thumbWrites` exists; the other four are unnamed. Not blocking implementation, but
-  worth settling before the type is exported, since renaming a published field later
-  costs a compatibility note.
-- **Where the shipped deployment's `config.json` lives in the repo** (D10), and how the
-  suite names it as its second configuration.
-- **The credits page's home** — with the landing page, sharing one set of copy decisions,
-  or standing alone as a generated document with a route. It is go-live gate 3.2 and
-  CC-BY requires displayed attribution. This change recommends the former and does not
-  settle it.
-- **Whether the allowed origin is one value or a list.** A list costs nothing to
-  implement and covers an apex-plus-subdomain deployment; a single value is harder to
-  misconfigure. The health-check point in D8 settles half of it — loopback is always in
-  the allowed set — so what remains is whether a deployment may name more than one public
-  origin. Leaning single-plus-loopback.
+None remain. Every question this document opened has been answered — see below; the two
+that were reversed after argument say so on their own line, so a reader can tell a
+settled answer from an unchallenged one.
 
+## Settled since drafting
+
+- **The credits page stands alone** (Masa, 2026-09-03), rather than riding the landing
+  page as this document first recommended. CC-BY attribution is go-live gate 3.2, and the
+  landing-page change opens with an unanswered question about its own copy; a compliance
+  item gated on aesthetics is how compliance items slip. The generator already exists from
+  `library-overrides`, so standalone it is a route and a rendering. Tracked as
+  `web-demo-backlog` 1.8.
+- **The field set and its names** — the table in D4 (Masa, 2026-09-03), including
+  `maintenance` arriving early and the index field folding into `hostDetails`.
+- **The allowed origins are a set, not one value** (Masa, 2026-09-03), reversing this
+  document's earlier lean. Nothing needs two names today — `models.masamaeda.com`, apex
+  left bare — but widening a scalar later is the easy direction and guessing wrong on one
+  is not. Loopback is in the set besides (D8).
+- **Where the shipped configuration lives:** `deploy/demo/config.json`. The rest of the
+  deployment's own configuration — reverse proxy, TLS, container definition — is **a
+  separate change** (Masa, 2026-09-03), writable and testable earlier than this one since
+  it depends on nothing here.

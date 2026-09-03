@@ -741,6 +741,18 @@ export default function App() {
           return next
         })
       }
+      // The listing may already carry this folder's choice — the derived
+      // annotation `listing-tree-cache` 6.3 emits from the server's preview
+      // layer (6.8). Landing it here is the whole of the saved round trip:
+      // same map, same once-per-listing discipline, same downstream rendering,
+      // and the delta's "a revisit is one request" scenario made literal. An
+      // entry the layer had nothing for carries no field and asks exactly as
+      // before — absence changes nothing, per the annotation requirement.
+      const carried = asked.find((e) => e.path === path)?.preview
+      if (carried !== undefined) {
+        land(carried)
+        return
+      }
       void api.peek(path).then(land, () => land(NO_PREVIEW))
     },
     [api],
@@ -941,7 +953,8 @@ export default function App() {
           : libraryMissingText(libraryState.root)
 
   const showSkeleton = useDelayedFlag(busy(state), SKELETON_DELAY_MS)
-  const { thumbs, setThumb, refetch, setPlaceholder, discardThumbFraming, setBands } = useThumbnails(
+  const { thumbs, setThumb, refetch, setPlaceholder, discardThumbFraming, setBands, reportImageError } =
+    useThumbnails(
     thumbEntries,
     api,
     lru,
@@ -1294,6 +1307,14 @@ export default function App() {
    * about `staleId` changed, so this does not re-run. Silence is the right
    * outcome — the listing on screen is the one the user asked for, and it is
    * the server's own marker saying it may be behind.
+   *
+   * **Silence including the header error**, which this comment used to promise
+   * and the reducer did not deliver (round-2 finding 2): a rejected follow-up
+   * reached the ordinary `failure` action and painted a banner over a perfectly
+   * good grid, reporting the app's own background housekeeping as the user's
+   * navigation having failed. The `failure` case now checks `inflight.followUp`
+   * and clears the request without setting one; 'Refreshing…' stays, because it
+   * was indeed not refreshed.
    */
   const staleId =
     state.result !== null && state.result.stale && state.result.followUp !== true
@@ -1943,7 +1964,11 @@ export default function App() {
     const img = el.querySelector('img')
     if (img !== null) {
       const r = img.getBoundingClientRect()
-      return { left: r.left, top: r.top, width: r.width, height: r.height }
+      // An `<img>` reporting no box is one whose lazily fetched image has not
+      // arrived and whose declared box the layout has not given it (a test
+      // DOM, a tile mid-layout): fall through to the content square rather
+      // than open the overlay at 0×0 (`thumbnail-image-serving` D3).
+      if (r.width > 0 && r.height > 0) return { left: r.left, top: r.top, width: r.width, height: r.height }
     }
     const content = el.querySelector('[data-tile-content]') ?? el
     return fitSquareBox(content.getBoundingClientRect())
@@ -2786,6 +2811,7 @@ export default function App() {
                   onModelOpen={openLightbox}
                   onModelHover={onModelHover}
                   onEntryMenu={onEntryMenu}
+                  onImageError={reportImageError}
                   markedPath={marked}
                   anchorPath={anchor?.path}
                   scoreFor={scoreFor}

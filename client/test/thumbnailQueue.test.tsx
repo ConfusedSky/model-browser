@@ -6,6 +6,7 @@ import type * as THREE from 'three'
 import type { DirEntry, IndexPose } from '../../shared/types'
 import type { ApiClient } from '../src/api/client'
 import { resetLookupQueueForTests, useThumbnails, type ThumbState } from '../src/hooks/useThumbnails'
+import { thumbImageUrl } from '../src/api/thumbUrl'
 import type { MeshLru } from '../src/three/lru'
 import { DEFAULT_CAMERA } from '../src/three/camera'
 import { POSE_VERSION } from '../src/three/pose'
@@ -68,7 +69,7 @@ function Harness({
   ao?: boolean
   poses?: Record<string, IndexPose>
 }) {
-  const { thumbs, setThumb, refetch, setPlaceholder, setBands } = useThumbnails(
+  const { thumbs, setThumb, refetch, setPlaceholder, setBands, reportImageError } = useThumbnails(
     entries,
     api,
     lru,
@@ -81,6 +82,7 @@ function Harness({
   lastRefetch = refetch
   lastSetPlaceholder = setPlaceholder
   lastSetBands = setBands
+  lastReportImageError = reportImageError
   // One line per committed render, so a cell can assert what the grid *passed
   // through* and not only where it ended up — a toggle that blanks every tile
   // to a spinner and back lands on the same final statuses as one that does not.
@@ -104,6 +106,7 @@ let lastSetThumb: ((path: string, state: ThumbState) => void) | null = null
 let lastRefetch: ((path: string) => void) | null = null
 let lastSetPlaceholder: ((path: string, url: string) => void) | null = null
 let lastSetBands: ((bands: ReadonlyMap<string, Band>) => void) | null = null
+let lastReportImageError: ((path: string) => void) | null = null
 let lastThumbs = new Map<string, ThumbState>()
 let renderLog: string[][] = []
 
@@ -155,11 +158,15 @@ beforeEach(() => {
   // The lookup queue is module-level and ranked: a held far lookup one cell
   // leaves behind would be dispatched by the next cell's report.
   resetLookupQueueForTests()
-  vi.stubGlobal('URL', {
-    ...URL,
-    createObjectURL: vi.fn(() => `blob:mint${minted++}`),
-    revokeObjectURL: vi.fn(),
-  })
+  // A real constructor, statics overridden — see `appHarness`'s `mount` for
+  // why a spread copy is not one.
+  vi.stubGlobal(
+    'URL',
+    Object.assign(class extends URL {}, {
+      createObjectURL: vi.fn(() => `blob:mint${minted++}`),
+      revokeObjectURL: vi.fn(),
+    }),
+  )
 })
 
 afterEach(async () => {
@@ -2040,5 +2047,171 @@ describe('refetch restarts one slot after a write the hook did not make', () => 
     await rerender(<Harness entries={entries} api={api} lru={mesh()} queue={new RenderQueue(2)} ao={false} />)
     await settle()
     expect(asked[2]).toBe(7)
+  })
+})
+
+/**
+ * A listing-known thumbnail is drawn without a lookup (`thumbnail-image-serving`
+ * D2/D3): where the entry carries a render the client's own predicate accepts,
+ * the tile is seeded `ready` at the image route's URL in the sweep's own
+ * batch, and no `getThumb` is issued for it.
+ */
+describe('a listing-known thumbnail is drawn without a lookup', () => {
+  const CAMERA = { az: 0.4, el: 0.2, distR: 2, target: [0, 0, 0] as [number, number, number] }
+  /** `n` models whose listing entries vouch for a current, usable render. */
+  function annotated(n: number, over: Partial<NonNullable<DirEntry['thumb']>> = {}, gen = 5): DirEntry[] {
+    return models(n).map((e) => ({
+      ...e,
+      thumb: {
+        gen,
+        framed: true,
+        camera: CAMERA,
+        axis: 'z' as const,
+        ao: { state: 'hit' as const, lighting: THUMB_LIGHTING, rig: RIG_VERSION },
+        noao: { state: 'miss' as const },
+        ...over,
+      },
+    }))
+  }
+  function fakeApi(getThumb = vi.fn().mockResolvedValue({ status: 'miss' })): ApiClient {
+    return {
+      getThumb,
+      thumbImageUrl,
+      putThumb: vi.fn().mockResolvedValue({}),
+    } as unknown as ApiClient
+  }
+  const urlOf = (path: string): string => lastThumbs.get(path)?.url ?? ''
+
+  it('a fully annotated listing issues no lookups: every tile is ready at its image URL, camera and axis included', async () => {
+    const api = fakeApi()
+    const entries = annotated(4)
+    await render(<Harness entries={entries} api={api} lru={fakeLru()} queue={new RenderQueue(2)} />)
+    await settle()
+    expect(api.getThumb).not.toHaveBeenCalled()
+    expect(statuses()).toEqual(['ready', 'ready', 'ready', 'ready'])
+    for (const e of entries) {
+      const state = lastThumbs.get(e.path)!
+      expect(state.url).toBe(thumbImageUrl(e.path, e.mtime, true, 5))
+      expect(state.camera).toEqual(CAMERA)
+      expect(state.axis).toBe('z')
+      // The generation rides the seed, so the slot's next fetch is pinned.
+      expect(state.gen).toBe(5)
+    }
+    // The F1 property: the sweep's own added-entry seed did not overwrite the
+    // listing's answer — the tile never passed through `loading` at all.
+    expect(renderLog.some((row) => row.some((cell) => cell.startsWith('loading')))).toBe(false)
+  })
+
+  it('the client’s constants decide: an old rig, an absent annotation, and a predating pose each take the lookup', async () => {
+    const getThumb = vi.fn().mockResolvedValue({ status: 'miss' })
+    const api = fakeApi(getThumb)
+    const oldRig = annotated(1, { ao: { state: 'hit', lighting: THUMB_LIGHTING, rig: RIG_VERSION - 1 } })
+    const bare = models(1).map((e) => ({ ...e, path: '/models/bare.stl', name: 'bare.stl' }))
+    const unposed = annotated(1, { camera: undefined, axis: undefined, framed: false }).map((e) => ({
+      ...e,
+      path: '/models/unposed.stl',
+      name: 'unposed.stl',
+    }))
+    const pose: IndexPose = {
+      up: [0, 1, 0],
+      azimuth_zero: [1, 0, 0],
+      source: 'siglip',
+      confidence: 0.9,
+      front: null,
+    }
+    const queue = new RenderQueue(2)
+    queue.suspend()
+    await render(
+      <Harness
+        entries={[...oldRig, ...bare, ...unposed]}
+        api={api}
+        lru={fakeLru()}
+        queue={queue}
+        poses={{ '/models/unposed.stl': pose }}
+      />,
+    )
+    await settle()
+    expect(getThumb.mock.calls.map((c) => c[0]).sort()).toEqual([
+      '/models/bare.stl',
+      '/models/m0.stl',
+      '/models/unposed.stl',
+    ])
+    expect(statuses()).toEqual(['loading', 'loading', 'loading'])
+  })
+
+  it('a later listing naming a newer generation redraws the survivor from the new URL, still without a lookup', async () => {
+    const api = fakeApi()
+    const first = annotated(1)
+    await render(<Harness entries={first} api={api} lru={fakeLru()} queue={new RenderQueue(2)} />)
+    await settle()
+    expect(urlOf('/models/m0.stl')).toContain('gen=5')
+
+    await rerender(<Harness entries={annotated(1, {}, 6)} api={api} lru={fakeLru()} queue={new RenderQueue(2)} />)
+    await settle()
+    expect(urlOf('/models/m0.stl')).toContain('gen=6')
+    expect(lastThumbs.get('/models/m0.stl')!.gen).toBe(6)
+    expect(api.getThumb).not.toHaveBeenCalled()
+
+    // The same generation again — a peek landing beside it, a re-landing —
+    // is not a new fact and restarts nothing.
+    const before = renderLog.length
+    await rerender(<Harness entries={annotated(1, {}, 6)} api={api} lru={fakeLru()} queue={new RenderQueue(2)} />)
+    await settle()
+    expect(renderLog.slice(before).every((row) => row[0] === `ready:${urlOf('/models/m0.stl')}`)).toBe(true)
+  })
+
+  it('a tile drawn from an image URL, re-rendered to blob:, then removed, releases exactly the blob', async () => {
+    const api = fakeApi()
+    await render(<Harness entries={annotated(1)} api={api} lru={fakeLru()} queue={new RenderQueue(2)} />)
+    await settle()
+    const imageUrl = urlOf('/models/m0.stl')
+    expect(imageUrl.startsWith('/api/thumb/image')).toBe(true)
+
+    // An outside writer (App's persist) replaces the picture with pixels the
+    // client minted. The image URL it displaces is nobody's to revoke.
+    await act(async () => {
+      lastSetThumb!('/models/m0.stl', { status: 'ready', url: 'blob:persisted', gen: 6 })
+    })
+    expect(vi.mocked(URL.revokeObjectURL)).not.toHaveBeenCalled()
+
+    await rerender(<Harness entries={[]} api={api} lru={fakeLru()} queue={new RenderQueue(2)} />)
+    expect(vi.mocked(URL.revokeObjectURL).mock.calls).toEqual([['blob:persisted']])
+  })
+
+  it('an image that fails to arrive demotes the entry to the lookup once per generation, never to error', async () => {
+    const getThumb = vi.fn().mockResolvedValue({ status: 'miss' })
+    const api = fakeApi(getThumb)
+    const queue = new RenderQueue(2)
+    queue.suspend() // the miss's render never lands, so the state stays where the demotion put it
+    await render(<Harness entries={annotated(1)} api={api} lru={fakeLru()} queue={queue} />)
+    await settle()
+    expect(getThumb).not.toHaveBeenCalled()
+
+    // happy-dom fetches no images, so the browser's `error` is synthesized
+    // through the same callback the tile's <img> would call (task 5.1).
+    await act(async () => {
+      lastReportImageError!('/models/m0.stl')
+    })
+    await settle()
+    expect(statuses()).toEqual(['loading']) // not 'error': a missing image is not a failed model
+    expect(getThumb).toHaveBeenCalledTimes(1)
+
+    // A restart at the same generation — the pose wave, a toggle — must not
+    // rebuild the refused URL: the annotation is skipped and the lookup asked
+    // again. The wave is a `poses` change, which re-runs the sweep.
+    const pose: IndexPose = { up: [0, 1, 0], azimuth_zero: [1, 0, 0], source: 'siglip', confidence: 0.9, front: null }
+    await rerender(
+      <Harness entries={annotated(1)} api={api} lru={fakeLru()} queue={queue} poses={{ '/models/m0.stl': pose }} />,
+    )
+    await settle()
+    expect(getThumb).toHaveBeenCalledTimes(2)
+    expect(urlOf('/models/m0.stl')).toBe('')
+
+    // A listing naming a *different* generation is a new fact, and is tried.
+    await rerender(
+      <Harness entries={annotated(1, {}, 7)} api={api} lru={fakeLru()} queue={queue} poses={{ '/models/m0.stl': pose }} />,
+    )
+    await settle()
+    expect(urlOf('/models/m0.stl')).toContain('gen=7')
   })
 })

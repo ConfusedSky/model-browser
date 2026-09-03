@@ -320,7 +320,8 @@ describe('the menu on a viewer surface', () => {
 
   it('gives Escape to the menu first and to the lightbox second', async () => {
     // Deep-linked rather than pointer-opened: this one closes without
-    // history.back, which the harness's stubbed URL cannot survive.
+    // history.back, which the suite plays by hand rather than through the
+    // browser (client/test/CLAUDE.md).
     await unmountApp()
     indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models' })
     const { mountAppAtCurrentUrl } = await import('./appHarness')

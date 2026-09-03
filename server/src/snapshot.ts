@@ -38,6 +38,7 @@ import { createHash } from 'node:crypto'
 import { mkdir, open, readFile, readdir, rename, rm, stat, unlink, utimes } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { envPositiveInt } from './env'
 import { type Library, LibraryError } from './library'
 import { VPathError } from './vpath'
 import type { ArchiveId, ZipDirCache, ZipEntry } from './zip'
@@ -145,22 +146,15 @@ interface ArchivesFile {
 }
 
 /**
- * The size cap from the environment, on `envLimit`'s rule (`listing.ts`): a
- * missing, malformed or non-positive value falls back to the default and never
- * silently unbounds the store. `Number('64MB')` is NaN, and a NaN cap makes
- * `total <= cap` false forever — a malformed knob that evicts everything on
- * every sweep, which is what this shape exists to refuse.
- *
- * The floor runs **before** the positivity test, not after (review finding 10,
- * and `envLimit` carries the same correction): `0.5` is finite and positive,
- * and flooring it afterwards gives a cap of 0 — which is the "evicts everything
- * on every sweep" failure above, reached by a different door.
+ * The size cap from the environment — `env.ts`'s one parser, which owns the
+ * rule this used to restate: malformed or non-positive falls back, the floor
+ * runs before the positivity test, and the store is never silently unbounded.
+ * `Number('64MB')` is NaN, and a NaN cap makes `total <= cap` false forever — a
+ * malformed knob that evicts everything on every sweep, which is what that
+ * shape exists to refuse.
  */
 function envCap(): number {
-  const raw = process.env.MODEL_BROWSER_SNAPSHOT_CAP
-  if (raw === undefined || raw.trim() === '') return DEFAULT_CAP
-  const n = Math.floor(Number(raw))
-  return Number.isFinite(n) && n > 0 ? n : DEFAULT_CAP
+  return envPositiveInt('MODEL_BROWSER_SNAPSHOT_CAP', DEFAULT_CAP)
 }
 
 /**
@@ -215,6 +209,8 @@ export class SnapshotStore {
   private archives: Map<string, ArchiveRecord> | undefined
   private archivesDirty = false
   private loadingArchives: Promise<Map<string, ArchiveRecord>> | undefined
+  /** The tail of the flush chain — see `flush`. Never rejects. */
+  private flushing: Promise<void> = Promise.resolve()
 
   constructor(
     readonly dir: string = process.env.MODEL_BROWSER_CACHE ?? join(homedir(), '.cache', 'model-browser'),
@@ -449,6 +445,26 @@ export class SnapshotStore {
    * for a walk that was cancelled or truncated and must persist nothing.
    */
   async flush(): Promise<void> {
+    // **One flush at a time, per store** (round-2 finding 10). Every walk's
+    // completing `save` calls this, and a server answers several roots at once:
+    // two flushes could serialize the layer, then interleave inside
+    // `writeAtomic`'s five awaits and commit their `rename`s in either order —
+    // so the *earlier*, smaller serialization could land last and permanently
+    // lose whatever the later one had learned. Atomicity makes each write whole;
+    // it says nothing about which whole write wins.
+    //
+    // Chained rather than locked, because the correction is entirely about
+    // order: each flush re-reads `archives` when its turn comes, so the last one
+    // through writes the newest state by construction. A failed flush must not
+    // wedge the chain, hence the `catch` on what the next one waits for — the
+    // error still reaches *this* caller through `run`.
+    const run = this.flushing.then(() => this.flushLocked())
+    this.flushing = run.catch(() => undefined)
+    return await run
+  }
+
+  /** One flush's own work, with the chain above guaranteeing it runs alone. */
+  private async flushLocked(): Promise<void> {
     if (!this.archivesDirty || this.archives === undefined) return
     const dir = await this.storeDir()
     const file: ArchivesFile = {

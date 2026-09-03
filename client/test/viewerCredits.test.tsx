@@ -99,10 +99,10 @@ describe('the panel credits the model’s source', () => {
     expect(creditLink('author')!.getAttribute('href')).toBe(CREDITS.authorUrl)
     expect(creditValue('license')!.textContent).toBe('Creative Commons - Attribution')
     // The source link's `href` is the stored URL verbatim; what it *reads* as is
-    // `hostLabel`'s business, pinned in its own describe below (the harness
-    // stubs global `URL` for object URLs, so `new URL` cannot construct here and
-    // the label falls back to the whole string — which is the fallback working,
-    // not the host rule). The full URL is on the title either way.
+    // `hostLabel`'s business, pinned in its own describe below, unmounted (the
+    // harness stubs global `URL` — a constructing subclass since
+    // `thumbnail-image-serving`, but what it does to a label is still not
+    // this cell's question). The full URL is on the title either way.
     expect(creditLink('source')!.getAttribute('href')).toBe(CREDITS.sourceUrl)
     expect(creditLink('source')!.getAttribute('title')).toBe(CREDITS.sourceUrl)
 
@@ -215,9 +215,10 @@ describe('the panel credits the model’s source', () => {
 })
 
 describe('a stored URL reads as its host', () => {
-  // No mount here, deliberately: `mountApp` stubs global `URL` for object URLs,
-  // and a spread of a class carries no constructor — so `new URL` throws inside
-  // a mounted test and this rule could only ever be asserted as its fallback.
+  // No mount here, deliberately: `hostLabel` is a pure function, and this rule
+  // is about it, not about what `mountApp`'s `URL` stub (a constructing
+  // subclass since `thumbnail-image-serving`; a spread copy that threw before)
+  // happens to do inside a mounted tree.
   it('drops the scheme, the path and a leading www.', () => {
     expect(hostLabel('https://www.thingiverse.com/thing:3750572')).toBe('thingiverse.com')
     expect(hostLabel('https://cults3d.com/en/3d-model/game/kit')).toBe('cults3d.com')

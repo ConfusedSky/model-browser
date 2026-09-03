@@ -5,8 +5,9 @@
 ### Requirement: API restricted to the app's own origin
 Because the server reads and serves the user's model library as the user, the server
 SHALL reject every `/api/*` request that does not originate from the app itself.
-Which origin *is* the app's own SHALL come from the deployment's configuration
-(see `public-deployment`), and SHALL default to loopback: requests carrying an `Origin`
+Which origins *are* the app's own SHALL come from the deployment's configuration
+(see `public-deployment`) as a set rather than a single value, since one deployment may
+answer more than one name, and SHALL default to loopback: requests carrying an `Origin`
 header that is not an allowed origin SHALL be refused, requests whose `Host` header is
 not an allowed host SHALL be refused, and CORS headers SHALL never be emitted. The
 listening address SHALL likewise be configured and SHALL default to loopback. Loopback
@@ -44,6 +45,10 @@ trusted user. Because no-cors subresource embeds (`<img src>`, `<script src>`) c
 #### Scenario: A public deployment answers its own origin and no other
 - **WHEN** a deployment configures a public origin and a request arrives from a different public origin
 - **THEN** the request is refused, and a request from the configured origin is served
+
+#### Scenario: A deployment answering two names
+- **WHEN** a deployment configures more than one origin and a request arrives from the second
+- **THEN** it is served, as one from the first is
 
 #### Scenario: The machine can always ask itself
 - **WHEN** a request arrives from loopback on a deployment that has configured a public origin

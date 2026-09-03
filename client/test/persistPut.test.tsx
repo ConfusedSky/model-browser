@@ -128,7 +128,12 @@ beforeEach(async () => {
   // (design D2/D7) and reads no last path, so this is what puts the app in
   // /models the way the storage seed used to.
   window.history.replaceState(null, '', '/?path=%2Fmodels')
-  vi.stubGlobal('URL', { ...URL, createObjectURL: () => 'blob:m', revokeObjectURL: () => {} })
+  // A subclass, never a spread copy: happy-dom parses every <img src> with the
+  // global URL and fires `error` synchronously when that throws (client/test/CLAUDE.md).
+  vi.stubGlobal(
+    'URL',
+    Object.assign(class extends URL {}, { createObjectURL: () => 'blob:m', revokeObjectURL: () => {} }),
+  )
   vi.stubGlobal('createImageBitmap', () => Promise.resolve({ close: () => {} }))
   listDir.mockReset()
   listDir.mockResolvedValue(LISTING)

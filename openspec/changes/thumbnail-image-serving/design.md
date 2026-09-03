@@ -191,9 +191,15 @@ lookup where `posed` predates it), the state is `ready` at
 absence included since `a2c5c28`, so omitting it would wipe the key that
 makes later fetches immutable. Every other case takes the lookup path.
 
-**Survivors re-read it.** The annotation is a new input to the pixels, so the
-survivor test becomes `slot.ao === ao && samePose(...) && slot.entry.thumb?.gen === entry.thumb?.gen`,
-and a survivor's `slot.entry` is updated. Without that, a tile pinned
+**Survivors re-read it.** The annotation is a new input to the pixels, so a
+survivor restarts when the listing names a generation the slot has not seen
+— neither the one its own lookup or PUT taught it (`slot.thumbGen`) nor the
+one its previous entry carried — and a survivor's `slot.entry` is updated
+either way. Not the literal `slot.entry.thumb?.gen === entry.thumb?.gen`
+first drafted: that restarts a tile whose own PUT it just watched, the moment
+a listing names the number it already knows, re-fetching bytes the client
+holds (the Non-Goal above). A listing carrying no annotation is not a new
+fact either — the server has simply not learned the entry. Without that, a tile pinned
 `immutable` at gen N would ignore a listing naming N+1 — another tab, a
 lightbox persist elsewhere, `bulk-thumbnail-jobs` — and show wrong pixels
 with no request that could ever discover it. The cost is one restart per
@@ -271,12 +277,31 @@ time-bounded inside the queue: once it has read closed for `FAR_GATE_MAX_MS`
 (a few seconds — tuned in 6.2, above the measured worst lookup of 3.7 s)
 `take` dispatches far work regardless, and the bound is stated in the spec.
 
+**The reset window.** Every navigation applies an empty ranking to both
+queues (D4), so until the grid publishes its first bands every pending
+lookup is *unreported* — nearer than far by definition — and the gate reads
+"any lookup pending" for exactly the window in which a fresh listing's
+cached tiles are filling. F8's nearer-than-far refinement bites only once
+bands are in; that is the right order (review R10).
+
+**Contiguous hold.** The bound's clock measures a contiguous run of held far
+work: it resets whenever a take passes without holding a far job — the gate
+read open, or there was nothing far to hold. Left running across a gap (a
+navigation retires the far jobs; new far work is pushed after the bound),
+the clock would already have expired and the new job would dispatch at once
+under a closed gate, defeating the gate until some take happened to read it
+open (review R1, verified under Bun with a faked clock).
+
 **Mechanics.** `pending` counts live jobs — husks are spliced only inside
-`take`, so it must not be `jobs.length + running`; `onIdle` fires *after* the
-decrement that makes `pending` zero, or the `poke` it triggers runs against a
-closed gate and far work waits for the next push; `poke` re-pumps. Nearer
-work is unaffected: a visible tile's render runs beside a pending lookup for
-a tile the user also wants.
+`take`, so it must not be `jobs.length + running`. The settle signal is
+`onSettle`, fired after **every** job finishes and after the decrement, not
+an idle-only `onIdle`: the gate reads "nearer than far pending", and the last
+*near* lookup can settle while far lookups still run — an idle signal would
+then leave far renders waiting on the last far lookup. The hook's callback
+pokes the render queue, whose gate re-reads the count; a closed gate arms one
+timer for the bound's remainder, since a queue holding only far work has
+nothing else to pump it. Nearer work is unaffected: a visible tile's render
+runs beside a pending lookup for a tile the user also wants.
 
 ### D6: Rollback and coexistence
 
@@ -303,6 +328,18 @@ Two things here touch that:
   the browser's copy is also gone; the size-cap sweep is the only reader of
   the clock. The requirement's word "read" is not amended; this paragraph is
   where its meaning under browser caching is written down.
+
+### D7a: What the test DOM does with an image
+
+happy-dom (20.x) loads no image URL — `enableImageFileLoading` is off — so it
+fires no `load`, and a cell about a picture arriving synthesizes the event.
+It *does* fire `error`, synchronously on `src` assignment, whenever the global
+`URL` cannot parse the source; and both harnesses stubbed `URL` with a spread
+copy that was not a constructor, so every listing-drawn tile demoted itself
+before a cell could look. The stubs are subclasses with two statics
+overridden now (`client/test/CLAUDE.md`). Task 5.1's premise that neither
+event fires was half right; recorded here so the next reader of a spinning
+tile in a test knows where to look.
 
 ### D8: Review disposition (2026-09-02, fresh opus reviewer on the draft)
 
@@ -334,7 +371,30 @@ Two things here touch that:
 | F24 | *(found implementing §0)* Holding far lookups contradicts main's "consulted at once whatever its position" — a far tile would keep its old recipe until approached; a cell failed on it | **Decided** (D0): ranked last, not held; the disk reads are D1–D3's to remove |
 | — | Blocking understated | **Fixed** (tasks header): which halves can start today |
 
+### D9: Implementation review (2026-09-02, opus, on `a5ed10d`/`7c42aad`/`f65299f`)
+
+| # | Finding | Disposition |
+|---|---|---|
+| R1 | The far gate's bound clock survived a gap in held far work; new far work pushed after the bound dispatched at once under a closed gate | **Fixed** (D5 *Contiguous hold*): `releaseHold` on every take that holds nothing; cell "the bound measures a contiguous hold" |
+| R2 | The image route is the first cross-origin-embeddable resource; `guard.ts` said none existed — a foreign page's `<img>` as an existence oracle | **Fixed**: `Cross-Origin-Resource-Policy: same-origin` on the image response, asserted in its cell; `guard.ts`'s rationale amended |
+| R3 | The delta's "a different generation SHALL be re-evaluated" was the literal rule D3 rejected | **Fixed** (delta): the implemented rule, absence included |
+| R4 | 6.2's "4 lookups" depends on a warm server: the fact index is per process | **Recorded** (6.2 precondition, Risks) |
+| R5 | `reportImageError`'s re-seed branch was dead | **Fixed**: `start` called for its side effect, `loading` written |
+| R6 | The sweep's batch wrote answered states twice | **Fixed** |
+| R7 | `persistPut.test.tsx` still stubbed `URL` as a spread copy, firing four spurious image errors per run | **Fixed**: subclass form |
+| R8 | Five test comments falsified by the subclass stub | **Fixed** where found (`viewerCredits`, `viewerMenu`, `viewerPanelActions`) |
+| R9 | `gateTimer` survived `setFarGate(null)` | **Fixed**: `releaseHold` on gate removal |
+| R10 | Task 4.3's fifth cell pinned counting, not wiring; the reset window makes the gate "any lookup pending" until bands publish | **Fixed**: the settle cell carries a pending far lookup; D5 *The reset window* |
+| R11 | `image`'s conditional spread; `new Uint8Array(png)` copied every PNG | **Fixed**: `{ gen, png }`, `c.body(png)` |
+| R12 | `ThumbView` hid good pixels behind a spinner when a tile moved from `blob:` back to an image URL | **Fixed**: the placeholder only until the first picture this view has shown |
+
 ## Risks / Trade-offs
+
+- [The fact index is per process] → the first listing of a directory after
+  a server start, before the startup sweep has read its sidecars, costs the
+  full lookup storm; the annotation appears once that process has read the
+  entries (review R4). Recorded, not mitigated: warming is
+  `listing-tree-cache`'s sweep, and a persisted index is its D7's note.
 
 - [An entry evicted between emission and fetch] → 404; `onImageError(path)`
   demotes the entry to the lookup path once per generation (D3).

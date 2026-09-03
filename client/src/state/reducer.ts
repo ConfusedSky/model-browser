@@ -660,6 +660,24 @@ export function reducer(state: SearchState, action: Action): SearchState {
 
     case 'failure': {
       if (!accepts(state, action.id, action.forView)) return state
+      // **A follow-up that fails says nothing** (`listing-tree-cache` §5.2,
+      // round-2 finding 2). The request that failed asked for nothing the user
+      // asked for: the listing it was going to correct is on screen, complete
+      // and rendered, and the only thing lost is a correction the user never
+      // knew was coming. Painting the header error over that would report a
+      // failure of the app's own background housekeeping as a failure of the
+      // navigation the user made — and, worse, would do it while the entries
+      // that failure did not touch are still sitting there.
+      //
+      // So: clear the request, keep the result and its `stale` flag, set no
+      // failure. 'Refreshing…' stays up, which is the truthful line — the
+      // listing was *not* refreshed. Nothing is retried: `staleId` is the
+      // answering event's id and no answer landed, so the effect that dispatches
+      // `revalidate` does not re-run. The effect's own contract comment already
+      // said this was the outcome ("a failed follow-up is not retried either …
+      // silence is the right outcome"); it was true of the retry and false of
+      // the banner.
+      if (state.inflight.followUp === true) return { ...state, inflight: null }
       // Keep the view, clear the optimism, say what went wrong. There is no
       // revert to get wrong: nothing advanced.
       return {

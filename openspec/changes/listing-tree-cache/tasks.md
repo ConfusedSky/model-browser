@@ -407,6 +407,17 @@
       budget goes, so a single over-budget folder answers zero models and "what was found
       still comes back" would have asserted nothing
 
+- [x] 6.8 The client consumes the carried preview (added 2026-09-02, Masa's find:
+      peeks were still issued for entries whose listing carried `preview` — the
+      annotation landed with no consumer, the reload-affordance gap's twin):
+      `requestPeek` lands `entry.preview` through the same map and
+      once-per-listing discipline instead of calling `/api/peek`; an entry
+      without the field asks exactly as before. Cell in folderSheets.test.tsx
+      ("draws a listing-carried preview and asks the server for nothing" — the
+      four-model peek mock proves no request decided the two-cell sheet);
+      falsified by removing the branch: `expected "spy" to not be called at
+      all, but actually been called 1 times`
+
 ## 7. Tests
 
 - [x] 7.1 Server: cached and walked responses are entry-for-entry identical on an unchanged tree (including ordering and truncation); one cached tree serves several different queries and both settings of the folder-matching option without re-traversing (instrument the walk, do not infer from timing); a second walk opens no archives; adding, removing, and renaming a model is picked up; a present-but-unreadable root invalidates rather than serving; the same tree reached at a different mountpoint under the same library is a **hit**; an unmounted library answers `missing` and leaves the snapshot in place; the on-disk format version invalidates a stale snapshot
@@ -495,6 +506,62 @@
       suite's existing `node:fs/promises` mock grew a one-shot `onRename` hook for it;
       without an interposition, "a `set` during the write is not lost" has no falsification
       at all and would have looked like coverage
+      <br>**Fix round 2 2026-09-02 (the round-2 review's ten composition-seam findings) —
+      12 cells added across `listingCache.test.ts` (4), `layers.test.ts` (4),
+      `snapshot.test.ts` (1), `listingRefresh.test.tsx` (2) and a new `env.test.ts` (4
+      cells, one file), for 608 server / 701 client.** Closed here: **R1** a `ListingError`
+      from `gatherFlat`'s up-front root stat — the walked root deleted or renamed while the
+      volume is present — is a contradiction like `RevalidationError` and invalidates, where
+      before it left the snapshot in place and every later serve answered a ghost tree
+      forever (the `isReady` recheck is what still separates an unmounted volume); **R2** a
+      FAILED follow-up paints no header error — the reducer's `failure` case clears the
+      request on `inflight.followUp`, keeps the result and its stale flag, and leaves
+      'Refreshing…' up as the truthful line, which is what App's staleId effect had claimed
+      in prose all along; **R3** `enumerateModels`' request-path `save` is best-effort like
+      `walkFlat`'s (the sibling missed when R1-round-1's finding 3 was applied); **R4a**
+      `/api/models` resolves the requested path before an *ancestor's* snapshot answers for
+      it, so a phantom path under a cached root 404s exactly as the uncached branch does
+      (one `stat`; the exact-root branch needs none — a snapshot there was written by a walk
+      that resolved it, and R1 now invalidates a root that has since gone); **R4b** an
+      enumeration awaits the covering root's pass when its stamp is missing or past
+      `REVALIDATE_TTL_MS`, rather than serving unchecked — correct over instant, because a
+      job's scope has no staleness marker on the wire for the caller to notice by; **R5**
+      the reuse branch's `access` probe is a contradiction only when the recorded level is
+      **non-empty**, since the walk itself skips an unreadable directory and an empty
+      recorded level re-obtains the same nothing — before this, one `chmod 644` on one empty
+      folder made every cadence a full cold walk, forever, because the walk that followed
+      recorded it empty again; **R6** pose-layer entries carry a `recordedAt` and stop being
+      emitted (and are dropped) past `POSE_ANNOTATION_TTL_MS` (5 min, injected clock) —
+      without it the annotation filters a model out of the client's wave permanently and
+      converts "stale until the next navigation" into "stale until restart"; **R7**
+      `POST /api/reload` uses a new `ListingCache.reload`, which awaits an in-flight pass
+      and then runs a **fresh** one, so the verdict it reports is a pass that began after
+      the gesture (`revalidate` keeps join semantics for serves); **R8** the invalidate
+      branch calls a new `DerivedLayers.dropPreviewsUnder(root)`, since that branch has no
+      changed-directory list to drive `noteDirChanged` with and folder tiles went on drawing
+      contact sheets of a contradicted subtree (ancestors kept, poses untouched); **R9** the
+      third env-parser copy is gone — one `server/src/env.ts` `envPositiveInt`, with the
+      floor-before-positivity rule and the never-silently-unbounded doc, behind all three
+      knobs; `cache.ts`'s copy still floored *after* the test, so
+      `MODEL_BROWSER_CACHE_CAP=0.5` was a cap of 0 that swept the whole pixel store on every
+      write; **R10** `SnapshotStore.flush()` chains on a private promise, so two concurrent
+      flushes cannot commit an older serialization over a newer one (the mark-clean-before-
+      await and re-dirty-on-throw semantics stay inside the chained section).
+      Every behavioral fix was falsified before being trusted — each defect re-introduced,
+      watched to fail, and unpatched from a copy (never `git checkout`, per the previous
+      round's finding); the exact failure text for each is in this round's report.
+      Two findings worth inheriting. **No pre-existing cell had to change**, but one nearly
+      did: `flat.test.ts`'s "the walk collects without consulting the query" slices
+      `listing.ts` between `async function walkFsLevel` and the literal text `function
+      envLimit`, so R9's extraction would have made that `indexOf` return -1 and the slice
+      run to the end of the file, failing on the query predicates for a reason with nothing
+      to do with the walk. `envLimit` is kept as a named forwarder to `envPositiveInt` and
+      the coupling is now documented at the declaration — a source-shape guard is a
+      dependency on a symbol like any other. And **R4b's "touches nothing when cached" cells
+      survive unchanged only because a completing walk stamps its root**: `listFlat` through
+      `ListingCache` validates as a side effect, so the enumerations that follow it in the
+      same cell are inside the TTL window and run no pass. A cell that cached a tree by any
+      other route would now pay one — worth knowing before writing the next one
 - [x] 7.2 Client: a stale-marked listing renders immediately with the refreshing affordance and reconciles on the follow-up; an unmarked listing shows no affordance; a superseded reconciliation is discarded by latest-wins
       — landed 2026-09-02 as `client/test/listingRefresh.test.tsx`, 9 cells (6 here, 3 for
       §6.4 below). All three this line names are there, plus the two the review of §5.1's

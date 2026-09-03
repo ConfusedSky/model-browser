@@ -1,6 +1,6 @@
 # Tasks — thumbnail-image-serving
 
-> **Landed:** §0 (2026-09-02, `5bf35a5`); §1 and 5.2 (2026-09-02, on `f88c6f0`). **What can start today:** §1.1–1.2 and §4 depend on nothing unlanded
+> **Landed:** §0 (2026-09-02, `5bf35a5`); §1 and 5.2 (`a5ed10d`); §2, §4, §5 (`7c42aad`); 6.2/6.3 measured. Reviewed (design D9), findings folded in. **What can start today:** §1.1–1.2 and §4 depend on nothing unlanded
 > — only `immutable-thumbnail-serving` (archived 2026-09-02). **What waits on
 > `listing-tree-cache` §6:** 1.3, 1.4, 2.2's annotation branch, 2.5, 5.1's
 > annotated cells, 5.3, and 6.2's revisit measurement. That change's 6.3
@@ -65,10 +65,10 @@
 
 ## 2. Client: drawing from the listing
 
-- [ ] 2.1 `ApiClient.thumbImageUrl(path, mtime, ao, gen)` — a pure URL builder,
+- [x] 2.1 *(the method delegates to `client/src/api/thumbUrl.ts`, a pure module the test harness imports directly so its fake client uses the real builder rather than a copy)* `ApiClient.thumbImageUrl(path, mtime, ao, gen)` — a pure URL builder,
       the same query shape `getThumb` sends, so the image URL and the lookup
       URL name the same bytes (D1)
-- [ ] 2.2 *(after §6)* `useThumbnails`: `start` returns the annotation's
+- [x] 2.2 *(the predicate is `usable`, module-level; the seed rides an `answered` map applied in the same updater — falsified by seeding through `setThumb`: three cells fail)* `useThumbnails`: `start` returns the annotation's
       verdict — `hit` under the client's predicate (`lighting ===
       THUMB_LIGHTING`, `rig === RIG_VERSION`, `poseStale` false against the
       pose held — the *same* predicate the hit branch applies to a lookup
@@ -78,20 +78,25 @@
       added entries, never through `setThumb` during the sweep (D3: the batch
       would overwrite it and nothing would ever write again). Every other
       verdict takes the lookup path unchanged
-- [ ] 2.3 Survivors re-read the annotation: the survivor test becomes
-      `slot.ao === ao && samePose(...) && slot.entry.thumb?.gen === entry.thumb?.gen`,
-      and a survivor's `slot.entry` is updated to the new entry (D3)
-- [ ] 2.4 Object-URL ownership by scheme: revocation on displace, removal and
+- [x] 2.3 Survivors re-read the annotation. **Landed as `newGen`**, not the
+      literal above: a listing naming a generation the slot has not seen —
+      neither the one its own lookup or PUT taught it (`slot.thumbGen`) nor
+      the one its previous entry carried — restarts it; a listing carrying no
+      annotation is not a new fact. The literal test would have restarted a
+      tile whose own PUT it had just watched, re-fetching bytes the client
+      holds (D3's Non-Goal). `slot.entry` is updated on every survivor.
+      Falsified by dropping `newGen`
+- [x] 2.4 *(`release(url)`, every revoke site; falsified by revoking by identity)* Object-URL ownership by scheme: revocation on displace, removal and
       unmount fires only for `blob:` URLs; `setThumb` from outside (`persist`,
       `entryActions`) still mints and releases `blob:` (D3)
-- [ ] 2.5 *(after §6)* The image can fail: `ThumbView` takes the **path** it
+- [x] 2.5 *(`reportImageError`, exported by the hook; `slot.refusedGen`; the memory is the comparison itself — a different generation passes it, so nothing clears; falsified by forgetting the refusal)* The image can fail: `ThumbView` takes the **path** it
       draws and an `onImageError(path)` held by identity in `App`; the hook
       remembers the refused generation on the slot (cleared when a listing
       delivers a different `gen`) and demotes the entry to the lookup path —
       once per generation, so a pose wave or toggle does not rebuild the same
       404 URL, and a pulled disk's 503s do not become 500 retire/start cycles
       (D3)
-- [ ] 2.6 The tile `<img>` gets a declared square box (`width: 100%;
+- [x] 2.6 *(the box is a square the height of the content area, `aspect-square h-full`, wrapped so the placeholder can sit over it; the press-before-load cell is **not** writable in happy-dom, whose rects are all 0×0 either way — 6.2 measures it in the browser)* The tile `<img>` gets a declared square box (`width: 100%;
       aspect-ratio: 1 / 1`), `loading="lazy"`, `decoding="async"`, and keeps
       `ThumbView`'s placeholder up until its `load` event when its URL is an
       image URL; `overlayRectFor`'s fallback also covers an `<img>` whose rect
@@ -107,18 +112,18 @@
 
 ## 4. Far reads yield to pending lookups
 
-- [ ] 4.1 `RenderQueue`: `pending` counts live jobs (**not** `jobs.length +
+- [x] 4.1 *(`onSettle`, not `onIdle` — see 4.2; `running` is a Set so ranks of running jobs can be asked; a closed gate arms one timer for the bound's remainder, since a queue holding only far work has nothing else to pump it)* `RenderQueue`: `pending` counts live jobs (**not** `jobs.length +
       running` — husks are spliced only inside `take`); `setFarGate(fn)`;
       `take` skips `far`-ranked jobs while the gate says no, **unless the gate
       has read closed for longer than `FAR_GATE_MAX_MS`** (a named constant,
       tuned in 6.2 above the measured worst lookup of 3.7 s); `onIdle` fires
       **after** the decrement that makes `pending` zero; a public `poke()`
       re-pumps (D5)
-- [ ] 4.2 The hook wires the render queue's gate to "a lookup ranked nearer
+- [x] 4.2 *(the lookup queue's `onSettle` fires after **every** lookup finishes, after the decrement; the hook's callback pokes the render queue, whose gate re-reads `pendingNearerThanFar`. An idle-only signal would have left far renders waiting on the last far lookup when the last *near* one had already settled)* The hook wires the render queue's gate to "a lookup ranked nearer
       than far is pending" (the lookup queue exposes that count, not just
       `pending`) and the lookup queue's `onIdle` to the render queue's `poke`;
       both cleared in the wiring effect's cleanup (0.3)
-- [ ] 4.3 `queue.test.ts` cells, DOM-free: with the gate closed a far job is
+- [x] 4.3 *(six cells under *RenderQueue far gate*)* `queue.test.ts` cells, DOM-free: with the gate closed a far job is
       skipped while a near job runs; the gate opening plus `poke` starts the
       far job with no new push; `pending` excludes cancelled husks; a gate
       that never opens releases far work after the bound (fake timers); a
@@ -126,7 +131,7 @@
 
 ## 5. Tests
 
-- [ ] 5.1 *(after §6)* `thumbnailQueue.test.tsx` hook cells with annotated
+- [x] 5.1 *(five cells under *a listing-known thumbnail is drawn without a lookup*, falsified six ways. **Premise corrected:** happy-dom fires no `load` for an image URL, but it *does* fire `error` synchronously when the global `URL` cannot parse the src — which the harnesses' spread-copy `URL` stub guaranteed; the stubs are subclasses now, `client/test/CLAUDE.md`)* `thumbnailQueue.test.tsx` hook cells with annotated
       entries: a listing whose entries all carry a current `hit` issues
       **zero** `getThumb` calls, every tile is `ready` at an image URL with the
       entry's camera/axis, and — the F1 cell — the state survives the sweep's
@@ -148,29 +153,66 @@
       `no-cache` with current bytes when superseded, 404 `no-store` on a miss
       **and on a stale entry**; the route bumps the PNG's mtime as the JSON hit
       does; the JSON route's existing cells untouched by the helper extraction
-- [ ] 5.3 *(after §6)* App-mount cell in `folderSheets.test.tsx`: a listing
+- [x] 5.3 *(two cells under *tiles drawn from the listing*; the vouched entries vouch both variants and the expected URL follows `aoEnabled()`, off in a fresh profile; falsified by unwiring the tile's `onError`)* App-mount cell in `folderSheets.test.tsx`: a listing
       with annotated entries mounts with no `getThumb` traffic and tiles
       showing image URLs; one unannotated entry beside them is looked up; a
       folder-sheet cell's image error demotes the *cell's* path, not the
       folder's
-- [ ] 5.4 Confirm no renderer-mock update is needed and `RIG_VERSION` is
+- [x] 5.4 Confirm no renderer-mock update is needed and `RIG_VERSION` is
       untouched — nothing here renders
 
 ## 6. Verification
 
-- [ ] 6.1 `bun run typecheck` and `bun run test` pass across workspaces
-- [ ] 6.2 Re-run the proposal's profile against the real library, in stages,
+- [x] 6.1 `bun run typecheck` and `bun run test` pass across workspaces — 699 client, 596 server (2026-09-02)
+- [x] 6.2 Re-run the proposal's profile against the real library, in stages,
       recording whose run and the conditions beside the 2026-09-02 baseline
-      (618 lookups / 49.7 MB / 65 s): **after §0 alone — done 2026-09-02,
-      this session:** on the flat root's cached region, 16 visible tiles in
-      545 ms, their lookups completing at ranks 0–17 of the listing's — first,
-      as ranked; the remaining stages measure **after §1–§2** — lookups on
-      a fully annotated listing (target: zero), bytes on a second load of the
-      same listing (target: zero for cached tiles), and the listing's own
-      payload growth measured, not estimated; in the browser, that a 404
-      image fires `error` and the tile recovers. Tune and freeze
-      `FAR_GATE_MAX_MS` here, above the measured worst lookup
-- [ ] 6.3 With the far drain running (an uncached listing left open), confirm
-      a fresh listing's cached tiles fill at lookup speed, not disk-contention
-      speed — the gate's whole point, measured rather than asserted — and that
-      the drain resumes after the gate's bound when a lookup is made to hang
+      (618 lookups / 49.7 MB / 65 s). **After §0 alone — 2026-09-02, this
+      session:** on the flat root's cached region, 16 visible tiles in 545 ms,
+      their lookups completing at ranks 0–17 of the listing's. **After §1–§2 —
+      2026-09-02, this session, Playwright Chromium 150 headless, 1900×876,
+      flat root (500 tiles, 571 images with folder sheets), browser cache
+      cleared through CDP before each first visit, read from
+      `performance.getEntriesByType('resource')`:**
+      - first visit: **4 lookups** (the four un-vouched entries; 618 before),
+        118 image fetches for 16.7 MB — the screen and the browser's own
+        lazy-load band, the other 448 images unfetched with their spinners
+        up; the 40 visible model tiles all drawn **908 ms** after navigation
+      - revisit: **0 bytes** for images — 118 of 118 answered from the
+        browser's cache (`transferSize` 0), the same 4 lookups
+      - the listing itself: `/api/dir` 264 KB (encoded = decoded; not
+        compressed on loopback), 85 ms — the baseline recorded 434 ms and no
+        size, so the growth is the whole annotated payload; against 49.7 MB
+        removed, taken
+      - a lazily loaded image nobody has scrolled to reports a 143×143 box
+        with `naturalWidth` 0 — the declared square, so a press there opens
+        the overlay at the box (2.6's browser half)
+      - a forced 404 (one image URL routed to 404, page reloaded): the tile
+        recovered to a `blob:` URL through **one** lookup, never showed the
+        error state; the image URL was requested three times on that page,
+        not in a loop (the tile and its folder-sheet twin, plus React's
+        development double-mount) — recorded, not tuned
+      `FAR_GATE_MAX_MS` stays **5000 ms**: the worst lookup this run saw was
+      far below it and the baseline's 3.7 s worst is the figure it clears.
+      **Precondition (review R4):** every number above is against a server
+      process that had already read those entries — `ThumbCache`'s fact
+      index is per process and warmed only by its own reads, writes and the
+      startup `maintain()` sweep, so the first listing after a `bun run dev`
+      whose sweep has not yet covered the directory still costs the full
+      lookup storm. "A revisit costs zero bytes" is a browser revisit against
+      a warm server
+- [x] 6.3 With the far drain running — `/Bestarium` flat, 448 models of
+      which 231 plain STLs up to 125 MB and almost none cached: 3 PUTs and
+      5 mesh reads in its first 12 s, i.e. renders in flight — the cached
+      root was opened **in-app through the path bar** (a reload would drop
+      the drain): listing landed in 744 ms, the 40 visible vouched tiles all
+      drawn **1089 ms** after Enter, browser cache cold — against 908 ms with
+      no drain at all. Lookup speed, not contention speed (2026-09-02, this
+      session, same setup as 6.2). The wedged-lookup half is pinned by the
+      fake-timer cell in `queue.test.ts` ("releases far work after the bound
+      when the gate never opens"); it has no natural browser reproduction —
+      a toggle that would re-issue lookups also retires every queued far
+      render — and is not claimed here. Review R1 found the bound's clock
+      surviving a gap in held far work (a navigation retires the far jobs;
+      new ones pushed after the bound dispatched at once under a closed
+      gate); the clock now resets whenever a take holds nothing, pinned by
+      "the bound measures a contiguous hold"

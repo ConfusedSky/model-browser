@@ -28,9 +28,16 @@
   fails "must be of scheme file"). Import it through Vite instead — `import CSS from
   '../src/index.css?raw'` — which needs `test: { css: true }` in vite.config.ts, since
   vitest otherwise stubs every CSS import, `?raw` included, to an empty string
-- The harness stubs `URL` for object URLs, so `history.back()` throws "URL is not a
-  constructor" — play the browser instead: `replaceState` then dispatch `PopStateEvent`
-  (urlLightbox.test.tsx)
+- The harness stubs `URL` for object URLs **as a subclass with two statics overridden**,
+  never as a spread copy: happy-dom parses every `<img src>` with the global `URL`, and a
+  stub that is not a constructor makes that parse throw, which happy-dom answers by firing
+  the image's `error` synchronously on mount — every listing-drawn tile demoted itself to
+  the lookup before the cell could look (`thumbnail-image-serving` 5.3). The spread copy
+  also made `history.back()` throw "URL is not a constructor"; the existing tests still
+  play the browser instead — `replaceState` then dispatch `PopStateEvent`
+  (urlLightbox.test.tsx) — and should keep to that. happy-dom fires `load` for no image
+  URL (`enableImageFileLoading` is off), so a cell about a lazily loaded picture arriving
+  has to synthesize the event
 - `mountApp(bootPath, listing)` does not clear the URL — it *writes* one,
   `/?path=<bootPath>` via `replaceState` (the parameter was `lastPath` before library-root):
   the URL is now the only way to open anywhere but the library's top, so a test that wants

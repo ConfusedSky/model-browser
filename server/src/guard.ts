@@ -14,7 +14,11 @@ const LOOPBACK_HOST = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/
  * - Non-loopback `Host` → refused (closes DNS rebinding).
  * - CORS headers are never emitted.
  * - No-cors embeds (`<img src>`, `<script src>`) send no Origin; they are
- *   neutralized by `application/octet-stream` + `nosniff` on model bytes.
+ *   neutralized by `application/octet-stream` + `nosniff` on model bytes —
+ *   and, for the one route that serves a real image type
+ *   (`GET /api/thumb/image`, `thumbnail-image-serving`), by
+ *   `Cross-Origin-Resource-Policy: same-origin`, which browsers enforce on
+ *   exactly the no-cors loads this guard cannot see.
  */
 export const guard: MiddlewareHandler = async (c, next) => {
   const origin = c.req.header('origin')

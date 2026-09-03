@@ -717,6 +717,28 @@ describe("the pass's failure taxonomy (§4.3, review finding 2)", () => {
     expect(cache.isValidated(ROOT)).toBe(false)
   })
 
+  it('invalidates when the walked root itself is gone but the volume is not', async () => {
+    const f = await fixture('lc-root-gone')
+    await walkFlat(f.library, ROOT, undefined, {}, f.store)
+    const cache = new ListingCache(f.store)
+
+    // The failure `levelFor` cannot raise, because `levelFor` is only reached
+    // once the root has resolved: `gatherFlat`'s own up-front stat fails, and
+    // that is a `ListingError`. Read as "not a `RevalidationError`, so not a
+    // contradiction", the snapshot stayed and every later serve answered a
+    // tree whose root no longer exists — forever, since nothing else revisits
+    // it (round-2 finding 1).
+    rmSync(f.kit, { recursive: true, force: true })
+    expect(await cache.revalidate(f.library, ROOT)).toBe(false)
+
+    // The volume is still perfectly present — this is not the `missing` state,
+    // which the `isReady` recheck separates before the taxonomy is consulted.
+    expect((await f.library.state()).state).toBe('ready')
+    expect(await f.store.load(ROOT)).toBeNull()
+    // And the ghost serve is dead: the next request walks, and finds nothing.
+    await expect(cache.list(f.library, ROOT)).rejects.toThrow(/no such path/)
+  })
+
   it('answers the listing it computed when the request-path save fails', async () => {
     const f = await fixture('lc-save-500')
     const store = new FlakyStore(f.base, undefined, f.library)
@@ -741,6 +763,44 @@ describe("the pass's failure taxonomy (§4.3, review finding 2)", () => {
     const control = await walkFlat(f.library, ROOT)
     expect(body.entries.map((e) => e.name)).toEqual(control.listing.entries.map((e) => e.name))
     expect(body.truncated).toBeUndefined()
+  })
+
+  it('answers the enumeration it computed when the request-path save fails', async () => {
+    const f = await fixture('lc-enum-save-500')
+    const store = new FlakyStore(f.base, undefined, f.library)
+    store.failSave = true
+    const app = createApp(
+      new ThumbCache(tempDir('mb-lc-thumbs-')),
+      undefined,
+      undefined,
+      f.library,
+      undefined,
+      ALL_FEATURES,
+      store,
+    )
+
+    // The same rule as the listing above, in the sibling that was missed when
+    // it was applied (round-2 finding 3): `/api/models` walks, the walk
+    // succeeds, and only the *optimisation for the next request* fails. A 500
+    // here would refuse a perfectly good enumeration — and its body would carry
+    // an errno and the cache directory's filesystem path.
+    const res = await app.request(`/api/models?path=${encodeURIComponent(ROOT)}`, {
+      headers: LOOPBACK,
+    })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { entries: { name: string }[]; complete: boolean }
+    expect(body.complete).toBe(true)
+    expect(body.entries.map((e) => e.name).sort()).toEqual([
+      'a/bracket.stl',
+      'a/deep/part.stl',
+      'box.zip!/arms/left.stl',
+      'box.zip!/box.stl',
+      'loose.stl',
+      'z/bracket.stl',
+    ])
+    // Nothing was cached, which is what makes the failure honest rather than
+    // hidden: the next request walks again.
+    expect(await store.load(ROOT)).toBeNull()
   })
 })
 
@@ -782,6 +842,99 @@ describe('a permission change moves no mtime (§4.3, review finding 4)', () => {
       chmodSync(f.kit, 0o755)
     }
     expect(await f.store.load(ROOT)).toBeNull()
+  })
+
+  it.skipIf(asRoot)('but an empty recorded folder that lost its read bit is not a contradiction', async () => {
+    const f = await fixture('lc-chmod-empty')
+    // A folder the walk saw and found empty. It contributes nothing to the
+    // snapshot's entries — only a `dirs` record — so what it "held" cannot
+    // become wrong.
+    mkdirSync(join(f.kit, 'empty'))
+    await walkFlat(f.library, ROOT, undefined, {}, f.store)
+    const before = await f.store.load(ROOT)
+    const cache = new ListingCache(f.store)
+
+    // 644: readable to nobody who has to traverse it, and `chmod` moves no
+    // mtime, so this lands squarely in the reuse branch the `access` probe
+    // guards. The probe must be no stricter than the walk it stands in for, and
+    // the walk *skips* an unreadable folder — an empty recorded level and a
+    // re-read of an unreadable one contribute exactly the same nothing. Calling
+    // that a contradiction cost a full ~32 s cold walk per cadence, forever,
+    // because the walk that followed recorded the folder as empty again
+    // (round-2 finding 5).
+    const shut = join(f.kit, 'empty')
+    chmodSync(shut, 0o644)
+    try {
+      expect(await cache.revalidate(f.library, ROOT)).toBe(false)
+    } finally {
+      chmodSync(shut, 0o755)
+    }
+
+    expect(await f.store.load(ROOT)).not.toBeNull()
+    expect((await f.store.load(ROOT))?.entries).toEqual(before?.entries)
+    // The pass *completed*, so the root is checked and the next serve is
+    // unmarked — the other half of "not a contradiction".
+    expect(cache.isValidated(ROOT)).toBe(true)
+  })
+})
+
+/**
+ * A store whose `save` can be held open, so a pass can be pinned *after* it has
+ * read the tree and before it has finished. `FlakyStore` fails writes; this one
+ * delays exactly one, which is the only way to arrange "a pass that started
+ * before the user's edit is still in flight when the reload arrives".
+ */
+class GatingStore extends SnapshotStore {
+  saves = 0
+  /** Armed by the cell; the next save waits on it and disarms. */
+  gate: Promise<void> | null = null
+
+  override async save(snapshot: TreeSnapshot): Promise<void> {
+    this.saves++
+    const held = this.gate
+    if (held !== null) {
+      this.gate = null
+      await held
+    }
+    await super.save(snapshot)
+  }
+}
+
+describe('reload runs a pass that began after the gesture (round-2 finding 7)', () => {
+  it('does not report an in-flight pass’s verdict as its own', async () => {
+    const f = await fixture('lc-reload-fresh')
+    const store = new GatingStore(f.base, undefined, f.library)
+    await walkFlat(f.library, ROOT, undefined, {}, store)
+    const cache = new ListingCache(store)
+    expect(store.saves).toBe(1) // the cold walk's
+
+    // A routine pass gets as far as reading the tree — which is unchanged — and
+    // is then held at its save.
+    let release!: () => void
+    store.gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const routine = cache.revalidate(f.library, ROOT)
+    await new Promise((r) => setTimeout(r, 20))
+
+    // *Now* the user edits the library elsewhere and hits reload. The pass in
+    // flight cannot possibly know about this: it stat'd every directory before
+    // the file existed. Joining it — which is what `revalidate` does, correctly,
+    // for a serve — would answer "nothing moved" about a library that had just
+    // moved, and the requirement is that a listing after a completed reload
+    // reflects what the reload found.
+    writeFileSync(join(f.kit, 'z', 'outside.stl'), stlBytes(21))
+    const reload = cache.reload(f.library, ROOT)
+    await new Promise((r) => setTimeout(r, 20))
+    release()
+
+    expect(await routine).toBe(false) // the pass that ran before the edit
+    expect(await reload).toBe(true) // the pass that ran after it
+    // Two passes, not one joined twice: the first's save, then the second's.
+    expect(store.saves).toBe(3)
+    // And the correction is applied, not merely reported.
+    const after = await cache.list(f.library, ROOT)
+    expect(after.entries.map((e) => e.name)).toContain('z/outside.stl')
   })
 })
 

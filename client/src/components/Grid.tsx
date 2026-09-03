@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, type RefObject } from 'react'
+import { memo, useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { baseName } from '../../../shared/names'
 import type { DirEntry, IndexScore } from '../../../shared/types'
 import type { ThumbState } from '../hooks/useThumbnails'
@@ -49,6 +49,9 @@ interface Props {
   /** Raise the entry menu — a secondary press, or the platform's context-menu
    *  key on a focused tile. Held by identity in App like the others. */
   onEntryMenu: (entry: DirEntry, el: HTMLElement, at: { x: number; y: number }) => void
+  /** A listing-drawn image that failed to arrive, by the path it was for —
+   *  the hook's `reportImageError`, held by identity. */
+  onImageError: (path: string) => void
   /** The entry a reveal just located, marked until the highlight fades.
    *  Component-local in App, never a view field (D8). */
   markedPath: string | null
@@ -128,6 +131,7 @@ function Grid({
   onModelOpen,
   onModelHover,
   onEntryMenu,
+  onImageError,
   markedPath,
   anchorPath,
   scoreFor,
@@ -304,6 +308,7 @@ function Grid({
             onModelOpen={onModelOpen}
             onModelHover={onModelHover}
             onEntryMenu={onEntryMenu}
+            onImageError={onImageError}
             // A boolean per tile, not the path: only the marked tile's props
             // change, so the memo keeps the other 499 from re-rendering.
             marked={entry.path === markedPath}
@@ -371,7 +376,30 @@ const BADGE_CLASS =
  * (`setPlaceholder` writes a url onto a loading state), and it must draw as the
  * picture it is rather than as a spinner.
  */
-function ThumbView({ thumb }: { thumb: ThumbState | undefined }) {
+function ThumbView({
+  thumb,
+  path,
+  onImageError,
+}: {
+  thumb: ThumbState | undefined
+  /**
+   * The path this view draws — the cell's own in a folder sheet, not the
+   * folder's — so an image that fails to arrive is reported for the entry it
+   * belongs to (`thumbnail-image-serving` D3).
+   */
+  path: string
+  onImageError?: (path: string) => void
+}) {
+  // Whether this view has ever shown a picture. An image drawn from the
+  // listing is fetched lazily by the browser, so until its `load` the
+  // placeholder stays up over the declared box — a visible cached tile shows
+  // a spinner then the picture, never a blank square. Only until the *first*
+  // picture, though: once one is up, a later URL — a `blob:` re-render, a
+  // re-vouched image URL at a new generation — replaces it when it arrives
+  // and the browser keeps the old pixels showing meanwhile, so hiding them
+  // behind a spinner would discard a picture already on screen (review R12).
+  // A `blob:` URL is bytes the client already holds and draws at once.
+  const [everLoaded, setEverLoaded] = useState(false)
   if (thumb?.status === 'error') {
     return (
       <span className="text-2xl" title="Failed to load model">
@@ -380,13 +408,28 @@ function ThumbView({ thumb }: { thumb: ThumbState | undefined }) {
     )
   }
   if (thumb?.url !== undefined) {
+    const url = thumb.url
+    const pending = !url.startsWith('blob:') && !everLoaded
     return (
-      <img
-        src={thumb.url}
-        alt="" // decorative: the button's aria-label names the model
-        draggable={false}
-        className="max-h-full max-w-full object-contain"
-      />
+      // The box is declared — a square the height of the content area — so
+      // `overlayRectFor` measures a real rect before a lazy image has any
+      // intrinsic size: thumbnails are always 512² at aspect 1 (the
+      // renderer's contract), so this is the box the picture will fill.
+      <span className="relative flex aspect-square h-full max-w-full items-center justify-center">
+        <img
+          src={url}
+          alt="" // decorative: the button's aria-label names the model
+          draggable={false}
+          loading="lazy"
+          decoding="async"
+          onLoad={() => setEverLoaded(true)}
+          onError={() => onImageError?.(path)}
+          className={`aspect-square h-full max-w-full object-contain${pending ? ' opacity-0' : ''}`}
+        />
+        {pending ? (
+          <span className="absolute size-6 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-400" />
+        ) : null}
+      </span>
     )
   }
   return (
@@ -411,9 +454,11 @@ function ThumbView({ thumb }: { thumb: ThumbState | undefined }) {
 function ContactSheet({
   preview,
   thumbs,
+  onImageError,
 }: {
   preview: DirEntry[]
   thumbs: (ThumbState | undefined)[] | undefined
+  onImageError: (path: string) => void
 }) {
   return (
     <div
@@ -437,7 +482,7 @@ function ContactSheet({
             preview.length === 3 && i === 2 ? ' col-span-2' : ''
           }`}
         >
-          <ThumbView thumb={thumbs?.[i]} />
+          <ThumbView thumb={thumbs?.[i]} path={entry.path} onImageError={onImageError} />
         </div>
       ))}
     </div>
@@ -452,6 +497,9 @@ interface TileProps {
   onModelOpen: (entry: DirEntry, el: HTMLElement) => void
   onModelHover: (path: string | null) => void
   onEntryMenu: (entry: DirEntry, el: HTMLElement, at: { x: number; y: number }) => void
+  /** A listing-drawn image that failed to arrive, by the path it was for
+   *  (`thumbnail-image-serving` D3); held by identity like the rest. */
+  onImageError: (path: string) => void
   marked: boolean
   anchor: boolean
   /** What the index scored this tile at; absent when nothing did (see `Grid`). */
@@ -505,6 +553,7 @@ const Tile = memo(function Tile({
   onModelOpen,
   onModelHover,
   onEntryMenu,
+  onImageError,
   marked,
   anchor,
   score,
@@ -627,7 +676,7 @@ const Tile = memo(function Tile({
             <div className="h-2.5 w-1/2 shrink-0 rounded-t-md bg-amber-400/40" />
             <div className="flex min-h-0 w-full flex-1 rounded-b-md rounded-tr-md bg-amber-400/40 p-1">
               {preview !== undefined && preview.length > 0 && (
-                <ContactSheet preview={preview} thumbs={previewThumbs} />
+                <ContactSheet preview={preview} thumbs={previewThumbs} onImageError={onImageError} />
               )}
             </div>
           </div>
@@ -702,7 +751,7 @@ const Tile = memo(function Tile({
       onPointerLeave={() => onModelHover(null)}
     >
       <div data-tile-content className="relative flex min-h-0 w-full flex-1 items-center justify-center">
-        <ThumbView thumb={thumb} />
+        <ThumbView thumb={thumb} path={entry.path} onImageError={onImageError} />
         {/* Over the image, never composited into it: a badge painted into the
             render would make the score part of the thumbnail's cache key, and
             every query change would re-render the grid (D5). `aria-hidden`

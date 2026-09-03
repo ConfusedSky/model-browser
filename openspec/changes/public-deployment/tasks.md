@@ -38,8 +38,9 @@
 
 ## 2. The guard and the listening address
 
-- [ ] 2.1 `guard`'s `LOOPBACK_ORIGIN`/`LOOPBACK_HOST` become the configured allowed set,
-      defaulting to exactly today's two patterns. Every other rule unchanged: absent
+- [ ] 2.1 `guard`'s `LOOPBACK_ORIGIN`/`LOOPBACK_HOST` become the configured allowed set —
+      a **list** of origins, not one value, with loopback always in it whatever is
+      configured — defaulting to exactly today's two patterns. Every other rule unchanged: absent
       `Origin` passes, non-matching `Host` refused, CORS never emitted, model bytes keep
       `application/octet-stream` + `nosniff` (D3)
 - [ ] 2.2 The guard stays mounted on `/api/*` only — the built client is public files and
@@ -49,10 +50,10 @@
 
 ## 3. Capability fields and their refusals
 
-- [ ] 3.1 Add four fields to `FeatureReport` beside `thumbWrites` — the launcher, the
-      chat tab, whether index operation is the viewer's concern, and whether the host is
-      the viewer's concern — each with its own default, chat's being off (D4, D11). Names
-      are an open design question; settle before exporting the type
+- [ ] 3.1 Add four fields to `FeatureReport` beside `thumbWrites`: `appLaunch`,
+      `chatTab`, `hostDetails`, `maintenance` — `true` means offered, and every default is
+      on except `chatTab` (D4's table). There is no separate index field: `hostDetails`
+      governs the index-state collapse too, since a condition is named by its remedy
 - [ ] 3.2 Rename and re-document `ALL_FEATURES`: it is the supported/default set, not
       "every capability on" (D4). Update `createApp`'s parameter comment and `index.ts`'s
       construction comment, which currently promises this change replaces the value with
@@ -66,22 +67,23 @@
       `/api/apps` short-circuit is **before** `launcher.report()`, not a filter over its
       result: `report()` execs `xdg-mime` per handled type and reads the machine's
       application entries, so filtering afterwards still spawns and still reads (D5)
-- [ ] 3.6 Where the host is declared not the viewer's concern (D11): `/api/library` omits
+- [ ] 3.6 Under `hostDetails` (D11): `/api/library` omits
       `top` and the locations its `missing`/`nested` states carry, and the `missing`/
       `nested` envelopes in `createApp`'s gate middleware name no host location while
       still naming the state. `top` becomes optional in
       `LibraryState`, so every client read of it is a compile error until handled
 
-- [ ] 3.7 Under the host field, the routes withhold the index's `detail`:
+- [ ] 3.7 Under `hostDetails`, the routes withhold the index's `detail`:
       `/api/semantic/status` answers the status object without it, and the 503s from
       `POST /api/semantic` and `/api/semantic/similar` omit it. It is mini-classify's free
       text and can name its cache directory, and a client-side collapse leaves `curl`
       returning what the sentence was rewritten to hide (D9). The server keeps composing
       and logging it — the operator's diagnosis depends on it
-- [ ] 3.8 `POST /api/reload` refuses under the host field (D11 risks): it drops every
-      cached layer and revalidates each snapshot root, which is an operator's act on the
-      operator's machine. Added by `listing-tree-cache` after this change first enumerated
-      the routes — re-enumerate before implementing rather than trusting this list
+- [ ] 3.8 `POST /api/reload` refuses under `maintenance`: it drops every cached layer and
+      revalidates each snapshot root, which is acting on the server's derived state, not a
+      question about the library. Added by `listing-tree-cache` after this change first
+      enumerated the routes — re-enumerate before implementing rather than trusting this
+      list, and check whether any other maintenance route has appeared since
 
 ## 4. Client consumers
 
@@ -105,9 +107,9 @@
       not the viewer's concern; `warming` and outside-the-collection stay distinct (D9).
       `indexStatus`'s reasoning is untouched — what changes is what reaches the client
 - [ ] 4.5 The find-similar copy for an unembedded model stops telling the viewer to run
-      the classifier where the host is not their concern (D11) — the notes flagged this
+      the classifier under `hostDetails` (D11) — the notes flagged this
       copy as needing a visitor-facing form
-- [ ] 4.6 Where `top` is withheld (D11), copy-path and the lightbox's file details show
+- [ ] 4.6 Where `top` is withheld under `hostDetails` (D11), copy-path and the lightbox's file details show
       the library path instead of composing a filesystem path
 
 ## 5. Serving the built client
@@ -123,8 +125,9 @@
 
 ## 6. The shipped deployment's configuration
 
-- [ ] 6.1 Commit the public deployment's `config.json` to the repository (D10). Its
-      location in the repo is an open question in design
+- [ ] 6.1 Commit the public deployment's configuration at `deploy/demo/config.json`
+      (D10). The rest of that deployment's own configuration — reverse proxy, TLS,
+      container definition — is a separate change and does not belong here
 - [ ] 6.2 Exercise that exact configuration in the suite as a second named
       configuration, so the deployment cannot drift from what CI proves (D10)
 
