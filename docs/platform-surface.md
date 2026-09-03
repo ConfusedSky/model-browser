@@ -58,6 +58,18 @@ contracts and placeholder rules: `openspec/changes/open-in-slicer/design.md` (L2
   drive letters and macOS `/Volumes/<name>` are re-assigned rather than fixed, so the same
   volume can come back under a different path there — unverified. Listings never show the
   marker directory.
+- **Secondary press**: every surface presenting an entry suppresses the platform's
+  context menu to raise the app's (entry-actions), and offers Shift+secondary-press
+  as the way through — recognised as Shift *plus the secondary button*
+  (`nativeMenuRequested`, `client/src/lib/gesture.ts`). Shift and not Ctrl because
+  Ctrl+click **is** the secondary press on macOS and arrives as `contextmenu` with
+  `ctrlKey`; by the same token Ctrl+Shift+click there carries `button: 0` and is not
+  the bypass — a two-finger tap or a second button is. Unverified on macOS, like the
+  rest of this file. Firefox implements the same gesture below the page (Shift held,
+  no `contextmenu` dispatched at all — `dom.event.contextmenu.shift_suppresses_event`);
+  Chrome dispatches it with `shiftKey` set and the app declines it. Keyboard raising
+  is unaffected either way: a keyboard-dispatched `contextmenu` carries `button: -1`
+  (Chrome 150) or `0`, never `2`.
 - **Content types**: the fixed extension→mime table (app-launch L6) is
   platform-neutral, but anything that would *consume* those mimes is registry-specific
   per the table above.

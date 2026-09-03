@@ -58,17 +58,44 @@ function mockRoutes(): void {
   })
 }
 
-/** The secondary press, as a browser delivers it: a pointerdown with button 2,
- *  then the contextmenu event. */
-async function secondaryPress(el: HTMLElement, x = 120, y = 140): Promise<void> {
+/**
+ * The secondary press, as a browser delivers it: a pointerdown with button 2,
+ * then the contextmenu event — which carries `button: 2` too (Chrome does;
+ * happy-dom would default it to 0, the keyboard's shape). Returns whether the
+ * app took the `contextmenu`: `dispatchEvent` is false exactly when something
+ * called `preventDefault`, which is what suppresses the platform's own menu.
+ */
+async function secondaryPress(
+  el: HTMLElement,
+  x = 120,
+  y = 140,
+  opts: { shift?: boolean } = {},
+): Promise<boolean> {
+  const shiftKey = opts.shift === true
+  let taken = false
   await act(async () => {
     el.dispatchEvent(
-      new PointerEvent('pointerdown', { bubbles: true, button: 2, buttons: 2, clientX: x, clientY: y }),
+      new PointerEvent('pointerdown', {
+        bubbles: true,
+        button: 2,
+        buttons: 2,
+        clientX: x,
+        clientY: y,
+        shiftKey,
+      }),
     )
-    el.dispatchEvent(
-      new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y }),
+    taken = !el.dispatchEvent(
+      new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        button: 2,
+        clientX: x,
+        clientY: y,
+        shiftKey,
+      }),
     )
   })
+  return taken
 }
 
 const menu = (): HTMLElement | null => document.querySelector<HTMLElement>('[role="menu"]')
@@ -94,6 +121,100 @@ beforeEach(async () => {
 })
 afterEach(async () => {
   await unmountApp()
+})
+
+// entry-actions, the requirement's one exception (native-context-menu-bypass):
+// a shifted secondary press is the browser's — not prevented, not raised.
+describe('the shifted secondary press', () => {
+  const overlay = (): Element | null => container.querySelector('.cursor-grab')
+  const lightbox = (): Element | null => document.querySelector('[role="dialog"]')
+
+  it('is left to the browser on a folder tile and on a model tile; unshifted still raises', async () => {
+    expect(await secondaryPress(tile('Alpha'), 120, 140, { shift: true })).toBe(false)
+    expect(menu()).toBeNull()
+
+    expect(await secondaryPress(tile('widget.stl'), 120, 140, { shift: true })).toBe(false)
+    expect(menu()).toBeNull()
+    // Press-side anchors for "disturbs nothing": decided by App's button
+    // check, not by the guard — they cannot fail under this cell's
+    // falsification and are here as regression anchors only.
+    expect(overlay()).toBeNull()
+    expect(lightbox()).toBeNull()
+
+    // The control: the same press without Shift is taken and raises.
+    expect(await secondaryPress(tile('Alpha'))).toBe(true)
+    expect(menu()).not.toBeNull()
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    })
+    expect(await secondaryPress(tile('widget.stl'))).toBe(true)
+    expect(menu()).not.toBeNull()
+  })
+
+  it('closes an open menu through its own contextmenu listener, and raises nothing in its place', async () => {
+    // The `contextmenu` alone, with no pointerdown before it: EntryMenu also
+    // closes on a capturing pointerdown, and a full press would close the
+    // menu before the contextmenu listener this cell is about ever ran.
+    await secondaryPress(tile('widget.stl'))
+    expect(menu()).not.toBeNull()
+
+    let taken = true
+    await act(async () => {
+      taken = !tile('Alpha').dispatchEvent(
+        new MouseEvent('contextmenu', {
+          bubbles: true,
+          cancelable: true,
+          button: 2,
+          shiftKey: true,
+          clientX: 40,
+          clientY: 40,
+        }),
+      )
+    })
+    expect(menu()).toBeNull()
+    expect(taken).toBe(false)
+  })
+
+  it('closes an open menu on the full shifted press, as the user makes it', async () => {
+    await secondaryPress(tile('widget.stl'))
+    expect(menu()).not.toBeNull()
+    expect(await secondaryPress(tile('Alpha'), 40, 40, { shift: true })).toBe(false)
+    expect(menu()).toBeNull()
+  })
+
+  it('is a pointer gesture only: the keyboard raises the app’s menu whatever Shift is doing', async () => {
+    const t = tile('widget.stl')
+    await act(async () => {
+      t.focus()
+      t.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true }))
+    })
+    expect(menu()).not.toBeNull()
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    })
+    expect(menu()).toBeNull()
+
+    // A `contextmenu` shaped as Chrome shapes a keyboard one — `button: -1`,
+    // at the element's centre, Shift held (Chrome 150, measured 2026-09-02).
+    // The predicate reads the button, so the app raises its menu here even
+    // though a shifted *press* would not; a `shiftKey`-only predicate fails
+    // this cell.
+    let taken = false
+    await act(async () => {
+      taken = !t.dispatchEvent(
+        new MouseEvent('contextmenu', {
+          bubbles: true,
+          cancelable: true,
+          button: -1,
+          shiftKey: true,
+          clientX: 60,
+          clientY: 40,
+        }),
+      )
+    })
+    expect(taken).toBe(true)
+    expect(menu()).not.toBeNull()
+  })
 })
 
 describe('raising the menu', () => {

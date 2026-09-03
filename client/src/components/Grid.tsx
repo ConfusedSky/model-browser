@@ -3,6 +3,7 @@ import { baseName } from '../../../shared/names'
 import type { DirEntry, IndexScore } from '../../../shared/types'
 import type { ThumbState } from '../hooks/useThumbnails'
 import { formatCosine, formatZ } from '../lib/format'
+import { nativeMenuRequested } from '../lib/gesture'
 import { SCALE_BADGE, SCALE_SPOKEN, Z_LABEL, type ScoreScale } from '../lib/scoreScale'
 import type { Band } from '../three/queue'
 
@@ -588,6 +589,7 @@ const Tile = memo(function Tile({
         className={base + markClass + anchorClass}
         onClick={() => onEnter(entry)}
         onContextMenu={(e) => {
+          if (nativeMenuRequested(e)) return
           e.preventDefault()
           onEntryMenu(entry, e.currentTarget, menuAt(e.currentTarget, e))
         }}
@@ -680,7 +682,11 @@ const Tile = memo(function Tile({
       onPointerDown={(e) => onModelPointerDown(e, entry, e.currentTarget)}
       // The press that raises a menu never orbits: App's `onModelPointerDown`
       // returns on `e.button !== 0` before any overlay is set.
+      // A shifted secondary press is the requirement's one exception — not
+      // prevented, not raised, so the browser's own menu appears. The missing
+      // `preventDefault` on that path is the feature.
       onContextMenu={(e) => {
+        if (nativeMenuRequested(e)) return
         e.preventDefault()
         onEntryMenu(entry, e.currentTarget, menuAt(e.currentTarget, e))
       }}

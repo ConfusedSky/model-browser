@@ -35,7 +35,7 @@ import {
 import { formatBytes, formatCosine, formatDate, formatZ } from '../lib/format'
 import { expandLibraryPath } from '../lib/libraryPath'
 import { SCALE_BADGE, Z_LABEL, type ScoreScale } from '../lib/scoreScale'
-import { GestureTracker } from '../lib/gesture'
+import { GestureTracker, nativeMenuRequested } from '../lib/gesture'
 import type { MeshLru } from '../three/lru'
 import { DEFAULT_CAMERA } from '../three/camera'
 import { cameraForPose } from '../three/pose'
@@ -502,6 +502,47 @@ export default function ViewerLayer({
     s.render(width, height)
   }
 
+  /**
+   * The end of the primary gesture, at the point given: a press without drag
+   * promotes (when asked to), a drag settles and persists. Two callers — the
+   * primary's own release, and `raiseEntryMenu` declining a shifted secondary
+   * press mid-gesture, which ends the orbit here because the browser's menu
+   * takes the primary's release and `onUp` would never run.
+   */
+  function endGesture(at: { clientX: number; clientY: number }, promote: boolean): void {
+    if (!pointer.current.down) return
+    pointer.current.down = false
+    if (!tracker.isDrag) {
+      if (promote && modeRef.current === 'orbit') onPromote()
+      return
+    }
+    const s = sessionRef.current
+    // Level the horizon and rebase the rest state, then persist that view.
+    // The chain is kept so post-drag dismissals can await it (D1).
+    if (s !== null) {
+      const p = s
+        .settle(renderNow)
+        .then(() => onPersist(s, { camera: true }))
+        .finally(() => {
+          if (pendingPersistRef.current === p) pendingPersistRef.current = null
+        })
+      pendingPersistRef.current = p
+    }
+    // A drag released outside the tile gets no later pointerleave — the
+    // overlay would be stuck. Dismiss (persistence-aware) if the release
+    // landed outside.
+    if (modeRef.current === 'orbit') {
+      const rect = containerRef.current?.getBoundingClientRect()
+      const inside =
+        rect !== undefined &&
+        at.clientX >= rect.left &&
+        at.clientX <= rect.right &&
+        at.clientY >= rect.top &&
+        at.clientY <= rect.bottom
+      if (!inside) void dismissAfterPersist()
+    }
+  }
+
   // Global gesture handling: the press that opened the overlay is already in
   // progress, so listeners live on window — and must attach synchronously
   // (before paint), or a fast click's pointerup arrives before they exist.
@@ -525,37 +566,13 @@ export default function ViewerLayer({
       }
     }
     function onUp(e: PointerEvent): void {
-      if (!pointer.current.down) return
-      pointer.current.down = false
-      if (!tracker.isDrag) {
-        if (modeRef.current === 'orbit') onPromote()
-        return
-      }
-      const s = sessionRef.current
-      // Level the horizon and rebase the rest state, then persist that view.
-      // The chain is kept so post-drag dismissals can await it (D1).
-      if (s !== null) {
-        const p = s
-          .settle(renderNow)
-          .then(() => onPersist(s, { camera: true }))
-          .finally(() => {
-            if (pendingPersistRef.current === p) pendingPersistRef.current = null
-          })
-        pendingPersistRef.current = p
-      }
-      // A drag released outside the tile gets no later pointerleave — the
-      // overlay would be stuck. Dismiss (persistence-aware) if the release
-      // landed outside.
-      if (modeRef.current === 'orbit') {
-        const rect = containerRef.current?.getBoundingClientRect()
-        const inside =
-          rect !== undefined &&
-          e.clientX >= rect.left &&
-          e.clientX <= rect.right &&
-          e.clientY >= rect.top &&
-          e.clientY <= rect.bottom
-        if (!inside) void dismissAfterPersist()
-      }
+      // The primary's release only. The gesture is the primary button's
+      // (startGesture), and the overlay mounts with it already down — so
+      // without this the *secondary* button's release mid-hold ended the
+      // gesture as if the primary had let go, and a right-click without a
+      // drag opened the lightbox under the menu it had just raised.
+      if (e.button !== 0) return
+      endGesture(e, true)
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
@@ -673,10 +690,20 @@ export default function ViewerLayer({
 
   /**
    * The secondary press on either viewer surface: the app's own entry menu,
-   * never the browser's. Nothing collides — there is no right-button gesture
-   * here to preserve.
+   * never the browser's — except the shifted press, which is the browser's by
+   * the requirement's one exception (entry-actions). Nothing else collides:
+   * there is no right-button gesture here to preserve.
+   *
+   * Declining mid-orbit ends the orbit first, as a release at this point
+   * would, but never promotes: the browser's menu is about to take the pointer,
+   * so the primary's release will not reach `onUp`, and an orbit left running
+   * would follow the mouse with no button held and refuse every dismissal.
    */
   function raiseEntryMenu(e: React.MouseEvent): void {
+    if (nativeMenuRequested(e)) {
+      endGesture(e, false)
+      return
+    }
     e.preventDefault()
     onEntryMenu(viewer.entry, containerRef.current, { x: e.clientX, y: e.clientY }, liveFramingView)
   }

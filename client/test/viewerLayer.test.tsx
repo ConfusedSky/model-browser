@@ -155,7 +155,9 @@ describe('ViewerLayer missing-model error', () => {
     props.tracker.start(50, 50) // the press that opened the overlay
     await render(props)
     await act(async () => {
-      window.dispatchEvent(new Event('pointerup')) // release without drag
+      // The primary's release, as a browser sends it — the release path reads
+      // the button, and a bare Event has none.
+      window.dispatchEvent(new PointerEvent('pointerup', { button: 0 })) // release without drag
     })
     expect(props.onPromote).toHaveBeenCalled()
     expect(props.onPersist).not.toHaveBeenCalled()

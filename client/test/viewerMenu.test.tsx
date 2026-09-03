@@ -31,6 +31,8 @@ import {
   wait,
 } from './appHarness'
 
+import { ViewerSession } from '../src/viewer/session'
+
 vi.mock('../src/api/client', async () => (await import('./appHarness')).apiClientModule())
 vi.mock('../src/three/renderer', async (importOriginal) =>
   (await import('./appHarness')).rendererModule(importOriginal),
@@ -83,11 +85,21 @@ const modelTile = (): HTMLElement =>
   tiles().find((t) => (t.getAttribute('title') ?? '') === 'widget.stl')!
 
 /**
- * The secondary press as a browser delivers it, returning whether the app took
- * the `contextmenu` event — `dispatchEvent` is false exactly when something
- * called `preventDefault`, which is what suppresses the platform's own menu.
+ * The secondary press as a browser delivers it — press, `contextmenu`, release,
+ * all carrying the secondary button (Chrome sends `button: 2` on the
+ * `contextmenu` too; happy-dom would default it to 0, which is the keyboard's
+ * shape) — returning whether the app took the `contextmenu` event.
+ * `dispatchEvent` is false exactly when something called `preventDefault`,
+ * which is what suppresses the platform's own menu. The release goes to
+ * window as the primary's does, so the viewer's release path sees it.
  */
-async function secondaryPress(el: HTMLElement, x = 120, y = 140): Promise<boolean> {
+async function secondaryPress(
+  el: HTMLElement,
+  x = 120,
+  y = 140,
+  opts: { shift?: boolean } = {},
+): Promise<boolean> {
+  const shiftKey = opts.shift === true
   let taken = false
   await act(async () => {
     el.dispatchEvent(
@@ -97,10 +109,21 @@ async function secondaryPress(el: HTMLElement, x = 120, y = 140): Promise<boolea
         buttons: 2,
         clientX: x,
         clientY: y,
+        shiftKey,
       }),
     )
     taken = !el.dispatchEvent(
-      new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y }),
+      new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        button: 2,
+        clientX: x,
+        clientY: y,
+        shiftKey,
+      }),
+    )
+    window.dispatchEvent(
+      new PointerEvent('pointerup', { bubbles: true, button: 2, clientX: x, clientY: y, shiftKey }),
     )
   })
   return taken
@@ -342,5 +365,89 @@ describe('the menu on a viewer surface', () => {
     expect(similar).toHaveBeenCalled()
     expect(window.location.search).toContain('similar=%2Fmodels%2Fwidget.stl')
     expect(tiles().map((t) => t.getAttribute('title'))).toContain('Alpha/near.stl')
+  })
+})
+
+// entry-actions, the requirement's one exception (native-context-menu-bypass):
+// a shifted secondary press is the browser's. On these surfaces that means the
+// page menu — Inspect, extension items — over a canvas that offers no image
+// items of its own.
+describe('the shifted secondary press on a viewer surface', () => {
+  const move = (x: number, y: number): void => {
+    window.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: x, clientY: y }))
+  }
+  const primaryRelease = (): Promise<void> =>
+    act(async () => {
+      window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, clientX: 50, clientY: 50 }))
+    })
+
+  it('is left to the browser on the lightbox, which stays open', async () => {
+    await openLightbox()
+    const taken = await secondaryPress(dialog()!, 120, 140, { shift: true })
+    expect(taken).toBe(false) // not prevented: the platform's menu appears
+    expect(menu()).toBeNull()
+    expect(dialog()).not.toBeNull()
+  })
+
+  it('mid-hold, ends the gesture without promoting — the primary’s lost release opens nothing', async () => {
+    // The browser's menu takes the pointer, so the primary's release never
+    // reaches the page. The press must end the gesture itself, or a release
+    // that *does* arrive later would promote a press nobody is still making.
+    await startOrbit()
+    const taken = await secondaryPress(overlay()!, 60, 60, { shift: true })
+    expect(taken).toBe(false)
+    expect(menu()).toBeNull()
+    expect(dialog()).toBeNull() // ended, not promoted (D6)
+
+    await primaryRelease()
+    await wait(150)
+    expect(dialog()).toBeNull() // the gesture was already over
+  })
+
+  it('mid-drag, ends the orbit — the mouse no longer steers a model nobody is holding', async () => {
+    const orbit = vi.spyOn(ViewerSession.prototype, 'orbit')
+    try {
+      await startOrbit()
+      await act(async () => {
+        move(120, 50) // beyond the drag threshold
+        move(160, 60)
+      })
+      // The control: a session exists and is steering, or the assertion
+      // below would pass for the wrong reason.
+      expect(orbit).toHaveBeenCalled()
+      const steered = orbit.mock.calls.length
+
+      const taken = await secondaryPress(overlay()!, 160, 60, { shift: true })
+      expect(taken).toBe(false)
+      expect(menu()).toBeNull()
+
+      await act(async () => {
+        move(200, 80)
+        move(240, 90)
+      })
+      expect(orbit.mock.calls.length).toBe(steered) // nothing follows the mouse
+      expect(dialog()).toBeNull()
+    } finally {
+      orbit.mockRestore()
+    }
+  })
+
+  it('an unshifted secondary press mid-hold raises the menu, and its release ends nothing', async () => {
+    // The release side of "raising the menu disturbs nothing": the secondary
+    // button's release is not the primary's. Before the guard, `onUp` took any
+    // release as the end of the gesture, and a right-click without a drag
+    // opened the lightbox under the menu it had just raised.
+    await startOrbit()
+    const taken = await secondaryPress(overlay()!, 60, 60)
+    expect(taken).toBe(true)
+    expect(menu()).not.toBeNull()
+    expect(dialog()).toBeNull() // the secondary release promoted nothing
+    expect(overlay()).not.toBeNull()
+
+    await escape()
+    // The primary's own release still ends the gesture as it always did.
+    await primaryRelease()
+    await wait(150)
+    expect(dialog()).not.toBeNull()
   })
 })
