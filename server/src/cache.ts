@@ -3,6 +3,7 @@ import { mkdir, readFile, readdir, realpath, rename, rm, stat, utimes, writeFile
 import { homedir } from 'node:os'
 import { dirname, join, sep } from 'node:path'
 import { CAMERA_EPSILON, type CameraState, type LightingMode, type OrbitAxis, type ThumbGetResponse, type ThumbInfo, type ThumbRenderInfo, type ThumbStatus } from '../../shared/types'
+import { envPositiveInt } from './env'
 import { type Library, LibraryError } from './library'
 import { VPathError, joinVPath, parseVPath } from './vpath'
 
@@ -246,17 +247,19 @@ const DEFAULT_CAP = 2 * 1024 ** 3
 const MAINTAIN_EVERY = 32
 
 /**
- * The size cap from the environment — parsed, never coerced, on `envLimit`'s
- * rule (`listing.ts`): a non-finite or non-positive value falls back to the
+ * The size cap from the environment — `env.ts`'s one parser, which owns the
+ * rule: a non-finite, fractional or non-positive value falls back to the
  * default. `Number('2GB')` is NaN, `total <= NaN` is false, and a NaN cap
  * therefore evicted every PNG in the cache on every sweep — a malformed knob
  * doing the opposite of what it spells.
+ *
+ * This copy is why `env.ts` exists at all: it floored *after* the positivity
+ * test, so `MODEL_BROWSER_CACHE_CAP=0.5` gave a cap of 0 and swept the whole
+ * pixel store on every write — the same bug the other two copies had, fixed in
+ * them and missed here (`listing-tree-cache` round-2 finding 9).
  */
 function envCap(): number {
-  const raw = process.env.MODEL_BROWSER_CACHE_CAP
-  if (raw === undefined || raw.trim() === '') return DEFAULT_CAP
-  const n = Number(raw)
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_CAP
+  return envPositiveInt('MODEL_BROWSER_CACHE_CAP', DEFAULT_CAP)
 }
 
 /**

@@ -78,6 +78,14 @@ const pastDelay = () => wait(SKELETON_DELAY_MS + 50)
 function refreshing(): Element | null {
   return container.querySelector('[aria-live="polite"]')
 }
+/**
+ * The header's transient line, when it is in the failure tone. Selected on the
+ * tone rather than on the element, because the same `<p>` carries a command's
+ * confirmation — "no banner" has to mean "no *error*", not "no line".
+ */
+function headerError(): string | null {
+  return container.querySelector('header p.text-red-400')?.textContent ?? null
+}
 /** Each tile's visible label, in grid order. */
 function labelled(): string[] {
   return tiles().map((t) => t.textContent ?? '')
@@ -164,6 +172,50 @@ describe('a stale-marked listing', () => {
     // Still the cached answer, because the client stopped asking rather than
     // grinding until the server happened to agree.
     expect(labelled()).toEqual(['b'])
+  })
+
+  it('a follow-up that fails says nothing at all — no banner over a good grid', async () => {
+    await mountApp('/models', HOME)
+    await settle()
+    let calls = 0
+    listDir.mockImplementation(() => {
+      calls++
+      return calls === 1
+        ? Promise.resolve(STALE_A)
+        : Promise.reject(new Error('Failed to fetch'))
+    })
+
+    await click(tiles()[0]!)
+    await settle()
+    await settle() // room for a retry to show itself
+
+    expect(calls).toBe(2)
+    // The request that failed asked for nothing the user asked for. The listing
+    // it was going to correct is on screen, complete and rendered, and the only
+    // thing lost is a correction nobody knew was coming — so reporting it as
+    // the navigation having failed is a lie about which request broke, painted
+    // over entries that failure never touched.
+    expect(headerError()).toBeNull()
+    expect(labelled()).toEqual(['b'])
+    // Still truthful, and for the reason the line says: it was *not* refreshed.
+    expect(refreshing()?.textContent).toBe('Refreshing…')
+    // And not retried — the once-guard is the effect's dependency, and no
+    // answer landed to change it.
+    expect(skeleton()).toBeNull()
+  })
+
+  it('but an ordinary request that fails still says so', async () => {
+    // The control, without which the cell above would pass on a reducer that
+    // had simply stopped reporting failures. Same rejection, same navigation —
+    // the only difference is that this one is what the user asked for.
+    await mountApp('/models', HOME)
+    await settle()
+    listDir.mockImplementation(() => Promise.reject(new Error('Failed to fetch')))
+
+    await click(tiles()[0]!)
+    await settle()
+
+    expect(headerError()).toBe('Failed to fetch')
   })
 
   it('an unmarked listing shows no line and asks nothing further', async () => {

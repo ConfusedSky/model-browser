@@ -41,6 +41,41 @@ import type { DirEntry, IndexPose } from '../../shared/types'
 export const LAYER_VERSION = 1
 
 /**
+ * How long a recorded pose is emitted on listings before the layer stops
+ * answering with it and drops it (round-2 finding 6).
+ *
+ * **The convergence bound, and why the layer needs one at all.** Before this
+ * change the client's per-listing wave asked the index about every model on
+ * screen, and a pose the index had corrected — a re-classification, a
+ * re-embedding — reached the user on the next navigation. The annotation
+ * inverts that: an entry the layer can answer is *filtered out of the wave*, so
+ * a pose recorded once is served on every later listing and the wave never asks
+ * about that model again. Nothing else drops it. `LAYER_VERSION` moves only when
+ * the derivation's meaning changes; the collection-root check catches a
+ * repoint, not a rebuild in place; and the process may run for weeks. The
+ * annotation would have converted "stale until the next navigation" into "stale
+ * until restart", which is a worse guarantee than the one it replaced.
+ *
+ * So an entry ages out, the wave re-asks, and `recordPoses` re-learns — the
+ * pre-change one-navigation convergence restored at a five-minute horizon.
+ *
+ * Five minutes, not less and not more, and both directions matter. Much shorter
+ * (10 s, say) would gut the annotation's purpose: a user browsing a grid would
+ * re-ask for everything on screen every few folders, which is the round trip
+ * §6.4 exists to delete. Much longer and the horizon stops being a convergence
+ * bound in any useful sense. Five minutes is longer than a browsing burst over
+ * one kit and far shorter than a session, so the common case pays nothing and a
+ * corrected pose still lands without a restart.
+ */
+export const POSE_ANNOTATION_TTL_MS = 5 * 60_000
+
+/** A recorded pose, against the moment this process learned it. */
+interface HeldPose {
+  pose: IndexPose
+  recordedAt: number
+}
+
+/**
  * Preview choices are per (directory, cell count): a sheet of 4 is not a sheet
  * of 8, and a folder asked about at both must not answer one from the other.
  *
@@ -95,6 +130,18 @@ function selfAndAncestors(dirPath: string): string[] {
   return out
 }
 
+/**
+ * Is `dirPath` at or beneath `root`? Segment-wise, so `/kit` never covers
+ * `/kit2` — `listing.ts`'s `encloses`, with the archive separator added because
+ * a walked root can itself be an archive and everything inside one is addressed
+ * `…zip!/…` rather than `…zip/…`.
+ */
+function under(root: string, dirPath: string): boolean {
+  if (dirPath === root) return true
+  if (root === '/') return dirPath.startsWith('/')
+  return dirPath.startsWith(`${root}/`) || dirPath.startsWith(`${root}!/`)
+}
+
 /** A listing entry, copied — the layer never hands out an object it still holds. */
 function copyEntry(e: DirEntry): DirEntry {
   const out: DirEntry = { name: e.name, path: e.path, kind: e.kind, size: e.size, mtime: e.mtime }
@@ -110,7 +157,7 @@ function copyEntry(e: DirEntry): DirEntry {
  * — is discovered by the revalidation pass that class owns.
  */
 export class DerivedLayers {
-  private readonly poses = new Map<string, IndexPose>()
+  private readonly poses = new Map<string, HeldPose>()
   private readonly previews = new Map<string, DirEntry[]>()
   /**
    * The index's collection root these entries were derived against, once
@@ -131,7 +178,16 @@ export class DerivedLayers {
    * reader of entries derived elsewhere — says "these are of another meaning",
    * and the layer then records nothing and answers nothing.
    */
-  constructor(version: number = LAYER_VERSION) {
+  constructor(
+    version: number = LAYER_VERSION,
+    /**
+     * The clock `POSE_ANNOTATION_TTL_MS` is measured on. A seam, not a knob, on
+     * `ListingCache`'s reasoning exactly: the horizon is only observable by
+     * letting five minutes pass, and a suite that slept that per cell would be
+     * paying the constant rather than testing it. Production passes nothing.
+     */
+    private readonly now: () => number = Date.now,
+  ) {
     this.live = version === LAYER_VERSION
   }
 
@@ -160,11 +216,18 @@ export class DerivedLayers {
   recordPoses(collectionRoot: string | undefined, poses: Record<string, IndexPose>): void {
     if (!this.live) return
     this.reroot(collectionRoot)
-    for (const [path, pose] of Object.entries(poses)) this.poses.set(path, pose)
+    // Re-recording an entry the index has just answered about restamps it, so a
+    // model the wave keeps asking about never ages out mid-conversation; the
+    // horizon is measured from the last time the index confirmed the fact, not
+    // from the first.
+    const recordedAt = this.now()
+    for (const [path, pose] of Object.entries(poses)) this.poses.set(path, { pose, recordedAt })
   }
 
   /**
-   * The pose held for a model, or undefined. A Map get: no I/O, no waiting.
+   * The pose held for a model, or undefined — undefined also once the entry is
+   * older than `POSE_ANNOTATION_TTL_MS`, which is where the annotation's
+   * convergence bound is actually applied. A Map get: no I/O, no waiting.
    *
    * Handed out **by reference**, unlike a preview choice, and that is a
    * deliberate difference rather than an oversight. A pose is a small record
@@ -176,7 +239,19 @@ export class DerivedLayers {
    * does exist — so that one is copied on the way in and on the way out.
    */
   poseFor(path: string): IndexPose | undefined {
-    return this.live ? this.poses.get(path) : undefined
+    if (!this.live) return undefined
+    const held = this.poses.get(path)
+    if (held === undefined) return undefined
+    // Aged out: not emitted, and dropped on the way past, so the map does not
+    // keep an entry nothing will ever answer with again. Dropping on read
+    // rather than sweeping is what keeps this a Map get with no timer behind it
+    // — the whole annotation is "three Map gets and no I/O", and a sweep would
+    // be a fourth thing happening on the listing path.
+    if (this.now() - held.recordedAt >= POSE_ANNOTATION_TTL_MS) {
+      this.poses.delete(path)
+      return undefined
+    }
+    return held.pose
   }
 
   /** Record the sheet a peek just derived for a directory. Copies in. */
@@ -211,6 +286,35 @@ export class DerivedLayers {
     const covered = new Set(selfAndAncestors(dirPath))
     for (const key of [...this.previews.keys()]) {
       if (covered.has(keyDir(key))) this.previews.delete(key)
+    }
+  }
+
+  /**
+   * A whole tree was contradicted: drop every preview choice derived from
+   * inside it — the root's own and every directory beneath it (round-2 finding
+   * 8, and the invalidate branch of `ListingCache.run` is the only caller).
+   *
+   * `noteDirChanged` walks *upward* because a change deep in the tree
+   * invalidates its ancestors' sheets; this walks *downward*, because what has
+   * been contradicted is the subtree itself. The two are not the same question
+   * and neither answers the other: an invalidate has no list of changed
+   * directories to feed the first with.
+   *
+   * Ancestors of the root are deliberately kept. Their sheets are derived from
+   * subtrees that include this one, so they are suspect — but an invalidate is
+   * not evidence that anything *changed*, only that the pass could not finish,
+   * and the next pass over those roots re-derives them through `noteDirChanged`
+   * if it did. Dropping every ancestor here would clear the library root's sheet
+   * whenever any kit anywhere failed to revalidate.
+   *
+   * Poses are untouched: a pose is a fact about a model's geometry, and a tree
+   * that could not be re-read says nothing about the models in it.
+   */
+  dropPreviewsUnder(root: string): void {
+    if (!this.live) return
+    if (this.previews.size === 0) return
+    for (const key of [...this.previews.keys()]) {
+      if (under(root, keyDir(key))) this.previews.delete(key)
     }
   }
 

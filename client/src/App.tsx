@@ -1267,6 +1267,14 @@ export default function App() {
    * about `staleId` changed, so this does not re-run. Silence is the right
    * outcome — the listing on screen is the one the user asked for, and it is
    * the server's own marker saying it may be behind.
+   *
+   * **Silence including the header error**, which this comment used to promise
+   * and the reducer did not deliver (round-2 finding 2): a rejected follow-up
+   * reached the ordinary `failure` action and painted a banner over a perfectly
+   * good grid, reporting the app's own background housekeeping as the user's
+   * navigation having failed. The `failure` case now checks `inflight.followUp`
+   * and clears the request without setting one; 'Refreshing…' stays, because it
+   * was indeed not refreshed.
    */
   const staleId =
     state.result !== null && state.result.stale && state.result.followUp !== true

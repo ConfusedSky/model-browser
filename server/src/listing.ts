@@ -3,6 +3,7 @@ import { access, readdir, realpath, stat } from 'node:fs/promises'
 import { join, posix, sep } from 'node:path'
 import { baseName } from '../../shared/names'
 import type { DirEntry, DirListing } from '../../shared/types'
+import { envPositiveInt } from './env'
 import { MARKER_DIR, type Library } from './library'
 import type { SnapshotEntry, SnapshotStore, TreeSnapshot } from './snapshot'
 import { joinVPath, parseVPath, VPathError } from './vpath'
@@ -274,14 +275,31 @@ async function levelFor(
     // walked root whose `r` bit was dropped while `x` stayed.
     //
     // Present-but-unreadable is D6's case, so this is a contradiction rather
-    // than a folder to skip. Costs one `access` per *reused* directory — the
-    // pass already pays one `stat` there, so it stays proportional to the
-    // tree's shape (2,318 directories here) and not to its entries.
-    const reachable = await access(fsDir, fsConstants.R_OK | fsConstants.X_OK).then(
-      () => true,
-      () => false,
-    )
-    if (!reachable) throw new RevalidationError(`cannot read directory: ${libPath}`)
+    // than a folder to skip. Costs one `access` per *reused non-empty*
+    // directory — the pass already pays one `stat` there, so it stays
+    // proportional to the tree's shape (2,318 directories here) and not to its
+    // entries.
+    //
+    // **Only when the recorded level is non-empty** (round-2 finding 5). The
+    // probe must be no stricter than the walk it stands in for, and the walk is
+    // *lenient* about an unreadable directory: `walkFsLevel` catches
+    // `listFsDir`'s failure and skips the folder, contributing nothing. So a
+    // directory the snapshot recorded as empty contributes nothing either way —
+    // the reused level and a real re-read agree exactly — and calling that a
+    // contradiction invalidates a snapshot the filesystem has not disagreed
+    // with. Worse, it does not converge: the invalidate forces a full walk, the
+    // walk records the still-unreadable folder as empty again, and the next
+    // pass invalidates again, so a single `chmod 644` on one empty folder turns
+    // every cadence into the ~32 s cold walk this change exists to remove. A
+    // recorded *non-empty* level is the real contradiction: the snapshot says
+    // these entries were there and the pass can no longer confirm any of them.
+    if (held.children.length > 0) {
+      const reachable = await access(fsDir, fsConstants.R_OK | fsConstants.X_OK).then(
+        () => true,
+        () => false,
+      )
+      if (!reachable) throw new RevalidationError(`cannot read directory: ${libPath}`)
+    }
     walk.dirMtimes.set(libPath, s.mtimeMs)
     return reusedLevel(held, fsDir)
   }
@@ -773,21 +791,23 @@ async function walkZip(
 }
 
 /**
- * Positive-integer knob from the environment. A missing, malformed, or
- * non-positive value falls back: `Number('20k')` is NaN, and a NaN limit
- * silently disables every comparison that bounds the walk.
+ * Positive-integer knob from the environment: `env.ts`'s one parser, which
+ * carries the rule this file used to state for itself (floor **before** the
+ * positivity test, never silently unbounded) and the history that argued for
+ * having exactly one copy of it.
  *
- * The floor is applied **before** the positivity test, not after (review
- * finding 10): `0.5` is finite and greater than zero, and flooring it
- * afterwards yields a budget of 0 — every walk instantly exhausted, every
- * listing empty and truncated. A fractional knob is malformed, and malformed
- * falls back.
+ * Kept as a named local rather than calling `envPositiveInt` at each of the six
+ * sites, for two reasons. Every one of those sites reads as a *limit* — the
+ * budgets and the caps — and that is the word the surrounding prose uses. And
+ * `flat.test.ts`'s "the walk collects without consulting the query" guard slices
+ * this source between `async function walkFsLevel` and the text `function
+ * envLimit`, so this declaration is a landmark something depends on: if it is
+ * ever renamed or inlined, move that delimiter with it rather than letting the
+ * slice run to the end of the file, where it matches the query predicates and
+ * fails for a reason that has nothing to do with the walk.
  */
 function envLimit(name: string, fallback: number): number {
-  const raw = process.env[name]
-  if (raw === undefined || raw.trim() === '') return fallback
-  const n = Math.floor(Number(raw))
-  return Number.isFinite(n) && n > 0 ? n : fallback
+  return envPositiveInt(name, fallback)
 }
 
 /**
@@ -1078,8 +1098,24 @@ export async function enumerateModels(
   library: Library,
   libPath: string,
   store?: SnapshotStore,
+  /**
+   * Called with the snapshot root that is about to answer this enumeration —
+   * `libPath` itself, or the nearest enclosing one — before anything is read
+   * out of it (round-2 finding 4b). `ListingCache.enumerate` passes the
+   * validation lifecycle here; a caller with no cache passes nothing and gets
+   * the pre-change behaviour.
+   *
+   * It may invalidate the snapshot it was told about, and this function is
+   * written so that it may: everything below re-loads from the store
+   * afterwards, so a root the callback dropped falls through to the walk.
+   */
+  validate?: (root: string) => Promise<unknown>,
 ): Promise<{ models: DirEntry[]; complete: boolean; fromSnapshot: boolean }> {
   if (store !== undefined) {
+    if (validate !== undefined) {
+      const covering = await coveringRoot(store, libPath)
+      if (covering !== null) await validate(covering)
+    }
     const exact = await store.load(libPath)
     if (exact !== null) {
       return { models: modelsUnder(partition(exact.entries).models, libPath), complete: true, fromSnapshot: true }
@@ -1089,6 +1125,22 @@ export async function enumerateModels(
     const roots = (await store.roots())
       .filter((root) => encloses(root, libPath))
       .sort((a, b) => b.length - a.length)
+    // **The requested path is resolved before an ancestor's tree answers for
+    // it** (round-2 finding 4a). A path that is merely *spelled* under a cached
+    // root has never been resolved by anything: no walk created a snapshot for
+    // it, and filtering an ancestor's entries by a prefix nothing matches
+    // yields an empty set, which this used to answer 200 `{entries: [], complete:
+    // true}` — "that folder holds no models" about a folder that does not
+    // exist. The uncached branch 404s it through `gatherFlat`'s own up-front
+    // stat, and the route's docstring promises "the same distinctions for the
+    // same reasons"; this is that stat, paid once, only where an ancestor is
+    // about to answer.
+    //
+    // Not needed on the exact branch above: a snapshot keyed at `libPath` was
+    // written by a walk that resolved it, and a root that has since been deleted
+    // is what the validation pass invalidates (round-2 finding 1) — after which
+    // this falls through to the walk and 404s there.
+    if (roots.length > 0) await requireEnumerable(library, libPath)
     for (const root of roots) {
       const snapshot = await store.load(root)
       if (snapshot === null) continue
@@ -1106,12 +1158,28 @@ export async function enumerateModels(
   )
   const complete = !g.budgetExhausted
   if (store !== undefined && complete) {
-    await store.save({
-      root: libPath,
-      walkedAt: Date.now(),
-      entries: snapshotEntries(g),
-      dirs: dirRecords(g.dirMtimes),
-    })
+    // **Best-effort, exactly as `walkFlat`'s request-path save is** (round-2
+    // finding 3; the sibling was corrected in round 1 and this copy was
+    // missed). This walk has already produced the enumeration the caller asked
+    // for; the save is an optimisation for the *next* request. A full disk, a
+    // read-only cache directory or a permission change would otherwise turn a
+    // perfectly good answer into a 500 — and into one carrying an errno and the
+    // cache's filesystem path in its body, which is a probe of the machine
+    // besides. The cost of swallowing it is one uncached walk, paid again next
+    // time.
+    //
+    // `revalidateTree`'s save still rejects, and deliberately: the pass's
+    // failure taxonomy distinguishes "the store could not be written" from "the
+    // filesystem contradicted the cache", and it can only do that if the first
+    // one reaches it. This is a request, not a pass.
+    await store
+      .save({
+        root: libPath,
+        walkedAt: Date.now(),
+        entries: snapshotEntries(g),
+        dirs: dirRecords(g.dirMtimes),
+      })
+      .catch(() => undefined)
   }
   // Through the same filter as the two cached paths, though a fresh walk's
   // models are all under the root already and already named that way: one rule,
@@ -1123,6 +1191,42 @@ export async function enumerateModels(
 /** Is `root` at or above `libPath`? Segment-wise, so `/kit` never encloses `/kit2`. */
 function encloses(root: string, libPath: string): boolean {
   return root === libPath || libPath.startsWith(root === '/' ? '/' : `${root}/`)
+}
+
+/**
+ * The snapshot root that would answer an enumeration of `libPath` — the exact
+ * one where there is one, else the nearest enclosing, else null.
+ *
+ * `roots()` is the census of usable snapshots, so an exact root is simply the
+ * longest of the enclosing ones. Deliberately does not `load` anything: it is
+ * asked before the answer is read, to name the root whose freshness the caller
+ * wants settled first.
+ */
+async function coveringRoot(store: SnapshotStore, libPath: string): Promise<string | null> {
+  const covering = (await store.roots())
+    .filter((root) => encloses(root, libPath))
+    .sort((a, b) => b.length - a.length)
+  return covering[0] ?? null
+}
+
+/**
+ * `gatherFlat`'s own up-front checks on a path, and nothing else: does it
+ * exist, and is it a thing that has an inside? Extracted so the cached
+ * enumeration branch refuses exactly what a walk of the same path would refuse,
+ * with the same status and the same sentence — the alternative is two answers to
+ * one question, differing by whether an ancestor happened to be cached.
+ */
+async function requireEnumerable(library: Library, libPath: string): Promise<void> {
+  const { fsPath, entry } = await library.resolve(libPath)
+  // Inside an archive: the archive itself is what must be one, which is the
+  // same test `gatherFlat` makes on that branch. A prefix naming no entry is
+  // not a refusal there either — an empty archive directory is an empty answer.
+  if (entry !== undefined) return await requireArchive(fsPath, libPath)
+  const s = await stat(fsPath).catch(() => null)
+  if (s === null) throw new ListingError(404, `no such path: ${libPath}`)
+  if (!s.isDirectory() && !/\.zip$/i.test(fsPath)) {
+    throw new ListingError(400, `not a directory or zip: ${libPath}`)
+  }
 }
 
 /**

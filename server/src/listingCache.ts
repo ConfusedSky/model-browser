@@ -33,10 +33,10 @@
  * gets what it got before.
  */
 
-import type { DirListing } from '../../shared/types'
+import type { DirEntry, DirListing } from '../../shared/types'
 import { DerivedLayers } from './layers'
 import type { Library } from './library'
-import { RevalidationError, revalidateTree, walkFlat } from './listing'
+import { ListingError, RevalidationError, enumerateModels, revalidateTree, walkFlat } from './listing'
 import type { SnapshotStore } from './snapshot'
 
 /**
@@ -133,6 +133,37 @@ export class ListingCache {
   }
 
   /**
+   * Every model beneath a library path (§6.7), through the same validation
+   * lifecycle a listing gets — with the one deliberate difference that this one
+   * **waits** (round-2 finding 4b).
+   *
+   * `list` answers a stale snapshot at once and starts the pass behind it,
+   * because a grid the user is looking at is worth more now than in five
+   * seconds and the marker plus the client's follow-up close the gap. An
+   * enumeration has no such reader: it is the scope a bulk job derives its work
+   * list from, so serving it from an unchecked tree means rendering thumbnails
+   * for models that are gone and missing ones that arrived — silently, with the
+   * job reporting success. There is also no marker on the wire to say so, and
+   * adding one would be a shape the caller has nothing to do with. Correct over
+   * instant, and the cost is bounded by the pass itself: one `stat` per
+   * directory, and only when the covering root's stamp is missing or older than
+   * `REVALIDATE_TTL_MS`.
+   *
+   * The wire is unchanged either way — the same `{models, complete}` — so a
+   * caller cannot tell a validated answer from a validated-a-moment-ago one,
+   * which is the point.
+   */
+  async enumerate(
+    library: Library,
+    libPath: string,
+  ): Promise<{ models: DirEntry[]; complete: boolean; fromSnapshot: boolean }> {
+    return await enumerateModels(library, libPath, this.store, async (root) => {
+      if (this.isValidated(root)) return
+      await this.revalidate(library, root)
+    })
+  }
+
+  /**
    * Run the incremental pass for a root now, joining one already in flight, and
    * report whether the tree had moved.
    *
@@ -146,6 +177,36 @@ export class ListingCache {
   async revalidate(library: Library, root: string): Promise<boolean> {
     if (this.store === undefined) return false
     return await (this.inFlight.get(root) ?? this.start(library, root))
+  }
+
+  /**
+   * Run a pass that **began after this call did**, and report what it found —
+   * what an explicit reload means, as against `revalidate`'s join (§6.6,
+   * round-2 finding 7).
+   *
+   * The difference is the whole of the endpoint's contract. `revalidate` joins a
+   * pass already in flight, which is right for every internal caller: a serve
+   * that wants a checked answer is served by whatever pass is checking. A reload
+   * is the user saying "I changed the library, look **now**", and a pass that
+   * started before the user's edit can answer "nothing moved" about a tree that
+   * has moved — it stat'd those directories before the change landed. Joining it
+   * would report that verdict as the reload's own, and the requirement is that a
+   * listing after a completed reload reflects what the reload discovered.
+   *
+   * So: await the one in flight if there is one (two passes over one root at
+   * once is what `inFlight` exists to prevent, and a spinning volume is exactly
+   * where doubling the head contention hurts), then run a fresh one and report
+   * *its* verdict. The wait is bounded by the pass — one `stat` per directory,
+   * ~5.6 s measured cold — and only a reload issued during a pass pays it.
+   */
+  async reload(library: Library, root: string): Promise<boolean> {
+    if (this.store === undefined) return false
+    // Awaiting the chained promise, not the bare pass: `start`'s `finally` has
+    // already removed it from the map by the time this resolves, so the call
+    // below cannot join the pass it just waited for.
+    const pending = this.inFlight.get(root)
+    if (pending !== undefined) await pending
+    return await this.start(library, root)
   }
 
   /**
@@ -216,12 +277,24 @@ export class ListingCache {
       //    directory that is suddenly gone is exactly what an unmount looks
       //    like from inside `levelFor`.
       if (!(await isReady(library))) return false
-      // 2. Anything else that is not a `RevalidationError` — the store's own
-      //    `save` failing on ENOSPC, a bug — is not the filesystem
-      //    contradicting the cache and must not be read as one. Nothing is
-      //    invalidated and nothing is stamped: the snapshot stays, serves
-      //    marked, and the pass is retried at the next cadence.
-      if (!(err instanceof RevalidationError)) return false
+      // 2. Anything else that is neither a `RevalidationError` nor a
+      //    `ListingError` — the store's own `save` failing on ENOSPC, a bug —
+      //    is not the filesystem contradicting the cache and must not be read
+      //    as one. Nothing is invalidated and nothing is stamped: the snapshot
+      //    stays, serves marked, and the pass is retried at the next cadence.
+      //
+      //    `ListingError` is grouped with the contradiction rather than here
+      //    (round-2 finding 1). It is what `gatherFlat` raises from its up-front
+      //    root `stat` — "no such path", "not a directory or zip" — which on the
+      //    revalidation path means the *walked root itself* was deleted,
+      //    renamed, or replaced by a file while the volume is still present.
+      //    `levelFor` cannot see that: it is reached only once the root has
+      //    resolved. Read as "not a contradiction", it left the snapshot in
+      //    place and every later serve answered a ghost tree from a root that
+      //    no longer exists, forever. The `isReady` recheck above is what keeps
+      //    this honest — an unmounted volume raises the same error and is
+      //    separated before this line.
+      if (!(err instanceof RevalidationError) && !(err instanceof ListingError)) return false
       // 3. A pass that could not be completed against a root that is *there*
       //    invalidates: the filesystem is authoritative and the cache loses
       //    (§4.3).
@@ -234,6 +307,17 @@ export class ListingCache {
         // serve and served marked until it can be.
         return false
       }
+      // The tree under this root is gone, so every preview choice derived from
+      // it is derived from nothing (round-2 finding 8). The success path drops
+      // a changed directory's sheet through `noteDirChanged`; this path had no
+      // list of changed directories to drive that with and dropped nothing, so
+      // a folder tile under an invalidated root went on drawing the contact
+      // sheet of a subtree the pass had just declared contradicted — served
+      // beside a listing freshly walked from disk, which is the one combination
+      // that cannot be explained away as cache lag. Poses are untouched, here
+      // as in `noteDirChanged`: a pose is a fact about a model's geometry, not
+      // about the tree it was reached through.
+      this.layers.dropPreviewsUnder(root)
       // The snapshot is gone rather than corrected, so there is no "what moved"
       // to report — and the root is stamped below, because this process has now
       // checked it and the next serve is a walk.

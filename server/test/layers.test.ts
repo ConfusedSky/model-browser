@@ -10,16 +10,16 @@
  * own below.
  */
 
-import { mkdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { zipSync } from 'fflate'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DirEntry, DirListing, ModelsListing, ReloadResult } from '../../shared/types'
+import type { DirEntry, DirListing, IndexPose, ModelsListing, ReloadResult } from '../../shared/types'
 import { createApp } from '../src/app'
 import { ThumbCache } from '../src/cache'
-import { DerivedLayers } from '../src/layers'
+import { DerivedLayers, LAYER_VERSION, POSE_ANNOTATION_TTL_MS } from '../src/layers'
 import type { Library } from '../src/library'
-import { ListingCache } from '../src/listingCache'
+import { ListingCache, REVALIDATE_TTL_MS } from '../src/listingCache'
 import { resetIndexStatus } from '../src/semantic'
 import { SnapshotStore } from '../src/snapshot'
 import { LOOPBACK, libraryFor, realTempDir, stlBytes } from './helpers'
@@ -119,7 +119,13 @@ function archiveOpens(f: Fixture): number {
   return fs.opens.filter((p) => p === f.zip).length
 }
 
-const POSE = {
+/**
+ * Typed, not inferred: the pose cells below hand this straight to
+ * `recordPoses`, whose `IndexPose` wants fixed-length tuples where a bare
+ * literal infers `number[]`. The stubbed-index cells only ever serialise it, so
+ * the annotation costs them nothing.
+ */
+const POSE: IndexPose = {
   up: [0, 1, 0],
   azimuth_zero: [1, 0, 0],
   source: 'siglip',
@@ -299,6 +305,42 @@ describe('the pose layer rides the listing (§6.1, §6.3)', () => {
   })
 })
 
+describe('a recorded pose converges rather than sticking (round-2 finding 6)', () => {
+  it('stops being emitted once it is older than the annotation TTL', async () => {
+    const f = await fixture('ly-pose-ttl')
+    // The clock is injected rather than slept through, exactly as
+    // `listingCache.test.ts` injects the revalidation TTL's: five minutes a cell
+    // would be paying the constant rather than testing it.
+    let now = 1_000_000
+    const layers = new DerivedLayers(LAYER_VERSION, () => now)
+    const s = serverFor(f, { listings: new ListingCache(f.store, layers) })
+    const model = join(f.kit, 'loose.stl')
+    stubIndex(f.top, { [model]: POSE })
+
+    await askPoses(s, ROOT)
+    expect(entryFor(await listFlat(s), 'loose.stl').pose).toEqual(POSE)
+
+    // Just inside the horizon: still the fast path, still no round trip.
+    now += POSE_ANNOTATION_TTL_MS - 1
+    expect(entryFor(await listFlat(s), 'loose.stl').pose).toEqual(POSE)
+
+    // Past it. Without this the annotation would have turned the client's
+    // per-listing wave off for that model permanently — an entry the layer can
+    // answer is filtered out of the wave, and nothing else here ever drops a
+    // pose — so a re-classification would reach the user at the next *restart*
+    // rather than the next navigation, which is worse than the guarantee the
+    // annotation replaced.
+    now += 1
+    expect(entryFor(await listFlat(s), 'loose.stl').pose).toBeUndefined()
+    // Dropped, not merely withheld: the wave re-asks, `recordPoses` re-learns,
+    // and the horizon starts again from the answer the index just gave.
+    expect(layers.size().poses).toBe(0)
+
+    await askPoses(s, ROOT)
+    expect(entryFor(await listFlat(s), 'loose.stl').pose).toEqual(POSE)
+  })
+})
+
 describe('the preview layer and its ancestors (§6.1, §7.3)', () => {
   /** Record a sheet for each directory, as a peek of each would. */
   function seed(layers: DerivedLayers, root: string, dirs: string[]): void {
@@ -332,6 +374,46 @@ describe('the preview layer and its ancestors (§6.1, §7.3)', () => {
     // the pass reports *which* directories moved instead of a bare boolean.
     expect(listings.layers.previewFor(`${ROOT}/z`, 4)).toBeDefined()
   })
+
+  it.skipIf(process.getuid?.() === 0)(
+    'an invalidated tree takes its previews with it, and leaves the rest alone (round-2 finding 8)',
+    async () => {
+      const f = await fixture('ly-invalidate-previews')
+      const listings = new ListingCache(f.store)
+      const s = serverFor(f, { listings })
+      await listFlat(s)
+
+      // Sheets inside the tree about to be contradicted, and one outside it.
+      seed(listings.layers, f.top, [ROOT, `${ROOT}/a`, `${ROOT}/a/deep`, '/'])
+      const posed = { path: join(f.kit, 'loose.stl') }
+      listings.layers.recordPoses(f.top, { [posed.path]: POSE })
+
+      // A contradiction, not a change: the root is there and refuses to be
+      // read, so the pass invalidates rather than correcting. That branch has no
+      // list of changed directories, so it drove `noteDirChanged` for nothing —
+      // and every folder tile under the root went on drawing a contact sheet of
+      // a subtree the pass had just thrown away, beside a listing walked fresh
+      // from disk.
+      chmodSync(f.kit, 0o000)
+      try {
+        expect(await listings.revalidate(f.library, ROOT)).toBe(false)
+      } finally {
+        chmodSync(f.kit, 0o755)
+      }
+      expect(await f.store.load(ROOT)).toBeNull()
+
+      for (const gone of [ROOT, `${ROOT}/a`, `${ROOT}/a/deep`]) {
+        expect(listings.layers.previewFor(gone, 4), `${gone} should be dropped`).toBeUndefined()
+      }
+      // The library root's own sheet is kept: an invalidate says the pass could
+      // not finish, not that anything changed, and dropping every ancestor would
+      // clear `/`'s sheet whenever any kit anywhere failed to revalidate.
+      expect(listings.layers.previewFor('/', 4)).toBeDefined()
+      // Poses are untouched — a tree that could not be read says nothing about
+      // the geometry of the models in it.
+      expect(listings.layers.poseFor(posed.path)).toEqual(POSE)
+    },
+  )
 
   it('a peek records its choice, and a listing then carries it on the folder tile', async () => {
     const f = await fixture('ly-preview-emit')
@@ -629,6 +711,69 @@ describe('enumerating a scope (§6.7)', () => {
       '/kit/a/bracket.stl',
       '/kit/a/deep/part.stl',
     ])
+    expect(treeReaddirs(f)).toEqual([])
+  })
+
+  it('404s a path that only looks like it lies under a cached root (round-2 finding 4a)', async () => {
+    const f = await fixture('ly-enum-phantom')
+    const s = serverFor(f)
+    await listFlat(s, ROOT) // `/kit` is cached; `/kit/nope` has never existed
+
+    // Filtering an ancestor's entries by a prefix nothing matches yields an
+    // empty set, which this answered as 200 `{entries: [], complete: true}` —
+    // "that folder holds no models" about a folder that is not there. The route
+    // promises the same refusals a listing gives, and the uncached branch 404s
+    // this through `gatherFlat`'s own up-front stat.
+    const res = await s.app.request(
+      `/api/models?path=${encodeURIComponent(`${ROOT}/nope`)}`,
+      { headers: LOOPBACK },
+    )
+    expect(res.status).toBe(404)
+
+    // The control that makes the cell about the *phantom* rather than about
+    // ancestors in general: a real subfolder under the same cached root is still
+    // answered from the snapshot.
+    const real = await enumerate(s, `${ROOT}/a`)
+    expect(real.entries.map((e) => e.name).sort()).toEqual(['bracket.stl', 'deep/part.stl'])
+
+    // A path that exists but has no inside is the listing's other refusal, and
+    // it is the same 400 here.
+    const file = await s.app.request(
+      `/api/models?path=${encodeURIComponent(`${ROOT}/loose.stl`)}`,
+      { headers: LOOPBACK },
+    )
+    expect(file.status).toBe(400)
+  })
+
+  it('validates the covering root before serving from it, rather than after (round-2 finding 4b)', async () => {
+    const f = await fixture('ly-enum-validate')
+    let now = 1_000_000
+    const listings = new ListingCache(f.store, undefined, () => now)
+    const s = serverFor(f, { listings })
+    await listFlat(s, ROOT) // walks, persists, and stamps the root
+
+    // A change made outside the app, after the stamp and after the cadence has
+    // lapsed. A *listing* would answer marked and converge afterwards — the
+    // client's follow-up closes that gap. An enumeration has no such reader: it
+    // is the scope a bulk job derives its work list from, and there is no
+    // staleness marker on this shape for the caller to notice by. So this one
+    // waits.
+    writeFileSync(join(f.kit, 'z', 'late.stl'), stlBytes(31))
+    now += REVALIDATE_TTL_MS
+
+    const models = await enumerate(s, ROOT)
+    expect(models.entries.map((e) => e.name)).toContain('z/late.stl')
+    // The pass ran, so the root is checked — and a listing right behind it is
+    // therefore unmarked, which is what "answer from the refreshed snapshot"
+    // means on the other side of the seam.
+    expect(listings.isValidated(ROOT)).toBe(true)
+
+    // …and inside the window it does not run: an enumeration is not a licence to
+    // stat the whole tree per request.
+    writeFileSync(join(f.kit, 'z', 'later.stl'), stlBytes(32))
+    fs.readdirs.length = 0
+    const again = await enumerate(s, ROOT)
+    expect(again.entries.map((e) => e.name)).not.toContain('z/later.stl')
     expect(treeReaddirs(f)).toEqual([])
   })
 

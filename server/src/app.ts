@@ -17,7 +17,7 @@ import { ThumbCache } from './cache'
 import { guard } from './guard'
 import { LaunchError, type Launcher, ZipTempStore, createLauncher } from './launch'
 import { LibraryError, type Library, canonicalLibPath, createLibrary } from './library'
-import { ListingError, PEEK_MAX_FINDS, complete, enumerateModels, listDir, peek } from './listing'
+import { ListingError, PEEK_MAX_FINDS, complete, listDir, peek } from './listing'
 import { ListingCache } from './listingCache'
 import {
   type OverrideHolder,
@@ -455,13 +455,25 @@ export function createApp(
    *
    * A path route like `/api/dir`: canonicalised the same way, gated by the
    * library's not-ready envelope with no code of its own, and 404/400 on the
-   * same distinctions for the same reasons.
+   * same distinctions for the same reasons — including for a path that only
+   * *looks* like it lies under a cached root, which is resolved before an
+   * ancestor's tree is allowed to answer for it (round-2 finding 4a).
+   *
+   * **This route waits where `/api/dir` does not** (round-2 finding 4b).
+   * `ListingCache.enumerate` runs the revalidation pass before answering when
+   * the covering root's stamp is missing or past `REVALIDATE_TTL_MS`, rather
+   * than serving marked and converging afterwards. An enumeration feeds a job's
+   * work list, not a grid: an unchecked tree here means rendering models that
+   * are gone and skipping ones that arrived, reported as a success, and there is
+   * no staleness marker on this shape for a caller to notice it by. Correct over
+   * instant. The wire is unchanged — the wait is invisible except as latency,
+   * bounded by one `stat` per directory and paid only past the cadence.
    */
   app.get('/api/models', async (c) => {
     const path = c.req.query('path')
     if (path === undefined || path === '') return c.json({ error: 'path is required' }, 400)
     const libPath = canonicalLibPath(path)
-    const { models, complete } = await enumerateModels(library, libPath, snapshots)
+    const { models, complete } = await listings.enumerate(library, libPath)
     applyDisplayNames(models, await overrides.store())
     // The same annotation object a listing carries, from the same index by the
     // same key lookup — never a second shape for the same fact.
@@ -474,11 +486,20 @@ export function createApp(
    * Freshness on demand (§6.6, design D9): run the incremental pass now for
    * every cached root and say whether anything moved.
    *
-   * No machinery of its own — it is `ListingCache.revalidate`, the seam built
-   * for exactly this, over the roots the store holds. Never a full re-walk: the
+   * No machinery of its own — it is `ListingCache.reload`, the seam built for
+   * exactly this, over the roots the store holds. Never a full re-walk: the
    * cost is one `stat` per directory, the same check routine revalidation uses,
    * and a root with no snapshot is nothing to reload rather than a reason to
    * walk one.
+   *
+   * `reload`, not `revalidate`, and the difference is the endpoint's whole
+   * contract (round-2 finding 7). `revalidate` joins a pass already in flight,
+   * which is right for a serve; joining one here would let a pass that started
+   * **before** the user's edit answer for the reload — it stat'd those
+   * directories while the tree still looked the way it used to — and report
+   * "nothing moved" about a library that had. The requirement is that a listing
+   * after a completed reload reflects what the reload found, so the pass this
+   * reports must be one that began after the gesture.
    *
    * The derived layers go wholesale, because a reload is the user saying "what
    * you have may be wrong" and the layers are the part of that the server cannot
@@ -495,7 +516,7 @@ export function createApp(
     const roots = snapshots === undefined ? [] : await snapshots.roots()
     let changed = false
     for (const root of roots) {
-      if (await listings.revalidate(library, root)) changed = true
+      if (await listings.reload(library, root)) changed = true
     }
     const body: ReloadResult = { ok: true, roots: roots.length, changed }
     return c.json(body)
