@@ -15,7 +15,7 @@ import { join } from 'node:path'
 import { zipSync } from 'fflate'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DirEntry, DirListing, IndexPose, ModelsListing, ReloadResult } from '../../shared/types'
-import { createApp } from '../src/app'
+import { ANNOTATION_BUDGET_MS, createApp } from '../src/app'
 import { ThumbCache } from '../src/cache'
 import { DerivedLayers, LAYER_VERSION, POSE_ANNOTATION_TTL_MS } from '../src/layers'
 import type { Library } from '../src/library'
@@ -239,9 +239,23 @@ describe('the pose layer rides the listing (§6.1, §6.3)', () => {
     const asked = index.mock.calls.length
     const listing = await listFlat(s)
     expect(entryFor(listing, 'loose.stl').pose).toEqual(POSE)
-    // The whole of "emission never blocks on the index": the listing that
-    // carries the pose made no call of its own to carry it.
-    expect(index.mock.calls.length).toBe(asked)
+    // What this cell pins is the *layer serving*: the pose it carried was read,
+    // not re-fetched — no request after this point names that model.
+    //
+    // It used to assert the listing made no call at all, which the 2026-09-03
+    // revision (§6.9) superseded for the ready-index case: emission now fills
+    // what the layers lack, so a listing whose *other* models are unposed does
+    // make a batch of its own. That is the feature, and asserting its absence
+    // would have pinned the shape the revision removed. The claim that survives
+    // — and the one the delta still makes — is per fact, not per listing.
+    for (const call of index.mock.calls.slice(asked)) {
+      const url = String(call[0])
+      if (!url.endsWith('/poses')) continue
+      const body = String((call[1] as RequestInit | undefined)?.body ?? '')
+      expect(body).not.toContain(join(f.kit, 'loose.stl'))
+    }
+    // The zero-call claim still has a home: it belongs to the states where the
+    // probe gate is what stops the fill, and the two cells below are it.
   })
 
   it('emits with a wedged index at the speed of one with none — no call at all (§7.3)', async () => {
@@ -924,5 +938,225 @@ describe('a layer built under another version serves nothing', () => {
     const live = new DerivedLayers()
     live.recordPoses('/collection', { '/kit/loose.stl': POSE as never })
     expect(live.poseFor('/kit/loose.stl')).toEqual(POSE)
+  })
+})
+
+/**
+ * Emission-time filling (§6.9) — the pass that makes a first sight whole
+ * instead of leaving the client to fill it in a round trip later.
+ *
+ * Everything here turns on **which** upstream calls a listing makes, so the
+ * cells count them at the fetch seam rather than timing them, with the two
+ * exceptions that are about time by nature: the budget (a listing must ship
+ * without a slow answer) and the probe gate (a declining listing must not pay
+ * the budget at all).
+ */
+describe('emission fills what the layers lack, under a budget (§6.9)', () => {
+  /**
+   * The index, stubbed with the three routes a fill can reach — `/status`,
+   * `/poses`, `/under` — plus a control surface for the states these cells
+   * need: an index that is not ready, one whose `/poses` hangs until released,
+   * one whose `/poses` has begun failing.
+   *
+   * `/under` answers `unindexed`, so a preview derivation falls through to the
+   * walk: what a sheet *contains* is `posedFirstPeek`'s contract and not what
+   * these cells are about. That the route is answered **at all** matters more
+   * than what it says — an unhandled route throws, and a throw inside
+   * `askIndex` forgets the probe memo, which would then gate the very pass
+   * under test.
+   */
+  function stubFillIndex(collectionRoot: string, poses: Record<string, unknown> = {}) {
+    const control = { ready: true, gate: null as Promise<void> | null, posesFail: false }
+    const json = (body: unknown): Response =>
+      new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } })
+    const spy = vi.fn(async (url: string, _init?: RequestInit) => {
+      const u = String(url)
+      if (u.endsWith('/status')) {
+        return json({
+          ready: control.ready,
+          elapsed: 1,
+          collection_root: collectionRoot,
+          covers: ['stl'],
+          volume: { present: true, root: collectionRoot, missing: null },
+        })
+      }
+      if (u.endsWith('/poses')) {
+        if (control.gate !== null) await control.gate
+        if (control.posesFail) throw new TypeError('fetch failed')
+        return json({ poses })
+      }
+      if (u.endsWith('/under')) {
+        return json({ status: 'unindexed', models: [], matched: 0, truncated: false })
+      }
+      throw new Error(`unexpected fetch: ${u}`)
+    })
+    vi.stubGlobal('fetch', spy)
+    resetIndexStatus()
+    const bodies = (route: string): string[] =>
+      spy.mock.calls
+        .filter((c) => String(c[0]).endsWith(route))
+        .map((c) => String((c[1] as RequestInit | undefined)?.body ?? ''))
+    return {
+      control,
+      calls: (): number => spy.mock.calls.length,
+      /** `/poses` batches that named this model. */
+      posesAbout: (real: string): number => bodies('/poses').filter((b) => b.includes(real)).length,
+      /** `/under` asks that named this folder — one per preview derivation. */
+      underAbout: (real: string): number => bodies('/under').filter((b) => b.includes(real)).length,
+    }
+  }
+
+  /** Warm the probe memo the way the running client does: the status route. */
+  async function warmProbe(s: Server): Promise<void> {
+    const res = await s.app.request('/api/semantic/status', { headers: LOOPBACK })
+    expect(res.status).toBe(200)
+  }
+
+  const settle = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+  it('carries pose and preview on the first sight, with no wave and no peek', async () => {
+    const f = await fixture('ly-fill-first')
+    const s = serverFor(f)
+    stubFillIndex(f.top, { [join(f.kit, 'loose.stl')]: POSE })
+    await warmProbe(s)
+
+    // The first listing of this folder in this process: nothing has peeked, no
+    // wave has run, and the layers are empty — which before §6.9 meant a bare
+    // listing and two follow-ups behind it.
+    const listing = await listDir(s, ROOT)
+
+    expect(entryFor(listing, 'loose.stl').pose).toEqual(POSE)
+    // Both folders arrive with the sheet their tile draws, so the client's
+    // carried-preview path lands them and issues no `/api/peek` at all.
+    expect(entryFor(listing, 'a').preview?.map((e) => e.name)).toEqual(['bracket.stl', 'part.stl'])
+    expect(entryFor(listing, 'z').preview?.map((e) => e.name)).toEqual(['bracket.stl'])
+    // Nothing on this listing is left for a follow-up to fetch: every model has
+    // its pose and every folder its sheet.
+    for (const entry of listing.entries) {
+      if (entry.kind === 'model') expect(entry.pose, entry.path).toBeDefined()
+      if (entry.kind === 'dir') expect(entry.preview, entry.path).toBeDefined()
+    }
+  })
+
+  it('ships within the budget without the slow answer, and the next listing carries it', async () => {
+    const f = await fixture('ly-fill-budget')
+    const s = serverFor(f)
+    const index = stubFillIndex(f.top, { [join(f.kit, 'loose.stl')]: POSE })
+    await warmProbe(s)
+
+    // Ready and slow — the one state the probe gate cannot catch, and the whole
+    // reason the fill is raced against a budget rather than awaited.
+    let release: () => void = () => {}
+    index.control.gate = new Promise<void>((r) => {
+      release = r
+    })
+
+    const started = Date.now()
+    const first = await listDir(s, ROOT)
+    const elapsed = Date.now() - started
+
+    // Shipped without the fact rather than waiting for it. The lower bound is
+    // what says the *budget* ended the wait: nothing else could have, since the
+    // answer is still gated as this assertion runs.
+    expect(entryFor(first, 'loose.stl').pose).toBeUndefined()
+    expect(elapsed).toBeGreaterThanOrEqual(ANNOTATION_BUDGET_MS - 30)
+    expect(elapsed).toBeLessThan(ANNOTATION_BUDGET_MS + 2000)
+
+    // The late answer still lands: the fill went on running after emission gave
+    // up on it, and recorded into the layer.
+    release()
+    for (let i = 0; i < 50 && s.listings.layers.poseFor(`${ROOT}/loose.stl`) === undefined; i++) {
+      await settle(10)
+    }
+    expect(s.listings.layers.poseFor(`${ROOT}/loose.stl`)).toEqual(POSE)
+
+    // And the next listing carries it. `/poses` fails from here on, so the pose
+    // on this listing can only have come from the layer — without the
+    // late-record continuation there would be nothing there to come from.
+    index.control.gate = null
+    index.control.posesFail = true
+    expect(entryFor(await listDir(s, ROOT), 'loose.stl').pose).toEqual(POSE)
+  })
+
+  it('makes no call at all, and pays no budget, while the probe says not ready', async () => {
+    const f = await fixture('ly-fill-gate')
+    const s = serverFor(f)
+    const index = stubFillIndex(f.top, { [join(f.kit, 'loose.stl')]: POSE })
+    // Warming: up, answering about itself, nothing to say about a model yet.
+    // The delta's "a warming or absent index costs a listing nothing" is this.
+    index.control.ready = false
+    await warmProbe(s)
+
+    const before = index.calls()
+    const started = Date.now()
+    const listing = await listDir(s, ROOT)
+    const elapsed = Date.now() - started
+
+    // Zero, counted at the seam — not "few", and not inferred from timing.
+    expect(index.calls()).toBe(before)
+    // Emission latency unchanged, which is a different claim from the one above
+    // it: a fill that ran and found nothing would still have spent the budget.
+    // This one never started.
+    expect(elapsed).toBeLessThan(ANNOTATION_BUDGET_MS)
+    expect(entryFor(listing, 'loose.stl').pose).toBeUndefined()
+    expect(entryFor(listing, 'a').preview).toBeUndefined()
+
+    // The same for a memo holding nothing at all: no answer is not a ready
+    // answer, and emission declines rather than probing on its own behalf.
+    resetIndexStatus()
+    const cold = index.calls()
+    await listDir(s, ROOT)
+    expect(index.calls()).toBe(cold)
+  })
+
+  it('asks once per horizon about a model the index has no pose for, not once per listing', async () => {
+    const f = await fixture('ly-fill-negative-pose')
+    // The horizon on an injected clock, exactly as the TTL cell above injects
+    // it: five minutes slept per cell would be paying the constant rather than
+    // testing it.
+    let now = 2_000_000
+    const layers = new DerivedLayers(LAYER_VERSION, () => now)
+    const s = serverFor(f, { listings: new ListingCache(f.store, layers) })
+    // An index that answers, and holds no orientation for anything.
+    const index = stubFillIndex(f.top, {})
+    await warmProbe(s)
+    const model = join(f.kit, 'loose.stl')
+
+    expect(entryFor(await listDir(s, ROOT), 'loose.stl').pose).toBeUndefined()
+    expect(index.posesAbout(model)).toBe(1)
+
+    // The second listing asks nothing about it. "Asked, and it has none" is an
+    // answer the layer holds, and reading it as an absence is what would put a
+    // `/poses` batch on every listing of this folder for as long as the server
+    // runs.
+    expect(entryFor(await listDir(s, ROOT), 'loose.stl').pose).toBeUndefined()
+    expect(index.posesAbout(model)).toBe(1)
+
+    // Past the horizon it is asked again: a negative converges on the same
+    // clock as a positive, because the index may learn a pose it did not have.
+    now += POSE_ANNOTATION_TTL_MS
+    await listDir(s, ROOT)
+    expect(index.posesAbout(model)).toBe(2)
+  })
+
+  it('derives an empty folder’s sheet once, not once per listing', async () => {
+    const f = await fixture('ly-fill-negative-preview')
+    // A folder with no models at all: the sheet it derives to is empty, and
+    // empty is an answer.
+    const empty = join(f.kit, 'empty')
+    mkdirSync(empty)
+    const s = serverFor(f)
+    const index = stubFillIndex(f.top, {})
+    await warmProbe(s)
+
+    const first = await listDir(s, ROOT)
+    // Attached as the empty sheet it is, rather than withheld: the client lands
+    // a carried sheet whatever its length and skips the peek, so withholding it
+    // would buy back the round trip this pass exists to delete.
+    expect(entryFor(first, 'empty').preview).toEqual([])
+    expect(index.underAbout(empty)).toBe(1)
+
+    await listDir(s, ROOT)
+    expect(index.underAbout(empty)).toBe(1)
   })
 })

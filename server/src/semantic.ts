@@ -343,6 +343,40 @@ export async function probeStatus(
   return { status: await mapCollectionRoot(library, raw), collectionRootFs: raw.collectionRoot }
 }
 
+/**
+ * What the probe memo currently holds, or `undefined` — **and never a probe of
+ * its own**. Synchronous, so it cannot become one by accident.
+ *
+ * `probeStatus` is the reader for anyone who *needs* an answer: it looks when
+ * the memo is cold or stale, and the wait is the price of the question. This is
+ * the reader for a caller that only wants to know whether an answer is already
+ * lying around — emission-time annotation filling (`listing-tree-cache` §6.9),
+ * whose whole contract is that an index which is absent, warming or wedged
+ * costs a listing *nothing*, "nothing" including the probe. A cold memo is not
+ * a ready index here; it is no answer, and the fill declines.
+ *
+ * The TTL is honoured, so a memo the probe would refuse to reuse is refused
+ * here too. Reading does not refresh it — a listing must not extend the life of
+ * a verdict it declined to take.
+ *
+ * The consequence, stated so nobody reads it as a bug: emission fills nothing
+ * until something else has probed, so the very first listing of a cold server
+ * emits as it always did — and in the running app that costs nothing, because
+ * the client asks `/api/semantic/status` at startup, before any listing a user
+ * sees.
+ *
+ * `collectionRootFs` is the index's own absolute path, unmapped: the memo holds
+ * the raw status, and `mapCollectionRoot` is applied per call by whoever is
+ * telling a *client* about it. The fill is not — it asks the index about paths.
+ */
+export function memoisedStatus():
+  | { status: IndexAvailability; collectionRootFs: string | undefined }
+  | undefined {
+  if (cached === null) return undefined
+  if (Date.now() - cached.at >= TTL_MS[cached.status.state]) return undefined
+  return { status: cached.status, collectionRootFs: cached.status.collectionRoot }
+}
+
 /** Availability for the status route: the wire half of `probeStatus`. */
 export async function indexStatus(
   library: Library,
@@ -884,8 +918,39 @@ export async function posesForPaths(
   libPaths: readonly string[],
   collectionRoot: string,
 ): Promise<Record<string, IndexPose>> {
+  return (await posesAsked(library, libPaths, collectionRoot)).poses
+}
+
+/**
+ * `posesForPaths`, plus the one thing swallowing an `IndexError` throws away:
+ * **whether the index actually answered** (`listing-tree-cache` §6.9).
+ *
+ * An empty map means two different things — "asked, and it holds no orientation
+ * for any of these" and "could not ask" — and every caller so far was right not
+ * to care, because a pose is advisory either way. Emission-time filling is the
+ * caller that must: it records a model the index has nothing for as a negative,
+ * so the next listing does not re-ask, and writing that on the strength of a
+ * *failure* would silence the fill for a horizon over an index that was merely
+ * having a bad second.
+ *
+ * `answered` is true when the index was asked and replied, and also when there
+ * was nothing to ask — every path refused by `scopeWithin` (a zip entry, a
+ * symlink out of the collection) is a settled "no" that no round trip would
+ * change, and re-asking it per listing is the standing cost §6.9 removes.
+ *
+ * The one blur it keeps is `askPoses`' own: a batch split across chunks where
+ * some chunks failed and others did not reports `true`, since the call as a
+ * whole replied. The failed chunk's models are then recorded as negatives for
+ * one horizon — bounded, self-correcting, and not worth a second error channel
+ * through a routine whose whole contract is that a pose never fails anything.
+ */
+export async function posesAsked(
+  library: Library,
+  libPaths: readonly string[],
+  collectionRoot: string,
+): Promise<{ poses: Record<string, IndexPose>; answered: boolean }> {
   const poses: Record<string, IndexPose> = {}
-  if (libPaths.length === 0) return poses
+  if (libPaths.length === 0) return { poses, answered: true }
   // Resolved in parallel, joined in the caller's order: what goes on the wire
   // must not depend on which `realpath` happened to finish first.
   const reals = await Promise.all(libPaths.map((p) => scopeWithin(library, p, collectionRoot)))
@@ -897,12 +962,12 @@ export async function posesForPaths(
     if (named === undefined) byReal.set(real, [libPath])
     else named.push(libPath)
   })
-  if (byReal.size === 0) return poses
+  if (byReal.size === 0) return { poses, answered: true }
   let answered: Record<string, IndexPose | null>
   try {
     answered = await askPoses([...byReal.keys()])
   } catch (err) {
-    if (err instanceof IndexError) return poses
+    if (err instanceof IndexError) return { poses, answered: false }
     throw err
   }
   for (const [real, named] of byReal) {
@@ -914,7 +979,7 @@ export async function posesForPaths(
     if (pose === undefined || pose === null) continue
     for (const libPath of named) poses[libPath] = pose
   }
-  return poses
+  return { poses, answered: true }
 }
 
 /**

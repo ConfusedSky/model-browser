@@ -13,10 +13,18 @@
  *
  * **Nothing here ever asks anyone anything.** Both maps are written by whoever
  * already had the answer in hand — the pose proxy routes when the index answers,
- * a peek when it derives a sheet — and read at emission by key lookup. A lookup
- * hits or the field is absent from that entry; emission does not wait on the
- * semantic index, and the client's existing wave stays the fill path for what
- * the layer does not know (D7's last paragraph).
+ * a peek when it derives a sheet, and since §6.9 the emission-time fill in
+ * `app.ts`, which asks under a budget and records here like any other caller —
+ * and read at emission by key lookup. A lookup hits or the field is absent from
+ * that entry; nothing in *this* file waits on the semantic index, and the
+ * client's existing wave stays the fill path for whatever the layer and the
+ * budget together did not produce (D7's last paragraph, as revised 2026-09-03).
+ *
+ * **A recorded "none" is an answer.** Both layers hold negatives — a pose the
+ * index was asked for and does not have, a folder derived to an empty sheet —
+ * so a fact nobody can supply is asked about once per horizon rather than once
+ * per listing. That is what keeps emission-time filling a one-off cost per
+ * navigation instead of standing traffic.
  */
 
 import type { DirEntry, IndexPose } from '../../shared/types'
@@ -69,9 +77,23 @@ export const LAYER_VERSION = 1
  */
 export const POSE_ANNOTATION_TTL_MS = 5 * 60_000
 
-/** A recorded pose, against the moment this process learned it. */
+/**
+ * A recorded pose, against the moment this process learned it.
+ *
+ * `pose: null` is a **recorded negative** — this model was asked about and the
+ * index held no orientation for it (§6.9). It is an answer, not an absence, and
+ * the difference is what stops emission re-asking about the same unposed model
+ * on every listing forever: without it the fill would convert one round trip of
+ * client pop-in into a permanent `/poses` batch per listing, against an index
+ * that serves one request at a time.
+ *
+ * A negative expires on the same `POSE_ANNOTATION_TTL_MS` clock as a positive,
+ * for the same reason: the index may learn a pose it did not have — a
+ * re-classification, a first embedding — and "we asked once and it said no" must
+ * not mean "never ask again until restart".
+ */
 interface HeldPose {
-  pose: IndexPose
+  pose: IndexPose | null
   recordedAt: number
 }
 
@@ -213,7 +235,22 @@ export class DerivedLayers {
    * Called where the answers already flow — the pose proxy routes — never by
    * asking the index anything on this layer's own account.
    */
-  recordPoses(collectionRoot: string | undefined, poses: Record<string, IndexPose>): void {
+  recordPoses(
+    collectionRoot: string | undefined,
+    poses: Record<string, IndexPose>,
+    /**
+     * The models the index was asked about, when the caller knows them — every
+     * one the answer does not name is recorded as a negative (§6.9).
+     *
+     * Optional because the two pose proxy routes do not have this list in hand:
+     * the GET's is assembled inside `posesForDir`, which lists the directory
+     * itself. They record what they learned and no more, exactly as before.
+     * Emission-time filling passes it, because it is the caller whose cost
+     * repeats — it runs on every listing, where a route runs when the client
+     * asks.
+     */
+    asked: readonly string[] = [],
+  ): void {
     if (!this.live) return
     this.reroot(collectionRoot)
     // Re-recording an entry the index has just answered about restamps it, so a
@@ -221,7 +258,44 @@ export class DerivedLayers {
     // horizon is measured from the last time the index confirmed the fact, not
     // from the first.
     const recordedAt = this.now()
+    // Negatives first, positives over them: what the answer names is what the
+    // index holds, and the rest of the question is what it does not.
+    for (const path of asked) this.poses.set(path, { pose: null, recordedAt })
     for (const [path, pose] of Object.entries(poses)) this.poses.set(path, { pose, recordedAt })
+  }
+
+  /**
+   * The entry held for a model, positive or negative, with the horizon applied
+   * — the one place `POSE_ANNOTATION_TTL_MS` is enforced, so a negative can
+   * never outlive a positive by being read through a different door.
+   *
+   * Aged entries are dropped **on the way past** rather than swept, which is
+   * what keeps this a Map get with no timer behind it: the whole annotation is
+   * "three Map gets and no I/O", and a sweep would be a fourth thing happening
+   * on the listing path.
+   */
+  private held(path: string): HeldPose | undefined {
+    if (!this.live) return undefined
+    const held = this.poses.get(path)
+    if (held === undefined) return undefined
+    if (this.now() - held.recordedAt >= POSE_ANNOTATION_TTL_MS) {
+      this.poses.delete(path)
+      return undefined
+    }
+    return held
+  }
+
+  /**
+   * Has this model been asked about within the horizon — whether the index
+   * answered with an orientation or with nothing (§6.9)?
+   *
+   * The question emission-time filling asks, and the reason it is not
+   * `poseFor(path) !== undefined`: that test cannot tell "no answer yet" from
+   * "answered, none", and reading a negative as the first is precisely the
+   * re-ask this exists to stop.
+   */
+  poseKnown(path: string): boolean {
+    return this.held(path) !== undefined
   }
 
   /**
@@ -239,22 +313,23 @@ export class DerivedLayers {
    * does exist — so that one is copied on the way in and on the way out.
    */
   poseFor(path: string): IndexPose | undefined {
-    if (!this.live) return undefined
-    const held = this.poses.get(path)
-    if (held === undefined) return undefined
-    // Aged out: not emitted, and dropped on the way past, so the map does not
-    // keep an entry nothing will ever answer with again. Dropping on read
-    // rather than sweeping is what keeps this a Map get with no timer behind it
-    // — the whole annotation is "three Map gets and no I/O", and a sweep would
-    // be a fourth thing happening on the listing path.
-    if (this.now() - held.recordedAt >= POSE_ANNOTATION_TTL_MS) {
-      this.poses.delete(path)
-      return undefined
-    }
-    return held.pose
+    // A recorded negative is `undefined` here, and deliberately so: what
+    // emission attaches is an orientation or nothing, never a `null` the client
+    // would have to test for. `poseKnown` is where the difference is visible,
+    // and it has exactly one caller.
+    return this.held(path)?.pose ?? undefined
   }
 
-  /** Record the sheet a peek just derived for a directory. Copies in. */
+  /**
+   * Record the sheet a peek just derived for a directory. Copies in.
+   *
+   * An **empty** sheet is a recorded answer like any other (§6.9): this folder
+   * was derived and holds no models the sheet can show. It is stored, served
+   * and invalidated exactly as a full one is — by `noteDirChanged` when the
+   * folder's contents move, by `dropPreviewsUnder` when its tree is
+   * contradicted, by `reroot` when the index repoints — so nothing special has
+   * to remember that empty is a fact rather than a gap.
+   */
   recordPreview(
     collectionRoot: string | undefined,
     dirPath: string,
@@ -266,7 +341,14 @@ export class DerivedLayers {
     this.previews.set(previewKey(dirPath, n), entries.map(copyEntry))
   }
 
-  /** The sheet held for a directory at that cell count, or undefined. Copies out. */
+  /**
+   * The sheet held for a directory at that cell count, or undefined. Copies out.
+   *
+   * `[]` and `undefined` are different answers and every caller must keep them
+   * so: `[]` is "derived, and there is nothing to show", `undefined` is "never
+   * derived". Collapsing them is what would make an empty folder re-derive its
+   * sheet on every listing.
+   */
   previewFor(dirPath: string, n: number): DirEntry[] | undefined {
     if (!this.live) return undefined
     return this.previews.get(previewKey(dirPath, n))?.map(copyEntry)

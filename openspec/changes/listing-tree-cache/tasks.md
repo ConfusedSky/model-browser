@@ -430,7 +430,7 @@
       against source: a5ed10d's emission-side `annotate(preview)` attaches both.
       Carried-choice staleness accepted as the recorded layer-lifecycle class
 
-- [ ] 6.9 Emission-time filling (added 2026-09-03, Masa — see the delta's revised
+- [x] 6.9 Emission-time filling (added 2026-09-03, Masa — see the delta's revised
       annotation requirement and D7's emission-time note): when the memoised probe
       says ready, `annotate`'s pass fills what the layers lack within
       `ANNOTATION_BUDGET_MS` (exported const, ~300 ms) — ONE batched `/poses` ask
@@ -447,6 +447,63 @@
       latency unchanged; falsify each (drop the budget → hang; drop the probe gate →
       warming index slows a listing; drop the late-record → second listing still
       bare)
+      <br>**Landed 2026-09-03** — `fillAnnotations` in `app.ts`, called on both
+      `/api/dir` branches between the listing and `annotate` (fill → annotate →
+      name, preserving 32c8bff's ordering); not on `/api/models` (enumeration
+      already awaits revalidation) and not on `/api/peek` (it *is* the
+      derivation). `ANNOTATION_BUDGET_MS = 300` exported; preview concurrency 4;
+      poses through `posesAsked` (`posesForPaths` plus whether the index
+      replied), previews through the existing `posedFirstPeek`. Budget is a
+      `Promise.race` over the whole fill, its timer `unref`'d, the continuation
+      flattened so it cannot reject unhandled.
+      <br>**The gate reads the probe memo, never takes a probe** — new
+      `memoisedStatus()` in `semantic.ts`. `probeStatus()` *fetches* on a cold
+      memo, which would break the pinned "a warming/absent/wedged index costs a
+      listing zero" (and the pre-existing wedged cell, which asserts zero calls
+      after `resetIndexStatus`). Consequence, recorded on the function: emission
+      fills nothing until something else has probed — free in the running app,
+      where the client asks `/api/semantic/status` at startup.
+      <br>**Negative caching, added by the coordinator's ruling in the same
+      task**: without it the feature converts one-time client pop-in into
+      per-listing upstream traffic. The pose layer records "asked, none" as
+      `HeldPose.pose === null`, expiring on `POSE_ANNOTATION_TTL_MS` like a
+      positive (the index may learn a pose later); `poseKnown` is the fill's
+      question, `poseFor` still answers only orientations. The preview layer's
+      recorded empty sheet already *was* a negative — `previewFor` distinguishes
+      `[]` from `undefined` — and it stays **attached** as `preview: []`, which
+      is the one clause of the ruling read differently and reported: the client
+      lands a carried sheet of any length and skips the peek, so withholding it
+      would buy back the round trip this task deletes. A failed ask records no
+      negatives ("did not answer" is not "has nothing").
+      <br>**Cells** (`server/test/layers.test.ts`, describe "emission fills what
+      the layers lack, under a budget (§6.9)", 5 cells; suite 620 → 625):
+      first sight carries pose+preview with no wave and no peek; a gated slow
+      index ships at the budget without the fact, the late answer lands, and the
+      next listing carries it with `/poses` failing from that point so it can
+      only have come from the layer; a not-ready probe makes zero calls **and**
+      pays no budget (two distinct claims), plus the cold-memo half; an unposed
+      model is asked about once per horizon, not once per listing; an empty
+      folder is derived once. **Falsified, exact texts**: drop the budget race →
+      `Error: Test timed out in 5000ms.`; drop the probe gate (fall back to
+      `probeStatus`) → `expected 2 to be 1`; drop the late record → `expected
+      undefined to deeply equal { up: [ +0, 1, +0 ], …(4) }`; drop pose
+      negatives → `expected 2 to be 1`; treat an empty sheet as never-derived →
+      `expected 2 to be 1`; drop the `poseKnown` guard → `expected
+      '{"paths":["/tmp/mb-ly-…/kit/…' not to contain '…/kit/loose.stl'`.
+      <br>**One pre-existing cell changed, adjudicated before editing** (option
+      (a), approved): layers.test.ts "carries a pose the proxy already answered,
+      without asking the index again" asserted `index.mock.calls.length` was
+      unchanged across the second listing — the absolutism the 2026-09-03
+      revision superseded for the ready-index case, since emission now does make
+      a batch of its own for the listing's *other* unposed models (measured: 1
+      `/poses` + 2×(`/under`+`/poses`) for the two folder tiles = 5, hence 7 vs
+      2). Replaced with the per-fact claim that survives: no `/poses` body after
+      that point names `loose.stl`, i.e. the pose it carried was read from the
+      layer rather than re-fetched. Its first assertion (a cold-memo first
+      listing carries nothing) is untouched and still passes.
+      <br>Verification: server 625 passed / 19 files; client 794 passed / 59
+      files (no client file touched); `bun run typecheck` clean both workspaces;
+      `openspec validate listing-tree-cache` → valid.
 
 ## 7. Tests
 
