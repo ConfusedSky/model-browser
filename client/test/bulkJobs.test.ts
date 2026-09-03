@@ -665,6 +665,11 @@ describe('what a count asks the index about', () => {
     // One request, naming exactly the model a count cannot judge without the index.
     expect(h.posesFor.mock.calls.map((c) => c[0])).toEqual([['/kit/unposed-axis-only.stl']])
     h.posesFor.mockClear()
+    // A reset consults the index wherever an axis is stored — with or without a
+    // camera, since the pose decides whether the axis goes with it.
+    await h.jobs.derive('reset', SCOPE)
+    expect(h.posesFor.mock.calls.map((c) => c[0])).toEqual([['/kit/unposed-axis-only.stl']])
+    h.posesFor.mockClear()
     await h.jobs.derive('generate', SCOPE)
     expect(h.posesFor.mock.calls.map((c) => c[0])).toEqual([
       ['/kit/unposed-plain.stl', '/kit/unposed-axis-only.stl', '/kit/unposed-camera.stl'],
@@ -675,5 +680,16 @@ describe('what a count asks the index about', () => {
     const h = harness(listing([model('unposed-plain'), model('unposed-camera', { thumb: thumb({ framed: true, camera: { az: 1, el: 0.2, distR: 3, target: [0, 0, 0] } }) })]))
     await h.jobs.count(SCOPE)
     expect(h.posesFor).not.toHaveBeenCalled()
+    // Nor does a reset over the same models: no axis is stored anywhere here.
+    await h.jobs.derive('reset', SCOPE)
+    expect(h.posesFor).not.toHaveBeenCalled()
+  })
+
+  it('a reset asks about a stored axis beside a camera, which a count does not need', async () => {
+    const h = harness(listing([model('camera-and-axis', { thumb: thumb({ framed: true, axis: 'z', camera: { az: 1, el: 0.2, distR: 3, target: [0, 0, 0] } }) })]))
+    await h.jobs.count(SCOPE)
+    expect(h.posesFor).not.toHaveBeenCalled()
+    await h.jobs.derive('reset', SCOPE)
+    expect(h.posesFor.mock.calls.map((c) => c[0])).toEqual([['/kit/camera-and-axis.stl']])
   })
 })

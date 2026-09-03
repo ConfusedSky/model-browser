@@ -247,9 +247,13 @@ axis, a framing given up from a tile or the viewer — move the reset count by
 into ±1 against the tile's pre-write state and the landed pose through the one
 rule (`resettable`), and the tab shows its derived count plus the change since
 that count landed; the next derivation absorbs the sum, which is where any drift
-from a concurrent writer heals. A count's wave is narrowed to the axis-only
-models, the one shape its rule needs the index for — it may miss a pose-stale
-render the layer has not learned, which the launch's full wave still finds.
+from a concurrent writer heals. The wave is sized to the question: a *count*
+asks the index only about axis-only models, a *reset* launch about every model
+with a stored axis (the pose decides whether the axis goes with the camera), and
+only a *generate* launch about every unowned model, since only generate's
+staleness test reads a pose — pressing the tab's Reset was sixteen requests
+before this. The count may miss a pose-stale render the layer has not learned,
+which a generate launch's full wave still finds.
 
 An enumeration that reports itself incomplete (a root with no snapshot whose walk
 stopped against its budget) is still a job, over what was found; the chip says the

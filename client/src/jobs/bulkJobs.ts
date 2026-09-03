@@ -194,7 +194,7 @@ export class BulkJobs {
    * than a second reading of it.
    */
   async derive(operation: JobOperation, scope: JobScope): Promise<Derivation> {
-    const scan = await this.enumerate(scope)
+    const scan = await this.enumerate(scope, operation)
     return {
       entries: scan.candidates.filter((c) => keeps(operation, c, scan.ao)),
       incomplete: scan.incomplete,
@@ -225,20 +225,27 @@ export class BulkJobs {
    */
   private async enumerate(
     scope: JobScope,
-    purpose: 'derive' | 'count' = 'derive',
+    purpose: JobOperation | 'count',
   ): Promise<{ candidates: JobEntry[]; incomplete: boolean; ao: boolean }> {
     const listing = await this.deps.api.models(scope.path)
     const models = listing.entries.filter((e) => e.kind === 'model')
-    // A *count* waves only over the models whose rule needs a pose it does not
-    // have: an axis alone, which resets exactly when a usable pose replaces it.
+    // Wave only over the models whose rule needs a pose it does not have.
     // Measured on the real library (2026-09-02): 18,737 models, 15,357 with no
-    // pose in the enumeration, so the full wave is sixteen index requests per
-    // opening of the tab for numbers the pose layer mostly already answers.
-    // The cost is honest and small: the generate count can miss a render whose
-    // `posed` is behind for a model the layer has not learned yet; the launch's
-    // derivation still waves in full and finds it.
+    // pose in the enumeration, so a full wave is sixteen index requests — paid
+    // once per opening of the tab and once per press of Reset before Masa
+    // objected. Only *generate* needs the index's opinion of every unowned
+    // model (a render whose `posed` is behind is stale). A *reset* consults a
+    // pose exactly where an axis is stored — that is what decides whether the
+    // axis goes with the camera — and a *count* only where the axis is stored
+    // alone, since a camera makes the model resettable whatever the index says.
+    // The generate count can miss a pose-stale render the layer has not
+    // learned yet; a generate launch's full wave still finds it.
     const needsPose = (e: DirEntry): boolean =>
-      purpose === 'derive' || (e.thumb?.axis !== undefined && e.thumb.camera === undefined)
+      purpose === 'generate'
+        ? true
+        : purpose === 'reset'
+          ? e.thumb?.axis !== undefined
+          : e.thumb?.axis !== undefined && e.thumb.camera === undefined
     // Only the models the enumeration could not answer for. The tree cache's
     // pose layer rides an enumeration as it rides a listing, so asking about a
     // model that already carries one would be asking the library what the index
