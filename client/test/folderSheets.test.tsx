@@ -212,6 +212,26 @@ describe('folder contact sheets', () => {
     expect(peek).toHaveBeenCalledTimes(1)
   })
 
+  it('draws a listing-carried preview and asks the server for nothing', async () => {
+    // The derived annotation (`listing-tree-cache` 6.3/6.8): a dir entry whose
+    // listing already carries `preview` lands it through the same map and
+    // once-per-listing discipline the peek path uses — the delta's "a revisit
+    // is one request" scenario, made literal. The first cell above is the
+    // absent control: no `preview` field, exactly one peek, unchanged.
+    peek.mockResolvedValue(found(4))
+    const annotated: DirListing = {
+      path: '/models',
+      entries: [{ ...dir('a'), preview: found(2) }],
+    }
+    await mountApp('/models', annotated)
+    await intersect(dirTile('/models/a'))
+    await settle()
+    // The carried choice is drawn — two cells, the sheet's own layout rules —
+    // and the peek mock's four-model answer proves no request decided this.
+    expect(peek).not.toHaveBeenCalled()
+    expect(cells('/models/a')).toHaveLength(2)
+  })
+
   it('reuses the map for a tile scrolled away and back inside one listing', async () => {
     peek.mockResolvedValue(found(2))
     await mountApp('/models', ONE_FOLDER)

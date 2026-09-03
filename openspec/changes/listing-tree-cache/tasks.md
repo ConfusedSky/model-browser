@@ -407,6 +407,17 @@
       budget goes, so a single over-budget folder answers zero models and "what was found
       still comes back" would have asserted nothing
 
+- [x] 6.8 The client consumes the carried preview (added 2026-09-02, Masa's find:
+      peeks were still issued for entries whose listing carried `preview` — the
+      annotation landed with no consumer, the reload-affordance gap's twin):
+      `requestPeek` lands `entry.preview` through the same map and
+      once-per-listing discipline instead of calling `/api/peek`; an entry
+      without the field asks exactly as before. Cell in folderSheets.test.tsx
+      ("draws a listing-carried preview and asks the server for nothing" — the
+      four-model peek mock proves no request decided the two-cell sheet);
+      falsified by removing the branch: `expected "spy" to not be called at
+      all, but actually been called 1 times`
+
 ## 7. Tests
 
 - [x] 7.1 Server: cached and walked responses are entry-for-entry identical on an unchanged tree (including ordering and truncation); one cached tree serves several different queries and both settings of the folder-matching option without re-traversing (instrument the walk, do not infer from timing); a second walk opens no archives; adding, removing, and renaming a model is picked up; a present-but-unreadable root invalidates rather than serving; the same tree reached at a different mountpoint under the same library is a **hit**; an unmounted library answers `missing` and leaves the snapshot in place; the on-disk format version invalidates a stale snapshot

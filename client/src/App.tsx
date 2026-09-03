@@ -738,6 +738,18 @@ export default function App() {
           return next
         })
       }
+      // The listing may already carry this folder's choice — the derived
+      // annotation `listing-tree-cache` 6.3 emits from the server's preview
+      // layer (6.8). Landing it here is the whole of the saved round trip:
+      // same map, same once-per-listing discipline, same downstream rendering,
+      // and the delta's "a revisit is one request" scenario made literal. An
+      // entry the layer had nothing for carries no field and asks exactly as
+      // before — absence changes nothing, per the annotation requirement.
+      const carried = asked.find((e) => e.path === path)?.preview
+      if (carried !== undefined) {
+        land(carried)
+        return
+      }
       void api.peek(path).then(land, () => land(NO_PREVIEW))
     },
     [api],
