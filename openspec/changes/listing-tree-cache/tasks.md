@@ -852,6 +852,20 @@
       there. 6.6's "client affordance minimal" half-clause should have cited D6 and did not
       — that is the line to read alongside this one.
 
+- [ ] 6.9c Deferred live check, recorded so it survives the session (2026-09-03): the
+      rapid-flat-toggle stall (empty grid + "Refreshing…" 3–15 s, agent-1's repro,
+      4-of-6 pre-fix against the REAL library) is diagnosed as round-3 G1/G2 and its
+      fix landed in 024c74e/e2b3244 — but the live A/B is unrun: the dev instance was
+      repointed to the 288-kit demo corpus mid-verification, which masks the symptom
+      entirely (clean even pre-fix). Re-run `/tmp/claude-1000/shared/repro-flat-toggle.mjs`
+      (CHROME=…chromium-1228…; needs 5173 up) once the root points back at the real
+      library; expect zero d0-at-15s states
+- [ ] 6.9d Round-3's below-cap cleanups, for the simplify pass beside round 1's list:
+      `previewFor`'s deep copy used as fillAnnotations' existence gate (a has()-style
+      probe would do), and the memo-TTL expression duplicated between `memoisedStatus`
+      and `probeStatus`'s `look()` (drift risk — G4 made them deliberately different
+      in one dimension already: gate is state-based, probe is age-based)
+
 ## 8. Verification
 
 - [x] 8.1 `bun run typecheck` and `bun run test` pass across workspaces
