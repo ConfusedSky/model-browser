@@ -57,8 +57,10 @@
       click, About and credits links — dismissed once per browser via localStorage; a full
       About page carrying license/provenance, corpus alterations and the print warning,
       the desktop-vs-demo differences, a five-line how-to, links, privacy, and a technical
-      section including posing. Ready to draft; the root's flat-view question stays open
-      inside it
+      section including posing. Root opens as kit tiles (Masa, 2026-09-03). The
+      banner also carries a source link (repo is public); the how-to names Ctrl+F alone
+      (it replaces browser find) and About notes Shift+right-click for the browser menu;
+      the chips get a bake-time test asserting each still returns a hit. Ready to draft
 - [ ] 1.6 the context-menu actions — Download replacing Open-in/Open-with, Copy path
       becoming Copy link. `native-context-menu-bypass` **archived 2026-09-03** (`e41a06a`)
       having MODIFIED *A context menu on grid tiles* — no ordering to declare, but rederive
@@ -93,9 +95,10 @@
 - [x] 2.4 Domain (item 6): on the critical path for TLS and the configured-origin guard —
       1.3 cannot name its allowed origin without it
       — **`masamaeda.com`** (Masa, 2026-09-02, recorded on the item the same day
-      with the live TXT-record proof of control). Expires 2026-11-12 — auto-renew
-      confirmation is the caveat carried on the item; exact hostname (apex vs
-      subdomain) is 1.3's call
+      with the live TXT-record proof of control). Expires 2026-11-12; **auto-renew
+      confirmed by Masa 2026-09-03**, so the caveat this line carried is closed and
+      the decision is unconditional. Hostname settled as `models.masamaeda.com`
+      (Masa, 2026-09-02), which is `public-deployment`'s configured origin
 - [x] 2.5 Ownership (item 7): this session owns the demo proposal and
       pose-for-every-model — Masa, 2026-08-29, the other session closed. Recorded on the
       item the same day

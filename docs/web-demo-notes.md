@@ -255,8 +255,9 @@ own origin"; only its body hardcodes loopback.
    2026-09-02" from the Namecheap dashboard; it answered from the authoritative
    `registrar-servers.com` nameservers and Google's public resolver within
    minutes; record deletable once read). Registration: Namecheap since
-   2019-11-12, **expires 2026-11-12 — confirm auto-renew before go-live**, the
-   one caveat on this decision. **Hostname decided 2026-09-02 (Masa):
+   2019-11-12, expires 2026-11-12 — **auto-renew confirmed by Masa 2026-09-03, so
+   this decision now carries no caveat.** (The confirmation is a Namecheap dashboard
+   fact: Masa's word, not something a session can verify from here.) **Hostname decided 2026-09-02 (Masa):
    `models.masamaeda.com`** — the subdomain this row called the easy path. The
    apex stays bare; the only records today are a stale `www` CNAME to a dead
    Netlify site (cert mismatch, 404) that can be cleaned up whenever. This is
