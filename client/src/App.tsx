@@ -3020,6 +3020,7 @@ export default function App() {
           onConfirm={() => jobs.confirm()}
           onCancel={() => jobs.cancel()}
           onDismiss={() => jobs.dismiss()}
+          viewOpen={viewer !== null}
         />
       )}
       {/* Corner pill: the SHIPPED ssao preference. The experimental picker it

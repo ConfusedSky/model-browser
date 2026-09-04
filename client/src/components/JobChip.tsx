@@ -18,10 +18,14 @@ export const WAITING_AFTER_MS = 1500
  * invisibly. One chip whichever launcher started the job — a container's menu
  * entry or the library tab — because there is only ever one job.
  *
- * **Pure props.** It reads no store and holds no state: everything on screen is
- * a field of `JobState`, and every button is one of the runner's four verbs
- * handed down. That is what lets the runner's cells assert counters without a
- * DOM and this component's assert copy without a runner.
+ * **Props, no store.** It reads no store and makes no request: every number on
+ * screen is a field of `JobState`, and every button is one of the runner's four
+ * verbs handed down. That is what lets the runner's cells assert counters
+ * without a DOM and this component's assert copy without a runner. The one
+ * word that is not a field is "waiting behind what you’re looking at": a wait
+ * the runner reports (`JobState.waiting`) or a view App reports (`viewOpen`),
+ * filtered through this component's own clock so the moment every entry waits
+ * says nothing (5.2).
  *
  * *Dismiss is not Cancel* (D2): it hides the chip and the job runs on. They are
  * two buttons for a reason, and the × never reaches `onCancel`.
@@ -31,6 +35,7 @@ export default function JobChip({
   onConfirm,
   onCancel,
   onDismiss,
+  viewOpen = false,
 }: {
   state: JobState
   /** Reset's consent (D5) — pressed only from the `confirming` phase. */
@@ -38,12 +43,20 @@ export default function JobChip({
   onCancel: () => void
   /** Hide the chip. Never a cancellation. */
   onDismiss: () => void
+  /**
+   * A lightbox or orbit overlay is open. The render queue is suspended for as
+   * long as it is, and an entry that already *started* waits inside its own
+   * `whenResumed()` gates where the runner's `waiting` cannot see it — the
+   * one stall a user is most likely to cause. App knows the view; the runner
+   * does not.
+   */
+  viewOpen?: boolean
 }) {
   // "Waiting" is time-filtered, not read raw: `waiting` flips true on every
   // push and false as it starts, so only a wait that outlasts the threshold
   // is worth a word.
   const [stalled, setStalled] = useState(false)
-  const waiting = state.phase === 'running' && state.waiting
+  const waiting = state.phase === 'running' && (state.waiting || viewOpen)
   useEffect(() => {
     if (!waiting) {
       setStalled(false)

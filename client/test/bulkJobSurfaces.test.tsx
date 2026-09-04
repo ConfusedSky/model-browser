@@ -29,6 +29,7 @@ import {
   tiles,
   unmountApp,
 } from './appHarness'
+import { resetLookupQueueForTests } from '../src/hooks/useThumbnails'
 import { JOB_BUSY } from '../src/lib/entryActions'
 import { RIG_VERSION, THUMB_LIGHTING } from '../src/three/renderer'
 
@@ -148,6 +149,10 @@ function holdRenders(): () => void {
 }
 
 beforeEach(() => {
+  // A lookup one cell leaves pending would close the far gate for the next
+  // cell's pinned-far job — and after `WAITING_AFTER_MS` the chip would add a
+  // word to sentences these cells match exactly (client/test/CLAUDE.md).
+  resetLookupQueueForTests()
   // The PUT's echo, which the render path reads back as the entry's new
   // generation. The harness default answers `{}`, restored on the way out.
   putThumb.mockResolvedValue({ gen: 2 })

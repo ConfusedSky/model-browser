@@ -96,6 +96,10 @@ not this capability's.
 - **WHEN** the user invokes a reset over a scope holding stored framings
 - **THEN** a confirmation states the count before anything is discarded, and cancelling it discards nothing
 
+#### Scenario: A held job says so
+- **WHEN** a generate job's next entry has waited more than a moment behind what is on screen — nearer renders, pending lookups, or an open viewer
+- **THEN** the chip says it is waiting behind what the user is looking at, and stops saying so the moment the entry runs
+
 #### Scenario: The chip outlives the folder that launched it
 - **WHEN** the user launches a subtree job from a context menu and navigates elsewhere
 - **THEN** the job continues, and the chip still shows its progress and offers cancel

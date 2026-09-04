@@ -86,8 +86,12 @@ export interface JobState {
    * looking at — and behind the far gate while nearer lookups are pending.
    * Seen live at a 200-folder root (2026-09-03): a job sat at "0 of 96" for
    * over twelve seconds with nothing wrong, and the chip could not say why.
-   * This is the fact the chip's "waiting behind what you're looking at" reads.
-   * Never true for a reset, which sends its writes directly.
+   * This is one of the two facts the chip's "waiting behind what you're
+   * looking at" reads; the other is App's — an open lightbox or orbit overlay
+   * suspends the queue, and an entry that already started then waits inside
+   * the core's own `whenResumed()` gates, which this flag cannot see (it went
+   * false the moment the callback began). Never true for a reset, which sends
+   * its writes directly.
    */
   waiting: boolean
   /** The enumeration ran out of budget — this job covers what was found, and

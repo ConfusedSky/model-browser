@@ -64,8 +64,9 @@ Bands solve interactive preemption, not bulk-vs-bulk: two interleaved bulk jobs
 double disk-head contention and make progress meaningless. One job runs at a
 time; launching another surfaces the running job's chip (cancel it to proceed).
 The chip is app-level — it survives navigation, shows operation, scope,
-done/total/failed, and Cancel — and is the same UI whichever launcher started
-the job. It is dismissible; dismissing hides it without cancelling.
+done/total/failed, and Cancel, and since 5.2 says when its next entry has waited
+more than a moment behind what is on screen — and is the same UI whichever
+launcher started the job. It is dismissible; dismissing hides it without cancelling.
 
 ### D3: Reset is the existing discard, fanned out — and the pixels go with it (revised 2026-09-02)
 

@@ -330,9 +330,10 @@
       remainder. **Two findings:** (a) at the root listing — 200 folder tiles, each a
       contact sheet — a generate job made **no progress at all for over 12 s** and
       issued no lookup. Attributed at the time to the far gate alone; read against the
-      queue afterwards (5.2), it is rank first — a far-pinned entry loses to every sheet
-      cell the root keeps queueing — and the gate second, whose hold expires. The same
-      job raced once the listing was small. That is 5.2's scenario, resolved as copy;
+      queue afterwards (5.2), it is both — rank, since a far-pinned entry loses to every
+      sheet cell render the root keeps queueing, and the gate, whose contiguous-hold
+      bound resets on every open reading. The same job raced once the listing was
+      small. That is 5.2's scenario, resolved as copy;
       (b) a full page reload ends the job (by design, D1 — resume is relaunch), which
       the chip does not get to say; the first attempt at (a) was lost that way.
       Before this run the line read: **Not run (2026-09-02).** A dev instance from another session held 3177/5173
@@ -374,16 +375,28 @@
       afterwards, that is the design working, twice over: the job's entry is pinned to
       `far`, so it loses to every sheet cell render the root keeps queueing (the spec's
       "on-screen, near, and unreported work always renders first"), and the far gate
-      holds it besides while sheet lookups are pending — and `farAllowed` expires that
-      hold after `FAR_GATE_MAX_MS`, so the gate alone never starves it. No exemption,
-      then: exempting bulk work would put a mesh read ahead of what the user is looking
-      at. What was owed was the word — landed 2026-09-03: `JobState.waiting` (true from
+      holds it besides while sheet lookups are pending. **The gate's bound is a
+      contiguous hold** — `releaseHold` forgets the clock on every open reading, from
+      `farAllowed` and from `poke` — so under lookups that drain and refill, gate plus
+      nearer work can starve a far entry indefinitely (the reviewer measured one open
+      flicker at 8.9 s costing a further 4.9 s; this line's first version said the gate
+      alone never starves it, which was wrong). What runs a far entry when nothing
+      nearer is pending is the open reading's own `poke → releaseHold → pump`, not the
+      expiry. No exemption, then: exempting bulk work would put a mesh read ahead of
+      what the user is looking at, and the starvation is the priority the spec asks
+      for. What was owed was the word — landed 2026-09-03: `JobState.waiting` (true from
       push to start, generate only) and the chip's "· waiting behind what you’re looking
       at" after `WAITING_AFTER_MS` of it, time-filtered so the wait every entry pays
-      says nothing. Cells: the runner reports the wait under a suspended queue and
-      clears it on resume, a reset never waits (`bulkJobs.test.ts`); the chip says it
-      only after the threshold and drops it when the entry starts, and short waits do
-      not add up (`jobChip.test.tsx`); both falsified. As drafted:
+      says nothing — and, after the fresh review, an open lightbox or orbit overlay
+      (`viewOpen`, App's word): the queue is suspended for as long as the view is, and
+      an entry that already started waits inside the core's `whenResumed()` gates where
+      the runner's flag cannot see it. Cells: the runner reports the wait under a
+      suspended queue and clears it on resume, a reset never waits (`bulkJobs.test.ts`);
+      the chip says it only after the threshold, drops it when the entry starts, reads
+      an open view as a wait, and short waits do not add up (`jobChip.test.tsx`); the
+      surfaces file resets the lookup queue per cell so a leftover lookup cannot put the
+      word into its exact-text sentences. A scenario for the word went into the
+      capability spec directly (the change was archived). As drafted:
       Chip copy under the far gate: with `thumbnail-image-serving` D5 landed, a
       generate job holds while the user browses (1.2's accepted stall). The chip's
       "N of M" does not move for up to `FAR_GATE_MAX_MS` and reads as hung; say

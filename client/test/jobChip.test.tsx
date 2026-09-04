@@ -11,6 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import JobChip, { WAITING_AFTER_MS } from '../src/components/JobChip'
 import type { JobState } from '../src/jobs/bulkJobs'
 
+;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+
 const running = (waiting: boolean): JobState => ({
   runId: 1,
   operation: 'generate',
@@ -30,9 +32,11 @@ const running = (waiting: boolean): JobState => ({
 let container: HTMLDivElement
 let root: Root
 const text = (): string => container.querySelector('p')?.textContent ?? ''
-function show(state: JobState): void {
+function show(state: JobState, viewOpen = false): void {
   act(() => {
-    root.render(<JobChip state={state} onConfirm={() => {}} onCancel={() => {}} onDismiss={() => {}} />)
+    root.render(
+      <JobChip state={state} viewOpen={viewOpen} onConfirm={() => {}} onCancel={() => {}} onDismiss={() => {}} />,
+    )
   })
 }
 
@@ -61,6 +65,16 @@ describe('the chip under a held entry', () => {
     })
     expect(text()).toBe('Generating thumbnails beneath kit: 0 of 96 · waiting behind what you’re looking at')
     show(running(false))
+    expect(text()).toBe('Generating thumbnails beneath kit: 0 of 96')
+  })
+
+  it('reads an open view as a wait too — the entry that started is held inside the core', () => {
+    show(running(false), true)
+    act(() => {
+      vi.advanceTimersByTime(WAITING_AFTER_MS)
+    })
+    expect(text()).toBe('Generating thumbnails beneath kit: 0 of 96 · waiting behind what you’re looking at')
+    show(running(false), false)
     expect(text()).toBe('Generating thumbnails beneath kit: 0 of 96')
   })
 
