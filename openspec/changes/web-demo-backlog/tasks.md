@@ -44,8 +44,8 @@
       **Drafted 2026-09-02 as `public-deployment`** (commits `abe4fc3`, `5dd6096`,
       `bd6b982`: two review rounds applied), which is the first of what is now six changes
       — the others are 1.4–1.8 below. Still open and carried as design questions, not
-      blockers: the landing page's contents (2.2), and the origin/CDN and host choices
-      that gate 3.3
+      blockers: the origin/CDN and host choices that gate 3.3. The landing page's
+      contents, open here at drafting, were decided 2026-09-03 (notes item 4, line 1.5)
 
 - [ ] 1.4 the deployment's own infrastructure — reverse proxy, TLS, the container
       definition, and how `deploy/demo/config.json` reaches the box (Masa, 2026-09-03: its
@@ -64,7 +64,9 @@
 - [ ] 1.6 the context-menu actions — Download replacing Open-in/Open-with, Copy path
       becoming Copy link. `native-context-menu-bypass` **archived 2026-09-03** (`e41a06a`)
       having MODIFIED *A context menu on grid tiles* — no ordering to declare, but rederive
-      against the applied spec rather than against what that requirement said before
+      against the applied spec rather than against what that requirement said before.
+      Carries the print warning: downloads are decimated display copies, print from the
+      source — at the Download action itself, not only on the About page (notes item 4)
 - [ ] 1.7 the corpus bake — preview paths attached to dir entries (the decided shape);
       rides `listing-tree-cache` and `bulk-thumbnail-jobs`
 - [ ] 1.8 the credits page — go-live gate 3.2, and **standing alone** rather than riding
@@ -85,8 +87,8 @@
       recruiter — banner, About beside credits, or nothing
       — **a landing page exists** (Masa, 2026-09-01, recorded on the item the same
       day): not the bare grid alone. Contents (banner vs About, copy, the flat-view
-      sub-question) deliberately deferred — 1.3 carries them as an open design
-      question, not a blocker
+      sub-question) were deferred at the time and **decided 2026-09-03** — recorded on
+      item 4 and line 1.5, not carried by 1.3
 - [x] 2.3 Names (item 5): rename folders at corpus build (re-embed) or display names from
       the store (near-free once 1.1 exists; ids stay in paths)
       — **display names from the store** (Masa, 2026-08-31, recorded on the item the same

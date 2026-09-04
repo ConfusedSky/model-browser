@@ -139,8 +139,8 @@ origins, since one deployment may answer more than one name.
 sides; whichever lands second adds that field. Nothing here touches the requirements
 `search-cancellation` or `thumbnail-image-serving` add.
 
-**Out of scope**, each its own change: the landing page (its first task is deciding its
-contents), the context-menu actions (Download replacing Open-in/Open-with, Copy path
+**Out of scope**, each its own change: the landing page (contents decided 2026-09-03, notes
+item 4), the context-menu actions (Download replacing Open-in/Open-with, Copy path
 becoming Copy link), the corpus bake, and the credits page. The credits page is
 go-live gate 3.2 and CC-BY requires displayed attribution; it wants a decision on
 whether it belongs with the landing page — one visitor-facing page change with one set
