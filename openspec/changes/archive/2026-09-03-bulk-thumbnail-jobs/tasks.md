@@ -311,7 +311,31 @@
       §2/§4): client 770 passed, server 617 passed, typecheck 0 in both;
       `indexContract.test.ts`'s live-index cell flaked once in the full run and passed
       alone (the known flake in `server/test/CLAUDE.md`)
-- [ ] 4.2 **Not run (2026-09-02).** A dev instance from another session held 3177/5173
+- [x] 4.2 **Run 2026-09-03** (this session, through Masa's Chrome against the dev instance,
+      which by then served the 2,254-model test library at
+      `~/Documents/tests/test-models/miniatures/deduplicated`, not the 18k one):
+      **library tab** — opening it made exactly one `/api/models` and no pose request,
+      "Generate 1389 missing thumbnails / Reset 6 framings"; **hand delta** — an orbit
+      persisted from the lightbox moved it to "Reset 7" with no new enumeration;
+      **subtree reset** — "Reset framings beneath" on that folder asked "Reset 1 framings
+      beneath …?" (exactly the orbit just made), Reset wrote once, chip "Reset 1 of 1",
+      the entry then answered `miss` with the camera gone and the axis kept (no usable
+      pose), both counts re-derived ("Reset 6", "Generate 1390" — the deleted render now
+      counts as missing); **chip survives navigation** — a generate over a 113-model kit
+      launched from the root ran on while browsing into another folder, whose own
+      uncached tiles were looked up meanwhile, and ended "Generated 95 of 95"; the chip
+      sits clear of the ssao pill; **cancel + relaunch** — whole-library generate from
+      the tab: "Generating thumbnails in the library: 5 of 1140", Cancel → "Cancelled
+      after 15 of 1140", the button re-derived to 1125, relaunch → "… 0 of 1125", the
+      remainder. **Two findings:** (a) at the root listing — 200 folder tiles, each a
+      contact sheet — a generate job made **no progress at all for over 12 s** and
+      issued no lookup: the far gate held its pinned-far entry while sheet lookups kept
+      re-closing it, and the bound is a contiguous hold. The same job raced once the
+      listing was small. That is 5.2's scenario, and it is not cosmetic at a root this
+      wide — worth a gate exemption or a bulk-aware bound, not only the "paused" copy;
+      (b) a full page reload ends the job (by design, D1 — resume is relaunch), which
+      the chip does not get to say; the first attempt at (a) was lost that way.
+      Before this run the line read: **Not run (2026-09-02).** A dev instance from another session held 3177/5173
       throughout, serving main rather than this branch, and stopping it was not this
       session's call. What 4.2 still owes, unchanged below; two things to look at first
       when it runs: the chip against the occlusion pill at `bottom-14`, and the library
@@ -345,7 +369,12 @@
       would collide at archive (design risks). Whichever change lands second does the
       rebase; the cells in `entryActions.test.ts` and `bulkJobSurfaces.test.tsx` that
       withhold under `thumbWrites: false` move to the new field with it
-- [ ] 5.2 Chip copy under the far gate: with `thumbnail-image-serving` D5 landed, a
+- [ ] 5.2 **Seen live 2026-09-03 (4.2): at a 200-folder root listing a generate job sat
+      at "0 of 96" for over 12 s with no lookup issued — sheet lookups kept re-closing
+      the gate and its bound measures a contiguous hold.** More than copy is owed: a
+      bulk job needs either an exemption from the gate or a bound that counts total
+      held time. Then the copy. As drafted:
+      Chip copy under the far gate: with `thumbnail-image-serving` D5 landed, a
       generate job holds while the user browses (1.2's accepted stall). The chip's
       "N of M" does not move for up to `FAR_GATE_MAX_MS` and reads as hung; say
       "paused while you browse" when the queue reports the gate closed — a small
