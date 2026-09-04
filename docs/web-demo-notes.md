@@ -240,7 +240,56 @@ own origin"; only its body hardcodes loopback.
    first screen is not the bare tile grid alone. Its contents (banner vs About
    beside credits, the copy, the flat-view question above) are deliberately
    deferred; the demo-mode change (backlog 1.3) carries them as an open design
-   question and does not block on them structurally.
+   question and does not block on them structurally. **Contents resolved 2026-09-03 (Masa, converging with the other
+   session's suggestion): a slim banner over the grid, not a page before it** — one
+   sentence saying what this is, plus example-query chips that *run* the query on click
+   (each verified against the live index before it becomes copy), an About link and the
+   credits link. **Dismissed once per browser** (localStorage, the visitor-orbit
+   precedent), with About reachable from a persistent spot afterwards. Everything else
+   goes on the About page: license and provenance (CC-BY, not Masa's models, per-model
+   attribution in the lightbox); how the corpus was altered (dedup, non-model drops,
+   vertex-clustering decimation with small meshes passed through byte-identical, display
+   names from the store) and that downloads are display copies — print from the source;
+   what differs from the desktop app (the `public-deployment` list: Download replaces
+   Open-in/Open-with, Copy path is Copy link, chat tab withheld, thumbnails baked and
+   read-only, orbits saved per browser, host details hidden); a five-line how-to (drag a
+   tile to orbit, Enter/Space opens, Ctrl-F narrows by name, Escape closes, Shift-F10 or
+   the menu key for tile actions, the AO toggle); links (source, corpus repo, contact,
+   credits, where to report a problem); a privacy line (no accounts, localStorage only);
+   a WebGL/desktop note; and a **technical section** for the recruiter audience — stack,
+   semantic search, and **posing** (Masa: harder than getting search right; invisible
+   when it works). The posing blurb describes mini-classify's three tiers as its
+   write-ups record them: flat-base geometry with a best/runner-up confidence ratio,
+   then a SigLIP ensemble scoring six rendered candidate-up tiles against text prompts
+   alongside the geometry vote, then a vision-language arbiter for the hard ~20% only;
+   the front view chosen by front/back prompts in the same embedding space; the pose
+   stored as data so listings, contact sheets and search all apply it and an orbit
+   overrides without discarding it. **No accuracy figure** — the 2026-08-12 write-up
+   there says in bold not to quote the tuned number, the holdout is 21 models, and a
+   figure would have to be re-run before publishing. The print warning also belongs at
+   the Download action itself (1.6), not on About alone. **Root opens as kit tiles** (Masa, 2026-09-03): the
+   contact-sheet listing, not flat view — the chips already give the model-first flat
+   grid on click, since a search result is one, so the two views keep different jobs.
+   The change is backlog 1.5; nothing in item 4 is open.
+   **Relayed from another session 2026-09-03 and verified against the code before being
+   kept** (the one claim that did not hold is noted last): (i) **Ctrl+F is the one
+   keybinding the copy must mention** — the app binds Ctrl/Cmd+F on window keydown to the
+   narrow-by-name bar (except while typing in a query or path field), so a visitor's
+   find-in-page becomes the app's find; Masa: Escape, Enter and Space are what everyone
+   expects and need no line, Shift+F10 is accessibility, Tab lives inside the lightbox.
+   (ii) **Shift+right-click** is left to the browser's own menu (`nativeMenuRequested`,
+   `client/src/lib/gesture.ts`); on the web build the app's menu offers only Download and
+   Copy link, so the bypass earns a line on About. (iii) **The repo is public**
+   (`ConfusedSky/model-browser`, confirmed with `gh repo view`) — a source link sits on
+   the banner itself beside About and credits, the strongest single item for the
+   audience. (iv) **Chips carry a bake-time test**: each chip query must return at least
+   one hit against the deployed index or the bake fails — a dead chip is the worst first
+   impression; a 1.5 task, not copy. (v) Banner-plus-About, not a dismissible splash —
+   already the shape above. **Not kept: "warm the index on page load."** mini-classify
+   loads SigLIP once at process start and stays resident (its `docs/api/surface.md`); on
+   the decided always-on VM the ~16 s lands at deploy, never on a visitor, and `App.tsx`
+   already re-reads index status on mount and every 2 s while warming, so a restart
+   under a visitor recovers without a reload. Nothing to add.
 5. **Names.** Rename folders at corpus build (re-embed — needed anyway) or
    display-name from the store (near-free if #1 is sidecars; ids stay in paths).
    **Resolved 2026-08-31 (Masa): display names from the store.** Near-free now
