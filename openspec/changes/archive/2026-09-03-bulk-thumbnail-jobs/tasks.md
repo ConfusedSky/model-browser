@@ -329,10 +329,10 @@
       after 15 of 1140", the button re-derived to 1125, relaunch → "… 0 of 1125", the
       remainder. **Two findings:** (a) at the root listing — 200 folder tiles, each a
       contact sheet — a generate job made **no progress at all for over 12 s** and
-      issued no lookup: the far gate held its pinned-far entry while sheet lookups kept
-      re-closing it, and the bound is a contiguous hold. The same job raced once the
-      listing was small. That is 5.2's scenario, and it is not cosmetic at a root this
-      wide — worth a gate exemption or a bulk-aware bound, not only the "paused" copy;
+      issued no lookup. Attributed at the time to the far gate alone; read against the
+      queue afterwards (5.2), it is rank first — a far-pinned entry loses to every sheet
+      cell the root keeps queueing — and the gate second, whose hold expires. The same
+      job raced once the listing was small. That is 5.2's scenario, resolved as copy;
       (b) a full page reload ends the job (by design, D1 — resume is relaunch), which
       the chip does not get to say; the first attempt at (a) was lost that way.
       Before this run the line read: **Not run (2026-09-02).** A dev instance from another session held 3177/5173
@@ -369,11 +369,21 @@
       would collide at archive (design risks). Whichever change lands second does the
       rebase; the cells in `entryActions.test.ts` and `bulkJobSurfaces.test.tsx` that
       withhold under `thumbWrites: false` move to the new field with it
-- [ ] 5.2 **Seen live 2026-09-03 (4.2): at a 200-folder root listing a generate job sat
-      at "0 of 96" for over 12 s with no lookup issued — sheet lookups kept re-closing
-      the gate and its bound measures a contiguous hold.** More than copy is owed: a
-      bulk job needs either an exemption from the gate or a bound that counts total
-      held time. Then the copy. As drafted:
+- [x] 5.2 **Seen live 2026-09-03 (4.2): at a 200-folder root listing a generate job sat
+      at "0 of 96" for over 12 s with no lookup issued.** Read against `RenderQueue.take`
+      afterwards, that is the design working, twice over: the job's entry is pinned to
+      `far`, so it loses to every sheet cell render the root keeps queueing (the spec's
+      "on-screen, near, and unreported work always renders first"), and the far gate
+      holds it besides while sheet lookups are pending — and `farAllowed` expires that
+      hold after `FAR_GATE_MAX_MS`, so the gate alone never starves it. No exemption,
+      then: exempting bulk work would put a mesh read ahead of what the user is looking
+      at. What was owed was the word — landed 2026-09-03: `JobState.waiting` (true from
+      push to start, generate only) and the chip's "· waiting behind what you’re looking
+      at" after `WAITING_AFTER_MS` of it, time-filtered so the wait every entry pays
+      says nothing. Cells: the runner reports the wait under a suspended queue and
+      clears it on resume, a reset never waits (`bulkJobs.test.ts`); the chip says it
+      only after the threshold and drops it when the entry starts, and short waits do
+      not add up (`jobChip.test.tsx`); both falsified. As drafted:
       Chip copy under the far gate: with `thumbnail-image-serving` D5 landed, a
       generate job holds while the user browses (1.2's accepted stall). The chip's
       "N of M" does not move for up to `FAR_GATE_MAX_MS` and reads as hung; say

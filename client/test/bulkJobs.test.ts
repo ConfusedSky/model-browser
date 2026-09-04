@@ -738,3 +738,26 @@ describe('what a job reports it wrote', () => {
     expect(h.putThumb).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('what the chip can say about a wait', () => {
+  it('reports an entry pushed but not started, and clears it the moment it runs', async () => {
+    const h = harness(listing([model('a'), model('b')]))
+    h.queue.suspend()
+    h.jobs.launch('generate', SCOPE)
+    await settle()
+    expect(h.jobs.state).toMatchObject({ phase: 'running', waiting: true, done: 0 })
+    h.queue.resume()
+    await settle()
+    expect(h.jobs.state).toMatchObject({ phase: 'done', waiting: false, done: 2 })
+  })
+
+  it('never reports a reset as waiting: its writes go nowhere near the queue', async () => {
+    const h = harness(listing([model('a', { thumb: thumb({ framed: true, camera: CAMERA }) })]))
+    h.queue.suspend()
+    h.jobs.launch('reset', SCOPE)
+    await settle()
+    h.jobs.confirm()
+    await settle()
+    expect(h.jobs.state).toMatchObject({ phase: 'done', waiting: false, wrote: 1 })
+  })
+})

@@ -1,4 +1,13 @@
+import { useEffect, useState } from 'react'
 import type { JobState } from '../jobs/bulkJobs'
+
+/**
+ * How long a pushed entry may wait to start before the chip says it is
+ * waiting. Every entry waits a little — the queue is two wide — and a
+ * counter that flickered "waiting" between entries would say nothing; a job
+ * genuinely behind the view waits whole seconds (`bulk-thumbnail-jobs` 5.2).
+ */
+export const WAITING_AFTER_MS = 1500
 
 /**
  * A bulk job's whole UI (`bulk-thumbnail-jobs` 2.3, D2).
@@ -30,6 +39,19 @@ export default function JobChip({
   /** Hide the chip. Never a cancellation. */
   onDismiss: () => void
 }) {
+  // "Waiting" is time-filtered, not read raw: `waiting` flips true on every
+  // push and false as it starts, so only a wait that outlasts the threshold
+  // is worth a word.
+  const [stalled, setStalled] = useState(false)
+  const waiting = state.phase === 'running' && state.waiting
+  useEffect(() => {
+    if (!waiting) {
+      setStalled(false)
+      return
+    }
+    const timer = setTimeout(() => setStalled(true), WAITING_AFTER_MS)
+    return () => clearTimeout(timer)
+  }, [waiting])
   return (
     <div
       role="status"
@@ -38,7 +60,10 @@ export default function JobChip({
       // left-3` in App): the two would otherwise overlap exactly, the pill on top.
       className="fixed bottom-14 left-3 z-20 flex max-w-sm items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900/95 px-3 py-2 text-xs text-zinc-200"
     >
-      <p className="min-w-0 flex-1">{sentence(state)}</p>
+      <p className="min-w-0 flex-1">
+        {sentence(state)}
+        {stalled && ' · waiting behind what you’re looking at'}
+      </p>
       {state.phase === 'confirming' && (
         <button type="button" onClick={onConfirm} className={ACTION_CLASS}>
           Reset

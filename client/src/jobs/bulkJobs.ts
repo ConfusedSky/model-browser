@@ -80,6 +80,16 @@ export interface JobState {
    * "pause" by D1; the next derivation absorbs it.
    */
   settled: boolean
+  /**
+   * A generate entry has been handed to the render queue and has not started:
+   * it is pinned to the far band, so it waits behind everything the user is
+   * looking at — and behind the far gate while nearer lookups are pending.
+   * Seen live at a 200-folder root (2026-09-03): a job sat at "0 of 96" for
+   * over twelve seconds with nothing wrong, and the chip could not say why.
+   * This is the fact the chip's "waiting behind what you're looking at" reads.
+   * Never true for a reset, which sends its writes directly.
+   */
+  waiting: boolean
   /** The enumeration ran out of budget — this job covers what was found, and
    *  the chip says the scope was cut. */
   incomplete: boolean
@@ -337,6 +347,7 @@ export class BulkJobs {
       dismissed: false,
       wrote: 0,
       settled: false,
+      waiting: false,
     }
     this.notify()
     void this.run(token, operation)
@@ -457,8 +468,11 @@ export class BulkJobs {
       if (token.cancelled) break
       if (operation === 'generate') {
         await new Promise<void>((resolve) => {
+          // Pushed, not started: the far band and the far gate decide when.
+          this.patchRun(token, { waiting: true })
           this.deps.queue.push(
             async () => {
+              this.patchRun(token, { waiting: false })
               try {
                 const outcome = await renderEntryThumbnail(job.entry, this.deps, {
                   discardFraming: false,
