@@ -52,8 +52,13 @@
       own ticket, separable from `public-deployment` and **writable and testable earlier**,
       since it depends on nothing in the app). Not the app's configuration, which
       `public-deployment` owns
-- [ ] 1.5 the landing page — its first task is Masa deciding the contents (2.2 settled
-      only that one exists)
+- [ ] 1.5 the landing page — contents **decided 2026-09-03** (Masa; recorded on notes item 4
+      the same day): a slim banner over the grid — one sentence, query chips that run on
+      click, About and credits links — dismissed once per browser via localStorage; a full
+      About page carrying license/provenance, corpus alterations and the print warning,
+      the desktop-vs-demo differences, a five-line how-to, links, privacy, and a technical
+      section including posing. Ready to draft; the root's flat-view question stays open
+      inside it
 - [ ] 1.6 the context-menu actions — Download replacing Open-in/Open-with, Copy path
       becoming Copy link. `native-context-menu-bypass` **archived 2026-09-03** (`e41a06a`)
       having MODIFIED *A context menu on grid tiles* — no ordering to declare, but rederive
