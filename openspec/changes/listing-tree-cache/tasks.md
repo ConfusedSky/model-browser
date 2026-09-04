@@ -231,6 +231,9 @@
 
 ## 6. Derived layers and explicit freshness (added 2026-09-02 — see design D7–D9; build after §4, the layers hang off the snapshot and its revalidation)
 
+      — archived open by Masa's instruction (2026-09-03): the affordance has been on
+      screen through the day's live sessions without complaint, and the freeze can
+      happen from the running app whenever; the pixels were not formally judged
 - [x] 6.1 Pose and preview-choice layers beside the snapshot module: per-path entries
       keyed against the tree plus the index generation and pose version; populated when
       the server's semantic proxy answers (poses) and when a peek derives a choice
