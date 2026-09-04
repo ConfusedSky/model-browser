@@ -37,7 +37,8 @@
 > hook/queue seams (28a9393, c2270f3); Stage B — the runner and the per-entry ops
 > (4d3d5c1); Stage C — the surfaces (f47f3d0); the coordinator's review fixes
 > (652b05f); then a merge of main, which had landed `thumbnail-image-serving` §2/§4 in
-> the same files. Evidence per task is on its line. **4.2 is not run** — see its note.
+> the same files. Evidence per task is on its line. 4.2 ran 2026-09-03 against the test
+> library (its note); 5.1 waits on `public-deployment`; 5.2 landed after it.
 > `SidePanel` is also touched by `public-deployment` (its chat-tab fallback): additive on
 > both sides, no hard ordering — whichever lands second rebases its tab list, as that
 > change's tasks declare too. Its `maintenance` field is what these surfaces gate on
