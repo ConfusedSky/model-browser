@@ -600,8 +600,15 @@ All re-runnable; say whose run when quoting.
   **`bulk-thumbnail-jobs`** (drafted: generate + reset-framings jobs, two
   launchers, the `library` side-panel tab, re-derivable job semantics — its
   D1–D6). Nothing was added to `thumbnail-sweep-priority`: its 2026-09-01
-  rebase is the argument for stacking on it, not growing it. What stays
-  *here* because no change owns it yet:
+  rebase is the argument for stacking on it, not growing it. The trip the
+  click itself spends — listing, then thumbnails, serially — became
+  **`hover-prefetch-listings`** (drafted 2026-09-03, **parked until
+  `public-deployment` lands**: folder and zip tiles warm their listing after
+  the model tiles' linger, the click lands from it with no request, and the
+  first screenful of already-rendered thumbnails is fetched into the browser
+  cache behind the hover; invisible locally at 5–8 ms per listing, which is
+  why it waits for a hosted origin to measure against). What stays *here*
+  because no change owns it yet:
   - **GraphQL declined** (Masa floated it; settled 2026-09-02): one lockstep
     client behind the ApiClient seam (D1) buys none of its flexibility, and
     uncacheable per-query POSTs fight the CDN plan — batching and
