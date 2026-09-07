@@ -133,6 +133,11 @@ gone — the shape an interrupted upgrade leaves, which no per-entry loop visits
 reclaims an existing library; the per-site removals above are for what happens between
 those runs. What is deliberately *not* added is a migration pass of its own.
 
+One gap is accepted: that name filter runs over the per-library directory, so an orphan
+with no sidecar left in the *flat* legacy top is unreachable. Reaching it needs an
+interrupted pre-library migration underneath an interrupted upgrade, and the flat
+directory is on its way out; the cost of walking it on every start is not worth that.
+
 (There is no `clear` method on `ThumbCache`; an earlier draft of this decision cited
 one. `clearRecipe` is a label helper, not a cache-wide delete.)
 
@@ -161,6 +166,13 @@ travels, and `ThumbCache.put` already treats an orientation write without pixels
 this needs: the stored render's recipe labels are cleared, so it reads as needing
 re-render and a capable browser fills it. A write that carried nothing but pixels is
 skipped outright rather than sent empty, which would bump a generation for no reason.
+
+A dropped render is also *reported*, not just performed: `ThumbPutResult` carries
+`dropped`, and `renderEntryThumbnail` turns it into the `skipped` outcome it already has
+for work it did not do. Without that the generate job would count a cache filling while
+nothing was written to it — the count is the whole of that job's output, so an honest
+write with a dishonest tally would have been no better than the mislabelled file this
+decision exists to prevent.
 
 The cost is that such a browser never warms a shared cache — for the demo, a Safari
 visitor re-renders each tile per visit — and that is visible in the requirement rather

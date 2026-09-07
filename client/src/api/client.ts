@@ -56,6 +56,14 @@ export interface ThumbResult {
 export interface ThumbPutResult {
   /** The entry's generation *after* this write. */
   gen?: number
+  /**
+   * The render did not land: the browser encoded it in a format this app does
+   * not store, so its pixels were dropped and only what the write carried
+   * besides them was sent (`webp-thumbnails` D6). Absent on every ordinary
+   * write. A caller that counts renders made must not count this as one — the
+   * entry still has no pixels of its own.
+   */
+  dropped?: true
 }
 
 export interface ThumbSave {
@@ -621,7 +629,7 @@ export class HttpApiClient implements ApiClient {
 
   async putThumb(save: ThumbSave): Promise<ThumbPutResult> {
     const write = withoutUnusableRender(save)
-    if (write === null) return {}
+    if (write === null) return { dropped: true }
     const res = await this.fetchFn('/api/thumb', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
@@ -655,6 +663,9 @@ export class HttpApiClient implements ApiClient {
     // write — an older server answers `{ok:true}` and nothing else — so it
     // degrades to "generation unknown", which is the validator tier.
     const body = (await res.json().catch(() => ({}))) as { gen?: number }
-    return { gen: body.gen }
+    // `write !== save` is the identity check the helper's contract allows: it
+    // returns the caller's own object untouched when the render is storable,
+    // and a stripped copy when it is not.
+    return write === save ? { gen: body.gen } : { gen: body.gen, dropped: true }
   }
 }

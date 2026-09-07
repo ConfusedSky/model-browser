@@ -10,7 +10,9 @@ a type that both claim the format this app produces are a claim the store cannot
 The client SHALL keep drawing such a render locally and leave the entry uncached — but
 SHALL still send whatever that write carried besides pixels, an orientation above all,
 since a write is refused for what its pixels are and not for what else it moves. The
-labels that describe pixels SHALL travel only with pixels.
+labels that describe pixels SHALL travel only with pixels. A write whose render was
+dropped SHALL say so to its caller, so that work counting renders counts this as work
+not done.
 
 #### Scenario: Fresh directory fills in progressively
 - **WHEN** the user opens a directory containing model files with no cached thumbnails
@@ -75,6 +77,10 @@ labels that describe pixels SHALL travel only with pixels.
 #### Scenario: A browser that cannot encode the format caches no pixels
 - **WHEN** a client's encoder answers with a format other than the one thumbnails are stored in
 - **THEN** that render is drawn for the user who rendered it and its pixels are not stored, so the entry stays uncached for a client that can encode it rather than being filled with bytes that are not what they are labelled
+
+#### Scenario: A dropped render is not counted as one that was made
+- **WHEN** bulk work renders an entry on a client whose encoder cannot produce the stored format
+- **THEN** that entry is reported as work not done rather than as a render written, so a run's count never claims a cache filled while nothing was stored in it
 
 #### Scenario: The orientation in that same write is still saved
 - **WHEN** such a render is sent together with a camera or an axis the user has just chosen

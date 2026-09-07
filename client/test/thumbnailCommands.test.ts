@@ -606,6 +606,24 @@ describe('the core the generate job runs directly', () => {
     expect(h.setThumb).not.toHaveBeenCalled()
   })
 
+  /**
+   * `webp-thumbnails` D6: a browser that cannot encode the stored format has
+   * its render dropped while the orientation in that write still lands. The
+   * job's count is the whole of its output, so a write that stored no pixels
+   * must not read as a render made.
+   */
+  it('answers skipped when the render was dropped for its encoding', async () => {
+    const h = harness({ status: 'miss' })
+    h.putThumb.mockResolvedValue({ gen: 5, dropped: true })
+
+    const outcome = await renderEntryThumbnail(HERO, h.host, {
+      discardFraming: false,
+      pose: undefined,
+    })
+
+    expect(outcome).toBe('skipped')
+  })
+
   it('rethrows a refusal that is not a moved generation', async () => {
     const h = harness({ status: 'miss' })
     h.putThumb.mockRejectedValue(new HttpError(400, 'bad request'))

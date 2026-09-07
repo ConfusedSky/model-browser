@@ -309,7 +309,7 @@ describe('HttpApiClient contract', () => {
     const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ ok: true, gen: 7 }))
     const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
     const png = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' })
-    expect(await api.putThumb({ path: '/m.stl', mtime: 42, png })).toEqual({})
+    expect(await api.putThumb({ path: '/m.stl', mtime: 42, png })).toEqual({ dropped: true })
     expect(fetchFn).not.toHaveBeenCalled()
   })
 
@@ -333,7 +333,7 @@ describe('HttpApiClient contract', () => {
         rig: 7,
         posed: 2,
       }),
-    ).toEqual({ gen: 9 })
+    ).toEqual({ gen: 9, dropped: true })
     const [, init] = fetchFn.mock.calls[0] as [string, RequestInit]
     const body = JSON.parse(init.body as string) as Record<string, unknown>
     expect(body.camera).toEqual(CAM)
@@ -344,6 +344,17 @@ describe('HttpApiClient contract', () => {
     expect(body.lighting).toBeUndefined()
     expect(body.rig).toBeUndefined()
     expect(body.posed).toBeUndefined()
+  })
+
+  // The flag exists so a caller that counts renders — the generate job — can
+  // tell a write that stored pixels from one that stored only an orientation.
+  it('putThumb reports nothing dropped on an ordinary write', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ ok: true, gen: 11 }))
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
+    const webp = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/webp' })
+    const res = await api.putThumb({ path: '/m.stl', mtime: 42, png: webp })
+    expect(res).toEqual({ gen: 11 })
+    expect(res.dropped).toBeUndefined()
   })
 
   it('putThumb passes a discard through even when the render is dropped', async () => {
