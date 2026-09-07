@@ -119,5 +119,9 @@
 - [x] 6.1 `bun run typecheck` and both suites green (810 client, 638 server)
 - [x] 6.2 `openspec validate webp-thumbnails --strict` passes and the archive dry run on a
       fresh copy applies cleanly (+1 added, ~5 modified). The archive itself is 6.3's
-- [ ] 6.3 After archiving, read `openspec/specs/model-thumbnails/spec.md` and check no
-      change-scoped prose landed in the capability's own description
+- [x] 6.3 Archived 2026-09-07 (+1 requirement, ~5 modified). The applied specs carry no
+      change-scoped prose: no mention of this change by name, no dates, no decision
+      citations, no `cwebp`. The one figure that could have rotted — the tile widths
+      behind the 256 choice — was moved to design D2 before archiving, so what the
+      capability now says is that thumbnails are square, 256², lossy WebP with lossless
+      alpha, and that a render in a superseded encoding is removed where it is met

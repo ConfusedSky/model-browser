@@ -200,7 +200,7 @@ Models SHALL be rendered with shadow mapping from the key light: the model SHALL
 - **THEN** the shadowing in the live view is indistinguishable from the thumbnail at handoff, preserving the no-shift guarantee
 
 ### Requirement: Ambient-occlusion shading
-Models SHALL be rendered with screen-space ambient occlusion that darkens crevices, recesses, and contact regions, applied identically in the orbit overlay, the lightbox, and thumbnails. The effect SHALL run as a post-process chain on the app's single shared renderer — introducing no additional WebGL context — and the thumbnail path SHALL produce its PNG from the post-processed output, under the color-pipeline parity and transparency that `model-thumbnails` already requires of it. Occlusion parameters SHALL scale with the model's bounds so models of any physical size receive equivalent depth-cueing. Occlusion SHALL affect only model pixels, in coverage as well as in color: silhouette edges over the transparent background SHALL NOT acquire dark halos, background pixels SHALL stay fully transparent, and model-interior pixels SHALL stay fully opaque. The effect is off by default — a fresh profile renders unoccluded until its user turns it on — and the viewer SHALL offer a toggle that enables or disables occlusion, a performance preference for weaker GPUs, persisted per browser profile; a profile that stored a choice before the default changed SHALL keep that choice. Thumbnails SHALL follow that preference: a tile SHALL be rendered and looked up under the occlusion setting the live view would use at handoff, so that handoff is seamless whether occlusion is on or off, and a render under either setting SHALL be cached as its own thumbnail (see `model-thumbnails`, *A thumbnail exists per occlusion recipe*). Neither setting's pixels SHALL change because the other exists; the pixel-recipe version is bumped only when a recipe changes.
+Models SHALL be rendered with screen-space ambient occlusion that darkens crevices, recesses, and contact regions, applied identically in the orbit overlay, the lightbox, and thumbnails. The effect SHALL run as a post-process chain on the app's single shared renderer — introducing no additional WebGL context — and the thumbnail path SHALL produce its image from the post-processed output, under the color-pipeline parity and transparency that `model-thumbnails` already requires of it. Occlusion parameters SHALL scale with the model's bounds so models of any physical size receive equivalent depth-cueing. Occlusion SHALL affect only model pixels, in coverage as well as in color: silhouette edges over the transparent background SHALL NOT acquire dark halos, background pixels SHALL stay fully transparent, and model-interior pixels SHALL stay fully opaque. The effect is off by default — a fresh profile renders unoccluded until its user turns it on — and the viewer SHALL offer a toggle that enables or disables occlusion, a performance preference for weaker GPUs, persisted per browser profile; a profile that stored a choice before the default changed SHALL keep that choice. Thumbnails SHALL follow that preference: a tile SHALL be rendered and looked up under the occlusion setting the live view would use at handoff, so that handoff is seamless whether occlusion is on or off, and a render under either setting SHALL be cached as its own thumbnail (see `model-thumbnails`, *A thumbnail exists per occlusion recipe*). Neither setting's pixels SHALL change because the other exists; the pixel-recipe version is bumped only when a recipe changes.
 
 #### Scenario: Crevices read at thumbnail size
 - **WHEN** a model with recesses or fine surface detail is thumbnailed with occlusion on
@@ -215,11 +215,11 @@ Models SHALL be rendered with screen-space ambient occlusion that darkens crevic
 - **THEN** the live view's occlusion and brightness are indistinguishable from the static thumbnail at the moment of handoff, because both were rendered under the same setting
 
 #### Scenario: Clean silhouettes over the transparent background
-- **WHEN** a thumbnail PNG rendered with ambient occlusion is composited over the app background
+- **WHEN** a thumbnail rendered with ambient occlusion is composited over the app background
 - **THEN** pixels just outside the model's silhouette show no occlusion darkening relative to an occlusion-free render
 
 #### Scenario: Occlusion does not disturb transparency
-- **WHEN** a thumbnail PNG rendered with ambient occlusion is inspected pixel by pixel
+- **WHEN** a thumbnail rendered with ambient occlusion is inspected pixel by pixel
 - **THEN** background pixels are still fully transparent and pixels inside the model are still fully opaque, so the model composites over the app background exactly as an occlusion-free thumbnail does
 
 #### Scenario: Toggling occlusion off for performance
@@ -229,6 +229,10 @@ Models SHALL be rendered with screen-space ambient occlusion that darkens crevic
 #### Scenario: Size-independent occlusion
 - **WHEN** a very small and a very large model with similar shapes are each rendered
 - **THEN** both show equivalent occlusion strength and reach, scaled to their own proportions
+
+#### Scenario: Transparency survives the encoder
+- **WHEN** a thumbnail is encoded for storage under a lossy image format
+- **THEN** background pixels are still fully transparent and the silhouette's edge is the one the render produced, the alpha channel having been carried losslessly while colour took the lossy path
 
 ### Requirement: STL shading normals derive from winding
 When parsing an STL model, the client SHALL derive shading normals from triangle winding and SHALL NOT use the file's stored facet normals, so an exporter that wrote its normal field in a different axis convention than its vertices — or wrote zero-length, inverted, or otherwise inconsistent normals — cannot corrupt lighting. Recomputed normals SHALL be flat facet normals — no smoothing is introduced — so a file whose stored normals agree with its winding renders as before, up to the precision the file itself stored them at. This applies identically to thumbnails, the orbit overlay, and the lightbox; other model formats keep their format-native vertex normals.
