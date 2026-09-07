@@ -75,8 +75,8 @@ own origin"; only its body hardcodes loopback.
 | decision | by | note |
 |---|---|---|
 | Port the server (container/VM), don't bake to static | corpus NOTES + both sessions | bake was weighed: D1's `ApiClient` seam would host a static client, `similar` is image×image dot products the browser could do, but text→embedding needs the SigLIP text tower (hundreds of MB) — one endpoint at minimum |
-| Always-on VM, not cold-start serverless | Masa | 16 s SigLIP load + `wedged` UI is the wrong first impression |
-| CPU-only index, fp32, US-located, 4–8 GB | Masa | see Measurements; GPU warmed is tens of ms, CPU 0.3–0.6 s judged acceptable (<1 s). **US-located relaxed 2026-09-02 (Masa): EU origins back in consideration pending a visitor-latency benchmark** — and therefore round-trip count is a first-class 1.3 design concern; see the EU paragraph in Measurements |
+| Always-on VM, not cold-start serverless | Masa | 16 s SigLIP load + `wedged` UI is the wrong first impression. **Load measured 6.9 s on the CX23 (2026-09-04, Measurements) — but that run was not shown to be cold, and the 16 s it is compared against was a GPU load on another machine; the decision stands and neither number is settled.** |
+| CPU-only index, fp32, US-located, 4–8 GB | Masa | see Measurements; GPU warmed is tens of ms, CPU 0.3–0.6 s judged acceptable (<1 s) — **but 0.3–0.6 s was an in-process harness on 8 desktop threads; through `POST /query` the same machine is 0.38 s, a 2-vCPU Hetzner CX23 is 1.23 s and misses the bar, and a 4-vCPU projects to ~0.89 s (Measurements, 2026-09-04)**. **US-located relaxed 2026-09-02 (Masa): EU origins back in consideration pending a visitor-latency benchmark** — and therefore round-trip count is a first-class 1.3 design concern; see the EU paragraph in Measurements |
 | Folder tiles get a 2×2 contact sheet — **a main-app change, before the split** (applied 2026-08-31: `folder-contact-sheets`, including the D3 no-reset assertions and the live checks once `ao-refreshes-thumbnails` landed the same day; every task closed, cold-media numbers in its tasks.md 3.4) | Masa | `Grid.tsx` draws sheets from `GET /api/peek` per visible tile, inside amber folder chrome; verified live on the clustered-hq root — 297 folders, 12 peeks on first paint, 10 more per scroll screen, AO toggle re-renders cells with no reset |
 | Credits/provenance shown in the lightbox info panel | Masa | plus a generated credits page for CC-BY |
 | ~~Lighting menu hidden in demo mode~~ → **axis lighting mode removed from the main app; camera is the only mode; the pill goes** (implemented: `remove-axis-lighting`, applied 2026-08-31 — row closed) | Masa | the hide was only ever to stop visitors picking axis. Item 9 has the grounding (every sidecar says `camera`, 0 `axis` — 1,758 at this session's count, 1,792 at later reviewers' runs the same day; axis's motivating bug has no counterpart in camera mode) |
@@ -271,6 +271,17 @@ own origin"; only its body hardcodes loopback.
    contact-sheet listing, not flat view — the chips already give the model-first flat
    grid on click, since a search result is one, so the two views keep different jobs.
    The change is backlog 1.5; nothing in item 4 is open.
+   **Added 2026-09-05 (Masa): About also carries a Limitations section**, as examples
+   rather than a disclaimer — what semantic search does badly, so a visitor whose query
+   fell flat reads it as the tool's edge and not as brokenness. Two to open with: (i)
+   **a concept the corpus barely holds returns nothing useful** — search is nearest
+   neighbours, so it always answers, and for a query the corpus does not represent the
+   answer is whatever is least far, not a "no results"; (ii) **it averages neighbouring
+   concepts** — vampires, zombies and skeletons all sit near "undead", so a search for
+   one usually brings the others. Both are Masa's observations, not measurements: like
+   the chips, each example is verified against the live index before it becomes copy,
+   and a limitation that stops reproducing is dropped rather than kept as lore. The
+   section is backlog 1.5's to draft with the rest of About.
    **Relayed from another session 2026-09-03 and verified against the code before being
    kept** (the one claim that did not hold is noted last): (i) **Ctrl+F is the one
    keybinding the copy must mention** — the app binds Ctrl/Cmd+F on window keydown to the
@@ -501,7 +512,67 @@ All re-runnable; say whose run when quoting.
   to 4 cores: fp32 0.55–0.6 s. **Fixed:** `load_siglip` now picks fp32 off-GPU
   (mini-classify LEARNINGS, "fp16 on a CPU"). GPU warmed: tens of ms (Masa's run).
   Still extrapolated: a real shared cloud vCPU (~1 s guessed) — one paid hour on
-  the target instance answers it.
+  the target instance answers it. **Being answered on Hetzner** (2026-09-04,
+  Masa's call — CX33 x86 and CAX21 ARM together): `docs/hetzner-probe-runbook.md`
+  is the procedure, `scripts/query-probe.py` the measurement. That probe times
+  the *request* (`POST /query`) rather than `cpu_dtype`'s in-process path, so it
+  needs its own baseline, measured this session on the 7940HS against the
+  running `embed-cache-test` server (2,165 models, device cpu, over localhost):
+  **median 381.6 ms, p90 421.0 ms** over the same 16 queries — the number a
+  Hetzner run is read against, and re-runnable from the script's docstring.
+  **Held to two physical cores** (`CUDA_VISIBLE_DEVICES= OMP_NUM_THREADS=2
+  taskset -c 0,1`), the proxy for the 2-vCPU tier, the same box gives
+  **median 931.7 ms, p90 1004.3 ms** at **VmHWM 2.78 GB** — so a desktop Zen 4
+  *pair* already sits on the 1 s bar before any cloud oversubscription, which
+  makes a 2-vCPU host the likely failure case for gate 3.3 and 4 vCPUs the
+  configuration the bar was implicitly written for. (Load was 4.6 s here, against the 16 s this
+  file cites: the checkpoint was already in page cache from the other running
+  server — and the 16 s is a GPU load on this machine, so neither is a cold CPU
+  load on a demo host. Nothing has measured that yet.)
+- **Gate 3.3, answered on a real box** (Masa's run, 2026-09-04, Hetzner **CX23**
+  in Falkenstein — 2 shared vCPU, 4 GB, Ubuntu 26.04, €3.99 + €0.50 IPv4, the
+  only cost-optimized type in stock that day; `docs/hetzner-probe-runbook.md`,
+  `scripts/query-probe.py`, 16 queries, `serve_api.py --no-volume` on the
+  275 MB index): **median 1229.7 ms, p90 1389.3 ms on the box — the 1 s bar is
+  missed by ~23%.** Four other results from the same hour, each worth as much
+  as the headline:
+  - **4 GB is enough.** VmHWM **2.43 GB** (below the 2.78 GB this machine
+    shows), 1.1 GB used with the rest page cache, and the 2 GB swapfile took
+    68 KB — i.e. never touched. The "4 GB works, add swap" sizing is now
+    measured on the target, not extrapolated.
+  - **SigLIP load on the box measured 6.9 s** against the 16 s this file has cited
+    since 2026-08-28 — but **"cold" is asserted, not shown**: that load ran minutes
+    after `hf download` wrote the 4.3 GB checkpoint, so page cache held some of it,
+    and the 16 s figure was a *GPU* load (CUDA init included) on a different
+    machine. The two are not the same measurement, and the same session that
+    correctly discounted its desktop's 4.6 s as page-cache-warm should have
+    discounted this. What is safe to say: nothing here has measured a genuinely
+    cold CPU load on the target class, and the arguments elsewhere in this file
+    that still spend "16 s" (Railway, Fly, Lambda, Cloud Run) are resting on an
+    unretired number.
+  - **No embedding drift on cloud x86**: top-1 identical to the desktop
+    baseline on all 16 queries. The parity question stays open only for ARM,
+    which needs a CAX21 (out of stock that day).
+  - **The ocean, upper-bounded**: through an SSH tunnel from the US the same
+    queries measured **2317.9 ms median**, ~1.09 s over the box-local figure.
+    That is a fresh connection per request through the tunnel, so it is an
+    upper bound on a keep-alive browser connection (which pays roughly one
+    RTT) — the honest visitor estimate is ~1.3–1.5 s, and the real answer
+    needs the per-interaction benchmark, not this probe.
+  **What it implies for the tier.** Scaling on this box through the same code
+  path: 8 threads 381.6 ms, 4 cores 673.8 ms, 2 cores 931.7 ms; CX23's 1229.7
+  is **1.32x** the 2-core line, so a 4-vCPU Hetzner (CX33, €6.49) projects to
+  **~890 ms median / ~925 ms p90** — inside the bar, but by ~10%, on a
+  single-point scaling factor. Verdict: **the 4 GB/2 vCPU tier is out on
+  latency while the 4 GB memory argument is confirmed**; the tier that can
+  pass is 4 vCPU, and it passes narrowly enough that any contention pushes it
+  back over. This is the condition the notes already named for the designated
+  fallback — a warm text-tower endpoint (Modal, tens of ms, ~$0/mo at demo
+  traffic) in front of a small box, which fixes latency and cost together and
+  makes the vCPU count stop mattering.
+  The probe needs no STL volume: `serve_api.py --no-volume` enumerates from
+  pose-cache.json, so a box needs ~275 MB of `embed-cache-test` (embeds plus
+  records) and the 4.3 GB checkpoint pulled on the box — not the 11 GB corpus.
 - **Hosting, USD/month, 8 GB always-on, US** (web, 2026-08-28): Vultr $40,
   Fly.io ~$47 + volume/egress, DigitalOcean $48, Linode $48, Hetzner Ashburn
   CPX31 ~$78–85 after the June 2026 increase (no longer the cheap option in the
@@ -551,7 +622,18 @@ All re-runnable; say whose run when quoting.
   €5.50, lands **~$7/mo** in the US per review sites (on-page US surcharge
   unconfirmed — check at order); **OVH US** VPS-1 (2 vCore/4 GB/40 GB NVMe,
   unlimited traffic at 500 Mbps) **$4.54/mo on a 12-month commitment**, VPS-2
-  (4/8 GB) $8.50 — the most established operator of the three. All meet
+  (4/8 GB) $8.50 — the most established operator of the three. **Both figures
+  re-verified 2026-09-04 against OVH's own unauthenticated order catalog**
+  (`api.us.ovhcloud.com/1.0/order/catalog/public/vps?ovhSubsidiary=US`, plans
+  `vps-2027-model1/2`, prices in ucents, every entry `interval: 1` i.e. per
+  month): VPS-1 2027 is 2 cores/4 GB/40 GB SSD/500 Mbps at **$5.35 month-to-
+  month, $5.08 on 6 months, $4.54 on 12**; VPS-2 2027 is 4 cores/8 GB/75 GB at
+  $10.00 / $9.50 / **$8.50**. So the commitment buys ~15%, and even the
+  no-commitment price is single digits — the catalog is the re-runnable source,
+  not the marketing page. (The *older* line still in the catalog is worse on
+  both axes: "VPS-1 2026" is 1 core/2 GB/40 GB at $7.00/mo, and "VPS-2 2026"
+  4 vCore/**4** GB/80 GB at $18.80/mo — a plausible source of a remembered
+  "$20-ish OVH", but it is not what VPS-1/2 sell for today.) All meet
   4 GB+/US/always-on/flat at ≤$9 vs the name-brand $24–28. The open axis is
   CPU: 0.31 s/query on the 7940HS (8 threads; 0.55–0.6 s pinned to 4), and
   budget hosts run older, oversold silicon — 1–2 s is plausible, which is
@@ -575,6 +657,151 @@ All re-runnable; say whose run when quoting.
   not worth ~$3/mo against a zero-moving-parts $4.54 OVH box — but it is the
   designated fallback if gate 3.3 measures >1 s on oversold vCPUs: warm GPU
   inference is tens of ms, fixing latency and cost in one move.**
+  **AWS — missing from the 2026-08-28 sweep** (this session, 2026-09-04,
+  Masa's ask; on-demand from `ec2.shop?region=us-east-1`, cross-checked
+  against instances.vantage.sh; aws.amazon.com/lightsail/pricing;
+  aws.amazon.com/vpc/pricing for the IPv4 charge. gp3 $0.08/GB-mo and
+  egress $0.09/GB after 100 GB/mo free are **secondary** sources — AWS
+  renders those tables in JS — confirm at order): the like-for-like AWS
+  product is **Lightsail, not EC2**, it being the only flat-rate form —
+  4 GB/2 vCPU/80 GB SSD/4 TB transfer **$24/mo** ($20 IPv6-only), 8 GB/2 vCPU/
+  160 GB **$44** ($40). Assembled from EC2 the same 4 GB box costs *more*:
+  t4g.medium (Graviton2, 2 vCPU/4 GB) $0.0336/h = $24.53/mo + 60 GB gp3 $4.80
+  + public IPv4 $3.65 ⇒ **~$33/mo** (x86 t3.medium $30.37 ⇒ ~$39); 8 GB
+  t4g.large $0.0672/h = $49.06 ⇒ **~$59**. A 1-year no-upfront reserved rate
+  ($0.0211/h) brings 4 GB to ~$24 and 8 GB to ~$41 — a year of lock-in buys
+  the *uncommitted* Lightsail price. Egress is $0 at demo traffic (100 GB/mo free
+  against a corpus of 1.8 GB of model files plus baked thumbnails, of which a
+  visitor pulls a fraction). No free ride: the 750-hour
+  12-month tier was retired 2025-07-15 for new accounts, replaced by $100–200
+  of credits that expire in 6–12 months. Verdict: **AWS is the $24–28
+  name-brand 4 GB tier this sweep already rejected** — 5× the $4.54 OVH box
+  for the same 4 GB — and brings no capability we need: its scale-to-zero
+  forms repeat the rejections above (App Runner/Fargate bill provisioned
+  RAM-hours, the Railway shape, not priced here; Lambda pays only per request
+  but wakes into the rejected 16 s SigLIP load). Two things it *is* good for:
+  gate 3.3's paid hour costs **3.4 cents** on t4g.medium, and it answers the
+  same open CPU axis as the budget hosts (T-series baseline is 20% of 2 vCPUs
+  with burst credits — a demo's 0.3–1 s query bursts fit, sustained crawling
+  tips into unlimited-mode surplus; Graviton2 vs the 7940HS is untested here).
+  **GCP and Azure** (this session, 2026-09-04, Masa's ask; both priced from the
+  vendors' own APIs, re-runnable: GCP `cloudbilling.googleapis.com/v1/services/
+  6F81-5844-456A/skus` with `gcloud auth print-access-token` — page it, the
+  Compute Engine service is 32,771 SKUs; Azure `prices.azure.com/api/retail/
+  prices?$filter=armRegionName eq 'eastus' and armSkuName eq '<sku>'`. Cloud Run
+  is service `152E-C115-5142`, Container Apps `serviceName eq 'Azure Container
+  Apps'`): **neither has a Lightsail-style flat bundle**, so both are assembled
+  like EC2 and land in the same place. GCP us-central1: E2 is $0.021812/vCPU-h +
+  $0.002924/GiB-h ⇒ e2-medium (4 GB) $0.0335/h = **$24.46/mo**, e2-standard-2
+  (8 GB) $48.92; + pd-balanced $0.10/GiB-mo (60 GB = $6.00) + external IP
+  $0.005/h ⇒ **~$34/mo** and ~$59. E2 gets **no** sustained-use discount (SUDs
+  are N1/N2/N2D/C2/M1/M2 only — cloud.google.com/compute/docs/
+  sustained-use-discounts), so the only lever is a 1-year CUD ($0.0137413/vCPU-h
+  + $0.00184182/GiB-h = $0.0211/h) ⇒ ~$25/mo. Azure eastus: the cheap 4 GiB is
+  **ARM** — B2pls_v2 (Cobalt) $0.0336/h = $24.53/mo, AMD B2als_v2 $27.45, Intel
+  B2s $30.37; 8 GiB D2ps_v6 $51.25 / B2as_v2 $54.90 / B2ms $60.74; + Standard SSD
+  E6 (64 GiB) $4.80 + Standard static IPv4 $0.005/h ⇒ **~$33/mo** (ARM) and ~$60.
+  A 1-year reservation on B2pls_v2 is $174/yr = $14.50/mo ⇒ ~$23/mo, the cheapest
+  *committed* hyperscaler price found. Egress splits them: AWS and Azure both give
+  100 GB/mo free (Azure then $0.087/GB, from its API), **GCP gives 1 GiB/mo** and
+  then $0.12/GiB premium tier — the only one of the three where a
+  thumbnail-heavy demo pays for bytes at all (single-digit $/mo at our volume;
+  Standard tier or a CDN in front removes it). Free tiers are irrelevant at
+  2.8 GB: GCP always-free e2-micro is 1 GB RAM, Azure's 12-month B1s is 1 GiB.
+  Their scale-to-zero forms price out as the Railway row predicted: a warm
+  4 GiB Cloud Run min-instance is ~$22–26/mo (instance-based memory $2e-6/GiB-s,
+  idle CPU $2.7e-7/s; request-based min-instance rates are $2.5e-6 for both),
+  Azure Container Apps ~$35/mo (idle memory and vCPU both $3e-6/GiB-s and /s) —
+  and at zero replicas both wake into the rejected 16 s SigLIP load. Cloud Run's
+  32 GiB memory ceiling does clear our 2.8 GB peak, unlike Fly's 2 GB suspend
+  cap, so it is the only scale-to-zero platform here that *could* hold the model
+  — the cold start is what disqualifies it, not the size. **Verdict: all three
+  hyperscalers converge at ~$33–34/mo on demand and ~$23–25 with a year
+  committed; AWS Lightsail's $24 flat is the cheapest of them, and still 5× the
+  $4.54 OVH box.** No new capability, no new argument — the sweep is now complete
+  across the big three and the answer did not move.
+- **The whole app on the box** (this session with Masa's SSH access, 2026-09-04,
+  same CX23): deployed and browsed end-to-end from the US, and the answer is
+  that **the CPU was never the problem — the bytes are**. Setup, for the record:
+  the shipped corpus (`clustered-hq`, 1.8 GB) rsynced at ~24 MB/s, the repo plus
+  `bun install` (Bun 1.4.1) on the box, the client built *locally* (`bun run
+  build`, 868 KB JS / 241 KB gzipped) and shipped as `dist`, and a 25-line Bun
+  front on 127.0.0.1:8080 serving `dist` and proxying `/api` to 3177. Browsed
+  over an SSH tunnel, which is why **no code changed and nothing was exposed**:
+  `guard` sees `Host: localhost:8080` and is satisfied, so the loopback posture
+  `public-deployment` exists to replace was never touched. The index was
+  re-pointed by passing the box's corpus path to `serve_api.py --no-volume`
+  (enumeration comes from the cache records, so the rel paths line up with the
+  shipped kit dirs) and `/api/semantic/status` came back `ready` with
+  `collectionRoot: "/"`.
+  - **New deployment finding: SigLIP's 4.5 GB checkpoint fails to mmap on a 4 GB
+    box** once anything else holds memory — `unable to mmap 4546331880 bytes`,
+    state `wedged`, which the app surfaces as an index failure. `sysctl -w
+    vm.overcommit_memory=1` fixes it. The gate-3.3 probe never saw this because
+    the index ran alone; any real 4 GB deployment runs it beside the app, so
+    this belongs in the deployment's setup, not in an operator's memory.
+  - **First screen, root of the corpus (297 folder tiles), from the US**: TTFB
+    329 ms, DOMContentLoaded 1.71 s (the uncompressed 868 KB bundle alone is
+    1.34 s — the front served no gzip; 241 KB compressed is the honest figure),
+    then **19.0 s to settle, 250 requests, 32.5 MB** — of which **28.4 MB is 24
+    STL downloads**, the client fetching geometry to draw folder contact sheets.
+    Leaving it on the same screen pulled a further **50 MB across 48 STLs over
+    29.5 s** as it worked through the folders.
+  - **What that means.** Those bytes are the same from Falkenstein or Ashburn:
+    this is not an EU-origin problem and not a 2-vCPU problem, it is the
+    unbaked-thumbnail problem, and it is exactly what `immutable-thumbnail-
+    serving` and `bulk-thumbnail-jobs` were drafted to fix. **The demo cannot
+    ship before those two land**, whatever host is chosen — and once they do,
+    the first screen becomes cacheable images instead of tens of MB of geometry,
+    at which point a CDN in front of an EU origin (the "EU compute, US bytes"
+    option) covers almost all of it and the search latency gate returns to being
+    the only open question.
+  - **Re-measured with the sheets baked** (2026-09-05, after Masa browsed the
+    whole corpus so the client's renders were `PUT` to the box — 2,254 PNGs,
+    208 MB in the box's thumb cache): the first screen fetches **no STL at
+    all**. Returning visitor (browser cache warm): TTFB 172 ms, DCL 1.26 s,
+    settle **8.3 s**, 102 requests, **1.16 MB**. First-time visitor, measured
+    by re-fetching every thumbnail on the screen with `cache: 'reload'` in
+    parallel: **114 PNGs, 9.62 MB, 4.4 s** — so ~10.5 MB and ~5 s all in,
+    against **32.5 MB and 19 s** unbaked. `GET /api/thumb/image` already sends
+    `cache-control: public, max-age=31536000, immutable`, so the second visit
+    costs nothing.
+  - **The next lever is the PNG itself: 86 KB average per 512² thumbnail**, and
+    a screen holds ~114 of them. That single number is now the demo's dominant
+    first-visit cost — bigger than the JS bundle by 10x — and it is a format
+    question (WebP/AVIF, or a smaller sheet-sized variant beside the 512² one),
+    not a hosting question. Worth measuring before choosing a host, since it
+    moves the bytes a CDN would be carrying.
+  - **256² WebP, tried on the box** (2026-09-05, Masa's call): the format is
+    worth more than the size. Sample of 60 renders, `cwebp -q 80 -alpha_q 100`:
+    **512² PNG 87 KB → 512² WebP 10 KB → 256² WebP 4 KB**, i.e. 8.6x for the
+    format alone and ~21x for both. Applied for real — `THUMB_SIZE` 256,
+    `toBlob('image/webp', 0.8)`, `RIG_VERSION` 6 → 7, `<key>.webp` on disk,
+    `Content-Type: image/webp` — and the box's whole baked cache converted in
+    place (a resample of the 512 renders, not a native 256 bake, which is close
+    enough for bytes and not for pixels): **2,254 files, 208 MB → 9.9 MB, avg
+    4.5 KB**. Measured in the browser from the US afterwards: thumbnails come
+    back `image/webp` at **5 KB each against 86 KB** — that per-thumbnail pair is
+    the sound comparison, and the only one. The two screen totals are **not** like
+    for like: 0.28 MB over 2.0 s was a **62**-thumbnail screen, 9.62 MB over 4.4 s a
+    **114**-thumbnail one, so the time pair says nothing about the format (per
+    request it is ~32 ms against ~39 ms) and an earlier reading of it here as "the
+    same screen" was wrong. At 5 KB, a 114-tile screen projects to **~0.57 MB**,
+    against 9.6 MB baked-PNG and 32.5 MB unbaked.
+  - **What is now the cost is round trips, not bytes.** Thumbnail bytes fell ~17x
+    per image while settle time did not follow it down (11.0 s against 8.3 s,
+    on screens of different sizes — treat the direction as the finding and
+    neither number as a measurement of the other), because the screen is
+    ~114 requests each paying an ocean RTT over HTTP/1.1 through the tunnel.
+    That is the notes' own trip-count lever, and it is what HTTP/2 (Caddy's
+    default) and a CDN in front of an EU origin are for — the bytes argument
+    for a US origin is now much weaker than it was two measurements ago.
+  - **Sharpness check**: model tiles render at 161 CSS px and contact-sheet
+    cells at 79, so 256 is ample at DPR 1 and mildly soft at DPR 2 (a 161 px
+    tile wants 322 device px). If retina matters, 320² is the number that
+    covers it exactly; the lightbox is a live 3D view and is unaffected.
+  - Not yet measured this way: a lightbox open on a single model, and a scroll
+    screen deeper in a kit. The tunnel and the box were left up.
   **EU origins re-admitted** (Masa, 2026-09-02, relaxing the Decided table's
   US-located row): Hetzner Falkenstein CX33 €8.49 (~$10) and the EU sides of
   Contabo/OVH/netcup re-enter — often better hardware per dollar than their
@@ -591,6 +818,35 @@ All re-runnable; say whose run when quoting.
   deciding (Masa: later): from a US vantage against an EU test box measure
   first paint, a scroll screen of sheets, a lightbox open, one search —
   the per-interaction shapes, not a bare ping.
+  **EU options, priced** (this session, 2026-09-04, Masa's ask — the row above
+  re-admitted them without numbers; USD at €1 = $1.1622, £1 = $1.353,
+  api.frankfurter.dev 2026-09-04; all ex-VAT, which is what a non-EU customer
+  pays): **Hetzner** cost-optimized, Nuremberg/Falkenstein/Helsinki only, all
+  with **20 TB** traffic and a €0.50/mo IPv4 surcharge — CX23 (2 vCPU x86,
+  4 GB, 40 GB) €3.99+0.50 = **$5.22/mo**, CAX11 (2 Ampere ARM, 4 GB) €4.49+0.50
+  = $5.80, CX33 (4 vCPU, 8 GB, 80 GB) €6.49+0.50 = **$8.12**, CAX21 (4 ARM,
+  8 GB) €7.99+0.50 = $9.87. **The €8.49 recorded above as "CX33" is almost
+  certainly CAX21** (€7.99 + the IPv4 €0.50 is exactly €8.49) or a pre-increase
+  CX33 — Hetzner raised the cost-optimized line by up to 37% on 2026-04-01 and
+  the CPX/CCX lines again in June; confirm at the order page, since
+  hetzner.com renders its price table in JS and both figures here are from
+  review sites (bitdoze, comparedge), not Hetzner. **netcup** (own site,
+  netcup.com/en/server/vps, G12 gen, prices listed incl. 19% German VAT):
+  VPS 500 (2 vCore, **4 GB DDR5 ECC**, 128 GB NVMe) €5.91 incl ⇒ €4.97 ex =
+  **$5.77**, VPS 1000 (4 vCore, 8 GB, 256 GB) €10.37 incl ⇒ €8.71 ex =
+  **$10.13**; locations Vienna/Nuremberg/Amsterdam/**Manassas USA**/Singapore
+  — so netcup is not an EU-only choice and can answer the latency question by
+  being ordered in the US. **OVH EU** (ovhcloud.com/en-gb, VPS-2027 range,
+  incl. 20% UK VAT): VPS-1 (2 vCore, 4 GB, 40 GB NVMe) £3.97 ⇒ £3.31 ex =
+  **$4.47**, VPS-2 (4 vCore, 8 GB, 75 GB) £7.55 ⇒ £6.29 ex = **$8.51** —
+  i.e. the EU side prices the same as the $4.54/$8.50 US side already recorded,
+  so OVH gives no EU discount, only a shorter hop for EU visitors.
+  **Contabo** EU is the €5.50 listing above without the US surcharge (~$6.4).
+  Summary: EU 4 GB runs **$4.50–5.80**, 8 GB **$8–10**, with better silicon per
+  euro (DDR5 ECC, NVMe, Ampere ARM) and far more included traffic than the
+  budget US racks — but the open item is unchanged and is *not* price: the
+  US-visitor latency benchmark (per-interaction, not a ping) and, if it fails,
+  the free-tier CDN in front of an EU origin.
   **Trip reduction — where it landed** (thread of 2026-09-02, Masa + this
   session; the mechanics now live in changes, which supersede this file):
   the local-app work became **`listing-tree-cache`** (updated in place: pose /
