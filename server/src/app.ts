@@ -16,6 +16,7 @@ import type {
   ThumbPutRefused,
   ThumbPutRequest,
 } from '../../shared/types'
+import { THUMB_MIME } from '../../shared/types'
 import { StaleWriteError, ThumbCache } from './cache'
 import { guard } from './guard'
 import { LaunchError, type Launcher, ZipTempStore, createLauncher } from './launch'
@@ -1644,7 +1645,7 @@ export function createApp(
       return c.json({ error: 'no cached thumbnail' }, 404)
     }
     if (thumbHitTiers(c, gen)) return c.body(null, 304)
-    c.header('Content-Type', 'image/webp')
+    c.header('Content-Type', THUMB_MIME)
     c.header('X-Content-Type-Options', 'nosniff')
     // The one resource this server serves that a foreign page *could* embed:
     // an `<img src>` sends no Origin, so the same-origin guard lets it

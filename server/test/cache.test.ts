@@ -133,6 +133,97 @@ describe('ThumbCache maintenance', () => {
     expect((await cache.get(path, 1)).status).toBe('stale')
   })
 
+  /**
+   * `webp-thumbnails`: renders stored under the encoding this app produced
+   * before it. `pngFile` cannot name them, so nothing measures, evicts or
+   * sweeps them unless the store is told about them by name — these cells are
+   * what say it is. The bytes are arbitrary; what is under test is the file.
+   */
+  describe('a superseded encoding leaves no stored bytes behind', () => {
+    const supersededName = (path: string, ao = true) =>
+      `${createHash('sha256').update(path).digest('hex')}${ao ? '' : '.noao'}.png`
+
+    it('a write reclaims what the same render was stored as before', async () => {
+      const cache = tempCache()
+      const fx = makeFixtures()
+      cleanups.push(fx.dir)
+      const path = join(fx.dir, 'loose.stl')
+      await cache.put(path, { mtime: 1, png: PNG_A })
+      writeFileSync(join(cache.dir, supersededName(path)), PNG_B)
+      writeFileSync(join(cache.dir, supersededName(path, false)), PNG_B)
+
+      await cache.put(path, { mtime: 1, png: PNG_NEW })
+
+      // Exactly the render written: a plain write does not touch the sibling —
+      // `supersedes` is what reaches across, and this write supersedes nothing.
+      // The sibling's orphan is the maintenance pass's, as the next cell shows.
+      expect(readdirSync(cache.dir).filter((f) => f.endsWith('.png'))).toEqual([
+        supersededName(path, false),
+      ])
+      expect(Buffer.from((await cache.get(path, 1)).png as string, 'base64')).toEqual(PNG_NEW)
+
+      await cache.maintain()
+      expect(readdirSync(cache.dir).filter((f) => f.endsWith('.png'))).toEqual([])
+    })
+
+    it('the maintenance pass reclaims one nothing else would ever meet again', async () => {
+      const cache = tempCache()
+      const fx = makeFixtures()
+      cleanups.push(fx.dir)
+      const path = join(fx.dir, 'loose.stl')
+      // The shape an upgrade leaves: a sidecar under the old recipe whose pixels
+      // are in the old encoding, and no current render at all.
+      await cache.put(path, { mtime: 1, png: PNG_A, rig: 6 })
+      unlinkSync(join(cache.dir, `${createHash('sha256').update(path).digest('hex')}.webp`))
+      writeFileSync(join(cache.dir, supersededName(path)), PNG_B)
+
+      await cache.maintain()
+
+      expect(readdirSync(cache.dir).filter((f) => f.endsWith('.png'))).toEqual([])
+      // The entry itself survives — it is the pixels that were superseded, and
+      // the client re-renders them under the current recipe.
+      expect((await cache.get(path, 1)).status).toBe('stale')
+    })
+
+    it('a deleted model takes its superseded render with it', async () => {
+      const cache = tempCache()
+      const fx = makeFixtures()
+      cleanups.push(fx.dir)
+      const doomed = join(fx.dir, 'doomed.stl')
+      writeFileSync(doomed, 'x')
+      await cache.put(doomed, { mtime: 1, png: PNG_A })
+      writeFileSync(join(cache.dir, supersededName(doomed)), PNG_B)
+      unlinkSync(doomed)
+
+      await cache.maintain()
+
+      expect(readdirSync(cache.dir)).toHaveLength(0)
+    })
+
+    it('re-filing a flat entry leaves none of its pixels flat', async () => {
+      const base = tempDir('mb-cache-')
+      const lib = makeLibraryTree('lib-superseded')
+      const legacy = new ThumbCache(base)
+      await legacy.put(lib.model, { mtime: 3, png: PNG_A, camera: CAM, axis: '-x', rig: 6 })
+      // What a pre-`webp-thumbnails` flat cache actually holds: the pixels under
+      // the old name. The rename cannot see them, so before this rule they
+      // stayed in the flat directory with no sidecar describing them.
+      renameSync(
+        onlyFile(base, '.webp'),
+        join(base, supersededName(lib.model)),
+      )
+
+      const cache = new ThumbCache(base, CAP, 32, libraryFor(lib.top))
+      await cache.maintain()
+
+      expect(readdirSync(base).filter((f) => f.endsWith('.png'))).toEqual([])
+      // The half migration exists to keep still arrives: the orientation.
+      const res = await cache.get(LIB, 3)
+      expect(res.camera).toEqual(CAM)
+      expect(res.axis).toBe('-x')
+    })
+  })
+
   it('sweeps whole entries (camera and axis included) when the source is gone', async () => {
     const cache = tempCache()
     const fx = makeFixtures()

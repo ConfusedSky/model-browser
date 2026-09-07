@@ -228,6 +228,15 @@ export interface CameraState {
  * with a narrower target distribution — same order, same conclusion). The
  * constant keeps ~4.6e4× headroom over the measured maximum.
  */
+/**
+ * The one encoding a thumbnail is produced, stored and served in
+ * (`webp-thumbnails`). Shared because three places must agree about it and a
+ * disagreement is silent: the client asks `canvas.toBlob` for it, the client
+ * refuses to upload a render that came back as anything else, and the image
+ * route types the bytes with it.
+ */
+export const THUMB_MIME = 'image/webp'
+
 export const CAMERA_EPSILON = 1e-9
 
 export type ThumbStatus = 'hit' | 'stale' | 'miss'

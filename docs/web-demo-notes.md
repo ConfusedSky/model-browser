@@ -771,6 +771,15 @@ All re-runnable; say whose run when quoting.
     against **32.5 MB and 19 s** unbaked. `GET /api/thumb/image` already sends
     `cache-control: public, max-age=31536000, immutable`, so the second visit
     costs nothing.
+  - **The real encoder, measured** (this session, 2026-09-07, on the box): the figures
+    above are `cwebp`'s. Deleting one kit's 43 cache entries and reopening the listing
+    made the client re-render and upload them, so the store then held **native 256²
+    renders from `canvas.toBlob('image/webp', 0.8)`** — 40 of them, **avg 5.6 KB, median
+    5.5, range 2.2–7.6**, all genuine WebP. That is +24% on the proxy's 4.5 KB, which is
+    the direction to expect (a native render keeps detail a downscale threw away) and
+    small enough that nothing built on the proxy needed revising; against 87 KB of PNG it
+    is ~16x rather than ~19x. Fetched back from the US, 39 tiles of that kit cost
+    **216 KB in 1.39 s**, served `image/webp` by the image route.
   - **The next lever is the PNG itself: 86 KB average per 512² thumbnail**, and
     a screen holds ~114 of them. That single number is now the demo's dominant
     first-visit cost — bigger than the JS bundle by 10x — and it is a format

@@ -131,9 +131,9 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
 - Camera state is bounds-relative, never world coords; thumbnails keyed path+mtime,
   camera by path only (D4)
 - Thumbnails always capture at aspect 1, `THUMB_SIZE`² (three/renderer.ts) — **256² WebP
-  at q0.8 since 2026-09-05, 512² PNG before it** (~20x fewer bytes, but every figure so
-  far is `cwebp` over downscaled 512s, not the browser's own `toBlob` encoder —
-  `openspec/changes/webp-thumbnails` D1 and its task 3.2; docs/web-demo-notes.md); the live
+  at q0.8 since 2026-09-05, 512² PNG before it** (~16x fewer bytes, measured on the
+  browser's own encoder — 5.6 KB against 87 KB of PNG, `openspec/changes/webp-thumbnails`
+  D1; docs/web-demo-notes.md); the live
   view uses its host's aspect — a non-square viewer host persists a thumbnail framed
   unlike what was seen. Store and wire still say `png`: the field name, `pngFile` and the
   base64 `png` body outlived the format, so read those as "the pixels"

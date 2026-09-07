@@ -15,7 +15,7 @@
 
 ## 2. Reclaim what the bump strands
 
-- [ ] 2.1 Delete any stored render whose name is in a superseded encoding (`<key>.png`,
+- [x] 2.1 Delete any stored render whose name is in a superseded encoding (`<key>.png`,
       `<key>.noao.png`) at **every** place the store already visits an entry: a write
       (the `png: null` deletion included), a stale re-render, `maintain`'s source-vanished
       sweep, and both halves of `migrate` — its duplicate drop and its **rename** (D5).
@@ -24,14 +24,16 @@
       flat cache's `.png` files while migrating their sidecars, quietly breaking
       *Server-side thumbnail persistence*'s "images intact". There is no `clear` method —
       an earlier draft of this task invented one
-- [ ] 2.2 The bounded cache's size accounting counts a superseded render as evictable
-      weight rather than ignoring it — today `maintain` builds its metas from the current
-      extension only, so the orphan is outside the size cap and can never be an eviction
-      candidate
-- [ ] 2.3 Test: an entry holding a superseded file is re-rendered, the old file is gone,
-      and the measured cache size drops by its bytes
-- [ ] 2.4 Test: a model whose file is gone takes its superseded render with it through
-      `maintain`'s sweep, not just its current one
+- [x] 2.2 Resolved by 2.1 rather than as written: `maintain`'s per-render pass now
+      removes a superseded file before it stats the current one, so the orphan is gone by
+      the end of the pass that would otherwise have had to weigh it. Nothing outside the
+      size cap survives a maintenance run, which is a stronger property than counting it
+- [x] 2.3 Tests (`cache.test.ts`, "a superseded encoding leaves no stored bytes behind"):
+      a write reclaims the render it replaces and the maintenance pass reclaims the sibling;
+      a sidecar left under the old recipe with only superseded pixels comes back `stale`
+      with nothing stranded
+- [x] 2.4 Tests: a deleted model takes its superseded render with it, and re-filing a
+      flat entry leaves no `.png` behind while its camera and axis arrive
 
 ## 3. Verify the encoder, not just the constant
 
@@ -43,17 +45,18 @@
       adds. `canvas.toBlob('image/webp', q)` is the encoder under test; happy-dom does
       not encode, so this belongs where a real canvas exists (Playwright), and the
       existing occlusion transparency check is the model to follow
-- [ ] 3.1a **`canvas.toBlob` falls back to PNG when the type is unsupported** (the HTML
+- [x] 3.1a **`canvas.toBlob` falls back to PNG when the type is unsupported** (the HTML
       spec's behaviour; WebKit has shipped it). A Safari client would upload 256² *PNG*
       bytes, which this store would file as `<key>.webp` and serve as `image/webp` —
       tiles still draw, since browsers sniff, but the bytes are several times the budget
       and the spec's encoding requirement is violated with nothing detecting it.
-      `renderThumbnail` never inspects `blob.type`. Decide and implement: refuse, record
-      the encoding, or accept knowingly — and say which in design
-- [ ] 3.2 Record the *browser*-encoded average size against the `cwebp` figures in D1,
-      on the same corpus, and correct D1 if they diverge by more than ~25% — the design
-      names cwebp's numbers and says so, and a spec should not rest on a proxy encoder
-      once the real one can be measured
+      Decided and implemented as **refuse** (D6): `putThumb` drops a write whose blob is
+      not `THUMB_MIME`, which is now the single shared constant the encoder request, the
+      refusal and the image route's content type all read
+- [x] 3.2 Browser-encoded sizes measured on the corpus (2026-09-07, demo box, headless
+      Chromium, 40 native 256² renders): **avg 5.6 KB, median 5.5, range 2.2–7.6**, against
+      the cwebp proxy's 4.5 KB — +24%, inside the bar this task set, so D1's figures stand
+      with the real numbers recorded beside them
 
 ## 4. Sweep the assertions and the prose
 
@@ -83,8 +86,11 @@
       sheet, and the handoff from tile to live view — accepting or overturning D2's
       choice of 256 over 320. Not done when the code lands; done when the pixels are
       judged
-- [ ] 5.2 Re-measure a cold first screen — **stating the tile count**, since the
-      2026-09-05 pair in the notes compared a 62-tile screen with a 114-tile one against the figures in `docs/web-demo-notes.md`
+- [x] 5.2 Cold screen re-measured with browser-encoded renders and its **tile count
+      stated**: 39 tiles of one kit, served `image/webp` from the image route, **216 KB in
+      1.39 s** from the US. Not the 114-tile root screen the 2026-09-05 figures used — that
+      one still holds cwebp-converted renders, and mixing encoders in one total is the
+      error those figures already made once against the figures in `docs/web-demo-notes.md`
       (baked-PNG 9.62 MB / 4.4 s over the ocean) and record the WebP numbers beside them
 
 ## 6. Land it

@@ -3,7 +3,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
-import type { CameraState, LightingMode, OrbitAxis } from '../../../shared/types'
+import { THUMB_MIME, type CameraState, type LightingMode, type OrbitAxis } from '../../../shared/types'
 import { applyState, boundsOf, DEFAULT_CAMERA, frameFor, type Bounds } from './camera'
 
 /**
@@ -451,6 +451,6 @@ export function renderThumbnail(
     canvas.toBlob((blob) => {
       if (blob === null) reject(new Error('toBlob failed'))
       else resolve(blob)
-    }, 'image/webp', THUMB_QUALITY)
+    }, THUMB_MIME, THUMB_QUALITY)
   })
 }

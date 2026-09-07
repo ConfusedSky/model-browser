@@ -1,3 +1,4 @@
+import { THUMB_MIME } from '../../../shared/types'
 import type {
   AppsReport,
   CameraState,
@@ -588,6 +589,16 @@ export class HttpApiClient implements ApiClient {
   }
 
   async putThumb(save: ThumbSave): Promise<ThumbPutResult> {
+    // `canvas.toBlob` falls back to PNG when it cannot encode the type asked
+    // for — silently, by the HTML spec's own rule, and WebKit ships exactly
+    // that. Those bytes would be filed under a name and served under a type
+    // that say WebP: tiles would still draw, since browsers sniff images, so
+    // nothing would ever surface it, while the entry cost several times its
+    // budget and every other client inherited a format this app does not
+    // produce. Refuse the write instead. Nothing is stored, this client keeps
+    // drawing the render it already has, and the entry stays a miss that a
+    // browser which *can* encode WebP will fill (`webp-thumbnails` D6).
+    if (save.png instanceof Blob && save.png.type !== THUMB_MIME) return {}
     const res = await this.fetchFn('/api/thumb', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },

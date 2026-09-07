@@ -368,6 +368,27 @@ export class ThumbCache {
   }
 
   /**
+   * Renders in an encoding this app no longer produces — PNG, before
+   * `webp-thumbnails`. `pngFile` cannot name them any more, which is exactly
+   * why they must be named here: what the store cannot name it cannot measure,
+   * cannot evict, and does not remove when the model itself is deleted, so an
+   * orphan outlives the thing it depicts.
+   *
+   * They are deleted wherever they are met rather than carried along, because
+   * a format change is a pixel change and so always arrives with a
+   * `RIG_VERSION` bump: pixels under a superseded encoding are stale
+   * everywhere, and no site could serve them even if it kept them.
+   */
+  private supersededFiles(dir: string, key: string, ao?: boolean): string[] {
+    const both: readonly boolean[] = ao === undefined ? [true, false] : [ao]
+    return both.map((a) => join(dir, a ? `${key}.png` : `${key}.noao.png`))
+  }
+
+  private async rmSuperseded(dir: string, key: string, ao?: boolean): Promise<void> {
+    for (const f of this.supersededFiles(dir, key, ao)) await rm(f, { force: true })
+  }
+
+  /**
    * `protected` rather than `private` so a test can observe the two reads the
    * size-cap pass makes of one sidecar (snapshot, then re-read) and interpose a
    * `put` between them; nothing in production subclasses this.
@@ -592,6 +613,7 @@ export class ThumbCache {
     if (opts.png === null) {
       await rm(this.pngFile(dir, key, true), { force: true })
       await rm(this.pngFile(dir, key, false), { force: true })
+      await this.rmSuperseded(dir, key)
       const gen = allocateGen(prev?.gen)
       await this.writeMeta(dir, key, {
         path,
@@ -686,10 +708,16 @@ export class ThumbCache {
     }
     if (opts.png !== undefined) {
       await mkdir(dir, { recursive: true })
-      // Superseded-mtime PNG is inherently replaced: one PNG per render per key.
+      // Superseded-mtime pixels are inherently replaced: one render per key.
       await writeFile(this.pngFile(dir, key, ao), opts.png)
+      // These new bytes are this render, so anything it was stored as before
+      // this app changed encoding is now duplicate weight.
+      await this.rmSuperseded(dir, key, ao)
     }
-    if (supersedes) await rm(this.pngFile(dir, key, !ao), { force: true })
+    if (supersedes) {
+      await rm(this.pngFile(dir, key, !ao), { force: true })
+      await this.rmSuperseded(dir, key, !ao)
+    }
     await this.writeMeta(dir, key, meta)
     if (opts.png !== undefined && ++this.writesSinceMaintain >= this.maintainEvery) {
       this.writesSinceMaintain = 0
@@ -759,6 +787,7 @@ export class ThumbCache {
         await rm(this.metaFile(dir, key), { force: true })
         await rm(this.pngFile(dir, key, true), { force: true })
         await rm(this.pngFile(dir, key, false), { force: true })
+        await this.rmSuperseded(dir, key)
         // The entry is gone, so the index must not go on describing it (§6.2).
         // Dropped rather than remembered as `null`: the model itself no longer
         // exists, so no listing can ever ask about this path again.
@@ -770,6 +799,11 @@ export class ThumbCache {
       // without a scan of its own — `index.ts` runs `maintain()` at startup.
       this.remember(meta.path, meta)
       for (const ao of [true, false]) {
+        // The pass that reaches every entry the library still has, so this is
+        // where an orphan from a superseded encoding is reclaimed: it cannot be
+        // served, cannot be counted below, and would otherwise never be met
+        // again by anything.
+        await this.rmSuperseded(dir, key, ao)
         const pngStat = await stat(this.pngFile(dir, key, ao)).catch(() => null)
         if (pngStat === null) continue // that render is not cached: nothing to evict
         metas.push({ key, ao, meta, pngSize: pngStat.size, lastRead: pngStat.mtimeMs })
@@ -891,6 +925,7 @@ export class ThumbCache {
       await rm(this.metaFile(this.dir, key), { force: true })
       await rm(this.pngFile(this.dir, key, true), { force: true })
       await rm(this.pngFile(this.dir, key, false), { force: true })
+      await this.rmSuperseded(this.dir, key)
     }
   }
 
@@ -958,6 +993,7 @@ export class ThumbCache {
         await rm(this.metaFile(this.dir, key), { force: true })
         await rm(this.pngFile(this.dir, key, true), { force: true })
         await rm(this.pngFile(this.dir, key, false), { force: true })
+        await this.rmSuperseded(this.dir, key)
         continue
       }
       // Every file of the key moves, sibling included. A flat entry cannot
@@ -967,6 +1003,13 @@ export class ThumbCache {
       // than because anything is expected to be found.
       await rename(this.pngFile(this.dir, key, true), this.pngFile(target, newKey, true)).catch(() => {})
       await rename(this.pngFile(this.dir, key, false), this.pngFile(target, newKey, false)).catch(() => {})
+      // A flat entry's pixels may still be in the superseded encoding, and the
+      // renames above cannot name those. They are not carried across: the
+      // recipe bump that accompanied the encoding change already made them
+      // unserveable, so moving them would re-file garbage under a new key. The
+      // sidecar — camera and axis, the part migration exists to keep — moves
+      // below; the pixels are re-rendered on the visit that finds them.
+      await this.rmSuperseded(this.dir, key)
       // Re-keying, not writing: the pixels and every label are the ones that
       // were already there, so the generation comes across on the spread
       // unbumped along with them. A legacy entry carries none at all, which

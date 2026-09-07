@@ -300,6 +300,36 @@ describe('HttpApiClient contract', () => {
     expect(await api.putThumb({ path: '/m.stl', mtime: 42 })).toEqual({ gen: undefined })
   })
 
+  /**
+   * `webp-thumbnails` D6: `canvas.toBlob` answers PNG when it cannot encode
+   * the type asked for, silently, so the only place a wrong format can be
+   * caught is the moment before it is uploaded.
+   */
+  it('putThumb refuses a render the browser encoded as something else', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ ok: true, gen: 7 }))
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
+    const png = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' })
+    expect(await api.putThumb({ path: '/m.stl', mtime: 42, png })).toEqual({})
+    expect(fetchFn).not.toHaveBeenCalled()
+  })
+
+  it('putThumb sends a render the browser encoded as WebP', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ ok: true, gen: 7 }))
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
+    const webp = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/webp' })
+    expect(await api.putThumb({ path: '/m.stl', mtime: 42, png: webp })).toEqual({ gen: 7 })
+    expect(fetchFn).toHaveBeenCalledOnce()
+  })
+
+  // The deletion is not a render, so the guard above must not stand in its way.
+  it('putThumb still sends the deletion a null carries', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ ok: true, gen: 8 }))
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
+    expect(await api.putThumb({ path: '/m.stl', mtime: 42, png: null })).toEqual({ gen: 8 })
+    const [, init] = fetchFn.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(init.body as string).png).toBeNull()
+  })
+
   it('getThumb on miss has no pngUrl', async () => {
     const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ status: 'miss' }))
     const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
@@ -313,7 +343,7 @@ describe('HttpApiClient contract', () => {
     await api.putThumb({
       path: '/m.stl',
       mtime: 42,
-      png: new Blob(['raw-png']),
+      png: new Blob(['raw-webp'], { type: 'image/webp' }),
       camera: CAM,
       axis: '-z',
       lighting: 'camera',
@@ -326,7 +356,7 @@ describe('HttpApiClient contract', () => {
     expect(body).toEqual({
       path: '/m.stl',
       mtime: 42,
-      png: btoa('raw-png'),
+      png: btoa('raw-webp'),
       camera: CAM,
       axis: '-z',
       lighting: 'camera',
@@ -340,7 +370,7 @@ describe('HttpApiClient contract', () => {
     await api.putThumb({
       path: '/m.stl',
       mtime: 42,
-      png: new Blob(['raw-png']),
+      png: new Blob(['raw-webp'], { type: 'image/webp' }),
       lighting: 'camera',
       rig: 2,
       ao: false,
@@ -397,7 +427,7 @@ describe('HttpApiClient contract', () => {
     // Absent for every ordinary write, so a client that is not running a job
     // sends the bytes it sent before this change and the write is unconditional.
     fetchFn.mockClear()
-    await api.putThumb({ path: '/m.stl', mtime: 42, png: new Blob(['raw-png']) })
+    await api.putThumb({ path: '/m.stl', mtime: 42, png: new Blob(['raw-webp'], { type: 'image/webp' }) })
     const [, plain] = fetchFn.mock.calls[0] as [string, RequestInit]
     expect(Object.hasOwn(JSON.parse(plain.body as string) as object, 'ifGen')).toBe(false)
   })

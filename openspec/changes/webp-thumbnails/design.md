@@ -51,6 +51,17 @@ The measurement that is *not* a proxy: the tile sizes in D2, and that a browser 
 these bytes over a transatlantic link received 5 KB per thumbnail where it had received
 86 KB (2026-09-05, `docs/web-demo-notes.md`).
 
+**The real encoder is now measured, and the table survives it** (this session, 2026-09-07,
+on the demo box: one kit's 43 cache entries deleted, the listing opened in headless
+Chromium so the client re-rendered and uploaded them, then the stored files measured).
+Forty native 256² renders through `canvas.toBlob('image/webp', 0.8)`: **average 5.6 KB,
+median 5.5, range 2.2–7.6**, all with `RIFF`/`WEBP` magic. That is ~24% above the 4.5 KB
+the cwebp proxy predicted for the same corpus — inside the ~25% bar task 3.2 set for
+leaving D1's figures alone, and in the direction the design expected, since a native
+render carries detail a downscale threw away. Read against 87 KB of PNG the ratio is
+~16x rather than ~19x. Fetched back over the ocean, 39 tiles of that kit cost **216 KB,
+5.5 KB each, in 1.39 s**.
+
 **The alpha half is now measured on the real encoder** (a parallel session's run,
 2026-09-07, headless Chromium 149 via playwright-core, synthetic 256² anti-aliased grey
 disc with a 3 px saturated red stroke on transparency, round-tripped through
@@ -113,6 +124,31 @@ for its own reasons.
 
 (There is no `clear` method on `ThumbCache`; an earlier draft of this decision cited
 one. `clearRecipe` is a label helper, not a cache-wide delete.)
+
+### D6: A render the browser encoded as something else is refused, not stored
+
+`canvas.toBlob(type, q)` answers PNG when it cannot encode `type` — silently, by the
+HTML spec's own rule, and WebKit ships exactly that. Three options were open: refuse the
+write, record each entry's encoding so the store can serve what it actually holds, or
+accept it knowingly. Refusing wins on the same argument D5 rests on — the store's ability
+to name what it holds. Recording the encoding per entry means a second name per render,
+a sidecar field, and an image route that types bytes from data rather than from a
+constant; that is a real feature, and it would exist to support browsers that cannot
+produce the format this app has chosen. Accepting silently is the status quo the review
+found: bytes several times the budget, under a name and a content type that both lie,
+which nothing would ever surface because browsers sniff images and the tile draws.
+
+So the check is client-side, in `putThumb` — the one place every upload passes through
+(D1's ApiClient seam is what makes that true) — and the failure is a no-op: nothing is
+stored, the client keeps drawing the render it already has, and the entry stays a miss
+that a browser which can encode WebP will fill. The cost is that such a browser never
+warms a shared cache, which for the demo means a Safari visitor renders each tile once
+per visit. That is the honest form of the trade, and it is visible in the requirement
+rather than hidden in a mislabelled file.
+
+The format itself now lives in one place, `THUMB_MIME` in `shared/types.ts`: the client
+asks the encoder for it, the client refuses anything else, and the image route types the
+bytes with it. Three sites had to agree and a disagreement between them is silent.
 
 ## Risks / Trade-offs
 
