@@ -42,9 +42,12 @@
       survived the encoder — and all four corners transparent. With the parallel session's
       synthetic-disc run (0 alpha mismatches over 631 partial-alpha pixels), Chrome's
       alpha handling is settled on both a contrived worst case and a real render
-- [ ] 3.1b The check above is a live measurement, not a cell. Decide which of three this
-      claim gets, and record the choice here:
-      - **A harness.** Vitest browser mode with a Playwright provider, as a second project
+- [x] 3.1b Chosen: **a probe script**, `scripts/encoder-probe.mjs` — one command, no CI
+      weight, its last run in its own docstring. It checks the encoder alone (an alpha ramp
+      and an anti-aliased disc through `toBlob`, so a silent PNG fallback or lossy alpha
+      fails there) and, given a running app, the render the pipeline actually stored. The
+      two alternatives, and why not:
+      - **A harness** (declined for now). Vitest browser mode with a Playwright provider, as a second project
         beside the 60 happy-dom files. The cell renders through `renderThumbnail` with a
         real `WebGLRenderer`, encodes, decodes and censuses alpha. Cost: browser binaries
         in CI, software rendering, and a suite that runs in two places. It only pays for
@@ -52,10 +55,8 @@
         `RIG_VERSION` bumps come along, since **nothing in this repo has ever asserted a
         real pixel** — `composer.test.ts` and `thumbnailTeardown.test.ts` mock
         `WebGLRenderer` away, so those occlusion scenarios were verified by hand too.
-      - **A probe script**, the `scripts/query-probe.py` precedent: one command, prints
-        blob type, bytes and the alpha census, its last run recorded in its own docstring.
-        Re-runnable by anyone, gates nothing.
-      - **A recorded manual check**, which is what the occlusion scenarios have today.
+      - **A recorded manual check** (declined): what the occlusion scenarios have today,
+        and the thing a script this small makes unnecessary.
       Whichever is chosen, nothing about WebKit or Gecko is measured either way — 3.1a
       drops their renders rather than trusting them — the `model-viewer` scenario this change
       adds. `canvas.toBlob('image/webp', q)` is the encoder under test; happy-dom does
@@ -81,11 +82,13 @@
 - [x] 4.2 The deliberate rig-version guard updated to 7 (`client/test/rig.test.ts`)
 - [x] 4.3 `CLAUDE.md`'s thumbnail constraint says `THUMB_SIZE`² WebP, notes the store
       and wire still say `png`, and the `.noao` example names the current extension
-- [ ] 4.4a `LIVE_SUPERSAMPLE` in `client/src/viewer/renderSize.ts` is justified by a
-      premise this change inverts — it matches the live view's sample density to "a 512²
-      thumbnail in a ~176 px tile, supersampled for free". At 256² the thumbnail is the
-      softer of the two, so the comment is not merely stale but backwards, and the
-      handoff it tunes needs judging at DPR 2 (5.1)
+- [x] 4.4a `LIVE_SUPERSAMPLE` keeps its value and loses its old justification. The premise
+      was 512² in a ~176 px tile — 1.45 samples per device pixel at DPR 2, so the tile was
+      supersampled and the live view was the more aliased surface. At 256² it is 0.80 at
+      DPR 2, so matching the tile would mean supersampling *below* device resolution. The
+      factor stands on the shading-aliasing argument that never depended on thumbnails,
+      and the handoff mismatch now runs the safe way round: a model sharpens when the user
+      takes hold of it
 - [x] 4.4 Grep both workspaces for surviving "PNG"/"512" in comments and docstrings that
       now describe pixels this app does not produce — **with `grep -a`**, since
       `server/src/app.ts` holds NUL bytes and plain grep silently reports nothing there.
@@ -96,9 +99,11 @@
 
 ## 5. Judge it in the app, then freeze
 
-- [ ] 5.1 Visual pass at DPR 1 and DPR 2 on a real listing — **DPR 1 reported clean by
-      Masa** (live view against thumbnail, no visible colour difference, 2026-09-07),
-      which leaves DPR 2, the case D2 accepts rather than fixes — tiles, a folder contact
+- [x] 5.1 Judged (2026-09-07, headless Chromium at both ratios against the demo box, and
+      Masa on the live app at DPR 1). DPR 1 clean. DPR 2 is a **1.41x upscale** in the
+      181 px tile measured — soft on fine detail, sound on silhouette and material —
+      and **accepted**: the tile is a browsing affordance, the lightbox is a live render,
+      and 320² would not fix it anyway in a grid whose tiles stretch (D2) — tiles, a folder contact
       sheet, and the handoff from tile to live view — accepting or overturning D2's
       choice of 256 over 320. Not done when the code lands; done when the pixels are
       judged

@@ -1,13 +1,23 @@
 /**
  * Backing-store size for the live canvas.
  *
- * A thumbnail is a fixed 512² render displayed in a ~176 px tile — roughly 1.5×
- * device pixels at DPR 2, i.e. supersampled for free. The live canvas has always
- * rendered 1:1 with device pixels, so at handoff the live view is the *more*
- * aliased of the two even though it is the interactive one. What separates them
- * is shading aliasing (high-frequency normals on dense sculpts, amplified by
- * ambient occlusion), which MSAA cannot touch: multisampling resolves geometric
- * edge coverage, not the shader result inside a fragment. Only more samples per
+ * The live canvas renders above device resolution because of shading aliasing;
+ * it no longer renders above it to *match a thumbnail*, which is what this
+ * comment used to say. That premise was `THUMB_SIZE` 512 in a ~176 px tile —
+ * 1.45 samples per device pixel at DPR 2, so the tile was supersampled for free
+ * and the live view at 1:1 was the more aliased of the two. `webp-thumbnails`
+ * made thumbnails 256², and in a ~161 px tile that is 0.80 samples per device
+ * pixel at DPR 2 and 1.59 at DPR 1: the tile is now the softer surface at high
+ * density, and matching it would mean supersampling *below* device resolution,
+ * which is not a thing worth matching. So the factor stays where it is on the
+ * argument that never depended on thumbnails — and the handoff mismatch now
+ * runs the safe way round, a model sharpening when the user takes hold of it
+ * rather than blurring.
+ *
+ * What the factor is for: shading aliasing — high-frequency normals on dense
+ * sculpts, amplified by ambient occlusion — which MSAA cannot touch, because
+ * multisampling resolves geometric edge coverage and not the shader result
+ * inside a fragment. Only more samples per
  * displayed pixel fix it, so the canvas renders above device resolution and the
  * browser downsamples it — the canvas keeps its CSS box (`style.width/height`
  * are 100%; `setSize` is called with `updateStyle: false`).

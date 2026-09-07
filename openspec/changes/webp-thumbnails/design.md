@@ -80,14 +80,26 @@ rather than trusting them.
 
 ### D2: 256², with the high-density case declined rather than missed
 
-A model tile draws at ~161 CSS px and a contact-sheet cell at ~79 (measured in the
-running app, 2026-09-05). At device-pixel-ratio 1 a 256² render is more than enough;
-at 2 a tile wants 322, so 256 is visibly soft on a retina display. 320² was the
-obvious answer and is declined: it costs ~50% more bytes on every visit from every
-display to sharpen one class of display, and the alternative — two stored sizes — is
-the size dimension this change lists as a non-goal. If high-density sharpness later
-outranks bytes, the change is one constant and a recipe bump, which is cheap precisely
-because this change makes size part of the recipe version.
+A model tile draws at ~161 CSS px in the layout measured, and a contact-sheet cell at
+~79. At device-pixel-ratio 1 a 256² render covers both outright. At 2 it does not: the
+tile was measured again at 181 CSS px in a wider viewport, which is 362 device pixels
+against a 256 px source — a **1.41x upscale**, visible as softness on fine detail
+(a sculpt's spine ridges, a tail's taper) while the silhouette, the shading and the
+material still read.
+
+320² was the obvious answer and is declined, for two reasons rather than the one this
+decision first gave. It costs ~50% more bytes on every visit from every display to
+sharpen one class of display. And it does not actually fix the case: the grid is
+`minmax(11rem, 1fr)`, so tiles stretch with the viewport — 320 covers a 161 px tile at
+DPR 2 exactly and the 181 px tile measured here not at all (0.88x). No fixed size covers
+every layout, so the choice is between accepting some upscaling and storing several
+sizes, and storing several sizes is the size dimension this change lists as a non-goal.
+
+The judgment (2026-09-07, headless Chromium at both ratios, a real listing): accepted.
+The tile is a browsing affordance and the lightbox is a live render, so the surface a
+user studies is never the upscaled one. If that is overturned later, it is one constant
+and a recipe bump — cheap precisely because this change makes size part of the recipe
+version.
 
 ### D3: A recipe bump, not a new key dimension
 
