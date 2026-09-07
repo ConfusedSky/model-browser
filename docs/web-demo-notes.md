@@ -281,7 +281,9 @@ own origin"; only its body hardcodes loopback.
    one usually brings the others; (iii, added 2026-09-07) **it returns partial matches
    as readily as full ones** — a query with two parts is matched part by part, so "an
    elf carrying an orb" brings back elves, and people holding orbs, beside the elves
-   with orbs that were asked for. All three are Masa's observations, not
+   with orbs that were asked for — though a hit meeting more of the query usually
+   scores higher, so the full matches tend to lead and the partial ones trail. All
+   three are Masa's observations, not
    measurements: like the chips, each example is verified against the live index
    before it becomes copy, and a limitation that stops reproducing is dropped rather
    than kept as lore. The section is backlog 1.5's to draft with the rest of About.
