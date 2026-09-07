@@ -51,6 +51,17 @@ The measurement that is *not* a proxy: the tile sizes in D2, and that a browser 
 these bytes over a transatlantic link received 5 KB per thumbnail where it had received
 86 KB (2026-09-05, `docs/web-demo-notes.md`).
 
+**The alpha half is now measured on the real encoder** (a parallel session's run,
+2026-09-07, headless Chromium 149 via playwright-core, synthetic 256² anti-aliased grey
+disc with a 3 px saturated red stroke on transparency, round-tripped through
+`canvas.toBlob('image/webp', q)` and decoded back): at q0.8, **0 alpha mismatches across
+631 partial-alpha pixels** and no transparent pixel became non-zero — so Chrome's default
+alpha handling is lossless, as this decision assumed. Bytes were 3,956 at q0.8 and 4,830
+at q0.9 against 10,552 for the same canvas as PNG. Maximum RGB error on opaque pixels was
+51, which is 4:2:0 chroma subsampling meeting a worst case — a thin saturated stroke — and
+Masa reports no visible colour difference between live view and thumbnail in the app at
+DPR 1. This settles Chrome; other engines and a real model render are still task 3.1's.
+
 ### D2: 256², with the high-density case declined rather than missed
 
 A model tile draws at ~161 CSS px and a contact-sheet cell at ~79 (measured in the
@@ -89,11 +100,19 @@ sweep that removes a render whose model has been deleted either. It would outliv
 model it depicts. On the corpus measured that is 208 MB per library, and it would never
 come back.
 
-So removal happens at every point the store already has the entry in hand: a write, a
-stale re-render, `maintain`'s source-vanished sweep, `migrate`'s duplicate drop, and
-`clear`. What is deliberately *not* added is a startup migration pass over libraries
-nothing has asked for — every one of those call sites is already reading that entry for
-its own reasons.
+So removal happens at every point the store already has the entry in hand: a write
+(including the pixel deletion a `png: null` write performs, which the reset job uses),
+a stale re-render, `maintain`'s source-vanished sweep, and both halves of `migrate` —
+its duplicate drop *and* its rename. The rename is the one a write-path rule misses
+entirely and the one with a second failure of its own: it moves pixels by the current
+name, so a legacy flat cache migrates its sidecars while its `.png` files stay flat
+forever, and *Server-side thumbnail persistence*'s promise that migration keeps images
+intact silently stops holding. What is deliberately *not* added is a startup pass over
+libraries nothing has asked for — every call site above is already reading that entry
+for its own reasons.
+
+(There is no `clear` method on `ThumbCache`; an earlier draft of this decision cited
+one. `clearRecipe` is a label helper, not a cache-wide delete.)
 
 ## Risks / Trade-offs
 
@@ -110,6 +129,9 @@ its own reasons.
   it. `renderThumbnail` does not inspect `blob.type` today. Task 3.1a decides between
   refusing such a write, recording the encoding per entry, and accepting it knowingly —
   the store's one-name-per-recipe shape is what makes "record it" more than a one-liner.
+  The cheapest of the three, and the one a reviewing session recommends, is client-side:
+  reject a blob whose `type` is not `image/webp` before it is uploaded, so a browser that
+  cannot produce the format writes nothing rather than writing something mislabelled.
 - **Browser encoder variance** even where WebP is produced: Chrome, Firefox and Safari
   differ in method, chroma handling and alpha defaults. The stored bytes are whatever the
   writing browser produced, which was already true of PNG but mattered less when the

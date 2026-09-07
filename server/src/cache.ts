@@ -25,10 +25,10 @@ interface RenderLabels {
 /**
  * One entry, up to two renders (`ao-as-recipe-dimension` D1). The occluded
  * render keeps the shape every sidecar has always had — its labels at the top
- * level, its pixels in `<key>.png` — because it is the render every existing
+ * level, its pixels in `<key>.webp` — because it is the render every existing
  * cache already holds, and making it a member of a symmetric map would have
  * cost a migration of every one of them. The unoccluded render is named for
- * what it lacks: `<key>.noao.png`, labels under `noao`. A sidecar written
+ * what it lacks: `<key>.noao.webp`, labels under `noao`. A sidecar written
  * before this change simply has no `noao`, which is exactly what "no
  * unoccluded render is cached" means.
  *

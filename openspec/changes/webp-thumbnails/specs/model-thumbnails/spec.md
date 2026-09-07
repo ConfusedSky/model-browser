@@ -162,13 +162,20 @@ from the cache rather than left beside its replacement. The recipe version alrea
 a render stale — it is re-rendered on the visit that finds it (see *Recipe-labelled
 thumbnails*) — but staleness alone frees no disk: a file the store can no longer name is a
 file nothing will ever evict, since the bounded cache measures and evicts only the renders it
-can find. Removal SHALL happen wherever the store already has that entry in hand — a write, a
-stale re-render, the sweep that follows a deleted model, a key migration, or a clear — and
-SHALL NOT require a migration pass of its own over libraries nothing has asked for.
+can find. Removal SHALL happen wherever the store already has that entry in hand — when it is
+written, when a stale render is replaced, when the sweep that follows a deleted model
+reaches it, and when an entry is re-filed under a new key — and SHALL NOT require a pass
+of its own over libraries nothing has asked for. Re-filing SHALL carry an entry's pixels
+whatever encoding they are stored in, since an entry that moves without them is the
+*Server-side thumbnail persistence* promise that migration keeps images intact, broken.
 
 #### Scenario: A re-render reclaims what it replaced
 - **WHEN** an entry whose stored bytes are in the superseded encoding is re-rendered under the current recipe
 - **THEN** the superseded file is gone from the cache directory, the current one is served, and the cache's measured size counts only the current one
+
+#### Scenario: Re-filing an entry brings its pixels whatever they are named
+- **WHEN** an entry whose stored render is in a superseded encoding is re-filed under a new key
+- **THEN** its pixels arrive under the new key rather than being left behind at the old one, and no file of that entry remains where it was
 
 #### Scenario: A superseded render does not outlive its model
 - **WHEN** the model behind an entry holding a superseded render is deleted and the store's maintenance sweep reaches it

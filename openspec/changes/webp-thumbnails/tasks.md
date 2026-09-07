@@ -16,10 +16,14 @@
 ## 2. Reclaim what the bump strands
 
 - [ ] 2.1 Delete any stored render whose name is in a superseded encoding (`<key>.png`,
-      `<key>.noao.png`) at **every** place the store already visits an entry: a write, a
-      stale re-render, `maintain`'s source-vanished sweep, `migrate`'s duplicate drop,
-      and `clear` (D5). The write path alone leaves a model that is deleted while its old
-      render is still on disk leaking that render forever
+      `<key>.noao.png`) at **every** place the store already visits an entry: a write
+      (the `png: null` deletion included), a stale re-render, `maintain`'s source-vanished
+      sweep, and both halves of `migrate` — its duplicate drop and its **rename** (D5).
+      The write path alone leaves a deleted model's render leaking forever; the rename is
+      worse than a leak, since it moves pixels by the current name and so strands a legacy
+      flat cache's `.png` files while migrating their sidecars, quietly breaking
+      *Server-side thumbnail persistence*'s "images intact". There is no `clear` method —
+      an earlier draft of this task invented one
 - [ ] 2.2 The bounded cache's size accounting counts a superseded render as evictable
       weight rather than ignoring it — today `maintain` builds its metas from the current
       extension only, so the orphan is outside the size cap and can never be an eviction
@@ -32,7 +36,10 @@
 ## 3. Verify the encoder, not just the constant
 
 - [ ] 3.1 Test that a browser-encoded thumbnail keeps full transparency outside the
-      silhouette and full opacity inside it — the `model-viewer` scenario this change
+      silhouette and full opacity inside it. **Chrome is already measured** (a parallel
+      session, 2026-09-07: 0 alpha mismatches over 631 partial-alpha pixels at q0.8 —
+      D1), on a synthetic disc; what is left is the same assertion on a real model render,
+      and any statement at all about WebKit and Gecko — the `model-viewer` scenario this change
       adds. `canvas.toBlob('image/webp', q)` is the encoder under test; happy-dom does
       not encode, so this belongs where a real canvas exists (Playwright), and the
       existing occlusion transparency check is the model to follow
@@ -60,13 +67,19 @@
       thumbnail in a ~176 px tile, supersampled for free". At 256² the thumbnail is the
       softer of the two, so the comment is not merely stale but backwards, and the
       handoff it tunes needs judging at DPR 2 (5.1)
-- [ ] 4.4 Grep both workspaces for surviving "PNG"/"512" in comments and docstrings that
+- [x] 4.4 Grep both workspaces for surviving "PNG"/"512" in comments and docstrings that
       now describe pixels this app does not produce — **with `grep -a`**, since
-      `server/src/app.ts` holds NUL bytes and plain grep silently reports nothing there
+      `server/src/app.ts` holds NUL bytes and plain grep silently reports nothing there.
+      Swept 2026-09-07: `thumbImageUrl`'s docstring, `ThumbCache`'s header comment,
+      `session.ts`'s rest-state comment and `Grid.tsx`'s box comment. `renderSize.ts` and
+      `ViewerLayer`'s `renderNow` comment were left deliberately — their 512² is a
+      premise, not a label, and 4.4a is where it gets judged
 
 ## 5. Judge it in the app, then freeze
 
-- [ ] 5.1 Visual pass at DPR 1 and DPR 2 on a real listing — tiles, a folder contact
+- [ ] 5.1 Visual pass at DPR 1 and DPR 2 on a real listing — **DPR 1 reported clean by
+      Masa** (live view against thumbnail, no visible colour difference, 2026-09-07),
+      which leaves DPR 2, the case D2 accepts rather than fixes — tiles, a folder contact
       sheet, and the handoff from tile to live view — accepting or overturning D2's
       choice of 256 over 320. Not done when the code lands; done when the pixels are
       judged

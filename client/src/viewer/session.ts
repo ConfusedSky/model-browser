@@ -289,7 +289,7 @@ export class ViewerSession {
   }
 
   /**
-   * 512×512 PNG of the rest state.
+   * `THUMB_SIZE`² WebP of the rest state.
    *
    * `ao` is the caller's, never this session's own `aoEnabled()` read — the
    * one place `render` and `snapshot` deliberately differ. `App.tsx`'s

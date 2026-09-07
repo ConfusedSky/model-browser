@@ -273,7 +273,7 @@ export interface ApiClient {
    */
   getThumb(path: string, mtime: number, ao?: boolean, gen?: number): Promise<ThumbResult>
   /**
-   * The URL at which the server answers the same render as `image/png` bytes
+   * The URL at which the server answers the same render as `image/webp` bytes
    * (`thumbnail-image-serving` D1) — for a tile whose listing entry vouches
    * for the render to reference by `<img src>`, with no lookup. Same key as
    * `getThumb`; a pure builder, no request.

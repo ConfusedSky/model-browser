@@ -415,7 +415,7 @@ function ThumbView({
       // the host's smaller axis (`100cqh` needs the host to be a size
       // container, which both hosts declare) — so `overlayRectFor` measures a
       // real rect before a lazy image has any intrinsic size: thumbnails are
-      // always 512² at aspect 1 (the renderer's contract), so this is the box
+      // always square at `THUMB_SIZE` (the renderer's contract), so this is the box
       // the picture will fill. Height-driven it was wrong in a sheet cell
       // taller than wide, where the width clamp squashed the box and the
       // picture stretched into it (Masa, 2026-09-03).
