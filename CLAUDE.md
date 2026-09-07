@@ -135,8 +135,9 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   browser's own encoder — 5.6 KB against 87 KB of PNG, `openspec/changes/webp-thumbnails`
   D1; docs/web-demo-notes.md); the live
   view uses its host's aspect — a non-square viewer host persists a thumbnail framed
-  unlike what was seen. Store and wire still say `png`: the field name, `pngFile` and the
-  base64 `png` body outlived the format, so read those as "the pixels"
+  unlike what was seen. The wire still says `png`: the field name and the base64 `png`
+  body outlived the format (the store's `pngFile` became `renderFile`), so read those as
+  "the pixels"
 - Zip entries use virtual paths `foo.zip!/entry`, one level only — nested zips are
   rejected by design (D6)
 - Any change that alters thumbnail pixel output (rig lights, materials, tone mapping) must
