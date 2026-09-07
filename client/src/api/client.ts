@@ -365,7 +365,7 @@ async function okOrThrow(res: Response): Promise<void> {
 
 function base64ToBlobUrl(b64: string): string {
   const bytes = Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0))
-  return URL.createObjectURL(new Blob([bytes], { type: 'image/png' }))
+  return URL.createObjectURL(new Blob([bytes], { type: 'image/webp' }))
 }
 
 async function blobToBase64(blob: Blob): Promise<string> {

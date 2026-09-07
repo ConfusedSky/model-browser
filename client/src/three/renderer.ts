@@ -6,17 +6,34 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import type { CameraState, LightingMode, OrbitAxis } from '../../../shared/types'
 import { applyState, boundsOf, DEFAULT_CAMERA, frameFor, type Bounds } from './camera'
 
-export const THUMB_SIZE = 512
+/**
+ * Thumbnail edge in pixels, and the quality WebP encodes them at.
+ *
+ * 256² WebP rather than the original 512² PNG because a first screen is
+ * ~114 of these and their bytes dominate a cold visit: on the CC-BY corpus a
+ * 512² PNG averages 87 KB, a 512² WebP at q0.8 10 KB, a 256² WebP at q0.8
+ * **4 KB** — but those are `cwebp -q 80 -alpha_q 100` over downscaled 512s
+ * (60 renders, docs/web-demo-notes.md 2026-09-05), not this line's own
+ * encoder over a native 256² render, which is unmeasured. Alpha is meant to
+ * stay lossless — the tile's silhouette is the edge a viewer reads — but that
+ * is the encoder's default rather than something this call can ask for, and a
+ * browser that cannot encode WebP falls back to PNG here silently.
+ */
+export const THUMB_SIZE = 256
+export const THUMB_QUALITY = 0.8
 
 /**
  * Version of the pixel recipe thumbnails are rendered with — bumped whenever
  * rendered output changes for the same input (rig contents, materials, tone
- * mapping). Cached PNGs carrying another (or no) version are re-rendered.
+ * mapping). Cached renders carrying another (or no) version are re-rendered.
  * 1 = the pre-rim rig (implicit), 2 = red/blue rim accents, 3 = key-light
  * shadows, 4 = contact floor at the tuned opacity (0.35 → 0.7),
- * 5 = screen-space ambient occlusion, 6 = STL normals from winding.
+ * 5 = screen-space ambient occlusion, 6 = STL normals from winding,
+ * 7 = 256² WebP at q0.8, where 1–6 were 512² PNG — a size and an encoder
+ * are pixel recipe as much as a light is, and every stored 512² PNG is a
+ * different image from what this build now produces.
  */
-export const RIG_VERSION = 6
+export const RIG_VERSION = 7
 
 /**
  * The lighting label every render writes, beside `RIG_VERSION` because it is
@@ -78,8 +95,8 @@ const AO_SAMPLES = 16
 /**
  * A post-process chain on the shared renderer (D1): `RenderPass → GTAOPass →
  * OutputPass` over an explicitly constructed 4× MSAA target. Chains are
- * renderer-scoped and long-lived — one for the live view, one pinned at 512²
- * for thumbnails — so opening an overlay or queueing a thumbnail allocates
+ * renderer-scoped and long-lived — one for the live view, one pinned at
+ * `THUMB_SIZE`² for thumbnails — so opening an overlay or queueing one allocates
  * nothing, and neither chain is ever disposed.
  */
 export interface RenderChain {
@@ -177,7 +194,7 @@ export function getLiveChain(width: number, height: number): RenderChain {
 }
 
 /**
- * The thumbnail chain: fixed at 512² and pinned to `UnsignedByteType`, because
+ * The thumbnail chain: fixed at `THUMB_SIZE`² and pinned to `UnsignedByteType`, because
  * `readRenderTargetPixels` into a `Uint8Array` needs an 8-bit target (D1).
  */
 export function getThumbChain(): RenderChain {
@@ -360,7 +377,7 @@ export function unstage(
 }
 
 /**
- * Render a model to a 512×512 transparent PNG through the thumbnail
+ * Render a model to a transparent `THUMB_SIZE`² WebP through the thumbnail
  * post-process chain on the shared renderer (never the visible canvas).
  *
  * `ao` is the occlusion recipe these pixels are drawn under — the caller's
@@ -434,6 +451,6 @@ export function renderThumbnail(
     canvas.toBlob((blob) => {
       if (blob === null) reject(new Error('toBlob failed'))
       else resolve(blob)
-    }, 'image/png')
+    }, 'image/webp', THUMB_QUALITY)
   })
 }

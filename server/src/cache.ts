@@ -364,7 +364,7 @@ export class ThumbCache {
 
   /** The occluded render's file is the historical one; the sibling is suffixed. */
   private pngFile(dir: string, key: string, ao = true): string {
-    return join(dir, ao ? `${key}.png` : `${key}.noao.png`)
+    return join(dir, ao ? `${key}.webp` : `${key}.noao.webp`)
   }
 
   /**

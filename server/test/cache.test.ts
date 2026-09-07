@@ -127,7 +127,7 @@ describe('ThumbCache maintenance', () => {
     const path = join(fx.dir, 'loose.stl')
     await cache.put(path, { mtime: 1, png: Buffer.from('one') })
     await cache.put(path, { mtime: 2, png: Buffer.from('two') })
-    const pngs = readdirSync(cache.dir).filter((f) => f.endsWith('.png'))
+    const pngs = readdirSync(cache.dir).filter((f) => f.endsWith('.webp'))
     expect(pngs).toHaveLength(1)
     expect((await cache.get(path, 2)).status).toBe('hit')
     expect((await cache.get(path, 1)).status).toBe('stale')
@@ -252,7 +252,7 @@ describe('ThumbCache maintenance', () => {
     cleanups.push(fx.dir)
     const path = join(fx.dir, 'loose.stl')
     await cache.put(path, { mtime: 1, png: Buffer.from('png'), camera: CAM, rig: 2 })
-    for (const f of readdirSync(cache.dir)) if (f.endsWith('.png')) unlinkSync(join(cache.dir, f))
+    for (const f of readdirSync(cache.dir)) if (f.endsWith('.webp')) unlinkSync(join(cache.dir, f))
     const res = await cache.get(path, 1)
     expect(res.status).toBe('stale')
     expect(res.rig).toBe(2)
@@ -290,7 +290,7 @@ describe('ThumbCache maintenance', () => {
     expect(resA.status).toBe('stale') // png gone…
     expect(resA.camera).toEqual(CAM) // …camera spared
     expect(resA.axis).toBe('z') // …axis spared too
-    const pngs = readdirSync(cache.dir).filter((f) => f.endsWith('.png'))
+    const pngs = readdirSync(cache.dir).filter((f) => f.endsWith('.webp'))
     expect(pngs.length).toBeLessThanOrEqual(1)
   })
 
@@ -495,15 +495,15 @@ describe('ThumbCache under a library', () => {
     await legacy.put(lib.model, { mtime: 3, png: PNG_A, camera: CAM, axis: '-x', lighting: 'camera', rig: 4 })
     // A clock old enough that a copy — or a touch — could not be mistaken for it.
     const then = new Date(Date.now() - 3_600_000)
-    utimesSync(onlyFile(base, '.png'), then, then)
-    const wasLastRead = statSync(onlyFile(base, '.png')).mtimeMs
+    utimesSync(onlyFile(base, '.webp'), then, then)
+    const wasLastRead = statSync(onlyFile(base, '.webp')).mtimeMs
 
     const cache = new ThumbCache(base, CAP, 32, libraryFor(lib.top))
     await cache.maintain()
 
     // Read the clock before any get: a hit touches the png, which *is* the clock.
     const idDir = join(base, 'lib-migrate')
-    expect(Math.abs(statSync(onlyFile(idDir, '.png')).mtimeMs - wasLastRead)).toBeLessThan(1)
+    expect(Math.abs(statSync(onlyFile(idDir, '.webp')).mtimeMs - wasLastRead)).toBeLessThan(1)
     expect(jsons(base)).toHaveLength(0) // nothing left flat
 
     const res = await cache.get(LIB, 3)
@@ -697,14 +697,14 @@ describe('ThumbCache under a library', () => {
 
 /**
  * Two renders per model, one orientation between them (`ao-as-recipe-dimension`
- * D1–D3). The occluded render is `<key>.png` with its labels at the top level of
+ * D1–D3). The occluded render is `<key>.webp` with its labels at the top level of
  * the sidecar — exactly the entry every existing cache holds — and the
- * unoccluded one is `<key>.noao.png` with its labels under `noao`.
+ * unoccluded one is `<key>.noao.webp` with its labels under `noao`.
  */
 describe('ThumbCache occlusion renders', () => {
   const pngsOf = (dir: string): string[] =>
     readdirSync(dir)
-      .filter((f) => f.endsWith('.png'))
+      .filter((f) => f.endsWith('.webp'))
       .sort()
 
   it('serves an entry written before the split as the occluded render, under `ao` absent and true alike', async () => {
@@ -779,7 +779,7 @@ describe('ThumbCache occlusion renders', () => {
 
     // Two files, named as D1 fixes them.
     const key = createHash('sha256').update(path).digest('hex')
-    expect(pngsOf(cache.dir)).toEqual([`${key}.noao.png`, `${key}.png`])
+    expect(pngsOf(cache.dir)).toEqual([`${key}.noao.webp`, `${key}.webp`])
   })
 
   it('carries a camera beyond tolerance to the other render as cleared labels, and leaves the written one alone', async () => {
@@ -1047,8 +1047,8 @@ describe('ThumbCache occlusion renders', () => {
         noao: { mtime: 1, lighting: 'camera', rig: 2 },
       }),
     )
-    writeFileSync(join(cache.dir, `${key}.png`), PNG_A)
-    writeFileSync(join(cache.dir, `${key}.noao.png`), PNG_B)
+    writeFileSync(join(cache.dir, `${key}.webp`), PNG_A)
+    writeFileSync(join(cache.dir, `${key}.noao.webp`), PNG_B)
 
     // A labels-only PUT on the unoccluded render. The two pose records still
     // differ, but no pixels were written — there is no newly drawn render
@@ -1107,7 +1107,7 @@ describe('ThumbCache occlusion renders', () => {
 
     await cache.put(path, { mtime: 2, png: PNG_NEW, rig: 2, lighting: 'camera' })
 
-    expect(pngsOf(cache.dir)).toEqual([`${key}.png`]) // the sibling's file is gone
+    expect(pngsOf(cache.dir)).toEqual([`${key}.webp`]) // the sibling's file is gone
     const superseded = await cache.get(path, 2, false)
     expect(superseded.status).toBe('miss') // no mtime, no labels, no camera to be stale from
     expect(superseded.rig).toBeUndefined()
@@ -1356,7 +1356,7 @@ describe('write generations', () => {
 describe('deletion and conditional writes', () => {
   const pngsOf = (dir: string): string[] =>
     readdirSync(dir)
-      .filter((f) => f.endsWith('.png'))
+      .filter((f) => f.endsWith('.webp'))
       .sort()
 
   /** An entry holding both renders' pixels and a camera — what a reset finds. */
@@ -1470,7 +1470,7 @@ describe('deletion and conditional writes', () => {
     const current = await cache.put(path, { mtime: 1, png: PNG_B, camera: CAM2, rig: 3 })
 
     const metaFile = onlyFile(cache.dir, '.json')
-    const pngFile = join(cache.dir, `${createHash('sha256').update(path).digest('hex')}.png`)
+    const pngFile = join(cache.dir, `${createHash('sha256').update(path).digest('hex')}.webp`)
     const sidecarBefore = readFileSync(metaFile, 'utf8')
     const pngBefore = readFileSync(pngFile)
 

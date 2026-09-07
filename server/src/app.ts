@@ -1624,7 +1624,7 @@ export function createApp(
   })
 
   /**
-   * The same render as `image/png` bytes, for a tile to reference by URL
+   * The same render as `image/webp` bytes, for a tile to reference by URL
    * (`thumbnail-image-serving` D1): same key, same tiers, so a listing that
    * says "cached at generation N" can point an `<img>` here and the browser's
    * own cache answers the revisit. Anything but a hit — a miss, a stale
@@ -1644,7 +1644,7 @@ export function createApp(
       return c.json({ error: 'no cached thumbnail' }, 404)
     }
     if (thumbHitTiers(c, gen)) return c.body(null, 304)
-    c.header('Content-Type', 'image/png')
+    c.header('Content-Type', 'image/webp')
     c.header('X-Content-Type-Options', 'nosniff')
     // The one resource this server serves that a foreign page *could* embed:
     // an `<img src>` sends no Origin, so the same-origin guard lets it

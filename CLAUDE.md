@@ -74,6 +74,11 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   before the numbers were dropped. A name is what a reader greps for anyway;
   where no symbol encloses the spot, name the nearest one and say which part ("`useThumbnails`'
   load effect", "`listFlat`'s `budget` assignment")
+- **`server/src/app.ts` contains literal NUL bytes** (three, inside template-literal cache
+  keys), so `grep` calls it binary and **silently prints nothing** — `grep -n thumb
+  server/src/app.ts` returns no matches while the routes are right there. Use `grep -a`
+  on this repo, or a plain-text reader; a "no matches" answer here is not evidence of
+  absence
 - Search spec/design prose with **whitespace collapsed**, not line-by-line — markdown wraps
   mid-phrase, so `grep` misses what spans a newline. A retracted claim survived two
   correction passes in normative spec text this way, and it hides edits too, not just reads:
@@ -125,15 +130,21 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
 - Mesh LRU eviction must call geometry.dispose() — dropping the reference leaks VRAM (D5)
 - Camera state is bounds-relative, never world coords; thumbnails keyed path+mtime,
   camera by path only (D4)
-- Thumbnails always capture 512² at aspect 1 (three/renderer.ts); the live view uses its
-  host's aspect — a non-square viewer host persists a thumbnail framed unlike what was seen
+- Thumbnails always capture at aspect 1, `THUMB_SIZE`² (three/renderer.ts) — **256² WebP
+  at q0.8 since 2026-09-05, 512² PNG before it** (~20x fewer bytes, but every figure so
+  far is `cwebp` over downscaled 512s, not the browser's own `toBlob` encoder —
+  `openspec/changes/webp-thumbnails` D1 and its task 3.2; docs/web-demo-notes.md); the live
+  view uses its host's aspect — a non-square viewer host persists a thumbnail framed
+  unlike what was seen. Store and wire still say `png`: the field name, `pngFile` and the
+  base64 `png` body outlived the format, so read those as "the pixels"
 - Zip entries use virtual paths `foo.zip!/entry`, one level only — nested zips are
   rejected by design (D6)
 - Any change that alters thumbnail pixel output (rig lights, materials, tone mapping) must
   bump RIG_VERSION in client/src/three/renderer.ts — never re-declare its value in a test
   mock (spread the real module; a literal silently masks the bump). A new recipe
   *dimension* is a new key, not a bump: adding a variant (`ao-as-recipe-dimension`'s
-  `.noao.png` sibling) changes no existing render's pixels, so old entries stay valid
+  `.noao.webp` sibling — `.noao.png` before the WebP change) changes no existing render's
+  pixels, so old entries stay valid
 - Scene population goes through `stageModel` (three/renderer.ts) for both thumbnails and
   live sessions — it pivots the model's bounds to the origin and fits the key light found
   by name (KEY_LIGHT); a light added to makeScene without that name is silently never fitted

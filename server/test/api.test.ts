@@ -605,7 +605,7 @@ describe('a cache under the app’s own library', () => {
     expect(readdirSync(perLibCache)).toEqual([perLib.id()])
     expect(readdirSync(idDir).map((f) => f.slice(f.lastIndexOf('.'))).sort()).toEqual([
       '.json',
-      '.png',
+      '.webp',
     ])
 
     const res = await perLibApp.request(
@@ -731,12 +731,12 @@ describe('thumbnail cacheability', () => {
       await put2({ path: path2, mtime: 111, png: png2 })
     })
 
-    it('serves the hit’s pixels as image/png, byte-equal to the lookup’s decoded png', async () => {
+    it('serves the hit’s pixels as image/webp, byte-equal to the lookup’s decoded png', async () => {
       const json = (await (await get2(key2)).json()) as ThumbGetResponse
       expect(json.status).toBe('hit')
       const res = await img2(key2)
       expect(res.status).toBe(200)
-      expect(res.headers.get('content-type')).toBe('image/png')
+      expect(res.headers.get('content-type')).toBe('image/webp')
       expect(res.headers.get('x-content-type-options')).toBe('nosniff')
       // The first embeddable resource this server serves: a foreign page's
       // `<img>` must not be able to use it as an existence oracle.
@@ -784,7 +784,7 @@ describe('thumbnail cacheability', () => {
 
     it('bumps the render’s LRU clock exactly as the lookup hit does (D7)', async () => {
       const pngPath = readdirSync(cacheDir2)
-        .filter((f) => f.endsWith('.png'))
+        .filter((f) => f.endsWith('.webp'))
         .map((f) => join(cacheDir2, f))[0]!
       const then = new Date(Date.now() - 60 * 60 * 1000)
       utimesSync(pngPath, then, then)
@@ -808,7 +808,7 @@ describe('thumbnail cacheability', () => {
         const image = await img2(`path=${encodeURIComponent('/escape.stl')}&mtime=5`)
         expect(json.status).not.toBe(200)
         expect(image.status).toBe(json.status)
-        expect(image.headers.get('content-type')).not.toBe('image/png')
+        expect(image.headers.get('content-type')).not.toBe('image/webp')
       } finally {
         unlinkSync(join(fx.dir, 'escape.stl'))
         rmSync(outside, { recursive: true, force: true })
