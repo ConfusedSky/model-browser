@@ -7,7 +7,7 @@
 - [x] 1.3 The client revives a base64 render as an `image/webp` blob
       (`base64ToBlobUrl`, `client/src/api/client.ts`)
 - [x] 1.4 The store names renders `<key>.webp` / `<key>.noao.webp` (`ThumbCache`'s
-      `pngFile`, `server/src/cache.ts`)
+      `renderFile`, `server/src/cache.ts` — named `pngFile` when this task was written)
 - [x] 1.4a Renamed to `renderFile` (19 call sites), so the store's own name stops saying
       PNG while the wire field keeps that legacy name deliberately (D4)
 - [x] 1.5 The image route types its answer `image/webp` (`server/src/app.ts`)
@@ -56,7 +56,7 @@
       bytes, which this store would file as `<key>.webp` and serve as `image/webp` —
       tiles still draw, since browsers sniff, but the bytes are several times the budget
       and the spec's encoding requirement is violated with nothing detecting it.
-      Decided and implemented as **refuse** (D6): `putThumb` drops a write whose blob is
+      Decided and implemented as **drop the render, keep the rest of the write** (D6): `putThumb` drops a write whose blob is
       not `THUMB_MIME`, which is now the single shared constant the encoder request, the
       refusal and the image route's content type all read
 - [x] 3.2 Browser-encoded sizes measured on the corpus (2026-09-07, demo box, headless

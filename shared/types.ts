@@ -204,6 +204,15 @@ export interface CameraState {
 }
 
 /**
+ * The one encoding a thumbnail is produced, stored and served in
+ * (`webp-thumbnails`). Shared because three places must agree about it and a
+ * disagreement is silent: the client asks `canvas.toBlob` for it, the client
+ * refuses to upload a render that came back as anything else, and the image
+ * route types the bytes with it.
+ */
+export const THUMB_MIME = 'image/webp'
+
+/**
  * How far two `CameraState`s may differ per component and still be the same
  * orientation. Every component is unit-free in the same sense — `az`/`el` in
  * radians, `distR` in bounding-sphere radii, `target` in radii too — so one
@@ -228,15 +237,6 @@ export interface CameraState {
  * with a narrower target distribution — same order, same conclusion). The
  * constant keeps ~4.6e4× headroom over the measured maximum.
  */
-/**
- * The one encoding a thumbnail is produced, stored and served in
- * (`webp-thumbnails`). Shared because three places must agree about it and a
- * disagreement is silent: the client asks `canvas.toBlob` for it, the client
- * refuses to upload a render that came back as anything else, and the image
- * route types the bytes with it.
- */
-export const THUMB_MIME = 'image/webp'
-
 export const CAMERA_EPSILON = 1e-9
 
 export type ThumbStatus = 'hit' | 'stale' | 'miss'

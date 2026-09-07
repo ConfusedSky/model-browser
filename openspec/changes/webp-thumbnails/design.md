@@ -118,19 +118,25 @@ come back.
 
 So removal happens at every point the store already has the entry in hand: a write
 (including the pixel deletion a `png: null` write performs, which the reset job uses),
-a stale re-render, `maintain`'s source-vanished sweep, and both halves of `migrate` —
-its duplicate drop *and* its rename. The rename is the one a write-path rule misses
-entirely and the one with a second failure of its own: it moves pixels by the current
-name, so a legacy flat cache migrates its sidecars while its `.png` files stay flat
-forever, and *Server-side thumbnail persistence*'s promise that migration keeps images
-intact silently stops holding. What is deliberately *not* added is a startup pass over
-libraries nothing has asked for — every call site above is already reading that entry
-for its own reasons.
+a stale re-render, the legacy flat sweep, and both halves of `migrate` — its duplicate
+drop *and* its rename. The rename is the one a write-path rule misses entirely and the
+one with a second failure of its own: it moves pixels by the current name, so a legacy
+flat cache migrates its sidecars while its `.png` files stay flat forever, and
+*Server-side thumbnail persistence*'s promise about migration silently stops holding.
+
+`maintain` is the sweep that reaches everything else, and it takes the superseded names
+from the directory listing it already reads rather than by removing blindly per entry:
+once a cache is clean that costs nothing, where two `rm` calls per sidecar would cost two
+syscalls per entry forever, and reading names also reaches an orphan whose sidecar is
+gone — the shape an interrupted upgrade leaves, which no per-entry loop visits. Since
+`index.ts` runs `maintain()` at startup, the first run after this ships is what actually
+reclaims an existing library; the per-site removals above are for what happens between
+those runs. What is deliberately *not* added is a migration pass of its own.
 
 (There is no `clear` method on `ThumbCache`; an earlier draft of this decision cited
 one. `clearRecipe` is a label helper, not a cache-wide delete.)
 
-### D6: A render the browser encoded as something else is refused, not stored
+### D6: A render the browser encoded as something else is dropped; the write around it is not
 
 `canvas.toBlob(type, q)` answers PNG when it cannot encode `type` — silently, by the
 HTML spec's own rule, and WebKit ships exactly that. Three options were open: refuse the
@@ -144,12 +150,21 @@ found: bytes several times the budget, under a name and a content type that both
 which nothing would ever surface because browsers sniff images and the tile draws.
 
 So the check is client-side, in `putThumb` — the one place every upload passes through
-(D1's ApiClient seam is what makes that true) — and the failure is a no-op: nothing is
-stored, the client keeps drawing the render it already has, and the entry stays a miss
-that a browser which can encode WebP will fill. The cost is that such a browser never
-warms a shared cache, which for the demo means a Safari visitor renders each tile once
-per visit. That is the honest form of the trade, and it is visible in the requirement
-rather than hidden in a mislabelled file.
+(D1's ApiClient seam is what makes that true). What it drops is the *render*, not the
+request: three callers move a camera or an axis in the same write as the pixels — the
+orbit release, the axis set, the reframe — so refusing the whole request would lose the
+orientation the user had just chosen, on one family of browsers, silently, while
+reporting success. The pixels leave and the three labels that describe pixels leave with
+them, because `lighting`, `rig` or `posed` arriving without a render would relabel the
+*stored* render as current, which is worse than dropping the write. Everything else
+travels, and `ThumbCache.put` already treats an orientation write without pixels the way
+this needs: the stored render's recipe labels are cleared, so it reads as needing
+re-render and a capable browser fills it. A write that carried nothing but pixels is
+skipped outright rather than sent empty, which would bump a generation for no reason.
+
+The cost is that such a browser never warms a shared cache — for the demo, a Safari
+visitor re-renders each tile per visit — and that is visible in the requirement rather
+than hidden in a mislabelled file.
 
 The format itself now lives in one place, `THUMB_MIME` in `shared/types.ts`: the client
 asks the encoder for it, the client refuses anything else, and the image route types the

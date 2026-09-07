@@ -135,9 +135,9 @@ describe('ThumbCache maintenance', () => {
 
   /**
    * `webp-thumbnails`: renders stored under the encoding this app produced
-   * before it. `pngFile` cannot name them, so nothing measures, evicts or
-   * sweeps them unless the store is told about them by name — these cells are
-   * what say it is. The bytes are arbitrary; what is under test is the file.
+   * before it. `renderFile` cannot name them, so nothing measures, evicts or
+   * sweeps them unless the store is told about them — these cells are what say
+   * it is. The bytes are arbitrary; what is under test is the file.
    */
   describe('a superseded encoding leaves no stored bytes behind', () => {
     const supersededName = (path: string, ao = true) =>
@@ -183,6 +183,23 @@ describe('ThumbCache maintenance', () => {
       // The entry itself survives — it is the pixels that were superseded, and
       // the client re-renders them under the current recipe.
       expect((await cache.get(path, 1)).status).toBe('stale')
+    })
+
+    // What an upgrade interrupted midway leaves: pixels whose sidecar was
+    // already rewritten or removed. No per-entry loop reaches those, which is
+    // why the pass reads the directory's own names.
+    it('reclaims an orphan whose sidecar is gone', async () => {
+      const cache = tempCache()
+      const fx = makeFixtures()
+      cleanups.push(fx.dir)
+      const path = join(fx.dir, 'loose.stl')
+      await cache.put(path, { mtime: 1, png: PNG_A })
+      writeFileSync(join(cache.dir, `${'0'.repeat(64)}.png`), PNG_B)
+
+      await cache.maintain()
+
+      expect(readdirSync(cache.dir).filter((f) => f.endsWith('.png'))).toEqual([])
+      expect((await cache.get(path, 1)).status).toBe('hit')
     })
 
     it('a deleted model takes its superseded render with it', async () => {

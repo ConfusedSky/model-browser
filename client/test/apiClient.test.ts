@@ -305,12 +305,56 @@ describe('HttpApiClient contract', () => {
    * the type asked for, silently, so the only place a wrong format can be
    * caught is the moment before it is uploaded.
    */
-  it('putThumb refuses a render the browser encoded as something else', async () => {
+  it('putThumb drops a render the browser encoded as something else', async () => {
     const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ ok: true, gen: 7 }))
     const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
     const png = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' })
     expect(await api.putThumb({ path: '/m.stl', mtime: 42, png })).toEqual({})
     expect(fetchFn).not.toHaveBeenCalled()
+  })
+
+  /**
+   * The orbit release, the axis set and the reframe all send a camera in the
+   * same write as the pixels. Refusing the whole request would lose the
+   * orientation the user just chose — silently, and on WebKit only.
+   */
+  it('putThumb keeps the orientation when it drops the render', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ ok: true, gen: 9 }))
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
+    const png = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' })
+    expect(
+      await api.putThumb({
+        path: '/m.stl',
+        mtime: 42,
+        png,
+        camera: CAM,
+        axis: '-z',
+        lighting: 'camera',
+        rig: 7,
+        posed: 2,
+      }),
+    ).toEqual({ gen: 9 })
+    const [, init] = fetchFn.mock.calls[0] as [string, RequestInit]
+    const body = JSON.parse(init.body as string) as Record<string, unknown>
+    expect(body.camera).toEqual(CAM)
+    expect(body.axis).toBe('-z')
+    // The pixels and the three labels that describe pixels stay behind: a label
+    // without a render would relabel the stored one as current.
+    expect(body.png).toBeUndefined()
+    expect(body.lighting).toBeUndefined()
+    expect(body.rig).toBeUndefined()
+    expect(body.posed).toBeUndefined()
+  })
+
+  it('putThumb passes a discard through even when the render is dropped', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ ok: true, gen: 10 }))
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch)
+    const png = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' })
+    await api.putThumb({ path: '/m.stl', mtime: 42, png, camera: null, axis: null })
+    const [, init] = fetchFn.mock.calls[0] as [string, RequestInit]
+    const body = JSON.parse(init.body as string) as Record<string, unknown>
+    expect(body.camera).toBeNull()
+    expect(body.axis).toBeNull()
   })
 
   it('putThumb sends a render the browser encoded as WebP', async () => {

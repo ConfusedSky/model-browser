@@ -364,6 +364,37 @@ async function okOrThrow(res: Response): Promise<void> {
   throw await errorOf(res)
 }
 
+/**
+ * The write to send for a render whose bytes are not what this app produces.
+ *
+ * `canvas.toBlob` answers PNG when it cannot encode the type asked for —
+ * silently, by the HTML spec's own rule, and WebKit ships exactly that. Those
+ * bytes must not be stored: they would be filed under a name and served under
+ * a content type that both say WebP, tiles would still draw because browsers
+ * sniff images, and nothing would ever surface it while the entry cost several
+ * times its byte budget (`webp-thumbnails` D6).
+ *
+ * What must still be stored is everything in that write which is *not* pixels.
+ * Three callers move a camera or an axis in the same request as a render — the
+ * orbit release, the axis set, and the reframe — so dropping the request whole
+ * would lose a user's orientation on every browser that cannot encode WebP, and
+ * report success while doing it. So the pixels leave, and with them the three
+ * labels that describe pixels: sending `lighting`, `rig` or `posed` without a
+ * render would relabel the *stored* render as current, which is the one lie
+ * worse than dropping the write. The rest travels, and `ThumbCache.put` treats
+ * an orientation write without pixels exactly as it always has — the stored
+ * render's recipe labels are cleared, so it reads as needing re-render, and a
+ * browser that can encode WebP fills it on the next visit.
+ *
+ * `null` when nothing but pixels was being written: there is nothing left to
+ * send, and an empty write would bump the entry's generation for no reason.
+ */
+function withoutUnusableRender(save: ThumbSave): ThumbSave | null {
+  if (!(save.png instanceof Blob) || save.png.type === THUMB_MIME) return save
+  const { png: _pixels, lighting: _lighting, rig: _rig, posed: _posed, ...rest } = save
+  return rest.camera === undefined && rest.axis === undefined ? null : rest
+}
+
 function base64ToBlobUrl(b64: string): string {
   const bytes = Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0))
   return URL.createObjectURL(new Blob([bytes], { type: 'image/webp' }))
@@ -589,37 +620,29 @@ export class HttpApiClient implements ApiClient {
   }
 
   async putThumb(save: ThumbSave): Promise<ThumbPutResult> {
-    // `canvas.toBlob` falls back to PNG when it cannot encode the type asked
-    // for — silently, by the HTML spec's own rule, and WebKit ships exactly
-    // that. Those bytes would be filed under a name and served under a type
-    // that say WebP: tiles would still draw, since browsers sniff images, so
-    // nothing would ever surface it, while the entry cost several times its
-    // budget and every other client inherited a format this app does not
-    // produce. Refuse the write instead. Nothing is stored, this client keeps
-    // drawing the render it already has, and the entry stays a miss that a
-    // browser which *can* encode WebP will fill (`webp-thumbnails` D6).
-    if (save.png instanceof Blob && save.png.type !== THUMB_MIME) return {}
+    const write = withoutUnusableRender(save)
+    if (write === null) return {}
     const res = await this.fetchFn('/api/thumb', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        path: save.path,
-        mtime: save.mtime,
+        path: write.path,
+        mtime: write.mtime,
         // Three states on the wire, and `null` is the one that only survives if
         // it is passed through deliberately: `JSON.stringify` drops an
         // `undefined` field, which is exactly what "absence keeps" means, while
-        // `null` is the deletion and must be written. The `save.png !==
+        // `null` is the deletion and must be written. The `write.png !==
         // undefined ? … : undefined` this replaced collapsed both into absence,
         // so a reset's deletion never left the client (`bulk-thumbnail-jobs`
         // D3).
-        png: save.png === null ? null : save.png === undefined ? undefined : await blobToBase64(save.png),
-        camera: save.camera,
-        axis: save.axis,
-        lighting: save.lighting,
-        rig: save.rig,
-        posed: save.posed,
-        ao: save.ao,
-        ifGen: save.ifGen,
+        png: write.png === null ? null : write.png === undefined ? undefined : await blobToBase64(write.png),
+        camera: write.camera,
+        axis: write.axis,
+        lighting: write.lighting,
+        rig: write.rig,
+        posed: write.posed,
+        ao: write.ao,
+        ifGen: write.ifGen,
       }),
     })
     // A refused conditional write arrives here as any other failure does: an

@@ -773,7 +773,16 @@ export class ThumbCache {
     } catch {
       return
     }
-    // One row per *render*, not per entry (D3): the two PNGs of a model are
+    // Renders left by an encoding this app no longer produces, taken from the
+    // listing this pass already holds rather than by blind removes per entry:
+    // once a cache is clean this costs nothing, where two `rm(force)` calls per
+    // sidecar would cost two syscalls per entry forever. Reading the *names*
+    // also reaches an orphan whose sidecar is gone, which a per-sidecar loop
+    // never visits — and that is the shape an interrupted upgrade leaves.
+    const superseded = files.filter((f) => f.endsWith('.png'))
+    for (const f of superseded) await rm(join(dir, f), { force: true })
+
+    // One row per *render*, not per entry (D3): the two renders of a model are
     // independent LRU candidates, so an unoccluded render nobody has looked at
     // since is evicted while the occluded one read this morning stays. The
     // existence sweep is still per entry — one model, one existence.
@@ -799,11 +808,6 @@ export class ThumbCache {
       // without a scan of its own — `index.ts` runs `maintain()` at startup.
       this.remember(meta.path, meta)
       for (const ao of [true, false]) {
-        // The pass that reaches every entry the library still has, so this is
-        // where an orphan from a superseded encoding is reclaimed: it cannot be
-        // served, cannot be counted below, and would otherwise never be met
-        // again by anything.
-        await this.rmSuperseded(dir, key, ao)
         const pngStat = await stat(this.renderFile(dir, key, ao)).catch(() => null)
         if (pngStat === null) continue // that render is not cached: nothing to evict
         metas.push({ key, ao, meta, pngSize: pngStat.size, lastRead: pngStat.mtimeMs })
