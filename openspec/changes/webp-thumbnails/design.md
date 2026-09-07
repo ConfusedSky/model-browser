@@ -71,7 +71,12 @@ alpha handling is lossless, as this decision assumed. Bytes were 3,956 at q0.8 a
 at q0.9 against 10,552 for the same canvas as PNG. Maximum RGB error on opaque pixels was
 51, which is 4:2:0 chroma subsampling meeting a worst case — a thin saturated stroke — and
 Masa reports no visible colour difference between live view and thumbnail in the app at
-DPR 1. This settles Chrome; other engines and a real model render are still task 3.1's.
+DPR 1. A real model render was then checked the same way (this session, 2026-09-07, a stored
+render fetched back through the image route and decoded): 54,061 fully transparent pixels,
+6,858 fully opaque, 4,617 partial, four transparent corners — the silhouette's
+anti-aliased edge survives the encoder on real geometry, not just on a contrived disc.
+Chrome is settled. WebKit and Gecko are not measured at all; D6 refuses their writes
+rather than trusting them.
 
 ### D2: 256², with the high-density case declined rather than missed
 

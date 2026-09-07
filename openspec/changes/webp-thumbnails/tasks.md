@@ -8,9 +8,8 @@
       (`base64ToBlobUrl`, `client/src/api/client.ts`)
 - [x] 1.4 The store names renders `<key>.webp` / `<key>.noao.webp` (`ThumbCache`'s
       `pngFile`, `server/src/cache.ts`)
-- [ ] 1.4a Rename that method to say `render`, not `png`, since the wire field keeps the
-      legacy name and the two should not read alike (D4) — **not done**: the extension
-      flipped, the name did not
+- [x] 1.4a Renamed to `renderFile` (19 call sites), so the store's own name stops saying
+      PNG while the wire field keeps that legacy name deliberately (D4)
 - [x] 1.5 The image route types its answer `image/webp` (`server/src/app.ts`)
 
 ## 2. Reclaim what the bump strands
@@ -37,11 +36,18 @@
 
 ## 3. Verify the encoder, not just the constant
 
-- [ ] 3.1 Test that a browser-encoded thumbnail keeps full transparency outside the
-      silhouette and full opacity inside it. **Chrome is already measured** (a parallel
-      session, 2026-09-07: 0 alpha mismatches over 631 partial-alpha pixels at q0.8 —
-      D1), on a synthetic disc; what is left is the same assertion on a real model render,
-      and any statement at all about WebKit and Gecko — the `model-viewer` scenario this change
+- [x] 3.1 **Verified on a real model render, live** (2026-09-07, a browser-encoded 256²
+      WebP fetched back from the demo box's image route and decoded): 54,061 fully
+      transparent pixels, 6,858 fully opaque, 4,617 partial — the anti-aliased edge
+      survived the encoder — and all four corners transparent. With the parallel session's
+      synthetic-disc run (0 alpha mismatches over 631 partial-alpha pixels), Chrome's
+      alpha handling is settled on both a contrived worst case and a real render
+- [ ] 3.1b The check above is a live measurement, not a cell: this repo has no harness
+      where a real canvas encodes, and happy-dom does not. Either add one (Playwright,
+      the way the occlusion transparency claim would want asserting too) or record here
+      that the `model-viewer` scenario is verified by hand each time the encoder changes.
+      Nothing about WebKit or Gecko is measured either way — 3.1a refuses their writes
+      rather than trusting them — the `model-viewer` scenario this change
       adds. `canvas.toBlob('image/webp', q)` is the encoder under test; happy-dom does
       not encode, so this belongs where a real canvas exists (Playwright), and the
       existing occlusion transparency check is the model to follow
@@ -95,8 +101,8 @@
 
 ## 6. Land it
 
-- [ ] 6.1 `bun run typecheck` and both suites green
-- [ ] 6.2 `openspec validate webp-thumbnails --strict`, then archive with a dry run first
-      (`T=$(mktemp -d); cp -r openspec $T/; (cd $T && openspec archive webp-thumbnails --yes)`)
+- [x] 6.1 `bun run typecheck` and both suites green (810 client, 638 server)
+- [x] 6.2 `openspec validate webp-thumbnails --strict` passes and the archive dry run on a
+      fresh copy applies cleanly (+1 added, ~5 modified). The archive itself is 6.3's
 - [ ] 6.3 After archiving, read `openspec/specs/model-thumbnails/spec.md` and check no
       change-scoped prose landed in the capability's own description
