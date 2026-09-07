@@ -622,6 +622,29 @@ describe('the core the generate job runs directly', () => {
     })
 
     expect(outcome).toBe('skipped')
+    // Only the count differs. The pixels exist and the user is looking at
+    // them, so the tile still adopts this render — an early return here would
+    // leave a pressed re-render changing nothing on screen.
+    expect(h.setThumb).toHaveBeenCalledOnce()
+    expect((h.setThumb.mock.calls[0]![1] as { gen?: number }).gen).toBe(5)
+  })
+
+  // The other half of the same rule: a discard that reached the server must
+  // reach the session map too, or the lightbox opens at the framing the user
+  // just gave up (4b.4).
+  it('still tells the session about a discard when the render was dropped', async () => {
+    const h = harness({ status: 'hit', camera: CAM, axis: '-x' })
+    h.putThumb.mockResolvedValue({ gen: 6, dropped: true })
+
+    const outcome = await renderEntryThumbnail(HERO, h.host, {
+      discardFraming: true,
+      pose: undefined,
+    })
+
+    expect(outcome).toBe('skipped')
+    const framingChanged = vi.mocked(h.host.framingChanged!)
+    expect(framingChanged).toHaveBeenCalledOnce()
+    expect(framingChanged.mock.calls[0]![1]).toEqual({ camera: null, axis: undefined })
   })
 
   it('rethrows a refusal that is not a moved generation', async () => {

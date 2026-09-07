@@ -641,13 +641,6 @@ export async function renderEntryThumbnail(
   // Nothing is handed to the session's map for a refused write either: the
   // tile's state belongs to whoever *did* write, not to this render.
   if (written === null) return 'skipped'
-  // Same word for the same reason, one step earlier in the write: the render
-  // never reached the store because this browser's encoder could not produce
-  // the stored format, though the orientation in that write did
-  // (`webp-thumbnails` D6). Counting it `done` would report a cache filling
-  // while nothing was written to it — the generate job's whole output is that
-  // count.
-  if (written.dropped === true) return 'skipped'
   // The session's own copy, not only the server's: App sources the
   // lightbox's camera and axis from this map, so a cache-only write would
   // leave the viewer opening at the orientation just given up (4b.4).
@@ -669,7 +662,16 @@ export async function renderEntryThumbnail(
     // fetch cacheable (setThumb adopts absence as "re-learn").
     gen: written.gen,
   })
-  return 'done'
+  // The outcome, and only the outcome. A render this browser's encoder could
+  // not produce in the stored format never reached the store, though the
+  // orientation in that write did (`webp-thumbnails` D6) — so this is work the
+  // job did not do, and `skipped` is the word this function already has for
+  // that. It is decided *here*, after the session updates, and not as an early
+  // return before them: the pixels exist and the user is looking at them, so
+  // the tile must show them and a discarded framing must reach the session map
+  // (4b.4) exactly as on any other write. What differs is the count, nothing
+  // the user can see.
+  return written.dropped === true ? 'skipped' : 'done'
 }
 
 /**
