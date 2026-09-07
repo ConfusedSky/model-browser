@@ -59,7 +59,9 @@
       the desktop-vs-demo differences, a five-line how-to, links, privacy, and a technical
       section including posing, and a Limitations section of verified examples (Masa,
       2026-09-05: under-represented concepts return the least-far neighbour, not
-      nothing; neighbouring concepts blur — vampires/zombies/skeletons as undead). Root
+      nothing; neighbouring concepts blur — vampires/zombies/skeletons as undead; a
+      two-part query matches part by part — "an elf carrying an orb" brings elves and
+      orb-holders beside the elves with orbs, added 2026-09-07). Root
       opens as kit tiles (Masa, 2026-09-03). The
       banner also carries a source link (repo is public); the how-to names Ctrl+F alone
       (it replaces browser find) and About notes Shift+right-click for the browser menu;

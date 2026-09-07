@@ -273,15 +273,18 @@ own origin"; only its body hardcodes loopback.
    The change is backlog 1.5; nothing in item 4 is open.
    **Added 2026-09-05 (Masa): About also carries a Limitations section**, as examples
    rather than a disclaimer — what semantic search does badly, so a visitor whose query
-   fell flat reads it as the tool's edge and not as brokenness. Two to open with: (i)
+   fell flat reads it as the tool's edge and not as brokenness. Three to open with: (i)
    **a concept the corpus barely holds returns nothing useful** — search is nearest
    neighbours, so it always answers, and for a query the corpus does not represent the
    answer is whatever is least far, not a "no results"; (ii) **it averages neighbouring
    concepts** — vampires, zombies and skeletons all sit near "undead", so a search for
-   one usually brings the others. Both are Masa's observations, not measurements: like
-   the chips, each example is verified against the live index before it becomes copy,
-   and a limitation that stops reproducing is dropped rather than kept as lore. The
-   section is backlog 1.5's to draft with the rest of About.
+   one usually brings the others; (iii, added 2026-09-07) **it returns partial matches
+   as readily as full ones** — a query with two parts is matched part by part, so "an
+   elf carrying an orb" brings back elves, and people holding orbs, beside the elves
+   with orbs that were asked for. All three are Masa's observations, not
+   measurements: like the chips, each example is verified against the live index
+   before it becomes copy, and a limitation that stops reproducing is dropped rather
+   than kept as lore. The section is backlog 1.5's to draft with the rest of About.
    **Relayed from another session 2026-09-03 and verified against the code before being
    kept** (the one claim that did not hold is noted last): (i) **Ctrl+F is the one
    keybinding the copy must mention** — the app binds Ctrl/Cmd+F on window keydown to the
