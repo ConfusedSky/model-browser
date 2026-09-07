@@ -42,12 +42,22 @@
       survived the encoder — and all four corners transparent. With the parallel session's
       synthetic-disc run (0 alpha mismatches over 631 partial-alpha pixels), Chrome's
       alpha handling is settled on both a contrived worst case and a real render
-- [ ] 3.1b The check above is a live measurement, not a cell: this repo has no harness
-      where a real canvas encodes, and happy-dom does not. Either add one (Playwright,
-      the way the occlusion transparency claim would want asserting too) or record here
-      that the `model-viewer` scenario is verified by hand each time the encoder changes.
-      Nothing about WebKit or Gecko is measured either way — 3.1a refuses their writes
-      rather than trusting them — the `model-viewer` scenario this change
+- [ ] 3.1b The check above is a live measurement, not a cell. Decide which of three this
+      claim gets, and record the choice here:
+      - **A harness.** Vitest browser mode with a Playwright provider, as a second project
+        beside the 60 happy-dom files. The cell renders through `renderThumbnail` with a
+        real `WebGLRenderer`, encodes, decodes and censuses alpha. Cost: browser binaries
+        in CI, software rendering, and a suite that runs in two places. It only pays for
+        itself if the two `model-viewer` occlusion transparency scenarios and future
+        `RIG_VERSION` bumps come along, since **nothing in this repo has ever asserted a
+        real pixel** — `composer.test.ts` and `thumbnailTeardown.test.ts` mock
+        `WebGLRenderer` away, so those occlusion scenarios were verified by hand too.
+      - **A probe script**, the `scripts/query-probe.py` precedent: one command, prints
+        blob type, bytes and the alpha census, its last run recorded in its own docstring.
+        Re-runnable by anyone, gates nothing.
+      - **A recorded manual check**, which is what the occlusion scenarios have today.
+      Whichever is chosen, nothing about WebKit or Gecko is measured either way — 3.1a
+      drops their renders rather than trusting them — the `model-viewer` scenario this change
       adds. `canvas.toBlob('image/webp', q)` is the encoder under test; happy-dom does
       not encode, so this belongs where a real canvas exists (Playwright), and the
       existing occlusion transparency check is the model to follow
