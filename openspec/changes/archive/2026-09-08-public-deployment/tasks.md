@@ -476,21 +476,26 @@
 
 ## 9. Fix round after archive (adversarial review, 2026-09-07 — design, *Settled after archive*)
 
-- [ ] 9.1 `indexErrorReply` takes `hostDetails`; both query routes answer a generic body
+- [x] 9.1 `indexErrorReply` takes `hostDetails`; both query routes answer a generic body
       under it, same status, real message logged. Cells in `refusals.test.ts` for both
       routes with a stubbed 404 naming a path, and the `hostDetails: true` control
-- [ ] 9.2 `app.onError`'s untyped branch and the launcher's 502 through one helper: generic
+      Done 2026-09-07 (4e33df1): `indexErrorReply(err, hostDetails)` through `indexError`, one log site (`viewerError`). Live re-probe on 127.0.0.1:3199 with the real library under the demo config: `POST /api/semantic/similar` for an unindexed `.obj` answered `{"error":"the index refused the request"}` 404 and the log carried `/api/semantic/similar: /run/media/…/harrifex.obj is not in the cache`; the dev instance (`hostDetails: true`) still answers the path, byte-identical to before. Cells in refusals.test.ts for both routes at 404 and 5xx plus the control
+- [x] 9.2 `app.onError`'s untyped branch and the launcher's 502 through one helper: generic
       under `hostDetails: false`, logged; controls byte-identical. A zip that cannot be read
       surfaces as a typed error naming the library path under both configurations
-- [ ] 9.3 `index.ts` says at start whether a built client was found
-- [ ] 9.4 `HttpError.refused`; the decorator keeps a framing locally on a write the route
+      Done 2026-09-07 (4e33df1): `viewerError` on `app.onError`'s fall-through and both `LaunchError` 502s; `listZipDir`, `/api/file`'s zip branch and `resolveEntryFile` type an unreadable archive as `cannot read zip: <library path>` under both configurations (the staging branch narrowed to `err.path === fsPath` so a full tmpdir is not relabelled). Cells: untyped throw via `/api/apps`, launcher 502 on both routes, a mode-000 archive listed, fetched and launched. Five falsifications, each failing on its cell
+- [x] 9.3 `index.ts` says at start whether a built client was found
+      Done 2026-09-07 (4e33df1): `client at <dist>` / `no built client at <dist>: serving the API only` beside the `library …` line; seen on the 3199 instance's log
+- [x] 9.4 `HttpError.refused`; the decorator keeps a framing locally on a write the route
       refused with `thumbWrites` and answers `dropped`; other refusals and faults rethrow
-- [ ] 9.5 A known writes-off report arriving after the first listing overlays the tiles on
+      Done 2026-09-07 (4de3b25): `HttpError.refused` filled by `errorOf` by shape; `LocalFramingClient.putThumb` keeps the framing and answers `dropped` only on a `thumbWrites` refusal, rethrows everything else including a bodyless 403 from the guard. Four cells; three falsifications
+- [x] 9.5 A known writes-off report arriving after the first listing overlays the tiles on
       screen once, through an imperative the hook publishes beside `refetch` (not
       `listingKey`, which drives no seeding — proved by probe); a writes-on report
       overlays nothing. The unconfigured sentence gets a
       visitor form; the reset job stops counting a `dropped` write as written
-- [ ] 9.6 The reviewer's clean list, kept so the next round does not re-probe it: Bun-only
+      Done 2026-09-07 (9629633, 4de3b25): `applyLocalFramings` published by `useThumbnails` beside `refetch`, a pure overlay over ready tiles returning untouched ones by identity, called by an App effect on `thumbWrites === false`; four hook-level cells covering both arrival paths and the writes-on gate — the App effect itself is convention-guarded (no App-level cell; a `useEffect` on the `features` state). `libraryUnconfiguredText` visitor form; the reset job counts `dropped` as not written
+- [x] 9.6 The reviewer's clean list, kept so the next round does not re-probe it: Bun-only
       APIs confined to `index.ts`; no raw `fetch` outside `ApiClient`; `RIG_VERSION`
       untouched; the decorator forwards exact arity; guard correct for explicit/default
       ports, IPv6 literals, case, superstring hosts, wrong scheme, `Origin: null`; static
@@ -498,4 +503,4 @@
       exact, directory paths; this machine's `~/.config/model-browser/config.json` parses
       and changes nothing; `deploy/demo/config.json` is loaded through `loadConfig` by a
       test; every 7.1–7.7 cell exists and asserts what its line says
-
+      Kept as the reviewer wrote it (2026-09-07); nothing here was re-probed by the fix round
