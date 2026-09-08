@@ -470,6 +470,6 @@
 - [x] 8.6 Point `docs/web-demo-notes.md` at this change where it supersedes the notes'
       Defaults section, as that file's own rule requires
       Already true since drafting (notes item 7, 2026-09-02: "supersede this file's Defaults section and items 3, 8 and 9's demo halves"); the same line now says applied 2026-09-07
-- [ ] 8.7 After archiving, write the `public-deployment` capability's `## Purpose` in
+- [x] 8.7 (2026-09-07, after archiving) Written; the applied specs were read and carry only cross-capability references (`see \`public-deployment\``), no dates, decisions or review prose from this change. After archiving, write the `public-deployment` capability's `## Purpose` in
       `openspec/specs/public-deployment/spec.md` — a new capability lands with a `TBD`
       placeholder otherwise (`chat-panel` still carries one)
