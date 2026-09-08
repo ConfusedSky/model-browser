@@ -559,6 +559,17 @@ implements them:
   named an env var and a file), and the reset job counts a `dropped` write as work not done,
   the rule generate already followed.
 
+*Second pass (2026-09-07), after the round above landed:* the success body of
+`POST /api/semantic` still carried the index's collection path as `scope.path` — the fix
+round had reached every failure body and no success body. Decided: `scope.path` is a
+**library path on the wire everywhere**, `null` where the scope resolves outside the
+library, whatever `hostDetails` says — one rule, the same the route already applies to
+its own `path`, rather than a fifth branch. No client code reads the field. Two nits from
+the same pass, recorded: the dev server on 3177 serves a stale `client/dist` whenever one
+is present (CLAUDE.md's dev-instance bullet now says so); and a tile whose re-render was
+queued before a late writes-off report reverts its overlaid camera when that render
+lands — storage is untouched, the next visit is right, not worth a latch.
+
 Left as recorded, not fixed: the report/refusal pairing, the three `resolveTab` sites and
 the two generate gates are each aligned by a test rather than by structure; a fourth site
 or a sixth field must remember. The reviewer's list of what it checked and found clean is

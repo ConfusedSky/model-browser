@@ -90,7 +90,11 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   `python3 -c "import re,sys;print(re.sub(r'\s+',' ',open(sys.argv[1]).read()))" FILE | grep …`
 - A dev instance is usually already running (check first — not always up; ports 3177/5173,
   EADDRINUSE on a second `bun run dev`) — server (`bun --hot`) and client (Vite HMR) pick
-  up edits live
+  up edits live. **3177 also serves `client/dist` whenever that directory exists** (the
+  server serves the built client since `public-deployment`; `dist/` is gitignored, so
+  `git status` will not show it): after a `bun run build` for a verification, a browser on
+  3177 runs that stale bundle against the live server while 5173 runs the live app.
+  Browse 5173, or `rm -rf client/dist` when the build is no longer needed
 - tasks.md lines that bundle code with a visual-tuning clause ("tune … then freeze") are not
   done when the code lands — leave them open until the pixels are judged
 - Archive changes with plain `openspec archive` (it applies delta specs); if the deltas

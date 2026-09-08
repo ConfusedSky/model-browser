@@ -504,3 +504,10 @@
       and changes nothing; `deploy/demo/config.json` is loaded through `loadConfig` by a
       test; every 7.1–7.7 cell exists and asserts what its line says
       Kept as the reviewer wrote it (2026-09-07); nothing here was re-probed by the fix round
+- [ ] 9.7 (second pass, 2026-09-07) `POST /api/semantic`'s `scope.path` is a library path
+      on the wire, `null` outside the library, under both configurations; cells with a
+      host-path stub in refusals.test.ts and one adjusted stub in semantic.test.ts
+- [x] 9.8 (second pass) CLAUDE.md's dev-instance bullet says 3177 serves `client/dist`
+      when one is present, so a verification build is a stale app on that port; the
+      late-render overlay revert is recorded in design and left alone
+
