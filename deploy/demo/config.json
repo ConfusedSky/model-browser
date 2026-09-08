@@ -1,0 +1,12 @@
+{
+  "root": "/library/miniatures/clustered-hq",
+  "origins": ["https://models.masamaeda.com"],
+  "listen": { "host": "127.0.0.1", "port": 3177 },
+  "features": {
+    "thumbWrites": false,
+    "appLaunch": false,
+    "chatTab": false,
+    "hostDetails": false,
+    "maintenance": false
+  }
+}

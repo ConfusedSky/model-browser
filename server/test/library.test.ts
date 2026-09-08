@@ -152,39 +152,58 @@ function createHashOf(text: string): string {
   return createHash('sha256').update(text).digest('hex')
 }
 
+/**
+ * The root's precedence, and nothing about the *file* — since
+ * `public-deployment` 1.2a the library is handed an already-parsed
+ * configuration and opens no file of its own, so the reading of it (absent,
+ * malformed, which file, the environment override applied to the returned
+ * value) lives in `config.test.ts`. What is left here is the one rule the
+ * library still owns: the environment's root over the configuration's.
+ */
 describe('library configuration', () => {
-  it('takes the root from the environment over the config file', async () => {
+  it('takes the root from the environment over the configuration', async () => {
     const tmp = tempTree()
     const chosen = join(tmp, 'chosen')
     const ignored = join(tmp, 'ignored')
     mkdirSync(chosen)
     mkdirSync(ignored)
-    const config = join(tmp, 'config.json')
-    writeFileSync(config, JSON.stringify({ root: ignored }))
 
-    const state = await createLibrary({ MODEL_BROWSER_ROOT: chosen, MODEL_BROWSER_CONFIG: config }).state()
+    const state = await createLibrary({ MODEL_BROWSER_ROOT: chosen }, { root: ignored }).state()
     expect(state.state === 'ready' && state.top).toBe(chosen)
   })
 
-  it('takes the root from the config file when the environment has none', async () => {
+  it('takes the root from the configuration when the environment has none', async () => {
     const tmp = tempTree()
     const root = join(tmp, 'from-config')
     mkdirSync(root)
-    const config = join(tmp, 'config.json')
-    writeFileSync(config, JSON.stringify({ root }))
 
-    const state = await createLibrary({ MODEL_BROWSER_CONFIG: config }).state()
+    const state = await createLibrary({}, { root }).state()
     expect(state.state === 'ready' && state.top).toBe(root)
   })
 
-  it('is unconfigured with neither, and with a config file that is absent or malformed', async () => {
+  it('is unconfigured with neither', async () => {
+    expect(await createLibrary({}, {}).state()).toEqual({ state: 'unconfigured' })
+    // The default is the same answer, so a caller that passes no configuration
+    // at all — every test that drives the root from the environment — is
+    // unaffected by the parameter's arrival.
+    expect(await createLibrary({}).state()).toEqual({ state: 'unconfigured' })
+  })
+
+  it('opens no configuration file while it re-asks the filesystem', async () => {
+    // 1.2a: `evaluate` re-runs on every `state()` while the library is
+    // unsettled — that is why a volume mounted later needs no restart — and it
+    // used to drag a `config.json` parse along with it. A file written under a
+    // running unconfigured server must now change nothing until a restart.
     const tmp = tempTree()
-    expect(await createLibrary({ MODEL_BROWSER_CONFIG: join(tmp, 'absent.json') }).state()).toEqual({
-      state: 'unconfigured',
-    })
-    const malformed = join(tmp, 'malformed.json')
-    writeFileSync(malformed, '{ "root": ')
-    expect(await createLibrary({ MODEL_BROWSER_CONFIG: malformed }).state()).toEqual({ state: 'unconfigured' })
+    const root = join(tmp, 'appears-in-a-file')
+    mkdirSync(root)
+    const library = createLibrary({ MODEL_BROWSER_CONFIG: join(tmp, 'config.json') }, {})
+    expect(await library.state()).toEqual({ state: 'unconfigured' })
+    writeFileSync(join(tmp, 'config.json'), JSON.stringify({ root }))
+    expect(await library.state()).toEqual({ state: 'unconfigured' })
+    // Not even the explicit re-probe reads it: `refresh()` re-asks the
+    // filesystem, and the file is the loader's business (D2).
+    expect(await library.refresh()).toEqual({ state: 'unconfigured' })
   })
 
   it('reports a root that is not there as missing, verbatim, and re-checks it every time', async () => {

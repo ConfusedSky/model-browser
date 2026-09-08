@@ -2,7 +2,7 @@ import { rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { FeatureReport } from '../../shared/types'
-import { createApp } from '../src/app'
+import { DEFAULT_FEATURES, createApp } from '../src/app'
 import { ThumbCache } from '../src/cache'
 import { createLibrary } from '../src/library'
 import { LOOPBACK, libraryFor, realTempDir } from './helpers'
@@ -12,6 +12,10 @@ import { LOOPBACK, libraryFor, realTempDir } from './helpers'
  * (feature-report D2/D4). Three cells: what a default server says, that an
  * injected value is what is answered, and that the answer arrives before there
  * is a library.
+ *
+ * The default set is the **maintained** configuration, not "everything on"
+ * (`public-deployment` D4): `chatTab` is off, because the tab is a placeholder
+ * with no backend.
  */
 describe('GET /api/features', () => {
   const lib = realTempDir('mb-features-lib-')
@@ -21,20 +25,29 @@ describe('GET /api/features', () => {
     return createApp(new ThumbCache(cache), undefined, undefined, libraryFor(lib), undefined, features)
   }
 
-  it('reports every capability on when the app is built with no opinion', async () => {
+  it('reports the maintained set when the app is built with no opinion', async () => {
     const res = await appWith().request('/api/features', { headers: LOOPBACK })
     expect(res.status).toBe(200)
     // The whole report, not a subset: a field this server grew and forgot to
     // decide about is a failure here rather than an undefined on the client.
-    expect(await res.json()).toEqual({ thumbWrites: true })
+    // Spelt out rather than compared against `DEFAULT_FEATURES`, so a default
+    // that flips has to be flipped here too and cannot slip through green.
+    expect(await res.json()).toEqual({
+      thumbWrites: true,
+      appLaunch: true,
+      chatTab: false,
+      hostDetails: true,
+      maintenance: true,
+    })
   })
 
   it('answers the injected value rather than a construction of its own', async () => {
-    // The cell the demo change's env selection rides on: nothing between
+    // The cell the deployment's configuration rides on: nothing between
     // `createApp`'s argument and the wire may reinterpret a field.
-    const res = await appWith({ thumbWrites: false }).request('/api/features', { headers: LOOPBACK })
+    const injected: FeatureReport = { ...DEFAULT_FEATURES, thumbWrites: false, chatTab: true }
+    const res = await appWith(injected).request('/api/features', { headers: LOOPBACK })
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ thumbWrites: false })
+    expect(await res.json()).toEqual(injected)
   })
 
   it('answers while the library is unconfigured, like /api/apps', async () => {
@@ -55,7 +68,7 @@ describe('GET /api/features', () => {
 
     const res = await app.request('/api/features', { headers: LOOPBACK })
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ thumbWrites: true })
+    expect(await res.json()).toEqual(DEFAULT_FEATURES)
     expect((await app.request('/api/apps', { headers: LOOPBACK })).status).toBe(200)
 
     rmSync(home, { recursive: true, force: true })

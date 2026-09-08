@@ -11,7 +11,7 @@ import { join } from 'node:path'
 import { zipSync } from 'fflate'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DirListing } from '../../shared/types'
-import { ALL_FEATURES, createApp } from '../src/app'
+import { DEFAULT_FEATURES, createApp } from '../src/app'
 import { ThumbCache } from '../src/cache'
 import type { Library } from '../src/library'
 import { walkFlat } from '../src/listing'
@@ -488,7 +488,7 @@ describe('the filesystem is authoritative (§4.3)', () => {
       undefined,
       f.library,
       undefined,
-      ALL_FEATURES,
+      DEFAULT_FEATURES,
       f.store,
     )
     await walkFlat(f.library, ROOT, undefined, {}, f.store)
@@ -572,7 +572,7 @@ describe('the staleness marker (§5.1)', () => {
       undefined,
       f.library,
       undefined,
-      ALL_FEATURES,
+      DEFAULT_FEATURES,
       f.store,
     )
 
@@ -749,7 +749,7 @@ describe("the pass's failure taxonomy (§4.3, review finding 2)", () => {
       undefined,
       f.library,
       undefined,
-      ALL_FEATURES,
+      DEFAULT_FEATURES,
       store,
     )
 
@@ -775,7 +775,7 @@ describe("the pass's failure taxonomy (§4.3, review finding 2)", () => {
       undefined,
       f.library,
       undefined,
-      ALL_FEATURES,
+      DEFAULT_FEATURES,
       store,
     )
 

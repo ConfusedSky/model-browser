@@ -42,7 +42,13 @@ const READY: IndexAvailability = { state: 'ready', collectionRoot: '/m' }
 // A **known** report saying this server takes thumbnail writes — what today's
 // server answers, and the only shape under which the two container *beneath*
 // rows are offered at all.
-const WRITES: FeatureReport = { thumbWrites: true }
+const WRITES: FeatureReport = {
+  thumbWrites: true,
+  appLaunch: true,
+  chatTab: false,
+  hostDetails: true,
+  maintenance: true,
+}
 // The default is `null` — the report not known — for `apps: null`'s reason:
 // every case written before the bulk rows existed is about the rest of the
 // table, and an unknown report withholds exactly those two.
@@ -156,7 +162,7 @@ describe("D6's per-kind table", () => {
     // or the read failed — and both read the same here, so nothing renders and
     // then vanishes a round trip later, and nothing opens on error.
     for (const entry of [dir('/m/d'), zip('/m/z.zip')]) {
-      for (const report of [null, { thumbWrites: false }] as (FeatureReport | null)[]) {
+      for (const report of [null, { ...WRITES, thumbWrites: false }] as (FeatureReport | null)[]) {
         expect(ids(entry, READY, report)).not.toContain('generateBeneath')
         expect(ids(entry, READY, report)).not.toContain('resetBeneath')
       }

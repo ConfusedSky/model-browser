@@ -19,9 +19,8 @@ import { createHash, randomUUID } from 'node:crypto'
 import type { Dirent } from 'node:fs'
 import { mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, posix, relative, sep } from 'node:path'
-import type { LibraryState } from '../../shared/types'
+import type { DeploymentConfig, LibraryState } from '../../shared/types'
 import { joinVPath, parseVPath } from './vpath'
-import { configHome } from './xdg'
 
 /**
  * A request that cannot become a filesystem path. `status` is what the route
@@ -112,10 +111,15 @@ export interface Library {
    */
   state(): Promise<LibraryState>
   /**
-   * Re-evaluate config, marker and probe from scratch, whatever the current
-   * state — the seam a later repoint-without-restart works through (D4).
-   * Nothing is carried over: the settled library, the pending
-   * return-transition and the `nested` memo are all dropped first.
+   * Re-evaluate marker and probe from scratch against the filesystem as it is
+   * now, whatever the current state — the seam a later repoint-without-restart
+   * works through (D4). Nothing is carried over: the settled library, the
+   * pending return-transition and the `nested` memo are all dropped first.
+   *
+   * It does **not** re-read the configuration file, which is parsed once at
+   * start (public-deployment D2). An explicit re-read is the seam Electron's
+   * file dialog will need; it stays named rather than built speculatively,
+   * because nothing outside this module calls `refresh()` today.
    */
   refresh(): Promise<LibraryState>
   /** The library top's resolved filesystem path. Throws unless `ready`. */
@@ -134,25 +138,25 @@ const MARKER_FILE = 'library.json'
 
 type Ready = Extract<LibraryState, { state: 'ready' }>
 
-/** The root from the environment, else `root` in the config file (D4). */
-async function configuredRoot(env: NodeJS.ProcessEnv): Promise<string | undefined> {
+/**
+ * The root: the environment's, else the configuration's (D4).
+ *
+ * **Pure, and it opens no file** (public-deployment D2, task 1.2a). Reading
+ * `config.json` from here is what made the file re-parsed on every request
+ * while the library was unsettled, since `evaluate` re-runs to re-ask the
+ * *filesystem* and dragged the file read along with it. The file is now parsed
+ * exactly once, by `config.ts` at start, and handed to `createLibrary`; this
+ * function keeps the precedence and nothing else.
+ *
+ * `MODEL_BROWSER_ROOT` is re-read per evaluation rather than baked, so a test
+ * that repoints it and calls `refresh()` still works, and `loadConfig` applies
+ * the same override to the value it returns — the two agree by construction,
+ * because they apply one rule.
+ */
+function configuredRoot(env: NodeJS.ProcessEnv, config: DeploymentConfig): string | undefined {
   const fromEnv = env.MODEL_BROWSER_ROOT
   if (fromEnv !== undefined && fromEnv !== '') return fromEnv
-  const explicit = env.MODEL_BROWSER_CONFIG
-  const file =
-    explicit !== undefined && explicit !== ''
-      ? explicit
-      : join(configHome(env), 'model-browser', 'config.json')
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(await readFile(file, 'utf8'))
-  } catch {
-    // Absent, unreadable or malformed all mean the same thing: no root here.
-    return undefined
-  }
-  if (typeof parsed !== 'object' || parsed === null) return undefined
-  const root = (parsed as Record<string, unknown>).root
-  return typeof root === 'string' && root !== '' ? root : undefined
+  return config.root !== undefined && config.root !== '' ? config.root : undefined
 }
 
 /**
@@ -370,7 +374,18 @@ function toLibPath(realTop: string, real: string): string | undefined {
  */
 const NESTED_RECHECK_MS = 5000
 
-export function createLibrary(env: NodeJS.ProcessEnv = process.env): Library {
+/**
+ * @param env  the process environment; a parameter so a test points the whole
+ *             chain at a temp tree without mutating the process.
+ * @param config  the deployment's configuration, **already parsed**
+ *                (`config.ts`, read once at start). Defaulted to `{}` so a
+ *                caller with no file — every test that drives the root from
+ *                `MODEL_BROWSER_ROOT` — is unaffected.
+ */
+export function createLibrary(
+  env: NodeJS.ProcessEnv = process.env,
+  config: DeploymentConfig = {},
+): Library {
   /**
    * What a successful evaluation settled on: the library, and the root string
    * that was configured to find it. The root is kept verbatim because it is
@@ -405,7 +420,7 @@ export function createLibrary(env: NodeJS.ProcessEnv = process.env): Library {
       if (Date.now() < nestedMemo.until) return nestedMemo.state
       nestedMemo = undefined
     }
-    const root = await configuredRoot(env)
+    const root = configuredRoot(env, config)
     if (root === undefined) return { state: 'unconfigured' }
     try {
       if (!(await stat(root)).isDirectory()) return { state: 'missing', root }

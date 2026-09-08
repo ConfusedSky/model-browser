@@ -391,13 +391,30 @@ async function posedFirstPeek(
 }
 
 /**
- * Every capability on — what this server does today, and `createApp`'s default
- * so a caller that has no opinion gets the whole app (feature-report D4).
- * `index.ts` passes it explicitly: that call is the construction site, and the
- * demo change replaces this value there with its env selection without touching
- * the mechanism.
+ * The **maintained** configuration — the one this project tests as its primary
+ * case and the one a distributed desktop build runs — and `createApp`'s default
+ * so a caller with no opinion gets it (public-deployment D4).
+ *
+ * Deliberately not "every capability on", which is what its old name
+ * (`ALL_FEATURES`) claimed: `chatTab` is **off**, because the tab is a
+ * placeholder whose submitted input may be ignored, and an unfinished surface
+ * belongs neither in a shipped desktop app nor on a public link. It stays
+ * declarable, so the day chat gains a backend the default flips. All-on is
+ * therefore a configuration nobody runs, and the feature-report capability's
+ * *Everything on changes nothing* scenario is an inertness proof for the report
+ * mechanism rather than a picture of the shipped app.
+ *
+ * `index.ts` builds the served report as `{ ...DEFAULT_FEATURES,
+ * ...config.features }` and passes it explicitly: one value, from which both
+ * the report and the routes' refusals are read (D5).
  */
-export const ALL_FEATURES: FeatureReport = { thumbWrites: true }
+export const DEFAULT_FEATURES: FeatureReport = {
+  thumbWrites: true,
+  appLaunch: true,
+  chatTab: false,
+  hostDetails: true,
+  maintenance: true,
+}
 
 export function createApp(
   cache: ThumbCache = new ThumbCache(),
@@ -417,11 +434,14 @@ export function createApp(
   // talking about; `index.ts` passes its own so the eager load's report lands
   // beside the startup line.
   overrides: OverrideHolder = createOverrideHolder(library),
-  // What this server accepts and offers (feature-report D4). Injected like the
-  // five above so a test drives a variant rather than the process's own
-  // construction, and read once — a per-process configuration, so the
-  // restart-after-editing rule every config in this app follows.
-  features: FeatureReport = ALL_FEATURES,
+  // What this server accepts and offers (feature-report D4, public-deployment
+  // D5). Injected like the five above so a test drives a variant rather than
+  // the process's own construction, and read once — a per-process
+  // configuration, so the restart-after-editing rule every config in this app
+  // follows. `index.ts` builds it from the deployment's configuration over
+  // `DEFAULT_FEATURES`; the routes' refusals read this same object, so a
+  // declaration and a refusal cannot disagree.
+  features: FeatureReport = DEFAULT_FEATURES,
   // The walked-tree cache (`listing-tree-cache` §4). Injected like the six
   // above, and **absent by default**: with no store, `ListingCache` walks every
   // request exactly as this app did before the change, so a caller with no
@@ -442,6 +462,13 @@ export function createApp(
    * hands it here.
    */
   listings: ListingCache = new ListingCache(snapshots),
+  /**
+   * The origins this deployment answers, beside loopback — from the
+   * deployment's configuration (public-deployment D3). Trailing and empty by
+   * default, so an unconfigured app guards exactly as it did: the two loopback
+   * patterns and nothing else.
+   */
+  origins: readonly string[] = [],
 ): Hono {
   const app = new Hono()
   const layers = listings.layers
@@ -781,7 +808,7 @@ export function createApp(
     return (await probeStatus(library)).collectionRootFs
   }
 
-  app.use('/api/*', guard)
+  app.use('/api/*', guard(origins))
 
   /**
    * The library's state, and — while it is not `ready` — the answer every path

@@ -19,50 +19,99 @@
 
 ## 1. Configuration
 
-- [ ] 1.1 Extend the configuration file's shape beside `root`: the capability fields, the
+- [x] 1.1 Extend the configuration file's shape beside `root`: the capability fields, the
       allowed origin, and the listening address. Type it in `shared/types.ts` beside
-      `FeatureReport` so both sides compile against one declaration
-- [ ] 1.2 Split the config read out of `configuredRoot` (`library.ts`) into one load that
+      `FeatureReport` so both sides compile against one declaration.
+      **Done 2026-09-07** — `DeploymentConfig` in `shared/types.ts` beside
+      `FeatureReport`: `root`, `origins` (a list), `listen` and `features`, and
+      nothing else. Parsing is strict and there is no free-text key — an unknown
+      key at either level, or a wrong type anywhere, is a failure, since a typo
+      quietly dropped is the disease D2 exists to cure
+- [x] 1.2 Split the config read out of `configuredRoot` (`library.ts`) into one load that
       returns the whole file, and have `configuredRoot` take the root from it —
       `MODEL_BROWSER_ROOT` overriding the `root` key alone and no longer returning before
-      the file is read (D2). `MODEL_BROWSER_CONFIG` keeps selecting the file
-- [ ] 1.2a Parse the file exactly once at start (D2). `evaluate` keeps re-asking the
+      the file is read (D2). `MODEL_BROWSER_CONFIG` keeps selecting the file.
+      **Done 2026-09-07** — the read moved to `loadConfig` in the new
+      `server/src/config.ts` (Node APIs only); `configuredRoot` is now a pure
+      function of env + config and opens nothing. `loadConfig` applies the env
+      override to the `root` key of the value it *returns*, so every consumer
+      reads one resolved root rather than each re-applying the precedence
+- [x] 1.2a Parse the file exactly once at start (D2). `evaluate` keeps re-asking the
       *filesystem* while the library is unsettled — that is why it re-runs, and a volume
       mounted later must still need no restart — but stops re-reading the file. Give
       `refresh()` an explicit re-read and correct its comment, which today calls itself
-      "Re-evaluate config, marker and probe from scratch"
-- [ ] 1.3 Absent file stays silent and means the defaults; a present file that cannot be
+      "Re-evaluate config, marker and probe from scratch".
+      **Done 2026-09-07** — `createLibrary(env, config)` takes the already-parsed
+      configuration; `evaluate` still re-runs per `state()` while unsettled and
+      still re-asks the filesystem, but opens no file. `refresh()`'s comment now
+      says it re-asks the filesystem and does **not** re-read the file.
+      *No re-read method was built*: D2's loose-ends paragraph says the Electron
+      re-read "stays a seam with no consumer — named, not built speculatively",
+      which supersedes this line's "gains an explicit re-read"; the seam is named
+      in `refresh()`'s comment instead. Cell: `library.test.ts` "opens no
+      configuration file while it re-asks the filesystem"
+- [x] 1.3 Absent file stays silent and means the defaults; a present file that cannot be
       parsed (including unreadable-for-permissions) raises a startup failure naming the
       file and the parse error, and the server does not start (D2). Today's
-      "Absent, unreadable or malformed all mean the same thing" comment goes with it
-- [ ] 1.4 Wire the load into `index.ts` so the failure surfaces beside the
+      "Absent, unreadable or malformed all mean the same thing" comment goes with it.
+      **Done 2026-09-07** — ENOENT is `{}` silently; unreadable (EACCES), unparseable or
+      failing validation raises `ConfigError` naming the file and the reason. The
+      old comment went with `configuredRoot`'s file read. Cells in
+      `config.test.ts`, including a chmod-000 one that skips under root
+- [x] 1.4 Wire the load into `index.ts` so the failure surfaces beside the
       `library <id> at <top>` startup line, where `library-overrides` already reports a
-      broken store
+      broken store.
+      **Done 2026-09-07** — `index.ts` awaits `loadConfig(process.env)` at the top and,
+      on `ConfigError`, prints the message to stderr and `process.exit(1)`; the
+      `library <id> at <top>` line is untouched
 
 ## 2. The guard and the listening address
 
-- [ ] 2.1 `guard`'s `LOOPBACK_ORIGIN`/`LOOPBACK_HOST` become the configured allowed set —
+- [x] 2.1 `guard`'s `LOOPBACK_ORIGIN`/`LOOPBACK_HOST` become the configured allowed set —
       a **list** of origins, not one value, with loopback always in it whatever is
       configured — defaulting to exactly today's two patterns. Every other rule unchanged: absent
       `Origin` passes, non-matching `Host` refused, CORS never emitted, model bytes keep
-      `application/octet-stream` + `nosniff` (D3)
-- [ ] 2.2 The guard stays mounted on `/api/*` only — the built client is public files and
-      guarding them would make the app unloadable from its own origin (D3)
-- [ ] 2.3 `index.ts`'s `hostname` and `port` come from the configuration, defaulting to
-      loopback and 3177
+      `application/octet-stream` + `nosniff` (D3).
+      **Done 2026-09-07** — `guard` is now a factory, `guard(origins)`, normalising each
+      configured origin once into the `Origin` spelling and the `Host` spellings
+      that name it (the scheme's default port implied when the origin names
+      none). The two loopback regexes are unchanged and always consulted, so with
+      nothing configured the behaviour is byte-identical — asserted, not
+      re-spelt, by `guard.test.ts`'s first block, which repeats `api.test.ts`'s
+      own guard requests
+- [x] 2.2 The guard stays mounted on `/api/*` only — the built client is public files and
+      guarding them would make the app unloadable from its own origin (D3).
+      **Done 2026-09-07** — `app.use('/api/*', guard(origins))` is still the only mount;
+      the static handler is composed in `index.ts`'s `fetch` and never sees the
+      middleware
+- [x] 2.3 `index.ts`'s `hostname` and `port` come from the configuration, defaulting to
+      loopback and 3177. **Done 2026-09-07** — `config.listen?.port ?? 3177`,
+      `config.listen?.host ?? '127.0.0.1'`
 
 ## 3. Capability fields and their refusals
 
-- [ ] 3.1 Add four fields to `FeatureReport` beside `thumbWrites`: `appLaunch`,
+- [x] 3.1 Add four fields to `FeatureReport` beside `thumbWrites`: `appLaunch`,
       `chatTab`, `hostDetails`, `maintenance` — `true` means offered, and every default is
       on except `chatTab` (D4's table). There is no separate index field: `hostDetails`
-      governs the index-state collapse too, since a condition is named by its remedy
-- [ ] 3.2 Rename and re-document `ALL_FEATURES`: it is the supported/default set, not
+      governs the index-state collapse too, since a condition is named by its remedy.
+      **Done 2026-09-07** — the four fields are on `FeatureReport` in `shared/types.ts`,
+      each with a doc comment saying what it governs (D4's table). No separate
+      index field
+- [x] 3.2 Rename and re-document `ALL_FEATURES`: it is the supported/default set, not
       "every capability on" (D4). Update `createApp`'s parameter comment and `index.ts`'s
       construction comment, which currently promises this change replaces the value with
-      "its env selection"
-- [ ] 3.3 Build the report from the configuration in `index.ts`, one value, and pass it
-      to `createApp` as today (D5)
+      "its env selection".
+      **Done 2026-09-07** — `ALL_FEATURES` becomes `DEFAULT_FEATURES`, documented as the
+      *maintained* set rather than "everything on", with the note that all-on is
+      now a configuration nobody runs and that feature-report's *Everything on
+      changes nothing* is an inertness proof. `createApp`'s parameter comment and
+      `index.ts`'s construction comment both rewritten; `listingCache.test.ts`'s
+      four uses renamed mechanically
+- [x] 3.3 Build the report from the configuration in `index.ts`, one value, and pass it
+      to `createApp` as today (D5). **Done 2026-09-07** —
+      `const features: FeatureReport = { ...DEFAULT_FEATURES, ...config.features }`,
+      passed positionally as before. Nothing re-derives a capability from the
+      configuration a second time
 - [ ] 3.4 `PUT /api/thumb` refuses when thumbnail writes are declared off — it consults
       nothing today. Refusal answers distinguishably from a failure (D5)
 - [ ] 3.5 `/api/open` and `/api/open-with` refuse when the launcher is declared off, and
@@ -141,31 +190,76 @@
 
 ## 5. Serving the built client
 
-- [ ] 5.1 Serve `client/dist` from `index.ts` (D8): API routes win, a request matching
+- [x] 5.1 Serve `client/dist` from `index.ts` (D8): API routes win, a request matching
       neither is answered with the client's entry document so a cold deep link resolves,
-      and a server with no built client serves its API exactly as before
-- [ ] 5.2 `/api/` is reserved: a 404 under it is final and never falls through to the
-      entry document (D8), as the delta now requires
-- [ ] 5.3 Cache headers (D8): the hashed bundle assets `immutable` with a long max-age,
+      and a server with no built client serves its API exactly as before.
+      **Done 2026-09-07** — the new `server/src/static.ts` (Node APIs only, no Hono
+      routes) exports `createStaticHandler(dist)` and the pure
+      `route(req, api, client)` that `index.ts` wires; `clientDist(env)` resolves
+      `server/../client/dist`, overridable by `MODEL_BROWSER_CLIENT`. With no
+      dist directory `index.ts` passes `null` and every request goes to the app.
+      Nothing is compressed, per D8 — the proxy that fronts the deployment this
+      is for already encodes. A path naming its way out of the dist is refused
+      403; measured, WHATWG URL eats a literal `..` *and* a `%2e%2e` segment, so
+      the traversal that reaches a handler is the encoded-slash one
+- [x] 5.2 `/api/` is reserved: a 404 under it is final and never falls through to the
+      entry document (D8), as the delta now requires. **Done 2026-09-07** — the rule is
+      the pure `isApiRequest` (`/api` itself included: it is the prefix, not a
+      document), consumed by `route`; `index.ts` only wires it. Falsified: with
+      `isApiRequest` returning false, the reservation cell reads 200/HTML
+- [x] 5.3 Cache headers (D8): the hashed bundle assets `immutable` with a long max-age,
       the entry document `no-cache`. The trip-reduction thread names static-bundle caching
-      as this change's concern, and the first draft dropped it
+      as this change's concern, and the first draft dropped it.
+      **Done 2026-09-07** — anything under `/assets/` gets
+      `public, max-age=31536000, immutable`; everything else, the entry document
+      included, gets `no-cache`. This is the half a proxy cannot supply, which is
+      why it is a rule here and compression is not
 
 ## 6. The shipped deployment's configuration
 
-- [ ] 6.1 Commit the public deployment's configuration at `deploy/demo/config.json`
+- [x] 6.1 Commit the public deployment's configuration at `deploy/demo/config.json`
       (D10). The rest of that deployment's own configuration — reverse proxy, TLS,
-      container definition — is a separate change and does not belong here
-- [ ] 6.2 Exercise that exact configuration in the suite as a second named
-      configuration, so the deployment cannot drift from what CI proves (D10)
+      container definition — is a separate change and does not belong here.
+      **Done 2026-09-07** — every field stated including the ones matching a default, so
+      a later default flip is an edit there. `listen` is loopback on purpose
+      (`demo-infrastructure` D1 puts the proxy, the app and the index in one
+      network namespace), and the file carries no free-text key — the
+      bake-pins-the-recipe note lives on that change's bake step.
+      **For the coordinator**: `demo-infrastructure`'s task 5.2 expected to
+      create this file with `root` only; it is created in full here, and nothing
+      was ticked there
+- [x] 6.2 Exercise that exact configuration in the suite as a second named
+      configuration, so the deployment cannot drift from what CI proves (D10).
+      **Done 2026-09-07** — `config.test.ts`'s "the committed demo configuration" block
+      loads `deploy/demo/config.json` through `loadConfig` and asserts the report
+      it yields, that a guard built from it admits
+      `Origin: https://models.masamaeda.com` / `Host: models.masamaeda.com`, that
+      loopback is still admitted, and that another public origin is not
 
 ## 7. Tests
 
-- [ ] 7.1 Server: an absent config file is silent and yields the defaults; a malformed one
+- [x] 7.1 Server: an absent config file is silent and yields the defaults; a malformed one
       fails at startup naming the file; `MODEL_BROWSER_ROOT` overrides the root while the
-      file's other settings still take effect; `MODEL_BROWSER_CONFIG` selects the file
-- [ ] 7.2 Server: the guard allows exactly loopback when unconfigured (assert the
+      file's other settings still take effect; `MODEL_BROWSER_CONFIG` selects the file.
+      **Done 2026-09-07** — `server/test/config.test.ts`, 11 cells: absent (both the
+      named file and the XDG default), the file the environment selects,
+      malformed naming the file, unreadable (skipped under root), an unknown key
+      at each of the three levels, a wrong type at each, an origin that is not
+      `scheme://host[:port]`, and the env override leaving `origins`/`features`
+      in force. Falsified: with the parse error swallowed, the malformed cell
+      reads a resolved `{}`
+- [x] 7.2 Server: the guard allows exactly loopback when unconfigured (assert the
       byte-identical behaviour, not a re-spelling of it), allows a configured origin,
-      refuses another public origin, refuses a non-matching `Host`, and never emits CORS
+      refuses another public origin, refuses a non-matching `Host`, and never emits CORS.
+      **Done 2026-09-07** — `server/test/guard.test.ts`. The first block makes
+      `api.test.ts`'s own guard requests against an unconfigured app, so the
+      byte-identical claim is tested rather than restated, and includes the
+      control that the public origin is refused *until* it is configured. The
+      second covers the configured origin by `Origin` and by both `Host`
+      spellings, loopback still admitted beside it, a subdomain/suffix near miss,
+      a wrong port, a wrong scheme, and no `Access-Control-*` on any answer.
+      Falsified: with the origin comparison removed, five cells across three
+      files fail
 - [ ] 7.3 Server: per field, assert the **pairing** — the report declares it off and the
       route refuses, from one configuration — rather than testing the report and the
       routes separately (D5's drift risk)

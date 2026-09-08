@@ -1,14 +1,34 @@
 // Bun entry point — the only runtime-specific file. The app itself (Hono) runs
 // unchanged on Node for a future Electron main/sidecar.
+import { statSync } from 'node:fs'
+import type { FeatureReport } from '../../shared/types'
 import { ThumbCache } from './cache'
-import { ALL_FEATURES, createApp } from './app'
+import { DEFAULT_FEATURES, createApp } from './app'
+import { ConfigError, loadConfig } from './config'
 import { ZipTempStore, createLauncher } from './launch'
 import { createLibrary } from './library'
 import { ListingCache } from './listingCache'
 import { createOverrideHolder } from './overrides'
 import { SnapshotStore } from './snapshot'
+import { clientDist, createStaticHandler, route } from './static'
 
-const library = createLibrary()
+// The deployment's configuration, parsed **once**, here, before anything is
+// built from it (public-deployment D2). An absent file is silent and means the
+// defaults; a file that was authored and cannot be used stops the server rather
+// than being read as an absent root, because a misread file may have been the
+// one carrying the origin and the capabilities, and continuing would serve
+// under a posture nobody chose. It is a deploy-time error, where the operator
+// is watching — and it fails here, beside the startup lines, for the reason
+// `library-overrides` reports a broken store here.
+const config = await loadConfig(process.env).catch((err: unknown) => {
+  if (err instanceof ConfigError) {
+    console.error(err.message)
+    process.exit(1)
+  }
+  throw err
+})
+
+const library = createLibrary(process.env, config)
 // Positional to keep the three existing parameters' defaults; the library is
 // what files entries under `<cache>/<id>/` and gates the sweep (D5).
 const cache = new ThumbCache(undefined, undefined, undefined, library)
@@ -72,24 +92,45 @@ void library.state().then((s) => {
   } else console.log(`library: ${s.state}`)
 })
 
-// The feature report is built here rather than left to `createApp`'s default,
-// because this is the construction site the demo change edits: today every
-// capability is on, and 1.3 replaces this value with its env selection without
-// touching the route or the type (feature-report D4).
+// The feature report, built here rather than left to `createApp`'s default,
+// because this is the construction site: the deployment's declarations over the
+// maintained set, as **one value** from which both `/api/features` and the
+// routes' refusals are read, so a declaration and a refusal cannot disagree
+// (public-deployment D5). Nothing re-derives a capability from the
+// configuration a second time.
+const features: FeatureReport = { ...DEFAULT_FEATURES, ...config.features }
+
 const app = createApp(
   cache,
   createLauncher(),
   new ZipTempStore(),
   library,
   overrides,
-  ALL_FEATURES,
+  features,
   snapshots,
   listings,
+  // Loopback is allowed besides, always — the guard adds it whatever is here.
+  config.origins ?? [],
 )
 
+/**
+ * The built client, if there is one. Serving files is adapter-specific, so it
+ * is wired here and not mounted on the Hono app (D1/D8). With no build present
+ * this stays null and every request goes to the API exactly as before, so the
+ * development loop — where Vite serves the client — does not start depending on
+ * a build.
+ */
+const dist = clientDist(process.env)
+const client = statSync(dist, { throwIfNoEntry: false })?.isDirectory() === true
+  ? createStaticHandler(dist)
+  : null
+
 export default {
-  port: 3177,
-  hostname: '127.0.0.1',
+  // Where the deployment says, defaulting to loopback (D8). The demo's own
+  // configuration pins loopback on purpose: `demo-infrastructure` D1 puts the
+  // proxy, the app and the index in one network namespace.
+  port: config.listen?.port ?? 3177,
+  hostname: config.listen?.host ?? '127.0.0.1',
   // Bun closes an idle connection after 10s by default, which silently killed
   // every listing that walked a large library off a slow disk: a cold flat or
   // deep-search walk measured ~32s on a spinning USB exfat drive (2.4 ms per
@@ -99,5 +140,5 @@ export default {
   // that hardware would still outlast it, which is a caching problem, not a
   // timeout one.
   idleTimeout: 255,
-  fetch: app.fetch,
+  fetch: (req: Request) => route(req, app.fetch, client),
 }

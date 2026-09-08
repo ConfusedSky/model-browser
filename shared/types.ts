@@ -660,6 +660,79 @@ export interface AppsReport {
 export interface FeatureReport {
   /** Whether `PUT /api/thumb` is accepted. */
   thumbWrites: boolean
+  /**
+   * Whether the platform launcher is offered — all three launcher routes
+   * (`/api/open`, `/api/open-with`, `/api/apps`), each of which runs a command
+   * on the machine the server sits on.
+   */
+  appLaunch: boolean
+  /**
+   * Whether the chat side-panel tab is offered. Its default is **off**: the tab
+   * is a placeholder with no backend, and an unfinished surface belongs neither
+   * in a shipped desktop build nor on a public link. It stays declarable, so
+   * the day chat gains a backend the default flips (public-deployment D4).
+   */
+  chatTab: boolean
+  /**
+   * Whether the machine the server runs on is the viewer's concern — governing
+   * whether any route or surface may name a location on that machine (the
+   * library's top, the configured root, an enclosed library's location, a
+   * dependency's cache directory) or offer a remedy only an operator can
+   * perform (start a service, mount a volume, re-run a tool). Library paths are
+   * not such locations and are unaffected (public-deployment D11).
+   */
+  hostDetails: boolean
+  /**
+   * Whether maintenance operations against the library are offered — the ones
+   * that act on the server's own derived state rather than answering a question
+   * about the library: dropping or revalidating caches, resetting stored
+   * framings in bulk. Bulk work that *fills* the thumbnail cache is governed by
+   * `thumbWrites` instead, since with those writes refused it would render and
+   * discard (public-deployment D4).
+   */
+  maintenance: boolean
+}
+
+/**
+ * The deployment's own configuration file — `config.json` under the XDG config
+ * home, location overridable by `MODEL_BROWSER_CONFIG` — which describes *this
+ * deployment*: which library it opens, which capabilities it offers, which
+ * origins it answers, and where it listens (public-deployment D1).
+ *
+ * One file rather than several, because these keys describe the same deployment
+ * `root` already describes and must be coherent with it; a separate file is for
+ * a different *authoring* concern, which is what keeps `launch.json` separate.
+ *
+ * Parsing is **strict**, and there is no free-text key: an unknown key at
+ * either level, or a wrong type anywhere, is a startup failure rather than a
+ * silently ignored line. A typo that was quietly dropped would leave the server
+ * running under a security posture nobody authored, which is the whole reason
+ * the file fails loudly (D2). Missing keys mean the built-in defaults, which are
+ * the maintained configuration rather than "everything on".
+ */
+export interface DeploymentConfig {
+  /**
+   * The library root — where the app opens inside the marked tree. Overridden
+   * by a non-empty `MODEL_BROWSER_ROOT`, which overrides *this key alone* and
+   * no longer suppresses the rest of the file (D2).
+   */
+  root?: string
+  /**
+   * The origins this deployment answers, e.g. `https://models.masamaeda.com`.
+   * A **list**, since one deployment may answer more than one name; each entry
+   * is `scheme://host[:port]` with no path. Loopback is allowed besides,
+   * whatever is configured, so a health check from the machine itself is never
+   * refused by the deployment it is checking (D3/D8).
+   */
+  origins?: string[]
+  /** Where the server listens. Defaults to `127.0.0.1:3177`, as today. */
+  listen?: { host?: string; port?: number }
+  /**
+   * Capability overrides, merged over the built-in defaults. An unknown field
+   * here is a parse failure: a misspelled capability that read as "unset" would
+   * silently offer the surface it was written to withhold.
+   */
+  features?: Partial<FeatureReport>
 }
 
 /**
