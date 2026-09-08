@@ -560,4 +560,3 @@
       thumbnailQueue.test.tsx; the existing cells threaded through an id. Two
       falsifications — the id dropped from the key, and an unknown id falling back to the
       bare key — each failing on its own cell
-||||||| parent of 221a35b (Serves models only, and makes a hidden entry unreachable)
