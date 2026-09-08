@@ -694,6 +694,22 @@ export interface FeatureReport {
 }
 
 /**
+ * A route's answer where its deployment declares the capability off
+ * (`feature-report`): **not a fault**. 403, the same status a stranger's request
+ * gets from the guard, with a body naming the field that was declared off — so a
+ * client can tell "this deployment does not offer that" from "that went wrong"
+ * without inferring it from the status code alone (public-deployment D5).
+ *
+ * Every route that carries one refuses *first*, before parsing a body, resolving
+ * a path or taking any other step, so a refused request does no work and reveals
+ * nothing about the library it declined to act on.
+ */
+export interface Refused {
+  error: string
+  refused: keyof FeatureReport
+}
+
+/**
  * The deployment's own configuration file — `config.json` under the XDG config
  * home, location overridable by `MODEL_BROWSER_CONFIG` — which describes *this
  * deployment*: which library it opens, which capabilities it offers, which
@@ -751,8 +767,13 @@ export type LibraryState =
        * The **filesystem** path of the library's top — the marker's own
        * directory, resolved. The client joins a library path onto it to expand
        * one into a filesystem path for copy/paste.
+       *
+       * **Absent where the deployment declares the host not the viewer's
+       * concern** (`hostDetails`, public-deployment D11): it names a machine the
+       * viewer cannot reach, so nothing is sent for a surface to compose a
+       * filesystem path from, and a copied path is the library path itself.
        */
-      top: string
+      top?: string
       /**
        * The configured root as a **library path**: `/` when the root is the
        * top, `/sub/dir` when it is a folder inside the library. Where the app
@@ -769,19 +790,24 @@ export type LibraryState =
   | { state: 'unconfigured' }
   | {
       state: 'missing'
-      /** The configured root's filesystem path, verbatim, so the UI can name it. */
-      root: string
+      /**
+       * The configured root's filesystem path, verbatim, so the UI can name it —
+       * absent under `hostDetails`, since mounting a volume is an operator's
+       * remedy and the state alone is what a viewer can be told (D11).
+       */
+      root?: string
     }
   | {
       state: 'nested'
-      /** The configured root's filesystem path, verbatim, so the UI can name it. */
-      root: string
+      /** The configured root's filesystem path, verbatim; absent under
+       *  `hostDetails`, like `missing.root`. */
+      root?: string
       /**
        * The **filesystem** path of a library top found *beneath* the root.
        * Claiming the root would have written a marker enclosing this one and
        * orphaned its cache, cameras included, so nothing was written and the
        * root serves nothing until it is repointed at this path or inside it
-       * (D1/R1).
+       * (D1/R1). Absent under `hostDetails`, like the two roots above.
        */
-      library: string
+      library?: string
     }

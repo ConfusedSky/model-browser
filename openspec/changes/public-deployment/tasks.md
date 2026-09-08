@@ -112,14 +112,32 @@
       `const features: FeatureReport = { ...DEFAULT_FEATURES, ...config.features }`,
       passed positionally as before. Nothing re-derives a capability from the
       configuration a second time
-- [ ] 3.4 `PUT /api/thumb` refuses when thumbnail writes are declared off — it consults
+- [x] 3.4 `PUT /api/thumb` refuses when thumbnail writes are declared off — it consults
       nothing today. Refusal answers distinguishably from a failure (D5)
-- [ ] 3.5 `/api/open` and `/api/open-with` refuse when the launcher is declared off, and
+      **Done 2026-09-07** — the handler's first line, before `c.req.json()` and long
+      before `cache.put`. The shape is `Refused` (`shared/types.ts`): 403 with
+      `{ error: 'not offered by this deployment', refused: '<field>' }`, one
+      `refuse` helper in `createApp` for all four refusing routes, so "not
+      offered here" reads apart from a fault without inferring it from the
+      status. Cell: `refusals.test.ts` thumbWrites, which also asserts
+      `/api/thumb/image` still 404s — nothing was written. Falsified: with the
+      line removed the write answers 200
+- [x] 3.5 `/api/open` and `/api/open-with` refuse when the launcher is declared off, and
       `/api/apps` answers an empty report — no applications, no configured chooser. The
       `/api/apps` short-circuit is **before** `launcher.report()`, not a filter over its
       result: `report()` execs `xdg-mime` per handled type and reads the machine's
       application entries, so filtering afterwards still spawns and still reads (D5)
-- [ ] 3.6 Under `hostDetails` (D11): `/api/library` omits
+      **Done 2026-09-07** — `/api/open` and `/api/open-with` refuse on their first line
+      (open-with before `chooserConfigured` too, so a withholding deployment
+      says so rather than reporting on the operator's chooser); `/api/apps`
+      short-circuits to `{ chooser: false, types: {} }` **before**
+      `launcher.report()` is named, and answers 200 — it is advisory by
+      definition and an empty report is the whole of the client's withholding.
+      `UNGATED` is untouched. Falsified: with the short-circuit moved after
+      `await launcher.report()`, `open.test.ts`'s recording launcher reads
+      `['report']` where the cell wants `[]` — the body was identical both
+      ways, which is the mistake D5 records
+- [x] 3.6 Under `hostDetails` (D11): `/api/library` omits
       `top` and the locations its `missing`/`nested` states carry, and the `missing`/
       `nested` envelopes in `createApp`'s gate middleware name no host location while
       still naming the state. **`ready.root` stays** — it reads like a sibling of `top`
@@ -129,18 +147,47 @@
       `missing.root` and `nested.root`/`nested.library` *are* filesystem paths, verbatim,
       and those are the ones that go. `top` becomes optional in
       `LibraryState`, so every client read of it is a compile error until handled
+      **Done 2026-09-07** — `top`, `missing.root`, `nested.root` and `nested.library` are
+      optional in `LibraryState`; `ready.root` and `id` stay required. One
+      helper, `viewerState` in `createApp`, does the withholding, and both
+      `/api/library` and the gate middleware read through it — the middleware
+      now narrows on its *result*, so the two accounts of one state cannot
+      drift. The envelopes become `the library is not present` and
+      `the root contains a library`, state named, location gone. Two internal
+      narrowings the optional `top` forced, neither on the wire: `library.ts`'s
+      `Ready` is intersected with `{ top: string }` (a ready library always
+      knows its own top), and `createOverrideHolder` takes the top from
+      `library.realTop()` rather than from the state. Falsified: with the
+      `ready` branch of `viewerState` removed, two `refusals.test.ts` cells fail
 
-- [ ] 3.7 Under `hostDetails`, the routes withhold the index's `detail`:
+- [x] 3.7 Under `hostDetails`, the routes withhold the index's `detail`:
       `/api/semantic/status` answers the status object without it, and the 503s from
       `POST /api/semantic` and `/api/semantic/similar` omit it. It is mini-classify's free
       text and can name its cache directory, and a client-side collapse leaves `curl`
       returning what the sentence was rewritten to hide (D9). The server keeps composing
       and logging it — the operator's diagnosis depends on it
-- [ ] 3.8 `POST /api/reload` refuses under `maintenance`: it drops every cached layer and
+      **Done 2026-09-07** — one helper, `viewerIndexStatus` in `createApp`, read at all
+      three sites: `/api/semantic/status` answers through it, and both 503s take
+      their `detail` from it (`JSON.stringify` drops the key when it is
+      undefined, so the wire loses it rather than carrying a null).
+      `semantic.ts` is untouched — `indexStatus` composes `detail` exactly as
+      before, and no logging was added or removed. Falsified: with the strip
+      undone on `POST /api/semantic` alone, that route's leg of the cell fails
+      and `/api/semantic/similar`'s passes
+- [x] 3.8 `POST /api/reload` refuses under `maintenance`: it drops every cached layer and
       revalidates each snapshot root, which is acting on the server's derived state, not a
       question about the library. Added by `listing-tree-cache` after this change first
       enumerated the routes — re-enumerate before implementing rather than trusting this
       list, and check whether any other maintenance route has appeared since
+      **Done 2026-09-07** — refused before `layers.dropAll()`, so a refused reload drops
+      nothing and re-walks nothing. Re-enumerated (`grep -an "app\.\(get\|post\|put\|delete\)('"`):
+      twenty routes, and `reload` is still the only one that acts on derived
+      state *instead of* answering a question about the library. Two that write
+      derived state were weighed and left alone, both on the requirement's own
+      wording: `POST /api/semantic/poses` records what it was just told (a pose
+      wave on the ordinary browsing path), and `/api/dir` fills the listing
+      cache — each caches the answer it was asked for, which is not a
+      maintenance operation. No other maintenance route has appeared
 - [ ] 3.8a Move the three bulk-job surfaces from `thumbWrites` to `maintenance` —
       `App.tsx`'s jobs enablement and the two `entryActions` job commands — which closes
       the open task 5.1 of the archived `bulk-thumbnail-jobs`, where `thumbWrites` was
@@ -196,9 +243,18 @@
 - [ ] 4.5 The find-similar copy for an unembedded model stops telling the viewer to run
       the classifier under `hostDetails` (D11) — the notes flagged this
       copy as needing a visitor-facing form
-- [ ] 4.6 Where `top` is withheld under `hostDetails` (D11) — read off
+- [x] 4.6 Where `top` is withheld under `hostDetails` (D11) — read off
       `AvailabilityContext` per the note above, since copy-path is built there — copy-path and the lightbox's file details show
       the library path instead of composing a filesystem path
+      **Done 2026-09-07** — and it needed **no** second read of the report: both surfaces
+      already expand through one `expandLibraryPath(libraryTop, path)`, whose
+      `top` is `string | null` and which hands the library path over unchanged
+      on null. So the whole edit is `App`'s `libraryTop`, now
+      `libraryState.top ?? null` — the server's omission arrives as the null
+      that already meant "no top to join onto", and `entryActions`' copy-path
+      and `ViewerLayer`'s file details are untouched. Beside it, the two
+      not-ready sentences (`libraryMissingText`, `libraryNestedText`) take the
+      location as optional and name the state alone without one
 
 ## 5. Serving the built client
 
@@ -272,13 +328,26 @@
       a wrong port, a wrong scheme, and no `Access-Control-*` on any answer.
       Falsified: with the origin comparison removed, five cells across three
       files fail
-- [ ] 7.3 Server: per field, assert the **pairing** — the report declares it off and the
+- [x] 7.3 Server: per field, assert the **pairing** — the report declares it off and the
       route refuses, from one configuration — rather than testing the report and the
       routes separately (D5's drift risk)
-- [ ] 7.4 Server: `/api/apps` empty under a withheld launcher **and spawning nothing**
+      **Done 2026-09-07** — `server/test/refusals.test.ts`, one cell per field
+      (`thumbWrites`, `appLaunch`, `maintenance`, `hostDetails`): each builds ONE
+      app from ONE report and asserts in the same cell that `/api/features` says
+      the field is off *and* that the route acts on it. A fifth cell is the
+      control — the same fixture with every field at its default, where the
+      write, the reload and the applications report all answer as today
+- [x] 7.4 Server: `/api/apps` empty under a withheld launcher **and spawning nothing**
       (assert no command runs, not merely that the body is empty); `/api/open` and
       `/api/open-with` refuse and spawn nothing
-- [ ] 7.4a Server: with the host declared not the viewer's concern, no response from any
+      **Done 2026-09-07** — `open.test.ts`'s "a deployment that withholds the launcher":
+      a `Launcher` whose `report`/`launch`/`chooser` record their calls, so the
+      assertion is that the launcher was never *asked*, not that the body came
+      back empty — the two are indistinguishable from the body alone. Three
+      cells: the empty report with no `report` call, both refusals with no
+      `launch`/`chooser` call, and the control where the same recording launcher
+      is reached for all three with the field on
+- [x] 7.4a Server: with the host declared not the viewer's concern, no response from any
       route contains a location on the host — assert the absence of the specific strings
       (the real library top, the configured root, an enclosed library's location, the
       config and cache directories, the index's cache directory), not of anything
@@ -286,6 +355,16 @@
       unaffected and must still be asserted *present*. Cover `/api/library` in every
       state, the not-ready envelopes, `/api/semantic/status`, both semantic 503s, and an
       error path
+      **Done 2026-09-07** — `refusals.test.ts`'s second describe, seven cells. `ready`
+      sweeps nine routes for the fixture's real top; `missing`, `nested` and
+      `unconfigured` assert the exact `/api/library` body and the exact envelope
+      a path route gives, plus the absence of the configured root and the
+      enclosed library's location; the index cells stub a `CacheUnusable`
+      failure whose reason and hint both name a cache directory, and assert its
+      absence from `/api/semantic/status` and both 503s, with the uncollapsed
+      control keeping it. Present-side: a listing's library paths, a one-level
+      archive virtual path (`/models.zip!/box.stl`), and a 404 naming the
+      library path it could not find
 - [x] 7.5 Client: with writes declared off, an orbit release stores locally and sends
       nothing, a read prefers the local orientation, and one browser's framing does not
       reach another; with the report unknown or failed, writes still go to the server

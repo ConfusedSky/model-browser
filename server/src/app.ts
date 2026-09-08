@@ -4,14 +4,17 @@ import { relative, resolve as resolvePath } from 'node:path'
 import { Readable } from 'node:stream'
 import { Hono, type Context } from 'hono'
 import type {
+  AppsReport,
   DirEntry,
   FeatureReport,
   IndexAvailability,
   IndexPose,
+  LibraryState,
   LightingMode,
   ModelsListing,
   OrbitAxis,
   PosesResponse,
+  Refused,
   ReloadResult,
   ThumbPutRefused,
   ThumbPutRequest,
@@ -808,6 +811,68 @@ export function createApp(
     return (await probeStatus(library)).collectionRootFs
   }
 
+  /**
+   * The answer a route gives where this deployment declares the capability off
+   * (D5). 403 — the status the guard already gives a request this server will
+   * not answer — with the field named in the body, so a client tells "not
+   * offered here" from "went wrong" without reading the status code alone.
+   *
+   * Every caller refuses on the handler's **first** line, before a body is
+   * parsed, a path resolved or a command run: a refused request must do no work
+   * and leak nothing about what it asked for.
+   */
+  function refuse(c: Context, field: keyof FeatureReport): Response {
+    const body: Refused = { error: 'not offered by this deployment', refused: field }
+    return c.json(body, 403)
+  }
+
+  /**
+   * The library's state as this deployment's *viewer* may read it (D11).
+   *
+   * Where the host is declared not the viewer's concern, the three filesystem
+   * locations go — the library's top, the configured root of a `missing`
+   * library, and both locations of a `nested` one — while the state itself, the
+   * identity, the `unmarked` flag and `ready.root` stay. `ready.root` is not a
+   * sibling of `top`: it is a **library** path (`/` at the top), and
+   * `bulk-thumbnail-jobs` scopes a whole-library job on it, so withholding it
+   * would break that change while protecting nothing.
+   *
+   * One helper, read by `/api/library` and by the gate middleware's not-ready
+   * envelopes both, so the two accounts of one state cannot drift apart.
+   */
+  function viewerState(s: LibraryState): LibraryState {
+    if (features.hostDetails) return s
+    if (s.state === 'ready') {
+      const { top: _top, ...rest } = s
+      return rest
+    }
+    if (s.state === 'missing') {
+      const { root: _root, ...rest } = s
+      return rest
+    }
+    if (s.state === 'nested') {
+      const { root: _root, library: _library, ...rest } = s
+      return rest
+    }
+    return s
+  }
+
+  /**
+   * The index's availability as this deployment's viewer may read it (D9).
+   *
+   * `detail` is mini-classify's own free text — its failure's reason and hint,
+   * able to name its cache directory or its collection root — so under the host
+   * field it does not go on the wire. The server keeps composing it, and
+   * `semantic.ts` is untouched: what changes is what three routes put in an
+   * answer, since a client-side collapse would leave `curl` returning exactly
+   * what the sentence was rewritten to hide.
+   */
+  function viewerIndexStatus(s: IndexAvailability): IndexAvailability {
+    if (features.hostDetails) return s
+    const { detail: _detail, ...rest } = s
+    return rest
+  }
+
   app.use('/api/*', guard(origins))
 
   /**
@@ -830,24 +895,35 @@ export function createApp(
   ])
   app.use('/api/*', async (c, next) => {
     if (UNGATED.has(c.req.path)) return next()
-    const s = await library.state()
+    // Read through the same withholding `/api/library` answers with, so the
+    // envelope on a path route and the state route's own answer cannot say
+    // different things about one deployment (D11). Where the host is not the
+    // viewer's concern the locations are gone here and the sentence names the
+    // state alone — mounting a volume and repointing a root are an operator's
+    // remedies, and this envelope reaches anyone, on every path route.
+    const s = viewerState(await library.state())
     if (s.state === 'ready') return next()
     if (s.state === 'missing') {
       return c.json(
-        { error: `the library at ${s.root} is not present`, state: s.state, root: s.root },
+        s.root === undefined
+          ? { error: 'the library is not present', state: s.state }
+          : { error: `the library at ${s.root} is not present`, state: s.state, root: s.root },
         503,
       )
     }
     if (s.state === 'nested') {
       // The root encloses a library rather than being one (R1). Both paths are
-      // named because the remedy is to point the root at the second.
+      // named because the remedy is to point the root at the second — unless
+      // neither is the viewer's to act on, when the state stands alone.
       return c.json(
-        {
-          error: `the root ${s.root} contains a library at ${s.library}`,
-          state: s.state,
-          root: s.root,
-          library: s.library,
-        },
+        s.root === undefined || s.library === undefined
+          ? { error: 'the root contains a library', state: s.state }
+          : {
+              error: `the root ${s.root} contains a library at ${s.library}`,
+              state: s.state,
+              root: s.root,
+              library: s.library,
+            },
         503,
       )
     }
@@ -862,7 +938,13 @@ export function createApp(
     return unreachable(s)
   })
 
-  app.get('/api/library', async (c) => c.json(await library.state()))
+  /**
+   * The library's state. Answered through `viewerState`, so a deployment that
+   * declares the host none of the viewer's business sends no filesystem
+   * location here either — the state, the identity and the library-path `root`
+   * are what remain (D11).
+   */
+  app.get('/api/library', async (c) => c.json(viewerState(await library.state())))
 
   app.onError((err, c) => {
     if (err instanceof LibraryError) return c.json({ error: err.message }, err.status)
@@ -990,6 +1072,12 @@ export function createApp(
    * the same disk head — the contention `search-cancellation` recorded.
    */
   app.post('/api/reload', async (c) => {
+    // The maintenance field's first consumer (D4): dropping every cached layer
+    // and revalidating each snapshot root acts on this server's own derived
+    // state rather than answering a question about the library, it is expensive,
+    // and it acts for every viewer at once. Refused before `dropAll`, so a
+    // refused reload drops nothing.
+    if (!features.maintenance) return refuse(c, 'maintenance')
     layers.dropAll()
     const roots = snapshots === undefined ? [] : await snapshots.roots()
     let changed = false
@@ -1139,7 +1227,20 @@ export function createApp(
    * registry mid-session, so a memoized answer would go stale exactly when it
    * mattered (L5).
    */
-  app.get('/api/apps', async (c) => c.json(await launcher.report()))
+  app.get('/api/apps', async (c) => {
+    // Short-circuited **before** `report()`, not a filter over what it returned
+    // (D5): `report()` loops the handled model types calling `queryDefault`,
+    // whose builtin execs `xdg-mime` and then reads the machine's application
+    // entries for their names — so filtering afterwards would still spawn and
+    // still read the operator's installed applications. An empty report is a
+    // 200, not a refusal: this route is advisory by definition, and the whole
+    // of the client's withholding is that it names nothing.
+    if (!features.appLaunch) {
+      const empty: AppsReport = { chooser: false, types: {} }
+      return c.json(empty)
+    }
+    return c.json(await launcher.report())
+  })
 
   /**
    * What this server accepts and offers (feature-report D2).
@@ -1167,6 +1268,9 @@ export function createApp(
    * would be false precision (L8).
    */
   app.post('/api/open', async (c) => {
+    // First, before the body is even read: a refused launch spawns nothing and
+    // resolves no path (D5).
+    if (!features.appLaunch) return refuse(c, 'appLaunch')
     const body = (await c.req.json().catch(() => null)) as
       | { path?: unknown; appId?: unknown }
       | null
@@ -1202,6 +1306,10 @@ export function createApp(
    * read the same.
    */
   app.post('/api/open-with', async (c) => {
+    // Before the body, and before `chooserConfigured` is consulted: a
+    // deployment that withholds the launcher says so, rather than reporting on
+    // whether the operator happens to have a chooser configured.
+    if (!features.appLaunch) return refuse(c, 'appLaunch')
     const body = (await c.req.json().catch(() => null)) as { path?: unknown } | null
     const path = body?.path
     if (typeof path !== 'string' || path.trim() === '') {
@@ -1228,7 +1336,7 @@ export function createApp(
    */
   app.get('/api/semantic/status', async (c) => {
     const s = await indexStatus(library, { fresh: c.req.query('fresh') === 'true' })
-    return c.json(s)
+    return c.json(viewerIndexStatus(s))
   })
 
   /**
@@ -1389,7 +1497,13 @@ export function createApp(
     if (status.state !== 'ready' || collectionRootFs === undefined) {
       // Not a 500: "the index is not there" is a state the UI renders, and the
       // state itself is what tells the user which thing to do about it.
-      return c.json({ error: 'index unavailable', state: status.state, detail: status.detail }, 503)
+      return c.json(
+        // `detail` through the same withholding `/api/semantic/status` uses: it
+        // is undefined here on a deployment that declares the host none of the
+        // viewer's business, and `JSON.stringify` drops the key (D9).
+        { error: 'index unavailable', state: status.state, detail: viewerIndexStatus(status).detail },
+        503,
+      )
     }
     // Virtual paths never leave this server (D7), and a scope outside the
     // collection is not the index's to answer.
@@ -1488,7 +1602,13 @@ export function createApp(
     }
     const { status, collectionRootFs } = await probeStatus(library)
     if (status.state !== 'ready' || collectionRootFs === undefined) {
-      return c.json({ error: 'index unavailable', state: status.state, detail: status.detail }, 503)
+      return c.json(
+        // `detail` through the same withholding `/api/semantic/status` uses: it
+        // is undefined here on a deployment that declares the host none of the
+        // viewer's business, and `JSON.stringify` drops the key (D9).
+        { error: 'index unavailable', state: status.state, detail: viewerIndexStatus(status).detail },
+        503,
+      )
     }
     const model = await scopeWithin(library, path, collectionRootFs)
     if (model === null) {
@@ -1690,6 +1810,11 @@ export function createApp(
   })
 
   app.put('/api/thumb', async (c) => {
+    // The first line, before the body is parsed and long before the cache is
+    // touched: this route consulted nothing until now, and its cache is keyed
+    // by path alone for cameras — so one accepted anonymous write re-frames the
+    // model *every later visitor* sees (model-thumbnails, D5).
+    if (!features.thumbWrites) return refuse(c, 'thumbWrites')
     const body = (await c.req.json()) as ThumbPutRequest
     if (typeof body.path !== 'string' || typeof body.mtime !== 'number') {
       return c.json({ error: 'path and mtime are required' }, 400)

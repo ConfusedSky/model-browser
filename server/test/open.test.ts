@@ -12,11 +12,13 @@ import { tmpdir } from 'node:os'
 import { basename, join, sep } from 'node:path'
 import { zipSync } from 'fflate'
 import { afterAll, describe, expect, it } from 'vitest'
-import { createApp } from '../src/app'
+import type { AppsReport, Refused } from '../../shared/types'
+import { DEFAULT_FEATURES, createApp } from '../src/app'
 import { ThumbCache } from '../src/cache'
 import {
   type ExecFn,
   type LaunchConfig,
+  type Launcher,
   type SpawnOptions,
   type SpawnResult,
   createLauncher,
@@ -95,6 +97,86 @@ async function post(
     body: JSON.stringify(body),
   })
 }
+
+/**
+ * `public-deployment` 3.5/7.4. All three launcher routes run commands on the
+ * machine hosting the server — `/api/apps` included, which looks like a read
+ * and is not: `report()` execs `xdg-mime` per handled model type and then reads
+ * the operator's application entries for their names, deliberately per request
+ * since a chooser can rewrite the registry mid-session.
+ *
+ * So the assertion is not that the answers are empty. It is that **the launcher
+ * was never asked**: a `/api/apps` that filtered `report()`'s result instead of
+ * short-circuiting would answer the same empty body while still spawning, which
+ * is the exact mistake D5 records.
+ */
+describe('a deployment that withholds the launcher', () => {
+  /** A launcher that records rather than runs, and fails loudly if reached. */
+  function recording(): { calls: string[]; launcher: Launcher } {
+    const calls: string[] = []
+    const launcher: Launcher = {
+      chooserConfigured: true,
+      report: async () => {
+        calls.push('report')
+        return { chooser: true, types: {} }
+      },
+      launch: async (appId, file) => {
+        calls.push(`launch ${appId} ${file}`)
+      },
+      chooser: async (file) => {
+        calls.push(`chooser ${file}`)
+      },
+    }
+    return { calls, launcher }
+  }
+
+  function withheld() {
+    const { calls, launcher } = recording()
+    const app = createApp(
+      new ThumbCache(cacheDir),
+      launcher,
+      new ZipTempStore(dir),
+      libraryFor(dir),
+      undefined,
+      { ...DEFAULT_FEATURES, appLaunch: false },
+    )
+    return { calls, app }
+  }
+
+  it('answers an empty report without asking the launcher for one', async () => {
+    const { calls, app } = withheld()
+    const res = await app.request('/api/apps', { headers: LOOPBACK })
+    expect(res.status).toBe(200)
+    const empty: AppsReport = { chooser: false, types: {} }
+    expect(await res.json()).toEqual(empty)
+    // The whole cell: no `xdg-mime`, no application entries read, nothing
+    // learned about what the operator has installed.
+    expect(calls).toEqual([])
+  })
+
+  it('refuses a launch and a chooser, spawning nothing, and says so as a refusal', async () => {
+    const { calls, app } = withheld()
+    for (const [route, body] of [
+      ['/api/open', { path: '/loose.stl', appId: 'lycheeslicer.desktop' }],
+      ['/api/open-with', { path: '/loose.stl' }],
+    ] as const) {
+      const res = await post(app, route, body)
+      expect([route, res.status]).toEqual([route, 403])
+      const refused: Refused = { error: 'not offered by this deployment', refused: 'appLaunch' }
+      expect([route, await res.json()]).toEqual([route, refused])
+    }
+    expect(calls).toEqual([])
+  })
+
+  it('is the field talking, not the routes: with it on, the same launcher is reached', async () => {
+    const { calls, launcher } = recording()
+    const app = createApp(new ThumbCache(cacheDir), launcher, new ZipTempStore(dir), libraryFor(dir))
+    expect((await app.request('/api/apps', { headers: LOOPBACK })).status).toBe(200)
+    expect((await post(app, '/api/open', { path: '/loose.stl', appId: 'x.desktop' })).status).toBe(200)
+    expect((await post(app, '/api/open-with', { path: '/loose.stl' })).status).toBe(200)
+    expect(calls).toEqual(['report', `launch x.desktop ${join(dir, 'loose.stl')}`, `chooser ${join(dir, 'loose.stl')}`])
+  })
+})
 
 describe('GET /api/apps', () => {
   it('reports every handled type, and whether a chooser is configured', async () => {

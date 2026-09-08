@@ -384,9 +384,14 @@ export function createOverrideHolder(
   async function current(): Promise<OverrideStore> {
     const state = await library.state()
     if (state.state !== 'ready') return EMPTY
-    if (held !== undefined && held.id === state.id && held.top === state.top) return held.store
-    const store = await loadOverrides(state.top, report)
-    held = { id: state.id, top: state.top, store }
+    // The top off `realTop()` rather than off the state: the state's own `top`
+    // is optional on the wire, since a deployment may withhold it (D11), while
+    // the library this holder is built over always knows it — and `realTop()`
+    // is that same value, already narrowed to a ready library.
+    const top = library.realTop()
+    if (held !== undefined && held.id === state.id && held.top === top) return held.store
+    const store = await loadOverrides(top, report)
+    held = { id: state.id, top, store }
     return store
   }
 

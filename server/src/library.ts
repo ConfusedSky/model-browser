@@ -136,7 +136,15 @@ export interface Library {
 export const MARKER_DIR = '.model-browser'
 const MARKER_FILE = 'library.json'
 
-type Ready = Extract<LibraryState, { state: 'ready' }>
+/**
+ * The `ready` state as the **server** holds it. `top` is optional on the wire —
+ * a deployment may declare the host none of the viewer's business and withhold
+ * it (`public-deployment` D11) — but a library that is ready always knows its
+ * own top, and everything below (`realTop`, `resolve`, `libPathOf`, the marker
+ * re-read) needs it. Narrowed once here, so the wire's optionality stays a fact
+ * about answers rather than leaking into what this module is sure of.
+ */
+type Ready = Extract<LibraryState, { state: 'ready' }> & { top: string }
 
 /**
  * The root: the environment's, else the configuration's (D4).

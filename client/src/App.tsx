@@ -289,12 +289,21 @@ function resolveView(url: UrlView): View {
  * path is the remedy. All are *states*, not failures — hence one line in the
  * header's existing slot and an empty grid, rather than an error surface of
  * their own (design D4/D7).
+ *
+ * A deployment may withhold those locations (`hostDetails`, `public-deployment`
+ * D11), and then the state itself is the whole sentence: mounting a volume and
+ * repointing a root are an operator's remedies, so a viewer who can perform
+ * neither is told *what* rather than *where*. The `undefined` here is the
+ * server's omission, not a value the client failed to read.
  */
 const LIBRARY_UNCONFIGURED =
   'No library configured — set MODEL_BROWSER_ROOT or root in config.json'
-const libraryMissingText = (root: string): string => `The library at ${root} is not present`
-const libraryNestedText = (library: string): string =>
-  `This root contains a library at ${library}. Point the root at it, or at a folder inside it.`
+const libraryMissingText = (root: string | undefined): string =>
+  root === undefined ? 'The library is not present' : `The library at ${root} is not present`
+const libraryNestedText = (library: string | undefined): string =>
+  library === undefined
+    ? 'The root contains another library.'
+    : `This root contains a library at ${library}. Point the root at it, or at a folder inside it.`
 
 /**
  * The library states that mean "the library is why this failed" — the ones a
@@ -1074,8 +1083,15 @@ export default function App() {
   /**
    * The library's top, filesystem-side, or null while it is not `ready` —
    * `expandLibraryPath`'s first argument wherever a path leaves the app.
+   *
+   * Null **also** where the deployment withholds it (`hostDetails`, D11): the
+   * top is then absent from a `ready` state, and `expandLibraryPath` already
+   * answers null by handing the library path over as it stands. So copy-path
+   * and the lightbox's file details show `/Kit/x.stl` rather than composing a
+   * filesystem path naming a machine the viewer cannot reach — through the same
+   * one expansion, with no second rule for either surface (task 4.6).
    */
-  const libraryTop = libraryState?.state === 'ready' ? libraryState.top : null
+  const libraryTop = libraryState?.state === 'ready' ? (libraryState.top ?? null) : null
   /**
    * The one sentence a not-`ready` library gets, or null. Non-null is also what
    * "there is nothing to browse" means below: a library that is unconfigured or
