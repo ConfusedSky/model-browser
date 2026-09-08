@@ -47,6 +47,7 @@ import {
   posesListingAsked,
   probeStatus,
   query as indexQuery,
+  scopeLibPath,
   scopeWithin,
   similar as indexSimilar,
 } from './semantic'
@@ -1656,6 +1657,9 @@ export function createApp(
     // caches know exactly as a listing's do (`thumbnail-image-serving` D2), or
     // it would keep the full lookup cost the listing routes have shed.
     annotate(entries)
+    // The scope the index says it answered under, as a library path (D2) —
+    // `scopeLibPath` reads why it can never be the index's own spelling.
+    const scopePath = await scopeLibPath(library, result.scope.path)
     return c.json({
       // A library path, like every other path on the wire (D2): the scope's,
       // else the collection's. A collection the library does not hold has no
@@ -1674,7 +1678,12 @@ export function createApp(
       // and the client says nothing extra (D9).
       ...(result.matched !== undefined ? { matched: result.matched } : {}),
       scope: {
-        path: result.scope.path,
+        // Never the index's own string: it is the real filesystem path this
+        // route handed it (`scopeWithin`), echoed back, so it names the host on
+        // every deployment. A library path or `null`, whatever `hostDetails`
+        // says — one rule rather than a fifth branch, and the same translation
+        // `path` above is built from.
+        path: scopePath,
         status: result.scope.status,
         indexed: result.scope.n_indexed,
         scanned: result.scope.n_scanned,

@@ -207,10 +207,14 @@ describe('semantic query', () => {
   }
 
   it('returns tiles built from this server’s own view of the tree', async () => {
-    stubIndex(READY, result)
+    // The index reports the scope it judged in as the real filesystem path it
+    // was handed. It reaches the wire as a **library path** (`scopeLibPath`) —
+    // like every other path this app answers with, and on every deployment,
+    // since a host location is not a viewer's to be told.
+    stubIndex(READY, { ...result, scope: { ...result.scope, path: join(root, 'kits') } })
     const body = (await (await post({ text: 'dragon' })).json()) as {
       entries: { name: string; path: string; size: number; mtime: number; kind: string }[]
-      scope: { indexed: number; scanned: number; covers: string[]; status: string }
+      scope: { path: string | null; indexed: number; scanned: number; covers: string[]; status: string }
       scores: Record<string, unknown>
       weak: boolean
     }
@@ -223,7 +227,7 @@ describe('semantic query', () => {
     // low, and rescaling it here would break the one thing it can be checked
     // against (the index's own `WEAK_Z`).
     expect(body.scores['/dragon.stl']).toEqual({ score: 0.16, z: 3.9 })
-    expect(body.scope).toEqual({ path: null, status: 'partial', indexed: 2801, scanned: 3396, covers: ['stl'] })
+    expect(body.scope).toEqual({ path: '/kits', status: 'partial', indexed: 2801, scanned: 3396, covers: ['stl'] })
   })
 
   it('a hit’s tile carries what the thumbnail cache knows, as a listing’s does', async () => {

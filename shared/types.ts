@@ -396,6 +396,19 @@ export interface ThumbPutRequest {
  * when the index loaded, so it tracks the folder loosely and can shift.
  */
 export interface SemanticScope {
+  /**
+   * Where the query was judged, as a **library path** — never the index's own
+   * spelling of it, which is a filesystem path on the machine the index runs
+   * on. Mapped on the way out by every deployment alike (`scopeLibPath`),
+   * because a host location is not a viewer's to be told (`feature-report`) and
+   * a library path is the only kind that reaches this wire (`library-root`).
+   *
+   * `null` where there is no library path to give: the index reported no scope,
+   * or the one it reported resolves outside the library — an unscoped query
+   * comes back scoped to the collection root, which may sit above or beside the
+   * library top. A scope the viewer cannot browse to is reported as absent
+   * rather than named.
+   */
   path: string | null
   status: 'indexed' | 'partial' | 'unindexed'
   indexed: number

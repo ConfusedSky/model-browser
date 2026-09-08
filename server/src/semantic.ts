@@ -469,6 +469,42 @@ export async function scopeWithin(
 }
 
 /**
+ * The other direction, for the scope the index *reports back*: a library path,
+ * or `null`.
+ *
+ * `scopeWithin` hands the index a real filesystem path and the index echoes
+ * that string verbatim in the scope of its answer, so what comes back names a
+ * place on the operator's machine — `/run/media/…` — and putting it on the wire
+ * names the host to every viewer, whatever the deployment declares
+ * (`feature-report`, *No host location reaches a viewer*). One rule rather than
+ * a fifth `hostDetails` branch: the scope on the wire is a library path
+ * everywhere, like every other path this app answers with (D2).
+ *
+ * `null` for anything that has no library path: a scope the index reported as
+ * absent, a value that is not a string (the fields inside the index's `scope`
+ * are unchecked JSON — see `query`), and a real path outside the library. That
+ * last one is not a fault to report: a query sent with no scope comes back
+ * scoped to the *collection* root, which may sit above or beside the library
+ * top, and a scope the viewer cannot browse to is not theirs to be told about.
+ *
+ * The `realpath` before `libPathOf` is `mapCollectionRoot`'s, for its reason:
+ * `libPathOf` compares against the library's resolved top, so an unresolved
+ * spelling would fail containment. It is a no-op on a value this server handed
+ * over (already real) and it is what makes the *unscoped* case work, where the
+ * string is the index's own spelling of its collection root.
+ */
+export async function scopeLibPath(library: Library, path: unknown): Promise<string | null> {
+  if (typeof path !== 'string') return null
+  const real = await realpath(path).catch(() => path)
+  try {
+    return library.libPathOf(real)
+  } catch (err) {
+    if (!(err instanceof LibraryError)) throw err
+    return null
+  }
+}
+
+/**
  * Why a path was excluded, for the one caller that has to tell the two kinds
  * apart (`posesAsked`, §6.9 / round-3 finding 5).
  *

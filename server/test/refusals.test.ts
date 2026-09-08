@@ -57,6 +57,14 @@ writeFileSync(
   JSON.stringify({ id: 'the-enclosed-library', version: 1 }),
 )
 
+/**
+ * A directory on the host beside the library, holding nothing. It stands for
+ * the scope an *unscoped* meaning query comes back reporting when the index's
+ * collection root sits outside the library top — a place the viewer has no
+ * library path for and no way to browse to.
+ */
+const besideLibrary = realTempDir('mb-refuse-beside-')
+
 const caches: string[] = []
 function cacheDir(): string {
   const d = realTempDir('mb-refuse-cache-')
@@ -159,7 +167,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 afterAll(() => {
-  for (const d of [top, enclosing, lockedTop, ...caches, ...homes]) {
+  for (const d of [top, enclosing, lockedTop, besideLibrary, ...caches, ...homes]) {
     rmSync(d, { recursive: true, force: true })
   }
   rmSync(join(absentRoot, '..'), { recursive: true, force: true })
@@ -482,6 +490,74 @@ describe('no host location reaches a viewer where the host is not their concern'
       expect([route, res.status]).toEqual([route, 404])
       const b = (await res.json()) as { error: string }
       expect([route, b.error]).toEqual([route, NOT_IN_CACHE])
+    }
+  })
+
+  /**
+   * The cells above are about the bodies a meaning query *fails* with. This is
+   * the body it **succeeds** with, which withheld nothing: `scopeWithin` hands
+   * the index a real filesystem path and the index echoes that string back in
+   * its scope, so `scope.path` forwarded verbatim named the host on every
+   * search a visitor ran — `/run/media/…` on the machine this was found on.
+   *
+   * One rule rather than a fifth `hostDetails` branch, which is why both
+   * declarations are asserted from the same stub: the scope on the wire is a
+   * library path everywhere.
+   */
+  function stubScopedIndex(scopePath: string | null): void {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (String(url).endsWith('/status')) {
+          return new Response(JSON.stringify(READY), {
+            headers: { 'content-type': 'application/json' },
+          })
+        }
+        return new Response(
+          JSON.stringify({
+            scope: {
+              path: scopePath,
+              status: 'indexed',
+              n_indexed: 1,
+              n_scanned: 1,
+              covers: ['stl'],
+            },
+            weak: false,
+            results: [],
+          }),
+        )
+      }),
+    )
+  }
+
+  type ScopedBody = { scope: { path: string | null } }
+
+  it('a query names the scope it was judged in by a library path, whatever is declared', async () => {
+    for (const over of [withheld, {}]) {
+      const app = appWith(over)
+      resetIndexStatus()
+      // The index's own spelling: the collection root's real path, joined.
+      stubScopedIndex(join(top, 'kit'))
+      const res = await send(app, 'POST', '/api/semantic', { text: 'dragon' })
+      expect([over, res.status]).toEqual([over, 200])
+      const raw = await res.text()
+      expect([over, (JSON.parse(raw) as ScopedBody).scope.path]).toEqual([over, '/kit'])
+      // And nowhere else in the body either — the field is where it was found,
+      // not what the rule is about.
+      expect([over, raw.includes(top)]).toEqual([over, false])
+    }
+  })
+
+  it('a scope the library does not hold is absent, not a place the viewer cannot browse to', async () => {
+    for (const over of [withheld, {}]) {
+      const app = appWith(over)
+      resetIndexStatus()
+      stubScopedIndex(besideLibrary)
+      const res = await send(app, 'POST', '/api/semantic', { text: 'dragon' })
+      expect([over, res.status]).toEqual([over, 200])
+      const raw = await res.text()
+      expect([over, (JSON.parse(raw) as ScopedBody).scope.path]).toEqual([over, null])
+      expect([over, raw.includes(besideLibrary)]).toEqual([over, false])
     }
   })
 
