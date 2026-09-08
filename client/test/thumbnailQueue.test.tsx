@@ -2366,7 +2366,7 @@ describe('a listing-known thumbnail is drawn without a lookup', () => {
 describe('a kept framing wins over the one the listing carried', () => {
   const CAMERA = { az: 0.4, el: 0.2, distR: 2, target: [0, 0, 0] as [number, number, number] }
   const KEPT = { az: 1.5, el: -0.3, distR: 4, target: [1, 0, 0] as [number, number, number] }
-  const OFF: FeatureReport = { thumbWrites: false }
+  const OFF: FeatureReport = { thumbWrites: false, appLaunch: true, chatTab: false, hostDetails: true, maintenance: true }
   const PATH = '/models/m0.stl'
 
   function annotated(over: Partial<NonNullable<DirEntry['thumb']>> = {}): DirEntry[] {

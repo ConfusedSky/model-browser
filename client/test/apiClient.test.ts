@@ -527,8 +527,8 @@ describe('HttpApiClient contract', () => {
 // `HttpApiClient` over a spy `fetchFn`, so "sends nothing" is asserted at the
 // network and not merely at a mock's method.
 describe('withLocalFramings', () => {
-  const OFF: FeatureReport = { thumbWrites: false }
-  const ON: FeatureReport = { thumbWrites: true }
+  const OFF: FeatureReport = { thumbWrites: false, appLaunch: true, chatTab: false, hostDetails: true, maintenance: true }
+  const ON: FeatureReport = { thumbWrites: true, appLaunch: true, chatTab: false, hostDetails: true, maintenance: true }
 
   /** A `Storage`-shaped map. `raw` is the bytes, for asserting what was kept. */
   function memStorage(): FramingStorage & { raw: Map<string, string> } {
