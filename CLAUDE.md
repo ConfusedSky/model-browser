@@ -9,15 +9,20 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
 - `bun run dev` - start server + client together. The server needs a library root:
   `MODEL_BROWSER_ROOT=<dir>` or `root` in `~/.config/model-browser/config.json`, whose path
   `MODEL_BROWSER_CONFIG` overrides; without one every path route answers 503
-  `{state:'unconfigured'}`. Restart after editing it (the `launch.json` rule) — but
-  "read once at server start" is **not** what the code does today, and this line said it
-  was: `configuredRoot` is called from `evaluate`, which `compute` re-runs on every
-  `state()` while the library is unsettled, so an *unconfigured* server re-parses the file
-  on every request and does pick up a `root` written under it. A settled `ready` library
-  never re-reads (one `stat` on the top per request instead). The re-read is a side effect
-  of re-asking a filesystem question, not a feature — `public-deployment` (1.2a) makes the
-  parse genuinely once and leaves the filesystem question re-asked, at which point this
-  line becomes true as originally written. Paths on the wire and in URLs are
+  `{state:'unconfigured'}`. That file describes the whole deployment (`public-deployment`,
+  `DeploymentConfig` in shared/types.ts): `root`, `origins` (the guard's allowed set, loopback
+  always allowed besides), `listen` (`{host, port}`, default `127.0.0.1:3177`) and `features`
+  (the capability fields over `DEFAULT_FEATURES`; `chatTab` defaults **off**). It is parsed
+  **exactly once at start** (`loadConfig`, server/src/config.ts — since 2026-09-07; before
+  that an unconfigured server re-parsed it per request) and the parse is **strict**: an
+  unknown key or a wrong type anywhere, or a file that is present but unreadable, stops
+  the server with a message naming the file — an absent file is silent and means the
+  defaults. `MODEL_BROWSER_ROOT` overrides the `root` key alone and no longer suppresses the
+  rest of the file. Restart after editing it (the `launch.json` rule): the library keeps
+  re-asking the *filesystem* while unsettled, so a volume mounted later needs no restart,
+  but a `root` written into the file under a running server is not seen until one. The
+  shipped public configuration is `deploy/demo/config.json`, exercised by the suite as a
+  named second configuration. Paths on the wire and in URLs are
   library-relative (`/` is the library top); the server writes
   `<library>/.model-browser/library.json` on first start — but the marker found *above* the
   root wins. The walk now stops at a mount boundary (same `st_dev`), so a stray marker on

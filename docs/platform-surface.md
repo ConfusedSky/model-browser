@@ -35,10 +35,14 @@ contracts and placeholder rules: `openspec/changes/open-in-slicer/design.md` (L2
   paths; Windows drive letters and separators are untested against them.
 - **User dirs**: thumbnail cache at `~/.cache/model-browser/<library-id>/` (the pre-library flat
   layout beside it is migrated once, then existence-swept), launch config at
-  `~/.config/model-browser/launch.json` and the library root in
-  `~/.config/model-browser/config.json` (`MODEL_BROWSER_ROOT` overrides it) are XDG-shaped;
-  Windows (`%LOCALAPPDATA%`) and macOS (`~/Library/Caches`, `~/Library/Application Support`)
-  differ.
+  `~/.config/model-browser/launch.json` and the deployment's configuration in
+  `~/.config/model-browser/config.json` — `root`, `origins`, `listen`, `features`
+  (`public-deployment`; `MODEL_BROWSER_ROOT` overrides the `root` key alone,
+  `MODEL_BROWSER_CONFIG` names another file, `MODEL_BROWSER_CACHE` another cache directory,
+  `MODEL_BROWSER_CLIENT` another built-client directory) — are XDG-shaped; Windows
+  (`%LOCALAPPDATA%`) and macOS (`~/Library/Caches`, `~/Library/Application Support`)
+  differ. The built client, when served by the server itself, is read from `client/dist`
+  beside the server package.
 - **The library marker** (`library-root` D1): `<library>/.model-browser/library.json` is the
   first file this app writes beside the models — a generated id at the library's top, found
   by walking up from the configured root. The walk stops at a **mount boundary**, compared as
