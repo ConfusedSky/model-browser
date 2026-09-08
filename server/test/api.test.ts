@@ -14,6 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { DirEntry, DirListing, ThumbGetResponse } from '../../shared/types'
 import { createApp } from '../src/app'
 import { ThumbCache } from '../src/cache'
+import { type ExecFn, createLauncher } from '../src/launch'
 import { LOOPBACK, libraryFor, makeFixtures } from './helpers'
 
 const fx = makeFixtures()
@@ -92,6 +93,150 @@ describe('same-origin guard', () => {
       expect([asked, res.status]).toEqual([asked, 200])
       expect(Buffer.from(await res.arrayBuffer()).equals(direct)).toBe(true)
     }
+  })
+})
+
+describe('GET /api/file serves models, and only models', () => {
+  // `public-deployment` 9.9a: the plain-file branch hands over exactly what a
+  // listing would show — `modelFormat`'s answer — because a deployment that
+  // answers strangers otherwise serves every `notes.txt`, README and stray
+  // archive of credentials that shares a directory with a kit to anyone who can
+  // spell its name. A rule at the route rather than an exclusion in whatever
+  // copies the library up, which the next rsync forgets.
+  it('answers a non-model exactly as a file that is not there', async () => {
+    // `notes.txt` really is beside the models in the fixture — the listing cell
+    // below is what keeps it out of a browse — so this is a refusal, not a miss.
+    const present = await get('/api/file?path=/notes.txt')
+    expect(present.status).toBe(404)
+    expect(await present.json()).toEqual({ error: 'no such file: /notes.txt' })
+    // Byte for byte the answer a name that is not there gets, so the URL cannot
+    // be used to confirm the file exists. A distinct status would do exactly
+    // that, which is why this is not a 403.
+    const absent = await get('/api/file?path=/gone.txt')
+    expect(absent.status).toBe(404)
+    expect(await absent.json()).toEqual({ error: 'no such file: /gone.txt' })
+    // And the control: the model beside it is served as it always was.
+    expect((await get('/api/file?path=/loose.stl')).status).toBe(200)
+  })
+
+  it('refuses one on the launch path too, spawning nothing', async () => {
+    // Launching a non-model is the same exposure as serving one — the file is
+    // opened on the host either way — so `resolveEntryFile` carries the rule.
+    // The assertion that matters is the empty `calls`: a check made *after* the
+    // launcher was asked would answer the same 404 with the file already open
+    // in whatever the machine handles text with.
+    const calls: string[] = []
+    const exec: ExecFn = async (file, args) => {
+      calls.push(`${file} ${args.join(' ')}`)
+      return { code: 0, stdout: '', stderr: '' }
+    }
+    const launching = createApp(
+      cache,
+      createLauncher({
+        env: { HOME: join(fx.dir, 'no-such-home'), XDG_DATA_DIRS: join(fx.dir, 'no-such-share') },
+        exec,
+        config: {},
+      }),
+      undefined,
+      libraryFor(fx.dir),
+    )
+    const open = (path: string) =>
+      launching.request('/api/open', {
+        method: 'POST',
+        headers: { ...LOOPBACK, 'content-type': 'application/json' },
+        body: JSON.stringify({ path, appId: 'x.desktop' }),
+      })
+
+    const res = await open('/notes.txt')
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({ error: 'no such file: /notes.txt' })
+    expect(calls).toEqual([])
+
+    // The control: the model launches, so what refused above is the format and
+    // not the route being broken.
+    expect((await open('/loose.stl')).status).toBe(200)
+    expect(calls).toHaveLength(1)
+  })
+})
+
+describe('GET /api/file byte ranges', () => {
+  // `public-deployment` 9.11c: a single range, on the branch that streams from
+  // disk. Everything else — a multi-range header, a malformed one — is served
+  // whole, which is always a correct answer to a range request.
+  const url = '/api/file?path=/loose.stl'
+  const size = statSync(join(fx.dir, 'loose.stl')).size
+
+  async function bytes(res: Response): Promise<Buffer> {
+    return Buffer.from(await res.arrayBuffer())
+  }
+
+  let whole: Buffer
+  beforeAll(async () => {
+    whole = await bytes(await get(url))
+  })
+
+  it('answers each of the three spellings with the slice it names', async () => {
+    const cases: [string, number, number][] = [
+      ['bytes=0-9', 0, 9], // a closed range
+      [`bytes=${size - 10}-`, size - 10, size - 1], // from an offset to the end
+      ['bytes=-16', size - 16, size - 1], // the last n bytes
+    ]
+    for (const [header, start, end] of cases) {
+      const res = await get(url, { ...LOOPBACK, range: header })
+      expect([header, res.status]).toEqual([header, 206])
+      expect([header, res.headers.get('content-range')]).toEqual([
+        header,
+        `bytes ${start}-${end}/${size}`,
+      ])
+      expect([header, res.headers.get('content-length')]).toEqual([header, String(end - start + 1)])
+      expect([header, res.headers.get('accept-ranges')]).toEqual([header, 'bytes'])
+      // The bytes themselves, against the whole file the same route serves:
+      // headers that agree with each other and disagree with the file would
+      // pass every assertion above.
+      expect([header, (await bytes(res)).equals(whole.subarray(start, end + 1))]).toEqual([
+        header,
+        true,
+      ])
+    }
+  })
+
+  it('clamps a range that runs off the end rather than failing it', async () => {
+    const res = await get(url, { ...LOOPBACK, range: `bytes=0-${size + 500}` })
+    expect(res.status).toBe(206)
+    expect(res.headers.get('content-range')).toBe(`bytes 0-${size - 1}/${size}`)
+    expect((await bytes(res)).equals(whole)).toBe(true)
+  })
+
+  it('answers a range naming nothing in the file with 416 and the size', async () => {
+    for (const header of [`bytes=${size}-`, `bytes=${size + 1}-${size + 9}`, 'bytes=-0']) {
+      const res = await get(url, { ...LOOPBACK, range: header })
+      expect([header, res.status]).toEqual([header, 416])
+      expect([header, res.headers.get('content-range')]).toEqual([header, `bytes */${size}`])
+      expect([header, (await bytes(res)).length]).toEqual([header, 0])
+    }
+  })
+
+  it('serves the whole file for anything else, and every 200 says ranges are welcome', async () => {
+    // A multi-range header and four malformed ones. Serving the whole
+    // representation is the permitted answer, and the one that keeps a client
+    // that asked badly working.
+    for (const header of ['bytes=0-9, 20-29', 'bytes=abc-def', 'items=0-9', 'bytes=-', 'bytes=9-0']) {
+      const res = await get(url, { ...LOOPBACK, range: header })
+      expect([header, res.status]).toEqual([header, 200])
+      expect([header, res.headers.get('content-length')]).toEqual([header, String(size)])
+      expect([header, (await bytes(res)).equals(whole)]).toEqual([header, true])
+    }
+    const plain = await get(url)
+    expect(plain.headers.get('accept-ranges')).toBe('bytes')
+  })
+
+  it('ignores a range on an archive entry, whose bytes never came off a stream', async () => {
+    // The zip branch reads a named entry into memory; there is no partial read
+    // to save there, and answering the whole entry is permitted.
+    const entry = `/api/file?path=${encodeURIComponent('/models.zip!/box.stl')}`
+    const res = await get(entry, { ...LOOPBACK, range: 'bytes=0-9' })
+    expect(res.status).toBe(200)
+    expect((await bytes(res)).equals(fx.boxStl)).toBe(true)
   })
 })
 

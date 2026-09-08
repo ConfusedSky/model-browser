@@ -140,6 +140,18 @@ describe('the composition index.ts wires', () => {
     expect(isApiRequest('/apiary')).toBe(false)
     expect(isApiRequest('/')).toBe(false)
     expect(isApiRequest('/kits/api/x')).toBe(false)
+    // The prefix is reserved case-insensitively (9.11b): the reservation is
+    // about which handler answers, and `/API/dir` falling through to the
+    // client's entry document with a 200 is the invisible bug the rule exists
+    // to prevent. The near miss keeps its answer — the case rule widens the
+    // prefix, not the match.
+    expect(isApiRequest('/API/dir')).toBe(true)
+    expect(isApiRequest('/Api')).toBe(true)
+    expect(isApiRequest('/APIary')).toBe(false)
+    // Routed to the API, not to the client: the stub answers with the path it
+    // saw, where the client would have answered the entry document.
+    const upper = await route(new Request('http://models.example/API/gone'), api, serve)
+    expect(await upper.json()).toEqual({ api: '/API/gone' })
 
     const dir = await route(new Request('http://models.example/api/dir?path=/'), api, serve)
     expect(await dir.json()).toEqual({ api: '/api/dir' })

@@ -514,12 +514,36 @@
 - [x] 9.8 (second pass) CLAUDE.md's dev-instance bullet says 3177 serves `client/dist`
       when one is present, so a verification build is a stale app on that port; the
       late-render overlay revert is recorded in design and left alone
-- [ ] 9.9 (third pass, decided 2026-09-08) `/api/file` serves model formats only on the
+- [x] 9.9 (third pass, decided 2026-09-08) `/api/file` serves model formats only on the
       plain-file branch; hidden components refused by `resolve` and never offered by
       completion (`library` spec, *Hidden entries are unreachable*)
-- [ ] 9.10 `POST /api/semantic` bounds `text`; `index.ts` caps request bodies;
+      Done 2026-09-08: `/api/file`'s plain-file branch and `resolveEntryFile` (loose files
+      only, the zip branches untouched) answer a name `modelFormat` does not recognise as
+      `no such file`, byte for byte the answer a name that is not there gets; `resolve`'s
+      marker branch widened to any dot-prefixed component of the filesystem half, and
+      `complete` no longer offers hidden directories to a dot prefix. Cells in
+      api.test.ts (route and launch path, the launch one asserting the launcher was never
+      asked) and library-paths.test.ts (four routes over a hidden directory that really
+      holds a model, a hidden component under a browsable parent, and the completion cell
+      widened from the marker to every hidden entry). Falsified four ways: dropping the
+      route check (`expected 200 to be 404`), the launch check (same), the dot refusal
+      (`expected [ '/api/dir?path=%2F.trash', 200 ] to deeply equal [ …, 400 ]`), and the
+      completion filter (`expected [ '/.trash/' ] to deeply equal []`)
+- [x] 9.10 `POST /api/semantic` bounds `text`; `index.ts` caps request bodies;
       `/api/models` refuses under `maintenance`
-- [ ] 9.11 Nits: public `listen.host` without `origins` is a `ConfigError`; `/api` prefix
+      Done 2026-09-08: `SEARCH_TEXT_MAX = 500` in shared/types.ts beside `MAX_RESULT_COUNT`,
+      doc-commented with the reason (the index 500s past ~600 characters and resets the
+      connection, which `askIndex` reads as absent — so the bound is refuse-before-work);
+      the route answers `400 text is too long` before `probeStatus`. `maxRequestBodySize:
+      1_048_576` on the exported serve object, commented with the largest legitimate body
+      (a base64 256² WebP thumbnail PUT, a `POSES_MAX` poses POST) and that it sits behind
+      Caddy's own cap — Bun-only and not under vitest, so no cell. `/api/models` refuses
+      `maintenance` on its first line. Cells: semantic.test.ts (501 characters → 400 with
+      `fetch` never called, 500 → 200 with it called) and refusals.test.ts's maintenance
+      pairing cell plus the all-on control. Falsified: dropping the bound
+      (`expected 200 to be 400`), dropping the refusal (`expected 200 to be 403`).
+      `askIndex`'s classification untouched — the two mini-classify items are for that repo
+- [x] 9.11 Nits: public `listen.host` without `origins` is a `ConfigError`; `/api` prefix
       case-insensitive; single-range `Range` on `/api/file`; static `send` without the
       copy; `~` expanded in `root`; the two-names guard cell
 - [x] 9.12 Client: the local-framing key carries the library id
@@ -535,4 +559,22 @@
       thumbnailQueue.test.tsx; the existing cells threaded through an id. Two
       falsifications — the id dropped from the key, and an unknown id falling back to the
       bare key — each failing on its own cell
+||||||| parent of 221a35b (Serves models only, and makes a hidden entry unreachable)
+- [ ] 9.12 Client: the local-framing key carries the library id
+      Done 2026-09-08: `validate` refuses a non-loopback `listen.host` with no origins
+      (cells for three public hosts, an empty list, and both controls); `isApiRequest`
+      compares lowercased (`/API/dir` and `/Api` reserved, `/APIary` still not);
+      `parseRange` beside the route gives `/api/file`'s plain-file branch the three single
+      -range spellings as 206, an unsatisfiable range as 416 with `bytes */size`, and
+      multi-range or malformed headers the whole file — every 200 there now carries
+      `accept-ranges`, and the zip branch ignores `Range`; static `send` hands `Response` a
+      view of the buffer it read rather than a copy (no new cell — the existing static
+      cells are the coverage); `loadConfig` expands a leading `~/` in `root` only, never
+      `~user`, a bare `~`, or `MODEL_BROWSER_ROOT`; guard.test.ts gains the applied
+      *A deployment answering two names* cell (either name by `Origin` and by `Host`,
+      cross-pairs admitted, a third refused). Falsified: the loopback rule
+      (`promise resolved "{ listen: { host: '0.0.0.0' } }" instead of rejecting`), the
+      literal prefix compare (`expected false to be true` on `/API/dir`), and range parsing
+      (`expected [ 'bytes=0-9', 200 ] to deeply equal [ 'bytes=0-9', 206 ]`)
+- [ ] 9.12 Client: the local-framing key carries the library id
 

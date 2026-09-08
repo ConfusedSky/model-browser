@@ -169,6 +169,52 @@ describe('a configured origin', () => {
     expect(res.status).toBe(403)
   })
 
+  it('answers two configured names, each by Origin and by Host, and no third', async () => {
+    // The applied scenario *A deployment answering two names* (9.11f): a
+    // deployment reached at an apex and a `www`, or during a rename, is one
+    // server with two origins — `origins` is a list, and the guard's answer
+    // must not depend on which entry is first.
+    const twoNames = createApp(
+      new ThumbCache(cacheDir),
+      undefined,
+      undefined,
+      library,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      ['https://models.masamaeda.com', 'https://www.models.masamaeda.com'],
+    )
+    for (const name of ['models.masamaeda.com', 'www.models.masamaeda.com']) {
+      expect(
+        (await ask(twoNames, { host: name, origin: `https://${name}` })).status,
+        name,
+      ).toBe(200)
+      // Each name answers on its own too: a Host with no Origin at all (a
+      // proxy's health check, a curl) and an Origin whose Host is the *other*
+      // configured name, which is still a request this deployment answers.
+      expect((await ask(twoNames, { host: name })).status, name).toBe(200)
+    }
+    expect(
+      (
+        await ask(twoNames, {
+          host: 'models.masamaeda.com',
+          origin: 'https://www.models.masamaeda.com',
+        })
+      ).status,
+    ).toBe(200)
+    // And a third name is refused by either header, so admitting two is not
+    // admitting any.
+    expect(
+      (await ask(twoNames, { host: 'models.masamaeda.com', origin: 'https://other.example' }))
+        .status,
+    ).toBe(403)
+    expect(
+      (await ask(twoNames, { host: 'other.example', origin: 'https://models.masamaeda.com' }))
+        .status,
+    ).toBe(403)
+  })
+
   it('never emits a CORS header, on any of these answers', async () => {
     for (const headers of [
       LOOPBACK,

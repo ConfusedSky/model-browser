@@ -481,6 +481,17 @@ export interface SemanticTuning {
  */
 export const MAX_RESULT_COUNT = 500
 
+/**
+ * The longest phrase a meaning query may carry, refused at the route before any
+ * index call is made. The index answers 500 to a phrase past roughly 600
+ * characters and resets the connection doing it, which `askIndex` cannot tell
+ * from a service that is not running — so a long phrase does not fail, it makes
+ * the index read as *absent* until the next probe. Bounded here so the work is
+ * refused before it is started, rather than diagnosed after it has broken the
+ * probe's answer for everyone.
+ */
+export const SEARCH_TEXT_MAX = 500
+
 export interface SemanticListing {
   path: string
   entries: DirEntry[]

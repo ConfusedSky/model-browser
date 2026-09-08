@@ -597,13 +597,24 @@ export function createLibrary(
       // would rewrite a cache key that is the string itself.
       const { fsPath, entry } = parseVPath(libPath)
       const normalized = posix.normalize(fsPath)
-      // The marker directory is this app's own corner of the library — its
-      // identity, and the home of every file the app keeps beside the models.
-      // Listings and completions already hide it; refusing it here is what
-      // keeps it unreadable by a request that spells it out. Refused as
-      // "outside", because that is what it is from the browsing side: the
-      // library is the models, and this is the app's own file.
-      if (normalized.split('/')[1] === MARKER_DIR) throw new LibraryError(OUTSIDE, 400)
+      // A hidden component is unreachable, not merely unlisted. Listings and
+      // completions skip dot-prefixed entries, and skipping was never the same
+      // thing: on a deployment that answers strangers, a trash directory a
+      // listing hides is browsable by anyone who spells its name. The marker
+      // directory — this app's own corner of the library, the home of every
+      // file it keeps beside the models — is the case this rule started as, and
+      // is covered by it, `.model-browser` being dot-prefixed like the rest.
+      // Refused as "outside", because that is what it is from the browsing
+      // side: the library is the models, and these are not among them.
+      //
+      // `.` and `..` never reach here as components — `posix.normalize` above
+      // resolved them, and an absolute path drops the leading `..` that would
+      // climb out. Only the filesystem half is tested: the entry half is an
+      // opaque archive name this module does not normalise, and the zip
+      // routes read a named entry rather than a path.
+      if (normalized.split('/').some((part) => part.startsWith('.'))) {
+        throw new LibraryError(OUTSIDE, 400)
+      }
       const candidate = join(realTop, normalized)
 
       // Confinement is decided on the nearest ancestor that exists, so a path

@@ -134,6 +134,61 @@ describe('loadConfig', () => {
     ).resolves.toEqual({ origins: ['https://models.example', 'http://box:8080'] })
   })
 
+  it('refuses a public listen.host with no origins, which would answer nobody', async () => {
+    // 9.11a. The guard admits loopback and the configured origins, so a box
+    // bound past loopback with no origin starts clean and 403s every visitor
+    // for its `Host`, with nothing anywhere saying why. It is a configuration
+    // error, and it is one at start, where the operator is still watching.
+    const tmp = realTempDir('mb-config-listen-')
+    for (const listen of [{ host: '0.0.0.0' }, { host: '::' }, { host: '192.168.1.10', port: 3177 }]) {
+      await expect(loadConfig(at(tmp, JSON.stringify({ listen })))).rejects.toThrow(
+        new RegExp(`listen.host ${listen.host.replace(/\./g, '\\.')} is not loopback`),
+      )
+    }
+    // An empty list is no origins, not "a list was written so it is fine".
+    await expect(
+      loadConfig(at(tmp, JSON.stringify({ listen: { host: '0.0.0.0' }, origins: [] }))),
+    ).rejects.toThrow(/no origins are configured/)
+
+    // The two controls, one on each half of the rule. A public host **with** an
+    // origin is the deployment shape this project runs behind a proxy...
+    await expect(
+      loadConfig(
+        at(tmp, JSON.stringify({ listen: { host: '0.0.0.0' }, origins: ['https://models.example'] })),
+      ),
+    ).resolves.toMatchObject({ listen: { host: '0.0.0.0' } })
+    // ...and loopback with no origins at all is the ordinary local install,
+    // which must not start failing to start.
+    for (const host of ['127.0.0.1', '::1', 'localhost']) {
+      await expect(loadConfig(at(tmp, JSON.stringify({ listen: { host } })))).resolves.toMatchObject({
+        listen: { host },
+      })
+    }
+  })
+
+  it('expands a leading ~/ in root, and only that spelling', async () => {
+    // 9.11b: `root` is written by hand in a file no shell ever expanded.
+    const tmp = realTempDir('mb-config-tilde-')
+    const home = join(tmp, 'home')
+    const env = { ...at(tmp, JSON.stringify({ root: '~/models/kits' })), HOME: home }
+    await expect(loadConfig(env)).resolves.toEqual({ root: join(home, 'models', 'kits') })
+
+    // `~user` needs a passwd lookup this app does not do, and a bare `~` is a
+    // directory whose name is a tilde: both stay exactly as written, so a path
+    // that is not expanded is not silently pointed somewhere else either.
+    for (const root of ['~other/models', '~', '~models', '/srv/~/models']) {
+      await expect(loadConfig({ ...at(tmp, JSON.stringify({ root })), HOME: home })).resolves.toEqual({
+        root,
+      })
+    }
+
+    // And the environment's root is left alone: the shell already expanded it,
+    // and a second pass would rewrite a real path that begins with a tilde.
+    await expect(
+      loadConfig({ ...at(tmp, JSON.stringify({ root: '/from-the-file' })), HOME: home, MODEL_BROWSER_ROOT: '~/literal' }),
+    ).resolves.toEqual({ root: '~/literal' })
+  })
+
   it('lets MODEL_BROWSER_ROOT override the root alone, the rest of the file still taking effect', async () => {
     const tmp = realTempDir('mb-config-envroot-')
     const env = at(

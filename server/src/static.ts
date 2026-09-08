@@ -36,7 +36,13 @@ import { fileURLToPath } from 'node:url'
  * prefix, not a document.
  */
 export function isApiRequest(pathname: string): boolean {
-  return pathname === '/api' || pathname.startsWith('/api/')
+  // Compared lowercased: a URL path is case-sensitive to a file server, but the
+  // reservation is about which *handler* answers, and `/API/dir` reaching the
+  // client's entry document with a 200 is the invisible bug this rule exists to
+  // prevent. A build emits no such name, so nothing is shadowed by the wider
+  // rule.
+  const p = pathname.toLowerCase()
+  return p === '/api' || p.startsWith('/api/')
 }
 
 /**
@@ -126,7 +132,12 @@ export function createStaticHandler(distDir: string): (req: Request) => Promise<
     } catch {
       return null
     }
-    return new Response(new Uint8Array(await readFile(file)), {
+    // A view over the buffer, never a copy of it: `new Uint8Array(buf)` copies
+    // every byte of a bundle this handler has just read, per request, for
+    // nothing — a `Buffer` is already a `Uint8Array`, and what `Response` needs
+    // is a view of those bytes.
+    const bytes = await readFile(file)
+    return new Response(new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength), {
       headers: {
         'content-type': TYPES[extensionOf(file)] ?? 'application/octet-stream',
         'cache-control': cacheControl,

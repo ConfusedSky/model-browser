@@ -149,5 +149,14 @@ export default {
   // that hardware would still outlast it, which is a caching problem, not a
   // timeout one.
   idleTimeout: 255,
+  // A cap on what a request may send, well above anything this app asks for:
+  // the largest legitimate body is a `PUT /api/thumb` carrying a base64 256²
+  // WebP (~10–20 KB with its camera and axis) and a `POST /api/semantic/poses`
+  // of `POSES_MAX` library paths. 1 MiB leaves both an order of magnitude of
+  // room and still refuses a body meant to occupy the process. Defence in
+  // depth: `demo-infrastructure`'s Caddy has its own cap in front of this, and
+  // this is the one that holds when the app is reached directly. Bun-only, so
+  // it lives here with the rest of the runtime's own configuration.
+  maxRequestBodySize: 1_048_576,
   fetch: (req: Request) => route(req, app.fetch, client),
 }

@@ -32,7 +32,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { DeploymentConfig, FeatureReport } from '../../shared/types'
 import { DEFAULT_FEATURES } from './app'
-import { configHome } from './xdg'
+import { configHome, home } from './xdg'
 
 /**
  * A configuration file that was authored and cannot be used. Its message names
@@ -62,6 +62,8 @@ export function configPath(env: NodeJS.ProcessEnv): string {
 const FEATURE_KEYS = Object.keys(DEFAULT_FEATURES) as (keyof FeatureReport)[]
 
 const TOP_LEVEL_KEYS = ['root', 'origins', 'listen', 'features']
+/** The addresses the guard admits whatever is configured (`guard.ts`). */
+const LOOPBACK_HOSTS = ['127.0.0.1', '::1', 'localhost']
 const LISTEN_KEYS = ['host', 'port']
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -159,7 +161,36 @@ function validate(parsed: unknown): DeploymentConfig {
     config.features = features
   }
 
+  // A deployment that binds past loopback and names no origin answers nobody:
+  // the guard admits loopback and the configured origins, so every request
+  // arriving at the public address is refused for its `Host` — a box that
+  // starts clean and 403s every visitor, with nothing anywhere saying why.
+  // Caught here, at start, where the operator is still watching, and by the
+  // same rule that makes a malformed file stop the server.
+  const host = config.listen?.host
+  if (host !== undefined && !LOOPBACK_HOSTS.includes(host) && (config.origins ?? []).length === 0) {
+    throw new ConfigError(
+      `listen.host ${host} is not loopback and no origins are configured: every API request would be refused`,
+    )
+  }
+
   return config
+}
+
+/**
+ * A `root` written with a leading `~/` names the running user's home, which is
+ * how it is written in a config file by hand and what the shell would have done
+ * to it on a command line. Exactly that prefix: `~user/…` is another user's
+ * home, which needs a passwd lookup this app does not do, and a bare `~` is a
+ * directory whose name is a tilde — both are left as written, so a path that is
+ * not expanded is not silently pointed somewhere else either.
+ *
+ * `MODEL_BROWSER_ROOT` is **not** expanded: it comes from an environment, where
+ * the shell already did this, and expanding a second time would rewrite a real
+ * path that happens to begin with a tilde.
+ */
+function expandRoot(root: string, env: NodeJS.ProcessEnv): string {
+  return root.startsWith('~/') ? join(home(env), root.slice(2)) : root
 }
 
 /**
@@ -191,6 +222,7 @@ export async function loadConfig(env: NodeJS.ProcessEnv): Promise<DeploymentConf
   } catch (err) {
     throw new ConfigError(`${file} is not a valid configuration: ${(err as Error).message}`)
   }
+  if (config.root !== undefined) config.root = expandRoot(config.root, env)
   return withRootFromEnv(config, env)
 }
 

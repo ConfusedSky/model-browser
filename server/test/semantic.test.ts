@@ -23,6 +23,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 import { createApp } from '../src/app'
 import { ThumbCache } from '../src/cache'
 import { resetIndexStatus } from '../src/semantic'
+import { SEARCH_TEXT_MAX } from '../../shared/types'
 import { LOOPBACK, libraryFor, realTempDir, stlBytes } from './helpers'
 
 // The library's top *is* the collection root here, so a hit's library path is
@@ -508,6 +509,32 @@ describe('semantic query', () => {
   it('a blank query is not a search', async () => {
     stubIndex(READY, result)
     expect((await post({ text: '   ' })).status).toBe(400)
+  })
+
+  it('refuses a phrase past the bound before the index is asked anything', async () => {
+    // 9.10a. The bound is refuse-*before*-work, not a tidier error: the index
+    // answers 500 to a long phrase and resets the connection doing it, and a
+    // reset is what `askIndex` reads as "the index is not running" — so one
+    // long phrase would make the feature look absent to every other query
+    // until the next probe. Hence the assertion that `fetch` was never called,
+    // which a check made after the query would fail while answering the same
+    // 400.
+    stubIndex(READY, result)
+    const asked = vi.mocked(fetch)
+    asked.mockClear()
+    const res = await post({ text: 'x'.repeat(SEARCH_TEXT_MAX + 1) })
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'text is too long' })
+    expect(asked).not.toHaveBeenCalled()
+  })
+
+  it('lets a phrase at the bound through, so the bound is the length and not the feature', async () => {
+    stubIndex(READY, result)
+    const asked = vi.mocked(fetch)
+    asked.mockClear()
+    const res = await post({ text: 'x'.repeat(SEARCH_TEXT_MAX) })
+    expect(res.status).toBe(200)
+    expect(asked).toHaveBeenCalled()
   })
 })
 

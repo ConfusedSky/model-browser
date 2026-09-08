@@ -206,10 +206,15 @@ describe('a declared-off capability is refused at its route', () => {
     await refusal(await send(app, 'POST', '/api/open-with', { path: '/kit/part.stl' }), 'appLaunch')
   })
 
-  it('maintenance: the report says off and a reload is refused', async () => {
+  it('maintenance: the report says off, and a reload and an enumeration are refused', async () => {
     const app = appWith({ maintenance: false })
     expect((await reported(app)).maintenance).toBe(false)
     await refusal(await send(app, 'POST', '/api/reload', {}), 'maintenance')
+    // `/api/models` beside it (9.10c): a whole-library enumeration whose only
+    // consumer is the bulk jobs' scope read — the work list a job is built
+    // from — so a deployment offering no bulk work does not answer the
+    // question its launcher would ask first either.
+    await refusal(await get(app, '/api/models?path=%2F'), 'maintenance')
   })
 
   it('hostDetails: the report says off and the library state carries no top', async () => {
@@ -242,6 +247,7 @@ describe('a declared-off capability is refused at its route', () => {
     })
     expect(write.status).toBe(200)
     expect((await send(app, 'POST', '/api/reload', {})).status).toBe(200)
+    expect((await get(app, '/api/models?path=%2F')).status).toBe(200)
     // `/api/apps` really did reach the launcher: an empty-by-refusal answer and
     // a machine with nothing installed look alike, so what is asserted is that
     // the report was consulted at all.

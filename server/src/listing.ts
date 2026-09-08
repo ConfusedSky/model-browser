@@ -4,7 +4,7 @@ import { join, posix, sep } from 'node:path'
 import { baseName } from '../../shared/names'
 import type { DirEntry, DirListing } from '../../shared/types'
 import { envPositiveInt } from './env'
-import { MARKER_DIR, type Library } from './library'
+import type { Library } from './library'
 import type { SnapshotEntry, SnapshotStore, TreeSnapshot } from './snapshot'
 import { joinVPath, parseVPath, VPathError } from './vpath'
 import { ZipError, type ZipDirCache, listZipEntries } from './zip'
@@ -1471,11 +1471,14 @@ export async function complete(library: Library, prefix: string): Promise<string
     .filter(
       (d) =>
         d.isDirectory() &&
-        // The marker is invisible everywhere, and a dot-prefix would otherwise
-        // be the one spelling that revealed it.
-        d.name !== MARKER_DIR &&
-        d.name.startsWith(base) &&
-        (base.startsWith('.') || !d.name.startsWith('.')),
+        // Never a hidden entry, whatever was typed. A dot prefix used to be
+        // the one spelling that offered them (the marker excepted); it is not
+        // any more, because `resolve` now refuses a hidden component outright
+        // and a completion that offered one would be offering a path the next
+        // request cannot fetch. The marker is covered by the same rule, being
+        // dot-prefixed itself.
+        !d.name.startsWith('.') &&
+        d.name.startsWith(base),
     )
     .map((d) => `${posix.join(dirLibPath, d.name)}/`)
     .sort()

@@ -23,6 +23,7 @@ import { LOOPBACK, libraryFor, realTempDir, stlBytes } from './helpers'
  *        escapedir  -> outside/secretdir
  *        alias      -> lib/kit          (an alias that stays inside)
  *   kit/ part.stl
+ *   .trash/junk.stl            (hidden: skipped by every listing, and unreachable)
  */
 const base = realTempDir('mb-conf-')
 const outside = join(base, 'outside')
@@ -38,6 +39,8 @@ mkdirSync(join(lib, 'in'), { recursive: true })
 mkdirSync(join(lib, 'kit'))
 writeFileSync(join(lib, 'in', 'real.stl'), stlBytes(4))
 writeFileSync(join(lib, 'kit', 'part.stl'), stlBytes(5))
+mkdirSync(join(lib, '.trash'))
+writeFileSync(join(lib, '.trash', 'junk.stl'), stlBytes(6))
 symlinkSync(join(outside, 'secret.stl'), join(lib, 'in', 'escape.stl'))
 symlinkSync(join(outside, 'secret.zip'), join(lib, 'in', 'escape.zip'))
 symlinkSync(join(outside, 'secretdir'), join(lib, 'in', 'escapedir'))
@@ -125,8 +128,16 @@ describe('completion is a library path in and out', () => {
     expect(await complete('/')).toEqual(['/in/', '/kit/'])
   })
 
-  it('never offers the marker directory, even to a dot prefix', async () => {
+  it('never offers a hidden entry, even to a dot prefix', async () => {
+    // Was "never offers the marker directory": a dot prefix used to be the one
+    // spelling that offered hidden directories, the marker excepted. It offers
+    // none of them now (9.9b), because `resolve` refuses a hidden component and
+    // a completion that offered one would name a path the next request cannot
+    // fetch. `.trash` is really there — the cell above lists `/` and sees only
+    // `/in/` and `/kit/`.
     expect(await complete('/.')).toEqual([])
+    expect(await complete('/.t')).toEqual([])
+    expect(await complete('/.trash/')).toEqual([])
   })
 
   it('offers nothing for a prefix that is not a library path', async () => {
@@ -146,6 +157,48 @@ describe('completion is a library path in and out', () => {
 
   it('offers nothing for a prefix that resolves outside the library', async () => {
     expect(await complete('/in/escapedir/')).toEqual([])
+  })
+})
+
+describe('a hidden entry is unreachable, not merely unlisted', () => {
+  // `library`'s *Hidden entries are unreachable* (9.9b). Skipping dot-prefixed
+  // entries in a walk was never the same thing as making them unreachable: on a
+  // deployment that answers strangers, the difference is a trash directory
+  // browsable by anyone who spells its name.
+  it('refuses a hidden component on every path route, whatever is really there', async () => {
+    // Two spellings on purpose: `.trash` holds a model and is really on disk,
+    // `.hidden` is not there at all — and the answer is the same refusal, so
+    // the routes say nothing about which is which.
+    const paths = ['/.trash', '/.trash/junk.stl', '/.hidden/x.stl', '/kit/../.trash/junk.stl']
+    for (const path of paths) {
+      const p = encodeURIComponent(path)
+      const cases = [
+        `/api/dir?path=${p}`,
+        `/api/file?path=${p}`,
+        `/api/peek?path=${p}`,
+        `/api/thumb?path=${p}&mtime=1`,
+      ]
+      for (const url of cases) {
+        const res = await get(url)
+        expect([url, res.status]).toEqual([url, 400])
+        expect([url, ((await res.json()) as { error: string }).error]).toEqual([
+          url,
+          'path outside the library',
+        ])
+      }
+    }
+  })
+
+  it('refuses a hidden component nested under a directory that is browsable', async () => {
+    // The rule is per component, not a prefix test on the first one: the file
+    // is under `/kit`, which lists.
+    mkdirSync(join(lib, 'kit', '.private'), { recursive: true })
+    writeFileSync(join(lib, 'kit', '.private', 'secret.stl'), stlBytes(7))
+    const res = await get(`/api/file?path=${encodeURIComponent('/kit/.private/secret.stl')}`)
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'path outside the library' })
+    // The control, one component apart: the model beside it is served.
+    expect((await get(`/api/file?path=${encodeURIComponent('/kit/part.stl')}`)).status).toBe(200)
   })
 })
 

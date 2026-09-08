@@ -19,12 +19,12 @@ import type {
   ThumbPutRefused,
   ThumbPutRequest,
 } from '../../shared/types'
-import { THUMB_MIME } from '../../shared/types'
+import { SEARCH_TEXT_MAX, THUMB_MIME } from '../../shared/types'
 import { StaleWriteError, ThumbCache } from './cache'
 import { guard } from './guard'
 import { LaunchError, type Launcher, ZipTempStore, createLauncher } from './launch'
 import { LibraryError, type Library, canonicalLibPath, createLibrary } from './library'
-import { ListingError, PEEK_MAX_FINDS, complete, listDir, peek } from './listing'
+import { ListingError, PEEK_MAX_FINDS, complete, listDir, modelFormat, peek } from './listing'
 import { ListingCache } from './listingCache'
 import {
   type OverrideHolder,
@@ -236,6 +236,47 @@ function indexErrorReply(
 function archiveOf(vpath: string): string {
   const i = vpath.indexOf('!/')
   return i === -1 ? vpath : vpath.slice(0, i)
+}
+
+/**
+ * A `Range` header, as far as this server honours one: a **single** byte range,
+ * in the three spellings RFC 9110 gives it — `bytes=a-b`, `bytes=a-`,
+ * `bytes=-n`.
+ *
+ * Three answers, and the difference between the last two is the point:
+ * `{start,end}` is a slice to send as 206; `'unsatisfiable'` is a range that
+ * names nothing in a file of this size, which owes a 416; and `null` is
+ * *serve the whole file* — what a multi-range or malformed header gets, since
+ * answering the whole representation is always a correct answer to a range
+ * request and refusing one would break a client that asked badly.
+ *
+ * `end` is inclusive, as the header is and as `createReadStream` takes it.
+ */
+function parseRange(
+  header: string | undefined,
+  size: number,
+): { start: number; end: number } | 'unsatisfiable' | null {
+  if (header === undefined) return null
+  const m = /^bytes=(\d*)-(\d*)$/.exec(header.trim())
+  if (m === null) return null
+  const [, from, to] = m
+  if (from === '' && to === '') return null
+  if (from === '') {
+    // A suffix range: the last `n` bytes. `bytes=-0` names nothing.
+    const n = Number(to)
+    if (n === 0) return 'unsatisfiable'
+    // More than the file holds is the whole file, not a failure.
+    return { start: Math.max(0, size - n), end: size - 1 }
+  }
+  const start = Number(from)
+  // Past the end — including every range against an empty file — is the one
+  // shape that owes a 416 rather than bytes.
+  if (start >= size) return 'unsatisfiable'
+  if (to === '') return { start, end: size - 1 }
+  const end = Number(to)
+  // A backwards range is malformed, not unsatisfiable: whole file.
+  if (end < start) return null
+  return { start, end: Math.min(end, size - 1) }
 }
 
 /**
@@ -1120,6 +1161,13 @@ export function createApp(
    * bounded by one `stat` per directory and paid only past the cadence.
    */
   app.get('/api/models', async (c) => {
+    // A maintenance route, refused on the first line like every other (D5).
+    // Its only consumer is the bulk jobs' scope read — the enumeration a job
+    // builds its work list from — so a deployment that does not offer bulk
+    // work does not answer the question the launcher would ask first, and a
+    // whole-library enumeration is not a thing a visitor has standing to ask
+    // for besides.
+    if (!features.maintenance) return refuse(c, 'maintenance')
     const path = c.req.query('path')
     if (path === undefined || path === '') return c.json({ error: 'path is required' }, 400)
     const libPath = canonicalLibPath(path)
@@ -1281,10 +1329,40 @@ export function createApp(
       }
       return c.body(new Uint8Array(bytes), 200, headers)
     }
+    // Model formats only, and anything else answered **exactly** as a file
+    // that is not there. The predicate is the one a listing already decides by
+    // (`modelFormat`), so what a listing hides a URL cannot fetch either — a
+    // deployment's `notes.txt`, its `passwords.kdbx`, the README beside a kit.
+    // A rule at the route rather than an exclusion in whatever copies the
+    // library up: the next rsync forgets a runbook, and this survives it.
+    // Answered as missing rather than refused so a URL cannot confirm that a
+    // non-model exists, which a distinct status would do.
+    if (modelFormat(libPath) === undefined) {
+      return c.json({ error: `no such file: ${libPath}` }, 404)
+    }
     const s = await stat(fsPath).catch(() => null)
     if (s === null || !s.isFile()) return c.json({ error: `no such file: ${libPath}` }, 404)
+    // Byte ranges, on the branch that streams from disk. A viewer that reads a
+    // header before the mesh, and a resumed transfer over a link that dropped,
+    // both ask for one; every 200 here says so. The zip branch below has the
+    // whole entry in memory already and ignores `Range` — permitted, and there
+    // is no partial read to save there.
+    const ranged = { ...headers, 'accept-ranges': 'bytes' }
+    const range = parseRange(c.req.header('range'), s.size)
+    if (range === 'unsatisfiable') {
+      return c.body(null, 416, { ...ranged, 'content-range': `bytes */${s.size}` })
+    }
+    if (range !== null) {
+      const { start, end } = range
+      const part = Readable.toWeb(createReadStream(fsPath, { start, end })) as ReadableStream
+      return c.body(part, 206, {
+        ...ranged,
+        'content-range': `bytes ${start}-${end}/${s.size}`,
+        'content-length': String(end - start + 1),
+      })
+    }
     const stream = Readable.toWeb(createReadStream(fsPath)) as ReadableStream
-    return c.body(stream, 200, { ...headers, 'content-length': String(s.size) })
+    return c.body(stream, 200, { ...ranged, 'content-length': String(s.size) })
   })
 
   /**
@@ -1308,6 +1386,14 @@ export function createApp(
     const { fsPath, entry } = await library.resolve(path)
     if (entry !== undefined && /\.zip$/i.test(entry)) {
       return { ok: false, body: { error: 'nested zips are unsupported' }, status: 400 }
+    }
+    // `/api/file`'s model-format rule, on the other route that turns a library
+    // path into bytes on this machine: launching a non-model is the same
+    // exposure as serving one, and answered the same way — as a file that is
+    // not there. Loose files only, as there: an entry inside an archive is a
+    // name the zip reader looks up, not a path this rule can widen.
+    if (entry === undefined && modelFormat(path) === undefined) {
+      return { ok: false, body: { error: `no such file: ${path}` }, status: 404 }
     }
     const s = await stat(fsPath).catch(() => null)
     if (s === null || !s.isFile()) {
@@ -1613,6 +1699,12 @@ export function createApp(
     if (typeof text !== 'string' || text.trim() === '') {
       return c.json({ error: 'text is required' }, 400)
     }
+    // Refused before the index is asked anything, `SEARCH_TEXT_MAX`'s reason:
+    // a phrase past what the index takes does not come back as an error, it
+    // resets the connection, and a reset reads as "the index is not running"
+    // to the probe every other query then shares. One long phrase would make
+    // the feature look absent to everyone until the next probe.
+    if (text.length > SEARCH_TEXT_MAX) return c.json({ error: 'text is too long' }, 400)
     // Both halves of availability from one probe: the library path the client
     // is told about, and the absolute root the index itself must be asked
     // about (D6). The gate is the *index's* root — a collection the library
