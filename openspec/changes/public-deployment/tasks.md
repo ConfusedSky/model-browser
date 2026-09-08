@@ -440,30 +440,36 @@
       asserted rather than the server's (3.7) — a cell fed no `detail` would pass with the
       client rule deleted. Falsified both ways: never collapsing fails the collapse cell,
       always collapsing fails the *today's sentences* cell
-- [ ] 7.8 Falsify every behavioural cell before trusting it — remove the guard's origin
+- [x] 7.8 Falsify every behavioural cell before trusting it — remove the guard's origin
       check, the refusal in each route, the decorator's install condition, the tab
       fallback — and confirm the corresponding cell fails
-
+      **Done per stage, 2026-09-07** (coordinator's tally from the four worker reports): A1 4 mutations (guard origin check, swallowed parse error, `/api/` fall-through, chatTab default), B1 4 (gate admits null, write forwards, seeding overlay, discard-as-keep), A2 5 (thumb refusal, apps filter-not-short-circuit, `top` omission, one 503's `detail`, reload refusal), B2 7 (runtime fallback to chat, collapse never/always, generate on one field ×2, libraryJobs on thumbWrites, copy chooser, library-tab generate). Every one failed on the expected cell and was restored
 ## 8. Verification
 
-- [ ] 8.1 `bun run test` / `bun run typecheck` clean from the workspace dirs
-- [ ] 8.2 Live, dev instance: the app is byte-identical to today except the absent chat
+- [x] 8.1 `bun run test` / `bun run typecheck` clean from the workspace dirs
+      Run 2026-09-07 on merged main 9d867a5: `bun run typecheck` both workspaces exit 0; server 688/688, client 841/841, from the workspace dirs
+- [x] 8.2 Live, dev instance: the app is byte-identical to today except the absent chat
       tab; `/api/features` reports the defaults; a malformed `config.json` refuses to
       start with a legible message; `MODEL_BROWSER_ROOT` set no longer hides the file
-- [ ] 8.3 Live, a locally-simulated public deployment (the committed configuration, a
+      Live 2026-09-07 on the dev instance (3177, `bun --watch`, picked the merge up itself): `/api/features` reports `{thumbWrites,appLaunch,hostDetails,maintenance: true, chatTab: false}`; headless Chromium sees tabs `search`, `library` — chat gone, nothing else changed (one pre-existing 404 on `/api/peek?path=/lost+found`, unrelated). A config with an unknown key and one with broken JSON both exit 1 naming the file. `MODEL_BROWSER_ROOT` set with a file present: the file's `listen`/`origins`/`features` took effect (the 8.3 instance below is exactly that)
+- [x] 8.3 Live, a locally-simulated public deployment (the committed configuration, a
       non-loopback `Host`/`Origin` via curl): the guard admits the configured origin and
       refuses another; thumbnail writes, launches and the chooser are refused; the built
       client is served and a cold deep link resolves
-- [ ] 8.4 Update `CLAUDE.md`'s `config.json` bullet — the new keys, fail-loud, and
+      Live 2026-09-07 on 127.0.0.1:3199 — `bun server/src/index.ts` under `MODEL_BROWSER_CONFIG` = deploy/demo/config.json with only `listen.port` changed, `MODEL_BROWSER_ROOT` at a one-STL scratch library, a scratch cache: configured Origin+Host 200; another origin / another host 403 `forbidden origin` / `forbidden host`, no `access-control-*` header; PUT thumb, open, open-with, reload 403 `{refused: thumbWrites|appLaunch|maintenance}`; apps `{chooser:false,types:{}}`; `/api/library` without `top`; `/api/semantic/status` without `detail`; `/`, `/kits/deep/link`, `/index.html` 200 HTML `no-cache`; `/assets/<hash>.js` 200 `immutable`; `/api/nope` 404 not HTML; headless Chromium opened `/?path=/Kit` cold and rendered the kit's model with only the `search` tab
+- [x] 8.4 Update `CLAUDE.md`'s `config.json` bullet — the new keys, fail-loud, and
       `MODEL_BROWSER_ROOT` no longer suppressing the file. The read-once half is already
       corrected there (`5dd6096` replaced the false "no route re-reads the file" with what
       the code actually does and a pointer to 1.2a); once 1.2a lands, that passage
       collapses back to the simple claim
-- [ ] 8.5 Update `docs/platform-surface.md`'s user-dirs bullet, which names `config.json`
+      Done 2026-09-07 (d83d40d): the dev bullet describes `DeploymentConfig`, read-once via `loadConfig`, strict parse, fail-loud, `MODEL_BROWSER_ROOT` overriding `root` alone, and names `deploy/demo/config.json`
+- [x] 8.5 Update `docs/platform-surface.md`'s user-dirs bullet, which names `config.json`
       as holding the library root — the house rule is that a change extending a
       `~/.config` file extends that bullet as part of the change
-- [ ] 8.6 Point `docs/web-demo-notes.md` at this change where it supersedes the notes'
+      Done 2026-09-07 (d83d40d): the user-dirs bullet names what the file holds and the four env overrides (`MODEL_BROWSER_CONFIG`, `MODEL_BROWSER_ROOT`, `MODEL_BROWSER_CACHE`, `MODEL_BROWSER_CLIENT`)
+- [x] 8.6 Point `docs/web-demo-notes.md` at this change where it supersedes the notes'
       Defaults section, as that file's own rule requires
+      Already true since drafting (notes item 7, 2026-09-02: "supersede this file's Defaults section and items 3, 8 and 9's demo halves"); the same line now says applied 2026-09-07
 - [ ] 8.7 After archiving, write the `public-deployment` capability's `## Purpose` in
       `openspec/specs/public-deployment/spec.md` — a new capability lands with a `TBD`
       placeholder otherwise (`chat-panel` still carries one)

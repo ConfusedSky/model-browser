@@ -29,7 +29,7 @@
       bake, or the bake produces un-posed tiles corpus-wide (verified in the notes).
       Reconcile with `ao-refreshes-thumbnails` §2b's `poseStale` rule, which it will
       exercise on every model
-- [ ] 1.3 the demo mode — the split itself (notes' "Not drafted" paragraph and Defaults):
+- [x] 1.3 the demo mode — **applied and archived 2026-09-07 as `public-deployment`** (the config file, the configured-origin guard, the five fields with refusal at the routes, the local-framing decorator, the withheld chat tab, the host withholding, the served client; the landing page, context-menu actions, bake and credits stay 1.5–1.8). The split itself (notes' "Not drafted" paragraph and Defaults):
       a separately-configured deployment, public-origin guard replacing the loopback body
       of *API restricted to the app's own origin*, read-only thumbs, launcher off, chat tab
       hidden, static serving, the bake, the credits page. 2.1–2.4 are all decided, and four

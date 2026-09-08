@@ -47,7 +47,7 @@ the demo split itself (confinement is now free; guard, read-only thumbs, launche
 chat tab hidden, static serving, bake, credits page), the decisions in items 3–6, and the
 go-live gates below.
 
-7. `public-deployment` — **drafted 2026-09-02** — the first of the six changes the demo
+7. `public-deployment` — **drafted 2026-09-02, applied 2026-09-07** (four staged workers, two review rounds each; archived the same day) — the first of the six changes the demo
    split became (`web-demo-backlog` 1.3–1.8). **Its proposal, design and specs supersede
    this file's Defaults section and items 3, 8 and 9's demo halves**, per the rule at the
    top of this file: the deployment's configuration, the configured-origin guard, the five
