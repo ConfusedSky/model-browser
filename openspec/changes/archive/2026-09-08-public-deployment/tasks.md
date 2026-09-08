@@ -514,4 +514,13 @@
 - [x] 9.8 (second pass) CLAUDE.md's dev-instance bullet says 3177 serves `client/dist`
       when one is present, so a verification build is a stale app on that port; the
       late-render overlay revert is recorded in design and left alone
+- [ ] 9.9 (third pass, decided 2026-09-08) `/api/file` serves model formats only on the
+      plain-file branch; hidden components refused by `resolve` and never offered by
+      completion (`library` spec, *Hidden entries are unreachable*)
+- [ ] 9.10 `POST /api/semantic` bounds `text`; `index.ts` caps request bodies;
+      `/api/models` refuses under `maintenance`
+- [ ] 9.11 Nits: public `listen.host` without `origins` is a `ConfigError`; `/api` prefix
+      case-insensitive; single-range `Range` on `/api/file`; static `send` without the
+      copy; `~` expanded in `root`; the two-names guard cell
+- [ ] 9.12 Client: the local-framing key carries the library id
 

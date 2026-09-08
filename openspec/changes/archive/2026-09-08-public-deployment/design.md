@@ -570,6 +570,24 @@ is present (CLAUDE.md's dev-instance bullet now says so); and a tile whose re-re
 queued before a late writes-off report reverts its overlaid camera when that render
 lands — storage is untouched, the next visit is right, not worth a latch.
 
+*Third pass (2026-09-08), decided by Masa on the reviewer's four findings, all "fine on
+loopback, not on a public origin":* (1) `/api/file`'s plain-file branch serves model
+formats only — the predicate listings already use — answering a non-model as not found,
+so what a listing hides a URL cannot fetch; a route rule survives the next rsync where a
+runbook exclusion does not. (2) Hidden (dot-prefixed) components are **unreachable**, not
+merely skipped: `resolve` refuses them and completion stops offering them — the `library`
+spec gained the requirement *Hidden entries are unreachable*. (3) Search text is bounded
+at the route and the runtime caps request bodies; the index's 500 on long text, and
+`askIndex` reading the reset connection as "absent", are recorded for `mini-classify`.
+(4) `/api/models` refuses under `maintenance`: its only consumer is the bulk jobs' scope
+read. Nits taken: a public `listen.host` with no `origins` is a configuration error at
+start rather than a silently refused API; the reserved `/api` prefix compares
+case-insensitively; `/api/file` honours a single byte range; the static handler stops
+copying the file it read; `root` expands a leading `~`; the local-framing key carries the
+library's id. Accepted, not fixed: an `unmarked` library's id is a digest of its top and is
+still sent — a digest of an unknown path has no preimage. The unpinned scenario *A
+deployment answering two names* gains a cell.
+
 Left as recorded, not fixed: the report/refusal pairing, the three `resolveTab` sites and
 the two generate gates are each aligned by a test rather than by structure; a fourth site
 or a sixth field must remember. The reviewer's list of what it checked and found clean is

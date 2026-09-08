@@ -120,3 +120,19 @@ The root SHALL be read from the `MODEL_BROWSER_ROOT` environment variable, else 
 - **WHEN** the configuration file exists and cannot be parsed
 - **THEN** the server reports the failure naming that file rather than starting as though no root were configured
 
+### Requirement: Hidden entries are unreachable
+A path naming a dot-prefixed component SHALL be refused by the library as if it did not
+exist, and path completion SHALL NOT offer one, so that what a listing hides is also what a
+request cannot reach. Skipping hidden directories in a walk was never the same thing as
+making them unreachable, and on a deployment that answers strangers the difference is a
+trash directory browsable by spelling its name. The library's own marker directory was
+already refused; this widens that rule to every hidden component.
+
+#### Scenario: A hidden directory cannot be browsed by name
+- **WHEN** a request names a path with a dot-prefixed component
+- **THEN** it is answered as a path that does not exist, whatever the filesystem holds there
+
+#### Scenario: Completion does not reveal one
+- **WHEN** completion is asked for a prefix beginning with a dot
+- **THEN** no hidden entry is offered
+
