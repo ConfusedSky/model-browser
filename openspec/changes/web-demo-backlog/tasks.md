@@ -43,8 +43,9 @@
       the bake shape, and `models.masamaeda.com`.
       **Drafted 2026-09-02 as `public-deployment`** (commits `abe4fc3`, `5dd6096`,
       `bd6b982`: two review rounds applied), which is the first of what is now six changes
-      — the others are 1.4–1.8 below. Still open and carried as design questions, not
-      blockers: the origin/CDN and host choices that gate 3.3. The landing page's
+      — the others are 1.4–1.8 below. The host was decided 2026-09-07 (Masa: the CX23
+      gate 3.3 ran on, as it is; upgrade later if visitors feel it — notes, Decided
+      table); the origin/CDN choice stays open as a design question, not a blocker. The landing page's
       contents, open here at drafting, were decided 2026-09-03 (notes item 4, line 1.5)
 
 - [ ] 1.4 the deployment's own infrastructure — reverse proxy, TLS, the container
@@ -123,5 +124,7 @@
 - [ ] 3.2 Credits page generated from `metadata/miniatures.json` (CC-BY requires displayed
       attribution) — the generator is 1.1's; the gate is the page existing for the
       shipped corpus
-- [ ] 3.3 One paid hour on the actual instance for the query-latency number (the CPU fp32
-      figure is from this machine; the notes' Measurements say where to re-run it)
+- [x] 3.3 One paid hour on the actual instance for the query-latency number — **run
+      2026-09-04 on a Hetzner CX23** (notes, Measurements: 1.23 s median, over the 1 s bar
+      by ~23%; `docs/hetzner-probe-runbook.md`, `scripts/query-probe.py`) and **the host
+      decided on it 2026-09-07** (Masa: launch as it is, upgrade if needed)
