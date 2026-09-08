@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { MAX_RESULT_COUNT, type IndexAvailability, type SemanticScope } from '../../../shared/types'
+import {
+  MAX_RESULT_COUNT,
+  type FeatureReport,
+  type IndexAvailability,
+  type SemanticScope,
+} from '../../../shared/types'
 import type { JobOperation } from '../jobs/bulkJobs'
 import type { SearchKinds, SearchMode, Tuning } from '../lib/searchOptions'
 import { clampCount, POOLS, TUNING_DEFAULTS } from '../lib/searchOptions'
@@ -54,6 +59,51 @@ function indexStateSentence(index: IndexAvailability, path: string): string {
 }
 
 /**
+ * The one thing a viewer who cannot reach the machine is told about the three
+ * conditions above whose only difference is which repair they name — start the
+ * service, mount the volume, restart the wedged process (`public-deployment`
+ * D9, `semantic-search`'s *A viewer is not sent to fix a machine they cannot
+ * reach*).
+ *
+ * It says the outcome and no more. Naming which of the three it is would both
+ * offer a remedy that is not the viewer's and describe the operator's machine
+ * to a stranger, and those are one leak, not two.
+ */
+export const INDEX_UNAVAILABLE = 'The index is not available.'
+
+/** The three states whose difference is only which operator repairs them. */
+function operatorRepairable(state: IndexAvailability['state']): boolean {
+  return state === 'absent' || state === 'volume-gone' || state === 'wedged'
+}
+
+/**
+ * The whole paragraph the panel prints about the index — the sentence and the
+ * index's own words after it, together, because under a collapse they are one
+ * decision and not two.
+ *
+ * `hostDetails` is the deployment's answer to *is the machine this server runs
+ * on the viewer's concern*; `true` where the report is unknown or says yes, so
+ * an in-flight report reads exactly as this panel always has (a behaviour with
+ * an existing default keeps it until a known report says otherwise).
+ *
+ * `warming` does not collapse: a deployment's own start is a real wait and
+ * "come back in a moment" is honest. Nor does a `ready` index out of range:
+ * that is a fact about where the viewer is browsing, which they can act on by
+ * browsing elsewhere.
+ *
+ * `detail` goes with the collapsed sentence rather than surviving it. It is
+ * mini-classify's free text, able to name its cache directory, and printing it
+ * beside a collapsed sentence would restore in a detail line exactly what the
+ * collapse removed. The server withholds it under this same field, so this is
+ * the second of two locks and not the only one — a client-side collapse alone
+ * leaves `curl` returning what the sentence was rewritten to hide (D9).
+ */
+function indexAccount(index: IndexAvailability, path: string, hostDetails: boolean): string {
+  if (!hostDetails && operatorRepairable(index.state)) return INDEX_UNAVAILABLE
+  return `${indexStateSentence(index, path)}${index.detail === undefined ? '' : ` ${index.detail}`}`
+}
+
+/**
  * The tabs that may be *recorded*. Similar is not one of them: it exists only
  * while a similarity view does, so a profile restored onto it with no such view
  * would open on a tab that is not there. Excluding it from the store's type is
@@ -64,11 +114,16 @@ function indexStateSentence(index: IndexAvailability, path: string): string {
  * direction** (`bulk-thumbnail-jobs` review M8, which overturned this tab's
  * first design): a tab the feature report can empty is a tab that can be
  * absent, and *can be absent* is the whole condition this type exists to
- * exclude. Its every occupant is a write affordance, so a deployment that
- * refuses thumbnail writes has no library tab at all — and a profile restored
- * onto a recorded `library` would open on nothing. The `tabStore` parser below
- * must therefore never learn the value either: a type that forbids writing it
- * is not a guarantee about what a *read* can produce.
+ * exclude. Its every occupant acts on the server's own derived state, so a
+ * deployment that does not offer maintenance has no library tab at all — and a
+ * profile restored onto a recorded `library` would open on nothing. The
+ * `tabStore` parser below must therefore never learn the value either: a type
+ * that forbids writing it is not a guarantee about what a *read* can produce.
+ *
+ * (The field was `thumbWrites` until `public-deployment` 3.8a moved these
+ * surfaces onto `maintenance`, closing the interim `bulk-thumbnail-jobs`
+ * declared in its own task 5.1. The reasoning above is unchanged by it: what
+ * matters here is that a report *can* empty the tab, not which field does.)
  */
 type StoredTab = Exclude<Tab, 'similar' | 'library'>
 
@@ -92,13 +147,47 @@ const collapseStore = stored(
 )
 /** Anything that is not `search` reads as `chat` — which is already how a
  *  profile that somehow holds `similar` or `library` degrades, so old profiles
- *  need nothing, and a hand-edited one naming a tab that may not exist opens on
- *  one that always does. */
+ *  need nothing.
+ *
+ *  `chat` is no longer a tab that always exists, and this parse is deliberately
+ *  **not** the place that learns so: what it reads back is the profile's
+ *  preference, and `resolveTab` is what turns a preference into a tab this
+ *  deployment has (`public-deployment` D7). Teaching the parse instead would
+ *  rewrite the recorded value on read, which is the one thing D7 forbids. */
 const tabStore = stored<StoredTab>(
   TAB_KEY,
   (raw) => (raw === 'search' ? 'search' : 'chat'),
   (v) => v,
 )
+
+/**
+ * The one fallback rule, for both of the places this panel falls back
+ * (`public-deployment` D7): the tab that was wanted if this deployment has it,
+ * and otherwise the first tab it does have.
+ *
+ * **The parse above is deliberately not rewritten to do this.** A recorded
+ * value is a profile's preference, not a description of the deployment it is
+ * being read on, and a profile carried between deployments must not come home
+ * edited by having visited one — so a profile recording `chat` that meets a
+ * deployment withholding the tab keeps `chat` recorded and simply opens on
+ * search. Nothing here writes the store, and the resolved answer is never
+ * written back.
+ *
+ * Both places needed it, which is why it is a function rather than two
+ * expressions. The store's parse strands a profile on a tab the deployment
+ * does not offer; the runtime move off a `library` tab that has gone away
+ * landed on `'chat'`, which is the very tab a deployment may withhold. The
+ * second was found only by reading this file against the tree — it arrived
+ * with `bulk-thumbnail-jobs`, after this decision was first written.
+ *
+ * `available` is the panel's own tab order, so a fallback lands on the
+ * leftmost tab there is; `search` is never withheld, so it is the leftmost
+ * wherever `chat` is absent and the `?? 'search'` below is the type system's
+ * indexing rule rather than a case that happens.
+ */
+export function resolveTab(preferred: Tab, available: readonly Tab[]): Tab {
+  return available.includes(preferred) ? preferred : (available[0] ?? 'search')
+}
 
 /**
  * The right-edge panel: a tab host for the placeholder chat, the search tab,
@@ -127,6 +216,7 @@ export default function SidePanel({
   tuning,
   index,
   scope,
+  features,
   onFolderMatching,
   onKinds,
   onMode,
@@ -144,8 +234,9 @@ export default function SidePanel({
   similar: { model: string; k: number; pool?: Tuning['pool'] } | null
   /**
    * The whole-library bulk-job launcher, or `null` when there is none to offer
-   * — the server does not accept thumbnail writes, the report has not landed,
-   * or the library is not ready (`bulk-thumbnail-jobs` D6). The tab is absent
+   * — the deployment does not offer maintenance operations, the report has not
+   * landed, or the library is not ready (`bulk-thumbnail-jobs` D6, moved onto
+   * that field by `public-deployment` 3.8a). The tab is absent
    * for a null, by the same absent-rather-than-inert rule the Similar tab and
    * the options inside these tabs follow.
    *
@@ -182,6 +273,19 @@ export default function SidePanel({
   index: IndexAvailability
   /** The index's own account of what it holds here — null outside a meaning search. */
   scope: SemanticScope | null
+  /**
+   * What this deployment offers, as App holds it — `null` while the read is in
+   * flight or after it failed, and the two are not told apart here.
+   *
+   * Two things in this panel read it, and they read it by the two halves of
+   * feature-report's unknown-report rule. The **chat tab is an offer**, so it
+   * is withheld unless a known report declares it on: withheld while unknown,
+   * so no tab renders and then vanishes a round trip later. The index-state
+   * sentence is a **behaviour with an existing default**, so it keeps saying
+   * what it has always said until a known report says the host is not the
+   * viewer's concern (`public-deployment` D7, D9).
+   */
+  features: FeatureReport | null
   onFolderMatching: (on: boolean) => void
   onKinds: (kinds: SearchKinds) => void
   onMode: (mode: SearchMode) => void
@@ -195,8 +299,37 @@ export default function SidePanel({
    */
   onSimilarTuning: (k: number, pool?: Tuning['pool']) => void
 }) {
+  // A tab with nothing to be about is absent, not greyed — the same rule the
+  // options inside these tabs follow, and the same rule a withheld capability
+  // follows, which is why the chat tab joins the list here rather than being
+  // rendered disabled. Library goes last: it is the app's maintenance surface
+  // (`bulk-thumbnail-jobs` D6), not one of the three tabs that describe the
+  // view on screen.
+  //
+  // Derived before the state below rather than beside the markup, because the
+  // opening tab is resolved against this list on the very first render.
+  const hasChat = features?.chatTab === true
+  const hasSimilar = similar !== null
+  const hasLibrary = library !== null
+  const tabs: Tab[] = [
+    ...(hasChat ? (['chat'] as const) : []),
+    'search',
+    ...(hasSimilar ? (['similar'] as const) : []),
+    ...(hasLibrary ? (['library'] as const) : []),
+  ]
   const [collapsed, setCollapsed] = useState(() => collapseStore.read())
-  const [tab, setTab] = useState<Tab>(() => tabStore.read())
+  /**
+   * The tab on screen. Seeded from the recorded one, resolved against the tabs
+   * this deployment actually has (`resolveTab`) — so a profile that recorded
+   * `chat` opens on search where the tab is withheld, and its recorded value is
+   * left alone.
+   *
+   * The report is not known on the first render, so a profile recording `chat`
+   * always opens on search and moves to chat when the report says the tab is
+   * offered — which is the effect below, and which the chat-panel capability
+   * asks for in as many words ("until the report says the tab is offered").
+   */
+  const [tab, setTab] = useState<Tab>(() => resolveTab(tabStore.read(), tabs))
   const [messages, setMessages] = useState<string[]>([])
   const [draft, setDraft] = useState('')
   /**
@@ -270,10 +403,12 @@ export default function SidePanel({
    * Neither writes the store: a tab the app selected is not a tab the user
    * chose, and the one being selected here is the one that is never recorded.
    */
-  const hasSimilar = similar !== null
   useEffect(() => {
     if (hasSimilar) setTab((t) => (t === 'search' ? 'similar' : t))
-    else setTab((t) => (t === 'similar' ? 'search' : t))
+    else setTab((t) => (t === 'similar' ? resolveTab('search', tabs) : t))
+    // `tabs` is read but not depended on: this runs when the Similar tab
+    // arrives or leaves, and the list it reads is the one this render built.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasSimilar])
 
   /**
@@ -281,10 +416,17 @@ export default function SidePanel({
    *
    * Leaving: the tab can stop existing under the user (a feature report that
    * lands late and says no, a library that stops being ready), and a tab that
-   * is gone cannot stay selected. It falls back to `chat`, the one tab that is
-   * always there — `search` is too, but this tab is nobody's search: the user
-   * was doing maintenance, and dropping them into the options for a search they
-   * never asked about would be the panel taking a decision it was not offered.
+   * is gone cannot stay selected. It prefers `chat` — `search` is there too,
+   * but this tab is nobody's search: the user was doing maintenance, and
+   * dropping them into the options for a search they never asked about would be
+   * the panel taking a decision it was not offered.
+   *
+   * **Prefers, since `public-deployment` D7 — it used to simply land there**,
+   * on the reasoning that chat is "the one tab that is always there". A
+   * deployment may withhold the chat tab, so that was a fallback onto a tab
+   * that need not exist, and this is the second of the two places `resolveTab`
+   * exists for. Where chat is withheld this lands on search after all — the
+   * lesser of the two, and the only one left.
    *
    * There is deliberately **no arriving half**. Similar arrives because a
    * find-similar reshapes the very view the panel is describing; a feature
@@ -294,10 +436,34 @@ export default function SidePanel({
    * Writes no store, like the Similar rule: a tab the app selected is not a tab
    * the user chose, and neither of these two is ever recorded anyway.
    */
-  const hasLibrary = library !== null
   useEffect(() => {
-    if (!hasLibrary) setTab((t) => (t === 'library' ? 'chat' : t))
+    if (!hasLibrary) setTab((t) => (t === 'library' ? resolveTab('chat', tabs) : t))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasLibrary])
+
+  /**
+   * And the third place a tab can stop existing: the report landing.
+   *
+   * Keyed on the report's answer alone, not on the tab list, because this is
+   * the one change that re-asks what the *profile* wanted rather than moving
+   * the tab in hand. A deployment offering chat is one where a profile that
+   * recorded it opens on it, and the first render cannot know that yet — the
+   * report is in flight, the tab is withheld like any unknown offer, and search
+   * is where the panel starts. When the answer arrives the recorded preference
+   * is resolved again against the list it now has.
+   *
+   * `similar` and `library` are exempt: neither is ever recorded, both are
+   * about the view on screen rather than about this profile, and a report
+   * resolving is not a thing the user did — taking a viewer off a similarity
+   * view they raised would be the panel deciding something nobody asked it.
+   *
+   * Writes no store: this reads the recorded value and never replaces it, which
+   * is what keeps a profile from being edited by the deployment it visited.
+   */
+  useEffect(() => {
+    setTab((t) => (t === 'similar' || t === 'library' ? t : resolveTab(tabStore.read(), tabs)))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasChat])
 
   /**
    * The two counts, derived when the tab is open and again whenever the
@@ -372,16 +538,6 @@ export default function SidePanel({
   // machines will never run it. It is worth reporting to someone whose mode
   // says meaning, who is otherwise looking at a panel that explains nothing.
   const showIndexState = !meaningRunnable && (mode === 'meaning' || index.state !== 'absent')
-  // A tab with nothing to be about is absent, not greyed — the same rule the
-  // options inside these tabs follow.
-  // Library goes last: it is the app's maintenance surface (D6), not one of the
-  // three tabs that describe the view on screen.
-  const tabs: Tab[] = [
-    'chat',
-    'search',
-    ...(hasSimilar ? (['similar'] as const) : []),
-    ...(hasLibrary ? (['library'] as const) : []),
-  ]
 
   return (
     <aside
@@ -441,11 +597,13 @@ export default function SidePanel({
               )}
               {/* The index's own words about itself: which of its states it is
                   in, and what it can hold at all. Absent is not an error to
-                  report — most machines will never run it (D4). */}
+                  report — most machines will never run it (D4). The sentence
+                  and the index's own words come from one call, because a
+                  deployment that collapses the states withholds both together
+                  (`indexAccount`). */}
               {showIndexState && (
                 <p className="text-zinc-500">
-                  {indexStateSentence(index, path)}
-                  {index.detail !== undefined && ` ${index.detail}`}
+                  {indexAccount(index, path, features?.hostDetails !== false)}
                 </p>
               )}
               {scope !== null && (

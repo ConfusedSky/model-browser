@@ -1164,9 +1164,18 @@ export interface EntryCommand {
  * chooser configured (L4), which is every machine until someone configures one:
  * the pill row still covers the associated applications, and an item that
  * cannot hand off to anything is not offered inert. The two *beneath* rows are
- * absent unless the **feature report is known and says thumbnail writes are
- * accepted** — both are write affordances, and a deployment that refuses the
- * write must not offer a button for it (`AvailabilityContext.features`).
+ * absent unless the **feature report is known and says maintenance operations
+ * are offered** — both act on the server's derived state for every viewer at
+ * once, which is the question `maintenance` asks (`AvailabilityContext.features`).
+ * They gated on `thumbWrites` until `public-deployment` landed the field, which
+ * `bulk-thumbnail-jobs` had declared an interim in its own task 5.1.
+ *
+ * *Generate beneath* carries a second condition on top: it needs `thumbWrites`
+ * as well, because with the write refused at the route it would be a loop that
+ * renders and discards (`public-deployment` D4). *Reset beneath* does not — it
+ * is a client loop over the same `PUT /api/thumb` a single model's reset makes,
+ * so it is withheld at this launcher while the writes it would make stay
+ * governed by `thumbWrites` at the route.
  */
 export const ENTRY_COMMANDS: readonly EntryCommand[] = [
   {
@@ -1223,7 +1232,12 @@ export const ENTRY_COMMANDS: readonly EntryCommand[] = [
   {
     id: 'generateBeneath',
     label: 'Generate thumbnails beneath',
-    applies: (entry, ctx) => entry.kind !== 'model' && ctx.features?.thumbWrites === true,
+    // **Both** fields, and that is the mixed configuration this row exists to
+    // get right: under `maintenance: true, thumbWrites: false` every write this
+    // job made would be refused at the route, so the job is a loop that renders
+    // and discards and the launcher is absent rather than inert (D4).
+    applies: (entry, ctx) =>
+      entry.kind !== 'model' && ctx.features?.maintenance === true && ctx.features.thumbWrites === true,
     // `displayName` first: the chip names the scope the way the tile the user
     // pressed named it (library-overrides D7), falling back to the real name.
     run: (entry, host) =>
@@ -1232,7 +1246,10 @@ export const ENTRY_COMMANDS: readonly EntryCommand[] = [
   {
     id: 'resetBeneath',
     label: 'Reset framings beneath',
-    applies: (entry, ctx) => entry.kind !== 'model' && ctx.features?.thumbWrites === true,
+    // `maintenance` alone: the writes are `png: null, camera: null`, which a
+    // write-refusing deployment refuses at the route without this launcher
+    // needing to ask (D4).
+    applies: (entry, ctx) => entry.kind !== 'model' && ctx.features?.maintenance === true,
     // No confirmation here: the runner derives first and parks in `confirming`
     // with the count, which is the chip's to state (D5). A dialog raised by the
     // command would have to state a number nobody has counted yet.

@@ -39,10 +39,12 @@ const READY: IndexAvailability = { state: 'ready', collectionRoot: '/m' }
 // `apps: null` is a machine whose registry has not answered — no chooser, so no
 // *Open with…*, which is what every case in this file is about. The launch
 // actions' own cases are in openInApps.test.tsx, where a report exists.
-// A **known** report saying this server takes thumbnail writes — what today's
-// server answers, and the only shape under which the two container *beneath*
-// rows are offered at all.
-const WRITES: FeatureReport = {
+// A **known** report carrying the server's own defaults — what today's server
+// answers with no configuration, and the shape under which both container
+// *beneath* rows are offered. Named for what it is rather than for one field:
+// the rows moved from `thumbWrites` to `maintenance` with `public-deployment`
+// 3.8a, and generate reads both, so no single field names this report.
+const OFFERED: FeatureReport = {
   thumbWrites: true,
   appLaunch: true,
   chatTab: false,
@@ -142,13 +144,13 @@ describe("D6's per-kind table", () => {
     // of their rule: a subtree is what a container has instead of a thumbnail,
     // and a model's own per-model actions already cover it.
     for (const id of ['generateBeneath', 'resetBeneath']) {
-      expect(ids(dir('/m/d'), READY, WRITES)).toContain(id)
-      expect(ids(zip('/m/z.zip'), READY, WRITES)).toContain(id)
-      expect(ids(model('/m/a.stl'), READY, WRITES)).not.toContain(id)
+      expect(ids(dir('/m/d'), READY, OFFERED)).toContain(id)
+      expect(ids(zip('/m/z.zip'), READY, OFFERED)).toContain(id)
+      expect(ids(model('/m/a.stl'), READY, OFFERED)).not.toContain(id)
     }
     // Not the index's actions either: a container's bulk work has nothing to do
     // with whether meaning search is answering.
-    expect(ids(dir('/m/d'), null, WRITES)).toEqual([
+    expect(ids(dir('/m/d'), null, OFFERED)).toEqual([
       'open',
       'reveal',
       'copyPath',
@@ -157,15 +159,45 @@ describe("D6's per-kind table", () => {
     ])
   })
 
-  it('withholds both unless a KNOWN report says thumbnail writes are accepted', () => {
+  it('withholds both unless a KNOWN report offers maintenance', () => {
     // The offer half of feature-report D3. `null` is *not known* — in flight,
     // or the read failed — and both read the same here, so nothing renders and
     // then vanishes a round trip later, and nothing opens on error.
+    //
+    // `maintenance` is the field, not `thumbWrites`: both rows act on the
+    // server's own derived state for every viewer at once (`public-deployment`
+    // 3.8a, closing the interim `bulk-thumbnail-jobs` 5.1 declared).
     for (const entry of [dir('/m/d'), zip('/m/z.zip')]) {
-      for (const report of [null, { ...WRITES, thumbWrites: false }] as (FeatureReport | null)[]) {
+      for (const report of [null, { ...OFFERED, maintenance: false }] as (FeatureReport | null)[]) {
         expect(ids(entry, READY, report)).not.toContain('generateBeneath')
         expect(ids(entry, READY, report)).not.toContain('resetBeneath')
       }
+    }
+  })
+
+  it('splits the two when maintenance and thumbnail writes disagree', () => {
+    // The spec's *Bulk work is gated by what it does*, and the one
+    // configuration a single field gets wrong.
+    //
+    // Maintenance offered, writes refused: generate would render every model
+    // beneath the scope and have each write refused at the route, so the
+    // launcher is absent rather than present and inert. Reset survives — it is
+    // a loop over the same `PUT /api/thumb` a single model's reset makes, so
+    // refusing it as maintenance would refuse that single reset too, and what
+    // it writes stays governed by `thumbWrites` at the route (D4).
+    const noWrites = { ...OFFERED, thumbWrites: false }
+    for (const entry of [dir('/m/d'), zip('/m/z.zip')]) {
+      expect(ids(entry, READY, noWrites)).not.toContain('generateBeneath')
+      expect(ids(entry, READY, noWrites)).toContain('resetBeneath')
+    }
+
+    // And the reverse configuration reverses them: writes accepted but no
+    // maintenance withholds both, because neither is a question about the
+    // library — generate's second condition never comes up.
+    const noMaintenance = { ...OFFERED, maintenance: false }
+    for (const entry of [dir('/m/d'), zip('/m/z.zip')]) {
+      expect(ids(entry, READY, noMaintenance)).not.toContain('generateBeneath')
+      expect(ids(entry, READY, noMaintenance)).not.toContain('resetBeneath')
     }
   })
 
@@ -175,7 +207,7 @@ describe("D6's per-kind table", () => {
     // from under the pointer. The cost is stated at the next step — the chip's
     // confirmation for reset, the chip itself for generate.
     const label = (id: string): string =>
-      commandsFor(dir('/m/d'), { index: READY, apps: null, features: WRITES }).find(
+      commandsFor(dir('/m/d'), { index: READY, apps: null, features: OFFERED }).find(
         (c) => c.id === id,
       )!.label
     expect(label('generateBeneath')).toBe('Generate thumbnails beneath')

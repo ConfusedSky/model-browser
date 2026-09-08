@@ -10,7 +10,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { vi } from 'vitest'
-import type { DirEntry, DirListing } from '../../shared/types'
+import type { DirEntry, DirListing, FeatureReport } from '../../shared/types'
 import { thumbImageUrl } from '../src/api/thumbUrl'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -66,12 +66,26 @@ export const semanticSearch = vi.fn()
 // this feature sees the menu it was written against.
 export const apps = vi.fn().mockResolvedValue({ chooser: false, types: {} })
 // What this server accepts and offers (feature-report). The default is a
-// **known** report with every capability on — what today's server answers — and
-// that is what makes every test written before the report existed still assert
-// the app it was written against: surfaces gate on a known report, so an all-on
-// one changes nothing. A test that wants a withheld surface opts into a report
-// that says so, or into one that never resolves.
-export const features = vi.fn().mockResolvedValue({ thumbWrites: true })
+// **known** report carrying the server's own defaults — what today's server
+// answers with no configuration — so every test asserts the app a person
+// running this project actually gets. A test that wants a withheld surface
+// opts into a report that says so, or into one that never resolves.
+//
+// Not "every capability on", which is what this said until `public-deployment`
+// D4 gave each field its own default: `chatTab` is **off**, because the tab is
+// a placeholder with no backend, so all-on is a configuration nobody runs and a
+// harness answering it would assert an app nobody meets. Spelt out rather than
+// imported from `server/src/app`'s `DEFAULT_FEATURES` — a client suite that
+// reached into the server would pass while the two drifted, and this literal
+// fails loudly instead.
+export const DEFAULT_REPORT: FeatureReport = {
+  thumbWrites: true,
+  appLaunch: true,
+  chatTab: false,
+  hostDetails: true,
+  maintenance: true,
+}
+export const features = vi.fn().mockResolvedValue(DEFAULT_REPORT)
 // Named `openApp` rather than `open`: `open` is a global in a DOM environment,
 // and the shadowing reads as a mistake at every call site.
 export const openApp = vi.fn().mockResolvedValue(undefined)
@@ -362,11 +376,11 @@ export async function unmountApp(): Promise<void> {
   // restored on the way out.
   apps.mockResolvedValue({ chooser: false, types: {} })
   // Same rule as `apps`': the report is read during mount, so a test configures
-  // it before mounting and the all-on default is restored on the way out —
-  // including after a test made the read fail or hang, which `mockReset` is
-  // what clears.
+  // it before mounting and the server's own defaults are restored on the way
+  // out — including after a test made the read fail or hang, which `mockReset`
+  // is what clears.
   features.mockReset()
-  features.mockResolvedValue({ thumbWrites: true })
+  features.mockResolvedValue(DEFAULT_REPORT)
   openApp.mockResolvedValue(undefined)
   openWith.mockResolvedValue(undefined)
   semanticSearch.mockReset()

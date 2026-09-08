@@ -15,6 +15,7 @@ import type { DirEntry, DirListing, ThumbInfo, ThumbRenderInfo } from '../../sha
 import {
   click,
   container,
+  DEFAULT_REPORT,
   dir,
   features,
   getThumb,
@@ -327,19 +328,31 @@ describe('the library tab', () => {
   it('is absent while the report is unknown, and absent when it says no', async () => {
     // Unknown: still in flight. An offer is withheld until a KNOWN report
     // declares the capability on, so nothing renders and then vanishes a round
-    // trip later (feature-report D3).
+    // trip later (feature-report D3). `chat` is absent for the same reason at
+    // this moment, and stays absent once the report lands saying off (D4).
     features.mockImplementation(() => new Promise(() => {}))
     await mountApp('/models', NESTED)
     await expandPanel()
-    expect(tabNames()).toEqual(['chat', 'search'])
+    expect(tabNames()).toEqual(['search'])
     await unmountApp()
 
-    // Known and off: every occupant of this tab is a write affordance, and an
-    // empty tab is not shown (D6).
-    features.mockResolvedValue({ thumbWrites: false })
+    // Known and off: every occupant of this tab acts on the server's own
+    // derived state for every viewer at once, which is what `maintenance`
+    // asks about (`public-deployment` D4 / 3.8a — it was `thumbWrites` while
+    // `bulk-thumbnail-jobs` waited for this field). An empty tab is not shown.
+    features.mockResolvedValue({ ...DEFAULT_REPORT, maintenance: false })
     await mountApp('/models', NESTED)
     await expandPanel()
-    expect(tabNames()).toEqual(['chat', 'search'])
+    expect(tabNames()).toEqual(['search'])
+    await unmountApp()
+
+    // And a write-refusing deployment that still offers maintenance KEEPS the
+    // tab: reset is a maintenance operation whatever it does with writes. The
+    // generate half is `entryActions`' to withhold, not this tab's.
+    features.mockResolvedValue({ ...DEFAULT_REPORT, thumbWrites: false })
+    await mountApp('/models', NESTED)
+    await expandPanel()
+    expect(tabNames()).toEqual(['search', 'library'])
   })
 
   it('states each button’s count, and says it is counting until it can', async () => {
@@ -574,7 +587,7 @@ describe('the library tab', () => {
     expect(libraryButtons().every((b) => b.disabled)).toBe(true)
   })
 
-  it('is never what the profile records, and a stored one opens on chat', async () => {
+  it('is never what the profile records, and a stored one opens on a tab there is', async () => {
     await mountApp('/models', NESTED)
     await expandPanel()
     await click(tabButton('library')!)
@@ -586,10 +599,13 @@ describe('the library tab', () => {
 
     // …and the parser will not read one back either, however it got there: a
     // hand-edited profile naming a tab that may not exist opens on one that
-    // always does.
+    // does. The parse degrades an unknown value to `chat`, and `resolveTab`
+    // then answers `search` here because this deployment has no chat tab —
+    // which is the whole of `public-deployment` D7 in one line, and used to be
+    // a landing on `chat` that the maintained configuration does not offer.
     localStorage.setItem(TAB_KEY, 'library')
     await mountApp('/models', NESTED)
     await expandPanel()
-    expect(selectedTab()).toBe('chat')
+    expect(selectedTab()).toBe('search')
   })
 })

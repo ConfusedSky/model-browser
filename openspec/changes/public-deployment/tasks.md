@@ -188,7 +188,7 @@
       wave on the ordinary browsing path), and `/api/dir` fills the listing
       cache — each caches the answer it was asked for, which is not a
       maintenance operation. No other maintenance route has appeared
-- [ ] 3.8a Move the three bulk-job surfaces from `thumbWrites` to `maintenance` —
+- [x] 3.8a Move the three bulk-job surfaces from `thumbWrites` to `maintenance` —
       `App.tsx`'s jobs enablement and the two `entryActions` job commands — which closes
       the open task 5.1 of the archived `bulk-thumbnail-jobs`, where `thumbWrites` was
       declared an interim until this field existed. The generate launcher takes **both**
@@ -196,6 +196,19 @@
       renders and discards (D4). The reset job is a client loop over `PUT /api/thumb`, so
       it is withheld at its launcher and its writes stay refused by `thumbWrites` at the
       route; only `reload` is refused as maintenance
+      **Done 2026-09-07** — all three moved: App's `libraryJobs` and
+      `entryActions`' `resetBeneath` read `maintenance` alone, `generateBeneath` reads
+      `maintenance && thumbWrites`. Comments naming `thumbWrites` as the field rewritten
+      in all four places (`ENTRY_COMMANDS`' preamble, both rows, `libraryJobs`,
+      `SidePanel`'s `library` prop and `StoredTab`). **This closes the archived
+      `bulk-thumbnail-jobs` task 5.1**, which declared `thumbWrites` an interim until this
+      field existed — the archive itself is not edited. Covered by `entryActions.test.ts`'s
+      *withholds both unless a KNOWN report offers maintenance* and the new *splits the two
+      when maintenance and thumbnail writes disagree* (the spec's *Bulk work is gated by
+      what it does*), and by `bulkJobSurfaces.test.tsx`'s *is absent while the report is
+      unknown*, which gained the write-refusing-but-maintained configuration that keeps the
+      tab. Falsified three ways: `generateBeneath` on `thumbWrites` alone, on `maintenance`
+      alone, and `libraryJobs` back on `thumbWrites` — each fails its own cell
 
 ## 4. Client consumers
 
@@ -231,18 +244,43 @@
       — 2026-09-08: `keepsFramingsLocally` is `report !== null && report.thumbWrites ===
       false`, read per call through a getter so a late report changes no client identity.
       Falsified: widening it to admit `null` failed three cells across both suites
-- [ ] 4.3 `SidePanel` withholds the chat tab when it is not declared on, absent rather
+- [x] 4.3 `SidePanel` withholds the chat tab when it is not declared on, absent rather
       than disabled; **both** its fallbacks resolve to a tab that exists, preferring the
       recorded one, and neither rewrites the recorded value (D7): `tabStore`'s parse, and
       the runtime move off a `library` tab that has gone away, which lands on `'chat'`
       today — the tab a deployment may withhold
-- [ ] 4.4 `SidePanel`'s index-state description collapses the operator-repairable
+      **Done 2026-09-07** — `SidePanel` takes `features: FeatureReport | null` from App and
+      lists `chat` only under `features?.chatTab === true`, so an in-flight or failed report
+      withholds it like any gated offer. One exported pure `resolveTab(preferred,
+      available)` serves all three resolutions: the opening tab, the runtime move off
+      `similar`/`library`, and the report landing (which re-reads the recorded preference,
+      exempting `similar`/`library` since neither is ever recorded and a report resolving is
+      not a thing the user did). `tabStore`'s parse and `StoredTab` are unchanged and
+      nothing writes a resolved value back. Covered by `sidePanel.test.tsx` (7.6);
+      falsified by restoring the `'chat'` landing, which fails the library-tab cell with
+      *expected undefined to be 'search'*
+- [x] 4.4 `SidePanel`'s index-state description collapses the operator-repairable
       conditions into one unavailability where the deployment declares index operation
       not the viewer's concern; `warming` and outside-the-collection stay distinct (D9).
       `indexStatus`'s reasoning is untouched — what changes is what reaches the client
-- [ ] 4.5 The find-similar copy for an unembedded model stops telling the viewer to run
+      **Done 2026-09-07** — `indexAccount` (SidePanel) returns the whole paragraph, and
+      under a known `hostDetails: false` answers `INDEX_UNAVAILABLE` for `absent`,
+      `volume-gone` and `wedged` with no `detail`; `warming` and the out-of-range `ready`
+      keep their own sentences and their `detail`. Sentence and `detail` come from one call
+      because a collapse withholds both together. Nothing on the server or in `indexStatus`
+      touched. Covered by `sidePanel.test.tsx` (7.7)
+- [x] 4.5 The find-similar copy for an unembedded model stops telling the viewer to run
       the classifier under `hostDetails` (D11) — the notes flagged this
       copy as needing a visitor-facing form
+      **Done 2026-09-07** — `notEmbeddedMessage(features)` in App picks `NOT_EMBEDDED_VISITOR`
+      ("This model is not in the index, so it has no neighbours yet.") under a known
+      `hostDetails: false`, and the existing `NOT_EMBEDDED` otherwise. Not a truncation of
+      it: "yet" and "try again" both promise a repair this viewer cannot make. Read through
+      `readFeatures()` rather than the `features` state, since the effect's deps are
+      `[requestId]` alone and a report landing must not re-ask the index. Covered by a new
+      cell in `findSimilar.test.tsx` beside the operator sentence's own —
+      7.6/7.7 name no cell for this task, and an untested copy change is not a done one;
+      falsified by collapsing the chooser to `NOT_EMBEDDED`, which fails it
 - [x] 4.6 Where `top` is withheld under `hostDetails` (D11) — read off
       `AvailabilityContext` per the note above, since copy-path is built there — copy-path and the lightbox's file details show
       the library path instead of composing a filesystem path
@@ -374,15 +412,28 @@
       the unknown cells drive. Falsified four ways — installing regardless of the report,
       forwarding the write to `inner`, dropping the seeding overlay, and treating a
       discard as "keep" — each failing only its own cells
-- [ ] 7.6 Client: a profile with no recorded tab, and one recording `chat`, both open on
+- [x] 7.6 Client: a profile with no recorded tab, and one recording `chat`, both open on
       search when the chat tab is withheld, and neither has its recorded value rewritten;
       with chat declared on **and the report known**, the panel behaves exactly as today;
       while the report is in flight the tab is withheld like any gated surface. A cell for
       the runtime fallback too: a viewer on the `library` tab when it goes away, on a
       deployment withholding chat, lands on a tab that exists
-- [ ] 7.7 Client: the collapsed index states say one thing for the three operator-only
+      **Done 2026-09-07** — `client/test/sidePanel.test.tsx`, six cells plus two
+      `resolveTab` unit cells, driven against the component rather than through App since
+      both rules are about inputs App only passes through. The harness's default report
+      became the server's own defaults (`DEFAULT_REPORT` in `appHarness.tsx`, `chatTab`
+      **off**) rather than "every capability on", which is what made three
+      `similarTuning.test.tsx` cells and one `bulkJobSurfaces.test.tsx` cell change: two
+      opt into a chat-offering report because the rule under test is about that tab, and
+      two now expect the maintained configuration's tab strip
+- [x] 7.7 Client: the collapsed index states say one thing for the three operator-only
       conditions, while `warming` and outside-the-collection still say their own; `detail`
       is absent in the collapsed states and still preferred in the uncollapsed ones
+      **Done 2026-09-07** — four cells in `client/test/sidePanel.test.tsx`. Every collapsed
+      cell is driven with a `detail` present, so the client's own suppression is what is
+      asserted rather than the server's (3.7) — a cell fed no `detail` would pass with the
+      client rule deleted. Falsified both ways: never collapsing fails the collapse cell,
+      always collapsing fails the *today's sentences* cell
 - [ ] 7.8 Falsify every behavioural cell before trusting it — remove the guard's origin
       check, the refusal in each route, the decorator's install condition, the tab
       fallback — and confirm the corresponding cell fails

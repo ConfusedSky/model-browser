@@ -202,6 +202,28 @@ function baseName(path: string): string {
  */
 const NOT_EMBEDDED =
   'This model has not been indexed yet, so the index knows no neighbours for it — run the classifier over it and try again.'
+/**
+ * …and the same fact for a viewer who cannot act on it. Running the classifier
+ * is an operator's act on the machine the server sits on, so a deployment
+ * declaring that machine none of the viewer's concern states the outcome and
+ * stops there (`public-deployment` D11, and `semantic-search`'s *A viewer is
+ * not told to run the classifier*).
+ *
+ * Not a truncation of the sentence above: "not indexed **yet**" and "try
+ * again" both promise a repair, and a promise nobody on this side can keep is
+ * worse than no explanation. What is left is the fact itself.
+ */
+const NOT_EMBEDDED_VISITOR = 'This model is not in the index, so it has no neighbours yet.'
+/**
+ * Which of the two a report chooses. Only a **known** report declaring the host
+ * not the viewer's concern takes the visitor form; unknown and failed reads
+ * keep the sentence this app has always shown, which is the behaviour half of
+ * feature-report's unknown-report rule (a default holds until a known report
+ * says otherwise).
+ */
+function notEmbeddedMessage(features: FeatureReport | null): string {
+  return features?.hostDetails === false ? NOT_EMBEDDED_VISITOR : NOT_EMBEDDED
+}
 const OUTSIDE_CORPUS =
   'Models inside an archive are outside what the index covers, so it can find nothing similar to this one.'
 
@@ -1311,7 +1333,10 @@ export default function App() {
           // cache the user has never heard of.
           if (notEmbedded) {
             if (!controller.signal.aborted) {
-              dispatch({ type: 'failure', id, forView, message: NOT_EMBEDDED })
+              // Through the getter, not the state: this effect's deps are
+              // `[requestId]` alone, and a report landing must not re-ask the
+              // index (see `readFeatures`).
+              dispatch({ type: 'failure', id, forView, message: notEmbeddedMessage(readFeatures()) })
             }
             return
           }
@@ -2521,12 +2546,24 @@ export default function App() {
     settledRunRef.current = job.runId
     if (job.wrote > 0) setJobsEnded((n) => n + 1)
   }, [job])
+  /**
+   * The library tab, or `null` when there is none to offer. `maintenance` is
+   * the field: the tab's every occupant acts on the server's derived state for
+   * every viewer at once (`public-deployment` D4), which closes the interim
+   * `bulk-thumbnail-jobs` declared in its own task 5.1 when it gated these on
+   * `thumbWrites` before this field existed.
+   *
+   * `maintenance` alone rather than both fields: reset is a maintenance
+   * operation whatever a deployment does with thumbnail writes, so a
+   * write-refusing deployment that offers maintenance still has a tab. An
+   * unknown report withholds it, as any gated offer.
+   */
   const libraryJobs = useMemo(
     () =>
-      features?.thumbWrites === true && rootScope !== null
+      features?.maintenance === true && rootScope !== null
         ? { count: countLibrary, launch: launchLibrary, recountKey: jobsEnded, resetAdjust: handDelta }
         : null,
-    [features?.thumbWrites, rootScope, countLibrary, launchLibrary, jobsEnded, handDelta],
+    [features?.maintenance, rootScope, countLibrary, launchLibrary, jobsEnded, handDelta],
   )
 
   function goUp(): void {
@@ -3037,6 +3074,10 @@ export default function App() {
             </>
           )}
         </main>
+        {/* The report goes down whole, not as a pair of booleans derived here:
+            the panel gates its chat tab on one field and its index sentence on
+            another, and two props would put the same unknown-is-null rule in
+            two places (`public-deployment` D7/D9). */}
         <SidePanel
           query={liveQuery}
           similar={liveSimilar}
@@ -3050,6 +3091,7 @@ export default function App() {
           onTuning={setTuning}
           index={state.index ?? { state: 'absent' }}
           scope={scope}
+          features={features}
           onFolderMatching={setFolderMatching}
           onKinds={setKinds}
           onMode={setMode}

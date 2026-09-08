@@ -13,7 +13,9 @@ import type { DirListing } from '../../shared/types'
 import {
   click,
   container,
+  DEFAULT_REPORT,
   dir,
+  features,
   indexAvailability,
   labels,
   listDir,
@@ -271,19 +273,27 @@ describe('the Similar tab itself (6.4)', () => {
     await settle()
     await expandPanel()
     // `library` is the app's maintenance surface, present because the harness's
-    // default feature report is a known all-on one (`bulk-thumbnail-jobs` D6).
-    expect(tabNames()).toEqual(['chat', 'search', 'library'])
+    // default report declares maintenance offered (`bulk-thumbnail-jobs` D6,
+    // moved onto that field by `public-deployment` 3.8a). `chat` is absent for
+    // the other half of the same rule: the default report declares it **off**,
+    // since it is a placeholder with no backend (D4).
+    expect(tabNames()).toEqual(['search', 'library'])
 
     listDir.mockResolvedValue({ path: '/models', entries: [model('widget.stl')] })
     await type(searchInput(), 'widget')
     await pressEnter(searchInput())
     await settle()
-    expect(tabNames()).toEqual(['chat', 'search', 'library'])
+    expect(tabNames()).toEqual(['search', 'library'])
   })
 
   it('appears under a similarity view', async () => {
     indexAvailability.mockResolvedValue(READY)
     similar.mockResolvedValue(NEIGHBOURS)
+    // Chat declared on, so this cell can still own the WHOLE order — the
+    // maintained configuration withholds the tab (D4), and the order rule is
+    // about where each tab sits when it is there, not about which of them the
+    // default offers.
+    features.mockResolvedValue({ ...DEFAULT_REPORT, chatTab: true })
     await mountAppAtCurrentUrl(LINK, NESTED)
     await settle()
     await expandPanel()
@@ -301,6 +311,10 @@ describe('the Similar tab itself (6.4)', () => {
     // item was clicked out in the grid.
     indexAvailability.mockResolvedValue(READY)
     similar.mockResolvedValue(NEIGHBOURS)
+    // A deployment offering chat, since the rule under test is about what the
+    // arrival does NOT take from that tab and the maintained configuration
+    // does not offer it (D4).
+    features.mockResolvedValue({ ...DEFAULT_REPORT, chatTab: true })
     await mountApp('/models', NESTED)
     await settle()
     await expandPanel()
@@ -314,6 +328,7 @@ describe('the Similar tab itself (6.4)', () => {
     localStorage.clear()
     indexAvailability.mockResolvedValue(READY)
     similar.mockResolvedValue(NEIGHBOURS)
+    features.mockResolvedValue({ ...DEFAULT_REPORT, chatTab: true })
     await mountApp('/models', NESTED)
     await settle()
     await expandPanel()
@@ -339,8 +354,9 @@ describe('the Similar tab itself (6.4)', () => {
     await click(dismissButton()!)
     await settle()
     // `library` is the app's maintenance surface, present because the harness's
-    // default feature report is a known all-on one (`bulk-thumbnail-jobs` D6).
-    expect(tabNames()).toEqual(['chat', 'search', 'library'])
+    // default report declares maintenance offered; `chat` is absent because the
+    // same report declares that off (D4).
+    expect(tabNames()).toEqual(['search', 'library'])
     expect(selectedTab()).toBe('search')
   })
 

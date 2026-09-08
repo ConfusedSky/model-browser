@@ -14,7 +14,9 @@ import type { DirListing } from '../../shared/types'
 import {
   click,
   container,
+  DEFAULT_REPORT,
   dir,
+  features,
   findInput,
   indexAvailability,
   labels,
@@ -445,6 +447,27 @@ describe('a similarity view', () => {
     // asked of the argument rather than of the call count.
     expect(indexAvailability).toHaveBeenCalled()
     expect(indexAvailability).not.toHaveBeenCalledWith({ fresh: true })
+  })
+
+  it('states the same fact without the instruction where the host is not the viewer’s', async () => {
+    // Running the classifier is an operator's act on the machine the server
+    // sits on, so a deployment declaring that machine none of the viewer's
+    // concern states the outcome and stops (`public-deployment` D11,
+    // `semantic-search`'s *A viewer is not told to run the classifier*).
+    //
+    // Not a truncation: "yet" and "try again" both promise a repair, and this
+    // viewer can make none. What is left is the fact.
+    features.mockResolvedValue({ ...DEFAULT_REPORT, hostDetails: false })
+    indexAvailability.mockResolvedValue(READY)
+    similar.mockRejectedValue(await httpError(404, '/models/Kits/Baal/hero.stl is not in the cache'))
+    await mountAppAtCurrentUrl(LINK, NESTED)
+    await settle()
+
+    expect(container.textContent).toContain('is not in the index, so it has no neighbours yet')
+    expect(container.textContent).not.toContain('run the classifier')
+    expect(container.textContent).not.toContain('try again')
+    // The index's own words stay out of it here as they do everywhere else.
+    expect(container.textContent).not.toContain('not in the cache')
   })
 
   it('a model inside an archive is a different sentence, and costs no request', async () => {
