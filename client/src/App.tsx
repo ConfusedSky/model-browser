@@ -337,8 +337,8 @@ export default function App() {
    * Decorated once, at construction, and the decorator asks the getter per
    * call: on a deployment declaring thumbnail writes off, a framing is kept in
    * this browser instead of sent, and a lookup's answer is overlaid with what
-   * is kept (D6). The five existing `putThumb` call sites are untouched — the
-   * seam is here, so the precedence rule lives in one place rather than five.
+   * is kept (D6). The six existing `putThumb` call sites are untouched — the
+   * seam is here, so the precedence rule lives in one place rather than six.
    */
   const api = useMemo(() => withLocalFramings(new HttpApiClient(), readFeatures), [readFeatures])
   const queue = useMemo(() => new RenderQueue(2), [])
