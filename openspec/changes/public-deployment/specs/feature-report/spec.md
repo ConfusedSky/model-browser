@@ -60,7 +60,11 @@ acts on the server's own derived state rather than answering a question about th
 renders in bulk. These SHALL be refused at the routes rather than merely withheld from the
 client, because each is expensive, each acts for every viewer at once, and none of them is
 a thing a visitor has any standing to ask for. The client SHALL withhold the surfaces that
-launch them, as it withholds any surface a capability declares off.
+launch them, as it withholds any surface a capability declares off. A surface SHALL be
+governed by the capability that describes what it does rather than by whichever capability
+existed when it was written: bulk work that destroys derived state is a maintenance
+operation, while bulk work that fills the thumbnail cache is governed by the capability for
+writing thumbnails, since with those writes refused it would render and discard.
 
 #### Scenario: A reload is refused
 - **WHEN** a request arrives to drop or revalidate the server's caches on such a deployment
@@ -69,6 +73,10 @@ launch them, as it withholds any surface a capability declares off.
 #### Scenario: The surfaces that launch them are absent
 - **WHEN** a viewer opens a surface that would offer a bulk or maintenance operation
 - **THEN** the offer is absent rather than present and inert
+
+#### Scenario: Bulk work is gated by what it does
+- **WHEN** a deployment accepts thumbnail writes but withholds maintenance
+- **THEN** the surface that fills the thumbnail cache is offered and the one that destroys stored framings is not, and the reverse configuration offers the reverse pair
 
 #### Scenario: A personal installation keeps them
 - **WHEN** a deployment does not declare this

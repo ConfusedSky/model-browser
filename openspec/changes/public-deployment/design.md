@@ -168,8 +168,26 @@ to leave the bulk-job surfaces' field to `bulk-thumbnail-jobs`, whose design say
 is declared in the delta so 1.3 can gate without modifying this capability." Then
 `POST /api/reload` turned up ungated (verification round), and dropping caches and running
 bulk renders are the same question — *may a viewer act on this server's derived state?* So
-the field exists now with `reload` as its first consumer, and that change joins it rather
-than adding a sixth.
+the field exists here, with `reload` as its first consumer.
+
+**What that change actually did, and what this one therefore has to fix** (found reviewing
+against the tree, 2026-09-07): `bulk-thumbnail-jobs` landed on 2026-09-03 without a field
+of its own, gating its surfaces on **`thumbWrites`** — the only capability the report
+carried — at `App.tsx`'s jobs enablement and the two `entryActions` job commands. Its
+capability spec says only that those surfaces are offered "where the server's feature
+report declares that capability on", naming no field, which is the vagueness that let the
+drift pass. So they are split by what they do rather than left where they landed:
+
+| surface | gate | why |
+|---|---|---|
+| generate renders | `thumbWrites` | it writes thumbnails; with writes off it is a loop that renders and discards |
+| reset framings | `maintenance` | it destroys derived state for every viewer, exactly as `reload` does |
+| `POST /api/reload` | `maintenance` | the consumer this field was created for |
+
+Left unsplit, both mixed configurations are wrong in a way a reader would have to run to
+discover: `thumbWrites: false, maintenance: true` withholds a maintenance surface for the
+wrong reason, and `thumbWrites: true, maintenance: false` offers a jobs panel whose reload
+the server refuses.
 
 **`hostDetails` absorbed what was going to be a separate index field** (Masa, 2026-09-03).
 They were one rule written twice: the host rule already forbids offering "a remedy only an
@@ -224,9 +242,10 @@ here" from "went wrong" without inferring it from a status code alone.
 ### D6: The client's write routing decorates `ApiClient`, leaving the call sites alone
 
 With writes declared off, a visitor's orbit persists in their own browser
-(`web-demo-backlog` 2.1). Five call sites write today — three in `entryActions`, one in
-`useThumbnails`, one in `App.tsx` — and they want different things: some send a rendered
-PNG, some send a camera, some send both.
+(`web-demo-backlog` 2.1). Six call sites write today — three in `entryActions`, one in `useThumbnails`, one in
+`App.tsx`, and one in `bulkJobs` (the generate job, which arrived with
+`bulk-thumbnail-jobs`) — and they want different things: some send a rendered image, some
+send a camera, some send both.
 
 Rather than gate five sites, install a decorator over `ApiClient`'s thumbnail read and
 write when a known report declares writes off: the write drops the PNG (the deployment's
@@ -239,6 +258,15 @@ client I/O goes through `ApiClient` is what makes that the natural seam.
 Installed **only** on a known report declaring writes off. The feature-report capability
 is explicit that not knowing must never relocate where a user's data is stored, so an
 unresolved or failed report keeps writing to the server.
+
+The decorator answers "as a write would", and `webp-thumbnails` (archived 2026-09-07) gave
+that answer meaning: `ThumbPutResult.dropped` says the pixels did not reach the store, and
+`renderEntryThumbnail` turns it into the `skipped` outcome so a job's count never claims a
+cache filled while nothing was written to it. A locally-stored orientation is the same
+shape of event — the orientation landed, the pixels did not — so the decorator sets that
+flag rather than reporting a clean write. Otherwise a deployment running generate with
+writes off reports every model as rendered, which is the accounting bug that change fixed,
+arriving from the other direction.
 
 **Hard ordering: after `thumbnail-image-serving`** (found in review; Masa's call). That
 change's *A listing-known thumbnail is drawn without a lookup* has the listing entry carry
@@ -274,6 +302,12 @@ The fallback becomes: resolve to a tab that exists, preferring the recorded one.
 recorded *value* is not rewritten — a profile that recorded chat and then visits a
 deployment withholding it must not come home with its preference erased.
 
+**Two fallbacks, not one** (found reviewing against the tree, 2026-09-07). Since
+`bulk-thumbnail-jobs`, `SidePanel` also falls back at *runtime*: when the library tab goes
+away it moves a viewer sitting on it to `'chat'` — the very tab a deployment may withhold.
+Fixing the store's parse alone leaves that path landing on nothing. Both resolve through
+one rule: a tab that exists, preferring the recorded one.
+
 ### D8: Static serving lives in the runtime entry point
 
 Serving files is adapter-specific, so under D1 it belongs in `index.ts` and not in the
@@ -287,8 +321,12 @@ Two details the trip-reduction thread already asked of this change and the first
 dropped (found in review). The built bundle is immutable and hashed, so its assets are
 served `immutable` with a long max-age while the entry document is `no-cache` — the notes
 name long-lived caching of static bundles as a first-class concern for an origin a visitor
-may be far from. And the allowed host set must always retain loopback alongside any
-configured origin, or a same-box health check against the bound port is refused by the
+may be far from. And the served bundle is **compressed**: ~868 KB raw against ~241 KB
+gzipped, and on the demo box that raw transfer measured 1.34 s of a 1.71 s first load for
+a US visitor against an EU origin (`docs/web-demo-notes.md`, 2026-09-05). A change whose
+own argument is "one process rather than a separate static host" cannot leave its largest
+single transfer to a proxy it does not require. And the allowed host set must always
+retain loopback alongside any configured origin, or a same-box health check against the bound port is refused by the
 guard; a reverse proxy that rewrites `Host` is the case a local curl cannot simulate. A server with no built client
 serves its API exactly as before — the local development loop, where Vite serves the
 client, must not start depending on a build.
@@ -360,6 +398,17 @@ of them happens to be one question too.
 
 ## Risks / Trade-offs
 
+- **A baked deployment pins a recipe version, and nothing enforces it** (found reviewing
+  against the tree, 2026-09-07). `usable()` treats a stored render whose `rig` differs from
+  the client's `RIG_VERSION` as needing re-render; with `thumbWrites` off, the write that
+  would heal it is refused. So a client build whose recipe version has moved past the baked
+  corpus re-renders every tile on every visit, for every visitor, forever — silently, and
+  looking exactly like a cache that never warms. `webp-thumbnails` bumped 6 → 7 on
+  2026-09-07, which makes this concrete rather than hypothetical: the corpus must be baked
+  by the same client build that ships, and a later bump means a re-bake before deploy. The
+  deployment's committed configuration (D10) is where that coupling is visible; enforcing
+  it — a served client refusing to boot against a corpus baked under another recipe — is
+  not attempted here and is worth its own change if the demo outlives one bump.
 - [A malformed `config.json` now takes a dev machine's server down, where it was
   previously ignored] → Absent stays silent, so the common case is untouched; only a file
   someone actually wrote can fail. The failure names the file and the parse error.

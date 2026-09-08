@@ -70,7 +70,9 @@ reaches the client (design D6).
 - **`POST /api/reload` stops being reachable by anyone.** It drops every cached layer and
   revalidates each snapshot root, and nothing gates it; `listing-tree-cache` added it after
   this change first enumerated the routes. It refuses under `maintenance`, the field
-  `bulk-thumbnail-jobs` will join rather than adding one of its own.
+  `bulk-thumbnail-jobs` was to have joined — that change landed on 2026-09-03 without a
+  field of its own, so this one owns `maintenance` outright and has to say where the job
+  surfaces belong (see below).
 - **`/api/apps` stops being a read.** It execs `xdg-mime` per model type on every request
   and reads the machine's application entries for their names, and it is ungated — so a
   withheld launcher must short-circuit it, not filter its result.
@@ -78,6 +80,24 @@ reaches the client (design D6).
   today while the library is unsettled — a side effect of re-asking a filesystem question,
   not a feature — which leaves "malformed fails at startup" undefined. The filesystem
   question keeps being re-asked; the file stops being re-read.
+- **The job surfaces move to the field that describes them.** `bulk-thumbnail-jobs`
+  landed gating its surfaces on `thumbWrites` (`App.tsx`'s jobs enablement, and the two
+  `entryActions` commands), which was the only capability the report carried. Two of the
+  three are maintenance by this change's own definition — reset-framings destroys derived
+  state, as `reload` does — while generate genuinely writes thumbnails. Left alone, a
+  deployment with `thumbWrites: false, maintenance: true` withholds a maintenance surface
+  for the wrong reason, and one with the flags reversed offers a jobs panel whose reload
+  the server refuses.
+- **A baked deployment pins a recipe version.** With writes off, a client whose
+  `RIG_VERSION` differs from the baked cache's re-renders every tile on every visit —
+  `usable()` requires the versions to match, and the write that would heal the entry is
+  the write this deployment refuses. So the corpus must be baked by the same client build
+  that ships, and a later recipe bump means a re-bake before deploy. This is not a new
+  mechanism; it is an existing one whose failure mode only appears once writes are off.
+- **The served client is compressed.** Serving the built client from this server makes its
+  transfer size this change's business: the bundle is ~868 KB raw against ~241 KB gzipped,
+  measured at 1.34 s of a 1.71 s first load from a US visitor to an EU origin
+  (`docs/web-demo-notes.md`, 2026-09-05).
 - **`ALL_FEATURES` is renamed and re-documented** — it is the supported set, not "every
   capability on".
 - **The demo's own `config.json` is checked into the repo** and tested as a named second
@@ -134,9 +154,10 @@ surface learns a deployment kind, only capabilities.
 origins, since one deployment may answer more than one name.
 
 **Ordering.** Hard ordering after `thumbnail-image-serving` (design D6).
-`bulk-thumbnail-jobs` also touches
-`SidePanel` and adds the fifth capability field for its own surfaces — additive on both
-sides; whichever lands second adds that field. Nothing here touches the requirements
+`bulk-thumbnail-jobs` **landed 2026-09-03**, so what were ordering
+notes are now facts to write against: `SidePanel` has a `library` tab, and the job
+surfaces gate on `thumbWrites` rather than on the field this change was going to give
+them. Nothing here touches the requirements
 `search-cancellation` or `thumbnail-image-serving` add.
 
 **Out of scope**, each its own change: the landing page (contents decided 2026-09-03, notes

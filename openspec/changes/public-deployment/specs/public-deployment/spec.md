@@ -72,12 +72,19 @@ SHALL be answered from the built client, with a request for no particular docume
 answered by the client's entry document so that a deep link opened directly resolves. The
 API's own prefix SHALL be reserved: a request under it that names no route SHALL answer as
 a missing route and SHALL NOT fall through to the entry document, so that a client's bad
-request is never answered with a page and a success status. Because the built client is
-content-hashed, its assets SHALL be served as immutable for a long lifetime while its
-entry document SHALL NOT be cached, so that a visitor far from the server fetches each
-asset once and still sees a new deployment on their next visit.
+request is never answered with a page and a success status. Because the built client is content-hashed, its assets SHALL be served as immutable for a
+long lifetime while its entry document SHALL NOT be cached, so that a visitor far from the
+server fetches each asset once and still sees a new deployment on their next visit. Text
+resources SHALL be served compressed where the requester accepts an encoding for them: the
+bundle is several times its compressed size, that difference is the largest single transfer
+of a first visit, and a deployment that serves its own client cannot leave it to a proxy it
+does not require.
 Serving the built client SHALL NOT be required: a server started without one SHALL
 continue to answer its API.
+
+#### Scenario: A first visit does not pay for uncompressed text
+- **WHEN** a browser that accepts compression requests the client's script bundle
+- **THEN** it is served compressed, and the bytes on the wire are a fraction of the bundle's size
 
 #### Scenario: The app loads from the server
 - **WHEN** a browser opens the server's own address with a built client present

@@ -3,7 +3,9 @@
 > Change "A" of the five `web-demo-backlog` 1.3 became. **Hard ordering: after
 > `thumbnail-image-serving`** — it introduces a second path by which a stored camera
 > reaches the client, which task 4.1's overlay must cover (design D6).
-> `bulk-thumbnail-jobs` also touches `SidePanel` — additive on both sides (it adds a tab,
+> `bulk-thumbnail-jobs` **landed 2026-09-03**, so what were ordering notes are facts to
+> write against: `SidePanel` has a `library` tab, and the job surfaces gate on
+> `thumbWrites`. The original note read: it also touches `SidePanel` — additive on both sides (it adds a tab,
 > this changes the fallback), so whichever lands first, the other rebases its tab list;
 > that change's proposal asked for the ordering to be declared here, and this is it.
 >
@@ -13,6 +15,24 @@
 >
 > Cite code by symbol name, never `file.ts:123` (CLAUDE.md). Bun-only APIs stay in
 > `server/src/index.ts` (D1). No thumbnail pixel output changes, so no `RIG_VERSION` bump.
+
+## 0. What the tree changed under this change (2026-09-07 review)
+
+- [ ] 0.1 Split the job surfaces by what they do (design D4): generate keeps `thumbWrites`,
+      reset-framings and `POST /api/reload` take `maintenance`. Today all three sit on
+      `thumbWrites` — `App.tsx`'s jobs enablement and the two `entryActions` job commands —
+      because it was the only field the report carried when `bulk-thumbnail-jobs` landed
+- [ ] 0.2 `SidePanel` has two tab fallbacks now, not one: `tabStore`'s parse **and** the
+      runtime move off a vanished `library` tab, which lands on `'chat'` — the tab a
+      deployment may withhold (D7). Both resolve through one rule
+- [ ] 0.3 The write decorator sets `ThumbPutResult.dropped` on a locally-kept write, so a
+      generate job on a write-refusing deployment reports work not done rather than a
+      cache that filled (D6, and `webp-thumbnails`' own accounting rule)
+- [ ] 0.4 Serve text compressed from the runtime entry point (D8), and measure the first
+      load against the ~868 KB / ~241 KB figures the notes carry
+- [ ] 0.5 Record in the deployment's committed configuration (D10) that a baked corpus
+      pins `RIG_VERSION`: with writes off, a client whose recipe version has moved past
+      the bake re-renders every tile on every visit and cannot heal itself
 
 ## 1. Configuration
 
