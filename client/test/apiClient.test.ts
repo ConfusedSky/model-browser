@@ -508,6 +508,38 @@ describe('HttpApiClient contract', () => {
     expect((err as HttpError).message).toBe('generation moved')
   })
 
+  // *A refusal is not a fault* (feature-report), on the client side. 403 is
+  // also what the origin guard answers a stranger, so the field is what makes
+  // the two tellable apart — and it has to reach every caller, which is why it
+  // is read in the one shared failure reader beside `state`.
+  it('carries the field a Refused body names, and nothing where a body names none', async () => {
+    const refusing = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ error: 'thumbnail writes are not offered', refused: 'thumbWrites' }, 403))
+    const refused = await new HttpApiClient(refusing as unknown as typeof fetch)
+      .putThumb({ path: '/m.stl', mtime: 42, camera: CAM })
+      .catch((e: unknown) => e)
+    expect(refused).toBeInstanceOf(HttpError)
+    expect((refused as HttpError).status).toBe(403)
+    expect((refused as HttpError).refused).toBe('thumbWrites')
+
+    // An ordinary fault, at the same route: no field, so nothing here says
+    // "declared off" — a caller branching on it cannot mistake a 500 for one.
+    const failing = vi.fn().mockResolvedValue(jsonResponse({ error: 'disk is full' }, 500))
+    const fault = await new HttpApiClient(failing as unknown as typeof fetch)
+      .putThumb({ path: '/m.stl', mtime: 42, camera: CAM })
+      .catch((e: unknown) => e)
+    expect((fault as HttpError).refused).toBeUndefined()
+
+    // And a refusal from the guard-shaped 403 that carries no body at all —
+    // the reader must not invent a field out of the status.
+    const bare = vi.fn().mockResolvedValue(new Response('nope', { status: 403 }))
+    const guarded = await new HttpApiClient(bare as unknown as typeof fetch)
+      .putThumb({ path: '/m.stl', mtime: 42, camera: CAM })
+      .catch((e: unknown) => e)
+    expect((guarded as HttpError).refused).toBeUndefined()
+  })
+
   it('models asks for every model beneath one path, escaped', async () => {
     const listing = { path: '/kit', entries: [], complete: true }
     const fetchFn = vi.fn().mockResolvedValue(jsonResponse(listing))
@@ -748,6 +780,77 @@ describe('withLocalFramings', () => {
     await api.putThumb({ path: '/m.stl', mtime: 42, camera: CAM })
     expect(fetchFn).toHaveBeenCalledTimes(1)
     expect(readLocalFraming('/m.stl', store)).toEqual({ camera: CAM })
+  })
+
+  /**
+   * The route's refusal, arriving where the report has not.
+   *
+   * The gate above is unchanged — an unknown report still writes to the server
+   * — but the answer that comes back is a fact, and it is the only one
+   * available while the report is in flight or its read failed. Without these
+   * the orientation is stored nowhere at all: App's orbit-release `persist`
+   * swallows the throw as best-effort, and the tile paths turn it into an
+   * errored tile or a failure toast.
+   */
+  const refusalResponse = (): Response =>
+    jsonResponse({ error: 'thumbnail writes are not offered', refused: 'thumbWrites' }, 403)
+
+  it('keeps a framing the route refused, even with the report unknown', async () => {
+    const fetchFn = vi.fn(() => Promise.resolve(refusalResponse()))
+    const store = memStorage()
+    const api = withLocalFramings(
+      new HttpApiClient(fetchFn as unknown as typeof fetch),
+      () => null,
+      store,
+    )
+
+    const written = await api.putThumb(orbitRelease())
+
+    // The write was attempted — the report said nothing, so the server is still
+    // asked first, which is what the unknown-report rule requires.
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+    // And the refusal is acted on rather than thrown: the same account the
+    // gated path gives, so no caller can tell which arrival point kept it.
+    expect(written).toEqual({ dropped: true })
+    expect(readLocalFraming('/m.stl', store)).toEqual({ camera: CAM, axis: '-z' })
+  })
+
+  it('rethrows a refusal of some other capability, keeping nothing', async () => {
+    const fetchFn = vi.fn(() =>
+      Promise.resolve(jsonResponse({ error: 'the launcher is not offered', refused: 'appLaunch' }, 403)),
+    )
+    const store = memStorage()
+    const api = withLocalFramings(
+      new HttpApiClient(fetchFn as unknown as typeof fetch),
+      () => null,
+      store,
+    )
+
+    const err = await api.putThumb(orbitRelease()).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(HttpError)
+    expect((err as HttpError).refused).toBe('appLaunch')
+    expect(store.raw.size).toBe(0)
+  })
+
+  it('rethrows an ordinary failure unchanged, keeping nothing', async () => {
+    // Including a 403 with no field: that is the origin guard, not a
+    // declaration, and swallowing it would hide a misconfigured deployment
+    // behind framings quietly piling up in the visitor's browser.
+    const store = memStorage()
+    for (const res of [
+      () => jsonResponse({ error: 'disk is full' }, 500),
+      () => new Response('nope', { status: 403 }),
+    ]) {
+      const api = withLocalFramings(
+        new HttpApiClient(vi.fn(res) as unknown as typeof fetch),
+        () => null,
+        store,
+      )
+      const err = await api.putThumb(orbitRelease()).catch((e: unknown) => e)
+      expect(err).toBeInstanceOf(HttpError)
+      expect((err as HttpError).refused).toBeUndefined()
+      expect(store.raw.size).toBe(0)
+    }
   })
 
   it('reads a hand-edited or malformed record as nothing stored', () => {

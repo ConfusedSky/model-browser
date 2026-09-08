@@ -343,6 +343,19 @@ export class HttpError extends Error {
      * render off the error and quietly grow a second copy of the state.
      */
     readonly state?: string,
+    /**
+     * The capability field a `Refused` body named (`feature-report`: *A
+     * declared-off capability is refused at its routes*), absent on every other
+     * failure. This is the whole of "a refusal is not a fault" on the client
+     * side: 403 alone is also what the origin guard answers a stranger, so the
+     * field — not the status — is what lets a caller tell "this deployment does
+     * not offer that" from "that went wrong".
+     *
+     * Carried, not interpreted. One caller acts on it today
+     * (`LocalFramingClient.putThumb`, on `thumbWrites`); everything else still
+     * sees the plain `HttpError` it saw before.
+     */
+    readonly refused?: keyof FeatureReport,
   ) {
     super(message)
   }
@@ -355,9 +368,16 @@ export class HttpError extends Error {
  */
 async function errorOf(res: Response): Promise<HttpError> {
   const body = (await res.json().catch(() => null)) as
-    | { error?: string; state?: string }
+    | { error?: string; state?: string; refused?: string }
     | null
-  return new HttpError(res.status, body?.error ?? res.statusText, body?.state)
+  // A `Refused` body's field, read here so every route's refusal arrives at
+  // every caller already distinguishable — the same reason `state` is read
+  // here rather than at four call sites. Narrowed by shape only (a string is a
+  // field name), never validated against `FeatureReport`'s keys: a server that
+  // names a field this build has not heard of has still refused, and a caller
+  // matching on the fields it knows simply does not match.
+  const refused = typeof body?.refused === 'string' ? (body.refused as keyof FeatureReport) : undefined
+  return new HttpError(res.status, body?.error ?? res.statusText, body?.state, refused)
 }
 
 async function jsonOrThrow<T>(res: Response): Promise<T> {

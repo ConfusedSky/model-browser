@@ -14,6 +14,7 @@ import type {
   SemanticTuning,
   SimilarListing,
 } from '../../../shared/types'
+import { HttpError } from './client'
 import type { ApiClient, ThumbPutResult, ThumbResult, ThumbSave } from './client'
 
 /**
@@ -214,11 +215,30 @@ class LocalFramingClient implements ApiClient {
    * into `skipped`, so a generate job on a refusing deployment reports work not
    * done rather than a cache that filled. A write carrying neither orientation
    * nor pixels is the same answer — nothing was written either way.
+   *
+   * **And where the route refuses what the report did not.** The gate above is
+   * unchanged — with the report on, or unknown, the write still goes to the
+   * server first, which is what *An unknown report does not move a user's
+   * orientations* requires. But a refusal that actually **arrives** is acted
+   * on: a route saying `refused: 'thumbWrites'` is at least as authoritative as
+   * the report, and it is the only word available when the report is in flight
+   * or its read failed. Without this the orientation is stored nowhere — App's
+   * orbit-release `persist` swallows the throw as best-effort, and the tile
+   * paths turn it into an errored tile or a failure toast. Any other failure,
+   * a refusal of any other field included, rethrows exactly as before.
    */
-  putThumb(save: ThumbSave): Promise<ThumbPutResult> {
-    if (!keepsFramingsLocally(this.report())) return this.inner.putThumb(save)
-    writeLocalFraming(save.path, save, this.storage)
-    return Promise.resolve({ dropped: true })
+  async putThumb(save: ThumbSave): Promise<ThumbPutResult> {
+    if (keepsFramingsLocally(this.report())) {
+      writeLocalFraming(save.path, save, this.storage)
+      return { dropped: true }
+    }
+    try {
+      return await this.inner.putThumb(save)
+    } catch (err) {
+      if (!(err instanceof HttpError) || err.refused !== 'thumbWrites') throw err
+      writeLocalFraming(save.path, save, this.storage)
+      return { dropped: true }
+    }
   }
 
   listDir(...args: Parameters<ApiClient['listDir']>): Promise<DirListing> {

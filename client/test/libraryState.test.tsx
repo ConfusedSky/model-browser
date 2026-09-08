@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DirListing } from '../../shared/types'
 import {
   container,
+  DEFAULT_REPORT,
   dir,
+  features,
   indexAvailability,
   library,
   listDir,
@@ -82,6 +84,21 @@ describe('the library states render instead of a grid', () => {
     expect(grid()).toBeNull()
     expect(tiles()).toEqual([])
     expect(skeleton()).toBeNull()
+  })
+
+  // `hostDetails` off (`public-deployment` D11). `missing` and `nested` take
+  // their visitor form from the server omitting the location; `unconfigured`
+  // has no such field — its whole sentence is a remedy, naming an environment
+  // variable and a config file on the operator's machine — so the client
+  // chooses it from the report, the way the not-in-the-index sentence does.
+  it('unconfigured says only the state where the host is not the viewer’s concern', async () => {
+    features.mockResolvedValue({ ...DEFAULT_REPORT, hostDetails: false })
+    library.mockResolvedValue({ state: 'unconfigured' })
+    await mountApp('/', AT_ROOT)
+    await settle()
+
+    expect(headerLine()).toBe('No library is configured.')
+    expect(grid()).toBeNull()
   })
 
   it('nested names the library the root would have enclosed', async () => {

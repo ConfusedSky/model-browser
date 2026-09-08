@@ -737,6 +737,28 @@ describe('what a job reports it wrote', () => {
     expect(h.jobs.state).toMatchObject({ phase: 'cancelled', settled: true, done: 1, wrote: 1 })
     expect(h.putThumb).toHaveBeenCalledTimes(1)
   })
+
+  it("does not count a reset's write the client kept rather than sent", async () => {
+    // On a deployment refusing thumbnail writes the local-framing decorator
+    // resolves `putThumb` with `{ dropped: true }` and reaches no store. The
+    // entry is processed — `done` — but nothing was written, and the chip
+    // reporting otherwise would claim writes nobody made. The same rule the
+    // generate path already gets through `renderEntryThumbnail`'s `skipped`.
+    const h = harness(
+      listing([
+        model('a', { thumb: thumb({ framed: true, camera: CAMERA }) }),
+        model('b', { thumb: thumb({ framed: true, camera: CAMERA }) }),
+      ]),
+    )
+    // Asymmetric on purpose: one of each, so `wrote: 1` cannot be read as
+    // either counter by accident.
+    h.putThumb.mockResolvedValueOnce({ gen: 2 }).mockResolvedValueOnce({ dropped: true })
+    h.jobs.launch('reset', SCOPE)
+    await settle()
+    h.jobs.confirm()
+    await settle()
+    expect(h.jobs.state).toMatchObject({ phase: 'done', settled: true, done: 2, wrote: 1, failed: 0, skipped: 0 })
+  })
 })
 
 describe('what the chip can say about a wait', () => {

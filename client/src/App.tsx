@@ -315,11 +315,25 @@ function resolveView(url: UrlView): View {
  * A deployment may withhold those locations (`hostDetails`, `public-deployment`
  * D11), and then the state itself is the whole sentence: mounting a volume and
  * repointing a root are an operator's remedies, so a viewer who can perform
- * neither is told *what* rather than *where*. The `undefined` here is the
- * server's omission, not a value the client failed to read.
+ * neither is told *what* rather than *where*. For `missing` and `nested` the
+ * `undefined` is the server's omission, not a value the client failed to read.
+ *
+ * `unconfigured` has no such field to omit: its whole sentence is a remedy, and
+ * an environment variable and a config file are locations on the operator's
+ * machine as surely as a path is. So this one is chosen from the report, the
+ * way `notEmbeddedMessage` chooses — and on the same rule: only a **known**
+ * report declaring `hostDetails` off takes the visitor form, since unknown and
+ * failed reads keep what this app has always shown.
  */
 const LIBRARY_UNCONFIGURED =
   'No library configured — set MODEL_BROWSER_ROOT or root in config.json'
+/**
+ * Not a truncation: the operator's sentence names two places to write a root,
+ * and a visitor can write neither. What is left is the state itself.
+ */
+const LIBRARY_UNCONFIGURED_VISITOR = 'No library is configured.'
+const libraryUnconfiguredText = (features: FeatureReport | null): string =>
+  features?.hostDetails === false ? LIBRARY_UNCONFIGURED_VISITOR : LIBRARY_UNCONFIGURED
 const libraryMissingText = (root: string | undefined): string =>
   root === undefined ? 'The library is not present' : `The library at ${root} is not present`
 const libraryNestedText = (library: string | undefined): string =>
@@ -1129,7 +1143,10 @@ export default function App() {
     libraryState === null || libraryState.state === 'ready'
       ? null
       : libraryState.state === 'unconfigured'
-        ? LIBRARY_UNCONFIGURED
+        ? // The state cell, not `readFeatures()`: this is a render, and a value
+          // read through the getter would not re-render the header when the
+          // report resolves.
+          libraryUnconfiguredText(features)
         : libraryState.state === 'nested'
           ? libraryNestedText(libraryState.library)
           : libraryMissingText(libraryState.root)

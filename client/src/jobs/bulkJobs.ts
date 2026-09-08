@@ -516,7 +516,7 @@ export class BulkJobs {
         // passed because it is the truthful answer to "what is stored".
         const { posed } = framingAfterDiscard(job.pose, job.entry.thumb?.axis ?? 'y')
         try {
-          await this.deps.api.putThumb({
+          const written = await this.deps.api.putThumb({
             path: job.entry.path,
             mtime: job.entry.mtime,
             // The discard, exactly as the per-model action writes it: the
@@ -529,7 +529,14 @@ export class BulkJobs {
             ifGen: job.gen,
           })
           done++
-          wrote++
+          // The same rule the generate path gets through `renderEntryThumbnail`'s
+          // `skipped`, applied to the write this path makes itself: `wrote`
+          // counts entries a PUT actually landed on, and a resolved `putThumb`
+          // is not that on its own. Where the deployment refuses writes the
+          // local-framing decorator answers `{ dropped: true }` without
+          // reaching the store, and counting it would have the chip report
+          // writes nobody made.
+          if (written.dropped !== true) wrote++
           // The in-memory half: a tile on screen is showing pixels the server
           // no longer has.
           this.deps.refetch(job.entry.path)
