@@ -185,17 +185,56 @@ export const FILL_PREVIEW_MAX = 12
  *   fixed.
  * - **5xx** — the index failed on its own side: a bad gateway, not an absent
  *   service.
+ *
+ * **`hostDetails` decides whose words travel, never which status does.** Every
+ * message above the 503 is the index's own `detail`, verbatim (`askIndex` in
+ * `semantic.ts`) — another process's free text, which names its cache directory,
+ * its collection root, or the **filesystem path of the model it was asked
+ * about**: find-similar on an unindexed model answers 404
+ * `/run/media/…/harrifex.obj is not in the cache`. Where the host is not the
+ * viewer's concern (D9/D11) that text is this server's to withhold, exactly as
+ * `viewerIndexStatus` withholds the same service's `detail` from `/status` —
+ * a route that still returned it would be the "service's own words are not a way
+ * around it" hole, on the two routes a public deployment serves most.
+ *
+ * What is withheld is the sentence and nothing else. The 404-versus-400
+ * distinction stays in the *status*, which is where the UI already reads it from
+ * ("not indexed yet" is keyed off the status, never off text to sniff), so the
+ * client behaves identically and only the prose changes. The operator loses
+ * nothing either: the caller logs the real message beside the route.
  */
-function indexErrorReply(err: IndexError): {
+function indexErrorReply(
+  err: IndexError,
+  hostDetails: boolean,
+): {
   body: { error: string; state?: string }
   status: 400 | 404 | 502 | 503
 } {
   if (err.upstreamStatus === undefined) {
-    return { body: { error: err.message, state: err.state }, status: 503 }
+    // The availability sentence is this server's own, but it is composed from
+    // the index's state and reads as a report about the operator's machine, so
+    // it collapses to the one the routes' own 503 already uses.
+    return {
+      body: { error: hostDetails ? err.message : 'index unavailable', state: err.state },
+      status: 503,
+    }
   }
-  if (err.upstreamStatus === 404) return { body: { error: err.message }, status: 404 }
+  const refused = hostDetails ? err.message : 'the index refused the request'
+  if (err.upstreamStatus === 404) return { body: { error: refused }, status: 404 }
   const bad = err.upstreamStatus >= 400 && err.upstreamStatus < 500
-  return { body: { error: err.message }, status: bad ? 400 : 502 }
+  if (bad) return { body: { error: refused }, status: 400 }
+  return { body: { error: hostDetails ? err.message : 'the index failed' }, status: 502 }
+}
+
+/**
+ * The archive's own library path, out of a virtual path naming an entry inside
+ * it — `/models.zip!/box.stl` → `/models.zip`. What an error about the *archive*
+ * names, since that is the entry that failed; the entry inside it is not what
+ * could not be read. A path with no `!/` is its own answer.
+ */
+function archiveOf(vpath: string): string {
+  const i = vpath.indexOf('!/')
+  return i === -1 ? vpath : vpath.slice(0, i)
 }
 
 /**
@@ -873,6 +912,47 @@ export function createApp(
     return rest
   }
 
+  /**
+   * A message this server did not compose, on its way to a viewer who may not
+   * be told about the host (D9/D11). Returns what may go on the wire.
+   *
+   * The typed errors are not this: a `LibraryError`, `ListingError`, `VPathError`
+   * or `ZipError` says something this codebase wrote, about a library path or a
+   * constant, and travels whatever the deployment declares. What passes through
+   * here is free text from *somewhere else* — a Node `Error` from the
+   * filesystem, a launcher's account of a command that failed, an index's own
+   * explanation — and the ones that name a path name a path **on the operator's
+   * machine**: `EACCES: permission denied, open '/tmp/…/models.zip'`,
+   * `spawn gtk-launch ENOENT`, `…/harrifex.obj is not in the cache`. There is no
+   * predicting which of them does, because none of them is ours to predict.
+   *
+   * So the choice is made once, here, rather than at each branch that answers
+   * with such a message — a branch is exactly the thing that gets added later
+   * and forgets. A new one calls this and is covered.
+   *
+   * **The message is not lost, it is redirected.** It goes to the server's log,
+   * where the operator is, beside the route that produced it; the viewer gets the
+   * same status and a sentence written here. A public deployment's diagnosis is
+   * the operator's job, and this is the only place the two audiences part.
+   */
+  function viewerError(c: Context, message: string, generic: string): string {
+    if (features.hostDetails) return message
+    console.error(`${c.req.path}: ${message}`)
+    return generic
+  }
+
+  /**
+   * Both scoring routes' one answer to an `IndexError`: `indexErrorReply` picks
+   * the status and the sentence, `viewerError` applies the rule and writes the
+   * log line. The two agree by construction — where the host is the viewer's
+   * concern both hand back `err.message`, so the body is byte-identical to what
+   * this route answered before the rule existed.
+   */
+  function indexError(c: Context, err: IndexError): Response {
+    const { body, status } = indexErrorReply(err, features.hostDetails)
+    return c.json({ ...body, error: viewerError(c, err.message, body.error) }, status)
+  }
+
   app.use('/api/*', guard(origins))
 
   /**
@@ -946,12 +1026,21 @@ export function createApp(
    */
   app.get('/api/library', async (c) => c.json(viewerState(await library.state())))
 
+  /**
+   * The typed branches carry sentences this codebase wrote — a library path, a
+   * constant, an archive's own grammar — and are unchanged by `hostDetails`,
+   * which is a rule about the *host's* locations and not about anything
+   * path-shaped. The fall-through is the opposite: whatever threw, in its own
+   * words, which for a Node `Error` is a host path (`EACCES: permission denied,
+   * open '/tmp/…/models.zip'` — a zip whose mode is 000, on `/api/dir` and
+   * `/api/file` both). It goes through `viewerError` for that reason.
+   */
   app.onError((err, c) => {
     if (err instanceof LibraryError) return c.json({ error: err.message }, err.status)
     if (err instanceof ListingError) return c.json({ error: err.message }, err.status === 404 ? 404 : 400)
     if (err instanceof VPathError) return c.json({ error: err.message }, 400)
     if (err instanceof ZipError) return c.json({ error: err.message }, 422)
-    return c.json({ error: err.message }, 500)
+    return c.json({ error: viewerError(c, err.message, 'internal error') }, 500)
   })
 
   app.get('/api/dir', async (c) => {
@@ -1178,7 +1267,17 @@ export function createApp(
     }
     if (entry !== undefined) {
       if (/\.zip$/i.test(entry)) return c.json({ error: 'nested zips are unsupported' }, 400)
-      const bytes = await extractEntry(fsPath, entry)
+      let bytes
+      try {
+        bytes = await extractEntry(fsPath, entry)
+      } catch (err) {
+        // `listZipDir`'s taxonomy, on the route that hands the bytes over: the
+        // archive resolved through the library, so a failure to read it is a
+        // library entry failing and is named as one. Untyped, it escaped as the
+        // host path the `open` failed on.
+        if (err instanceof ZipError) throw err
+        throw new ListingError(404, `cannot read zip: ${archiveOf(libPath)}`)
+      }
       return c.body(new Uint8Array(bytes), 200, headers)
     }
     const s = await stat(fsPath).catch(() => null)
@@ -1214,7 +1313,25 @@ export function createApp(
       return { ok: false, body: { error: `no such file: ${path}` }, status: 404 }
     }
     if (entry !== undefined) {
-      return { ok: true, file: await zipTemp.fileFor(path, fsPath, entry) }
+      try {
+        return { ok: true, file: await zipTemp.fileFor(path, fsPath, entry) }
+      } catch (err) {
+        // The same unreadable archive reaches the launch endpoints, through the
+        // third `extractEntry` call site — `fileFor` extracts before it stages.
+        //
+        // Narrowed to failures on the **archive itself**, deliberately: the rest
+        // of `fileFor` writes and renames inside the temp store, and an
+        // out-of-space or unwritable tmpdir is the server's own problem, not a
+        // library entry that could not be read. Rebranding it as one would send
+        // an operator to look at the archive. Both runtimes carry `path` on an
+        // fs error and both set it to the file the `open` failed on (probed
+        // under Node 24 and Bun, EACCES on a mode-000 archive).
+        if (err instanceof ZipError) throw err
+        if ((err as NodeJS.ErrnoException | null)?.path === fsPath) {
+          throw new ListingError(404, `cannot read zip: ${archiveOf(path)}`)
+        }
+        throw err
+      }
     }
     return { ok: true, file: resolvePath(fsPath) }
   }
@@ -1287,7 +1404,12 @@ export function createApp(
     try {
       await launcher.launch(appId, target.file)
     } catch (err) {
-      if (err instanceof LaunchError) return c.json({ error: err.message }, 502)
+      // The reason is the command's own — an exit status with its stderr, or a
+      // spawn failure naming the binary and the host's tmpdir — so it travels
+      // under `viewerError`'s rule rather than verbatim.
+      if (err instanceof LaunchError) {
+        return c.json({ error: viewerError(c, err.message, 'the launch failed') }, 502)
+      }
       throw err
     }
     return c.json({ ok: true })
@@ -1323,7 +1445,10 @@ export function createApp(
     try {
       await launcher.chooser(target.file)
     } catch (err) {
-      if (err instanceof LaunchError) return c.json({ error: err.message }, 502)
+      // As on `/api/open`: the chooser's own account of its failure.
+      if (err instanceof LaunchError) {
+        return c.json({ error: viewerError(c, err.message, 'the launch failed') }, 502)
+      }
       throw err
     }
     return c.json({ ok: true })
@@ -1523,10 +1648,7 @@ export function createApp(
         minScore: body?.minScore,
       })
     } catch (err) {
-      if (err instanceof IndexError) {
-        const { body: reply, status } = indexErrorReply(err)
-        return c.json(reply, status)
-      }
+      if (err instanceof IndexError) return indexError(c, err)
       throw err
     }
     const { entries, poses, scores } = await hitsToEntries(library, result.results, collectionRootFs)
@@ -1618,10 +1740,7 @@ export function createApp(
     try {
       result = await indexSimilar(model, k, pool)
     } catch (err) {
-      if (err instanceof IndexError) {
-        const { body: reply, status: code } = indexErrorReply(err)
-        return c.json(reply, code)
-      }
+      if (err instanceof IndexError) return indexError(c, err)
       throw err
     }
     // The same hit→tile join a meaning answer takes: this server's own view of

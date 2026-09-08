@@ -344,13 +344,21 @@ async function listZipDir(
   zipLibPath: string,
   prefix: string,
 ): Promise<DirEntry[]> {
-  let zipStat
+  let zipStat, zipEntries
   try {
     zipStat = await stat(zipFsPath)
-  } catch {
+    // Inside the `try` with the `stat`, and this is the half that was outside
+    // it: `stat` succeeds on an archive whose mode is 000 — reading a file's
+    // metadata needs no permission on the file — so the failure lands on the
+    // `open` in here, and escaped untyped as `EACCES: permission denied, open
+    // '<host path>'`, a 500 naming the operator's filesystem. Same taxonomy as
+    // `walkZip`'s: a corrupt archive is a `ZipError` and says so, an unreadable
+    // one is this library entry failing and is named by its library path.
+    zipEntries = await listZipEntries(zipFsPath)
+  } catch (err) {
+    if (err instanceof ZipError) throw err
     throw new ListingError(404, `cannot read zip: ${zipLibPath}`)
   }
-  const zipEntries = await listZipEntries(zipFsPath)
   const norm = prefix === '' ? '' : prefix.endsWith('/') ? prefix : `${prefix}/`
 
   // A prefix that is itself a *file* entry in the archive is not a directory.

@@ -6,7 +6,7 @@
 // the route acts on it. Testing the report in one file and the refusals in
 // another is exactly the drift D5 forbids — a declaration that nothing enforces
 // is a promise, and a refusal nothing declares is a surprise.
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { zipSync } from 'fflate'
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -32,6 +32,19 @@ const top = realTempDir('mb-refuse-lib-')
 mkdirSync(join(top, 'kit'), { recursive: true })
 writeFileSync(join(top, 'kit', 'part.stl'), stlBytes(1))
 writeFileSync(join(top, 'models.zip'), zipSync({ 'box.stl': new Uint8Array(stlBytes(2)) }))
+
+/**
+ * A library holding one archive the process cannot read: mode 000, so `stat`
+ * still answers — reading a file's metadata needs no permission on the file —
+ * and the failure lands on the `open` inside the zip reader. Its own library, so
+ * that no other cell's walk meets it.
+ *
+ * Skipped as root, where mode 000 is not a wall.
+ */
+const lockedTop = realTempDir('mb-refuse-locked-')
+writeFileSync(join(lockedTop, 'locked.zip'), zipSync({ 'box.stl': new Uint8Array(stlBytes(2)) }))
+chmodSync(join(lockedTop, 'locked.zip'), 0o000)
+const asRoot = process.getuid?.() === 0
 
 /** A configured root that is not there: the `missing` state. */
 const absentRoot = join(realTempDir('mb-refuse-absent-'), 'not-mounted')
@@ -90,8 +103,14 @@ function fakeLauncher(): Launcher {
  * One app from one report — the value `/api/features` answers and the value the
  * routes read, which is the whole point of the pairing.
  */
-function appWith(over: Partial<FeatureReport>, library: Library = libraryFor(top)) {
-  return createApp(new ThumbCache(cacheDir()), fakeLauncher(), undefined, library, undefined, {
+function appWith(
+  over: Partial<FeatureReport>,
+  library: Library = libraryFor(top),
+  // Trailing and defaulted, like `createApp`'s own injections: only the cells
+  // that need a launcher to *fail* pass one.
+  launcher: Launcher = fakeLauncher(),
+) {
+  return createApp(new ThumbCache(cacheDir()), launcher, undefined, library, undefined, {
     ...DEFAULT_FEATURES,
     ...over,
   })
@@ -140,7 +159,9 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 afterAll(() => {
-  for (const d of [top, enclosing, ...caches, ...homes]) rmSync(d, { recursive: true, force: true })
+  for (const d of [top, enclosing, lockedTop, ...caches, ...homes]) {
+    rmSync(d, { recursive: true, force: true })
+  }
   rmSync(join(absentRoot, '..'), { recursive: true, force: true })
 })
 
@@ -377,5 +398,157 @@ describe('no host location reaches a viewer where the host is not their concern'
     stubFailedIndex()
     const body = (await (await get(app, '/api/semantic/status')).json()) as { detail?: string }
     expect(body.detail).toContain(CACHE_DIR)
+  })
+
+  /**
+   * The cells above cover an index that is *unavailable*. These cover one that
+   * is up and **refuses a request** — the other half of `askIndex`'s error
+   * contract, and the half a visitor actually meets, because it is what
+   * find-similar answers for a model that has no embedding. The sentence is the
+   * index's own `detail`, built around the filesystem path it looked the model
+   * up by, and it reached a live viewer verbatim as a 404 body.
+   */
+  const UNINDEXED = join(top, 'kit', 'part.stl')
+  const READY = {
+    ready: true,
+    elapsed: 18.8,
+    collection_root: top,
+    covers: ['stl'],
+    volume: { present: true, root: top, missing: null },
+  }
+
+  /** `/status` ready, every scoring route answering `status` with `detail`. */
+  function stubRefusingIndex(detail: string, status = 404): void {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (String(url).endsWith('/status')) {
+          return new Response(JSON.stringify(READY), {
+            headers: { 'content-type': 'application/json' },
+          })
+        }
+        return new Response(JSON.stringify({ detail }), { status })
+      }),
+    )
+  }
+
+  const NOT_IN_CACHE = `${UNINDEXED} is not in the cache`
+
+  /** Both routes that score, with the smallest body each will accept. */
+  const scoring: [string, unknown][] = [
+    ['/api/semantic', { text: 'dragon' }],
+    ['/api/semantic/similar', { path: '/kit/part.stl' }],
+  ]
+
+  it("an index refusal keeps its status and loses its sentence, on both scoring routes", async () => {
+    const app = appWith(withheld)
+    for (const [route, body] of scoring) {
+      resetIndexStatus()
+      stubRefusingIndex(NOT_IN_CACHE)
+      const res = await send(app, 'POST', route, body)
+      // The **status** is what the client reads "not indexed yet" off, never
+      // the text, so the distinction the mapping draws survives untouched and
+      // only the prose collapses.
+      expect([route, res.status]).toEqual([route, 404])
+      const b = (await res.json()) as { error: string }
+      expect([route, b.error]).toEqual([route, 'the index refused the request'])
+      expect([route, b.error.includes(UNINDEXED)]).toEqual([route, false])
+    }
+  })
+
+  it("an index failing on its own side is a bad gateway and says no more", async () => {
+    // The 5xx arm of the same mapping: a different sentence, because "it
+    // refused" and "it broke" are different facts and the operator's log gets
+    // both in full either way.
+    const app = appWith(withheld)
+    for (const [route, body] of scoring) {
+      resetIndexStatus()
+      stubRefusingIndex(`CUDA out of memory loading ${UNINDEXED}`, 500)
+      const res = await send(app, 'POST', route, body)
+      expect([route, res.status]).toEqual([route, 502])
+      const b = (await res.json()) as { error: string }
+      expect([route, b.error]).toEqual([route, 'the index failed'])
+    }
+  })
+
+  it("keeps an index refusal verbatim where the host is the viewer's concern", async () => {
+    // The control: byte-for-byte the answer these routes gave before the rule
+    // existed, from the same stub.
+    const app = appWith({})
+    for (const [route, body] of scoring) {
+      resetIndexStatus()
+      stubRefusingIndex(NOT_IN_CACHE)
+      const res = await send(app, 'POST', route, body)
+      expect([route, res.status]).toEqual([route, 404])
+      const b = (await res.json()) as { error: string }
+      expect([route, b.error]).toEqual([route, NOT_IN_CACHE])
+    }
+  })
+
+  /**
+   * Whatever threw, in its own words — the branch no taxonomy covers, and the
+   * one a future route lands in by default. `/api/apps` is the readiest place to
+   * put one: it runs the launcher, which on a real machine execs `xdg-mime` and
+   * reads the operator's application entries, so an untyped failure there is not
+   * a contrivance.
+   */
+  it('an untyped failure gives the status and nothing else, and the log keeps the reason', async () => {
+    const secret = join(top, 'secret')
+    const thrower: Launcher = {
+      ...fakeLauncher(),
+      report: () => {
+        throw new Error(`EACCES: permission denied, open '${secret}'`)
+      },
+    }
+    const logged: string[] = []
+    const spy = vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => {
+      logged.push(a.join(' '))
+    })
+    try {
+      const res = await get(appWith(withheld, libraryFor(top), thrower), '/api/apps')
+      expect(res.status).toBe(500)
+      expect(await res.json()).toEqual({ error: 'internal error' })
+      // Redirected, not lost: the operator is told which route and what.
+      expect(logged.join('\n')).toContain('/api/apps')
+      expect(logged.join('\n')).toContain(secret)
+    } finally {
+      spy.mockRestore()
+    }
+
+    const control = await get(appWith({}, libraryFor(top), thrower), '/api/apps')
+    expect(control.status).toBe(500)
+    expect(((await control.json()) as { error: string }).error).toContain(secret)
+  })
+
+  /**
+   * An archive the library resolved and the process cannot open. The honest
+   * answer is the same under both configurations, because it is not a host
+   * detail at all: a **library entry** failed, and a library path names it —
+   * which is exactly the distinction the `library paths are untouched` cell
+   * above draws. Untyped, it was a 500 carrying `EACCES: permission denied,
+   * open '<host path>'` on both of these routes.
+   */
+  it.skipIf(asRoot)('an unreadable archive is named by its library path, whatever is declared', async () => {
+    for (const over of [withheld, {}]) {
+      const app = appWith(over, libraryFor(lockedTop))
+      const listed = await get(app, '/api/dir?path=%2Flocked.zip')
+      expect(listed.status).toBe(404)
+      expect(await listed.json()).toEqual({ error: 'cannot read zip: /locked.zip' })
+
+      const fetched = await get(
+        app,
+        `/api/file?path=${encodeURIComponent('/locked.zip!/box.stl')}`,
+      )
+      expect(fetched.status).toBe(404)
+      expect(await fetched.json()).toEqual({ error: 'cannot read zip: /locked.zip' })
+
+      // Nothing named where the archive lives, on either route.
+      for (const res of [
+        await get(app, '/api/dir?path=%2Flocked.zip'),
+        await get(app, `/api/file?path=${encodeURIComponent('/locked.zip!/box.stl')}`),
+      ]) {
+        expect(await text(res)).not.toContain(lockedTop)
+      }
+    }
   })
 })

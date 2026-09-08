@@ -124,6 +124,15 @@ const dist = clientDist(process.env)
 const client = statSync(dist, { throwIfNoEntry: false })?.isDirectory() === true
   ? createStaticHandler(dist)
   : null
+// Said out loud, beside the `library …` line, because the absence is silent and
+// looks exactly like the app being broken: an image that builds the client
+// *after* the server starts, or one whose build failed, serves the API and
+// nothing else until it is restarted, and every request for the app answers 404
+// with no line anywhere saying why. Operator-facing stdout, so the directory is
+// named — it is the one thing that makes the answer actionable.
+console.log(
+  client === null ? `no built client at ${dist}: serving the API only` : `client at ${dist}`,
+)
 
 export default {
   // Where the deployment says, defaulting to loopback (D8). The demo's own

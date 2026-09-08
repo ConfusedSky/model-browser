@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   closeSync,
   mkdtempSync,
   openSync,
@@ -11,8 +12,8 @@ import {
 import { tmpdir } from 'node:os'
 import { basename, join, sep } from 'node:path'
 import { zipSync } from 'fflate'
-import { afterAll, describe, expect, it } from 'vitest'
-import type { AppsReport, Refused } from '../../shared/types'
+import { afterAll, describe, expect, it, vi } from 'vitest'
+import type { AppsReport, FeatureReport, Refused } from '../../shared/types'
 import { DEFAULT_FEATURES, createApp } from '../src/app'
 import { ThumbCache } from '../src/cache'
 import {
@@ -47,6 +48,12 @@ writeFileSync(
   join(dir, 'nest.zip'),
   zipSync({ 'inner.zip': [zipSync({ 'deep.stl': new Uint8Array(stlBytes(7)) }), { level: 0 }] }),
 )
+// An archive the process cannot open, for the staging path: `stat` still
+// answers on a mode-000 file, so the failure lands inside the extraction.
+writeFileSync(join(dir, 'locked.zip'), zipSync({ 'part.stl': new Uint8Array(aPart) }))
+chmodSync(join(dir, 'locked.zip'), 0o000)
+/** Mode 000 is not a wall for root, so the cell that needs one steps aside. */
+const asRoot = process.getuid?.() === 0
 
 interface Call {
   file: string
@@ -70,6 +77,10 @@ function harness(
     stderr: '',
   }),
   zipTemp: ZipTempStore = new ZipTempStore(dir),
+  // Trailing and defaulted, like the three above: the deployment's declarations
+  // over the maintained set, for the cells that care what a *public* server says
+  // about a launch that failed.
+  features: Partial<FeatureReport> = {},
 ): { calls: Call[]; app: ReturnType<typeof createApp> } {
   const calls: Call[] = []
   const exec: ExecFn = async (file, args, opts) => {
@@ -82,8 +93,24 @@ function harness(
     createLauncher({ env, exec, config }),
     zipTemp,
     libraryFor(dir),
+    undefined,
+    { ...DEFAULT_FEATURES, ...features },
   )
   return { calls, app }
+}
+
+/** Collect what the server told its operator while `run` was in flight. */
+async function logged(run: () => Promise<void>): Promise<string> {
+  const lines: string[] = []
+  const spy = vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => {
+    lines.push(a.join(' '))
+  })
+  try {
+    await run()
+  } finally {
+    spy.mockRestore()
+  }
+  return lines.join('\n')
 }
 
 async function post(
@@ -326,6 +353,23 @@ describe('POST /api/open', () => {
     expect(((await res.json()) as { error: string }).error).toMatch(/exited 4: no such application/)
   })
 
+  it.skipIf(asRoot)('names an unreadable archive by its library path, and spawns nothing', async () => {
+    // The third place an archive is opened: `resolveEntryFile` stages the entry
+    // into the temp store before anything is spawned. That failure is a library
+    // entry that could not be read — not a launch that failed — so it answers
+    // like the listing routes do, rather than escaping as the host path the
+    // `open` failed on. Narrowly: a temp store that could not be *written* is
+    // still the server's own fault and is not rebranded as this.
+    const { calls, app } = harness()
+    const res = await post(app, '/api/open', {
+      path: '/locked.zip!/part.stl',
+      appId: 'x.desktop',
+    })
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({ error: 'cannot read zip: /locked.zip' })
+    expect(calls).toHaveLength(0)
+  })
+
   it('surfaces an unspawnable launch command with its reason', async () => {
     const { app } = harness({}, () => {
       throw new Error('spawn gtk-launch ENOENT')
@@ -459,5 +503,53 @@ describe('POST /api/open-with', () => {
     const res = await post(app, '/api/open-with', { path: '/loose.stl' })
     expect(res.status).toBe(502)
     expect(((await res.json()) as { error: string }).error).toMatch(/another instance/)
+  })
+})
+
+/**
+ * The launcher is **offered** here and the launch is really attempted — this is
+ * not the withholding case above, which never reaches a command at all. What
+ * changes is who is told why it failed: a launcher's reason is the command's own
+ * account of itself, naming the binary, its exit status, its stderr, and on an
+ * `ENOENT` the host path it tried to spawn. None of that is a viewer's, and all
+ * of it is the operator's, so it goes to the log and a bare 502 goes on the wire
+ * (`public-deployment` D9/D11). The two cells above are the controls, on the same
+ * fixtures with the field left alone.
+ */
+describe('a deployment that launches but does not describe its host', () => {
+  const withheld = { hostDetails: false }
+
+  it('answers that the launch failed and tells the operator what did', async () => {
+    const { app } = harness(
+      {},
+      () => ({ code: 4, stdout: '', stderr: 'no such application\n' }),
+      undefined,
+      withheld,
+    )
+    let res: Response | undefined
+    const lines = await logged(async () => {
+      res = await post(app, '/api/open', { path: '/loose.stl', appId: 'ghost.desktop' })
+    })
+    expect(res?.status).toBe(502)
+    expect(await res?.json()).toEqual({ error: 'the launch failed' })
+    expect(lines).toContain('/api/open')
+    expect(lines).toMatch(/exited 4: no such application/)
+  })
+
+  it('does the same for the chooser, which is its own call site', async () => {
+    const { app } = harness(
+      { chooser: ['open-with', '{file}'] },
+      () => ({ code: 1, stdout: '', stderr: 'another instance is already running\n' }),
+      undefined,
+      withheld,
+    )
+    let res: Response | undefined
+    const lines = await logged(async () => {
+      res = await post(app, '/api/open-with', { path: '/loose.stl' })
+    })
+    expect(res?.status).toBe(502)
+    expect(await res?.json()).toEqual({ error: 'the launch failed' })
+    expect(lines).toContain('/api/open-with')
+    expect(lines).toMatch(/another instance/)
   })
 })
