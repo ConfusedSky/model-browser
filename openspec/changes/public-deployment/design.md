@@ -294,6 +294,32 @@ site added forgets it); a separate camera store the sites consult first (rejecte
 that is the decorator with extra steps, and it splits the precedence rule across two
 modules).
 
+**Implementation notes** (settled at the 4.1 check-in, 2026-09-08). The store, the gate
+and the decorator live in one new module, `client/src/api/localFramings.ts`. Four
+decisions worth keeping: (1) the decorator is a class with **explicit one-line delegates**
+for every `ApiClient` method rather than a prototype trick over the inner client — a
+method added to `ApiClient` later must fail to compile here so its author decides whether
+it needs the overlay, which is the same preference for a compiler complaint over a silent
+fall-through that `createApp`'s `unreachable` and `StoredTab`'s excluded tab encode. Each
+delegate forwards `...args: Parameters<…>` rather than naming its parameters, and that is
+not style: naming an optional parameter and passing it on re-emits it as an explicit
+`undefined`, turning a three-argument call into a four-argument one. Invisible at runtime,
+very visible to a spy — three existing cells failed on it — and the arity is deliberate in
+`useThumbnails`' lookup, which omits the generation it does not know "rather than a fourth
+argument spelling out its ignorance". A decorator may not rewrite the call it forwards.
+(2) The gate is one exported predicate, `keepsFramingsLocally(report)`, read by the
+decorator and by the seeding site, so 4.2's rule cannot drift between the two arrival
+points. (3) `App` holds the report in a **ref beside the state** and passes one
+`useCallback` getter to both `withLocalFramings` and `useThumbnails`: both are built once
+and neither may be rebuilt when the report resolves — an unstable getter in the hook's
+dependency array re-runs the thumbnail sweep over the whole grid on every render.
+(4) At the seeding site the overlay is applied to the returned tile state and **not** fed
+to `usable`: "the listing answered this tile" stays a statement about the server's render.
+The consequence is deliberate — an entry carrying no orientation, with a locally-kept
+camera and a held pose, fails `usable`, falls to the lookup, and gets the same kept camera
+from the decorator's overlay there. One extra lookup, identical framing; it is not a bug
+to fix by teaching `usable` about the local store.
+
 ### D7: The tab fallback changes; the recorded value does not
 
 `SidePanel`'s `tabStore` parses `raw === 'search' ? 'search' : 'chat'` — an absent key,

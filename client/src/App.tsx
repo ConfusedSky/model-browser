@@ -10,6 +10,7 @@ import type {
   OrbitAxis,
 } from '../../shared/types'
 import { HttpApiClient, HttpError } from './api/client'
+import { withLocalFramings } from './api/localFramings'
 import EntryMenu from './components/EntryMenu'
 import FindBar from './components/FindBar'
 import Grid from './components/Grid'
@@ -319,7 +320,27 @@ const LIBRARY_STATES: ReadonlySet<string> = new Set(
 )
 
 export default function App() {
-  const api = useMemo(() => new HttpApiClient(), [])
+  /**
+   * The feature report as a *stable getter*, for the two consumers that must
+   * read it without depending on it (`public-deployment` D6).
+   *
+   * `features` below is state, and both readers here are built once: the client
+   * identity must survive the report resolving, and the thumbnail sweep's
+   * dependency array must not churn — an unstable getter there would re-run the
+   * sweep on every render, which is the failure the `ao` parameter's own note
+   * describes. A ref written where `setFeatures` is called gives both readers
+   * the current value through one identity.
+   */
+  const featuresRef = useRef<FeatureReport | null>(null)
+  const readFeatures = useCallback(() => featuresRef.current, [])
+  /**
+   * Decorated once, at construction, and the decorator asks the getter per
+   * call: on a deployment declaring thumbnail writes off, a framing is kept in
+   * this browser instead of sent, and a lookup's answer is overlaid with what
+   * is kept (D6). The five existing `putThumb` call sites are untouched — the
+   * seam is here, so the precedence rule lives in one place rather than five.
+   */
+  const api = useMemo(() => withLocalFramings(new HttpApiClient(), readFeatures), [readFeatures])
   const queue = useMemo(() => new RenderQueue(2), [])
   const placeholderRef = useRef<(path: string, url: string) => void>(() => {})
   const lru = useMemo(
@@ -1090,6 +1111,9 @@ export default function App() {
     // The listing's own array, not `thumbEntries`: the band ranking resets
     // per listing, and a landed peek must not count as one (review F1).
     entries,
+    // The same getter the decorated client reads, so the local-framing rule is
+    // one rule at both arrival points (D6).
+    readFeatures,
   )
   placeholderRef.current = setPlaceholder
 
@@ -1760,7 +1784,13 @@ export default function App() {
     let alive = true
     void api.features().then(
       (report) => {
-        if (alive) setFeatures(report)
+        if (!alive) return
+        // The ref beside the state, written in the same act: the decorated
+        // `ApiClient` and the thumbnail sweep read the report through
+        // `readFeatures` rather than through this state, because both are built
+        // once and must not be rebuilt when it resolves (D6).
+        featuresRef.current = report
+        setFeatures(report)
       },
       () => {
         // Deliberately nothing: `null` already means "not known", and the next

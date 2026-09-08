@@ -3,8 +3,9 @@ import { act, StrictMode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as THREE from 'three'
-import type { DirEntry, IndexPose } from '../../shared/types'
+import type { DirEntry, FeatureReport, IndexPose } from '../../shared/types'
 import type { ApiClient } from '../src/api/client'
+import { withLocalFramings, writeLocalFraming } from '../src/api/localFramings'
 import { resetLookupQueueForTests, useThumbnails, type ThumbState } from '../src/hooks/useThumbnails'
 import { thumbImageUrl } from '../src/api/thumbUrl'
 import type { MeshLru } from '../src/three/lru'
@@ -61,6 +62,7 @@ function Harness({
   queue,
   ao = true,
   poses,
+  features,
 }: {
   entries: DirEntry[]
   api: ApiClient
@@ -68,6 +70,12 @@ function Harness({
   queue: RenderQueue
   ao?: boolean
   poses?: Record<string, IndexPose>
+  /**
+   * The feature report, as App passes it: a getter, not the report, so a
+   * resolving report cannot re-run the sweep (`public-deployment` D6). Omitted
+   * by every cell but the local-framing ones, which is "the report is unknown".
+   */
+  features?: () => FeatureReport | null
 }) {
   const { thumbs, setThumb, refetch, setPlaceholder, setBands, reportImageError } = useThumbnails(
     entries,
@@ -76,6 +84,8 @@ function Harness({
     queue,
     ao,
     poses,
+    entries,
+    features,
   )
   lastThumbs = thumbs
   lastSetThumb = setThumb
@@ -2337,6 +2347,130 @@ describe('a listing-known thumbnail is drawn without a lookup', () => {
     await settle()
     expect(urlOf('/models/m0.stl')).toContain('ao=off')
     expect(getThumb).toHaveBeenCalledTimes(2)
+  })
+})
+
+/**
+ * The local-framing overlay at the **seeding** arrival point
+ * (`public-deployment` 4.1, D6).
+ *
+ * The decorator over `ApiClient` covers the lookup's answer, and would cover
+ * nothing at all on a deployment whose thumbnails are all baked: every tile
+ * there is drawn straight from the listing's annotation with no lookup issued.
+ * These cells are about that second arrival — one store, one rule, two places.
+ *
+ * They use the environment's own `localStorage`, not an injected store: the
+ * hook takes no storage argument, and using the real one is what makes the
+ * third cell able to hand the *same* store to the decorator.
+ */
+describe('a kept framing wins over the one the listing carried', () => {
+  const CAMERA = { az: 0.4, el: 0.2, distR: 2, target: [0, 0, 0] as [number, number, number] }
+  const KEPT = { az: 1.5, el: -0.3, distR: 4, target: [1, 0, 0] as [number, number, number] }
+  const OFF: FeatureReport = { thumbWrites: false }
+  const PATH = '/models/m0.stl'
+
+  function annotated(over: Partial<NonNullable<DirEntry['thumb']>> = {}): DirEntry[] {
+    return models(1).map((e) => ({
+      ...e,
+      thumb: {
+        gen: 5,
+        framed: true,
+        camera: CAMERA,
+        axis: 'z' as const,
+        ao: { state: 'hit' as const, lighting: THUMB_LIGHTING, rig: RIG_VERSION },
+        noao: { state: 'miss' as const },
+        ...over,
+      },
+    }))
+  }
+  const fakeApi = (getThumb = vi.fn().mockResolvedValue({ status: 'miss' })): ApiClient =>
+    ({ getThumb, thumbImageUrl, putThumb: vi.fn().mockResolvedValue({}) }) as unknown as ApiClient
+
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
+  it('overrides the listing entry’s own camera and axis, still with no lookup', async () => {
+    writeLocalFraming(PATH, { camera: KEPT, axis: '-x' })
+    const api = fakeApi()
+    await render(
+      <Harness
+        entries={annotated()}
+        api={api}
+        lru={fakeLru()}
+        queue={new RenderQueue(2)}
+        features={() => OFF}
+      />,
+    )
+    await settle()
+
+    // Still the listing's answer about the *pixels* — the overlay is about
+    // orientation only, and issues no request of its own.
+    expect(api.getThumb).not.toHaveBeenCalled()
+    expect(statuses()).toEqual(['ready'])
+    expect(lastThumbs.get(PATH)!.url).toBe(thumbImageUrl(PATH, 1, true, 5))
+    expect(lastThumbs.get(PATH)!.camera).toEqual(KEPT)
+    expect(lastThumbs.get(PATH)!.axis).toBe('-x')
+  })
+
+  it('does not, while the report is unknown', async () => {
+    // 4.2: not knowing must never relocate where a user's orientations live —
+    // and that cuts both ways. A browser carrying framings from some other
+    // deployment must not silently re-frame a server that never refused a write.
+    writeLocalFraming(PATH, { camera: KEPT, axis: '-x' })
+    const api = fakeApi()
+    await render(
+      <Harness entries={annotated()} api={api} lru={fakeLru()} queue={new RenderQueue(2)} />,
+    )
+    await settle()
+
+    expect(api.getThumb).not.toHaveBeenCalled()
+    expect(lastThumbs.get(PATH)!.camera).toEqual(CAMERA)
+    expect(lastThumbs.get(PATH)!.axis).toBe('z')
+  })
+
+  it('reaches an unframed entry through the lookup, where a held pose refuses the seed', async () => {
+    // The consequence of overlaying the seed's *state* and not feeding the
+    // overlay to `usable`: this entry carries no orientation, so a held pose
+    // makes the annotation stale and the tile falls to the lookup — where the
+    // decorator's own overlay lands the same kept camera. One extra lookup,
+    // same framing. Do not "fix" this by teaching `usable` about the local
+    // store: "the listing answered this tile" is a statement about the
+    // server's render, not about something only this browser holds.
+    writeLocalFraming(PATH, { camera: KEPT })
+    const pose: IndexPose = {
+      up: [0, 1, 0],
+      azimuth_zero: [1, 0, 0],
+      source: 'siglip',
+      confidence: 0.9,
+      front: null,
+    }
+    const getThumb = vi.fn().mockResolvedValue({
+      status: 'hit',
+      pngUrl: 'blob:from-lookup',
+      lighting: THUMB_LIGHTING,
+      rig: RIG_VERSION,
+      gen: 5,
+    })
+    const api = withLocalFramings(fakeApi(getThumb), () => OFF)
+
+    await render(
+      <Harness
+        entries={annotated({ camera: undefined, axis: undefined })}
+        api={api}
+        lru={fakeLru()}
+        queue={new RenderQueue(2)}
+        poses={{ [PATH]: pose }}
+        features={() => OFF}
+      />,
+    )
+    await settle()
+
+    expect(getThumb).toHaveBeenCalledTimes(1)
+    expect(statuses()).toEqual(['ready'])
+    expect(lastThumbs.get(PATH)!.url).toBe('blob:from-lookup')
+    // The kept camera arrived, and the pose did not reassert itself over it.
+    expect(lastThumbs.get(PATH)!.camera).toEqual(KEPT)
   })
 })
 

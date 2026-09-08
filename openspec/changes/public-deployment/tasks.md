@@ -159,7 +159,7 @@
 > rebases onto it. Either way there is one path, not two (coordinated with that change's
 > session, 2026-09-03).
 
-- [ ] 4.1 Decorate `ApiClient`'s thumbnail read and write when a known report declares
+- [x] 4.1 Decorate `ApiClient`'s thumbnail read and write when a known report declares
       writes off (D6): the write drops the PNG and stores camera and axis in this
       browser, answering as a write would; the read overlays a locally-stored orientation
       onto the server's answer. Precedence: local, then server, then an orientation source, then default. The six
@@ -169,9 +169,21 @@
       carries the stored camera and the tile is drawn with no lookup at all, so an overlay
       that lives only on the lookup answer misses every baked tile — apply it where the
       tile state is seeded
-- [ ] 4.2 Install the decorator **only** on a known report explicitly declaring writes
+      — 2026-09-08: `client/src/api/localFramings.ts` (`withLocalFramings`, the store, and
+      `keepsFramingsLocally`), installed at `App`'s `api` `useMemo`. Both arrivals: the
+      decorator's `getThumb` overlay, and `useThumbnails`' `start` listing-annotation
+      branch, which reads the same store under the same predicate. All six `putThumb` call
+      sites and `renderEntryThumbnail` are untouched — including `bulkJobs`' reset write,
+      whose `camera: null` deletes the kept half rather than leaving a stale override, and
+      whose `png: null` needs no special case. `LocalFramingClient.putThumb` answers
+      `{ dropped: true }` with no `gen`, which `renderEntryThumbnail` already turns into
+      `skipped`. See D6's Implementation notes
+- [x] 4.2 Install the decorator **only** on a known report explicitly declaring writes
       off — unknown and failed reports keep writing to the server, which the
       feature-report capability requires normatively (D6)
+      — 2026-09-08: `keepsFramingsLocally` is `report !== null && report.thumbWrites ===
+      false`, read per call through a getter so a late report changes no client identity.
+      Falsified: widening it to admit `null` failed three cells across both suites
 - [ ] 4.3 `SidePanel` withholds the chat tab when it is not declared on, absent rather
       than disabled; **both** its fallbacks resolve to a tab that exists, preferring the
       recorded one, and neither rewrites the recorded value (D7): `tabStore`'s parse, and
@@ -274,9 +286,15 @@
       unaffected and must still be asserted *present*. Cover `/api/library` in every
       state, the not-ready envelopes, `/api/semantic/status`, both semantic 503s, and an
       error path
-- [ ] 7.5 Client: with writes declared off, an orbit release stores locally and sends
+- [x] 7.5 Client: with writes declared off, an orbit release stores locally and sends
       nothing, a read prefers the local orientation, and one browser's framing does not
       reach another; with the report unknown or failed, writes still go to the server
+      — 2026-09-08: nine cells in `apiClient.test.ts`'s `withLocalFramings` block (two
+      injected stores make "nobody else's" a claim about two stores, not one) and three in
+      `thumbnailQueue.test.tsx` for the seeding arrival. A failed read is the same `null`
+      the unknown cells drive. Falsified four ways — installing regardless of the report,
+      forwarding the write to `inner`, dropping the seeding overlay, and treating a
+      discard as "keep" — each failing only its own cells
 - [ ] 7.6 Client: a profile with no recorded tab, and one recording `chat`, both open on
       search when the chat tab is withheld, and neither has its recorded value rewritten;
       with chat declared on **and the report known**, the panel behaves exactly as today;

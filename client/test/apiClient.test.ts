@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { HttpApiClient, HttpError, POSES_MAX } from '../src/api/client'
+import type { FeatureReport } from '../../shared/types'
+import { HttpApiClient, HttpError, POSES_MAX, type ThumbSave } from '../src/api/client'
+import {
+  readLocalFraming,
+  withLocalFramings,
+  type FramingStorage,
+} from '../src/api/localFramings'
 
 const CAM = { az: 1, el: 0.5, distR: 2, target: [0, 0, 0] as [number, number, number] }
 
@@ -510,5 +516,245 @@ describe('HttpApiClient contract', () => {
     // superseded by scrolling, and a stale answer is dropped by the caller.
     await expect(api.models('/kit')).resolves.toEqual(listing)
     expect(fetchFn).toHaveBeenCalledWith(`/api/models?path=${encodeURIComponent('/kit')}`)
+  })
+})
+
+// The local-framing decorator (`public-deployment` D6, tasks 4.1/4.2/0.3).
+//
+// Storage is injected per cell rather than shared through a global
+// `localStorage`: "one browser's framing is nobody else's" is a claim about two
+// stores, and it cannot be made against one. The inner client is a real
+// `HttpApiClient` over a spy `fetchFn`, so "sends nothing" is asserted at the
+// network and not merely at a mock's method.
+describe('withLocalFramings', () => {
+  const OFF: FeatureReport = { thumbWrites: false }
+  const ON: FeatureReport = { thumbWrites: true }
+
+  /** A `Storage`-shaped map. `raw` is the bytes, for asserting what was kept. */
+  function memStorage(): FramingStorage & { raw: Map<string, string> } {
+    const raw = new Map<string, string>()
+    return {
+      raw,
+      getItem: (k: string) => raw.get(k) ?? null,
+      setItem: (k: string, v: string) => {
+        raw.set(k, v)
+      },
+      removeItem: (k: string) => {
+        raw.delete(k)
+      },
+    }
+  }
+
+  /** An orbit release: pixels, both orientation halves, and the pixel labels. */
+  function orbitRelease(): ThumbSave {
+    return {
+      path: '/m.stl',
+      mtime: 42,
+      png: new Blob(['pixels'], { type: 'image/webp' }),
+      camera: CAM,
+      axis: '-z',
+      // Literals here, and deliberately: these three are being asserted
+      // **absent** from what is kept, so their values cannot mask a recipe bump
+      // the way a literal in a cache-hit fixture would (client/test/CLAUDE.md).
+      lighting: 'camera',
+      rig: 7,
+      posed: 3,
+    }
+  }
+
+  it('keeps an orbit release in this browser, sends nothing, and reports the pixels as not stored', async () => {
+    // A `fetchFn` that would *succeed* if it were reached, deliberately: a bare
+    // `vi.fn()` returning undefined makes a forwarding decorator crash instead
+    // of fail, and a crash is a weaker statement than "the request was made".
+    const fetchFn = vi.fn(() => Promise.resolve(jsonResponse({ ok: true, gen: 5 })))
+    const store = memStorage()
+    const api = withLocalFramings(
+      new HttpApiClient(fetchFn as unknown as typeof fetch),
+      () => OFF,
+      store,
+    )
+
+    const written = await api.putThumb(orbitRelease())
+
+    // Nothing left the browser — asserted at the network, since the whole point
+    // is that a public deployment's cache is never reached.
+    expect(fetchFn).not.toHaveBeenCalled()
+    // `dropped` and no generation: the orientation landed, the pixels did not,
+    // which is the account `renderEntryThumbnail` turns into `skipped` so a
+    // generate job never counts this as a render made (0.3).
+    expect(written).toEqual({ dropped: true })
+    expect(written.gen).toBeUndefined()
+    // Only the orientation is kept. The PNG and the three labels that describe
+    // pixels are dropped together, for `withoutUnusableRender`'s reason.
+    expect(JSON.parse(store.raw.get('mb:framing:/m.stl') as string)).toEqual({
+      camera: CAM,
+      axis: '-z',
+    })
+  })
+
+  it('answers a pixels-only write as dropped too, keeping nothing', async () => {
+    const fetchFn = vi.fn(() => Promise.resolve(jsonResponse({ ok: true, gen: 5 })))
+    const store = memStorage()
+    const api = withLocalFramings(
+      new HttpApiClient(fetchFn as unknown as typeof fetch),
+      () => OFF,
+      store,
+    )
+    const written = await api.putThumb({
+      path: '/m.stl',
+      mtime: 42,
+      png: new Blob(['pixels'], { type: 'image/webp' }),
+    })
+    expect(fetchFn).not.toHaveBeenCalled()
+    expect(written).toEqual({ dropped: true })
+    expect(store.raw.size).toBe(0)
+  })
+
+  it("prefers this browser's framing over the one the server holds", async () => {
+    const store = memStorage()
+    const server = { az: 9, el: 9, distR: 9, target: [1, 1, 1] as [number, number, number] }
+    // A fresh Response per call — one cannot be read twice, and these cells
+    // read more than once.
+    const fetchFn = vi.fn(() =>
+      Promise.resolve(jsonResponse({ status: 'miss', camera: server, axis: 'y', gen: 4 })),
+    )
+    const api = withLocalFramings(
+      new HttpApiClient(fetchFn as unknown as typeof fetch),
+      () => OFF,
+      store,
+    )
+
+    await api.putThumb({ path: '/m.stl', mtime: 42, camera: CAM, axis: '-z' })
+    const read = await api.getThumb('/m.stl', 42)
+
+    expect(read.camera).toEqual(CAM)
+    expect(read.axis).toBe('-z')
+    // The overlay is about orientation only: the pixels and the status are the
+    // server's business, and a miss with a local camera is still a miss.
+    expect(read.status).toBe('miss')
+    expect(read.gen).toBe(4)
+  })
+
+  it("a discard deletes the local half, and the next read shows the server's", async () => {
+    const store = memStorage()
+    const server = { az: 9, el: 9, distR: 9, target: [1, 1, 1] as [number, number, number] }
+    const fetchFn = vi.fn(() =>
+      Promise.resolve(jsonResponse({ status: 'miss', camera: server, axis: 'y' })),
+    )
+    const api = withLocalFramings(
+      new HttpApiClient(fetchFn as unknown as typeof fetch),
+      () => OFF,
+      store,
+    )
+
+    await api.putThumb({ path: '/m.stl', mtime: 42, camera: CAM, axis: '-z' })
+    expect((await api.getThumb('/m.stl', 42)).camera).toEqual(CAM)
+
+    // Give the framing up, as a tile or the viewer does. A stale local override
+    // must not outlive the discard, or nothing the server holds could ever
+    // reach this model again on this browser.
+    await api.putThumb({ path: '/m.stl', mtime: 42, camera: null })
+    const after = await api.getThumb('/m.stl', 42)
+    expect(after.camera).toEqual(server)
+    // The axis was not named by the discard, so it is kept — three states, and
+    // absence is the one that changes nothing.
+    expect(after.axis).toBe('-z')
+
+    await api.putThumb({ path: '/m.stl', mtime: 42, axis: null })
+    expect((await api.getThumb('/m.stl', 42)).axis).toBe('y')
+    // Nothing of this model is held any more — an emptied record is removed,
+    // not left as an empty object for later reads to step over.
+    expect(store.raw.size).toBe(0)
+  })
+
+  it("one browser's framing is nobody else's", async () => {
+    const first = memStorage()
+    const second = memStorage()
+    const fetchFn = vi.fn(() => Promise.resolve(jsonResponse({ status: 'miss', axis: 'y' })))
+    const mine = withLocalFramings(
+      new HttpApiClient(fetchFn as unknown as typeof fetch),
+      () => OFF,
+      first,
+    )
+    const theirs = withLocalFramings(
+      new HttpApiClient(fetchFn as unknown as typeof fetch),
+      () => OFF,
+      second,
+    )
+
+    await mine.putThumb({ path: '/m.stl', mtime: 42, camera: CAM, axis: '-z' })
+
+    expect((await mine.getThumb('/m.stl', 42)).camera).toEqual(CAM)
+    // The second visitor sees the deployment's own framing, not the first's.
+    expect((await theirs.getThumb('/m.stl', 42)).camera).toBeUndefined()
+    expect((await theirs.getThumb('/m.stl', 42)).axis).toBe('y')
+    expect(second.raw.size).toBe(0)
+  })
+
+  // 4.2, and normative in the feature-report capability: not knowing must never
+  // relocate where a user's data is stored. Both cells assert the *same object*
+  // reached the inner client, so a pass-through that rebuilt the save — and
+  // could therefore have dropped a field — would fail.
+  it('passes through untouched while the report is unknown', async () => {
+    const store = memStorage()
+    const inner = new HttpApiClient(
+      vi.fn(() => Promise.resolve(jsonResponse({ ok: true, gen: 5 }))) as unknown as typeof fetch,
+    )
+    const put = vi.spyOn(inner, 'putThumb')
+    const get = vi.spyOn(inner, 'getThumb')
+    const api = withLocalFramings(inner, () => null, store)
+
+    const save = orbitRelease()
+    expect(await api.putThumb(save)).toEqual({ gen: 5 })
+    expect(put).toHaveBeenCalledTimes(1)
+    expect(put.mock.calls[0]![0]).toBe(save)
+    // Nothing was kept here — the write went to the server, as it does today.
+    expect(store.raw.size).toBe(0)
+
+    await api.getThumb('/m.stl', 42, false, 5)
+    expect(get).toHaveBeenCalledWith('/m.stl', 42, false, 5)
+  })
+
+  it('passes through untouched where the deployment accepts writes', async () => {
+    const store = memStorage()
+    const inner = new HttpApiClient(
+      vi.fn().mockResolvedValue(jsonResponse({ ok: true, gen: 5 })) as unknown as typeof fetch,
+    )
+    const put = vi.spyOn(inner, 'putThumb')
+    const api = withLocalFramings(inner, () => ON, store)
+
+    const save = orbitRelease()
+    expect(await api.putThumb(save)).toEqual({ gen: 5 })
+    expect(put.mock.calls[0]![0]).toBe(save)
+    expect(store.raw.size).toBe(0)
+  })
+
+  // The report resolves *after* the client is built (App holds one identity for
+  // the session), so the gate has to be read per call and not at construction.
+  it('reads the report per call, not at construction', async () => {
+    const store = memStorage()
+    const fetchFn = vi.fn(() => Promise.resolve(jsonResponse({ ok: true, gen: 5 })))
+    let report: FeatureReport | null = null
+    const api = withLocalFramings(
+      new HttpApiClient(fetchFn as unknown as typeof fetch),
+      () => report,
+      store,
+    )
+
+    await api.putThumb({ path: '/m.stl', mtime: 42, camera: CAM })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+
+    report = OFF
+    await api.putThumb({ path: '/m.stl', mtime: 42, camera: CAM })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+    expect(readLocalFraming('/m.stl', store)).toEqual({ camera: CAM })
+  })
+
+  it('reads a hand-edited or malformed record as nothing stored', () => {
+    const store = memStorage()
+    store.raw.set('mb:framing:/m.stl', 'not json')
+    expect(readLocalFraming('/m.stl', store)).toBeUndefined()
+    store.raw.set('mb:framing:/m.stl', JSON.stringify({ camera: { az: 'left' }, axis: 'w' }))
+    expect(readLocalFraming('/m.stl', store)).toBeUndefined()
   })
 })

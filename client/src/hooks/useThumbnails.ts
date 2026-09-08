@@ -3,12 +3,14 @@ import type * as THREE from 'three'
 import type {
   CameraState,
   DirEntry,
+  FeatureReport,
   IndexPose,
   LightingMode,
   OrbitAxis,
   ThumbRenderInfo,
 } from '../../../shared/types'
 import type { ApiClient } from '../api/client'
+import { keepsFramingsLocally, readLocalFraming } from '../api/localFramings'
 import { DEFAULT_CAMERA } from '../three/camera'
 import type { MeshLru } from '../three/lru'
 import { cameraForPose, POSE_VERSION } from '../three/pose'
@@ -261,6 +263,14 @@ export function isCurrentRender(
 }
 
 /**
+ * The default `features` getter, module-level rather than a `() => null`
+ * written into the parameter list: that default is a fresh function per call,
+ * and this value lands in the sweep effect's dependency array, so an inline one
+ * would re-run the sweep on every render of any caller that omits the argument.
+ */
+const NO_FEATURES = (): FeatureReport | null => null
+
+/**
  * Per-tile thumbnail pipeline: check the server cache (own concurrency limit),
  * and on miss/stale run load → parse → render → PUT through the render queue.
  * Meshes load through the LRU, so thumbnail bytes seed later orbits.
@@ -297,6 +307,21 @@ export function useThumbnails(
    * that have no separate listing.
    */
   listingKey: unknown = entries,
+  /**
+   * The feature report, read per call rather than held — the same getter the
+   * decorated `ApiClient` reads (`public-deployment` D6/4.1).
+   *
+   * A getter, and a stable one: this lands in the sweep effect's dependency
+   * array, so a function rebuilt per render would re-run the sweep over the
+   * whole grid every time App rendered. It exists because the stored
+   * orientation reaches the client by **two** paths — a `getThumb` answer,
+   * which the decorator overlays, and a listing entry's annotation, which is
+   * drawn with no lookup at all (`thumbnail-image-serving` D3) and so never
+   * passes through the client. On a deployment whose thumbnails are all baked
+   * the second path is *every* tile, which is exactly where a visitor's kept
+   * framing matters. One store and one rule; two arrival points.
+   */
+  features: () => FeatureReport | null = NO_FEATURES,
 ) {
   const [thumbs, setThumbs] = useState<Map<string, ThumbState>>(new Map())
   const slotsRef = useRef<Map<string, EntrySlot>>(new Map())
@@ -665,7 +690,26 @@ export function useThumbnails(
         slot.urlGen = info.gen
         slot.urlAo = ao
         slot.thumbGen = info.gen
-        return { status: 'ready', url, camera: info.camera, axis: info.axis, gen: info.gen }
+        // Where the deployment refuses writes, this browser's own framing wins
+        // over the one the listing carried — the delta's precedence, applied at
+        // the arrival point that never passes through `ApiClient` (D6).
+        //
+        // Overlaid onto the state, deliberately **not** fed to `usable` above:
+        // "the listing answered this tile" stays a statement about the server's
+        // render, not about an orientation only this browser holds. The one
+        // consequence, which is correct and should not be "fixed": an entry
+        // carrying no camera, with a local one and a stale pose held, fails
+        // `usable` and falls to the lookup — where the decorator's own overlay
+        // lands the same local camera. Same picture, same framing, one extra
+        // lookup.
+        const local = keepsFramingsLocally(features()) ? readLocalFraming(entry.path) : undefined
+        return {
+          status: 'ready',
+          url,
+          camera: local?.camera ?? info.camera,
+          axis: local?.axis ?? info.axis,
+          gen: info.gen,
+        }
       }
 
       slot.cancels.push(
@@ -957,7 +1001,9 @@ export function useThumbnails(
     // rebuilds only when a wave actually answers). `RIG_VERSION` is
     // still absent for D2's reason: it changes with a build, not with a
     // gesture, and nothing on screen is waiting on it.
-  }, [entries, api, lru, queue, setThumb, ao, poses, applyRanking])
+    // `features` is the getter, not the report: a stable identity that reads the
+    // current value per call, so a resolving report does not re-run the sweep.
+  }, [entries, api, lru, queue, setThumb, ao, poses, applyRanking, features])
 
   // Only an unmount disposes. Separate from the sweep effect on purpose: that
   // one must have no cleanup at all, or React would tear every entry down
