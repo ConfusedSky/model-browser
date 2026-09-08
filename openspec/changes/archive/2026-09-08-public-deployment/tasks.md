@@ -543,6 +543,7 @@
       pairing cell plus the all-on control. Falsified: dropping the bound
       (`expected 200 to be 400`), dropping the refusal (`expected 200 to be 403`).
       `askIndex`'s classification untouched — the two mini-classify items are for that repo
+      The two index items are filed as ConfusedSky/mini-classify#5 (2026-09-08): the 500 on long text, and the reset read as absent
 - [x] 9.11 Nits: public `listen.host` without `origins` is a `ConfigError`; `/api` prefix
       case-insensitive; single-range `Range` on `/api/file`; static `send` without the
       copy; `~` expanded in `root`; the two-names guard cell
@@ -560,21 +561,3 @@
       falsifications — the id dropped from the key, and an unknown id falling back to the
       bare key — each failing on its own cell
 ||||||| parent of 221a35b (Serves models only, and makes a hidden entry unreachable)
-- [ ] 9.12 Client: the local-framing key carries the library id
-      Done 2026-09-08: `validate` refuses a non-loopback `listen.host` with no origins
-      (cells for three public hosts, an empty list, and both controls); `isApiRequest`
-      compares lowercased (`/API/dir` and `/Api` reserved, `/APIary` still not);
-      `parseRange` beside the route gives `/api/file`'s plain-file branch the three single
-      -range spellings as 206, an unsatisfiable range as 416 with `bytes */size`, and
-      multi-range or malformed headers the whole file — every 200 there now carries
-      `accept-ranges`, and the zip branch ignores `Range`; static `send` hands `Response` a
-      view of the buffer it read rather than a copy (no new cell — the existing static
-      cells are the coverage); `loadConfig` expands a leading `~/` in `root` only, never
-      `~user`, a bare `~`, or `MODEL_BROWSER_ROOT`; guard.test.ts gains the applied
-      *A deployment answering two names* cell (either name by `Origin` and by `Host`,
-      cross-pairs admitted, a third refused). Falsified: the loopback rule
-      (`promise resolved "{ listen: { host: '0.0.0.0' } }" instead of rejecting`), the
-      literal prefix compare (`expected false to be true` on `/API/dir`), and range parsing
-      (`expected [ 'bytes=0-9', 200 ] to deeply equal [ 'bytes=0-9', 206 ]`)
-- [ ] 9.12 Client: the local-framing key carries the library id
-
