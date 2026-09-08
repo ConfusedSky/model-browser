@@ -544,10 +544,17 @@ implements them:
   unchanged: an unknown report still sends to the server first, as the spec requires; only
   a refusal that actually arrives is acted on. Before this, an orbit made in the
   unknown-report window was refused and dropped nowhere.
-- **The report's arrival re-seeds the current listing once** when it transitions to a
-  known writes-off, through the hook's `listingKey` rather than its dependency array, so
-  a tile seeded before the report landed shows the visitor's kept framing without a
-  navigation. Note (3) of D6's implementation notes stands: the getter stays stable.
+- **The report's arrival overlays the tiles already on screen, once**, when it
+  transitions to a known writes-off: an imperative published by `useThumbnails` beside
+  `refetch` walks the current tiles and lays each one's locally-kept framing over its
+  camera and axis, returning untouched tiles by identity. A pure overlay rather than a
+  re-seed, because both arrival paths need it — a tile answered by `getThumb` before the
+  report landed lacks the overlay as much as one seeded from the listing — and re-running
+  `start` would issue lookups and renders for the first class. *The first pin named
+  `listingKey`; the implementing worker proved by probe that it is the band-ranking reset
+  and drives no seeding, and that a fresh listing of the same paths re-seeds nothing
+  either (the survivors loop). Corrected before landing.* Note (3) of D6's implementation
+  notes stands: the getter and the dependency array are untouched.
 - **Two nits taken with them:** the unconfigured-library sentence gets a visitor form (it
   named an env var and a file), and the reset job counts a `dropped` write as work not done,
   the rule generate already followed.

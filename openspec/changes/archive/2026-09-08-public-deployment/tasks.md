@@ -485,8 +485,10 @@
 - [ ] 9.3 `index.ts` says at start whether a built client was found
 - [ ] 9.4 `HttpError.refused`; the decorator keeps a framing locally on a write the route
       refused with `thumbWrites` and answers `dropped`; other refusals and faults rethrow
-- [ ] 9.5 A known writes-off report arriving after the first listing re-seeds it once via
-      `listingKey`; a writes-on report re-seeds nothing. The unconfigured sentence gets a
+- [ ] 9.5 A known writes-off report arriving after the first listing overlays the tiles on
+      screen once, through an imperative the hook publishes beside `refetch` (not
+      `listingKey`, which drives no seeding — proved by probe); a writes-on report
+      overlays nothing. The unconfigured sentence gets a
       visitor form; the reset job stops counting a `dropped` write as written
 - [ ] 9.6 The reviewer's clean list, kept so the next round does not re-probe it: Bun-only
       APIs confined to `index.ts`; no raw `fetch` outside `ApiClient`; `RIG_VERSION`
