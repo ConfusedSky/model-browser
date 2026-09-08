@@ -27,9 +27,8 @@ model's orientation by preferring its own stored orientation, then the one the s
 holds, then whatever an orientation source supplies, then the default. A locally-held
 orientation SHALL affect only the browser holding it. Where the deployment accepts writes, or where the report is unknown or could not be read,
 the client SHALL continue to send orientations as it does today: not knowing SHALL NOT
-relocate where a user's orientations are stored. A write kept locally SHALL report itself
-as one whose pixels did not reach the store, so that work counting renders counts it as
-work not done — the same account a render the browser could not encode already gives.
+relocate where a user's orientations are stored. A write kept locally SHALL report itself as one whose pixels did not reach the store, so
+that anything counting renders counts it as work not done.
 
 #### Scenario: A visitor orbits a model
 - **WHEN** a visitor orbits and releases a model on a deployment that refuses writes
@@ -39,9 +38,7 @@ work not done — the same account a render the browser could not encode already
 - **WHEN** one visitor has re-framed a model and another opens the same model
 - **THEN** the second sees the deployment's own framing, not the first visitor's
 
-#### Scenario: A locally-kept write is not counted as a render made
-- **WHEN** bulk work runs against a deployment that refuses thumbnail writes
-- **THEN** each entry it reaches is reported as work not done rather than as a render written, since the store holds no pixels for it
+
 
 #### Scenario: An unknown report does not move a user's orientations
 - **WHEN** the report has not resolved or failed to load

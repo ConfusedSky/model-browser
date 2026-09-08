@@ -1,13 +1,14 @@
 # Tasks — public-deployment
 
-> Change "A" of the five `web-demo-backlog` 1.3 became. **Hard ordering: after
-> `thumbnail-image-serving`** — it introduces a second path by which a stored camera
-> reaches the client, which task 4.1's overlay must cover (design D6).
-> `bulk-thumbnail-jobs` **landed 2026-09-03**, so what were ordering notes are facts to
-> write against: `SidePanel` has a `library` tab, and the job surfaces gate on
-> `thumbWrites`. The original note read: it also touches `SidePanel` — additive on both sides (it adds a tab,
-> this changes the fallback), so whichever lands first, the other rebases its tab list;
-> that change's proposal asked for the ordering to be declared here, and this is it.
+> Change "A" of the five `web-demo-backlog` 1.3 became. **Everything this change waited
+> on has landed** (2026-09-07 re-read): `thumbnail-image-serving` and
+> `bulk-thumbnail-jobs` on 2026-09-03, `webp-thumbnails` on 2026-09-07. So what were
+> ordering conditions are now facts to write against. A listing entry already carries the
+> write generation and the stored camera and axis, which is the second path a stored
+> camera reaches the client by and which task 4.1's overlay must cover (design D6).
+> `SidePanel` already has its `library` tab, so the tab list needs no rebase — only the
+> two fallbacks D7 names. The bulk-job surfaces already gate on `thumbWrites`, which that
+> change's own open task 5.1 declared an interim until this field exists (3.8a closes it).
 >
 > The tree moved twice under the drafting of this change (`snapshots` appended to
 > `createApp`; `native-context-menu-bypass` appearing). Re-read every symbol named below
@@ -15,24 +16,6 @@
 >
 > Cite code by symbol name, never `file.ts:123` (CLAUDE.md). Bun-only APIs stay in
 > `server/src/index.ts` (D1). No thumbnail pixel output changes, so no `RIG_VERSION` bump.
-
-## 0. What the tree changed under this change (2026-09-07 review)
-
-- [ ] 0.1 Split the job surfaces by what they do (design D4): generate keeps `thumbWrites`,
-      reset-framings and `POST /api/reload` take `maintenance`. Today all three sit on
-      `thumbWrites` — `App.tsx`'s jobs enablement and the two `entryActions` job commands —
-      because it was the only field the report carried when `bulk-thumbnail-jobs` landed
-- [ ] 0.2 `SidePanel` has two tab fallbacks now, not one: `tabStore`'s parse **and** the
-      runtime move off a vanished `library` tab, which lands on `'chat'` — the tab a
-      deployment may withhold (D7). Both resolve through one rule
-- [ ] 0.3 The write decorator sets `ThumbPutResult.dropped` on a locally-kept write, so a
-      generate job on a write-refusing deployment reports work not done rather than a
-      cache that filled (D6, and `webp-thumbnails`' own accounting rule)
-- [ ] 0.4 Serve text compressed from the runtime entry point (D8), and measure the first
-      load against the ~868 KB / ~241 KB figures the notes carry
-- [ ] 0.5 Record in the deployment's committed configuration (D10) that a baked corpus
-      pins `RIG_VERSION`: with writes off, a client whose recipe version has moved past
-      the bake re-renders every tile on every visit and cannot heal itself
 
 ## 1. Configuration
 
@@ -109,13 +92,20 @@
       question about the library. Added by `listing-tree-cache` after this change first
       enumerated the routes — re-enumerate before implementing rather than trusting this
       list, and check whether any other maintenance route has appeared since
+- [ ] 3.8a Move the three bulk-job surfaces from `thumbWrites` to `maintenance` —
+      `App.tsx`'s jobs enablement and the two `entryActions` job commands — which closes
+      the open task 5.1 of the archived `bulk-thumbnail-jobs`, where `thumbWrites` was
+      declared an interim until this field existed. The generate launcher takes **both**
+      `maintenance` and `thumbWrites`, or a write-refusing deployment offers a loop that
+      renders and discards (D4). The reset job is a client loop over `PUT /api/thumb`, so
+      it is withheld at its launcher and its writes stay refused by `thumbWrites` at the
+      route; only `reload` is refused as maintenance
 
 ## 4. Client consumers
 
 > **Where the client reads the report.** `bulk-thumbnail-jobs` adds `features:
 > FeatureReport | null` to `AvailabilityContext` (`entryActions.ts`) and threads it into
-> all four contexts from `App` — on its branch, not on main, where that interface carries
-> `apps` and no `features`. If it lands first, 4.1–4.6 read the report there rather than
+> all four contexts from `App` — on main since it landed, so that interface already carries `features` beside `apps`. If it lands first, 4.1–4.6 read the report there rather than
 > adding a second plumb; if this change lands first, it adds the plumb and that change
 > rebases onto it. Either way there is one path, not two (coordinated with that change's
 > session, 2026-09-03).
@@ -123,8 +113,9 @@
 - [ ] 4.1 Decorate `ApiClient`'s thumbnail read and write when a known report declares
       writes off (D6): the write drops the PNG and stores camera and axis in this
       browser, answering as a write would; the read overlays a locally-stored orientation
-      onto the server's answer. Precedence: local, then server, then an orientation
-      source, then default. The five existing `putThumb` call sites are untouched.
+      onto the server's answer. Precedence: local, then server, then an orientation source, then default. The six
+      existing `putThumb` call sites are untouched. A locally-kept write answers with the
+      result's dropped-pixels flag set, so anything counting renders counts it honestly.
       **Cover both arrival paths**: after `thumbnail-image-serving`, a listing entry
       carries the stored camera and the tile is drawn with no lookup at all, so an overlay
       that lives only on the lookup answer misses every baked tile — apply it where the
@@ -133,8 +124,10 @@
       off — unknown and failed reports keep writing to the server, which the
       feature-report capability requires normatively (D6)
 - [ ] 4.3 `SidePanel` withholds the chat tab when it is not declared on, absent rather
-      than disabled; `tabStore` resolves to a tab that exists, preferring the recorded
-      one, and does not rewrite the recorded value (D7)
+      than disabled; **both** its fallbacks resolve to a tab that exists, preferring the
+      recorded one, and neither rewrites the recorded value (D7): `tabStore`'s parse, and
+      the runtime move off a `library` tab that has gone away, which lands on `'chat'`
+      today — the tab a deployment may withhold
 - [ ] 4.4 `SidePanel`'s index-state description collapses the operator-repairable
       conditions into one unavailability where the deployment declares index operation
       not the viewer's concern; `warming` and outside-the-collection stay distinct (D9).
@@ -193,7 +186,9 @@
 - [ ] 7.6 Client: a profile with no recorded tab, and one recording `chat`, both open on
       search when the chat tab is withheld, and neither has its recorded value rewritten;
       with chat declared on **and the report known**, the panel behaves exactly as today;
-      while the report is in flight the tab is withheld like any gated surface
+      while the report is in flight the tab is withheld like any gated surface. A cell for
+      the runtime fallback too: a viewer on the `library` tab when it goes away, on a
+      deployment withholding chat, lands on a tab that exists
 - [ ] 7.7 Client: the collapsed index states say one thing for the three operator-only
       conditions, while `warming` and outside-the-collection still say their own; `detail`
       is absent in the collapsed states and still preferred in the uncollapsed ones

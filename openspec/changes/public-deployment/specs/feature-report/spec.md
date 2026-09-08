@@ -60,11 +60,13 @@ acts on the server's own derived state rather than answering a question about th
 renders in bulk. These SHALL be refused at the routes rather than merely withheld from the
 client, because each is expensive, each acts for every viewer at once, and none of them is
 a thing a visitor has any standing to ask for. The client SHALL withhold the surfaces that
-launch them, as it withholds any surface a capability declares off. A surface SHALL be
-governed by the capability that describes what it does rather than by whichever capability
-existed when it was written: bulk work that destroys derived state is a maintenance
-operation, while bulk work that fills the thumbnail cache is governed by the capability for
-writing thumbnails, since with those writes refused it would render and discard.
+launch them, as it withholds any surface a capability declares off. Where a maintenance operation is performed through routes that also serve ordinary
+per-entry work, the refusal that reaches it SHALL be the one governing those writes, and
+the operation itself SHALL be withheld at its launcher: a bulk reset is a client's loop
+over the same write a single model's reset makes, so refusing it as maintenance would
+refuse that single reset too. A launcher whose work would be refused for another reason
+SHALL NOT be offered at all — bulk work that fills the thumbnail cache is not offered
+where thumbnail writes are refused, since it would render and discard.
 
 #### Scenario: A reload is refused
 - **WHEN** a request arrives to drop or revalidate the server's caches on such a deployment
@@ -74,9 +76,9 @@ writing thumbnails, since with those writes refused it would render and discard.
 - **WHEN** a viewer opens a surface that would offer a bulk or maintenance operation
 - **THEN** the offer is absent rather than present and inert
 
-#### Scenario: Bulk work is gated by what it does
-- **WHEN** a deployment accepts thumbnail writes but withholds maintenance
-- **THEN** the surface that fills the thumbnail cache is offered and the one that destroys stored framings is not, and the reverse configuration offers the reverse pair
+#### Scenario: A launcher whose work would be refused anyway is not offered
+- **WHEN** a deployment offers maintenance but refuses thumbnail writes
+- **THEN** the surface that would fill the thumbnail cache is absent rather than present and inert, since every write it made would be refused
 
 #### Scenario: A personal installation keeps them
 - **WHEN** a deployment does not declare this
