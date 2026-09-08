@@ -42,12 +42,37 @@ export interface LocalFraming {
   axis?: OrbitAxis
 }
 
-/**
- * Prefixed by the **library** path, which is what every other client surface
- * keys a model by. A filesystem path would not survive the library moving, and
- * is not a thing this client holds anyway.
- */
+/** This store's own namespace in a shared `localStorage`. See `framingKey`. */
 const PREFIX = 'mb:framing:'
+
+/**
+ * The default library-id getter, module-level for the reason `useThumbnails`'
+ * `NO_FEATURES` is: an inline `() => null` is a fresh function per call, and
+ * this value lands in that hook's sweep dependency array.
+ */
+export const NO_LIBRARY = (): string | null => null
+
+/**
+ * Where one library's framing for `path` is held: `mb:framing:<id>:<path>`.
+ *
+ * The **library id** is in front of the path because the server's thumbnail
+ * cache is keyed by it, and this store stands in for that cache. A personal
+ * installation repointed between two libraries that share relative paths — the
+ * same kit copied to a second drive, a backup mounted beside the original —
+ * would otherwise read one library's framings onto the other's models. Moot on
+ * a public deployment, which is one library per origin; real locally, which is
+ * where the store is reached through a refused write (`putThumb` below).
+ *
+ * `null` — the library is not known yet — has **no key at all**: a framing
+ * cannot be filed under a library that has not been named, so a read answers
+ * `undefined` and a write is dropped. That window is acceptable because it
+ * cannot hold a gesture: every path route answers 503 until the library is
+ * `ready`, and `App` asks `/api/library` before any listing lands, so there is
+ * no tile on screen to orbit before the id is here.
+ */
+function framingKey(path: string, libraryId: string | null): string | null {
+  return libraryId === null ? null : `${PREFIX}${libraryId}:${path}`
+}
 
 const AXES: readonly string[] = ['x', '-x', 'y', '-y', 'z', '-z']
 
@@ -98,11 +123,14 @@ export function keepsFramingsLocally(report: FeatureReport | null): boolean {
 export function readLocalFraming(
   path: string,
   storage: FramingStorage | null = browserStorage(),
+  libraryId: () => string | null = NO_LIBRARY,
 ): LocalFraming | undefined {
   if (storage === null) return undefined
+  const key = framingKey(path, libraryId())
+  if (key === null) return undefined
   let raw: string | null
   try {
-    raw = storage.getItem(PREFIX + path)
+    raw = storage.getItem(key)
   } catch {
     return undefined
   }
@@ -137,21 +165,24 @@ export function writeLocalFraming(
   path: string,
   save: Pick<ThumbSave, 'camera' | 'axis'>,
   storage: FramingStorage | null = browserStorage(),
+  libraryId: () => string | null = NO_LIBRARY,
 ): void {
   if (storage === null) return
+  const key = framingKey(path, libraryId())
+  if (key === null) return
   // Neither half named is not a write at all — pixels alone reach here on a
   // refusing deployment, and there is nothing of them to keep.
   if (save.camera === undefined && save.axis === undefined) return
-  const held = readLocalFraming(path, storage)
+  const held = readLocalFraming(path, storage, libraryId)
   const next: LocalFraming = {
     camera: save.camera === undefined ? held?.camera : (save.camera ?? undefined),
     axis: save.axis === undefined ? held?.axis : (save.axis ?? undefined),
   }
   try {
-    if (next.camera === undefined && next.axis === undefined) storage.removeItem(PREFIX + path)
+    if (next.camera === undefined && next.axis === undefined) storage.removeItem(key)
     // `JSON.stringify` drops an `undefined` field, which is what "this half is
     // not held" means on the way back in.
-    else storage.setItem(PREFIX + path, JSON.stringify(next))
+    else storage.setItem(key, JSON.stringify(next))
   } catch {
     // Storage refused the write — the framing is simply not kept.
   }
@@ -182,6 +213,7 @@ class LocalFramingClient implements ApiClient {
     private readonly inner: ApiClient,
     private readonly report: () => FeatureReport | null,
     private readonly storage: FramingStorage | undefined,
+    private readonly libraryId: () => string | null,
   ) {}
 
   /**
@@ -192,7 +224,7 @@ class LocalFramingClient implements ApiClient {
   async getThumb(...args: Parameters<ApiClient['getThumb']>): Promise<ThumbResult> {
     const answer = await this.inner.getThumb(...args)
     if (!keepsFramingsLocally(this.report())) return answer
-    const local = readLocalFraming(args[0], this.storage)
+    const local = readLocalFraming(args[0], this.storage, this.libraryId)
     if (local === undefined) return answer
     return {
       ...answer,
@@ -229,14 +261,14 @@ class LocalFramingClient implements ApiClient {
    */
   async putThumb(save: ThumbSave): Promise<ThumbPutResult> {
     if (keepsFramingsLocally(this.report())) {
-      writeLocalFraming(save.path, save, this.storage)
+      writeLocalFraming(save.path, save, this.storage, this.libraryId)
       return { dropped: true }
     }
     try {
       return await this.inner.putThumb(save)
     } catch (err) {
       if (!(err instanceof HttpError) || err.refused !== 'thumbWrites') throw err
-      writeLocalFraming(save.path, save, this.storage)
+      writeLocalFraming(save.path, save, this.storage, this.libraryId)
       return { dropped: true }
     }
   }
@@ -298,12 +330,15 @@ class LocalFramingClient implements ApiClient {
  * Wrap `inner` so thumbnail writes are kept in this browser wherever a known
  * report declares them off. The report is read through a getter, per call, so
  * one client identity survives the report resolving — `App` builds this once
- * and every consumer holds the same object.
+ * and every consumer holds the same object. The library id arrives the same
+ * way and for the same reason: it is unknown when this is built and known a
+ * round trip later, and it decides the key (`framingKey`).
  */
 export function withLocalFramings(
   inner: ApiClient,
   features: () => FeatureReport | null,
   storage?: FramingStorage,
+  libraryId: () => string | null = NO_LIBRARY,
 ): ApiClient {
-  return new LocalFramingClient(inner, features, storage)
+  return new LocalFramingClient(inner, features, storage, libraryId)
 }

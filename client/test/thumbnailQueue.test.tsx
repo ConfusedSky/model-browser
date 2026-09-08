@@ -63,6 +63,7 @@ function Harness({
   ao = true,
   poses,
   features,
+  libraryId,
 }: {
   entries: DirEntry[]
   api: ApiClient
@@ -76,6 +77,13 @@ function Harness({
    * by every cell but the local-framing ones, which is "the report is unknown".
    */
   features?: () => FeatureReport | null
+  /**
+   * The library the tiles belong to, also as App passes it — the local-framing
+   * store keys by library and path, so a cell that expects a kept framing must
+   * name one. Omitted elsewhere, which is "the library is not known yet" and
+   * keeps nothing.
+   */
+  libraryId?: () => string | null
 }) {
   const { thumbs, setThumb, refetch, setPlaceholder, applyLocalFramings, setBands, reportImageError } = useThumbnails(
     entries,
@@ -86,6 +94,7 @@ function Harness({
     poses,
     entries,
     features,
+    libraryId,
   )
   lastThumbs = thumbs
   lastSetThumb = setThumb
@@ -2372,6 +2381,12 @@ describe('a kept framing wins over the one the listing carried', () => {
   const KEPT = { az: 1.5, el: -0.3, distR: 4, target: [1, 0, 0] as [number, number, number] }
   const OFF: FeatureReport = { thumbWrites: false, appLaunch: true, chatTab: false, hostDetails: true, maintenance: true }
   const PATH = '/models/m0.stl'
+  /**
+   * The library these tiles belong to. The store keys by library and path
+   * (`framingKey`), so every cell that keeps a framing writes it and renders
+   * under the same id — and the last cell here writes under a different one.
+   */
+  const LIB = (): string => 'lib-a'
 
   function annotated(over: Partial<NonNullable<DirEntry['thumb']>> = {}): DirEntry[] {
     return models(1).map((e) => ({
@@ -2395,7 +2410,7 @@ describe('a kept framing wins over the one the listing carried', () => {
   })
 
   it('overrides the listing entry’s own camera and axis, still with no lookup', async () => {
-    writeLocalFraming(PATH, { camera: KEPT, axis: '-x' })
+    writeLocalFraming(PATH, { camera: KEPT, axis: '-x' }, undefined, LIB)
     const api = fakeApi()
     await render(
       <Harness
@@ -2404,6 +2419,7 @@ describe('a kept framing wins over the one the listing carried', () => {
         lru={fakeLru()}
         queue={new RenderQueue(2)}
         features={() => OFF}
+        libraryId={LIB}
       />,
     )
     await settle()
@@ -2421,10 +2437,40 @@ describe('a kept framing wins over the one the listing carried', () => {
     // 4.2: not knowing must never relocate where a user's orientations live —
     // and that cuts both ways. A browser carrying framings from some other
     // deployment must not silently re-frame a server that never refused a write.
-    writeLocalFraming(PATH, { camera: KEPT, axis: '-x' })
+    writeLocalFraming(PATH, { camera: KEPT, axis: '-x' }, undefined, LIB)
     const api = fakeApi()
     await render(
-      <Harness entries={annotated()} api={api} lru={fakeLru()} queue={new RenderQueue(2)} />,
+      <Harness
+        entries={annotated()}
+        api={api}
+        lru={fakeLru()}
+        queue={new RenderQueue(2)}
+        libraryId={LIB}
+      />,
+    )
+    await settle()
+
+    expect(api.getThumb).not.toHaveBeenCalled()
+    expect(lastThumbs.get(PATH)!.camera).toEqual(CAMERA)
+    expect(lastThumbs.get(PATH)!.axis).toBe('z')
+  })
+
+  it('does not, where the framing was kept for another library', async () => {
+    // The seeding point's half of the third pass's key fix (2026-09-08): the
+    // same relative path in a second library — a backup drive holding the same
+    // kit — is a different model, and the framing kept for one must not frame
+    // the other.
+    writeLocalFraming(PATH, { camera: KEPT, axis: '-x' }, undefined, () => 'lib-b')
+    const api = fakeApi()
+    await render(
+      <Harness
+        entries={annotated()}
+        api={api}
+        lru={fakeLru()}
+        queue={new RenderQueue(2)}
+        features={() => OFF}
+        libraryId={LIB}
+      />,
     )
     await settle()
 
@@ -2441,7 +2487,7 @@ describe('a kept framing wins over the one the listing carried', () => {
     // same framing. Do not "fix" this by teaching `usable` about the local
     // store: "the listing answered this tile" is a statement about the
     // server's render, not about something only this browser holds.
-    writeLocalFraming(PATH, { camera: KEPT })
+    writeLocalFraming(PATH, { camera: KEPT }, undefined, LIB)
     const pose: IndexPose = {
       up: [0, 1, 0],
       azimuth_zero: [1, 0, 0],
@@ -2456,7 +2502,7 @@ describe('a kept framing wins over the one the listing carried', () => {
       rig: RIG_VERSION,
       gen: 5,
     })
-    const api = withLocalFramings(fakeApi(getThumb), () => OFF)
+    const api = withLocalFramings(fakeApi(getThumb), () => OFF, undefined, LIB)
 
     await render(
       <Harness
@@ -2466,6 +2512,7 @@ describe('a kept framing wins over the one the listing carried', () => {
         queue={new RenderQueue(2)}
         poses={{ [PATH]: pose }}
         features={() => OFF}
+        libraryId={LIB}
       />,
     )
     await settle()
@@ -2491,7 +2538,7 @@ describe('a kept framing wins over the one the listing carried', () => {
   const applyAfterReport = (): Promise<void> => act(async () => lastApplyLocalFramings!())
 
   it('reaches a tile the listing seeded before the report landed', async () => {
-    writeLocalFraming(PATH, { camera: KEPT, axis: '-x' })
+    writeLocalFraming(PATH, { camera: KEPT, axis: '-x' }, undefined, LIB)
     const api = fakeApi()
     // The report is unknown while the listing draws, and resolves to
     // writes-off afterwards — the exact order nothing about the two requests
@@ -2499,7 +2546,14 @@ describe('a kept framing wins over the one the listing carried', () => {
     let report: FeatureReport | null = null
     const read = (): FeatureReport | null => report
     await render(
-      <Harness entries={annotated()} api={api} lru={fakeLru()} queue={new RenderQueue(2)} features={read} />,
+      <Harness
+        entries={annotated()}
+        api={api}
+        lru={fakeLru()}
+        queue={new RenderQueue(2)}
+        features={read}
+        libraryId={LIB}
+      />,
     )
     await settle()
     expect(lastThumbs.get(PATH)!.camera).toEqual(CAMERA)
@@ -2521,7 +2575,7 @@ describe('a kept framing wins over the one the listing carried', () => {
     // a fresh lookup for: this tile carries no annotation the sweep can seed
     // from, so its framing came back through `getThumb` — before the decorator
     // had a report to overlay with.
-    writeLocalFraming(PATH, { camera: KEPT })
+    writeLocalFraming(PATH, { camera: KEPT }, undefined, LIB)
     const getThumb = vi.fn().mockResolvedValue({
       status: 'hit',
       pngUrl: 'blob:from-lookup',
@@ -2533,7 +2587,7 @@ describe('a kept framing wins over the one the listing carried', () => {
     })
     let report: FeatureReport | null = null
     const read = (): FeatureReport | null => report
-    const api = withLocalFramings(fakeApi(getThumb), read)
+    const api = withLocalFramings(fakeApi(getThumb), read, undefined, LIB)
     await render(
       <Harness
         entries={models(1)}
@@ -2541,6 +2595,7 @@ describe('a kept framing wins over the one the listing carried', () => {
         lru={fakeLru()}
         queue={new RenderQueue(2)}
         features={read}
+        libraryId={LIB}
       />,
     )
     await settle()
@@ -2564,7 +2619,14 @@ describe('a kept framing wins over the one the listing carried', () => {
     let report: FeatureReport | null = null
     const read = (): FeatureReport | null => report
     await render(
-      <Harness entries={annotated()} api={api} lru={fakeLru()} queue={new RenderQueue(2)} features={read} />,
+      <Harness
+        entries={annotated()}
+        api={api}
+        lru={fakeLru()}
+        queue={new RenderQueue(2)}
+        features={read}
+        libraryId={LIB}
+      />,
     )
     await settle()
     const before = lastThumbs.get(PATH)!
@@ -2583,12 +2645,19 @@ describe('a kept framing wins over the one the listing carried', () => {
     // some other deployment must not re-frame a server that never refused a
     // write — the same cut the seeding site makes, and the reason the overlay
     // asks the getter rather than the store alone.
-    writeLocalFraming(PATH, { camera: KEPT, axis: '-x' })
+    writeLocalFraming(PATH, { camera: KEPT, axis: '-x' }, undefined, LIB)
     const api = fakeApi()
     let report: FeatureReport | null = null
     const read = (): FeatureReport | null => report
     await render(
-      <Harness entries={annotated()} api={api} lru={fakeLru()} queue={new RenderQueue(2)} features={read} />,
+      <Harness
+        entries={annotated()}
+        api={api}
+        lru={fakeLru()}
+        queue={new RenderQueue(2)}
+        features={read}
+        libraryId={LIB}
+      />,
     )
     await settle()
     const before = lastThumbs.get(PATH)!

@@ -522,5 +522,17 @@
 - [ ] 9.11 Nits: public `listen.host` without `origins` is a `ConfigError`; `/api` prefix
       case-insensitive; single-range `Range` on `/api/file`; static `send` without the
       copy; `~` expanded in `root`; the two-names guard cell
-- [ ] 9.12 Client: the local-framing key carries the library id
+- [x] 9.12 Client: the local-framing key carries the library id
+      Done 2026-09-08: `framingKey` builds `mb:framing:<library id>:<library path>`, and
+      the id reaches the store the way the report does — a getter, a fourth argument to
+      `withLocalFramings`, `readLocalFraming` and `writeLocalFraming` and a ninth to
+      `useThumbnails`, all fed by App's `readLibraryId` over a `libraryIdRef` written
+      beside `libraryRef`. An unknown id keys nothing at all: reads answer `undefined`
+      and writes drop while still answering `dropped`, a window no gesture can reach
+      since every path route answers 503 until the library is `ready`. Cells: two
+      libraries at one path, and the unknown-id window, in apiClient.test.ts; a framing
+      kept for another library not overlaid at the seeding point in
+      thumbnailQueue.test.tsx; the existing cells threaded through an id. Two
+      falsifications — the id dropped from the key, and an unknown id falling back to the
+      bare key — each failing on its own cell
 

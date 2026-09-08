@@ -561,6 +561,14 @@ describe('HttpApiClient contract', () => {
 describe('withLocalFramings', () => {
   const OFF: FeatureReport = { thumbWrites: false, appLaunch: true, chatTab: false, hostDetails: true, maintenance: true }
   const ON: FeatureReport = { thumbWrites: true, appLaunch: true, chatTab: false, hostDetails: true, maintenance: true }
+  /**
+   * The library the framings belong to, as App reads it: a getter, because it
+   * is unknown when the client is built and known a round trip later. Every
+   * cell names one — the store keys by library, so a client with no library
+   * keeps nothing at all (the `while the library is unknown` cell below).
+   */
+  const LIB = (): string => 'lib-a'
+  const OTHER = (): string => 'lib-b'
 
   /** A `Storage`-shaped map. `raw` is the bytes, for asserting what was kept. */
   function memStorage(): FramingStorage & { raw: Map<string, string> } {
@@ -604,6 +612,7 @@ describe('withLocalFramings', () => {
       new HttpApiClient(fetchFn as unknown as typeof fetch),
       () => OFF,
       store,
+      LIB,
     )
 
     const written = await api.putThumb(orbitRelease())
@@ -618,7 +627,7 @@ describe('withLocalFramings', () => {
     expect(written.gen).toBeUndefined()
     // Only the orientation is kept. The PNG and the three labels that describe
     // pixels are dropped together, for `withoutUnusableRender`'s reason.
-    expect(JSON.parse(store.raw.get('mb:framing:/m.stl') as string)).toEqual({
+    expect(JSON.parse(store.raw.get('mb:framing:lib-a:/m.stl') as string)).toEqual({
       camera: CAM,
       axis: '-z',
     })
@@ -631,6 +640,7 @@ describe('withLocalFramings', () => {
       new HttpApiClient(fetchFn as unknown as typeof fetch),
       () => OFF,
       store,
+      LIB,
     )
     const written = await api.putThumb({
       path: '/m.stl',
@@ -654,6 +664,7 @@ describe('withLocalFramings', () => {
       new HttpApiClient(fetchFn as unknown as typeof fetch),
       () => OFF,
       store,
+      LIB,
     )
 
     await api.putThumb({ path: '/m.stl', mtime: 42, camera: CAM, axis: '-z' })
@@ -677,6 +688,7 @@ describe('withLocalFramings', () => {
       new HttpApiClient(fetchFn as unknown as typeof fetch),
       () => OFF,
       store,
+      LIB,
     )
 
     await api.putThumb({ path: '/m.stl', mtime: 42, camera: CAM, axis: '-z' })
@@ -707,11 +719,13 @@ describe('withLocalFramings', () => {
       new HttpApiClient(fetchFn as unknown as typeof fetch),
       () => OFF,
       first,
+      LIB,
     )
     const theirs = withLocalFramings(
       new HttpApiClient(fetchFn as unknown as typeof fetch),
       () => OFF,
       second,
+      LIB,
     )
 
     await mine.putThumb({ path: '/m.stl', mtime: 42, camera: CAM, axis: '-z' })
@@ -721,6 +735,69 @@ describe('withLocalFramings', () => {
     expect((await theirs.getThumb('/m.stl', 42)).camera).toBeUndefined()
     expect((await theirs.getThumb('/m.stl', 42)).axis).toBe('y')
     expect(second.raw.size).toBe(0)
+  })
+
+  // The key carries the library's **id** as well as the path (third pass,
+  // 2026-09-08), because the server cache this store stands in for is per
+  // library id. One browser on one origin can still see two libraries: a
+  // personal installation repointed between a drive and its backup, where the
+  // same kit sits at the same relative path in both.
+  it("does not read another library's framing for the same path", async () => {
+    const store = memStorage()
+    const fetchFn = vi.fn(() => Promise.resolve(jsonResponse({ status: 'miss', axis: 'y' })))
+    const here = withLocalFramings(
+      new HttpApiClient(fetchFn as unknown as typeof fetch),
+      () => OFF,
+      store,
+      LIB,
+    )
+    const there = withLocalFramings(
+      new HttpApiClient(fetchFn as unknown as typeof fetch),
+      () => OFF,
+      store,
+      OTHER,
+    )
+
+    await here.putThumb({ path: '/m.stl', mtime: 42, camera: CAM, axis: '-z' })
+
+    expect((await here.getThumb('/m.stl', 42)).camera).toEqual(CAM)
+    // Same browser, same store, same path — a different library, so what the
+    // second one shows is the deployment's own framing.
+    expect((await there.getThumb('/m.stl', 42)).camera).toBeUndefined()
+    expect((await there.getThumb('/m.stl', 42)).axis).toBe('y')
+
+    // And the crossing does not run the other way either.
+    await there.putThumb({ path: '/m.stl', mtime: 42, axis: 'x' })
+    expect((await here.getThumb('/m.stl', 42)).axis).toBe('-z')
+    expect([...store.raw.keys()]).toEqual(['mb:framing:lib-a:/m.stl', 'mb:framing:lib-b:/m.stl'])
+  })
+
+  // `/api/library` has not answered yet. No tile can be on screen to orbit —
+  // every path route answers 503 until the library is ready — so this is a
+  // window nothing should reach. What matters is that reaching it files
+  // nothing under a library that has not been named, rather than under a bare
+  // path the next library would then read.
+  it('keeps nothing while the library is unknown, and still answers dropped', async () => {
+    const store = memStorage()
+    const fetchFn = vi.fn(() => Promise.resolve(jsonResponse({ ok: true, gen: 5 })))
+    const unknown = (): string | null => null
+    const api = withLocalFramings(
+      new HttpApiClient(fetchFn as unknown as typeof fetch),
+      () => OFF,
+      store,
+      unknown,
+    )
+
+    const written = await api.putThumb(orbitRelease())
+
+    // The gate is still the report's: the write is not sent...
+    expect(fetchFn).not.toHaveBeenCalled()
+    // ...and it still accounts for itself as pixels that did not reach the
+    // store, which is what `renderEntryThumbnail` turns into `skipped`.
+    expect(written).toEqual({ dropped: true })
+    // Nothing was kept, under this key or a bare one.
+    expect(store.raw.size).toBe(0)
+    expect(readLocalFraming('/m.stl', store, unknown)).toBeUndefined()
   })
 
   // 4.2, and normative in the feature-report capability: not knowing must never
@@ -734,7 +811,7 @@ describe('withLocalFramings', () => {
     )
     const put = vi.spyOn(inner, 'putThumb')
     const get = vi.spyOn(inner, 'getThumb')
-    const api = withLocalFramings(inner, () => null, store)
+    const api = withLocalFramings(inner, () => null, store, LIB)
 
     const save = orbitRelease()
     expect(await api.putThumb(save)).toEqual({ gen: 5 })
@@ -753,7 +830,7 @@ describe('withLocalFramings', () => {
       vi.fn().mockResolvedValue(jsonResponse({ ok: true, gen: 5 })) as unknown as typeof fetch,
     )
     const put = vi.spyOn(inner, 'putThumb')
-    const api = withLocalFramings(inner, () => ON, store)
+    const api = withLocalFramings(inner, () => ON, store, LIB)
 
     const save = orbitRelease()
     expect(await api.putThumb(save)).toEqual({ gen: 5 })
@@ -771,6 +848,7 @@ describe('withLocalFramings', () => {
       new HttpApiClient(fetchFn as unknown as typeof fetch),
       () => report,
       store,
+      LIB,
     )
 
     await api.putThumb({ path: '/m.stl', mtime: 42, camera: CAM })
@@ -779,7 +857,7 @@ describe('withLocalFramings', () => {
     report = OFF
     await api.putThumb({ path: '/m.stl', mtime: 42, camera: CAM })
     expect(fetchFn).toHaveBeenCalledTimes(1)
-    expect(readLocalFraming('/m.stl', store)).toEqual({ camera: CAM })
+    expect(readLocalFraming('/m.stl', store, LIB)).toEqual({ camera: CAM })
   })
 
   /**
@@ -802,6 +880,7 @@ describe('withLocalFramings', () => {
       new HttpApiClient(fetchFn as unknown as typeof fetch),
       () => null,
       store,
+      LIB,
     )
 
     const written = await api.putThumb(orbitRelease())
@@ -812,7 +891,7 @@ describe('withLocalFramings', () => {
     // And the refusal is acted on rather than thrown: the same account the
     // gated path gives, so no caller can tell which arrival point kept it.
     expect(written).toEqual({ dropped: true })
-    expect(readLocalFraming('/m.stl', store)).toEqual({ camera: CAM, axis: '-z' })
+    expect(readLocalFraming('/m.stl', store, LIB)).toEqual({ camera: CAM, axis: '-z' })
   })
 
   it('rethrows a refusal of some other capability, keeping nothing', async () => {
@@ -824,6 +903,7 @@ describe('withLocalFramings', () => {
       new HttpApiClient(fetchFn as unknown as typeof fetch),
       () => null,
       store,
+      LIB,
     )
 
     const err = await api.putThumb(orbitRelease()).catch((e: unknown) => e)
@@ -845,6 +925,7 @@ describe('withLocalFramings', () => {
         new HttpApiClient(vi.fn(res) as unknown as typeof fetch),
         () => null,
         store,
+        LIB,
       )
       const err = await api.putThumb(orbitRelease()).catch((e: unknown) => e)
       expect(err).toBeInstanceOf(HttpError)
@@ -855,9 +936,9 @@ describe('withLocalFramings', () => {
 
   it('reads a hand-edited or malformed record as nothing stored', () => {
     const store = memStorage()
-    store.raw.set('mb:framing:/m.stl', 'not json')
-    expect(readLocalFraming('/m.stl', store)).toBeUndefined()
-    store.raw.set('mb:framing:/m.stl', JSON.stringify({ camera: { az: 'left' }, axis: 'w' }))
-    expect(readLocalFraming('/m.stl', store)).toBeUndefined()
+    store.raw.set('mb:framing:lib-a:/m.stl', 'not json')
+    expect(readLocalFraming('/m.stl', store, LIB)).toBeUndefined()
+    store.raw.set('mb:framing:lib-a:/m.stl', JSON.stringify({ camera: { az: 'left' }, axis: 'w' }))
+    expect(readLocalFraming('/m.stl', store, LIB)).toBeUndefined()
   })
 })

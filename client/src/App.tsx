@@ -379,13 +379,28 @@ export default function App() {
   const featuresRef = useRef<FeatureReport | null>(null)
   const readFeatures = useCallback(() => featuresRef.current, [])
   /**
+   * The library's id, read the same way and written beside `libraryRef` below.
+   *
+   * It keys the local-framing store (`framingKey`), which stands in for a
+   * server cache that is itself per library id: without it one installation
+   * repointed between two libraries sharing relative paths would read one's
+   * framings onto the other's models. `null` in every state but `ready`,
+   * including before `/api/library` has answered — a framing is filed under no
+   * library until there is one to name.
+   */
+  const libraryIdRef = useRef<string | null>(null)
+  const readLibraryId = useCallback(() => libraryIdRef.current, [])
+  /**
    * Decorated once, at construction, and the decorator asks the getter per
    * call: on a deployment declaring thumbnail writes off, a framing is kept in
    * this browser instead of sent, and a lookup's answer is overlaid with what
    * is kept (D6). The six existing `putThumb` call sites are untouched — the
    * seam is here, so the precedence rule lives in one place rather than six.
    */
-  const api = useMemo(() => withLocalFramings(new HttpApiClient(), readFeatures), [readFeatures])
+  const api = useMemo(
+    () => withLocalFramings(new HttpApiClient(), readFeatures, undefined, readLibraryId),
+    [readFeatures, readLibraryId],
+  )
   const queue = useMemo(() => new RenderQueue(2), [])
   const placeholderRef = useRef<(path: string, url: string) => void>(() => {})
   const lru = useMemo(
@@ -536,6 +551,7 @@ export default function App() {
    */
   const libraryRef = useRef<LibraryState | null>(null)
   libraryRef.current = libraryState
+  libraryIdRef.current = libraryState?.state === 'ready' ? libraryState.id : null
 
   /**
    * A command's brief report, shown on the path bar's transient line (task
@@ -1177,6 +1193,8 @@ export default function App() {
     // The same getter the decorated client reads, so the local-framing rule is
     // one rule at both arrival points (D6).
     readFeatures,
+    // And the same library, so both arrival points key a framing alike.
+    readLibraryId,
   )
   placeholderRef.current = setPlaceholder
 

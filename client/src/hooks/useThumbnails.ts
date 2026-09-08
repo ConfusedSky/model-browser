@@ -10,7 +10,7 @@ import type {
   ThumbRenderInfo,
 } from '../../../shared/types'
 import type { ApiClient } from '../api/client'
-import { keepsFramingsLocally, readLocalFraming } from '../api/localFramings'
+import { NO_LIBRARY, keepsFramingsLocally, readLocalFraming } from '../api/localFramings'
 import { DEFAULT_CAMERA } from '../three/camera'
 import type { MeshLru } from '../three/lru'
 import { cameraForPose, POSE_VERSION } from '../three/pose'
@@ -322,6 +322,16 @@ export function useThumbnails(
    * framing matters. One store and one rule; two arrival points.
    */
   features: () => FeatureReport | null = NO_FEATURES,
+  /**
+   * The library the tiles belong to, read per call like `features` and for the
+   * same two reasons: it is unknown when App builds this and known a round
+   * trip later, and a getter rebuilt per render would re-run the sweep. It
+   * reaches the local-framing store, which keys a framing by library and path
+   * (`framingKey`), so one installation repointed between two libraries that
+   * share relative paths does not overlay one's framings onto the other's
+   * models. `NO_LIBRARY` — no id — keeps nothing and reads nothing.
+   */
+  libraryId: () => string | null = NO_LIBRARY,
 ) {
   const [thumbs, setThumbs] = useState<Map<string, ThumbState>>(new Map())
   const slotsRef = useRef<Map<string, EntrySlot>>(new Map())
@@ -514,7 +524,7 @@ export function useThumbnails(
         // A loading or errored tile carries no framing to overlay, and the
         // pass that answers it reads the store itself.
         if (tile.status !== 'ready') continue
-        const local = readLocalFraming(path)
+        const local = readLocalFraming(path, undefined, libraryId)
         if (local === undefined) continue
         const camera = local.camera ?? tile.camera
         const axis = local.axis ?? tile.axis
@@ -524,7 +534,7 @@ export function useThumbnails(
       }
       return next ?? prev
     })
-  }, [features])
+  }, [features, libraryId])
 
   /** Placeholder hook for the LRU loader (embedded 3MF previews). */
   const setPlaceholder = useCallback((path: string, url: string) => {
@@ -744,7 +754,9 @@ export function useThumbnails(
         // `usable` and falls to the lookup — where the decorator's own overlay
         // lands the same local camera. Same picture, same framing, one extra
         // lookup.
-        const local = keepsFramingsLocally(features()) ? readLocalFraming(entry.path) : undefined
+        const local = keepsFramingsLocally(features())
+          ? readLocalFraming(entry.path, undefined, libraryId)
+          : undefined
         return {
           status: 'ready',
           url,
@@ -1045,7 +1057,8 @@ export function useThumbnails(
     // gesture, and nothing on screen is waiting on it.
     // `features` is the getter, not the report: a stable identity that reads the
     // current value per call, so a resolving report does not re-run the sweep.
-  }, [entries, api, lru, queue, setThumb, ao, poses, applyRanking, features])
+    // `libraryId` is the same shape for the same reason.
+  }, [entries, api, lru, queue, setThumb, ao, poses, applyRanking, features, libraryId])
 
   // Only an unmount disposes. Separate from the sweep effect on purpose: that
   // one must have no cleanup at all, or React would tear every entry down
