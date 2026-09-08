@@ -1152,8 +1152,16 @@ export default function App() {
           : libraryMissingText(libraryState.root)
 
   const showSkeleton = useDelayedFlag(busy(state), SKELETON_DELAY_MS)
-  const { thumbs, setThumb, refetch, setPlaceholder, discardThumbFraming, setBands, reportImageError } =
-    useThumbnails(
+  const {
+    thumbs,
+    setThumb,
+    refetch,
+    setPlaceholder,
+    discardThumbFraming,
+    applyLocalFramings,
+    setBands,
+    reportImageError,
+  } = useThumbnails(
     thumbEntries,
     api,
     lru,
@@ -1171,6 +1179,31 @@ export default function App() {
     readFeatures,
   )
   placeholderRef.current = setPlaceholder
+
+  /**
+   * The one moment the sweep cannot cover (review F4): a report that resolves
+   * to writes-off *after* a listing has already drawn its tiles.
+   *
+   * The sweep applies the overlay where a tile is seeded, and the decorator
+   * applies it to a lookup's answer — but neither runs again for a tile that
+   * has already landed, and nothing orders the report against the first
+   * listing. Measured, the report lands first on ten loads out of ten; nothing
+   * *makes* it, and a failed read's retry lands on a later navigation, at which
+   * point the tiles on screen carry the deployment's framing rather than this
+   * browser's until the user leaves and comes back.
+   *
+   * Deliberately not a re-run of the sweep: the pixels are the server's and
+   * nothing has questioned them, so a restart would spend lookups and renders
+   * to arrive at the same picture. `applyLocalFramings` moves the framing and
+   * touches nothing else.
+   *
+   * A plain effect rather than a latch, because the overlay is idempotent and
+   * `features` resolves once per session — the report effect above stops
+   * asking the moment it is non-null.
+   */
+  useEffect(() => {
+    if (features?.thumbWrites === false) applyLocalFramings()
+  }, [features, applyLocalFramings])
 
   // Mirrored after commit, not during render: a render React discards must not
   // leave the delta reading state that never landed.

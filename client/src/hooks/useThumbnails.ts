@@ -484,6 +484,48 @@ export function useThumbnails(
     })
   }, [])
 
+  /**
+   * Lay this browser's kept framings over the tiles already on screen, for the
+   * one moment the sweep cannot cover: the report resolving to writes-off
+   * *after* a listing has drawn.
+   *
+   * The gate is read per call and per tile the way it is everywhere else, so a
+   * report that is unknown, or that accepts writes, changes nothing here.
+   *
+   * **An overlay, not a restart**, and that is the whole of why it is a
+   * separate imperative rather than a re-run of the sweep. Both arrival points
+   * are already stale by the time the report lands — a tile seeded from the
+   * listing's annotation and a tile the lookup answered alike — and re-running
+   * `start` for the second class would issue fresh lookups and, on a miss,
+   * renders, for tiles whose pixels nothing has questioned. The pixels are the
+   * server's and are unchanged; the only thing that moves is the framing an
+   * orbit or the lightbox opens at.
+   *
+   * Nothing is re-rendered for a tile with no kept framing: an unchanged tile
+   * keeps its object, and a pass that changes none returns the map itself.
+   * Idempotent, so a second call is free — which is what lets the caller be a
+   * plain effect on the report rather than a latch.
+   */
+  const applyLocalFramings = useCallback(() => {
+    if (!keepsFramingsLocally(features())) return
+    setThumbs((prev) => {
+      let next: Map<string, ThumbState> | null = null
+      for (const [path, tile] of prev) {
+        // A loading or errored tile carries no framing to overlay, and the
+        // pass that answers it reads the store itself.
+        if (tile.status !== 'ready') continue
+        const local = readLocalFraming(path)
+        if (local === undefined) continue
+        const camera = local.camera ?? tile.camera
+        const axis = local.axis ?? tile.axis
+        if (camera === tile.camera && axis === tile.axis) continue
+        next ??= new Map(prev)
+        next.set(path, { ...tile, camera, axis })
+      }
+      return next ?? prev
+    })
+  }, [features])
+
   /** Placeholder hook for the LRU loader (embedded 3MF previews). */
   const setPlaceholder = useCallback((path: string, url: string) => {
     // Ownership is decided here, outside the updater, mirroring `setThumb`'s
@@ -1026,5 +1068,14 @@ export function useThumbnails(
     }
   }, [])
 
-  return { thumbs, setThumb, refetch, setPlaceholder, discardThumbFraming, setBands, reportImageError }
+  return {
+    thumbs,
+    setThumb,
+    refetch,
+    setPlaceholder,
+    discardThumbFraming,
+    applyLocalFramings,
+    setBands,
+    reportImageError,
+  }
 }

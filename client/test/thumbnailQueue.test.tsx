@@ -77,7 +77,7 @@ function Harness({
    */
   features?: () => FeatureReport | null
 }) {
-  const { thumbs, setThumb, refetch, setPlaceholder, setBands, reportImageError } = useThumbnails(
+  const { thumbs, setThumb, refetch, setPlaceholder, applyLocalFramings, setBands, reportImageError } = useThumbnails(
     entries,
     api,
     lru,
@@ -90,6 +90,7 @@ function Harness({
   lastThumbs = thumbs
   lastSetThumb = setThumb
   lastRefetch = refetch
+  lastApplyLocalFramings = applyLocalFramings
   lastSetPlaceholder = setPlaceholder
   lastSetBands = setBands
   lastReportImageError = reportImageError
@@ -114,6 +115,9 @@ function Harness({
 /** The hook's own setters, for the cells that write through them from outside. */
 let lastSetThumb: ((path: string, state: ThumbState) => void) | null = null
 let lastRefetch: ((path: string) => void) | null = null
+/** The report-resolved overlay (`public-deployment`, review F4), called the way
+ *  App's own effect calls it. */
+let lastApplyLocalFramings: (() => void) | null = null
 let lastSetPlaceholder: ((path: string, url: string) => void) | null = null
 let lastSetBands: ((bands: ReadonlyMap<string, Band>) => void) | null = null
 let lastReportImageError: ((path: string) => void) | null = null
@@ -2471,6 +2475,130 @@ describe('a kept framing wins over the one the listing carried', () => {
     expect(lastThumbs.get(PATH)!.url).toBe('blob:from-lookup')
     // The kept camera arrived, and the pose did not reassert itself over it.
     expect(lastThumbs.get(PATH)!.camera).toEqual(KEPT)
+  })
+
+  /**
+   * The report resolving *after* the tiles drew (review F4).
+   *
+   * Both arrival points are already stale by then — the sweep seeds once and
+   * the survivors loop `continue`s over an unchanged entry, and a lookup that
+   * has answered is not asked again — so the overlay reaches them through an
+   * imperative App calls on the transition. It is an overlay and not a
+   * restart: these cells assert the api spies are untouched, because
+   * re-running the sweep would spend a lookup and, on a miss, a render to
+   * arrive at pixels nothing has questioned.
+   */
+  const applyAfterReport = (): Promise<void> => act(async () => lastApplyLocalFramings!())
+
+  it('reaches a tile the listing seeded before the report landed', async () => {
+    writeLocalFraming(PATH, { camera: KEPT, axis: '-x' })
+    const api = fakeApi()
+    // The report is unknown while the listing draws, and resolves to
+    // writes-off afterwards — the exact order nothing about the two requests
+    // guarantees either way.
+    let report: FeatureReport | null = null
+    const read = (): FeatureReport | null => report
+    await render(
+      <Harness entries={annotated()} api={api} lru={fakeLru()} queue={new RenderQueue(2)} features={read} />,
+    )
+    await settle()
+    expect(lastThumbs.get(PATH)!.camera).toEqual(CAMERA)
+
+    report = OFF
+    await applyAfterReport()
+
+    expect(lastThumbs.get(PATH)!.camera).toEqual(KEPT)
+    expect(lastThumbs.get(PATH)!.axis).toBe('-x')
+    // The pixels are the server's and are unchanged: same URL, no lookup, no
+    // write. Only the framing an orbit would open at has moved.
+    expect(lastThumbs.get(PATH)!.url).toBe(thumbImageUrl(PATH, 1, true, 5))
+    expect(api.getThumb).not.toHaveBeenCalled()
+    expect(api.putThumb).not.toHaveBeenCalled()
+  })
+
+  it('reaches a tile the lookup answered before the report landed', async () => {
+    // The second arrival point, and the one a re-run of the sweep would charge
+    // a fresh lookup for: this tile carries no annotation the sweep can seed
+    // from, so its framing came back through `getThumb` — before the decorator
+    // had a report to overlay with.
+    writeLocalFraming(PATH, { camera: KEPT })
+    const getThumb = vi.fn().mockResolvedValue({
+      status: 'hit',
+      pngUrl: 'blob:from-lookup',
+      lighting: THUMB_LIGHTING,
+      rig: RIG_VERSION,
+      camera: CAMERA,
+      axis: 'z',
+      gen: 5,
+    })
+    let report: FeatureReport | null = null
+    const read = (): FeatureReport | null => report
+    const api = withLocalFramings(fakeApi(getThumb), read)
+    await render(
+      <Harness
+        entries={models(1)}
+        api={api}
+        lru={fakeLru()}
+        queue={new RenderQueue(2)}
+        features={read}
+      />,
+    )
+    await settle()
+    expect(getThumb).toHaveBeenCalledTimes(1)
+    expect(lastThumbs.get(PATH)!.camera).toEqual(CAMERA)
+
+    report = OFF
+    await applyAfterReport()
+
+    expect(lastThumbs.get(PATH)!.camera).toEqual(KEPT)
+    // The axis is not kept locally, so the server's stands — the precedence is
+    // per half, not per model.
+    expect(lastThumbs.get(PATH)!.axis).toBe('z')
+    expect(lastThumbs.get(PATH)!.url).toBe('blob:from-lookup')
+    // Not asked a second time: the overlay reads the store, not the network.
+    expect(getThumb).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves a tile with nothing kept for it exactly as it was', async () => {
+    const api = fakeApi()
+    let report: FeatureReport | null = null
+    const read = (): FeatureReport | null => report
+    await render(
+      <Harness entries={annotated()} api={api} lru={fakeLru()} queue={new RenderQueue(2)} features={read} />,
+    )
+    await settle()
+    const before = lastThumbs.get(PATH)!
+
+    report = OFF
+    await applyAfterReport()
+
+    // Object identity, not a deep equality: a rebuilt-but-equal tile would
+    // re-render every tile on the grid for a report that changed nothing about
+    // any of them.
+    expect(lastThumbs.get(PATH)).toBe(before)
+  })
+
+  it('changes nothing where the deployment accepts writes', async () => {
+    // The gate, at this arrival point too. A browser carrying framings from
+    // some other deployment must not re-frame a server that never refused a
+    // write — the same cut the seeding site makes, and the reason the overlay
+    // asks the getter rather than the store alone.
+    writeLocalFraming(PATH, { camera: KEPT, axis: '-x' })
+    const api = fakeApi()
+    let report: FeatureReport | null = null
+    const read = (): FeatureReport | null => report
+    await render(
+      <Harness entries={annotated()} api={api} lru={fakeLru()} queue={new RenderQueue(2)} features={read} />,
+    )
+    await settle()
+    const before = lastThumbs.get(PATH)!
+
+    report = { ...OFF, thumbWrites: true }
+    await applyAfterReport()
+
+    expect(lastThumbs.get(PATH)).toBe(before)
+    expect(lastThumbs.get(PATH)!.camera).toEqual(CAMERA)
+    expect(lastThumbs.get(PATH)!.axis).toBe('z')
   })
 })
 
