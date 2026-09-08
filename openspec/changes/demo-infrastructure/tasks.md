@@ -61,10 +61,11 @@
       for `index` (D4); `/cache` bind mount for `app` (D5); `./config.json` read-only at
       `/config/config.json` (D6); the `hf` and `caddy_data` named volumes; the `setup` and
       `local` profiles. A comment on the `network_mode` line carries D1's reason
-- [ ] 5.2 `deploy/demo/config.json` with `{ "root": "/library/miniatures/clustered-hq" }`
-      — the one key the server reads today. **Hard ordering with `public-deployment`
-      6.1, which adds the origins, bind and capability fields to this same file**:
-      whichever lands second edits, neither recreates
+- [x] 5.2 `deploy/demo/config.json` — **created in full by `public-deployment` 6.1
+      (2026-09-07, its stage A1)**: `root` `/library/miniatures/clustered-hq`, the origin,
+      loopback `listen` (this change's D1), every capability field stated. Nothing for
+      this change to write; Compose mounts it read-only at `/config/config.json` (D6).
+      The ordering this line declared is discharged
 - [ ] 5.3 `docker compose -f deploy/demo/compose.yaml config` validates; `--profile local
       up --build` here brings the stack up, `https://localhost/api/features` answers
       through Caddy (the guard sees a loopback `Host`), and the app's log shows the index
