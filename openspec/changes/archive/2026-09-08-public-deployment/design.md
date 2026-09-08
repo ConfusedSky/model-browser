@@ -520,3 +520,40 @@ settled answer from an unchallenged one.
   deployment's own configuration — reverse proxy, TLS, container definition — is **a
   separate change** (Masa, 2026-09-03), writable and testable earlier than this one since
   it depends on nothing here.
+
+## Settled after archive (adversarial review, 2026-09-07)
+
+A read-only reviewer on the other model line walked the applied change against the tree
+and a live instance after the archive. Two findings were verified leaks against the applied
+host requirement, two were design gaps in the client's unknown-report window. Decided by
+the coordinator, recorded here because the change is archived and a follow-up round
+implements them:
+
+- **Every message this server did not compose is withheld under `hostDetails`, by one
+  rule in one place each.** `indexErrorReply` relayed the index's `detail` verbatim on
+  both query routes (live: a 404 naming the model's filesystem path), and `app.onError`'s
+  untyped branch and the launcher's 502 relayed `EACCES`/spawn messages naming host
+  paths. The fix: a generic body with the same status on the wire, the real message to the
+  server log. D9 had covered only the status route and the two 503s; the reviewer's point
+  that "a service's own words are not a way around it" applies to the query paths and the
+  raw-error path equally is right. A zip that cannot be read surfaces as a typed error
+  naming the library path everywhere, since it is a library entry that failed.
+- **A route's refusal is authoritative for the client.** `HttpError` carries `refused`, and
+  the decorator, on an ungated write refused with `thumbWrites`, keeps the framing locally
+  and answers `dropped` — the same answer the gated path gives. The report gate is
+  unchanged: an unknown report still sends to the server first, as the spec requires; only
+  a refusal that actually arrives is acted on. Before this, an orbit made in the
+  unknown-report window was refused and dropped nowhere.
+- **The report's arrival re-seeds the current listing once** when it transitions to a
+  known writes-off, through the hook's `listingKey` rather than its dependency array, so
+  a tile seeded before the report landed shows the visitor's kept framing without a
+  navigation. Note (3) of D6's implementation notes stands: the getter stays stable.
+- **Two nits taken with them:** the unconfigured-library sentence gets a visitor form (it
+  named an env var and a file), and the reset job counts a `dropped` write as work not done,
+  the rule generate already followed.
+
+Left as recorded, not fixed: the report/refusal pairing, the three `resolveTab` sites and
+the two generate gates are each aligned by a test rather than by structure; a fourth site
+or a sixth field must remember. The reviewer's list of what it checked and found clean is
+in the round's record (task 9.6).
+
