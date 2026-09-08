@@ -200,15 +200,21 @@
       `entryActions`' `resetBeneath` read `maintenance` alone, `generateBeneath` reads
       `maintenance && thumbWrites`. Comments naming `thumbWrites` as the field rewritten
       in all four places (`ENTRY_COMMANDS`' preamble, both rows, `libraryJobs`,
-      `SidePanel`'s `library` prop and `StoredTab`). **This closes the archived
-      `bulk-thumbnail-jobs` task 5.1**, which declared `thumbWrites` an interim until this
+      `SidePanel`'s `library` prop and `StoredTab`). The library tab's **generate
+      control carries the same second condition** — `libraryOps` renders it only under
+      `thumbWrites`, since it is the other surface of the offer `generateBeneath` gates and
+      the capability's *A launcher whose work would be refused anyway is not offered* names
+      the surface, not the menu entry; the tab itself stays on `maintenance`, because reset
+      lives there. **This closes the archived `bulk-thumbnail-jobs` task 5.1**, which declared `thumbWrites` an interim until this
       field existed — the archive itself is not edited. Covered by `entryActions.test.ts`'s
       *withholds both unless a KNOWN report offers maintenance* and the new *splits the two
       when maintenance and thumbnail writes disagree* (the spec's *Bulk work is gated by
       what it does*), and by `bulkJobSurfaces.test.tsx`'s *is absent while the report is
       unknown*, which gained the write-refusing-but-maintained configuration that keeps the
-      tab. Falsified three ways: `generateBeneath` on `thumbWrites` alone, on `maintenance`
-      alone, and `libraryJobs` back on `thumbWrites` — each fails its own cell
+      tab and now also pins that the tab's generate button is absent there while reset
+      stays, against an all-on control. Falsified four ways: `generateBeneath` on
+      `thumbWrites` alone, on `maintenance` alone, `libraryJobs` back on `thumbWrites`, and
+      `libraryOps` rendering generate unconditionally — each fails its own cell
 
 ## 4. Client consumers
 

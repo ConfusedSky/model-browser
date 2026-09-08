@@ -539,6 +539,29 @@ export default function SidePanel({
   // says meaning, who is otherwise looking at a panel that explains nothing.
   const showIndexState = !meaningRunnable && (mode === 'meaning' || index.state !== 'absent')
 
+  /**
+   * Which of the library tab's two buttons this deployment offers — the
+   * feature-report capability's *A launcher whose work would be refused anyway
+   * is not offered*.
+   *
+   * The **tab** is gated on `maintenance` (App's `libraryJobs`), because that
+   * is the question both jobs ask. Generate carries a second condition on top:
+   * with `thumbWrites` refused at the route, every write it made would be
+   * refused, so the job is a loop that renders and discards and the button is
+   * absent rather than present and inert (`public-deployment` D4). Reset has no
+   * such condition — it is a loop over the same `PUT /api/thumb` a single
+   * model's reset makes, so it is withheld with the tab or not at all, and what
+   * it writes stays governed by `thumbWrites` at the route.
+   *
+   * **This is the same condition `entryActions`' `generateBeneath.applies`
+   * carries, and the two must not drift**: they are one offer on two surfaces —
+   * the container menu's entry and this button — and a deployment offering
+   * either would be offering the discarding loop. `bulkJobSurfaces.test.tsx`
+   * asserts them under one configuration for that reason.
+   */
+  const libraryOps: readonly JobOperation[] =
+    features?.thumbWrites === true ? ['generate', 'reset'] : ['reset']
+
   return (
     <aside
       className={`flex h-full shrink-0 flex-col border-l border-zinc-800 bg-zinc-950 transition-all ${collapsed ? 'w-10' : 'w-80'}`}
@@ -896,7 +919,7 @@ export default function SidePanel({
               {/* Counted labels, which the context menu's entries deliberately
                   are not (D5): this surface renders asynchronously already, so
                   a number arriving a moment later reshapes nothing. */}
-              {(['generate', 'reset'] as const).map((op) => {
+              {libraryOps.map((op) => {
                 const n =
                   counts === null || counts === 'failed'
                     ? null

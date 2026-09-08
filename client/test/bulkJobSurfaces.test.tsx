@@ -347,12 +347,36 @@ describe('the library tab', () => {
     await unmountApp()
 
     // And a write-refusing deployment that still offers maintenance KEEPS the
-    // tab: reset is a maintenance operation whatever it does with writes. The
-    // generate half is `entryActions`' to withhold, not this tab's.
+    // tab: reset is a maintenance operation whatever it does with writes.
+    // *Generate* is the half that goes, and it goes from inside the tab — the
+    // capability's *A launcher whose work would be refused anyway is not
+    // offered*: every write it made would be refused at the route, so it would
+    // render and discard. The same second condition `entryActions`'
+    // `generateBeneath` carries, asserted here so the two surfaces cannot
+    // drift.
     features.mockResolvedValue({ ...DEFAULT_REPORT, thumbWrites: false })
     await mountApp('/models', NESTED)
     await expandPanel()
     expect(tabNames()).toEqual(['search', 'library'])
+    await click(tabButton('library')!)
+    await settle()
+    expect(libraryButtons().map((b) => b.textContent)).toEqual(['Reset 0 framings'])
+    // Absent, not present and inert: a disabled Generate would still be an
+    // offer, and a zero count is how this tab says "nothing to do", which is
+    // not what a refused write means.
+    expect(libraryButtons().some((b) => /^Generate /.test(b.textContent ?? ''))).toBe(false)
+    await unmountApp()
+
+    // The control: the maintained configuration offers both, so the assertion
+    // above is about `thumbWrites` and not about an empty library.
+    await mountApp('/models', NESTED)
+    await expandPanel()
+    await click(tabButton('library')!)
+    await settle()
+    expect(libraryButtons().map((b) => b.textContent)).toEqual([
+      'Generate 0 missing thumbnails',
+      'Reset 0 framings',
+    ])
   })
 
   it('states each button’s count, and says it is counting until it can', async () => {
