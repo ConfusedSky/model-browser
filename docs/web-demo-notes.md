@@ -495,13 +495,20 @@ own origin"; only its body hardcodes loopback.
   (index covers a wider tree than ships).
 - Two containers behind Caddy (Hono + corpus, mini-classify); Caddy for TLS and a
   light rate limit on `/api/semantic`. mini-classify serialises queries already,
-  so abuse degrades to queueing.
+  so abuse degrades to queueing. **Superseded 2026-09-07 by `demo-infrastructure`
+  (backlog 1.4, drafted):** three containers sharing one network namespace so every
+  loopback default holds, only Caddy published, automatic TLS and HTTP/2, **no rate
+  limit at launch** for the queueing reason above (the plugin route recorded), state in
+  volumes, `deploy/demo/config.json` bind-mounted from the checkout. Read that change's
+  design, not this line.
 - Semantic states on the demo: `absent`/`volume-gone`/`wedged` collapse to
   "unavailable" (a visitor can't start a service or mount a drive); `warming`
   stays (container boot is real). "not indexed yet — run the classifier" copy
   needs a visitor-facing form.
 - Static client served by Hono in `index.ts` (adapter-specific ⇒ D1 puts it
   there). `client/dist` exists from an earlier build; nothing serves it today.
+  (`public-deployment` D8 owns the serving; `demo-infrastructure` builds `client/dist`
+  into the app image and deliberately does not serve it from Caddy.)
 - Kit-dominated results ("dragon" → five files from one kit): leave; flat view
   keeps a kit contiguous (D3).
 

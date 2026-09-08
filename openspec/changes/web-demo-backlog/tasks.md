@@ -52,7 +52,11 @@
       definition, and how `deploy/demo/config.json` reaches the box (Masa, 2026-09-03: its
       own ticket, separable from `public-deployment` and **writable and testable earlier**,
       since it depends on nothing in the app). Not the app's configuration, which
-      `public-deployment` owns
+      `public-deployment` owns. **Drafted 2026-09-07 as `demo-infrastructure`**: one shared
+      network namespace behind Caddy, images built on the box from pinned bases, state in
+      volumes, the config file bind-mounted from the checkout, a `local` profile to
+      rehearse here first. Hard ordering with `public-deployment` 6.1 on
+      `deploy/demo/config.json` (this change creates it with `root`; 6.1 extends it)
 - [ ] 1.5 the landing page — contents **decided 2026-09-03** (Masa; recorded on notes item 4
       the same day): a slim banner over the grid — one sentence, query chips that run on
       click, About and credits links — dismissed once per browser via localStorage; a full
