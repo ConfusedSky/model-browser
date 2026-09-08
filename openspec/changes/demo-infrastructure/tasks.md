@@ -77,7 +77,12 @@
       for the checkpoint), first deploy, redeploy (`git pull && docker compose up -d
       --build`), rollback (`git checkout <rev>` and the same), and what to check: the
       certificate, **the 403 before `public-deployment` lands and what turns it into
-      the app**, `free -m` against D10's table, a reboot
+      the app**, `free -m` against D10's table, a reboot. The bake step carries the
+      recipe pin `public-deployment`'s Risks name (2026-09-07, f354811 there): with
+      `thumbWrites` off, a client whose `RIG_VERSION` has moved past the bake re-renders
+      every tile on every visit and cannot heal itself, so the corpus is baked by the
+      client build that ships and re-baked before deploying a build with a newer recipe —
+      a committed `config.json` has no comment to carry this, the runbook does
 - [ ] 6.2 `docs/hetzner-probe-runbook.md` keeps its tier table and the query probe; its
       setup section becomes a pointer at the README
 
