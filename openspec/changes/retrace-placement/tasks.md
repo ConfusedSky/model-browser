@@ -128,7 +128,8 @@
 
 ## 6. Land it
 
-- [ ] 6.1 `bun run typecheck` and both suites green
+- [x] 6.1 `bun run typecheck` and both suites green
+      Done 2026-09-09 on merged main 75f8b38: both typechecks exit 0; server 714/714, client 910/910
 - [ ] 6.2 `openspec validate retrace-placement --strict`, archive dry run on a fresh copy;
       after archiving, check the applied `directory-browsing` text carries no change-scoped
       prose

@@ -139,10 +139,14 @@ Applied once: a listing that lands twice (the stale follow-up, a peek) may shift
 the user has been placed. Accepted; re-applying would fight a user who has already started
 scrolling, and the shift is rare and small.
 
-"Patched, not landed" is decided by `entries` identity, not by the result object: the
-reducer's `patch` mints a new result (`{ ...state.result, forView }`) and preserves only
-`entries` (its own R5 rule), so a lightbox close or a same-question Back keeps the entries
-the request was raised against, and the request is dropped without applying. The record
+"Patched, not landed" is decided by the answer's `id`, not by the result object: the
+reducer's `patch` mints a new result (`{ ...state.result, forView }`) and preserves the
+`id` and the `entries` of the answer it patched, while a landing mints a new id — so a
+lightbox close or a same-question Back carries the id the request was raised against and
+the request is dropped without applying. The id rather than `entries` identity, because a
+test harness that hands back one listing object for every fetch would make a genuine
+re-fetch look like a patch under identity (the wiring worker's call; the same key
+`listingPoses` already uses). The record
 is flushed synchronously at the user's gesture — `navigate`, the ✕ dismissal, a search or
 similarity commit — while the old grid is still on screen, not in the projection effect,
 where the new grid has already rendered and a measurement would file the new listing under
