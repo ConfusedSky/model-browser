@@ -6,11 +6,15 @@
       — the fallback chain of D4 as a pure function returning what to apply. Unit cells for
       each, including a resize (a tile found in a different row keeps its offset) and the
       flat fall-through (anchor absent, child absent → top)
-- [ ] 1.2 `client/src/lib/trail.ts`: the session mirror (D2) — `current()`, `record(idx,
+- [x] 1.2 `client/src/lib/trail.ts`: the session mirror (D2) — `current()`, `record(idx,
       listing, placement)`, `push(idx, listing)` pruning above, `walkBack(fromIdx,
       listing)` for D3, capped; on `sessionStorage`, never throwing (the `stored.ts`
       posture). Cells: prune on push, walk finds the nearest match and not a later branch,
-      unknown index answers nothing, a refused storage answers nothing
+      unknown index answers nothing, a refused storage answers nothing — 2026-09-09:
+      landed as `trailPush`/`trailReplace`/`trailRecord`/`trailPlacement`/`trailWalkBack`
+      with `listingKey` (`serializeView(toUrlView({...view, model: null}))`); 11 cells in
+      `client/test/trail.test.ts`, falsified twice (walk ignoring `fromIdx` → the nearest
+      cell fails "expected 3 to be 1"; prune dropped → the push cell fails, 6 rows for 3)
 
 ## 2. History carries an index
 
