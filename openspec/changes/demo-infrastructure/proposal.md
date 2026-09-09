@@ -65,10 +65,9 @@ accepts and serves, and this change consumes it as it is.
   `oven/bun`, `python:3.12-slim` and `caddy` images; the CPU torch wheel index. The
   index image pins what the probe runbook installed by hand, because `mini-classify`
   carries no dependency manifest — a gap that belongs upstream and is noted there.
-- **Ordering.** Rehearsable now. On the box, before `public-deployment` lands, the guard
-  answers every proxied API request 403 (its `Host` is not loopback) and nothing serves
-  the client — so the pre-landing smoke test proves TLS, the proxy and the container
-  boundary, and the app appears when `public-deployment` configures its origins and
-  serves `client/dist`. The bake (`web-demo-backlog` 1.7) runs after the app's first
-  start on the box, which is when the library marker is written and the cache directory
-  gets its name.
+- **Ordering.** `public-deployment` landed on 2026-09-08 before this change was applied,
+  so the box serves the app on its first deploy: the smoke test expects the client at `/`
+  and the demo posture at `/api/features`, with a foreign `Origin` refused as the guard's
+  liveness check. The bake (`web-demo-backlog` 1.7) runs after the app's first start on
+  the box, which is when the library marker is written and the cache directory gets its
+  name.

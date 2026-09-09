@@ -89,7 +89,7 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   correction passes in normative spec text this way, and it hides edits too, not just reads:
   `python3 -c "import re,sys;print(re.sub(r'\s+',' ',open(sys.argv[1]).read()))" FILE | grep …`
 - A dev instance is usually already running (check first — not always up; ports 3177/5173,
-  EADDRINUSE on a second `bun run dev`) — server (`bun --hot`) and client (Vite HMR) pick
+  EADDRINUSE on a second `bun run dev`) — server (`bun --watch`) and client (Vite HMR) pick
   up edits live. **3177 also serves `client/dist` whenever that directory exists** (the
   server serves the built client since `public-deployment`; `dist/` is gitignored, so
   `git status` will not show it): after a `bun run build` for a verification, a browser on

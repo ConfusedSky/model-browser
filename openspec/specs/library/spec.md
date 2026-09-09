@@ -122,7 +122,9 @@ The root SHALL be read from the `MODEL_BROWSER_ROOT` environment variable, else 
 
 ### Requirement: Hidden entries are unreachable
 A path naming a dot-prefixed component **in its filesystem half** SHALL be refused by the
-library exactly as a path that does not exist is, and path completion SHALL NOT offer one,
+library with the status a missing path gets — and, where a route answers a missing path
+with a sentence of its own, that route's; the two are told apart by nothing but the dot
+the requester typed — and path completion SHALL NOT offer one,
 so that what a listing hides is also what a request cannot reach. Skipping hidden
 directories in a walk was never the same thing as making them unreachable, and on a
 deployment that answers strangers the difference is a trash directory browsable by

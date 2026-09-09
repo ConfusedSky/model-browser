@@ -77,8 +77,14 @@
       rsync lines for corpus and index from the probe runbook, the setup-profile command
       for the checkpoint), first deploy, redeploy (`git pull && docker compose up -d
       --build`), rollback (`git checkout <rev>` and the same), and what to check: the
-      certificate, **the 403 before `public-deployment` lands and what turns it into
-      the app**, `free -m` against D10's table, a reboot. The bake step carries the
+      certificate, **what a healthy box answers** (`public-deployment` landed 2026-09-08,
+      so the smoke expectations below are the app's, not a guard's 403): `/api/features`
+      with the demo posture, `/` the client, the two startup lines in `docker compose logs
+      app` — `client at …/client/dist` and `library <id> at /library/miniatures/clustered-hq`,
+      the only place the resolved top can be read since `hostDetails` withholds it on the
+      wire — and `Origin: https://evil.example` → 403 as the guard's liveness check (a
+      foreign `Host` never reaches the app through Caddy's site block), `free -m` against
+      D10's table, a reboot. The bake step carries the
       recipe pin `public-deployment`'s Risks name (2026-09-07, f354811 there): with
       `thumbWrites` off, a client whose `RIG_VERSION` has moved past the bake re-renders
       every tile on every visit and cannot heal itself, so the corpus is baked by the
@@ -104,11 +110,15 @@
 
 - [ ] 8.1 Populate: checkpoint via the setup profile; corpus and index via rsync
 - [ ] 8.2 `docker compose up -d --build`; `curl -sI https://models.masamaeda.com/` shows
-      the certificate and the redirect from HTTP; `/api/features` answers **403** from the
-      guard — the expected pre-landing signal (D7) — and `docker compose exec caddy wget
-      -qO- http://127.0.0.1:3177/api/features` answers 200 from inside the namespace
+      the certificate and the redirect from HTTP; `/api/features` answers 200 with every
+      field off (the demo posture); `/` is the client; `/api/library` carries no `top`;
+      `curl -H 'Origin: https://evil.example' …/api/features` answers 403 `forbidden
+      origin` — the guard's liveness check, since Caddy never forwards a foreign `Host`
+      (D7); and `docker compose exec caddy wget -qO- http://127.0.0.1:3177/api/features`
+      answers the same 200 from inside the namespace
 - [ ] 8.3 Record `free -m` with the stack idle and after one query, beside D10's table;
       reboot the box and confirm the stack returns without a hand
-- [ ] 8.4 After `public-deployment` lands: `git pull && docker compose up -d --build`;
-      the site loads the client and a search answers. Not this change's task to make true,
-      but its task to confirm the box needed no other change
+- [ ] 8.4 `public-deployment` landed before this change was applied, so there is no
+      second deploy: 8.2 already expects the app. Kept as the place to confirm a meaning
+      search answers through Caddy end to end, and that the box needed nothing beyond
+      this change

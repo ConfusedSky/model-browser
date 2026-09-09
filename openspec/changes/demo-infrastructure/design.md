@@ -175,11 +175,12 @@ each paying an ocean RTT over HTTP/1.1, and multiplexing is the cheapest answer 
 Caddy's `/data` is a named volume so a rebuild or rollback keeps the certificate; Let's
 Encrypt limits duplicate issuance to five a week, which a careless rebuild loop would hit.
 
-`Host` is passed through unchanged. Until `public-deployment` lands the guard therefore
-answers every proxied API request 403 — which is the *honest* pre-landing smoke signal:
-TLS terminated, proxy reached the app, app refused a stranger. A `header_up Host`
-rewrite would make the smoke test green by lying to the guard, and would have to be
-removed later; it is not added.
+`Host` is passed through unchanged, so the guard sees the public name and admits it from
+the committed configuration's `origins`. (Written before `public-deployment` landed, this
+paragraph expected a 403 as the pre-landing smoke signal; it landed on 2026-09-08, before
+this change was applied, so the smoke test expects the app. The guard's liveness is
+checked with a foreign `Origin` header, which Caddy passes through, rather than a foreign
+`Host`, which its site block never forwards.) A `header_up Host` rewrite is not added.
 
 No rate limit. Stock Caddy has none; `mini-classify` serialises queries so a flood queues
 rather than overloads; the flat walk is bounded by its 200k-step budget. If abuse shows,
@@ -239,9 +240,10 @@ change to this design.
   so the old stack serves through it; the client build is under a minute, the torch
   layer is cached after the first build. Acceptable for a demo; a registry is the
   answer if it stops being.
-- [The pre-landing smoke test is a 403] → Stated as the expected signal in the runbook,
-  with what changes it (`public-deployment` D3 and D8). A reviewer measuring "the app
-  does not load" before that change lands should read this line, not file a bug.
+- [A misconfigured origin looks like a dead site] → the runbook's first check is
+  `/api/features` with the public `Host`, and its negative control is a foreign `Origin`;
+  a 403 on the former means `origins` in `deploy/demo/config.json` does not name the host
+  Caddy is serving.
 - [A read-write corpus mount on a public box] → Nothing reachable writes to it: thumbnail
   writes are refused, the launcher withheld, and the only paths the app writes are under
   `.model-browser/`. The index container mounts it read-only.
@@ -260,10 +262,9 @@ change to this design.
    is verifiable here.
 2. Prepare the box (§1 tasks): firewall, swap, Docker, DNS, clone.
 3. Populate the volumes: checkpoint via the setup profile, corpus and index via rsync.
-4. `docker compose up -d --build`; confirm the certificate and the 403.
-5. When `public-deployment` lands: `git pull`, `docker compose up -d --build`; the 403
-   becomes the app.
-6. Rollback at any step: `git checkout <previous>` and the same command; volumes and
+4. `docker compose up -d --build`; confirm the certificate, the app at `/`, the demo
+   posture at `/api/features`, and a foreign `Origin` refused.
+5. Rollback at any step: `git checkout <previous>` and the same command; volumes and
    certificate untouched.
 
 ## Open Questions
