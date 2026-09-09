@@ -588,6 +588,23 @@ library's id. Accepted, not fixed: an `unmarked` library's id is a digest of its
 still sent — a digest of an unknown path has no preimage. The unpinned scenario *A
 deployment answering two names* gains a cell.
 
+*Fourth pass (2026-09-08), decided by Masa:* a suffix range on an empty file was a 500
+(`parseRange` had no zero-length case) — fixed. The search-text bound was documented with
+the wrong mechanism: the index's limit is a **token** budget (~64 SigLIP2 tokens; 100 CJK
+characters fail where 120 bytes of ASCII pass), the 500 is a proper response and the
+"reset read as absent" chain did not reproduce — the route keeps its coarse 500-unit guard
+with a corrected comment, and the precise limit is fixed **in mini-classify** (#5) as a
+4xx naming the budget. **Archives are opaque** to the model-format and hidden rules: the
+zip branch of `/api/file` serves any member by name and zip listings show dot entries;
+the `library` requirement is narrowed to the filesystem half and says so, and the public
+corpus ships no archives. A hidden component answers **404 as a missing path**, not 400
+"outside the library" — the spec's "as if it did not exist", and the message a personal
+install's owner sees for a dot folder they used to type is then the true one. The
+overlay effect also waits for the ready library id, closing the boot race a
+last-arriving `/api/library` left on the first grid. Accepted, recorded: a non-dot
+symlink can alias a hidden directory (owner-planted, by-name rule); the range unit is
+matched case-sensitively (a `Bytes=` request is served whole, which the RFC permits).
+
 Left as recorded, not fixed: the report/refusal pairing, the three `resolveTab` sites and
 the two generate gates are each aligned by a test rather than by structure; a fourth site
 or a sixth field must remember. The reviewer's list of what it checked and found clean is

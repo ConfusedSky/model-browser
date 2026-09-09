@@ -560,3 +560,13 @@
       thumbnailQueue.test.tsx; the existing cells threaded through an id. Two
       falsifications — the id dropped from the key, and an unknown id falling back to the
       bare key — each failing on its own cell
+- [ ] 9.13 (fourth pass, decided 2026-09-08) `parseRange` answers 416 on a zero-length
+      file; a hidden component answers 404 as a missing path; `maxRequestBodySize` and
+      `SEARCH_TEXT_MAX` comments state the real bounds
+- [ ] 9.14 The overlay effect waits for the ready library id as well as the report
+- [ ] 9.15 mini-classify answers a 4xx naming its token budget (#5 there); model-browser
+      keeps its coarse guard
+- [x] 9.16 Archives opaque to the model-format and hidden rules — `library` spec narrowed
+      to the filesystem half, `directory-browsing` says entries not directories; the
+      symlink alias and the range-unit case accepted (design, fourth-pass paragraph)
+

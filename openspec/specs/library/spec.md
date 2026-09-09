@@ -121,12 +121,16 @@ The root SHALL be read from the `MODEL_BROWSER_ROOT` environment variable, else 
 - **THEN** the server reports the failure naming that file rather than starting as though no root were configured
 
 ### Requirement: Hidden entries are unreachable
-A path naming a dot-prefixed component SHALL be refused by the library as if it did not
-exist, and path completion SHALL NOT offer one, so that what a listing hides is also what a
-request cannot reach. Skipping hidden directories in a walk was never the same thing as
-making them unreachable, and on a deployment that answers strangers the difference is a
-trash directory browsable by spelling its name. The library's own marker directory was
-already refused; this widens that rule to every hidden component.
+A path naming a dot-prefixed component **in its filesystem half** SHALL be refused by the
+library exactly as a path that does not exist is, and path completion SHALL NOT offer one,
+so that what a listing hides is also what a request cannot reach. Skipping hidden
+directories in a walk was never the same thing as making them unreachable, and on a
+deployment that answers strangers the difference is a trash directory browsable by
+spelling its name. The library's own marker directory was already refused; this widens
+that rule to every hidden component. An archive is opaque to this rule: the entry half of
+a virtual path is a name the archive reader looks up, its members are neither hidden nor
+filtered by format, and a deployment whose corpus must not expose an archive's members
+ships no archives (the public corpus holds none).
 
 #### Scenario: A hidden directory cannot be browsed by name
 - **WHEN** a request names a path with a dot-prefixed component
