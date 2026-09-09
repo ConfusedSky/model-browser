@@ -198,7 +198,7 @@ describe('leaving a similarity view', () => {
     expect(location.search).toContain('similar=')
     // The entry is marked, which is what makes the return possible at all, and
     // the depth is 1 because the search it was raised from is not marked.
-    expect(history.state).toEqual({ similar: true, depth: 1 })
+    expect(history.state).toMatchObject({ similar: true, depth: 1 })
 
     listDir.mockClear()
     await click(dismissButton()!)
@@ -230,17 +230,17 @@ describe('leaving a similarity view', () => {
     const { go } = fakeHistory()
 
     await findSimilarOn('widget.stl')
-    expect(history.state).toEqual({ similar: true, depth: 1 })
+    expect(history.state).toMatchObject({ similar: true, depth: 1 })
     await openPanel()
 
     await tuneCount('40')
     expect(location.search).toContain('k=40')
-    expect(history.state).toEqual({ similar: true, depth: 2 })
+    expect(history.state).toMatchObject({ similar: true, depth: 2 })
 
     await click(poolButton('max'))
     await settle()
     expect(location.search).toContain('pool=max')
-    expect(history.state).toEqual({ similar: true, depth: 3 })
+    expect(history.state).toMatchObject({ similar: true, depth: 3 })
 
     await click(dismissButton()!)
     await settle()
@@ -319,12 +319,12 @@ describe('leaving a similarity view', () => {
 
     await findSimilarOn('widget.stl')
     expect(location.search).toContain(encodeURIComponent(HERO))
-    expect(history.state).toEqual({ similar: true, depth: 1 })
+    expect(history.state).toMatchObject({ similar: true, depth: 1 })
 
     similar.mockResolvedValue({ ...NEIGHBOURS, entries: [model('Kits/Baal/hero.stl')] })
     await findSimilarOn('base.stl')
     expect(location.search).toContain(encodeURIComponent('/models/Kits/Baal/base.stl'))
-    expect(history.state).toEqual({ similar: true, depth: 2 })
+    expect(history.state).toMatchObject({ similar: true, depth: 2 })
 
     listDir.mockResolvedValue(NESTED)
     await click(dismissButton()!)
@@ -358,7 +358,7 @@ describe('leaving a similarity view', () => {
     await settle()
     const tunedUrl = location.search
     expect(tunedUrl).toContain('pool=max')
-    expect(history.state).toEqual({ similar: true, depth: 2 })
+    expect(history.state).toMatchObject({ similar: true, depth: 2 })
 
     // Away, then back — the way the browser does it, carrying the entry's own
     // state, which is what a real back/forward preserves.
@@ -372,7 +372,7 @@ describe('leaving a similarity view', () => {
     await settle()
     expect(location.search).toBe(tunedUrl)
     expect(labels()).toEqual(['base.stl', 'wing.stl'])
-    expect(history.state).toEqual({ similar: true, depth: 2 })
+    expect(history.state).toMatchObject({ similar: true, depth: 2 })
 
     listDir.mockResolvedValue(NESTED)
     await click(dismissButton()!)
@@ -393,7 +393,7 @@ describe('leaving a similarity view', () => {
     await type(searchInput(), 'widget')
     await pressEnter(searchInput())
     await settle()
-    expect(history.state).toBeNull()
+    expect(history.state?.similar).toBeUndefined()
 
     const go = vi.spyOn(window.history, 'go')
     listDir.mockResolvedValue(NESTED)

@@ -17,10 +17,13 @@
       -20`). Tile lookup is an attribute scan, not `CSS.escape` + `querySelector`:
       happy-dom refuses any backslash in a quoted attribute selector, so the selector form
       could not be tested with a path carrying quotes — see `tilesIn`'s comment)*
-- [ ] 2.1 `commitUrl` stamps `{ idx }` into the state it writes, merged with `LIGHTBOX_ENTRY`
+- [x] 2.1 `commitUrl` stamps `{ idx }` into the state it writes, merged with `LIGHTBOX_ENTRY`
       / `SIMILAR_ENTRY` when those are passed; a push is the current index plus one, a
       replace keeps it; boot without one is index 0 via `replaceState` (D2). `isLightboxEntry`
-      and `similarDepth` unchanged. Cells in the urlState suite
+      and `similarDepth` unchanged. Cells in the urlState suite — 2026-09-09: `historyIndex()`
+      added, `commitUrl` returns `{ idx, wrote }`; six cells under "the entry index" in
+      `urlState.test.ts`; falsified twice (overwrite instead of merge → 4 marker cells fail;
+      push writes the current index → 5 cells fail)
 - [ ] 2.2 `onPop` reads the index off `history.state` and raises the entry's placement as
       the pending request, or `top` when the mirror knows nothing
 

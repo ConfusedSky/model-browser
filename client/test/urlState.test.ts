@@ -5,6 +5,7 @@ import { MAX_RESULT_COUNT } from '../../shared/types'
 import { requestOf, type View } from '../src/state/view'
 import {
   commitUrl,
+  historyIndex,
   isLightboxEntry,
   isSimilarEntry,
   LIGHTBOX_ENTRY,
@@ -134,8 +135,9 @@ describe('url state', () => {
     expect(isLightboxEntry()).toBe(false)
     commitUrl({ path: '/a', flat: false, model: '/a/m.stl' }, { state: LIGHTBOX_ENTRY })
     expect(isLightboxEntry()).toBe(true)
-    // The marker rides the entry, so it outlives any in-memory flag.
-    expect(window.history.state).toEqual({ lightbox: true })
+    // The marker rides the entry, so it outlives any in-memory flag. The entry
+    // index rides beside it (retrace-placement D2) — merged, not overwritten.
+    expect(window.history.state).toEqual({ lightbox: true, idx: 2 })
   })
 
   it('marks the entries an in-app find-similar mints, and the two markers do not read each other', () => {
@@ -191,6 +193,73 @@ describe('url state', () => {
     commitUrl({ path: '/a', flat: false, q: 'gear' }, { replace: true })
     expect(window.history.length).toBe(len)
     expect(parseUrl().q).toBe('gear')
+  })
+})
+
+describe('the entry index', () => {
+  // retrace-placement D2: the browser exposes only the current entry's state,
+  // so every entry `commitUrl` writes carries its position in the stack, and
+  // that position is what a session mirror of the stack is keyed by.
+  it('a state without an index answers 0', () => {
+    expect(historyIndex()).toBe(0)
+    window.history.replaceState({ lightbox: true }, '', '/')
+    expect(historyIndex()).toBe(0)
+    window.history.replaceState({ idx: 'three' }, '', '/')
+    expect(historyIndex()).toBe(0)
+  })
+
+  it('a boot replace over an entry with no state writes index 0', () => {
+    expect(commitUrl({ path: '/a', flat: false }, { replace: true })).toEqual({
+      idx: 0,
+      wrote: 'replace',
+    })
+    expect(window.history.state).toEqual({ idx: 0 })
+    expect(historyIndex()).toBe(0)
+  })
+
+  it('a push writes the previous index plus one and returns it', () => {
+    expect(commitUrl({ path: '/a', flat: false })).toEqual({ idx: 1, wrote: 'push' })
+    expect(historyIndex()).toBe(1)
+    expect(commitUrl({ path: '/b', flat: false })).toEqual({ idx: 2, wrote: 'push' })
+    expect(historyIndex()).toBe(2)
+    expect(window.history.state).toEqual({ idx: 2 })
+  })
+
+  it('a replace keeps the index', () => {
+    commitUrl({ path: '/a', flat: false })
+    commitUrl({ path: '/b', flat: false })
+    expect(commitUrl({ path: '/b', flat: false, q: 'gear' }, { replace: true })).toEqual({
+      idx: 2,
+      wrote: 'replace',
+    })
+    expect(historyIndex()).toBe(2)
+  })
+
+  it('the markers keep reading true beside the index', () => {
+    commitUrl({ path: '/a', flat: false })
+    commitUrl({ path: '/a', flat: false, model: '/a/m.stl' }, { state: LIGHTBOX_ENTRY })
+    expect(isLightboxEntry()).toBe(true)
+    expect(historyIndex()).toBe(2)
+    expect(window.history.state).toEqual({ lightbox: true, idx: 2 })
+
+    commitUrl({ path: '/a', flat: false, similar: '/a/m.stl' }, { state: SIMILAR_ENTRY(2) })
+    expect(isSimilarEntry()).toBe(true)
+    expect(similarDepth()).toBe(2)
+    expect(isLightboxEntry()).toBe(false)
+    expect(historyIndex()).toBe(3)
+  })
+
+  it('the same-view short-circuit writes nothing and says so', () => {
+    commitUrl({ path: '/a', flat: false })
+    const len = window.history.length
+    const url = window.location.search
+    expect(commitUrl({ path: '/a', flat: false })).toEqual({ idx: 1, wrote: 'none' })
+    expect(commitUrl({ path: '/a', flat: false }, { replace: true, state: LIGHTBOX_ENTRY })).toEqual(
+      { idx: 1, wrote: 'none' },
+    )
+    expect(window.history.length).toBe(len)
+    expect(window.location.search).toBe(url)
+    expect(window.history.state).toEqual({ idx: 1 })
   })
 })
 

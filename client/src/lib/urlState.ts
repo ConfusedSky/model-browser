@@ -268,20 +268,45 @@ function sameView(a: UrlView, b: UrlView): boolean {
 }
 
 /**
+ * The position of the current entry in the session's stack, read off the
+ * `idx` every `commitUrl` write stamps into its state; 0 when the entry
+ * carries none (the boot entry before its seed, or one minted before the
+ * stamp existed) or carries something that is not a number.
+ */
+export function historyIndex(): number {
+  const idx = (window.history.state as { idx?: unknown } | null)?.idx
+  return typeof idx === 'number' ? idx : 0
+}
+
+/**
  * Write `view` into the URL. Reads the live URL at write time and does
  * nothing when it already names this view (a re-commit of the same view must
  * not stack history entries); otherwise pushes, or replaces when the write is
  * a history restoration or a boot seed (D2/D4).
+ *
+ * Every entry written here carries an index in its state, merged with whatever
+ * marker the caller passes (`LIGHTBOX_ENTRY`, `SIMILAR_ENTRY`): a push is the
+ * current index plus one, a replace keeps it — which makes the boot seed, over
+ * an entry that never had one, index 0 (retrace-placement D2). The browser
+ * exposes only the *current* entry's state, so the index is what lets a
+ * session mirror of the stack find the row an entry corresponds to. The
+ * return says what was written and at which index, so the caller can file
+ * that row; `none` is the declined redundant write, reported at the index the
+ * entry already holds.
  */
 export function commitUrl(
   view: UrlView,
   opts: { replace?: boolean; state?: unknown } = {},
-): void {
-  if (sameView(parseUrl(), view)) return
+): { idx: number; wrote: 'push' | 'replace' | 'none' } {
+  if (sameView(parseUrl(), view)) return { idx: historyIndex(), wrote: 'none' }
   const url = `${window.location.pathname}${serializeView(view)}`
-  const state = opts.state ?? null
-  if (opts.replace === true) window.history.replaceState(state, '', url)
+  const replace = opts.replace === true
+  const idx = replace ? historyIndex() : historyIndex() + 1
+  const marker = typeof opts.state === 'object' && opts.state !== null ? opts.state : {}
+  const state = { ...marker, idx }
+  if (replace) window.history.replaceState(state, '', url)
   else window.history.pushState(state, '', url)
+  return { idx, wrote: replace ? 'replace' : 'push' }
 }
 
 /**
