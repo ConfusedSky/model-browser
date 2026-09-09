@@ -483,12 +483,24 @@ export const MAX_RESULT_COUNT = 500
 
 /**
  * The longest phrase a meaning query may carry, refused at the route before any
- * index call is made. The index answers 500 to a phrase past roughly 600
- * characters and resets the connection doing it, which `askIndex` cannot tell
- * from a service that is not running — so a long phrase does not fail, it makes
- * the index read as *absent* until the next probe. Bounded here so the work is
- * refused before it is started, rather than diagnosed after it has broken the
- * probe's answer for everyone.
+ * index call is made — a coarse guard against a pasted paragraph, not a
+ * restatement of the index's own limit.
+ *
+ * This doc used to say the index 500s past roughly 600 *characters* and resets
+ * the connection doing it, which `askIndex` could not tell from a service that
+ * was not running, so one long phrase made the feature read as absent to
+ * everyone. Measured 2026-09-08 and none of that holds. The index's limit is a
+ * **token** budget — about 64 SigLIP2 tokens, so 100 CJK characters fail while
+ * 120 bytes of ASCII words pass, and no character count describes it. The 500
+ * is a proper HTTP response with no connection reset, and availability stays
+ * `ready` across it, so the probe is unaffected and nothing leaks to other
+ * requests.
+ *
+ * So this bound is not load-bearing for correctness and cannot be made precise
+ * here: the precise one belongs to the index, which is being fixed to answer a
+ * 4xx naming the token budget (ConfusedSky/mini-classify#5). 500 characters is
+ * kept as what it is — well under any plausible token budget for ordinary
+ * prose, and enough to stop a paragraph from becoming an index round trip.
  */
 export const SEARCH_TEXT_MAX = 500
 

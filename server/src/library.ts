@@ -604,8 +604,16 @@ export function createLibrary(
       // directory — this app's own corner of the library, the home of every
       // file it keeps beside the models — is the case this rule started as, and
       // is covered by it, `.model-browser` being dot-prefixed like the rest.
-      // Refused as "outside", because that is what it is from the browsing
-      // side: the library is the models, and these are not among them.
+      //
+      // Answered as a path that is not there — `no such path`, 404, the
+      // sentence `listDir` and `peek` give a name that misses — rather than as
+      // the "outside" refusal it was first written as. *Unreachable* is the
+      // property the spec asks for, and a distinct refusal is not
+      // unreachability: a 400 saying "outside" where a miss says 404 is an
+      // oracle, telling a stranger that the name they spelled is one this
+      // server treats specially. The point is that `/.trash/junk.stl`, which is
+      // really on disk, and `/.hidden/x.stl`, which is not, and `/nope/x.stl`,
+      // which is neither, are one answer.
       //
       // `.` and `..` never reach here as components — `posix.normalize` above
       // resolved them, and an absolute path drops the leading `..` that would
@@ -613,7 +621,7 @@ export function createLibrary(
       // opaque archive name this module does not normalise, and the zip
       // routes read a named entry rather than a path.
       if (normalized.split('/').some((part) => part.startsWith('.'))) {
-        throw new LibraryError(OUTSIDE, 400)
+        throw new LibraryError(`no such path: ${libPath}`, 404)
       }
       const candidate = join(realTop, normalized)
 

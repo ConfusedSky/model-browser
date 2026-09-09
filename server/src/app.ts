@@ -261,6 +261,14 @@ function parseRange(
   if (m === null) return null
   const [, from, to] = m
   if (from === '' && to === '') return null
+  // A zero-length representation before the three spellings are told apart:
+  // RFC 9110 §14.1.1 makes *no* byte-range-spec satisfiable against one, and
+  // the suffix branch below would otherwise answer `bytes=-n` with the empty
+  // slice `{start: 0, end: -1}` — which `createReadStream` rejects outright,
+  // turning a well-formed request into a 500. The `start >= size` test further
+  // down already covers the two prefixed spellings here (`0 >= 0`); this makes
+  // the rule the header-independent one it always was.
+  if (size === 0) return 'unsatisfiable'
   if (from === '') {
     // A suffix range: the last `n` bytes. `bytes=-0` names nothing.
     const n = Number(to)
@@ -269,8 +277,8 @@ function parseRange(
     return { start: Math.max(0, size - n), end: size - 1 }
   }
   const start = Number(from)
-  // Past the end — including every range against an empty file — is the one
-  // shape that owes a 416 rather than bytes.
+  // Past the end is the one remaining shape that owes a 416 rather than bytes
+  // (the empty file, which this check used to carry, is caught above).
   if (start >= size) return 'unsatisfiable'
   if (to === '') return { start, end: size - 1 }
   const end = Number(to)
@@ -1699,11 +1707,14 @@ export function createApp(
     if (typeof text !== 'string' || text.trim() === '') {
       return c.json({ error: 'text is required' }, 400)
     }
-    // Refused before the index is asked anything, `SEARCH_TEXT_MAX`'s reason:
-    // a phrase past what the index takes does not come back as an error, it
-    // resets the connection, and a reset reads as "the index is not running"
-    // to the probe every other query then shares. One long phrase would make
-    // the feature look absent to everyone until the next probe.
+    // Refused before the index is asked anything, `SEARCH_TEXT_MAX`'s reason —
+    // which is *not* the one written here until 2026-09-08. A phrase past what
+    // the index takes was said to reset the connection, and so to read as "the
+    // index is not running" to the probe every other query shares. Measured: it
+    // is a proper 500, no reset, availability stays `ready`, and the index's
+    // limit is a token budget rather than a character count (see
+    // `SEARCH_TEXT_MAX`). Nothing leaks to other requests, so this bound is a
+    // coarse guard that keeps a pasted paragraph from becoming a round trip.
     if (text.length > SEARCH_TEXT_MAX) return c.json({ error: 'text is too long' }, 400)
     // Both halves of availability from one probe: the library path the client
     // is told about, and the absolute root the index itself must be asked

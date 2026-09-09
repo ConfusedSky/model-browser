@@ -417,13 +417,18 @@ describe('GET /api/overrides', () => {
     expect(await res.json()).toEqual({ name: 'The Kit' })
   })
 
-  it('refuses what the library refuses', async () => {
+  it('answers a marker path exactly as the library does, as one that is not there', async () => {
+    // The marker directory is dot-prefixed, so it rides the hidden-component
+    // branch in `Library.resolve` — which answers `no such path`, 404, rather
+    // than the 400 "outside" refusal this cell used to assert. What the cell is
+    // for is unchanged: this route says whatever the library says about a path,
+    // and does not have an opinion of its own.
     const res = await appOn(fixtureLibrary()).request(
       `/api/overrides?path=/${MARKER_DIR}/overrides.json`,
       { headers: LOOPBACK },
     )
-    expect(res.status).toBe(400)
-    expect(await res.json()).toEqual({ error: 'path outside the library' })
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({ error: `no such path: /${MARKER_DIR}/overrides.json` })
   })
 
   it('answers the not-ready envelope while the library is unconfigured', async () => {

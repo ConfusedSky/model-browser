@@ -165,12 +165,25 @@ describe('a hidden entry is unreachable, not merely unlisted', () => {
   // entries in a walk was never the same thing as making them unreachable: on a
   // deployment that answers strangers, the difference is a trash directory
   // browsable by anyone who spells its name.
-  it('refuses a hidden component on every path route, whatever is really there', async () => {
+  it('answers a hidden component as a path that does not exist, whatever is really there', async () => {
+    // 404 `no such path`, not the 400 "outside" refusal this branch shipped
+    // with: the scenario asks for *unreachable*, and a refusal of its own is
+    // not that. A distinct status or sentence is an oracle — it tells a
+    // stranger the name they spelled is one this server treats specially — and
+    // the sibling cell below pins that the answer is the miss's, byte for byte.
+    //
     // Two spellings on purpose: `.trash` holds a model and is really on disk,
-    // `.hidden` is not there at all — and the answer is the same refusal, so
-    // the routes say nothing about which is which.
-    const paths = ['/.trash', '/.trash/junk.stl', '/.hidden/x.stl', '/kit/../.trash/junk.stl']
-    for (const path of paths) {
+    // `.hidden` is not there at all — and the answer is the same, so the
+    // routes say nothing about which is which. The expected sentence names the
+    // **canonical** path, which is what every route resolves before answering:
+    // the `..` spelling is answered as `/.trash/junk.stl`.
+    const paths: [string, string][] = [
+      ['/.trash', '/.trash'],
+      ['/.trash/junk.stl', '/.trash/junk.stl'],
+      ['/.hidden/x.stl', '/.hidden/x.stl'],
+      ['/kit/../.trash/junk.stl', '/.trash/junk.stl'],
+    ]
+    for (const [path, canonical] of paths) {
       const p = encodeURIComponent(path)
       const cases = [
         `/api/dir?path=${p}`,
@@ -180,47 +193,81 @@ describe('a hidden entry is unreachable, not merely unlisted', () => {
       ]
       for (const url of cases) {
         const res = await get(url)
-        expect([url, res.status]).toEqual([url, 400])
-        expect([url, ((await res.json()) as { error: string }).error]).toEqual([
-          url,
-          'path outside the library',
-        ])
+        expect([url, res.status]).toEqual([url, 404])
+        expect([url, await res.json()]).toEqual([url, { error: `no such path: ${canonical}` }])
       }
     }
   })
 
-  it('refuses a hidden component nested under a directory that is browsable', async () => {
+  it('answers it indistinguishably from a path that is simply not there', async () => {
+    // The point of the status change, asserted as equality rather than as two
+    // literals: `/.trash/x.stl` names a hidden directory that exists, and
+    // `/nope/x.stl` names nothing at all, and on the two routes that answer a
+    // miss in the library's own words the responses are identical once the
+    // path itself is substituted.
+    for (const route of ['/api/dir', '/api/peek']) {
+      const hidden = await get(`${route}?path=${encodeURIComponent('/.trash/x.stl')}`)
+      const absent = await get(`${route}?path=${encodeURIComponent('/nope/x.stl')}`)
+      expect([route, hidden.status]).toEqual([route, absent.status])
+      const shape = (body: { error: string }) => body.error.replace(/\/[^/]+\/x\.stl$/, '/…')
+      expect([route, shape((await hidden.json()) as { error: string })]).toEqual([
+        route,
+        shape((await absent.json()) as { error: string }),
+      ])
+    }
+    // `/api/file` and `/api/thumb` answer a miss in their own words — "no such
+    // file" for a model that is not on disk, a 200 cache miss for a thumbnail
+    // nobody has rendered — so a hidden component is not word-for-word what
+    // *those* two say about `/nope/x.stl`. That is not an oracle: what the
+    // answer distinguishes is the dot the requester typed, never what the
+    // filesystem holds behind it, which is the property the scenario states
+    // and the cell above pins (`.trash` present, `.hidden` absent, one answer).
+    const file = await get(`/api/file?path=${encodeURIComponent('/nope/x.stl')}`)
+    expect([file.status, await file.json()]).toEqual([404, { error: 'no such file: /nope/x.stl' }])
+  })
+
+  it('answers a hidden component nested under a directory that is browsable', async () => {
     // The rule is per component, not a prefix test on the first one: the file
     // is under `/kit`, which lists.
     mkdirSync(join(lib, 'kit', '.private'), { recursive: true })
     writeFileSync(join(lib, 'kit', '.private', 'secret.stl'), stlBytes(7))
     const res = await get(`/api/file?path=${encodeURIComponent('/kit/.private/secret.stl')}`)
-    expect(res.status).toBe(400)
-    expect(await res.json()).toEqual({ error: 'path outside the library' })
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({ error: 'no such path: /kit/.private/secret.stl' })
     // The control, one component apart: the model beside it is served.
     expect((await get(`/api/file?path=${encodeURIComponent('/kit/part.stl')}`)).status).toBe(200)
   })
 })
 
 describe('the marker directory is the app’s own, not a folder to browse', () => {
-  it('refuses to list it or to read the marker, however the path is spelled', async () => {
-    // The marker is written when the library is first evaluated, so ask for a
-    // listing before looking for it — this test must not depend on which
-    // others ran first.
+  it('answers it as a path that is not there, however the path is spelled', async () => {
+    // The marker is dot-prefixed, so it rides the hidden-component branch
+    // above and moved with it: 404 `no such path`, where this cell asserted the
+    // 400 "outside" refusal. The marker is written when the library is first
+    // evaluated, so ask for a listing before looking for it — this test must
+    // not depend on which others ran first.
     await listing('/')
-    // The file is really there — what follows is a refusal, not a miss.
+    // The file is really there — what follows is the answer a miss gets, said
+    // about something that exists.
     expect(existsSync(join(lib, '.model-browser', 'library.json'))).toBe(true)
-    const cases: [string, string][] = [
-      ['/api/dir', '/.model-browser'],
-      ['/api/dir', '/.model-browser/'],
-      ['/api/dir', '/kit/../.model-browser'],
-      ['/api/file', '/.model-browser/library.json'],
-      ['/api/dir', '/.model-browser/library.json'],
+    // Third column: the canonical spelling the answer names, which is what
+    // every route resolves before saying anything (`/.model-browser/` and the
+    // `..` climb are both answered as `/.model-browser`).
+    const cases: [string, string, string][] = [
+      ['/api/dir', '/.model-browser', '/.model-browser'],
+      ['/api/dir', '/.model-browser/', '/.model-browser'],
+      ['/api/dir', '/kit/../.model-browser', '/.model-browser'],
+      ['/api/file', '/.model-browser/library.json', '/.model-browser/library.json'],
+      ['/api/dir', '/.model-browser/library.json', '/.model-browser/library.json'],
     ]
-    for (const [route, path] of cases) {
+    for (const [route, path, canonical] of cases) {
       const res = await get(`${route}?path=${encodeURIComponent(path)}`)
-      expect([route, path, res.status]).toEqual([route, path, 400])
-      expect(((await res.json()) as { error: string }).error).toBe('path outside the library')
+      expect([route, path, res.status]).toEqual([route, path, 404])
+      expect([route, path, await res.json()]).toEqual([
+        route,
+        path,
+        { error: `no such path: ${canonical}` },
+      ])
     }
   })
 

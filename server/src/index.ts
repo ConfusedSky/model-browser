@@ -149,14 +149,32 @@ export default {
   // that hardware would still outlast it, which is a caching problem, not a
   // timeout one.
   idleTimeout: 255,
-  // A cap on what a request may send, well above anything this app asks for:
-  // the largest legitimate body is a `PUT /api/thumb` carrying a base64 256²
-  // WebP (~10–20 KB with its camera and axis) and a `POST /api/semantic/poses`
-  // of `POSES_MAX` library paths. 1 MiB leaves both an order of magnitude of
-  // room and still refuses a body meant to occupy the process. Defence in
-  // depth: `demo-infrastructure`'s Caddy has its own cap in front of this, and
-  // this is the one that holds when the app is reached directly. Bun-only, so
-  // it lives here with the rest of the runtime's own configuration.
+  // A cap on what a request may send. It is not above every legitimate body,
+  // and this comment used to claim it was ("an order of magnitude of room").
+  // Two bodies to size it against:
+  //
+  //   `PUT /api/thumb` — a base64 256² WebP with its camera and axis, ~10–20 KB.
+  //   Comfortably under.
+  //
+  //   `POST /api/semantic/poses` — up to `POSES_MAX` (1024) library paths, each
+  //   admitted at up to `MAX_PATH_BYTES` (4096, `library.ts`). The worst case a
+  //   client could construct without being refused anywhere else is therefore
+  //   1024 × 4096 = 4 MiB of path exactly, plus its JSON quoting — ~4.2 MiB,
+  //   four times this cap rather than a tenth of it.
+  //
+  // 1 MiB is still the value, chosen on what libraries actually hold rather
+  // than on the admissible maximum: a real library path runs ~100–200 bytes, so
+  // a full 1024-path wave is ≈105–205 KB, 5–10x under. Sizing for the
+  // 4096-byte worst case would mean accepting a 4 MiB body from anyone, which
+  // is the thing the cap exists to refuse. The cost when a wave does exceed it
+  // is bounded and self-healing: `semanticPosesFor` (the client) chunks at
+  // `POSES_MAX` and is per-chunk tolerant, so a 413 loses that chunk's poses
+  // and nothing else — the paths are simply absent from the map, which already
+  // reads as "the index has no orientation for this", and the next wave asks
+  // again. Defence in depth: `demo-infrastructure`'s Caddy has its own cap in
+  // front of this, and this is the one that holds when the app is reached
+  // directly. Bun-only, so it lives here with the rest of the runtime's own
+  // configuration.
   maxRequestBodySize: 1_048_576,
   fetch: (req: Request) => route(req, app.fetch, client),
 }

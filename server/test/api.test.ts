@@ -15,7 +15,7 @@ import type { DirEntry, DirListing, ThumbGetResponse } from '../../shared/types'
 import { createApp } from '../src/app'
 import { ThumbCache } from '../src/cache'
 import { type ExecFn, createLauncher } from '../src/launch'
-import { LOOPBACK, libraryFor, makeFixtures } from './helpers'
+import { LOOPBACK, libraryFor, makeFixtures, realTempDir } from './helpers'
 
 const fx = makeFixtures()
 const cacheDir = mkdtempSync(join(tmpdir(), 'mb-cache-'))
@@ -228,6 +228,41 @@ describe('GET /api/file byte ranges', () => {
     }
     const plain = await get(url)
     expect(plain.headers.get('accept-ranges')).toBe('bytes')
+  })
+
+  it('answers every range against a zero-length model with 416, not a stream error', async () => {
+    // RFC 9110 §14.1.1: no byte-range-spec is satisfiable against a
+    // zero-length representation. `bytes=-5` used to be read as a suffix
+    // range and clamped to `{start: 0, end: -1}`, which `createReadStream`
+    // rejects — so a well-formed request came back 500 instead of 416.
+    // `bytes=0-` was already 416 through `start >= size`; it is here to pin
+    // that the fix did not move it.
+    //
+    // Its own library, not an entry in the shared fixture: every listing cell
+    // in this file spells out what `/` holds, and an extra model would rewrite
+    // all of them.
+    const dir = realTempDir('mb-empty-')
+    const emptyCache = realTempDir('mb-empty-cache-')
+    writeFileSync(join(dir, 'empty.stl'), '')
+    const emptyApp = createApp(new ThumbCache(emptyCache), undefined, undefined, libraryFor(dir))
+    try {
+      for (const header of ['bytes=-5', 'bytes=0-']) {
+        const res = await emptyApp.request('/api/file?path=/empty.stl', {
+          headers: { ...LOOPBACK, range: header },
+        })
+        expect([header, res.status]).toEqual([header, 416])
+        expect([header, res.headers.get('content-range')]).toEqual([header, 'bytes */0'])
+        expect([header, (await res.arrayBuffer()).byteLength]).toEqual([header, 0])
+      }
+      // The control: with no range header the same model is served, 200 and no
+      // bytes — so what 416s above is the range and not the file.
+      const whole = await emptyApp.request('/api/file?path=/empty.stl', { headers: LOOPBACK })
+      expect(whole.status).toBe(200)
+      expect((await whole.arrayBuffer()).byteLength).toBe(0)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+      rmSync(emptyCache, { recursive: true, force: true })
+    }
   })
 
   it('ignores a range on an archive entry, whose bytes never came off a stream', async () => {
