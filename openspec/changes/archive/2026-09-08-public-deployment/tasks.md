@@ -560,10 +560,20 @@
       thumbnailQueue.test.tsx; the existing cells threaded through an id. Two
       falsifications — the id dropped from the key, and an unknown id falling back to the
       bare key — each failing on its own cell
-- [ ] 9.13 (fourth pass, decided 2026-09-08) `parseRange` answers 416 on a zero-length
+- [x] 9.13 (fourth pass, decided 2026-09-08) `parseRange` answers 416 on a zero-length
       file; a hidden component answers 404 as a missing path; `maxRequestBodySize` and
-      `SEARCH_TEXT_MAX` comments state the real bounds
-- [ ] 9.14 The overlay effect waits for the ready library id as well as the report
+      `SEARCH_TEXT_MAX` comments state the real bounds. Done (f3546db): live on a scratch
+      library under the demo config, `bytes=-5` on an empty model answers 416 `bytes */0`,
+      and `/.trash` and `/nope` both answer 404 `no such path: …` on `/api/dir`; on
+      `/api/file` and `/api/thumb` a hidden path is a 404 while a missing one keeps its
+      route's own miss wording — what differs reveals the dot the requester typed, never
+      what the filesystem holds (a present and an absent dot path answer identically).
+      Suites 714 / 855. The retracted reset story was also in semantic.test.ts's cell
+      rationale; corrected
+- [x] 9.14 The overlay effect waits for the ready library id as well as the report. Done
+      (022889a): one hook-level cell seeds with the report off and the id unknown, then the
+      id lands and the overlay applies; the App effect's dependency is convention-guarded,
+      as the report's already was (a tile's camera has no App-level observable)
 - [ ] 9.15 mini-classify answers a 4xx naming its token budget (#5 there); model-browser
       keeps its coarse guard
 - [x] 9.16 Archives opaque to the model-format and hidden rules — `library` spec narrowed

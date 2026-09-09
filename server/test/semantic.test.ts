@@ -512,13 +512,14 @@ describe('semantic query', () => {
   })
 
   it('refuses a phrase past the bound before the index is asked anything', async () => {
-    // 9.10a. The bound is refuse-*before*-work, not a tidier error: the index
-    // answers 500 to a long phrase and resets the connection doing it, and a
-    // reset is what `askIndex` reads as "the index is not running" — so one
-    // long phrase would make the feature look absent to every other query
-    // until the next probe. Hence the assertion that `fetch` was never called,
-    // which a check made after the query would fail while answering the same
-    // 400.
+    // 9.10a. The bound is refuse-*before*-work, not a tidier error: a phrase
+    // past it is a pointless round trip to an index whose own limit is a token
+    // budget it is being taught to refuse with a 4xx (mini-classify#5); this
+    // route's guard is the coarse one that stops a pasted paragraph reaching
+    // it at all. (An earlier draft said the index reset the connection and
+    // was read as absent; measured 2026-09-08, it answers a proper 500 and
+    // stays `ready`.) Hence the assertion that `fetch` was never called, which
+    // a check made after the query would fail while answering the same 400.
     stubIndex(READY, result)
     const asked = vi.mocked(fetch)
     asked.mockClear()
