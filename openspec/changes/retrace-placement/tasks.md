@@ -1,23 +1,22 @@
 ## 1. The two pure pieces
 
-- [ ] 1.1 `client/src/lib/placement.ts`: `measurePlacement(scroller, tiles)` — the first
+- [x] 1.1 `client/src/lib/placement.ts`: `measurePlacement(scroller, tiles)` — the first
       tile crossing the top edge and its offset (D1); `applyPlacement(scroller, tile,
       placement)` for `top` and `center` alignments; `resolvePlacement(request, entries)`
       — the fallback chain of D4 as a pure function returning what to apply. Unit cells for
       each, including a resize (a tile found in a different row keeps its offset) and the
       flat fall-through (anchor absent, child absent → top)
 - [x] 1.2 `client/src/lib/trail.ts`: the session mirror (D2) — `current()`, `record(idx,
-      listing, placement)`, `push(idx, listing)` pruning above, `walkBack(fromIdx,
-      listing)` for D3, capped; on `sessionStorage`, never throwing (the `stored.ts`
-      posture). Cells: prune on push, walk finds the nearest match and not a later branch,
-      unknown index answers nothing, a refused storage answers nothing — 2026-09-09:
-      landed as `trailPush`/`trailReplace`/`trailRecord`/`trailPlacement`/`trailWalkBack`
-      with `listingKey` (`serializeView(toUrlView({...view, model: null}))`); 11 cells in
-      `client/test/trail.test.ts`, falsified twice (walk ignoring `fromIdx` → the nearest
-      cell fails "expected 3 to be 1"; prune dropped → the push cell fails, 6 rows for 3)
-
-## 2. History carries an index
-
+      *(2026-09-09: landed as `measurePlacement(scrollportTop, tiles)` + `resolvePlacement`
+      pure, with `measureIn(scroller)` / `applyIn(scroller, resolved)` as the DOM adapters
+      — `applyIn` takes the resolved answer rather than a tile, so the lookup by
+      `data-entry-tile` lives in one place. 26 cells in `client/test/placement.test.ts`;
+      falsified: child fallback skipped → the two deep-arrival cells fail (`expected
+      { kind: 'top' } to deeply equal { kind: 'center', path: '/Kit A' }`); offset ignored
+      → the anchor and resize cells fail (`expected 230 to be 250`, `expected +0 to be
+      -20`). Tile lookup is an attribute scan, not `CSS.escape` + `querySelector`:
+      happy-dom refuses any backslash in a quoted attribute selector, so the selector form
+      could not be tested with a path carrying quotes — see `tilesIn`'s comment)*
 - [ ] 2.1 `commitUrl` stamps `{ idx }` into the state it writes, merged with `LIGHTBOX_ENTRY`
       / `SIMILAR_ENTRY` when those are passed; a push is the current index plus one, a
       replace keeps it; boot without one is index 0 via `replaceState` (D2). `isLightboxEntry`
