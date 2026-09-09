@@ -167,13 +167,33 @@ already false while the skeleton still renders and the grid is not mounted — t
 would consume the answer's id against an empty DOM and lose the placement one commit
 later. Gated on `showSkeleton`, it places when the grid returns, and the reveal's mark
 and scroll land together too (they had split on that path, regressing `entry-actions`).
-The pending request is cleared on **every** commit now, not only in `navigate`: a search
-or a model opened while a retrace's listing is still in flight is an arrival and lands at
-the top — including a model tile opened in the ~`SKELETON_DELAY_MS` before an in-flight
-restore lands, an edge the review did not name, judged consistent with "every commit
-supersedes". The failure and `followUp` arms clear it too, and every raiser raises after
-its commit so clearing in `commit` cannot wipe a fresh request. This is the case a
-warm-cache live pass cannot see; it is verified against a throttled `/api/dir`.
+This is the case a warm-cache live pass cannot see; it is verified against a throttled
+`/api/dir`. That round also cleared the pending request on **every** commit, which the
+second review overturned (below).
+
+*Second fix round (2026-09-09, second adversarial review):* three ways a request was lost
+with nothing arriving in its place, and one mechanism replacing them. (1) The apply gate
+was `inflight !== null`, but `busy` exempts a follow-up: a slow flat listing lands
+`stale` under the skeleton, the same flush releases the skeleton and asks the follow-up,
+the gate holds on the follow-up, and the `followUp` arm drops the request unapplied — the
+grid at the top in exactly the slow, snapshot-served mode this change is for. The gate is
+`busy(state)` now: the stale answer's grid commit applies, the follow-up lands a new id and
+is not re-applied. (2) The commit-wide clear wiped a request on commits that ask nothing —
+`setKinds` is always a patch; mode, folder matching and tuning outside a query, similarity
+tuning outside similar — so a Show-group click, or a model tile opened during a Back's
+flight, landed the parent at the top (the "modelOpen edge" the first round accepted was
+this, and it was visible after Escape, not hidden under the lightbox). The clear is gone
+from `commit` and the action host. A request now rides exactly one question: the first
+non-follow-up `inflight.id` seen after the raise (`pendingQuestionRef`, reset by
+`raisePlacement`; every raiser raises in the same batch as its dispatch); a different id
+in flight supersedes it, which is what a search, a typed path or find-similar during the
+flight do; a patch changes no question and leaves it alone. (3) `ask` keeps a standing
+failure and the failure arm ran first, so a Back raised after a failed ↑ was dropped on
+its first render. The arm is gone rather than keyed by identity: a retrace's own failure
+leaves the answer it was raised against on screen, so the patch check (unchanged id) drops
+it, and a failure-identity arm could never be the sole drop — the fix worker's mutation
+showed both failure cells green with it deleted. One arm per case; the two in-flight
+search cells are the supersession rule's pins.
 
 ### D6: The band observer needs nothing
 
