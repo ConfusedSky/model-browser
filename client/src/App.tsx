@@ -553,6 +553,14 @@ export default function App() {
     (action: Action, opts: { replace?: boolean; state?: unknown } = {}): void => {
       // The leaving grid's place, filed before the view moves on (D2's flush).
       recordNow()
+      // A placement still pending belongs to a landing this commit supersedes
+      // — a retrace whose listing is in flight when the user commits a search
+      // — and must not resolve against the answer this one lands. Every
+      // raiser raises *after* its commit (`goUp`, `leaveSubject`, the reveal),
+      // so this cannot wipe a request just raised; with nothing pending, the
+      // landing goes to the top (retrace-placement D5): a tile click, a typed
+      // path, a search and a deep link arrive, they do not retrace.
+      setPendingPlacement(null)
       urlIntent.current = opts
       dispatch(action)
     },
@@ -1731,14 +1739,12 @@ export default function App() {
       // filter is the caller's to clear because the reducer never reads it.
       setFindText('')
       setFindOpen(false)
-      // The reveal mark and the pending placement are ephemeral in exactly the
-      // same sense (3.5), so they are dropped here — one place a new ephemeral
-      // reset gets added, rather than one per caller. Reveal and ↑ raise their
-      // placement *after* calling this, deliberately: it belongs to the arrival
-      // this navigation causes, not to the view being left. With nothing
-      // raised, the landing goes to the top (retrace-placement D5): a tile
-      // click, a typed path and a deep link arrive, they do not retrace.
-      setPendingPlacement(null)
+      // The reveal mark is ephemeral in the same sense (3.5) and dropped here;
+      // the pending placement, which used to be dropped beside it, is
+      // `commit`'s to drop — every commit supersedes one, not only a
+      // navigation. Reveal and ↑ raise their placement *after* calling this,
+      // deliberately: it belongs to the arrival this navigation causes, not
+      // to the view being left.
       setMarked(null)
       // A volume mounted after the server started is picked up by the next
       // navigation rather than by a reload (library R4): the state is asked
@@ -2227,6 +2233,20 @@ export default function App() {
    * the top — explicitly, so a fast landing with no skeleton does not keep the
    * old scroller's clamped offset.
    *
+   * "Settled" includes the skeleton being down. The skeleton is a delayed flag
+   * that clears in a passive effect, so on the commit a slow listing lands
+   * the answer is settled but `<main>` still renders the skeleton and no tile
+   * exists to place against; consuming the id there would lose the place on
+   * the very landing this exists for (a re-fetch slower than
+   * `SKELETON_DELAY_MS`). The effect waits — the id is untouched — and runs
+   * again on the commit that mounts the grid, where the placement and the
+   * reveal's mark both take.
+   *
+   * A request outlives nothing: a failed retrace drops it, and a stale
+   * follow-up's landing drops it, so the next landing — one the user commits
+   * meanwhile — is an arrival and goes to the top rather than resolving a
+   * request raised for a different answer.
+   *
    * The reveal is the `reveal` case: a located entry is centred and marked; a
    * revealed entry that has since been moved or deleted leaves the folder
    * presented normally, with no error and nothing marked.
@@ -2234,14 +2254,21 @@ export default function App() {
   const appliedRef = useRef<number | null>(null)
   useLayoutEffect(() => {
     const result = state.result
-    if (result === null || state.inflight !== null || state.failure !== null) return
+    if (state.failure !== null) {
+      if (pendingPlacement !== null) setPendingPlacement(null)
+      return
+    }
+    if (result === null || state.inflight !== null || showSkeleton) return
     if (pendingPlacement !== null && pendingPlacement.raisedWith?.id === result.id) {
       setPendingPlacement(null)
       return
     }
     if (appliedRef.current === result.id) return
     appliedRef.current = result.id
-    if (result.followUp === true) return
+    if (result.followUp === true) {
+      if (pendingPlacement !== null) setPendingPlacement(null)
+      return
+    }
     const request = pendingPlacement?.request ?? TOP_REQUEST
     const resolved = resolvePlacement(request, result.entries)
     const main = mainRef.current
@@ -2253,7 +2280,7 @@ export default function App() {
     // comes off, so revealing the same entry twice replays it.
     clearTimeout(markTimerRef.current)
     markTimerRef.current = setTimeout(() => setMarked(null), MARK_MS)
-  }, [pendingPlacement, state.result, state.inflight, state.failure])
+  }, [pendingPlacement, state.result, state.inflight, state.failure, showSkeleton])
 
   // The lightbox history push hooks the transition INTO 'lightbox' mode, not
   // openLightbox — that function is the keyboard entrance only; the pointer
@@ -2482,9 +2509,12 @@ export default function App() {
     () => ({
       navigate,
       // Find-similar lands a new entry through this, not `commit`, so the
-      // leaving grid's place is filed here as it is there (D2's flush).
+      // leaving grid's place is filed here as it is there (D2's flush), and a
+      // placement still pending is dropped here as it is there: the
+      // neighbours arrive at the top.
       dispatch: (action) => {
         recordNow()
+        setPendingPlacement(null)
         dispatch(action)
       },
       markOnArrival: (path) => raisePlacement({ kind: 'reveal', path }),

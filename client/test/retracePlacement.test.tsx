@@ -15,11 +15,13 @@
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DirListing } from '../../shared/types'
+import { SKELETON_DELAY_MS } from '../src/hooks/useDelayedFlag'
 import { resetLookupQueueForTests } from '../src/hooks/useThumbnails'
 import { TRAIL_KEY } from '../src/lib/trail'
 import {
   click,
   container,
+  deferred,
   dir,
   listDir,
   model,
@@ -28,6 +30,7 @@ import {
   pressEnter,
   searchInput,
   settle,
+  skeleton,
   tiles,
   type,
   unmountApp,
@@ -54,18 +57,49 @@ const FLAT_PARENT: DirListing = {
   entries: Array.from({ length: 9 }, (_, i) => model(`k00/part${i}.stl`)),
 }
 const SEARCH: DirListing = { path: '/models', entries: [model('k03/found.stl')] }
+// A search whose answer holds the parent's anchor tile (k06, the tile at the
+// top edge after a scroll to 450). A request left standing from a retrace
+// would find its anchor here and place it — so a cell asserting that a search
+// committed over an in-flight retrace lands at the top asserts a move, not a
+// listing with nowhere else to go.
+const SEARCH_WITH_ANCHOR: DirListing = {
+  path: '/models',
+  entries: [model('k03/found.stl'), dir('k06'), model('k07/found.stl')],
+}
 
 /** Every listing is a fresh object: a landing must be told from a patch by the
  *  answer's id, never by the accident of a mock handing the same array back. */
-function routes(): void {
+function routes(search: DirListing = SEARCH): void {
   listDir.mockImplementation((target: string, opts?: { flat?: boolean; q?: string }) => {
-    if (opts?.q !== undefined) return Promise.resolve(structuredClone(SEARCH))
+    if (opts?.q !== undefined) return Promise.resolve(structuredClone(search))
     if (target === '/models') {
       return Promise.resolve(structuredClone(opts?.flat === true ? FLAT_PARENT : PARENT))
     }
     return Promise.resolve(CHILD_OF(target.slice('/models/'.length)))
   })
 }
+
+/**
+ * Hold `path`'s next plain listing until `release` hands it over. A fetch that
+ * outlasts `SKELETON_DELAY_MS` is the case this change exists for — the grid is
+ * unmounted and the skeleton stands in — and no resolved mock ever reaches it.
+ * Every other request keeps answering as `routes` had it.
+ */
+function holdListing(path: string): { release: (listing: DirListing) => Promise<void> } {
+  const held = deferred<DirListing>()
+  const answer = listDir.getMockImplementation()!
+  listDir.mockImplementation((target: string, opts?: { flat?: boolean; q?: string }) =>
+    target === path && opts?.q === undefined ? held.promise : answer(target, opts),
+  )
+  return {
+    release: async (listing) => {
+      listDir.mockImplementation(answer)
+      await act(async () => held.resolve(structuredClone(listing)))
+      await settle()
+    },
+  }
+}
+const pastDelay = (): Promise<void> => wait(SKELETON_DELAY_MS + 50)
 
 // ---- geometry -------------------------------------------------------------
 
@@ -314,21 +348,46 @@ describe('arriving lands at the top', () => {
   })
 })
 
+/** Open the lightbox on the listing's model tile the way a pointer does. */
+async function openLightbox(): Promise<void> {
+  const modelTile = main().querySelector<HTMLElement>('button[data-model-tile]')!
+  await act(async () => {
+    modelTile.dispatchEvent(
+      new PointerEvent('pointerdown', { bubbles: true, clientX: 50, clientY: 50, button: 0 }),
+    )
+  })
+  await settle()
+  await act(async () => {
+    window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: 50, clientY: 50 }))
+  })
+  await wait(150)
+  expect(container.querySelector('[role="dialog"]')).not.toBeNull()
+}
+
+/** Right-click `path`'s tile and choose "Reveal" from its menu. */
+async function reveal(path: string): Promise<void> {
+  const target = tile(path)
+  await act(async () => {
+    target.dispatchEvent(
+      new PointerEvent('pointerdown', { bubbles: true, button: 2, buttons: 2, clientX: 120, clientY: 140 }),
+    )
+    target.dispatchEvent(
+      new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 120, clientY: 140 }),
+    )
+    window.dispatchEvent(
+      new PointerEvent('pointerup', { bubbles: true, button: 2, clientX: 120, clientY: 140 }),
+    )
+  })
+  await settle()
+  await click(document.querySelector<HTMLButtonElement>('[role="menu"] [data-command="reveal"]')!)
+}
+const markedTile = (): string | undefined =>
+  container.querySelector('.animate-reveal-mark')?.getAttribute('data-entry-tile') ?? undefined
+
 describe('closing the lightbox keeps the place', () => {
   it('re-fetches nothing and moves nothing', async () => {
     await scrollTo(450)
-    const modelTile = main().querySelector<HTMLElement>('button[data-model-tile]')!
-    await act(async () => {
-      modelTile.dispatchEvent(
-        new PointerEvent('pointerdown', { bubbles: true, clientX: 50, clientY: 50, button: 0 }),
-      )
-    })
-    await settle()
-    await act(async () => {
-      window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: 50, clientY: 50 }))
-    })
-    await wait(150)
-    expect(container.querySelector('[role="dialog"]')).not.toBeNull()
+    await openLightbox()
     const requests = listDir.mock.calls.length
 
     await back() // ✕ on a pushed lightbox is this same history.back
@@ -337,32 +396,117 @@ describe('closing the lightbox keeps the place', () => {
     expect(listDir.mock.calls.length).toBe(requests)
     expect(main().scrollTop).toBe(450)
   })
+
+  it('a search committed after the close lands at the top', async () => {
+    // The close patches, so the request Back raised for it must be dropped
+    // there — left standing, it would place the next landing that carries its
+    // anchor.
+    routes(SEARCH_WITH_ANCHOR)
+    await scrollTo(450)
+    await openLightbox()
+    await back()
+    await wait(200)
+    expect(main().scrollTop).toBe(450)
+
+    await type(searchInput(), 'found')
+    await pressEnter(searchInput())
+    await settle()
+    expect(tiles().length).toBe(SEARCH_WITH_ANCHOR.entries.length)
+    expect(main().scrollTop).toBe(0)
+  })
 })
 
 describe('the reveal', () => {
   it('still centres the located entry and marks it', async () => {
     // Reveal k10 from its own listing: the navigation re-asks /models, and the
     // landing centres the tile through the same placement a Back uses.
-    const target = tile('/models/k10')
-    await act(async () => {
-      target.dispatchEvent(
-        new PointerEvent('pointerdown', { bubbles: true, button: 2, buttons: 2, clientX: 120, clientY: 140 }),
-      )
-      target.dispatchEvent(
-        new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 120, clientY: 140 }),
-      )
-      window.dispatchEvent(
-        new PointerEvent('pointerup', { bubbles: true, button: 2, clientX: 120, clientY: 140 }),
-      )
-    })
-    await settle()
-    const reveal = document.querySelector<HTMLButtonElement>('[role="menu"] [data-command="reveal"]')!
-    await click(reveal)
+    await reveal('/models/k10')
     await settle()
 
     expect(main().scrollTop).toBe(centredOn('/models/k10'))
-    expect(container.querySelector('.animate-reveal-mark')?.getAttribute('data-entry-tile')).toBe(
-      '/models/k10',
-    )
+    expect(markedTile()).toBe('/models/k10')
+  })
+})
+
+describe('a listing slow enough for the skeleton', () => {
+  // The case the change exists for: the re-fetched listing takes longer than
+  // `SKELETON_DELAY_MS`, the grid is unmounted while it is fetched, and the
+  // place has to be applied on the commit where the tiles are back — not on
+  // the landing commit, where the skeleton is still up and there is nothing
+  // to place against.
+  it('Back lands the anchor once the grid is back on screen', async () => {
+    await scrollTo(450)
+    await click(tile('/models/k00'))
+    await settle()
+    expect(main().scrollTop).toBe(0)
+
+    const parent = holdListing('/models')
+    await back()
+    await pastDelay()
+    expect(skeleton()).not.toBeNull()
+    expect(tileEls().length).toBe(0)
+
+    await parent.release(PARENT)
+    expect(skeleton()).toBeNull()
+    expect(main().scrollTop).toBe(450)
+    expect(tile('/models/k06').getBoundingClientRect().top).toBe(MAIN_TOP - 50)
+  })
+
+  it('the reveal centres and marks the entry once the grid is back on screen', async () => {
+    const parent = holdListing('/models')
+    await reveal('/models/k10')
+    await pastDelay()
+    expect(skeleton()).not.toBeNull()
+
+    await parent.release(PARENT)
+    expect(main().scrollTop).toBe(centredOn('/models/k10'))
+    expect(markedTile()).toBe('/models/k10')
+  })
+})
+
+describe('a commit made while a retrace is in flight', () => {
+  // The retrace's request belongs to the landing it was raised for. A user
+  // commit before that landing supersedes it, and the new answer arrives at
+  // the top — the request must not resolve against a listing it was never
+  // raised against.
+  it('a search committed before ↑ lands arrives at the top', async () => {
+    routes(SEARCH_WITH_ANCHOR)
+    await scrollTo(450)
+    await click(tile('/models/k00'))
+    await settle()
+
+    const parent = holdListing('/models')
+    await click(upButton())
+    await settle()
+    await type(searchInput(), 'found')
+    await pressEnter(searchInput())
+    await settle()
+    expect(tiles().length).toBe(SEARCH_WITH_ANCHOR.entries.length)
+    expect(main().scrollTop).toBe(0)
+
+    await parent.release(PARENT) // the superseded answer lands nowhere
+    expect(tiles().length).toBe(SEARCH_WITH_ANCHOR.entries.length)
+    expect(main().scrollTop).toBe(0)
+  })
+
+  it('a search committed before ✕ lands arrives at the top', async () => {
+    routes(SEARCH_WITH_ANCHOR)
+    await scrollTo(450)
+    await type(searchInput(), 'found')
+    await pressEnter(searchInput())
+    await settle()
+    expect(main().scrollTop).toBe(0)
+
+    const parent = holdListing('/models')
+    await click(dismiss())
+    await settle()
+    await type(searchInput(), 'found again')
+    await pressEnter(searchInput())
+    await settle()
+    expect(tiles().length).toBe(SEARCH_WITH_ANCHOR.entries.length)
+    expect(main().scrollTop).toBe(0)
+
+    await parent.release(PARENT)
+    expect(main().scrollTop).toBe(0)
   })
 })

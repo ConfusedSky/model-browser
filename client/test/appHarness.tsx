@@ -222,6 +222,19 @@ let root: Root | null = null
 export const wait = (ms: number): Promise<void> =>
   act(() => new Promise<void>((r) => setTimeout(r, ms)))
 export const settle = (): Promise<void> => wait(20)
+/**
+ * A promise the cell resolves by hand. The way a mocked listing is made slower
+ * than `SKELETON_DELAY_MS`: every `mockResolvedValue` answers in a microtask,
+ * so the skeleton never stands in for the grid unless a cell holds the answer
+ * back and releases it after the delay has passed.
+ */
+export function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((r) => {
+    resolve = r
+  })
+  return { promise, resolve }
+}
 export const click = (el: HTMLElement): Promise<void> => act(async () => el.click())
 
 /** Native setter + input event — a plain `el.value =` is masked by React's value tracker. */
