@@ -56,6 +56,11 @@ and does not come back to a fetch).
 
 ## 1. Setup — on each box
 
+> **Superseded for the deployment (2026-09-08):** the box is now prepared and run from
+> `deploy/demo/README.md` (`demo-infrastructure`) — Docker, the three containers, the
+> volumes and the checks. What follows is the *probe* setup: a hand-installed venv for
+> `query-probe.py` on a fresh tier (CX33, CAX21) when the upgrade question is reopened.
+
 ```sh
 ssh root@<ip>
 apt-get update && apt-get install -y rsync

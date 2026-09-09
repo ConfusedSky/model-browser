@@ -42,7 +42,14 @@ contracts and placeholder rules: `openspec/changes/open-in-slicer/design.md` (L2
   `MODEL_BROWSER_CLIENT` another built-client directory) — are XDG-shaped; Windows
   (`%LOCALAPPDATA%`) and macOS (`~/Library/Caches`, `~/Library/Application Support`)
   differ. The built client, when served by the server itself, is read from `client/dist`
-  beside the server package.
+  beside the server package. **In the public container** (`demo-infrastructure`,
+  `deploy/demo/`) the same four overrides place everything: the configuration is
+  bind-mounted read-only at `/config/config.json` (`MODEL_BROWSER_CONFIG`), the thumbnail
+  and listing caches at `/cache` (`MODEL_BROWSER_CACHE`), the corpus at `/library` (the
+  `root` in the committed configuration), and the built client at its default
+  `client/dist` beside the server package inside the image; the index container mounts the
+  same corpus read-only at the same path and its embeddings at `/index`, with the checkpoint
+  under `/hf` (`HF_HOME`).
 - **The library marker** (`library-root` D1): `<library>/.model-browser/library.json` is the
   first file this app writes beside the models — a generated id at the library's top, found
   by walking up from the configured root. The walk stops at a **mount boundary**, compared as

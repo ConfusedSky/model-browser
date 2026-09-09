@@ -90,15 +90,16 @@
       every tile on every visit and cannot heal itself, so the corpus is baked by the
       client build that ships and re-baked before deploying a build with a newer recipe —
       a committed `config.json` has no comment to carry this, the runbook does
-- [ ] 6.2 `docs/hetzner-probe-runbook.md` keeps its tier table and the query probe; its
+- [x] 6.2 `docs/hetzner-probe-runbook.md` keeps its tier table and the query probe; its
       setup section becomes a pointer at the README
-
+      Done 2026-09-08: the runbook's setup section opens with a pointer at `deploy/demo/README.md` and keeps the tier table and the probe steps for an upgrade run
 ## 7. The record
 
-- [ ] 7.1 `docs/platform-surface.md`, user-dirs bullet: the container's paths —
+- [x] 7.1 `docs/platform-surface.md`, user-dirs bullet: the container's paths —
       `/config/config.json`, `/cache`, `/library` — and the env overrides that place them
       (`MODEL_BROWSER_CONFIG`, `MODEL_BROWSER_CACHE`), as a fourth column of where files
       live
+      Done 2026-09-08: the user-dirs bullet gained the container column — `/config/config.json`, `/cache`, `/library`, the client at its in-image default, `/index` and `/hf` for the index
 - [x] 7.2 `docs/web-demo-notes.md`: the "Two containers behind Caddy" default and the
       "Static client served by Hono" line point at this change (three containers, one
       namespace — the count changed); `web-demo-backlog` 1.4 records the draft — done at
