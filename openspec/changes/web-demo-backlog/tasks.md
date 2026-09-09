@@ -48,18 +48,19 @@
       table); the origin/CDN choice stays open as a design question, not a blocker. The landing page's
       contents, open here at drafting, were decided 2026-09-03 (notes item 4, line 1.5)
 
-- [ ] 1.4 the deployment's own infrastructure — reverse proxy, TLS, the container
+- [x] 1.4 the deployment's own infrastructure — reverse proxy, TLS, the container
       definition, and how `deploy/demo/config.json` reaches the box (Masa, 2026-09-03: its
       own ticket, separable from `public-deployment` and **writable and testable earlier**,
       since it depends on nothing in the app). Not the app's configuration, which
       `public-deployment` owns. **Drafted 2026-09-07 as `demo-infrastructure`**: one shared
       network namespace behind Caddy, images built on the box from pinned bases, state in
       volumes, the config file bind-mounted from the checkout, a `local` profile to
-      rehearse here first. **Applied 2026-09-08** — every file written and the whole
-      stack rehearsed locally through Caddy (`deploy/demo/README.md` §8); what remains is
-      the box itself (its sections 1 and 8: firewall, DNS, Docker, volumes, first deploy),
-      which needs the CX23's access and is the operator's. `deploy/demo/config.json` was
-      written in full by `public-deployment`
+      rehearse here first. **Applied 2026-09-08 and deployed 2026-09-09 — archived**:
+      https://models.masamaeda.com is up on the CX23 behind Caddy with a Let's Encrypt
+      certificate, every runbook check passing from outside; the thumbnails are **not yet
+      baked** (1.7), so until then every visitor renders every tile in their own browser
+      and nothing persists. `deploy/demo/config.json` was written in full by
+      `public-deployment`
 - [ ] 1.5 the landing page — contents **decided 2026-09-03** (Masa; recorded on notes item 4
       the same day): a slim banner over the grid — one sentence, query chips that run on
       click, About and credits links — dismissed once per browser via localStorage; a full

@@ -20,6 +20,12 @@ count), root `miniatures/deduplicated/`.
 Audience: recruiters viewing a portfolio (from the other session). First
 impression and the link never being dead outrank everything else.
 
+**Live since 2026-09-09: https://models.masamaeda.com** — the CX23 in Falkenstein, three
+containers behind Caddy (`demo-infrastructure`, archived; the operator's steps are
+`deploy/demo/README.md`). Not yet baked (backlog 1.7), so every tile still renders in
+the visitor's browser; the landing page, the context-menu actions and the credits page
+(1.5, 1.6, 1.8) are still to come.
+
 ## Drafted (2026-08-28) — these supersede the items they cover
 
 The pre-split main-app sequence exists as OpenSpec changes, each validated and
