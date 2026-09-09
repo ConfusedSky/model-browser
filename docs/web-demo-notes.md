@@ -884,12 +884,16 @@ All re-runnable; say whose run when quoting.
   D1–D6). Nothing was added to `thumbnail-sweep-priority`: its 2026-09-01
   rebase is the argument for stacking on it, not growing it. The trip the
   click itself spends — listing, then thumbnails, serially — became
-  **`hover-prefetch-listings`** (drafted 2026-09-03, **parked until
-  `public-deployment` lands**: folder and zip tiles warm their listing after
-  the model tiles' linger, the click lands from it with no request, and the
-  first screenful of already-rendered thumbnails is fetched into the browser
-  cache behind the hover; invisible locally at 5–8 ms per listing, which is
-  why it waits for a hosted origin to measure against). What stays *here*
+  **`hover-prefetch-listings`** (drafted 2026-09-03, **unparked
+  2026-09-08** when `public-deployment` archived: folder and zip tiles warm
+  their listing after the model tiles' linger and the click lands from it with
+  no request; invisible locally at 5–8 ms per listing, so its build is gated on
+  a before/after measurement taken against the real origin rather than the SSH
+  tunnel, whose connection-per-request shape flatters any prefetch. The
+  thumbnail half — fetching the first screen's already-rendered images behind
+  the hover — split out the same day as **`hover-prefetch-thumbnails`**,
+  because the listing trip is serial and unavoidable while the image fan-out is
+  what HTTP/2 collapses and a CDN would move to an edge hop). What stays *here*
   because no change owns it yet:
   - **GraphQL declined** (Masa floated it; settled 2026-09-02): one lockstep
     client behind the ApiClient seam (D1) buys none of its flexibility, and

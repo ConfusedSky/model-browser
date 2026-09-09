@@ -84,12 +84,14 @@
       the landing page (Masa, 2026-09-03): CC-BY attribution should not wait on that
       change's copy decisions. The generator exists from `library-overrides`, so this is a
       route and a rendering. Closes gate 3.2 when it lands
-- [ ] 1.9 hover-warmed listings — **drafted 2026-09-03 as `hover-prefetch-listings`,
-      parked until 1.3 lands** (Masa): folder and zip tiles prefetch their listing and
-      first screenful of thumbnails after the mesh warm's linger, so a click spends no
-      round trip. Client only, no server change; its tasks §1 gates the build on a
-      hosted before/after measurement, because against localhost (5–8 ms a listing) the
-      change is invisible
+- [ ] 1.9 hover-warmed listings — drafted 2026-09-03 as `hover-prefetch-listings`,
+      **unparked 2026-09-08** when 1.3 landed: folder and zip tiles warm their listing
+      after the mesh warm's linger, so a click spends no round trip. Client only, no
+      server change; its tasks §1 still gates the build on a before/after measurement,
+      because against localhost (5–8 ms a listing) the change is invisible — and it must
+      be taken against the real origin, not the SSH tunnel. The thumbnail half split out
+      the same day as `hover-prefetch-thumbnails`, gated on that measurement and on the
+      CDN question: HTTP/2 and an edge cache may leave it worth nothing
 
 ## 2. Decisions to record in `docs/web-demo-notes.md` (answer + date on the item)
 

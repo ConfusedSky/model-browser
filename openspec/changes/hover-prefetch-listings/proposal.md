@@ -1,14 +1,14 @@
 ## Why
 
-> **Parked** (Masa, 2026-09-03): drafted now so the shape is recorded while the reasoning
-> is fresh, but not to be worked until `public-deployment` has landed and there is a
-> hosted instance to measure against. Against a local server the change is invisible.
+> **Unparked** (2026-09-08): the condition was `public-deployment`, which archived that
+> day. The measurement in tasks §1 still gates the build, and should be taken against
+> `demo-infrastructure`'s origin rather than the SSH tunnel used for the gate-3.3 probe.
 
 Entering a folder is a waterfall of round trips before it looks populated: the click
 fetches the listing, the listing mounts the grid, and only then can the visible tiles
 fetch their thumbnails — two serial trips, three where the server answers from a tree
 it has not revalidated within its window and the client spends a follow-up request
-(`listing-cache` §5.2). On the machine the app runs on today a listing answers in
+(`listing-cache`, *Age is disclosed, and staleness converges*). On the machine the app runs on today a listing answers in
 5–8 ms and none of this is perceptible. On the hosted demo it is the whole cost:
 `docs/web-demo-notes.md` records ~90–150 ms per round trip for a US visitor on an EU
 origin, **per trip, not per byte**, and names trip count as the first-class design
@@ -33,17 +33,19 @@ trip begin before the click.
   rather than issuing a second. Everything downstream of a landing — the URL write, the
   recent-directories push, the pose wave, the stale follow-up — runs exactly as it does
   for a fetched landing, because the landing is the same action.
-- **A warmed listing warms its first screenful of thumbnails.** For the leading entries
-  of the filed listing whose annotation says a current, usable render exists (the
-  `model-thumbnails` rule *A listing-known thumbnail is drawn without a lookup*, under the
-  client's own constants and the occlusion variant currently in force), the client
-  starts an image fetch of the same URL the tile will draw from. The image route already
-  answers immutable-cacheable by key, so the tile's later `<img>` is a browser-cache hit.
-  Renders that do not exist are not produced on hover: the render queue serves the grid
-  on screen, and nothing here competes with it.
-- **Sweeping the cursor across a grid of folders triggers nothing**, by the same linger
-  rule as the mesh warm, and the number of hover fetches in flight at once is capped, so
-  the worst a wandering pointer costs is a bounded handful of cheap requests.
+- **The thumbnail half is not in this change** (2026-09-08). It warmed the images a
+  listing's first screen would draw; it left for `hover-prefetch-thumbnails` because its
+  win is the fan-out *after* mount — the part Caddy's HTTP/2 collapses onto one connection
+  and a CDN would move to an edge hop — while the listing trip is serial and nothing else
+  can remove it. It was also wrong as drafted: it walked top-level entries for model
+  entries, and since `listing-tree-cache` a folder's sheet cells are nested inside
+  `entry.preview`, so a folder-of-folders would have warmed nothing.
+- **A warm is a plain listing and nothing else.** It does not fire while the flat view is
+  on: a flat listing walks a subtree under a step budget with the request held open, and
+  putting an uncancellable traversal behind a pointer is what `search-cancellation` exists
+  to prevent. Sweeping the cursor across a grid triggers nothing, by the same linger rule
+  as the mesh warm; in-flight warms are capped; and a warm whose request fails is
+  discarded rather than handed to the click.
 - **No server change.** No new route, no new header, no change to what a listing
   carries. The local app gets the same behaviour and pays a few milliseconds for it.
 
@@ -55,10 +57,10 @@ None.
 
 ### Modified Capabilities
 
-- `directory-browsing`: ADDs two requirements — a folder or zip tile hovered past the
+- `directory-browsing`: ADDs one requirement — a folder or zip tile hovered past the
   linger threshold warms its listing, and a click on it lands from that warm answer
-  without a fetch; and a warmed listing warms the thumbnails its first screenful will
-  draw. Nothing existing is MODIFIED: *In-flight listing feedback* holds unchanged (a
+  without a fetch. (The second, the thumbnail warm, left with the half that owns it.)
+  Nothing existing is MODIFIED: *In-flight listing feedback* holds unchanged (a
   warm landing resolves under the reveal delay, so it is the "fast navigation" case that
   requirement already states), and `search-cancellation`'s ADDED *Concurrent and abandoned
   listing work* is not touched — a hover fetch is bounded and carries no abort signal, for
@@ -66,15 +68,17 @@ None.
 
 ## Impact
 
-- **Client only**: `client/src/components/Grid.tsx` (hover callbacks on the non-model
-  tile branch), `client/src/App.tsx` (a second hover warmer; the request effect consults
-  the store before `listDir`), a new `client/src/lib/listingPrefetch.ts` (the store, the
-  join-in-flight rule, the thumbnail warm), and `client/src/hooks/useThumbnails.ts`
-  exports its `usable` test so the warm and the tile agree on which render to fetch.
+- **Client only**: `client/src/components/Grid.tsx` (hover callbacks on the non-model tile
+  branch), `client/src/App.tsx` (a second hover warmer; the request effect consults the
+  store before `listDir`, except for follow-ups), and a new
+  `client/src/lib/listingPrefetch.ts` (the store, the join-in-flight rule). No change to
+  `useThumbnails`: the export it was going to need belonged to the half that left, which
+  in any case wants the already-exported `isCurrentRender`.
 - **Specs**: `openspec/specs/directory-browsing/spec.md` gains two requirements.
 - **Docs**: `docs/web-demo-notes.md`'s trip-reduction paragraph and `web-demo-backlog`'s
   list point here (done in this draft).
-- **Ordering**: after `public-deployment` — not for any code dependency, but because the
-  measurement that justifies the change (tasks §1) needs a hosted origin, and a change
-  judged against localhost would be judged on nothing. Independent of `search-cancellation`
-  (different requirement, no shared symbols beyond `listDir`'s existing signature).
+- **Ordering**: `public-deployment` archived 2026-09-08, so nothing blocks this but its
+  own measurement, which needs a real origin — `demo-infrastructure`'s, when it stands.
+  A change judged against localhost would be judged on nothing. Independent of
+  `search-cancellation` (different requirement, no shared symbols beyond `listDir`'s
+  existing signature), and the plain-only rule above is what keeps that true.
