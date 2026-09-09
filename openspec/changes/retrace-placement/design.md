@@ -185,7 +185,9 @@ call from here.
 
 - [The mirror and the browser's stack disagree] → Every push goes through `commitUrl`
   today; the index on `history.state` is the integrity check, and an unknown index means
-  "no placement", which is the top — the behaviour before this change.
+  "no placement", which is the top — the behaviour before this change. The row's listing
+  is checked too, not just the index: a state-less entry reads as index 0, and row 0's
+  placement is some other entry's.
 - [Recording on scroll costs work on a 2,000-tile flat listing] → One rect read per tile
   up to the first crossing, throttled to scroll settle; the tiles above the fold are the
   few the scroller has passed, so the walk is short in practice.

@@ -75,8 +75,8 @@ describe('trailPush', () => {
       { idx: 1, listing: 'l1', placement: null },
       { idx: 2, listing: 'fresh', placement: null },
     ])
-    expect(trailPlacement(2, s)).toBeNull()
-    expect(trailPlacement(4, s)).toBeNull()
+    expect(trailPlacement(2, 'fresh', s)).toBeNull()
+    expect(trailPlacement(4, 'l4', s)).toBeNull()
   })
 
   it('caps by dropping the lowest indices', () => {
@@ -95,9 +95,9 @@ describe('trailReplace', () => {
     trailPush(0, PARENT, s)
     trailRecord(0, AT, s)
     trailReplace(0, PARENT, s)
-    expect(trailPlacement(0, s)).toEqual(AT)
+    expect(trailPlacement(0, PARENT, s)).toEqual(AT)
     trailReplace(0, CHILD, s)
-    expect(trailPlacement(0, s)).toBeNull()
+    expect(trailPlacement(0, CHILD, s)).toBeNull()
     expect(trailWalkBack(1, CHILD, s)?.idx).toBe(0)
   })
 
@@ -116,17 +116,29 @@ describe('trailRecord', () => {
     const s = memory()
     trailPush(0, PARENT, s)
     trailRecord(0, AT, s)
-    expect(trailPlacement(0, s)).toEqual(AT)
+    expect(trailPlacement(0, PARENT, s)).toEqual(AT)
     trailRecord(0, null, s)
-    expect(trailPlacement(0, s)).toBeNull()
+    expect(trailPlacement(0, PARENT, s)).toBeNull()
   })
 
   it('ignores an index the trail does not know', () => {
     const s = memory()
     trailPush(0, PARENT, s)
     trailRecord(7, AT, s)
-    expect(trailPlacement(7, s)).toBeNull()
+    expect(trailPlacement(7, PARENT, s)).toBeNull()
     expect(JSON.parse(s.map.get(TRAIL_KEY) ?? '[]')).toHaveLength(1)
+  })
+})
+
+describe('trailPlacement', () => {
+  it('answers the placement for the row’s own listing, and null for another or an absent row', () => {
+    // A state-less entry reads as index 0 (`historyIndex`'s default), so a
+    // row found by index alone would hand some other entry's place to it.
+    const s = excursion()
+    trailRecord(0, AT, s)
+    expect(trailPlacement(0, PARENT, s)).toEqual(AT)
+    expect(trailPlacement(0, CHILD, s)).toBeNull()
+    expect(trailPlacement(4, CHILD, s)).toBeNull()
   })
 })
 
@@ -160,7 +172,7 @@ describe('storage that cannot be used', () => {
     expect(() => trailPush(0, PARENT, s)).not.toThrow()
     expect(() => trailReplace(0, PARENT, s)).not.toThrow()
     expect(() => trailRecord(0, AT, s)).not.toThrow()
-    expect(trailPlacement(0, s)).toBeNull()
+    expect(trailPlacement(0, PARENT, s)).toBeNull()
     expect(trailWalkBack(1, PARENT, s)).toBeNull()
   })
 

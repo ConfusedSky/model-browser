@@ -27,6 +27,7 @@ import {
   model,
   mountApp,
   mountAppAtCurrentUrl,
+  pathInput,
   pressEnter,
   searchInput,
   settle,
@@ -80,24 +81,39 @@ function routes(search: DirListing = SEARCH): void {
 }
 
 /**
- * Hold `path`'s next plain listing until `release` hands it over. A fetch that
- * outlasts `SKELETON_DELAY_MS` is the case this change exists for — the grid is
- * unmounted and the skeleton stands in — and no resolved mock ever reaches it.
- * Every other request keeps answering as `routes` had it.
+ * Hold `path`'s next `count` plain listings until `release` hands each over,
+ * in order. A fetch that outlasts `SKELETON_DELAY_MS` is the case this change
+ * exists for — the grid is unmounted and the skeleton stands in — and no
+ * resolved mock ever reaches it. Two held is a stale answer and the follow-up
+ * it earns. Every other request keeps answering as `routes` had it.
  */
-function holdListing(path: string): { release: (listing: DirListing) => Promise<void> } {
-  const held = deferred<DirListing>()
+function holdListing(path: string, count = 1): { release: (listing: DirListing) => Promise<void> } {
+  const held = Array.from({ length: count }, () => deferred<DirListing>())
   const answer = listDir.getMockImplementation()!
+  let asked = 0
   listDir.mockImplementation((target: string, opts?: { flat?: boolean; q?: string }) =>
-    target === path && opts?.q === undefined ? held.promise : answer(target, opts),
+    target === path && opts?.q === undefined && asked < count
+      ? held[asked++]!.promise
+      : answer(target, opts),
   )
+  let released = 0
   return {
     release: async (listing) => {
-      listDir.mockImplementation(answer)
-      await act(async () => held.resolve(structuredClone(listing)))
+      const next = held[released++]!
+      if (released === count) listDir.mockImplementation(answer)
+      await act(async () => next.resolve(structuredClone(listing)))
       await settle()
     },
   }
+}
+/** Reject `path`'s next plain listing; everything else answers as `routes` had it. */
+function rejectListing(path: string): void {
+  const answer = listDir.getMockImplementation()!
+  listDir.mockImplementationOnce((target: string, opts?: { flat?: boolean; q?: string }) =>
+    target === path && opts?.q === undefined
+      ? Promise.reject(new Error(`no such path: ${path}`))
+      : answer(target, opts),
+  )
 }
 const pastDelay = (): Promise<void> => wait(SKELETON_DELAY_MS + 50)
 
@@ -162,6 +178,20 @@ const back = (): Promise<void> =>
     window.history.back()
     await new Promise((r) => setTimeout(r, 50))
   })
+const forward = (): Promise<void> =>
+  act(async () => {
+    window.history.forward()
+    await new Promise((r) => setTimeout(r, 50))
+  })
+const escape = (): Promise<void> =>
+  act(async () => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+  })
+/** The side panel's Show group: 'both' | 'folders' | 'models'. */
+const showButton = (kind: string): HTMLButtonElement =>
+  Array.from(
+    container.querySelectorAll<HTMLButtonElement>('[role="group"][aria-label="Show"] button'),
+  ).find((b) => b.textContent === kind)!
 const listingRequests = (path: string): number =>
   listDir.mock.calls.filter((c) => c[0] === path).length
 const dismiss = (): HTMLButtonElement =>
@@ -314,6 +344,21 @@ describe('retracing restores the place', () => {
     expect(tile('/models/k06')).toBeUndefined()
     expect(tile('/models/k00')).toBeUndefined()
     expect(main().scrollTop).toBe(0)
+  })
+
+  it('Forward lands the entry it arrives at where it was left', async () => {
+    await scrollTo(450)
+    await click(tile('/models/k00'))
+    await settle()
+    await scrollTo(300) // the child: part3 (row 1) at −100
+
+    await back()
+    await settle()
+    expect(tiles().length).toBe(PARENT.entries.length)
+    await forward()
+    await settle()
+    expect(tiles().length).toBe(9) // the child, re-fetched
+    expect(main().scrollTop).toBe(300)
   })
 
   it('a window resized in between still lands the anchor at its offset', async () => {
@@ -508,5 +553,131 @@ describe('a commit made while a retrace is in flight', () => {
 
     await parent.release(PARENT)
     expect(main().scrollTop).toBe(0)
+  })
+})
+
+describe('a stale listing slower than the skeleton', () => {
+  // The answer lands under the skeleton, the same flush releases the skeleton
+  // and asks the follow-up, and the place must land then — a follow-up in
+  // flight is not a wait. The follow-up's own landing is applied to nobody:
+  // the user was placed, and may have moved since.
+  it('Back to a stale listing slower than the skeleton lands the anchor', async () => {
+    await scrollTo(450)
+    await click(tile('/models/k00'))
+    await settle()
+    expect(main().scrollTop).toBe(0)
+    const before = listingRequests('/models')
+
+    const parent = holdListing('/models', 2)
+    await back()
+    await pastDelay()
+    expect(skeleton()).not.toBeNull()
+
+    await parent.release({ ...PARENT, stale: true })
+    expect(skeleton()).toBeNull()
+    expect(listingRequests('/models')).toBe(before + 2) // the follow-up is in flight
+    expect(main().scrollTop).toBe(450)
+
+    await parent.release(PARENT)
+    expect(listingRequests('/models')).toBe(before + 2)
+    expect(main().scrollTop).toBe(450)
+  })
+
+  it('the follow-up does not move a user who scrolled on after being placed', async () => {
+    await scrollTo(450)
+    await click(tile('/models/k00'))
+    await settle()
+
+    const parent = holdListing('/models', 2)
+    await back()
+    await pastDelay()
+    await parent.release({ ...PARENT, stale: true })
+    expect(main().scrollTop).toBe(450)
+    await scrollTo(250)
+
+    await parent.release(PARENT)
+    expect(main().scrollTop).toBe(250)
+  })
+})
+
+describe('a failed navigation', () => {
+  // `ask` keeps a standing failure, so a retrace raised after a failed
+  // navigation runs its first render under that failure: dropped for it, the
+  // place would be lost on every Back out of a dead end. Only the request's
+  // own failure drops it.
+  it('Back after a failed ↑ still lands where the listing was left', async () => {
+    await scrollTo(450)
+    await click(tile('/models/k00'))
+    await settle()
+    expect(main().scrollTop).toBe(0)
+    // ↑ asks for the parent and the answer never comes: nothing lands, so
+    // nothing is pushed, and the failure stands over the child's grid.
+    rejectListing('/models')
+    await click(upButton())
+    await settle()
+    const before = listingRequests('/models')
+
+    await back()
+    await settle()
+    expect(listingRequests('/models')).toBe(before + 1)
+    expect(tiles().length).toBe(PARENT.entries.length)
+    expect(main().scrollTop).toBe(450)
+  })
+
+  it('a retrace whose own listing fails drops its request', async () => {
+    routes(SEARCH_WITH_ANCHOR)
+    await scrollTo(450)
+    await click(tile('/models/k00'))
+    await settle()
+
+    rejectListing('/models')
+    await back()
+    await settle()
+    expect(tiles().length).toBe(9) // the child is still what is on screen
+    await scrollTo(300)
+
+    // The same path typed is an arrival that lands a listing holding the
+    // anchor: a request left standing would place it.
+    await type(pathInput(), '/models')
+    await pressEnter(pathInput())
+    await settle()
+    expect(tiles().length).toBe(PARENT.entries.length)
+    expect(main().scrollTop).toBe(0)
+  })
+})
+
+describe('a patch made while a retrace is in flight', () => {
+  // A patch asks no new question, so the retrace's request still rides the
+  // one in flight and lands with it. Only a different question supersedes.
+  it('a kind filter flipped while a retrace is in flight does not lose the place', async () => {
+    await scrollTo(450)
+    await click(tile('/models/k00'))
+    await settle()
+
+    const parent = holdListing('/models')
+    await back()
+    await click(showButton('folders'))
+    await settle()
+    expect(showButton('folders').getAttribute('aria-pressed')).toBe('true')
+
+    await parent.release(PARENT)
+    expect(main().scrollTop).toBe(450)
+  })
+
+  it('a model opened while a retrace is in flight lands the grid where it was left', async () => {
+    await scrollTo(450)
+    await click(tile('/models/k00'))
+    await settle()
+
+    const parent = holdListing('/models')
+    await back()
+    await openLightbox() // a model of the child, still on screen under the hold
+
+    await parent.release(PARENT)
+    expect(main().scrollTop).toBe(450)
+    await escape()
+    await wait(200)
+    expect(container.querySelector('[role="dialog"]')).toBeNull()
+    expect(main().scrollTop).toBe(450)
   })
 })

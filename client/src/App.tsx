@@ -90,7 +90,7 @@ import {
   similarDepth,
   type UrlView,
 } from './lib/urlState'
-import { initialState, reducer, type Action, type Landed, type Result } from './state/reducer'
+import { initialState, reducer, type Action, type Failure, type Landed, type Result } from './state/reducer'
 import {
   busy,
   byKind,
@@ -141,11 +141,15 @@ const RECORD_SETTLE_MS = 150
  * a new result object but keeps `id` (and `entries`) — so an unchanged id at
  * the settled moment means nothing landed and nothing may be applied, which is
  * what keeps a lightbox close from moving the grid. A landing always carries a
- * new id.
+ * new id. `raisedFailure` is the failure standing at the raise, by identity —
+ * the reducer mints a new object per failure and `ask` keeps the old one — so
+ * a request raised after a failed navigation is not dropped for that failure,
+ * only for one of its own.
  */
 interface PendingPlacement {
   request: PlacementRequest
   raisedWith: Result | null
+  raisedFailure: Failure | null
 }
 
 const TOP_REQUEST: PlacementRequest = { kind: 'top' }
@@ -552,15 +556,12 @@ export default function App() {
   const commit = useCallback(
     (action: Action, opts: { replace?: boolean; state?: unknown } = {}): void => {
       // The leaving grid's place, filed before the view moves on (D2's flush).
+      // A placement still pending is not touched here: whether this commit
+      // supersedes it is the placement effect's call, by the question it
+      // asks (retrace-placement D5). With nothing pending, the landing goes
+      // to the top: a tile click, a typed path, a search and a deep link
+      // arrive, they do not retrace.
       recordNow()
-      // A placement still pending belongs to a landing this commit supersedes
-      // — a retrace whose listing is in flight when the user commits a search
-      // — and must not resolve against the answer this one lands. Every
-      // raiser raises *after* its commit (`goUp`, `leaveSubject`, the reveal),
-      // so this cannot wipe a request just raised; with nothing pending, the
-      // landing goes to the top (retrace-placement D5): a tile click, a typed
-      // path, a search and a deep link arrive, they do not retrace.
-      setPendingPlacement(null)
       urlIntent.current = opts
       dispatch(action)
     },
@@ -826,11 +827,20 @@ export default function App() {
    * both be waiting on the same landing.
    */
   const [pendingPlacement, setPendingPlacement] = useState<PendingPlacement | null>(null)
+  /** The id of the one question the pending request rides — the first in
+   *  flight after the raise — so the placement effect can tell a different
+   *  question (which supersedes it) from a patch of the same one. */
+  const pendingQuestionRef = useRef<number | null>(null)
   const [marked, setMarked] = useState<string | null>(null)
   /** Raise a placement for the landing the caller is about to cause, naming
    *  the answer on screen now so a landing can be told from a patch. */
   const raisePlacement = useCallback((request: PlacementRequest): void => {
-    setPendingPlacement({ request, raisedWith: stateRef.current.result })
+    pendingQuestionRef.current = null
+    setPendingPlacement({
+      request,
+      raisedWith: stateRef.current.result,
+      raisedFailure: stateRef.current.failure,
+    })
   }, [])
   const markTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => () => clearTimeout(markTimerRef.current), [])
@@ -1740,11 +1750,10 @@ export default function App() {
       setFindText('')
       setFindOpen(false)
       // The reveal mark is ephemeral in the same sense (3.5) and dropped here;
-      // the pending placement, which used to be dropped beside it, is
-      // `commit`'s to drop — every commit supersedes one, not only a
-      // navigation. Reveal and ↑ raise their placement *after* calling this,
-      // deliberately: it belongs to the arrival this navigation causes, not
-      // to the view being left.
+      // a pending placement is not — the placement effect drops one when the
+      // question it rides is superseded. Reveal and ↑ raise their placement
+      // *after* calling this, deliberately: it belongs to the arrival this
+      // navigation causes, not to the view being left.
       setMarked(null)
       // A volume mounted after the server started is picked up by the next
       // navigation rather than by a reload (library R4): the state is asked
@@ -2185,11 +2194,14 @@ export default function App() {
       // are the restored entry's: a settle timer still pending belongs to the
       // entry just left and must not file under this one, and the placement
       // to land is this entry's own row (retrace-placement D2/D4). Unknown
-      // index, unknown row: null, which resolves to the top.
+      // index, unknown row, or a row for a different listing (a state-less
+      // entry reads as index 0, which is some other entry's row): null, which
+      // resolves to the top.
       clearTimeout(recordTimerRef.current)
       recordTimerRef.current = undefined
-      raisePlacement({ kind: 'entry', placement: trailPlacement(historyIndex()) })
-      dispatch({ type: 'restore', view: resolveView(v) })
+      const view = resolveView(v)
+      raisePlacement({ kind: 'entry', placement: trailPlacement(historyIndex(), listingKey(view)) })
+      dispatch({ type: 'restore', view })
     }
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
@@ -2242,10 +2254,16 @@ export default function App() {
    * again on the commit that mounts the grid, where the placement and the
    * reveal's mark both take.
    *
-   * A request outlives nothing: a failed retrace drops it, and a stale
-   * follow-up's landing drops it, so the next landing — one the user commits
-   * meanwhile — is an arrival and goes to the top rather than resolving a
-   * request raised for a different answer.
+   * A request rides exactly one question: the first in flight after it was
+   * raised (`pendingQuestionRef`; every raiser raises in the same batch as
+   * its dispatch). A different question in flight supersedes it — the user
+   * committed a search, a path, a similarity view while the retrace was in
+   * flight — and that landing is an arrival, at the top. Its own failure
+   * drops it, by identity against the failure standing at the raise, since
+   * `ask` keeps a standing failure and a retrace raised after a failed
+   * navigation would otherwise be dropped on its first render. A patch leaves
+   * it alone: a kind flip, a tuning commit outside a query, a model opened
+   * during the flight change no question, so the place still lands.
    *
    * The reveal is the `reveal` case: a located entry is centred and marked; a
    * revealed entry that has since been moved or deleted leaves the folder
@@ -2255,10 +2273,23 @@ export default function App() {
   useLayoutEffect(() => {
     const result = state.result
     if (state.failure !== null) {
-      if (pendingPlacement !== null) setPendingPlacement(null)
-      return
+      if (pendingPlacement === null) return
+      if (state.failure !== pendingPlacement.raisedFailure) {
+        setPendingPlacement(null)
+        return
+      }
     }
-    if (result === null || state.inflight !== null || showSkeleton) return
+    if (pendingPlacement !== null && state.inflight !== null && state.inflight.followUp !== true) {
+      if (pendingQuestionRef.current === null) pendingQuestionRef.current = state.inflight.id
+      else if (pendingQuestionRef.current !== state.inflight.id) {
+        setPendingPlacement(null)
+        return
+      }
+    }
+    // `busy`, not `inflight !== null`: a stale answer's follow-up must not
+    // hold the apply, or the answer lands under the skeleton, the follow-up
+    // takes its place in flight, and its own landing is the arm below.
+    if (result === null || busy(state) || showSkeleton) return
     if (pendingPlacement !== null && pendingPlacement.raisedWith?.id === result.id) {
       setPendingPlacement(null)
       return
@@ -2509,12 +2540,11 @@ export default function App() {
     () => ({
       navigate,
       // Find-similar lands a new entry through this, not `commit`, so the
-      // leaving grid's place is filed here as it is there (D2's flush), and a
-      // placement still pending is dropped here as it is there: the
-      // neighbours arrive at the top.
+      // leaving grid's place is filed here as it is there (D2's flush). It
+      // asks a new question, which is what supersedes a placement still
+      // pending: the neighbours arrive at the top.
       dispatch: (action) => {
         recordNow()
-        setPendingPlacement(null)
         dispatch(action)
       },
       markOnArrival: (path) => raisePlacement({ kind: 'reveal', path }),
@@ -2877,7 +2907,8 @@ export default function App() {
     // state the parent will actually land in (`navigate` keeps the live
     // toggle), so a parent visited nested and left flat has no row under this
     // key, and D4's fall-through runs: the child tile centred where it exists,
-    // else the top. Raised after `navigate`, which clears what was pending.
+    // else the top. Raised after `navigate`, in the same batch, so the
+    // request rides the parent's question.
     const parentKey = listingKey({
       ...liveView(state),
       path: parent,

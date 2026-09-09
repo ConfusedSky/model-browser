@@ -118,9 +118,15 @@ export function trailRecord(idx: number, placement: Placement | null, storage = 
   writeRows(storage, rows)
 }
 
-/** The entry's placement, `null` when unknown. */
-export function trailPlacement(idx: number, storage = browserStorage()): Placement | null {
-  return readRows(storage).find((r) => r.idx === idx)?.placement ?? null
+/** The entry's placement, `null` when the row is unknown or names another
+ *  listing — a state-less entry reads as index 0, which is some other row. */
+export function trailPlacement(
+  idx: number,
+  listing: string,
+  storage = browserStorage(),
+): Placement | null {
+  const row = readRows(storage).find((r) => r.idx === idx)
+  return row !== undefined && row.listing === listing ? row.placement : null
 }
 
 /** The nearest row below `fromIdx` whose listing is `listing` — the visit that led here (D3). */
