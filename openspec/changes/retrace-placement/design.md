@@ -156,6 +156,21 @@ the old index; the trailing scroll-settle timer covers everything in between.
 with no skeleton keeps the old `scrollTop`, clamped; a fresh entry's request is `top`, so the
 scroller is set to 0 on that landing.
 
+*Fix round (2026-09-09, adversarial review):* the apply effect must also bail on
+`showSkeleton`, not only on `inflight`/`failure`. `showSkeleton` is `useDelayedFlag`,
+cleared in a passive effect, so on a slow re-fetch's landing commit `busy(state)` is
+already false while the skeleton still renders and the grid is not mounted — the effect
+would consume the answer's id against an empty DOM and lose the placement one commit
+later. Gated on `showSkeleton`, it places when the grid returns, and the reveal's mark
+and scroll land together too (they had split on that path, regressing `entry-actions`).
+The pending request is cleared on **every** commit now, not only in `navigate`: a search
+or a model opened while a retrace's listing is still in flight is an arrival and lands at
+the top — including a model tile opened in the ~`SKELETON_DELAY_MS` before an in-flight
+restore lands, an edge the review did not name, judged consistent with "every commit
+supersedes". The failure and `followUp` arms clear it too, and every raiser raises after
+its commit so clearing in `commit` cannot wipe a fresh request. This is the case a
+warm-cache live pass cannot see; it is verified against a throttled `/api/dir`.
+
 ### D6: The band observer needs nothing
 
 `Grid`'s band observer is an `IntersectionObserver` on `scrollRoot`; a programmatic scroll
