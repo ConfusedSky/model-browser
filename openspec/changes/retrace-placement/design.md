@@ -77,8 +77,12 @@ a mirror. `commitUrl` stamps `{ idx }` into every entry's state, merged with the
 already writes; a session-scoped store (`sessionStorage`, key `mb:trail`) holds one row per
 index — `{ idx, listing, placement }` where `listing` is the entry's view minus its model,
 serialized as `sameListing` compares. A push at index *i* prunes every row above *i*, as
-the browser prunes Forward, and appends *i+1*. A boot with no `idx` on the state is index 0,
-written with `replaceState`. An entry whose index the mirror does not know is treated as
+the browser prunes Forward, and appends *i+1*. A boot with no `idx` on the state is index 0 by
+`historyIndex()`'s default; a deep-link boot writes no state at all (`commitUrl` declines
+with `wrote: 'none'` when the URL already names the view), so only the trail row is seeded
+off that 0 — no `replaceState` fires. A reload keeps both `sessionStorage` and
+`history.state` and they agree, but boot raises no placement request, so a reload lands at
+the top: arriving, not retracing. An entry whose index the mirror does not know is treated as
 having no placement — fresh, top, never wrong.
 
 `sessionStorage` because history state itself survives reload and the mirror should match
