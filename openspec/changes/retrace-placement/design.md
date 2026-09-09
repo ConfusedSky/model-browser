@@ -94,6 +94,16 @@ parent's original row, not the child's. The parent's most recent visit on some o
 is exactly what is *not* wanted, and the mirror's pruning on push is what guarantees the
 walk never sees a branch the user left.
 
+*Settled at apply (2026-09-09, the wiring worker's check-in):* the walk serves the ✕
+dismissal of a search too. That dismissal — the ✕ on a query view, and clearing the box —
+is a `clearSubject` **push**, not a pop, so it cannot read the entry it lands on the way
+Back does; it retraces exactly as ↑ does, walking back to the nearest row whose listing is
+the view the clear lands on (the anchor path, no subject, the current flat state), with no
+child fallback since nothing was "come out of". Only the similarity dismissal
+(`history.go(-depth)`) and browser Back are pops. The listing key a subject-less view
+serializes to is `path` + `flat` alone, which is what makes the flat fall-through in D4 a
+key mismatch rather than a comparison.
+
 The "sly" alternative — make ↑ a `history.back()` when the parent is the entry behind —
 was weighed and declined: it is only sometimes the adjacent entry, and `history.go(-n)`
 would discard the Forward entries in between, so ↑ would silently rewrite Forward.
@@ -128,6 +138,15 @@ highlight — and no longer scrolls.
 Applied once: a listing that lands twice (the stale follow-up, a peek) may shift rows after
 the user has been placed. Accepted; re-applying would fight a user who has already started
 scrolling, and the shift is rare and small.
+
+"Patched, not landed" is decided by `entries` identity, not by the result object: the
+reducer's `patch` mints a new result (`{ ...state.result, forView }`) and preserves only
+`entries` (its own R5 rule), so a lightbox close or a same-question Back keeps the entries
+the request was raised against, and the request is dropped without applying. The record
+is flushed synchronously at the user's gesture — `navigate`, the ✕ dismissal, a search or
+similarity commit — while the old grid is still on screen, not in the projection effect,
+where the new grid has already rendered and a measurement would file the new listing under
+the old index; the trailing scroll-settle timer covers everything in between.
 
 "Arriving lands at the top" is made explicit rather than inherited. Today a fast landing
 with no skeleton keeps the old `scrollTop`, clamped; a fresh entry's request is `top`, so the
