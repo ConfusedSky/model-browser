@@ -90,7 +90,7 @@ import {
   similarDepth,
   type UrlView,
 } from './lib/urlState'
-import { initialState, reducer, type Action, type Failure, type Landed, type Result } from './state/reducer'
+import { initialState, reducer, type Action, type Landed, type Result } from './state/reducer'
 import {
   busy,
   byKind,
@@ -141,15 +141,12 @@ const RECORD_SETTLE_MS = 150
  * a new result object but keeps `id` (and `entries`) — so an unchanged id at
  * the settled moment means nothing landed and nothing may be applied, which is
  * what keeps a lightbox close from moving the grid. A landing always carries a
- * new id. `raisedFailure` is the failure standing at the raise, by identity —
- * the reducer mints a new object per failure and `ask` keeps the old one — so
- * a request raised after a failed navigation is not dropped for that failure,
- * only for one of its own.
+ * new id — and a failure carries none, so a retrace whose own listing fails
+ * reads as a patch and is dropped the same way.
  */
 interface PendingPlacement {
   request: PlacementRequest
   raisedWith: Result | null
-  raisedFailure: Failure | null
 }
 
 const TOP_REQUEST: PlacementRequest = { kind: 'top' }
@@ -839,7 +836,6 @@ export default function App() {
     setPendingPlacement({
       request,
       raisedWith: stateRef.current.result,
-      raisedFailure: stateRef.current.failure,
     })
   }, [])
   const markTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -2258,12 +2254,13 @@ export default function App() {
    * raised (`pendingQuestionRef`; every raiser raises in the same batch as
    * its dispatch). A different question in flight supersedes it — the user
    * committed a search, a path, a similarity view while the retrace was in
-   * flight — and that landing is an arrival, at the top. Its own failure
-   * drops it, by identity against the failure standing at the raise, since
-   * `ask` keeps a standing failure and a retrace raised after a failed
-   * navigation would otherwise be dropped on its first render. A patch leaves
-   * it alone: a kind flip, a tuning commit outside a query, a model opened
-   * during the flight change no question, so the place still lands.
+   * flight — and that landing is an arrival, at the top. A patch leaves it
+   * alone: a kind flip, a tuning commit outside a query, a model opened
+   * during the flight change no question, so the place still lands. A
+   * failure is not an arm of its own: `ask` keeps a standing failure, so
+   * dropping on any failure lost a retrace raised after a failed navigation;
+   * and a retrace's own failure leaves the raised answer on screen, which the
+   * patch check below drops.
    *
    * The reveal is the `reveal` case: a located entry is centred and marked; a
    * revealed entry that has since been moved or deleted leaves the folder
@@ -2272,13 +2269,6 @@ export default function App() {
   const appliedRef = useRef<number | null>(null)
   useLayoutEffect(() => {
     const result = state.result
-    if (state.failure !== null) {
-      if (pendingPlacement === null) return
-      if (state.failure !== pendingPlacement.raisedFailure) {
-        setPendingPlacement(null)
-        return
-      }
-    }
     if (pendingPlacement !== null && state.inflight !== null && state.inflight.followUp !== true) {
       if (pendingQuestionRef.current === null) pendingQuestionRef.current = state.inflight.id
       else if (pendingQuestionRef.current !== state.inflight.id) {
