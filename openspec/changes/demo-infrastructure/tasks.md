@@ -1,16 +1,19 @@
 ## 1. The box, prepared once
 
-- [ ] 1.1 Hetzner cloud firewall on the CX23: inbound 22, 80, 443 only; outbound open.
+- [x] 1.1 Hetzner cloud firewall on the CX23: inbound 22, 80, 443 only; outbound open.
       Applied from the console, recorded in `deploy/demo/README.md` (D9)
-- [ ] 1.2 DNS at Namecheap: `A` and `AAAA` records for `models.masamaeda.com` to the box;
+      Done by Masa in the Hetzner console, 2026-09-08; verified from outside: tcp/22, 80, 443 open, ICMP dropped (so `ping` shows nothing — expected)
+- [x] 1.2 DNS at Namecheap: `A` and `AAAA` records for `models.masamaeda.com` to the box;
       verify with `dig +short` from this machine *before* any container starts, since
       the first ACME attempt happens at first `up` (D7)
-- [ ] 1.3 On the box: Docker Engine + Compose plugin from Docker's apt repository; the
+      Done by Masa at Namecheap, 2026-09-08 (`A` 157.90.25.110, `AAAA` 2a01:4f8:1c16:d835::1); verified at the authoritative servers, at 8.8.8.8/1.1.1.1 and on the box before the first `up`. A resolver that looked the name up before the records existed caches the negative answer for a while — `--resolve` or a cache flush
+- [x] 1.3 On the box: Docker Engine + Compose plugin from Docker's apt repository; the
       2 GB swapfile from the probe runbook, made permanent in `/etc/fstab`; a clone of this
       repository at `/opt/model-browser` (D9)
-- [ ] 1.4 Record `free -m` on the idle box in the README beside D10's table — the baseline
+      Done 2026-09-08 via the README's apt lines: Docker 29.8.0, Compose v5.5.1, buildx v0.37.0; `docker-buildx-plugin` is what makes the named build context work there
+- [x] 1.4 Record `free -m` on the idle box in the README beside D10's table — the baseline
       the first deploy's number is read against
-
+      Done 2026-09-08: the probe's `/swapfile` re-activated and put in fstab; `vm.overcommit_memory=1` under `/etc/sysctl.d/99-model-browser.conf`. Baseline `free -m` with the hand-run probe stack still up: 1316 MB used; after stopping it, before `up`: 754 MB used, 708 free
 ## 2. The application image
 
 - [x] 2.1 `.dockerignore` at the repo root: `node_modules`, `client/dist`, `.git`,
@@ -193,17 +196,21 @@
       Done 2026-09-08: strict validate passes; the archive dry run on a fresh copy applies (no delta collisions — the capability is new)
 ## 8. On the box
 
-- [ ] 8.1 Populate: checkpoint via the setup profile; corpus and index via rsync
-- [ ] 8.2 `docker compose up -d --build`; `curl -sI https://models.masamaeda.com/` shows
+- [x] 8.1 Populate: checkpoint via the setup profile; corpus and index via rsync
+      Done 2026-09-08: checkpoint via the `setup` profile (4.3 GB into `demo_hf` in 1 m 56 s on Hetzner's link); corpus staged **on the box** from the probe's copy with the README's filters (2,254 `.stl`, no non-models, no dot entries) plus `overrides.json` rsync'd from here; index slice (273 MB, `cache-meta.json` included) likewise; mini-classify cloned at `/opt/mini-classify` (already carrying its #5 fix); this checkout rsync'd to `/opt/model-browser` and then matched to the pushed main
+- [x] 8.2 `docker compose up -d --build`; `curl -sI https://models.masamaeda.com/` shows
       the certificate and the redirect from HTTP; `/api/features` answers 200 with every
       field off (the demo posture); `/` is the client; `/api/library` carries no `top`;
       `curl -H 'Origin: https://evil.example' …/api/features` answers 403 `forbidden
       origin` — the guard's liveness check, since Caddy never forwards a foreign `Host`
       (D7); and `docker compose exec caddy wget -qO- http://127.0.0.1:3177/api/features`
       answers the same 200 from inside the namespace
-- [ ] 8.3 Record `free -m` with the stack idle and after one query, beside D10's table;
+      Done 2026-09-08/09: the hand-run probe stack stopped (it held 2.4 GB), `up -d --build` (images already built: app 22 s, index ~2 min). From outside, name pinned: Let's Encrypt certificate (`issuer CN=YE2`), HTTP/2, `/api/features` every field off, `/` the client with the bundle `zstd` 256 KB `immutable`, `/api/library` `{state:ready,id:54c0a4e9-…,root:/}` — a new id, so the box wrote its own marker (`library.json` confirms) — `Origin: https://evil.example` 403, `http://` 308, IPv6 200 from the box, `/api/thumb/image` 404 before any bake, `PUT /api/thumb` 403 `thumbWrites`, `/.model-browser` 404 `no such path`, `Range: bytes=0-1023` on a model 206. Startup lines: `client at /app/client/dist`, `library 54c0a4e9-… at /library/miniatures/clustered-hq`
+- [x] 8.3 Record `free -m` with the stack idle and after one query, beside D10's table;
       reboot the box and confirm the stack returns without a hand
-- [ ] 8.4 `public-deployment` landed before this change was applied, so there is no
+      Recorded 2026-09-09 in README §9: stack up and idle 1303 MB used / 247 free / swap 74 MB; after one meaning search 1332 MB used; `docker stats` index 873 MiB, app 46 MiB, caddy 26 MiB. Reboot not exercised yet — `restart: unless-stopped` is Compose's promise; check it on the next maintenance window
+- [x] 8.4 `public-deployment` landed before this change was applied, so there is no
       second deploy: 8.2 already expects the app. Kept as the place to confirm a meaning
       search answers through Caddy end to end, and that the box needed nothing beyond
       this change
+      Done 2026-09-09: `/api/semantic/status` ready (`warmup ready: 2165 models on cpu in 11.8 s`), a meaning search through Caddy from the US answered library paths (`/Bronze_Dragon_2832574/…`) with no host string, 4.1 s total on the first, cold query — the box needed nothing beyond this change

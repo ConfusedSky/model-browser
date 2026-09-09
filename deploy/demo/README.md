@@ -386,4 +386,8 @@ About 3.0 GB against 4 GB, with 2 GB of swap as the floor. **Record the real
 baseline. If the app's share is wrong by a factor that matters, the remedy is the
 CX33 resize the host decision already names, not a change to this design.
 
-<!-- first deploy: idle `free -m` … / after one search … / swap used … -->
+First deploy, 2026-09-09 (`free -m`, MB): before `up`, box idle — used 754, free 708;
+stack up and idle — used 1303, free 247, swap 74; after one meaning search — used
+1332. `docker stats`: index 873 MiB, app 46 MiB, caddy 26 MiB. Well inside D10's table;
+the index's resident share is under the probe's 2.43 GB peak because the checkpoint is
+mapped, not read, and the kernel keeps it in page cache under `buff/cache`.
