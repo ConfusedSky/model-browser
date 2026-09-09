@@ -125,9 +125,10 @@
 
 ## 5. Archive
 
-- [ ] 5.1 Dry-run `openspec archive` on a fresh copy of `openspec/` and confirm
-      the MODIFIED block still applies without dropping a scenario.
-- [ ] 5.2 After archiving, read `openspec/specs/directory-browsing/spec.md` and
+- [x] 5.1 Dry-run `openspec archive` on a fresh copy of `openspec/` and confirm
+      the MODIFIED block still applies without dropping a scenario. (Applied
+      `~ 1 modified`, 74 scenarios, none dropped.)
+- [x] 5.2 After archiving, read `openspec/specs/directory-browsing/spec.md` and
       strip any change-scoped prose that reads as the capability's own. One
       reconciliation to make explicit while there: the flat-listing requirement
       already says archive members are opaque to the hidden-entry test (citing
