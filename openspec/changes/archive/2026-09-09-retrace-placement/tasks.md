@@ -101,6 +101,15 @@
       tile index, cell-local `cols`/`rowH` and `main.scrollTop`, `clientHeight` defined on
       the instance; every mocked listing `structuredClone`d so a landing is a new answer.
       No existing cell changed: full client suite 64 files / 910 tests green)*
+      *(2026-09-09, two fix rounds: 22 cells now. First round added the skeleton pair
+      (Back and the reveal once the grid is back on screen) and the in-flight pair (a
+      search committed before ↑ / ✕ lands arrives at the top), plus the lightbox-close
+      search cell. Second round: Back to a stale listing slower than the skeleton; the
+      follow-up does not move a user who scrolled on; Back after a failed ↑ still lands
+      where the listing was left; a retrace whose own listing fails drops its request; a
+      kind filter flipped / a model opened while a retrace is in flight keeps the place;
+      Forward lands where it was left. `trailPlacement`'s listing check has its own cell
+      in `trail.test.ts`)*
 - [x] 4.2 Falsify: make `walkBack` return the latest match instead of the nearest → the
       excursion cell fails; make `resolvePlacement` skip the child fallback → the
       deep-link cell fails; restore `scrollIntoView` in `Tile` and drop the apply effect →
@@ -116,6 +125,22 @@
       because the scroller never moved — they now assert the child arrived at 0 first.
       `leaveSubject` raising nothing → exactly the ✕ dismiss cell fails (`expected +0 to
       be 450`))*
+      *(2026-09-09, second fix round, re-run by the reviewer on 2a83f59 — each mechanism
+      one mutation: gate back to `inflight !== null` → the two stale cells (`expected +0
+      to be 450`); `followUp` arm deleted → the same two (`+0 to be 450`, `+0 to be 250`);
+      the failure arm restored → "Back after a failed ↑" (`+0 to be 450`); the clear back
+      in `commit` → the kind-flip and model-opened cells (`+0 to be 450`); the supersession
+      block deleted → both in-flight search cells (`50 to be +0`); the patch arm deleted →
+      "a search committed after the close lands at the top" (`50 to be +0`), which the
+      first round's commit-wide clear had masked; the listing test dropped from
+      `trailPlacement` → its trail cell. Two things are reasoned, not pinned: "a retrace
+      whose own listing fails drops its request" fails only under the patch arm AND the
+      supersession block deleted together (either alone drops it — the design's claim
+      that the patch arm carries it is the supersession-deleted run staying green); and
+      find-similar superseding a pending retrace, traced through its three paths (ready
+      index → `askCommitted`, a new id; warming → `defer` asks a stand-in, a new id;
+      unprobed → nothing asked, `inflight` null, the patch arm drops it) with no cell.
+      Accepted debt with 6.2's: the `recordNow` flush and the `busyRef` guard)*
 
 ## 5. Live
 
@@ -131,6 +156,10 @@
 
 - [x] 6.1 `bun run typecheck` and both suites green
       Done 2026-09-09 on merged main 75f8b38: both typechecks exit 0; server 714/714, client 910/910
-- [ ] 6.2 `openspec validate retrace-placement --strict`, archive dry run on a fresh copy;
+      Re-run 2026-09-09 on 2a83f59 after the second fix round: both typechecks exit 0; client 64 files / 923
+- [x] 6.2 `openspec validate retrace-placement --strict`, archive dry run on a fresh copy;
       after archiving, check the applied `directory-browsing` text carries no change-scoped
       prose
+      Done 2026-09-09 after the second review's GO: valid under --strict; dry run on a
+      fresh copy `+ 1` to directory-browsing; the applied text carries no HTML comments
+      (checked after the real archive)
