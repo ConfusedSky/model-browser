@@ -26,13 +26,7 @@
  */
 import { serializeView } from './urlState'
 import { toUrlView, type View } from '../state/view'
-
-/** An anchor tile and its offset from the scrollport's top edge (D1). Structurally
- *  the record `placement.ts` measures; declared here so this module stands alone. */
-export interface Placement {
-  anchor: string
-  offset: number
-}
+import type { Placement } from './placement'
 
 export interface TrailRow {
   idx: number

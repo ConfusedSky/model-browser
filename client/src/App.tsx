@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from 'react'
 import type * as THREE from 'three'
 import type {
   AppsReport,
@@ -45,6 +53,7 @@ import {
 import { GestureTracker } from './lib/gesture'
 import { createHoverWarmer } from './lib/hover'
 import { fitSquareBox, type Box } from './lib/layout'
+import { applyIn, measureIn, resolvePlacement, type PlacementRequest } from './lib/placement'
 import { pushRecent } from './lib/recents'
 import { scaleOf } from './lib/scoreScale'
 import {
@@ -62,7 +71,16 @@ import {
   type Tuning,
 } from './lib/searchOptions'
 import {
+  listingKey,
+  trailPlacement,
+  trailPush,
+  trailRecord,
+  trailReplace,
+  trailWalkBack,
+} from './lib/trail'
+import {
   commitUrl,
+  historyIndex,
   isLightboxEntry,
   isSimilarEntry,
   LIGHTBOX_ENTRY,
@@ -72,7 +90,7 @@ import {
   similarDepth,
   type UrlView,
 } from './lib/urlState'
-import { initialState, reducer, type Action, type Landed } from './state/reducer'
+import { initialState, reducer, type Action, type Landed, type Result } from './state/reducer'
 import {
   busy,
   byKind,
@@ -107,6 +125,30 @@ const TUNING_DEBOUNCE_MS = 300
  * so a second reveal of the same entry replays it.
  */
 const MARK_MS = 1800
+
+/**
+ * How long after the last scroll event the current entry's placement is filed
+ * into the trail (retrace-placement D2). A trailing timer rather than
+ * per-frame coalescing: a fling emits a scroll event per frame, and the trail
+ * wants where the user *settled*, not sixty rows it passed on the way.
+ */
+const RECORD_SETTLE_MS = 150
+
+/**
+ * What the next settled landing does with the scroller (retrace-placement
+ * D5). `raisedWith` is the answer on screen when the request was raised, by
+ * its id: a restore that asks the same question *patches* — the reducer mints
+ * a new result object but keeps `id` (and `entries`) — so an unchanged id at
+ * the settled moment means nothing landed and nothing may be applied, which is
+ * what keeps a lightbox close from moving the grid. A landing always carries a
+ * new id.
+ */
+interface PendingPlacement {
+  request: PlacementRequest
+  raisedWith: Result | null
+}
+
+const TOP_REQUEST: PlacementRequest = { kind: 'top' }
 
 /** How long a command's brief report stays on the path bar's transient line. */
 const ACTION_TEXT_MS = 2500
@@ -459,13 +501,71 @@ export default function App() {
    *  rewrite, moved the URL without a projection, and re-asserting the last
    *  view we happened to have written then read as a no-op. */
   const projectedRef = useRef<string | null>(null)
+
+  /**
+   * The grid's scroller — `<main>` — which `Grid`'s observers root at and the
+   * trail measures against. A `RefObject`, never its `.current`, so its identity
+   * is stable in the observer effect's deps and its population (during commit,
+   * before passive effects) is never waited on (sweep-priority D2).
+   */
+  const mainRef = useRef<HTMLElement>(null)
+  /**
+   * Whether the grid on screen is *not* the current entry's answer — a listing
+   * in flight, or the skeleton standing in for one — read at record time
+   * through a ref so the scroll listener below can be attached once. Set
+   * during render (the `listingRef` pattern) because the record has to see the
+   * value the last commit painted, not the one an effect will get to.
+   */
+  const busyRef = useRef(false)
+  const recordTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  /**
+   * File the current entry's placement now (retrace-placement D2). The
+   * trailing timer records a scroll settle; this is the same record taken at
+   * the moment the user acts — a tile click, ↑, a dismissal, a search — while
+   * the grid they are leaving is still on screen and `historyIndex()` is still
+   * its entry's. Called from `commit` (every user commit that owns the URL) and
+   * the action host's `dispatch` (find-similar), so no leave goes unfiled
+   * within the timer's window. Skipped while busy: a skeleton has no tiles, and
+   * a grid that is not this entry's answer must not be filed as its place.
+   */
+  const recordNow = useCallback((): void => {
+    clearTimeout(recordTimerRef.current)
+    recordTimerRef.current = undefined
+    const main = mainRef.current
+    if (main === null || busyRef.current) return
+    trailRecord(historyIndex(), measureIn(main))
+  }, [])
+  useEffect(() => {
+    const main = mainRef.current
+    if (main === null) return
+    const onScroll = (): void => {
+      clearTimeout(recordTimerRef.current)
+      recordTimerRef.current = setTimeout(recordNow, RECORD_SETTLE_MS)
+    }
+    main.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      main.removeEventListener('scroll', onScroll)
+      clearTimeout(recordTimerRef.current)
+    }
+  }, [recordNow])
+
   const commit = useCallback(
     (action: Action, opts: { replace?: boolean; state?: unknown } = {}): void => {
+      // The leaving grid's place, filed before the view moves on (D2's flush).
+      recordNow()
       urlIntent.current = opts
       dispatch(action)
     },
-    [dispatch],
+    [dispatch, recordNow],
   )
+  /**
+   * The state as of the last render, for callbacks whose identity must not
+   * follow it: the placement a navigation raises names the answer on screen at
+   * that moment (`PendingPlacement.raisedWith`), and the callbacks raising it
+   * (`onPop`, `leaveSubject`, the action host) are subscribed or memoised once.
+   */
+  const stateRef = useRef(state)
+  stateRef.current = state
 
   // Three pieces of text, one job each — they shared two controls until
   // find-in-listing separated them.
@@ -710,13 +810,20 @@ export default function App() {
   )
 
   /**
-   * Reveal's two ephemeral cells (D3/D8): the entry whose containing folder is
-   * being navigated to, and the entry the arrival located. Component-local, like
-   * `findText` and for the same reason — the reducer never reads a highlight —
-   * so neither reaches the URL, history, or a reload.
+   * The placement the next settled landing applies (retrace-placement D5), and
+   * the entry a reveal located. Component-local, like `findText` and for the
+   * same reason — the reducer never reads a highlight or a scroll position — so
+   * neither reaches the URL, history, or a reload. One pending thing, not two:
+   * the reveal is the `reveal` case of the request, so it and a Back cannot
+   * both be waiting on the same landing.
    */
-  const [pendingReveal, setPendingReveal] = useState<string | null>(null)
+  const [pendingPlacement, setPendingPlacement] = useState<PendingPlacement | null>(null)
   const [marked, setMarked] = useState<string | null>(null)
+  /** Raise a placement for the landing the caller is about to cause, naming
+   *  the answer on screen now so a landing can be told from a patch. */
+  const raisePlacement = useCallback((request: PlacementRequest): void => {
+    setPendingPlacement({ request, raisedWith: stateRef.current.result })
+  }, [])
   const markTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => () => clearTimeout(markTimerRef.current), [])
 
@@ -889,11 +996,6 @@ export default function App() {
     previewsRef.current = NO_PREVIEWS
     setPreviews(NO_PREVIEWS)
   }
-  /** The scroller `Grid`'s observers root at — a `RefObject`, never its
-   *  `.current`, so its identity is stable in the observer effect's deps and
-   *  its population (during commit, before passive effects) is never waited
-   *  on (sweep-priority D2). */
-  const mainRef = useRef<HTMLElement>(null)
   /**
    * Ask for one folder's preview, at most once per listing.
    *
@@ -1174,6 +1276,9 @@ export default function App() {
           : libraryMissingText(libraryState.root)
 
   const showSkeleton = useDelayedFlag(busy(state), SKELETON_DELAY_MS)
+  // `busy` and not `inflight !== null`: a stale listing's follow-up keeps the
+  // answered grid on screen while it runs, and the user's place in it is real.
+  busyRef.current = busy(state) || showSkeleton
   const {
     thumbs,
     setThumb,
@@ -1309,7 +1414,18 @@ export default function App() {
     }
     projectedRef.current = url
     if (!advanced && intent.replace !== true) return
-    commitUrl(toUrlView(state.view), intent)
+    // The trail mirrors what was written (retrace-placement D2): a push prunes
+    // Forward and opens the new entry's row; a replace re-names the entry's
+    // row. A declined write on a replace pass is the boot seed — the URL
+    // already named the view (a deep link, a harness mount) and `history.state`
+    // stays null, so `historyIndex()` answers 0 and the row is keyed off that,
+    // never off a state that was written. `trailReplace` keeps the row's
+    // placement when the listing is unchanged, which a Back that lands on an
+    // already-rewound URL relies on.
+    const key = listingKey(state.view)
+    const { idx, wrote } = commitUrl(toUrlView(state.view), intent)
+    if (wrote === 'push') trailPush(idx, key)
+    else if (wrote === 'replace' || intent.replace === true) trailReplace(idx, key)
   }, [state])
 
   /**
@@ -1615,12 +1731,14 @@ export default function App() {
       // filter is the caller's to clear because the reducer never reads it.
       setFindText('')
       setFindOpen(false)
-      // The reveal mark is ephemeral in exactly the same sense (3.5), so it is
-      // dropped here — one place a new ephemeral reset gets added, rather than
-      // one per caller. Reveal arms the mark *after* calling this, deliberately:
-      // it belongs to the arrival this navigation causes, not to the view being
-      // left.
-      setPendingReveal(null)
+      // The reveal mark and the pending placement are ephemeral in exactly the
+      // same sense (3.5), so they are dropped here — one place a new ephemeral
+      // reset gets added, rather than one per caller. Reveal and ↑ raise their
+      // placement *after* calling this, deliberately: it belongs to the arrival
+      // this navigation causes, not to the view being left. With nothing
+      // raised, the landing goes to the top (retrace-placement D5): a tile
+      // click, a typed path and a deep link arrive, they do not retrace.
+      setPendingPlacement(null)
       setMarked(null)
       // A volume mounted after the server started is picked up by the next
       // navigation rather than by a reload (library R4): the state is asked
@@ -1669,15 +1787,31 @@ export default function App() {
   const leaveSubject = useCallback(
     (otherwise: Action): void => {
       if (isSimilarEntry()) {
+        // The leaving grid's place, filed while the index is still this
+        // entry's — `go` moves it asynchronously, and `onPop` reads the entry
+        // it lands on.
+        recordNow()
         // popstate does the rest: the restoration is one dispatch of the
         // previous URL resolved whole, which is the machinery that already
         // exists for Back (url-navigation D2).
         window.history.go(-similarDepth())
         return
       }
+      // A query's dismissal is a push, not a pop, so it cannot read the entry
+      // it lands on; it retraces the way ↑ does (retrace-placement D3): the
+      // trail is walked back to the nearest entry whose listing is the one the
+      // clear lands on — the anchor path, no subject, the current flat state —
+      // which is the visit the search was raised from. `entry`, not `up`: there
+      // is no folder the user came out of, so no child to centre.
+      const base = liveView(stateRef.current)
+      const key = listingKey({ ...base, subject: { kind: 'none' }, model: null })
       commit(otherwise)
+      raisePlacement({
+        kind: 'entry',
+        placement: trailWalkBack(historyIndex(), key)?.placement ?? null,
+      })
     },
-    [commit],
+    [commit, recordNow, raisePlacement],
   )
 
   function handleQueryTextChange(value: string): void {
@@ -2040,13 +2174,20 @@ export default function App() {
       setFindOpen(false)
       // Nor is the reveal mark: going back to a folder an entry was revealed in
       // lists it with nothing marked (3.5).
-      setPendingReveal(null)
       setMarked(null)
+      // The browser has already moved, so `history.state` — and the index —
+      // are the restored entry's: a settle timer still pending belongs to the
+      // entry just left and must not file under this one, and the placement
+      // to land is this entry's own row (retrace-placement D2/D4). Unknown
+      // index, unknown row: null, which resolves to the top.
+      clearTimeout(recordTimerRef.current)
+      recordTimerRef.current = undefined
+      raisePlacement({ kind: 'entry', placement: trailPlacement(historyIndex()) })
       dispatch({ type: 'restore', view: resolveView(v) })
     }
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
-  }, [dispatch])
+  }, [dispatch, raisePlacement])
 
   // A `model` the view names but nothing has mounted yet (url-navigation D3):
   // honored once its entry is in a landed listing, dropped silently after a
@@ -2068,23 +2209,51 @@ export default function App() {
     dispatch({ type: 'modelDrop' })
   }, [state.view.model, state.result, state.inflight, state.failure, viewer, openRestoredLightbox, dispatch])
 
-  // Locate on arrival (3.2) — the honor-or-drop pattern the effect above
-  // follows, with a highlight instead of a lightbox: hold the payload, act only
-  // on a settled answer, honor it when the entry is in the listing that landed,
-  // drop it silently when it is not. A revealed entry that has since been moved
-  // or deleted leaves the folder presented normally, with no error and nothing
-  // marked.
-  useEffect(() => {
-    if (pendingReveal === null) return
-    if (state.result === null || state.inflight !== null || state.failure !== null) return
-    setPendingReveal(null)
-    if (!state.result.entries.some((e) => e.path === pendingReveal)) return
-    setMarked(pendingReveal)
+  /**
+   * Place the grid on arrival (retrace-placement D5) — the honor-or-drop
+   * pattern the effect above follows, for the scroller: hold the request, act
+   * only on a settled answer, resolve it against the listing that landed
+   * (`resolvePlacement` is D4's whole fallback chain), apply it once, clear it.
+   * A layout effect so the placed position is what paints, not the top and
+   * then a jump.
+   *
+   * Once per landing, by the answer's id. A restore that asked the same
+   * question patched instead — same id, nothing landed — so a request raised
+   * for it is dropped and nothing is applied: closing the lightbox leaves the
+   * grid exactly where it was. A stale listing's follow-up lands a new id but
+   * is not applied either: the user was placed when the first answer landed
+   * and may have moved since; re-placing them would fight that (D5's "applied
+   * once"). And with no request at all, the landing is an arrival and goes to
+   * the top — explicitly, so a fast landing with no skeleton does not keep the
+   * old scroller's clamped offset.
+   *
+   * The reveal is the `reveal` case: a located entry is centred and marked; a
+   * revealed entry that has since been moved or deleted leaves the folder
+   * presented normally, with no error and nothing marked.
+   */
+  const appliedRef = useRef<number | null>(null)
+  useLayoutEffect(() => {
+    const result = state.result
+    if (result === null || state.inflight !== null || state.failure !== null) return
+    if (pendingPlacement !== null && pendingPlacement.raisedWith?.id === result.id) {
+      setPendingPlacement(null)
+      return
+    }
+    if (appliedRef.current === result.id) return
+    appliedRef.current = result.id
+    if (result.followUp === true) return
+    const request = pendingPlacement?.request ?? TOP_REQUEST
+    const resolved = resolvePlacement(request, result.entries)
+    const main = mainRef.current
+    if (main !== null) applyIn(main, resolved)
+    if (pendingPlacement !== null) setPendingPlacement(null)
+    if (request.kind !== 'reveal' || resolved.kind !== 'center') return
+    setMarked(request.path)
     // The fade is the animation's (index.css); this only decides when the class
     // comes off, so revealing the same entry twice replays it.
     clearTimeout(markTimerRef.current)
     markTimerRef.current = setTimeout(() => setMarked(null), MARK_MS)
-  }, [pendingReveal, state.result, state.inflight, state.failure])
+  }, [pendingPlacement, state.result, state.inflight, state.failure])
 
   // The lightbox history push hooks the transition INTO 'lightbox' mode, not
   // openLightbox — that function is the keyboard entrance only; the pointer
@@ -2312,8 +2481,13 @@ export default function App() {
   const actionHost = useMemo<ActionHost>(
     () => ({
       navigate,
-      dispatch,
-      markOnArrival: setPendingReveal,
+      // Find-similar lands a new entry through this, not `commit`, so the
+      // leaving grid's place is filed here as it is there (D2's flush).
+      dispatch: (action) => {
+        recordNow()
+        dispatch(action)
+      },
+      markOnArrival: (path) => raisePlacement({ kind: 'reveal', path }),
       open: (entry, el) => {
         if (entry.kind !== 'model') {
           enterEntry(entry)
@@ -2362,6 +2536,8 @@ export default function App() {
       noteFramingChanged,
       navigate,
       dispatch,
+      recordNow,
+      raisePlacement,
       enterEntry,
       openLightbox,
       sayWhereLooking,
@@ -2663,7 +2839,27 @@ export default function App() {
     // also disabled there, so this is the second of two guards, not the only
     // one).
     const parent = containingFolder(target)
-    if (parent !== target) navigate(parent)
+    if (parent === target) return
+    // Where the parent was when the user went into this folder (retrace-
+    // placement D3): the trail is walked back from the current entry to the
+    // nearest row whose listing is the parent's — the visit that led here, not
+    // the parent's latest visit on some other branch. The key names the flat
+    // state the parent will actually land in (`navigate` keeps the live
+    // toggle), so a parent visited nested and left flat has no row under this
+    // key, and D4's fall-through runs: the child tile centred where it exists,
+    // else the top. Raised after `navigate`, which clears what was pending.
+    const parentKey = listingKey({
+      ...liveView(state),
+      path: parent,
+      subject: { kind: 'none' },
+      model: null,
+    })
+    navigate(parent)
+    raisePlacement({
+      kind: 'up',
+      placement: trailWalkBack(historyIndex(), parentKey)?.placement ?? null,
+      child: target,
+    })
   }
 
   const persist = useCallback(

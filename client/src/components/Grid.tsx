@@ -583,16 +583,10 @@ const Tile = memo(function Tile({
   previewThumbs,
 }: TileProps) {
   const ref = useRef<HTMLButtonElement>(null)
-  // Locating is the point of reveal (D3): a grid of identical squares ten
-  // screens tall is not answered by scrolling alone. `center` rather than
-  // `nearest` so the tile never lands flush against the top of the scroller,
-  // where the notice row sits and where a sticky header would sit if one is
-  // ever added; `nearest` inline because the grid never scrolls sideways.
-  // Instant, not smooth: the listing has only just appeared, and a half-second
-  // glide over sixty rows is a distraction rather than an orientation.
-  useEffect(() => {
-    if (marked) ref.current?.scrollIntoView?.({ block: 'center', inline: 'nearest' })
-  }, [marked])
+  // Locating is not this tile's job any more: `marked` is the highlight alone.
+  // App places the revealed tile — centred — through the same placement every
+  // retrace uses (retrace-placement D5), against the scroller it owns, so the
+  // reveal and a Back cannot drift apart in how they scroll.
 
   const base =
     'group flex aspect-square w-full flex-col items-center justify-center gap-1 overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900 p-2 text-zinc-300 transition-colors hover:border-zinc-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-500'
