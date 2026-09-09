@@ -574,8 +574,16 @@
       (022889a): one hook-level cell seeds with the report off and the id unknown, then the
       id lands and the overlay applies; the App effect's dependency is convention-guarded,
       as the report's already was (a tile's camera has no App-level observable)
-- [ ] 9.15 mini-classify answers a 4xx naming its token budget (#5 there); model-browser
-      keeps its coarse guard
+- [x] 9.15 mini-classify answers a 4xx naming its token budget (#5 there); model-browser
+      keeps its coarse guard. Done in that repo as `fe25e8e` (2026-09-08): `truncation`
+      was the missing processor flag (`Sequence length must be less than
+      max_position_embeddings`, 101 tokens against 64), the budget is derived from the
+      model's config, `/query` answers 422 naming the count and the budget, 786 tests
+      pass there. **Not pushed, and the index on :8077 still runs the pre-fix code** (it
+      answers 500 to 100 CJK characters as of this tick) — both are that repo's owner's
+      to do; #5 stays open until the push. A parallel session in that tree worked the same
+      issue and the two ended up in one commit; nothing was lost, the reflog holds the
+      intermediate states, and the combined message is the worker's
 - [x] 9.16 Archives opaque to the model-format and hidden rules — `library` spec narrowed
       to the filesystem half, `directory-browsing` says entries not directories; the
       symlink alias and the range-unit case accepted (design, fourth-pass paragraph)
