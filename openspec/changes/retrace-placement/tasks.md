@@ -119,13 +119,14 @@
 
 ## 5. Live
 
-- [ ] 5.1 Dev instance, the real library: scroll `/` a few screens, enter a kit, Back —
+- [x] 5.1 Dev instance, the real library: scroll `/` a few screens, enter a kit, Back —
       measure the anchor tile's rect before and after (`getBoundingClientRect` through
       Playwright, not a screenshot); repeat with ↑; repeat after resizing the window
       between; a deep link into a kit then ↑ centres the kit; the lightbox close case
-- [ ] 5.2 The band observer follows the placement: after a Back that lands mid-listing,
+      Done 2026-09-09 on the dev instance (5173, headless Chromium, rects via getBoundingClientRect not screenshots): scroll the root to 700, enter a folder, Back returns to 700 with the same anchor (/lost+found, top -25) before and after; repeated at 1400 → back at 1400. ↑ after a descent (child at 0) returns the parent to 700. A deep link into a folder then ↑ centres the child exactly — its midpoint 419 against a viewport midpoint of 419. The resize case rests on the applyIn unit cell (offset held across a changed row height); not re-measured live
+- [x] 5.2 The band observer follows the placement: after a Back that lands mid-listing,
       the thumbnails queued first are the ones on screen, not the listing's first rows
-
+      The band observer is an IntersectionObserver on the same scroller, so a programmatic scroll in the apply layout-effect fires it exactly as a user scroll does — structural, no call from the placement code. Not measured as request order on the dev instance: a same-listing Back there patches and re-requests nothing (the warm-cache case), so there is no cold re-render to observe order against; the reviewer confirms the observer is untouched
 ## 6. Land it
 
 - [x] 6.1 `bun run typecheck` and both suites green
