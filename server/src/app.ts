@@ -642,22 +642,17 @@ export function createApp(
    * anywhere in its subtree, whose mtimes have nothing to do with the folder's,
    * and comparing them would drop every sheet on every listing.
    */
-  function staleInterior(dir: DirEntry, preview: readonly DirEntry[]): boolean {
+  function staleInterior(dir: DirEntry): boolean {
     if (!dir.path.includes('!/')) return false
-    // What the sheet was derived against, where the deriver recorded it. The
-    // cells cannot answer for an **empty** sheet — there is nothing there to
-    // disagree with the archive — and an interior that holds no models is the
-    // ordinary case, not a corner: an `images/` folder beside the parts is what
-    // most kits look like.
-    const stamp = layers.previewStamp(dir.path, PEEK_DEFAULT)
-    if (stamp !== undefined) return stamp !== dir.mtime
-    // No stamp: a sheet recorded before this bookkeeping existed, or by a path
-    // that had no archive to name. The cells still answer for a full sheet, and
-    // an empty one is re-derived rather than trusted, which is the safe
-    // direction — a spurious re-derivation costs a bounded in-memory walk over
-    // entries the archive layer is already holding.
-    if (preview.length === 0) return true
-    return preview.some((cell) => cell.mtime !== dir.mtime)
+    // Every interior sheet is recorded against the archive it was derived from
+    // (`recordPreview`'s stamp), so an absent stamp is a sheet that cannot
+    // account for itself and is re-derived rather than trusted. Comparing the
+    // *cells* was the first implementation and could not see the case that
+    // mattered: an interior holding no models records `[]`, and `[].some(...)`
+    // is false however far the archive has moved since — an `images/` folder
+    // beside the parts is what most kits hold, so the sheet that never
+    // recovered was the ordinary one.
+    return layers.previewStamp(dir.path, PEEK_DEFAULT) !== dir.mtime
   }
 
   function annotate(entries: DirEntry[]): void {
@@ -676,7 +671,7 @@ export function createApp(
         // The sheet a tile draws by default. A tile asking for more cells still
         // asks `/api/peek`, which is the only place a wider sheet is derived.
         const preview = layers.previewFor(entry.path, PEEK_DEFAULT)
-        if (preview !== undefined && staleInterior(entry, preview)) {
+        if (preview !== undefined && staleInterior(entry)) {
           // The archive under this sheet has been rewritten. Dropped rather
           // than served, and re-derived by the fill or the client's peek like
           // any sheet that was never held (`archive-interior-sheets` D9).

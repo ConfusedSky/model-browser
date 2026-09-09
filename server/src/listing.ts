@@ -720,6 +720,12 @@ async function peekInArchive(
   if (s !== null && (!s.isFile() || !/\.zip$/i.test(fsPath))) {
     throw new ListingError(400, `not an archive: ${libPath}`)
   }
+  // An archive that is not there is the zip readers' 404, and it is decided
+  // *before* the empty-entry-half case below for that case's own reason: two
+  // spellings of one tile must not give two answers, and `/nope.zip` already
+  // 404s. Falling through would have answered `[]` — a shrug about a path the
+  // listing refuses.
+  if (s === null) throw new ListingError(404, `cannot read zip: ${zipLibPath}`)
   // An empty entry half is the archive's own tile by another spelling, and
   // `/kit.zip` answers `[]` rather than refusing — two spellings of one tile
   // must not give two answers. It must not fall through: a prefix of `''` would

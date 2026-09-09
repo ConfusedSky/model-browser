@@ -166,6 +166,9 @@ writeFileSync(
   join(libTop, 'onlyzip', 'mac.zip'),
   zipSync({
     'kit/part.stl': new Uint8Array(stlBytes(50)),
+    // A dot-named *model* at the previewed level itself, which is the case the
+    // nested `__MACOSX` entries below do not exercise.
+    'kit/.hidden.stl': new Uint8Array(stlBytes(51)),
     '__MACOSX/kit/._part.stl': new Uint8Array([1, 2, 3]),
     '__MACOSX/._kit': new Uint8Array([4, 5, 6]),
   }),
@@ -418,6 +421,8 @@ describe('what a peek does not enter', () => {
     // A real library's archives carry `__MACOSX` trees; their `._name.stl`
     // resource forks are not models, and a sheet asking the client to render
     // them is worse than the icon.
+    // `.hidden.stl` sits at this level and sorts before `part.stl`, so it would
+    // be the first cell if dot-names were taken.
     expect(names(await peekOf(`${macZipLibPath}!/kit`, 4))).toEqual(['part.stl'])
     expect(await peekOf(`${macZipLibPath}!/__MACOSX`, 4)).toEqual([])
   })
@@ -533,6 +538,16 @@ describe('the route', () => {
     } finally {
       chmodSync(dir, 0o755)
       rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('404s on an entry half of an archive that is not there, as the listing does', async () => {
+    // Decided before the empty-entry-half shrug: `/nope.zip` already 404s, and
+    // two spellings of one tile must not give two answers.
+    for (const path of ['/nope.zip!/', '/nope.zip!/parts']) {
+      const res = await ask(path, 4)
+      expect(res.status, path).toBe(404)
+      expect(((await res.json()) as { error: string }).error).toMatch(/cannot read zip/)
     }
   })
 

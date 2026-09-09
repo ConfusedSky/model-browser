@@ -1125,7 +1125,9 @@ describe('emission fills what the layers lack, under a budget (§6.9)', () => {
     utimesSync(f.zip, later, later)
 
     const after = entryFor(await listDir(s, '/kit/box.zip'), 'images')
-    expect(after.preview ?? []).toEqual([])
+    // Dropped, not served: `?? []` here would accept a stale sheet as happily
+    // as a dropped one, which is the whole question this cell exists to ask.
+    expect(after.preview).toBeUndefined()
     await settle(ANNOTATION_BUDGET_MS + 40)
     const fresh = entryFor(await listDir(s, '/kit/box.zip'), 'images')
     expect(fresh.preview?.map((c) => c.name)).toEqual(['plate.stl'])
