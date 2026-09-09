@@ -188,9 +188,9 @@
       "Static client served by Hono" line point at this change (three containers, one
       namespace — the count changed); `web-demo-backlog` 1.4 records the draft — done at
       drafting, 2026-09-07
-- [ ] 7.3 `openspec validate demo-infrastructure --strict`, and an archive dry run on a
+- [x] 7.3 `openspec validate demo-infrastructure --strict`, and an archive dry run on a
       fresh copy
-
+      Done 2026-09-08: strict validate passes; the archive dry run on a fresh copy applies (no delta collisions — the capability is new)
 ## 8. On the box
 
 - [ ] 8.1 Populate: checkpoint via the setup profile; corpus and index via rsync

@@ -3,3 +3,6 @@ dist/
 *.log
 .claude.local.md
 .claude/worktrees
+
+# A local rehearsal of the demo stack that was run without CACHE_DIR (deploy/demo/compose.yaml)
+deploy/demo/cache/
