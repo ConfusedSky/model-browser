@@ -155,6 +155,18 @@ The bound governs determinism more than I/O here — the central directory is in
 memory once read — but keeping one constant is what makes "a sheet is a glance"
 mean one thing across both sources.
 
+**Collected, then sorted, then charged — in that order.** `listFsDir` sorts a
+level by code point *before* spending a step per dirent, and the requirement says
+a level is taken in code-point order "before counting". Charging while scanning
+makes the sheet a function of the archive's *stored* order instead: measured
+during review, a hundred models written backwards previewed `036…039` where the
+same models written forwards previewed `000…003`. Deterministic per archive
+either way — the bytes decide — but not the sheet the requirement defines, and
+two archives holding identical content in different stored order would disagree.
+Latent on this library (116 of 452 archives have unsorted central directories,
+but no level is wider than the 64-entry bound), which is exactly the kind of
+thing that stops being latent later.
+
 **It does not go through `takeStep`, and that matters to a neighbour.** The
 interior walk has no `FlatWalk` — there is no filesystem level, no `visited`
 set, no `dirMtimes` — so it counts with a plain counter of its own.
@@ -235,11 +247,23 @@ archives populate neither.
 
 **The interior key validates itself.** An interior directory entry already
 carries the containing archive's `mtime` (`listZipDir` and `walkZip` both emit
-`mtime: zipStat.mtimeMs`), and so does every cell in its recorded sheet. So
-emission compares the entry's mtime against the recorded cells' and re-derives on
-a mismatch — a check no filesystem directory could offer, firing on exactly the
-"listed again" that the revalidation route misses, and needing nothing new to
-detect a change.
+`mtime: zipStat.mtimeMs`). So emission compares that against what the sheet was
+derived from and re-derives on a mismatch — a check no filesystem directory
+could offer, firing on exactly the "listed again" that the revalidation route
+misses, and needing nothing new to detect a change.
+
+**The comparison is against a recorded stamp, not against the cells.** Comparing
+cells was the first implementation and it is wrong in the ordinary case: an
+interior holding no models records `[]`, `[].some(...)` is `false` whatever the
+archive has done since, and nothing else would ever clear it — the fill skips a
+held sheet (empty included, deliberately), and the client renders a carried
+`preview: []` without asking. An `images/` folder beside the parts is what most
+kits hold, so this was the common case rather than a corner. `recordPreview`
+therefore takes the archive's mtime as a `stamp`, threaded out of the interior
+peek through `PeekOut`, and `staleInterior` reads it back. A sheet recorded
+without one falls back to the cells, and an **empty** unstamped sheet is
+re-derived rather than trusted — the safe direction, costing a bounded in-memory
+walk over entries the archive layer already holds.
 
 This also closes the thumbnail hazard: cells key on path+mtime, so a sheet held
 against a dead archive version would draw against a cache entry that no longer
@@ -298,6 +322,15 @@ mtime would render and cache a second image beside the model tile's.
 - **A recorded empty sheet is served until the process restarts.** Interiors
   derived to `[]` by the current code sit in the layer. → The deploy is a
   restart (D6); nothing else is needed.
+- **A malformed archive can name one child twice** — `foo.stl` as a file entry
+  and `foo.stl/inner.stl` as a directory prefix. A listing offers both; a sheet
+  has to pick, and picks the directory, since descending finds models where
+  treating it as a leaf shows a file the archive itself calls a folder.
+  → Deterministic per bytes, and no well-formed archive holds it.
+- **Dot-names are skipped inside an archive**, as `listFsDir` skips them, which
+  `listZipDir` does not. → Deliberate: a sheet is a selection, and real archives
+  carry `__MACOSX` trees whose `._name.stl` resource forks would otherwise be
+  handed to the renderer as models. A listing still shows them.
 - **The zip tile still shows an icon**, and a user who sees interiors previewed
   will read that as inconsistent. → It is a recorded non-goal, but its stated
   justification is the one this change could not reproduce (Non-Goals). The

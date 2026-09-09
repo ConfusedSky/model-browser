@@ -24,7 +24,15 @@ import { StaleWriteError, ThumbCache } from './cache'
 import { guard } from './guard'
 import { LaunchError, type Launcher, ZipTempStore, createLauncher } from './launch'
 import { LibraryError, type Library, canonicalLibPath, createLibrary } from './library'
-import { ListingError, PEEK_MAX_FINDS, complete, listDir, modelFormat, peek } from './listing'
+import {
+  ListingError,
+  PEEK_MAX_FINDS,
+  type PeekOut,
+  complete,
+  listDir,
+  modelFormat,
+  peek,
+} from './listing'
 import { ListingCache } from './listingCache'
 import {
   type OverrideHolder,
@@ -333,9 +341,10 @@ async function walkRanked(
    * structurally and sends it down `walkOnly` (D8).
    */
   zips?: ZipDirCache,
-): Promise<{ entries: DirEntry[]; learned: Learned }> {
-  const finds = await peek(library, libPath, PEEK_MAX_FINDS, zips)
-  if (finds.length === 0) return { entries: finds, learned: NOTHING_LEARNED }
+): Promise<{ entries: DirEntry[]; learned: Learned; stamp?: number }> {
+  const out: PeekOut = {}
+  const finds = await peek(library, libPath, PEEK_MAX_FINDS, zips, out)
+  if (finds.length === 0) return { entries: finds, learned: NOTHING_LEARNED, stamp: out.archiveMtime }
   const asked = finds.map((e) => e.path)
   const { poses, answered } = await posesAsked(library, asked, collectionRootFs)
   const posed = finds.filter((e) => poses[e.path] !== undefined)
@@ -345,6 +354,7 @@ async function walkRanked(
   return {
     entries: [...posed, ...unposed],
     learned: { poses, asked: answered ? asked : [] },
+    stamp: out.archiveMtime,
   }
 }
 
@@ -439,7 +449,13 @@ async function posedFirstPeek(
    * where a cache handed in at the route reaches it.
    */
   zips?: ZipDirCache,
-): Promise<{ entries: DirEntry[]; collectionRootFs: string | undefined; learned: Learned }> {
+): Promise<{
+  entries: DirEntry[]
+  collectionRootFs: string | undefined
+  learned: Learned
+  /** An archive interior's own mtime, for the layer to record (D9). */
+  stamp?: number
+}> {
   // Handed back beside the sheet rather than re-probed by the caller: this
   // function already asks, the answer is what the preview layer records its
   // identity against (§6.1), and a second `probeStatus` at the route would be a
@@ -450,11 +466,12 @@ async function posedFirstPeek(
     entries: DirEntry[]
     collectionRootFs: string | undefined
     learned: Learned
-  }> => ({
-    entries: await peek(library, libPath, n, zips),
-    collectionRootFs,
-    learned: NOTHING_LEARNED,
-  })
+    stamp?: number
+  }> => {
+    const out: PeekOut = {}
+    const entries = await peek(library, libPath, n, zips, out)
+    return { entries, collectionRootFs, learned: NOTHING_LEARNED, stamp: out.archiveMtime }
+  }
   if (status.state !== 'ready' || collectionRootFs === undefined) return walkOnly()
   // The collection's reach, asked about the folder rather than about its finds
   // — the same call, one level up. `null` is every way it can fail to reach:
@@ -627,6 +644,19 @@ export function createApp(
    */
   function staleInterior(dir: DirEntry, preview: readonly DirEntry[]): boolean {
     if (!dir.path.includes('!/')) return false
+    // What the sheet was derived against, where the deriver recorded it. The
+    // cells cannot answer for an **empty** sheet — there is nothing there to
+    // disagree with the archive — and an interior that holds no models is the
+    // ordinary case, not a corner: an `images/` folder beside the parts is what
+    // most kits look like.
+    const stamp = layers.previewStamp(dir.path, PEEK_DEFAULT)
+    if (stamp !== undefined) return stamp !== dir.mtime
+    // No stamp: a sheet recorded before this bookkeeping existed, or by a path
+    // that had no archive to name. The cells still answer for a full sheet, and
+    // an empty one is re-derived rather than trusted, which is the safe
+    // direction — a spurious re-derivation costs a bounded in-memory walk over
+    // entries the archive layer is already holding.
+    if (preview.length === 0) return true
     return preview.some((cell) => cell.mtime !== dir.mtime)
   }
 
@@ -897,7 +927,7 @@ export function createApp(
           // `posedFirstPeek`'s own `probeStatus` would fetch on a memo past its
           // TTL, which is a `/status` call on the browse path (round-3 finding
           // 4).
-          const { entries, collectionRootFs, learned } = await posedFirstPeek(
+          const { entries, collectionRootFs, learned, stamp } = await posedFirstPeek(
             library,
             dirPath,
             PEEK_DEFAULT,
@@ -908,7 +938,7 @@ export function createApp(
           // Recorded before any naming pass, for `/api/peek`'s reason: the
           // choice is the models and their order, never how one request
           // happened to label them.
-          layers.recordPreview(collectionRootFs, dirPath, PEEK_DEFAULT, entries)
+          layers.recordPreview(collectionRootFs, dirPath, PEEK_DEFAULT, entries, stamp)
           layers.recordPoses(collectionRootFs, learned.poses, learned.asked)
         } catch {
           // A folder that cannot be peeked simply has no sheet, exactly as
@@ -1338,7 +1368,7 @@ export function createApp(
     // `pose` to every cell — a wire change to a shape another capability owns.
     // The fill's own derivations record, so a *listing's* carried sheet arrives
     // posed either way, which is where the client's preview wave reads from.
-    const { entries, collectionRootFs } = await posedFirstPeek(
+    const { entries, collectionRootFs, stamp } = await posedFirstPeek(
       library,
       libPath,
       n,
@@ -1348,7 +1378,7 @@ export function createApp(
     // Recorded **before** the naming pass, so an override name a later request
     // removes cannot survive inside the layer: what is kept is the choice — the
     // models and their order — never how they were labelled on one request.
-    layers.recordPreview(collectionRootFs, libPath, n, entries)
+    layers.recordPreview(collectionRootFs, libPath, n, entries, stamp)
     applyDisplayNames(entries, await overrides.store())
     annotate(entries)
     return c.json(entries)

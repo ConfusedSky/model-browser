@@ -167,6 +167,15 @@ function under(root: string, dirPath: string): boolean {
   return dirPath.startsWith(`${root}/`) || dirPath.startsWith(`${root}!/`)
 }
 
+/**
+ * One directory's recorded sheet: the cells, and what they were derived against
+ * where the deriver had such a fact (`recordPreview`'s `stamp`).
+ */
+interface HeldPreview {
+  entries: DirEntry[]
+  stamp?: number
+}
+
 /** A listing entry, copied — the layer never hands out an object it still holds. */
 function copyEntry(e: DirEntry): DirEntry {
   const out: DirEntry = { name: e.name, path: e.path, kind: e.kind, size: e.size, mtime: e.mtime }
@@ -183,7 +192,7 @@ function copyEntry(e: DirEntry): DirEntry {
  */
 export class DerivedLayers {
   private readonly poses = new Map<string, HeldPose>()
-  private readonly previews = new Map<string, DirEntry[]>()
+  private readonly previews = new Map<string, HeldPreview>()
   /**
    * The index's collection root these entries were derived against, once
    * anything has been recorded under a known one.
@@ -356,16 +365,26 @@ export class DerivedLayers {
    * folder's contents move, by `dropPreviewsUnder` when its tree is
    * contradicted, by `reroot` when the index repoints — so nothing special has
    * to remember that empty is a fact rather than a gap.
+   *
+   * `stamp` is what the sheet was derived *against*, for a caller that has such
+   * a thing: an archive interior passes the containing archive's mtime
+   * (`archive-interior-sheets` D9). It exists because the cells cannot always
+   * answer that question — an **empty** sheet has no cell to disagree with the
+   * archive it came from, so an interior that holds no models would otherwise be
+   * served for the life of the process however often the archive was rewritten.
+   * A directory on the filesystem passes nothing: its sheet is drawn from a
+   * whole subtree, and there is no single fact it is derived against.
    */
   recordPreview(
     collectionRoot: string | undefined,
     dirPath: string,
     n: number,
     entries: readonly DirEntry[],
+    stamp?: number,
   ): void {
     if (!this.live) return
     this.reroot(collectionRoot)
-    this.previews.set(previewKey(dirPath, n), entries.map(copyEntry))
+    this.previews.set(previewKey(dirPath, n), { entries: entries.map(copyEntry), stamp })
   }
 
   /**
@@ -388,6 +407,19 @@ export class DerivedLayers {
   }
 
   /**
+   * What the held sheet was derived against, or `undefined` where the sheet is
+   * not held or was recorded without one.
+   *
+   * Separate from `previewFor` rather than folded into it, so the shape a route
+   * emits is unchanged: the stamp is the layer's own bookkeeping and never
+   * reaches the wire.
+   */
+  previewStamp(dirPath: string, n: number): number | undefined {
+    if (!this.live) return undefined
+    return this.previews.get(previewKey(dirPath, n))?.stamp
+  }
+
+  /**
    * The sheet held for a directory at that cell count, or undefined. Copies out.
    *
    * `[]` and `undefined` are different answers and every caller must keep them
@@ -397,7 +429,7 @@ export class DerivedLayers {
    */
   previewFor(dirPath: string, n: number): DirEntry[] | undefined {
     if (!this.live) return undefined
-    return this.previews.get(previewKey(dirPath, n))?.map(copyEntry)
+    return this.previews.get(previewKey(dirPath, n))?.entries.map(copyEntry)
   }
 
   /**

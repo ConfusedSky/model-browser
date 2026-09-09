@@ -36,13 +36,17 @@
       find has no `fsPath`, so the branch needs its own `DirEntry` collection.
 - [x] 1.4 Carry `zipStat.mtimeMs` on every interior find, as `listZipDir` and
       `walkZip` emit (D11) — thumbnails are keyed path+mtime, so any other value
-      makes a sheet cell cache a second image beside the model tile's. Reuse the
-      stat `listZipEntries` already takes rather than adding a second one.
+      makes a sheet cell cache a second image beside the model tile's. One `stat`
+      in the interior branch: it does `requireArchive`'s test itself on the same
+      answer it needs the mtime from, rather than stat, stat and stat again.
+      (`listZipEntries` still takes its own for the layer's identity.)
 - [x] 1.5 Charge `PEEK_BUDGET` **one step per distinct immediate child** — each
       file name and each distinct subdirectory name directly under the prefix
       (D4). Not `walkZip`'s per-entry-at-any-depth rule. Names outside the prefix
-      are never charged; the charge loop runs over the code-point-sorted children
-      and breaks at the budget as `listFsDir` does.
+      are never charged; the children are collected, **sorted, and then** charged
+      in that order, as `listFsDir` sorts before counting — charging during the
+      scan cuts by the archive's stored order and previews a different sheet for
+      the same content.
 - [x] 1.6 Thread an optional `ZipDirCache` through `peek` to `listZipEntries`,
       the way `gatherFlat` threads `walk.zips` (D3).
 

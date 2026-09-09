@@ -572,21 +572,36 @@ async function peekLevel(
 }
 
 /**
- * Up to `n` models found inside an **archive's** directory — the interior half
- * of a peek (`archive-interior-sheets` D2). The archive's names are a flat
- * list, so a "level" is the names directly under a prefix: files with no
- * further slash, and the distinct first segments of the ones that have one.
+ * One level of an archive interior, from the archive's flat name list
+ * (`archive-interior-sheets` D2). A "level" is the names directly under a
+ * prefix: files with no further slash, and the distinct first segments of the
+ * ones that have one.
  *
- * Ordering is **code-point**, not `sortEntries`' `localeCompare`, for the reason
+ * **Collected, then sorted, then charged** — in that order, and the order is the
+ * point. `listFsDir` sorts a level by code point *before* it spends a step per
+ * dirent, because a bound that cuts mid-scan otherwise keeps whatever the
+ * source happened to list first; on the filesystem that is `readdir` order, and
+ * here it is the central directory's, which is the order a zip was written in.
+ * Charging while scanning made the sheet a function of that: the same hundred
+ * models stored forwards previewed `000…003` and stored backwards previewed
+ * `036…039`. Deterministic per archive either way, but not the sheet the
+ * requirement defines, and two archives holding identical content in different
+ * stored order would disagree.
+ *
+ * Ordering is code-point, not `sortEntries`' `localeCompare`, for the reason
  * `listFsDir` gives at its own sort: ICU collation is locale-dependent, so a
- * bound cutting under it cuts differently on two machines holding the same
- * library.
+ * bound cutting under it cuts differently on two machines holding one library.
  *
  * The budget is charged **one step per distinct immediate child** (D4) — the
  * dirent analogue, and the only reading under which "the same entry bound as a
  * directory" means anything. Not `walkZip`'s rule, which charges every entry
  * under the prefix at every depth and would spend a hundred steps at a parent
  * on one subdirectory of a hundred models.
+ *
+ * Names beginning with `.` are skipped, as `listFsDir` skips them. A listing
+ * still shows them — that is `listZipDir`'s business and unchanged — but a
+ * sheet is a selection, and the archives in a real library carry `__MACOSX`
+ * trees whose `._name.stl` resource forks are not models anyone wants rendered.
  *
  * No confinement or cycle guard: an entry name is data inside a file the
  * resolver already confined, and a name list is finite (D5). A nested archive
@@ -602,32 +617,44 @@ function peekArchiveLevel(
   n: number,
 ): void {
   const norm = prefix === '' ? '' : prefix.endsWith('/') ? prefix : `${prefix}/`
-  const models: { name: string; size: number }[] = []
-  const dirs: string[] = []
-  const seen = new Set<string>()
+  /**
+   * This level's distinct children, before the bound is consulted. A child that
+   * is both a file entry and a directory prefix — `foo.stl` beside
+   * `foo.stl/inner.stl`, which only a malformed archive holds — is taken as the
+   * directory: a listing offers both, but a sheet has to pick one thing to do
+   * with the name, and descending finds models where treating it as a leaf
+   * would show a file the archive also says is a folder.
+   */
+  const children = new Map<string, { dir: boolean; size: number }>()
   for (const e of names) {
     if (!e.name.startsWith(norm)) continue
     const rest = e.name.slice(norm.length)
     if (rest === '') continue
     const slash = rest.indexOf('/')
     const child = slash === -1 ? rest : rest.slice(0, slash)
-    if (seen.has(child)) continue
-    seen.add(child)
-    // Charged per distinct immediate child, once, whether it turns out to be a
-    // model, a subdirectory or something ignored — a dirent costs a step on the
-    // filesystem side before anything is known about it either.
+    if (child.startsWith('.')) continue
+    const held = children.get(child)
+    if (held === undefined) children.set(child, { dir: slash !== -1, size: e.size })
+    else if (slash !== -1) held.dir = true
+  }
+  const models: { name: string; size: number }[] = []
+  const dirs: string[] = []
+  for (const child of [...children.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))) {
+    // Charged per distinct child, in the order the bound is defined to cut,
+    // whether it turns out to be a model, a subdirectory or something ignored —
+    // a dirent costs a step on the filesystem side before anything is known
+    // about it either.
     if (budget.left <= 0) break
     budget.left--
-    if (slash !== -1) {
+    const held = children.get(child)!
+    if (held.dir) {
       dirs.push(child)
       continue
     }
     // Nested archives fall out here with everything that is not a model, the
     // same way `listZipDir` declines to offer them (global D6).
-    if (modelFormat(child) !== undefined) models.push({ name: child, size: e.size })
+    if (modelFormat(child) !== undefined) models.push({ name: child, size: held.size })
   }
-  models.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
-  dirs.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
   for (const m of models) {
     if (found.length >= n) return
     found.push({
@@ -649,13 +676,33 @@ function peekArchiveLevel(
 }
 
 /**
+ * What a peek learned that its answer cannot carry.
+ *
+ * Only the interior half fills it in: `archiveMtime` is what the sheet was
+ * derived against, and the layer records it beside the cells so that an
+ * **empty** interior sheet — which has no cell to disagree with the archive —
+ * can still be told apart from a live one (`archive-interior-sheets` D9).
+ */
+export interface PeekOut {
+  archiveMtime?: number
+}
+
+/**
  * The interior branch of `peek`: the archive is read once, through the layer
  * when there is one, and the level walk above picks the sheet.
  *
- * The refusals are the **listing's**, not a bare empty answer (D10). Before
- * this change every entry-half path answered `[]`, which hid four different
- * cases behind one shrug; each is answered here as `listDir` answers it, so a
- * malformed path and an unreadable archive stop reading like an empty folder.
+ * The refusals are the **listing's**, not a bare empty answer (D10). Before this
+ * change every entry-half path answered `[]`, which hid four cases behind one
+ * shrug; each is answered here as `listDir` answers it — including
+ * `/somedir!/x`, where the filesystem half is not an archive at all, which is
+ * decided **before** the empty-entry-half case below so that a malformed path
+ * refuses rather than shrugging.
+ *
+ * One `stat`, not `requireArchive`'s plus its own: the same test on the same
+ * answer, kept here because the interior needs the archive's `mtimeMs` anyway
+ * and a second `stat` for it was pure duplication. The sentence it throws is
+ * `requireArchive`'s, so a peek and a listing still refuse a non-archive in the
+ * same words.
  */
 async function peekInArchive(
   fsPath: string,
@@ -663,21 +710,24 @@ async function peekInArchive(
   entry: string,
   n: number,
   zips?: ZipDirCache,
+  out?: PeekOut,
 ): Promise<DirEntry[]> {
+  const zipLibPath = libHalfOf(libPath)
+  const s = await stat(fsPath).catch(() => null)
+  // A path that does not stat at all is left alone, exactly as `requireArchive`
+  // leaves it: that is the zip readers' own 404 below, and "not found" and "not
+  // an archive" are different answers.
+  if (s !== null && (!s.isFile() || !/\.zip$/i.test(fsPath))) {
+    throw new ListingError(400, `not an archive: ${libPath}`)
+  }
   // An empty entry half is the archive's own tile by another spelling, and
   // `/kit.zip` answers `[]` rather than refusing — two spellings of one tile
   // must not give two answers. It must not fall through: a prefix of `''` would
   // preview the whole archive, which is the thing the tile's own branch
   // refuses.
   if (entry === '') return []
-  // 400 `not an archive` when the filesystem half is not one, exactly as
-  // `listDir` and `gatherFlat` guard it. Without this `listZipEntries` runs on
-  // a directory and raises an untyped errno.
-  await requireArchive(fsPath, libPath)
-  const zipLibPath = libHalfOf(libPath)
-  let zipStat, zipEntries
+  let zipEntries
   try {
-    zipStat = await stat(fsPath)
     zipEntries = await listZipEntries(fsPath, zips)
   } catch (err) {
     // A corrupt archive — the library holds one zip64 that raises here — says
@@ -696,8 +746,12 @@ async function peekInArchive(
     if (/\.zip$/i.test(exactFile.name)) throw new VPathError('nested zips are unsupported')
     throw new ListingError(400, `not a directory: ${exactFile.name}`)
   }
+  // `s` is non-null by here: a path that did not stat cannot have produced
+  // entries above.
+  const zipMtime = s?.mtimeMs ?? 0
+  if (out !== undefined) out.archiveMtime = zipMtime
   const found: DirEntry[] = []
-  peekArchiveLevel(zipEntries, zipLibPath, zipStat.mtimeMs, norm, { left: PEEK_BUDGET }, found, n)
+  peekArchiveLevel(zipEntries, zipLibPath, zipMtime, norm, { left: PEEK_BUDGET }, found, n)
   // A prefix that matched nothing leaves `found` empty and answers `[]` — an
   // empty sheet, which is what a directory with nothing previewable answers
   // everywhere else.
@@ -727,6 +781,7 @@ export async function peek(
   libPath: string,
   n: number,
   zips?: ZipDirCache,
+  out?: PeekOut,
 ): Promise<DirEntry[]> {
   const { fsPath, entry } = await library.resolve(libPath)
   // An archive's own tile is not previewed — that is the branch below, after
@@ -735,7 +790,7 @@ export async function peek(
   // cost it was written for is a listing **of** archives: by the time an
   // interior tile exists, the request that emitted it has read this archive's
   // entries already.
-  if (entry !== undefined) return await peekInArchive(fsPath, libPath, entry, n, zips)
+  if (entry !== undefined) return await peekInArchive(fsPath, libPath, entry, n, zips, out)
   const realTop = library.realTop()
   const s = await stat(fsPath).catch(() => null)
   if (s === null) throw new ListingError(404, `no such path: ${libPath}`)

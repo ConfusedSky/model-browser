@@ -146,6 +146,31 @@ writeFileSync(
   }),
 )
 
+/**
+ * The same wide level as `deep.zip`'s `bud/sub`, written to the central
+ * directory **backwards**. A zip's stored order is whatever wrote it, and a
+ * bound that charges while scanning keeps whatever it met first — so this is the
+ * interior analogue of `rd.reverse` on the filesystem side, and the one order
+ * this suite can produce that is definitely not sorted.
+ */
+const revZipLibPath = '/onlyzip/rev.zip'
+const revEntries: Record<string, Uint8Array> = {}
+for (let i = 99; i >= 0; i--) {
+  revEntries[`wide/${String(i).padStart(3, '0')}.stl`] = new Uint8Array(stlBytes(140 + i))
+}
+writeFileSync(join(libTop, 'onlyzip', 'rev.zip'), zipSync(revEntries))
+
+/** An archive carrying the `__MACOSX` tree a real library's zips carry. */
+const macZipLibPath = '/onlyzip/mac.zip'
+writeFileSync(
+  join(libTop, 'onlyzip', 'mac.zip'),
+  zipSync({
+    'kit/part.stl': new Uint8Array(stlBytes(50)),
+    '__MACOSX/kit/._part.stl': new Uint8Array([1, 2, 3]),
+    '__MACOSX/._kit': new Uint8Array([4, 5, 6]),
+  }),
+)
+
 // A directory, not an archive, for the `!/` -on-a-non-archive refusal.
 mkdirSync(join(libTop, 'somedir'))
 writeFileSync(join(libTop, 'somedir', 'a.stl'), stlBytes(37))
@@ -368,6 +393,35 @@ describe('what a peek does not enter', () => {
     ])
   })
 
+  it('cuts an interior level where code-point order cuts, not where the archive was written', async () => {
+    // `wide/` holds 100 models stored backwards. Charged while scanning, the
+    // bound keeps the highest names it met first (`036…039` when this was
+    // written); the requirement says a level is taken in code-point order
+    // *before* counting, which is the same first four whichever way the archive
+    // was written.
+    expect(names(await peekOf(`${revZipLibPath}!/wide`, 4))).toEqual([
+      '000.stl',
+      '001.stl',
+      '002.stl',
+      '003.stl',
+    ])
+    // The control: the same content stored forwards previews the same sheet.
+    expect(names(await peekOf(`${deepZipLibPath}!/bud/sub`, 4))).toEqual([
+      '000.stl',
+      '001.stl',
+      '002.stl',
+      '003.stl',
+    ])
+  })
+
+  it('skips dot-names inside an archive, as a filesystem level does', async () => {
+    // A real library's archives carry `__MACOSX` trees; their `._name.stl`
+    // resource forks are not models, and a sheet asking the client to render
+    // them is worse than the icon.
+    expect(names(await peekOf(`${macZipLibPath}!/kit`, 4))).toEqual(['part.stl'])
+    expect(await peekOf(`${macZipLibPath}!/__MACOSX`, 4)).toEqual([])
+  })
+
   it('previews the same interior models in the same order on every visit', async () => {
     const first = await peekOf(`${deepZipLibPath}!/bud`, 4)
     // Non-empty first: two empty answers are equal, so the refusal this change
@@ -480,6 +534,14 @@ describe('the route', () => {
       chmodSync(dir, 0o755)
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  it('400s on an empty entry half whose filesystem half is not an archive', async () => {
+    // Decided before the empty-entry-half case, or `/somedir!/` would shrug
+    // where `/api/dir` on the same path refuses.
+    const res = await ask('/somedir!/', 4)
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { error: string }).error).toMatch(/not an archive/)
   })
 
   it('400s on an entry half whose filesystem half is not an archive', async () => {

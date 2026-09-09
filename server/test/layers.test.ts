@@ -1089,6 +1089,48 @@ describe('emission fills what the layers lack, under a budget (§6.9)', () => {
     expect(unshared).toBe(shared * 2)
   })
 
+  it('re-derives an interior sheet that was empty when the archive gained models', async () => {
+    // The cells cannot answer this one: an interior holding no models records
+    // `[]`, and `[].some(...)` is false however far the archive has moved since.
+    // Left to the cells it was permanent — the fill skips a held sheet, empty
+    // included, and the client renders a carried `preview: []` without asking —
+    // and an `images/` folder beside the parts is what most kits hold.
+    const f = await fixture('ly-zip-empty-stale')
+    const s = serverFor(f)
+    stubFillIndex(f.top)
+    await warmProbe(s)
+
+    writeFileSync(
+      f.zip,
+      zipSync({
+        'box.stl': new Uint8Array(stlBytes(5)),
+        'images/card.png': new Uint8Array([1, 2, 3]),
+      }),
+    )
+    await listDir(s, '/kit/box.zip')
+    await settle(ANNOTATION_BUDGET_MS + 40)
+    const empty = entryFor(await listDir(s, '/kit/box.zip'), 'images')
+    // Derived and held as empty — a recorded answer, not a gap.
+    expect(empty.preview).toEqual([])
+
+    writeFileSync(
+      f.zip,
+      zipSync({
+        'box.stl': new Uint8Array(stlBytes(5)),
+        'images/card.png': new Uint8Array([1, 2, 3]),
+        'images/plate.stl': new Uint8Array(stlBytes(9)),
+      }),
+    )
+    const later = statSync(f.zip).mtimeMs / 1000 + 5
+    utimesSync(f.zip, later, later)
+
+    const after = entryFor(await listDir(s, '/kit/box.zip'), 'images')
+    expect(after.preview ?? []).toEqual([])
+    await settle(ANNOTATION_BUDGET_MS + 40)
+    const fresh = entryFor(await listDir(s, '/kit/box.zip'), 'images')
+    expect(fresh.preview?.map((c) => c.name)).toEqual(['plate.stl'])
+  })
+
   it("drops an interior sheet whose archive has been rewritten under it", async () => {
     const f = await fixture('ly-zip-stale')
     const s = serverFor(f)
