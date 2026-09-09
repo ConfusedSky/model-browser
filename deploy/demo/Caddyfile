@@ -1,0 +1,63 @@
+# The demo's public entry point (`demo-infrastructure` D7). This site block is
+# the whole of what the box exposes: the app and the index publish no port and
+# have no interface outside the shared network namespace (D1), so nothing else
+# can be reached even by mistake.
+#
+# The local rehearsal uses Caddyfile.local instead; keep the two bodies the same
+# or the rehearsal stops rehearsing anything.
+
+models.masamaeda.com {
+	# There is no `tls` line on purpose. Caddy obtains the certificate from
+	# Let's Encrypt (ZeroSSL as fallback), renews it, and redirects http:// to
+	# https:// by itself — no operator step issues or installs anything. Its
+	# /data is a named volume (compose.yaml) so a rebuild or a rollback re-uses
+	# the certificate it already has: Let's Encrypt allows five duplicate
+	# issuances a week, which a rebuild loop would otherwise spend in an hour.
+	#
+	# HTTP/2 comes with TLS, and stock Caddy also serves HTTP/3 on 443/udp,
+	# which compose.yaml publishes. That is the lever the demo notes name for an
+	# ocean of latency: a first screen is ~114 small requests, and multiplexing
+	# is the cheapest answer to paying a round trip for each of them.
+
+	encode zstd gzip
+
+	# A cap on what the API will read, in front of the app's own
+	# (`maxRequestBodySize` in server/src/index.ts). Deliberately the same
+	# number, so a body refused here would have been refused there and the two
+	# cannot disagree about what is too big. The largest legitimate body is
+	# `POST /api/semantic/poses` — up to 1024 library paths, ~105–205 KB for
+	# real libraries. Over the cap answers 413.
+	@api path /api/*
+	request_body @api {
+		max_size 1MB
+	}
+
+	# `Host` passes through unchanged — there is no `header_up Host` here, and
+	# there must not be. What the app answers is decided by the origins in the
+	# committed configuration (deploy/demo/config.json) against the header the
+	# visitor sent; rewriting it here would move that decision into the proxy,
+	# silently, and the guard's refusals would stop meaning anything. It is also
+	# what makes the runbook's liveness check work: a foreign `Origin` reaches
+	# the app and is refused, while a foreign `Host` never gets past this block
+	# in the first place.
+	reverse_proxy 127.0.0.1:3177
+}
+
+# **No rate limit, deliberately** (D7). Stock Caddy has none. The index
+# serialises queries, so a flood queues rather than overloads, and the flat walk
+# is bounded by its own step budget: abuse degrades to waiting rather than to
+# failure. Nginx was weighed for its built-in `limit_req` and declined — the
+# feature that matters daily is the certificate above, and Caddy's needs no
+# configuration.
+#
+# If that stops being true, the route is the `caddy-ratelimit` plugin
+# (github.com/mholt/caddy-ratelimit), which the stock image cannot load: it
+# needs a builder stage, roughly
+#
+#     FROM caddy:2-builder AS builder
+#     RUN xcaddy build --with github.com/mholt/caddy-ratelimit
+#     FROM caddy:2
+#     COPY --from=builder /usr/bin/caddy /usr/bin/caddy
+#
+# and a `rate_limit` block in the site above. Recorded here so the next operator
+# does not go looking for a knob this image does not have.

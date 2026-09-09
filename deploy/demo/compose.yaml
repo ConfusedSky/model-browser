@@ -1,0 +1,130 @@
+# The demo stack (`demo-infrastructure`): one public entry point, three
+# containers, one loopback. Run from anywhere in the checkout —
+#
+#     docker compose -f deploy/demo/compose.yaml up -d --build
+#
+# Every relative path below resolves against **this file's directory**
+# (deploy/demo), and every machine-specific mount takes its default from the
+# layout of the machine this was written on, so the local rehearsal needs no
+# environment at all. The box sets MINI_CLASSIFY_DIR, CORPUS_DIR, CACHE_DIR and
+# INDEX_DIR; README.md says to what.
+
+# The index image is built once and used by two services — the server and the
+# one-shot `setup` that fetches the checkpoint into the volume it will read.
+x-index-build: &index-build
+  context: .
+  dockerfile: index.Dockerfile
+  # `mini-classify` is a sibling checkout, not part of this repository. A named
+  # context keeps this build's own context to this directory; index.Dockerfile
+  # has the reason at the `COPY --from=mini-classify` lines.
+  # Absolute-by-`~` rather than relative, like the three mount defaults below:
+  # a relative default resolves against this file's directory, which is not the
+  # same depth in a git worktree as in the checkout.
+  additional_contexts:
+    mini-classify: ${MINI_CLASSIFY_DIR:-~/Documents/tests/mini-classify}
+
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    # The only ports published anywhere in this file, and the only ones the
+    # Hetzner cloud firewall admits besides SSH (D9). 443/udp is HTTP/3, which
+    # stock Caddy serves by default.
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      # The site definition, chosen by variable rather than by profile:
+      # `CADDYFILE=Caddyfile.local docker compose … up` rehearses the whole
+      # stack here under Caddy's internal CA (D8). Compose cannot swap one
+      # service's mount by profile, so this is the swap.
+      - ./${CADDYFILE:-Caddyfile}:/etc/caddy/Caddyfile:ro
+      # The certificate and the ACME account, outside the image, so a rebuild or
+      # a rollback re-issues nothing (D7).
+      - caddy_data:/data
+
+  app:
+    build:
+      context: ../..
+      dockerfile: deploy/demo/app.Dockerfile
+    restart: unless-stopped
+    # **All three containers share one network namespace** (D1) — Caddy's. It is
+    # the pod shape, and it is chosen because it is exactly the topology every
+    # constraint in this stack was already written for: the app binds a loopback
+    # literal, its guard's `Host` and `Origin` rules are loopback rules, and the
+    # index's default address is loopback. Nothing here needs a flag, an env var
+    # or a wait. It also makes the security boundary a property of the namespace
+    # rather than of three services each remembering to bind narrowly: there is
+    # no interface on which the app or the index could be reached even by
+    # mistake, and only Caddy publishes anything.
+    network_mode: "service:caddy"
+    depends_on: [caddy]
+    volumes:
+      # Read-write, and only because of what the app writes *beside* the models:
+      # the library marker under `.model-browser/` on first start — without it
+      # the library is named by a hash of the container path, which would orphan
+      # the baked cache if the mount point ever moved — and the override store
+      # that carries the corpus's credits (D4). Nothing a visitor can reach
+      # writes here: thumbnail writes are refused by the deployment's
+      # configuration and the launcher is withheld.
+      - ${CORPUS_DIR:-~/Documents/tests/test-models}:/library
+      # Thumbnails and listing snapshots, one directory named by
+      # MODEL_BROWSER_CACHE (D5). A bind mount rather than a named volume
+      # because the bake and any hand inspection want a path on the host, and
+      # because it is the one thing worth copying off the box. Docker creates
+      # the default as root if it is not there, inside the checkout — pass
+      # CACHE_DIR for a rehearsal rather than leaving one behind.
+      - ${CACHE_DIR:-./cache}:/cache
+      # The deployment's configuration, from the checkout, read-only (D6): a
+      # configuration change is a commit and a redeploy, and nothing inside the
+      # container can rewrite it.
+      - ./config.json:/config/config.json:ro
+
+  index:
+    build: *index-build
+    restart: unless-stopped
+    # Same namespace, same reason as `app` above (D1): it binds 127.0.0.1:8077
+    # and the app looks for it there with no MODEL_BROWSER_INDEX set.
+    network_mode: "service:caddy"
+    depends_on: [caddy]
+    volumes:
+      # The same corpus at the same path as the app's, because the index reports
+      # its collection root as an absolute path and the app maps that path
+      # through its own library — they must agree or the index covers nothing.
+      # Read-only: the corpus is the app's to write and the index has no
+      # business in it (D4).
+      - ${CORPUS_DIR:-~/Documents/tests/test-models}:/library:ro
+      # The embeddings and the records `--no-volume` enumerates from (~275 MB),
+      # rsync'd onto the box: see README.md. Read-only — the server only reads
+      # a cache it did not build.
+      - ${INDEX_DIR:-~/Documents/tests/mini-classify/embed-cache-test}:/index:ro
+      - hf:/hf
+
+  # One shot, on the box, before the first `up`: 4.3 GB of SigLIP into the `hf`
+  # volume the index reads (D3).
+  #
+  #     docker compose -f deploy/demo/compose.yaml --profile setup run --rm --build setup
+  #
+  # Not in an image and not uploaded from a developer machine: Hetzner's link
+  # fetches it in minutes, where from here it would be a 4.3 GB upload. The one
+  # container in this file that talks to the internet on purpose, so it is also
+  # the one that turns HF_HUB_OFFLINE off — and it stays on the default network
+  # rather than in Caddy's namespace, since it runs before the stack does.
+  setup:
+    profiles: [setup]
+    build: *index-build
+    restart: "no"
+    environment:
+      HF_HUB_OFFLINE: "0"
+    volumes:
+      - hf:/hf
+    command: ["hf", "download", "google/siglip2-so400m-patch16-512"]
+
+volumes:
+  # The checkpoint. A volume rather than a bind mount because nothing on the
+  # host has any reason to read it, and it is 4.3 GB that must survive every
+  # rebuild.
+  hf:
+  # Caddy's /data: the certificate, the key and the ACME account (D7).
+  caddy_data:

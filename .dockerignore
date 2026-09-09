@@ -1,0 +1,38 @@
+# The build context for `deploy/demo/app.Dockerfile`, whose context is this
+# directory (`demo-infrastructure` 2.1). What the image needs is the source the
+# two workspaces build from; everything else is either rebuilt inside the image,
+# irrelevant to it, or actively wrong in it.
+#
+# The index image does not read this file: its context is `deploy/demo/` and
+# `mini-classify` reaches it as a named build context (see index.Dockerfile).
+
+# Installed inside the image, from the lockfile. Also the single largest thing
+# in this tree, and copying a host `node_modules` in would put this machine's
+# platform binaries in a Linux image.
+node_modules
+**/node_modules
+
+# Built inside the image by stage one. A stale local `dist` copied in would be
+# served instead of the build that was just made.
+client/dist
+
+.git
+.gitignore
+
+# The deployment's own files. `config.json` is mounted from the checkout at
+# runtime and must exist in exactly one place with one age (D6), so it must not
+# also be a layer; the Dockerfiles and the Caddyfiles are read by the builder
+# and by Caddy, never by the app.
+deploy
+
+# Prose, specifications and tooling: none of it is imported by the source.
+openspec
+docs
+scripts
+README.md
+CLAUDE.md
+.node-version
+
+.playwright-mcp
+.claude
+*.log

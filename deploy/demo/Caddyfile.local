@@ -1,0 +1,33 @@
+# The local rehearsal's entry point (`demo-infrastructure` D8): the same stack,
+# the same namespace wiring, the same images, under a certificate from Caddy's
+# own internal CA instead of Let's Encrypt.
+#
+#     CADDYFILE=Caddyfile.local docker compose -f deploy/demo/compose.yaml up --build
+#
+# Then https://localhost — `curl -k` from the shell, or trust Caddy's root once
+# (`docker compose exec caddy caddy trust`) for a browser without a warning.
+#
+# The app needs no configuration change for this: its guard admits a loopback
+# `Host` and a loopback `Origin` whatever the deployment's origins say, so the
+# committed config.json — origins, capabilities and all — is exercised exactly
+# as it will be on the box.
+#
+# **Keep this body identical to Caddyfile's.** The only difference that belongs
+# here is the site address and the internal CA; anything else that drifts is a
+# thing the rehearsal stops rehearsing.
+
+localhost {
+	# Caddy would use its internal CA for `localhost` anyway; saying so is what
+	# keeps this file from ever reaching for a public certificate for a name no
+	# ACME server can validate.
+	tls internal
+
+	encode zstd gzip
+
+	@api path /api/*
+	request_body @api {
+		max_size 1MB
+	}
+
+	reverse_proxy 127.0.0.1:3177
+}
