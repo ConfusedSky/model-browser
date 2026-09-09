@@ -752,9 +752,8 @@ async function peekInArchive(
     if (/\.zip$/i.test(exactFile.name)) throw new VPathError('nested zips are unsupported')
     throw new ListingError(400, `not a directory: ${exactFile.name}`)
   }
-  // `s` is non-null by here: a path that did not stat cannot have produced
-  // entries above.
-  const zipMtime = s?.mtimeMs ?? 0
+  // Narrowed by the `s === null` refusal above, so no fallback is needed here.
+  const zipMtime = s.mtimeMs
   if (out !== undefined) out.archiveMtime = zipMtime
   const found: DirEntry[] = []
   peekArchiveLevel(zipEntries, zipLibPath, zipMtime, norm, { left: PEEK_BUDGET }, found, n)

@@ -62,11 +62,13 @@
       and `walkRanked` (which stays unreachable for interiors but must compile);
       `/api/peek` and `fillPreviews` supply `snapshots?.archiveCache()`. No change
       to the `unchosen` collection — it already takes these dirs (D7).
-- [x] 2.3 Re-derive a stale interior sheet at emission (D9): the held cells carry
-      the archive's mtime and so does the listing's interior entry, so emission
-      compares them and re-derives on a mismatch. **Not** `noteDirChanged` — it
-      walks upward and leaves interior keys held (probed); and not the
-      revalidation route, which never runs for a nested `/api/dir`.
+- [x] 2.3 Re-derive a stale interior sheet at emission (D9): the sheet is
+      recorded against the containing archive's mtime and emission compares the
+      listing entry's against it. **Against that stamp, not the cells** — an
+      interior holding no models records `[]` and has no cell to disagree, which
+      is the ordinary case, not a corner. **Not** `noteDirChanged` — it walks
+      upward and leaves interior keys held (probed); and not the revalidation
+      route, which never runs for a nested `/api/dir`.
 - [x] 2.4 Update `selfAndAncestors`' comment in server/src/layers.ts — "A preview
       is never derived inside an archive today" becomes false with 1.1.
 
@@ -126,4 +128,11 @@
 - [ ] 5.1 Dry-run `openspec archive` on a fresh copy of `openspec/` and confirm
       the MODIFIED block still applies without dropping a scenario.
 - [ ] 5.2 After archiving, read `openspec/specs/directory-browsing/spec.md` and
-      strip any change-scoped prose that reads as the capability's own.
+      strip any change-scoped prose that reads as the capability's own. One
+      reconciliation to make explicit while there: the flat-listing requirement
+      already says archive members are opaque to the hidden-entry test (citing
+      `library`'s *Hidden entries are unreachable*), and this change's sentence
+      skips dot-names when *choosing* an interior's models. They agree — one is
+      about reachability and listing, the other about selection — but they land
+      one requirement apart with nothing saying so, so add the parenthetical
+      rather than leave the next reader to reconstruct it.

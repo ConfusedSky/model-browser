@@ -600,6 +600,38 @@ export function createApp(
   const layers = listings.layers
 
   /**
+   * Is this held sheet derived from an archive that has since been rewritten?
+   * (`archive-interior-sheets` D9.)
+   *
+   * An interior directory entry carries the **containing archive's** mtime —
+   * `listZipDir` and the interior peek both emit `zipStat.mtimeMs` — and the
+   * layer records that same fact beside the sheet when it derives one. So the
+   * listing that is about to serve a sheet is the one that can see the archive
+   * beneath it has moved, which is a check no filesystem directory could offer
+   * and why interiors need no revalidation route.
+   *
+   * **Against the recorded stamp, never against the cells.** Comparing cells was
+   * the first implementation and could not see the case that mattered: an
+   * interior holding no models records `[]`, and `[].some(...)` is false however
+   * far the archive has moved since — an `images/` folder beside the parts is
+   * what most kits hold, so the sheet that never recovered was the ordinary one.
+   * An absent stamp is a sheet that cannot account for itself and is re-derived.
+   *
+   * On the **snapshot** path this fires slightly early rather than late: a flat
+   * listing's interior tile carries the mtime its walk recorded, so between a
+   * rewrite and the next revalidation pass the stamp is fresher than the tile
+   * and the sheet is dropped on each listing. That costs a layer lookup and an
+   * in-memory walk per interior, no archive read, and it settles when the pass
+   * re-stats the archive. Preferring the fresher fact is deliberate: the
+   * alternative carries cells from one version of an archive under a tile from
+   * another.
+   */
+  function staleInterior(dir: DirEntry): boolean {
+    if (!dir.path.includes('!/')) return false
+    return layers.previewStamp(dir.path, PEEK_DEFAULT) !== dir.mtime
+  }
+
+  /**
    * Attach what this server's caches already knew about these entries (§6.3):
    * the thumbnail state, a model's pose, a folder's contact sheet.
    *
@@ -626,35 +658,6 @@ export function createApp(
    * stays the only place a fact is attached, so there is one annotation path
    * rather than two that could come to disagree about what a field means.
    */
-  /**
-   * Is this held sheet derived from an archive that has since been rewritten?
-   * (`archive-interior-sheets` D9.)
-   *
-   * An interior entry and every cell of its sheet carry the **containing
-   * archive's** mtime — `listZipDir` and the interior peek both emit
-   * `zipStat.mtimeMs` — so a sheet whose cells disagree with the tile above them
-   * was derived against a version of the archive that is gone. That is a check
-   * no filesystem directory could offer, and it is why interiors need no
-   * revalidation route: the key validates itself at emission, on exactly the
-   * listing that would otherwise serve it stale.
-   *
-   * Only interiors are asked. A filesystem directory's sheet holds models from
-   * anywhere in its subtree, whose mtimes have nothing to do with the folder's,
-   * and comparing them would drop every sheet on every listing.
-   */
-  function staleInterior(dir: DirEntry): boolean {
-    if (!dir.path.includes('!/')) return false
-    // Every interior sheet is recorded against the archive it was derived from
-    // (`recordPreview`'s stamp), so an absent stamp is a sheet that cannot
-    // account for itself and is re-derived rather than trusted. Comparing the
-    // *cells* was the first implementation and could not see the case that
-    // mattered: an interior holding no models records `[]`, and `[].some(...)`
-    // is false however far the archive has moved since — an `images/` folder
-    // beside the parts is what most kits hold, so the sheet that never
-    // recovered was the ordinary one.
-    return layers.previewStamp(dir.path, PEEK_DEFAULT) !== dir.mtime
-  }
-
   function annotate(entries: DirEntry[]): void {
     for (const entry of entries) {
       const thumb = cache.annotate(entry.path, entry.mtime)

@@ -269,6 +269,16 @@ This also closes the thumbnail hazard: cells key on path+mtime, so a sheet held
 against a dead archive version would draw against a cache entry that no longer
 matches the model tiles beside it.
 
+**On the snapshot path it fires early rather than late, and that is the side to
+err on.** A flat listing's interior tile carries the mtime its walk recorded, so
+between an in-place rewrite and the next revalidation pass the stamp — taken
+from a fresh `stat` — is the fresher fact and the sheet is dropped on every
+listing in that window. Measured by probe: a layer lookup and an in-memory walk
+per interior, no archive read, settling as soon as the pass re-stats the archive
+(`REVALIDATE_TTL_MS`). Comparing "not older" instead of "not equal" would stop
+the over-fire at the price of serving cells from one version of an archive under
+a tile from another, which is the trade this refuses.
+
 ### D10. The interior branch inherits the listing's refusals, not a bare `[]`
 
 `peek`'s entry-half return currently answers `[]` for *every* entry-half path,
