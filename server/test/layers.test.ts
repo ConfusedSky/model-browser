@@ -1048,6 +1048,88 @@ describe('emission fills what the layers lack, under a budget (§6.9)', () => {
 
   const settle = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
+  /**
+   * The interior half of a sheet (`archive-interior-sheets`). Counted at
+   * `open`, which is what a central-directory read costs and what the archive
+   * layer exists to avoid — a timing here would be a proxy for the syscall
+   * rather than the syscall.
+   */
+  const opensOf = (zip: string): number => fs.opens.filter((path) => path === zip).length
+
+  it('shares one archive read between a listing and the tiles inside it', async () => {
+    // Counted at `open`, which is what a central-directory read costs — a
+    // timing would be a proxy for the syscall rather than the syscall. Not an
+    // absolute count: `readCentralDirectory` opens twice for one read (the tail
+    // scan, then the directory), so what is asserted is the *ratio* the layer
+    // exists to produce.
+    const withStore = await fixture('ly-zip-share')
+    const s1 = serverFor(withStore)
+    stubFillIndex(withStore.top)
+    await warmProbe(s1)
+    fs.opens.length = 0
+    const listing = await listDir(s1, '/kit/box.zip')
+    await settle(ANNOTATION_BUDGET_MS + 40)
+    const shared = opensOf(withStore.zip)
+    expect(entryFor(listing, 'arms').kind).toBe('dir')
+
+    // The same listing with no `SnapshotStore` behind it: no archive layer, so
+    // the listing and the interior derivation each pay their own read. Before
+    // this change the store-backed server behaved like this one, because
+    // `listZipDir` read through no layer at all.
+    const noStore = await fixture('ly-zip-share-nostore')
+    const s2 = serverFor(noStore, { store: undefined })
+    stubFillIndex(noStore.top)
+    await warmProbe(s2)
+    fs.opens.length = 0
+    await listDir(s2, '/kit/box.zip')
+    await settle(ANNOTATION_BUDGET_MS + 40)
+    const unshared = opensOf(noStore.zip)
+
+    expect(shared).toBeGreaterThan(0)
+    expect(unshared).toBe(shared * 2)
+  })
+
+  it("drops an interior sheet whose archive has been rewritten under it", async () => {
+    const f = await fixture('ly-zip-stale')
+    const s = serverFor(f)
+    stubFillIndex(f.top)
+    await warmProbe(s)
+
+    const first = await listDir(s, '/kit/box.zip')
+    await settle(ANNOTATION_BUDGET_MS + 40)
+    // Derived and held: the sheet rides the listing on the next sight.
+    const held = await listDir(s, '/kit/box.zip')
+    const before = entryFor(held, 'arms')
+    expect(before.preview?.map((c) => c.name)).toEqual(['left.stl'])
+    expect(before.preview?.[0]?.mtime).toBe(before.mtime)
+    expect(entryFor(first, 'arms').path).toBe(before.path)
+
+    // Rewritten in place, with a later stamp: the archive layer notices by
+    // `{mtime, size}` and the listing is right, while the held sheet still
+    // names cells keyed on the version that is gone.
+    writeFileSync(
+      f.zip,
+      zipSync({
+        'box.stl': new Uint8Array(stlBytes(7)),
+        'arms/right.stl': new Uint8Array(stlBytes(8)),
+      }),
+    )
+    const later = statSync(f.zip).mtimeMs / 1000 + 5
+    utimesSync(f.zip, later, later)
+
+    const after = entryFor(await listDir(s, '/kit/box.zip'), 'arms')
+    // Not served. `noteDirChanged` would have left this held — it walks upward
+    // from a change and an interior key is a descendant — and the revalidation
+    // pass never runs for a nested browse at all.
+    expect(after.preview?.some((c) => c.name === 'left.stl')).not.toBe(true)
+
+    // And re-derived from the archive that is actually there.
+    await settle(ANNOTATION_BUDGET_MS + 40)
+    const fresh = entryFor(await listDir(s, '/kit/box.zip'), 'arms')
+    expect(fresh.preview?.map((c) => c.name)).toEqual(['right.stl'])
+    expect(fresh.preview?.[0]?.mtime).toBe(fresh.mtime)
+  })
+
   it('carries pose and preview on the first sight, with no wave and no peek', async () => {
     const f = await fixture('ly-fill-first')
     const s = serverFor(f)

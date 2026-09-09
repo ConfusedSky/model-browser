@@ -7,6 +7,17 @@
 > drafted 2026-09-03 and four changes have archived since. The thumbnail half left this
 > change on the same date (design D4) and is drafted as `hover-prefetch-thumbnails`.
 
+## 0. Interaction with `archive-interior-sheets`
+
+- [ ] 0.1 `archive-interior-sheets` (implemented, not yet archived) gives the
+      directories **inside** an archive contact sheets, derived by the
+      emission-time fill. A hovered **zip** tile therefore
+      warms a listing that also derives its interiors' sheets, which is work this
+      change's budget did not account for when it was written. The archive read
+      is shared (that change's D3 puts `listZipDir` on the archive layer), so the
+      added cost is the peeks' own walking, not extra tail reads — confirm the
+      warm still fits its budget before freezing it.
+
 ## 1. Measure before building (gates §2–§4)
 
 - [ ] 1.1 From a US-side vantage against the hosted origin, record the click-to-populated

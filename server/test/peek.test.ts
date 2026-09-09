@@ -116,6 +116,49 @@ writeFileSync(
   }),
 )
 
+/**
+ * The interior fixtures (`archive-interior-sheets`). One archive holding every
+ * shape the interior walk has an opinion about:
+ *
+ *   onlydirs/{a/1.stl, b/2.stl}   a level of nothing but subdirectories
+ *   nest/{inner.zip, ok.stl}      a nested archive, which is skipped
+ *   ord/{B.stl, a.stl}            code-point order, where ICU collation differs
+ *   bud/{zz.stl, sub/000…099}     a subdirectory wider than the entry bound
+ *   notes.txt                     a non-model at the root level
+ */
+const deepZipLibPath = '/onlyzip/deep.zip'
+const wideSub: Record<string, Uint8Array> = {}
+for (let i = 0; i < 100; i++) {
+  wideSub[`bud/sub/${String(i).padStart(3, '0')}.stl`] = new Uint8Array(stlBytes(40 + i))
+}
+writeFileSync(
+  join(libTop, 'onlyzip', 'deep.zip'),
+  zipSync({
+    'onlydirs/a/1.stl': new Uint8Array(stlBytes(30)),
+    'onlydirs/b/2.stl': new Uint8Array(stlBytes(31)),
+    'nest/ok.stl': new Uint8Array(stlBytes(32)),
+    'nest/inner.zip': [new Uint8Array(zipSync({ 'deep.stl': new Uint8Array(stlBytes(33)) })), { level: 0 }],
+    'ord/B.stl': new Uint8Array(stlBytes(34)),
+    'ord/a.stl': new Uint8Array(stlBytes(35)),
+    'bud/zz.stl': new Uint8Array(stlBytes(36)),
+    'notes.txt': new Uint8Array([1, 2, 3]),
+    ...wideSub,
+  }),
+)
+
+// A directory, not an archive, for the `!/` -on-a-non-archive refusal.
+mkdirSync(join(libTop, 'somedir'))
+writeFileSync(join(libTop, 'somedir', 'a.stl'), stlBytes(37))
+
+// An archive whose mode is 000: `stat` succeeds, the `open` inside fails, and
+// the failure must be named by its library path rather than the host's.
+const lockedZipLibPath = '/onlyzip/locked.zip'
+writeFileSync(
+  join(libTop, 'onlyzip', 'locked.zip'),
+  zipSync({ 'parts/x.stl': new Uint8Array(stlBytes(38)) }),
+)
+chmodSync(join(libTop, 'onlyzip', 'locked.zip'), 0o000)
+
 mkdirSync(join(libTop, 'empty'))
 
 const cacheDir = realTempDir('mb-peek-cache-')
@@ -289,8 +332,80 @@ describe('what a peek does not enter', () => {
     expect(await peekOf(zipLibPath, 4)).toEqual([])
   })
 
-  it('previews nothing for a path inside an archive', async () => {
-    expect(await peekOf(`${zipLibPath}!/parts`, 4)).toEqual([])
+  it('previews a directory inside an archive', async () => {
+    // The bug this change fixed: every entry-half path answered `[]`, so a
+    // folder inside a zip drew the emoji while its models listed fine and had
+    // thumbnails already rendered.
+    expect(names(await peekOf(`${zipLibPath}!/parts`, 4))).toEqual(['lid.stl'])
+  })
+
+  it('descends an interior level that holds only subdirectories', async () => {
+    expect(names(await peekOf(`${deepZipLibPath}!/onlydirs`, 4))).toEqual(['1.stl', '2.stl'])
+  })
+
+  it('skips a nested archive inside an interior rather than descending it', async () => {
+    // `deep.stl` lives inside `nest/inner.zip`; a sheet that showed it would
+    // mean the walk entered a nested archive, which is refused by design.
+    expect(names(await peekOf(`${deepZipLibPath}!/nest`, 4))).toEqual(['ok.stl'])
+  })
+
+  it('orders an interior level by code point, not by collation', async () => {
+    // `'B' < 'a'` by code point and `'a' < 'B'` under ICU collation, so this
+    // cell fails if the interior walk reaches for `sortEntries`' comparator.
+    expect(names(await peekOf(`${deepZipLibPath}!/ord`, 4))).toEqual(['B.stl', 'a.stl'])
+  })
+
+  it("charges the interior bound per child, so a wide subdirectory does not starve its level", async () => {
+    // `bud/` holds two children — `zz.stl` and `sub/` — but 101 entries beneath
+    // it. Charged per entry (the flat walk's rule) the bound would be spent
+    // before the level's own model was emitted; charged per distinct immediate
+    // child it costs two.
+    expect(names(await peekOf(`${deepZipLibPath}!/bud`, 4))).toEqual([
+      'zz.stl',
+      '000.stl',
+      '001.stl',
+      '002.stl',
+    ])
+  })
+
+  it('previews the same interior models in the same order on every visit', async () => {
+    const first = await peekOf(`${deepZipLibPath}!/bud`, 4)
+    // Non-empty first: two empty answers are equal, so the refusal this change
+    // removed would satisfy the comparison below while asserting nothing.
+    expect(first).toHaveLength(4)
+    expect(await peekOf(`${deepZipLibPath}!/bud`, 4)).toEqual(first)
+  })
+
+  it('answers an empty sheet for an interior prefix that matches nothing', async () => {
+    expect(await peekOf(`${deepZipLibPath}!/nosuch`, 4)).toEqual([])
+    // The control: this archive is readable and this walk does find things, so
+    // the empty answer above is about the prefix and not about the archive.
+    expect(names(await peekOf(`${deepZipLibPath}!/ord`, 4))).toEqual(['B.stl', 'a.stl'])
+  })
+
+  it('answers an empty sheet for an empty entry half, as the archive tile does', async () => {
+    // `/kit.zip!/` is the archive's own tile by another spelling. It must not
+    // fall through to a `''` prefix and preview the whole archive, and it must
+    // not refuse where `/kit.zip` answers `[]` — one tile, one answer.
+    expect(await peekOf(`${zipLibPath}!/`, 4)).toEqual([])
+    expect(await peekOf(zipLibPath, 4)).toEqual([])
+    // The control, against a walk that does answer for this archive: `box.stl`
+    // at the root would be the sheet if the empty half fell through to `''`.
+    expect(names(await peekOf(`${zipLibPath}!/parts`, 4))).toEqual(['lid.stl'])
+  })
+
+  it("carries the archive's mtime on interior finds, so a cell shares the model's cache entry", async () => {
+    const [cell] = await peekOf(`${zipLibPath}!/parts`, 4)
+    const listed = (await (
+      await app.request(`/api/dir?path=${encodeURIComponent(`${zipLibPath}!/parts`)}`, {
+        headers: LOOPBACK,
+      })
+    ).json()) as { entries: DirEntry[] }
+    const twin = listed.entries.find((e) => e.name === 'lid.stl')
+    // Thumbnails are keyed path+mtime, so a cell built with any other mtime
+    // would render and cache a second image beside the model tile's.
+    expect(cell?.path).toBe(twin?.path)
+    expect(cell?.mtime).toBe(twin?.mtime)
   })
 
   it('walks a directory whose name ends in .zip like any other', async () => {
@@ -365,6 +480,37 @@ describe('the route', () => {
       chmodSync(dir, 0o755)
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  it('400s on an entry half whose filesystem half is not an archive', async () => {
+    // Before this change every entry-half path answered `[]`, which hid a
+    // malformed request behind the same shrug as an empty folder.
+    const res = await ask('/somedir!/x', 4)
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { error: string }).error).toMatch(/not an archive/)
+  })
+
+  it('404s on an unreadable archive, naming the library path and not the host path', async () => {
+    // `stat` succeeds on a mode-000 file — reading metadata needs no permission
+    // — so the failure lands on the `open` inside. Untyped it escaped as a 500
+    // carrying `EACCES … '/tmp/…'`, which is the operator's filesystem.
+    const res = await ask(`${lockedZipLibPath}!/parts`, 4)
+    expect(res.status).toBe(404)
+    const { error } = (await res.json()) as { error: string }
+    expect(error).toContain(lockedZipLibPath)
+    expect(error).not.toContain(libTop)
+  })
+
+  it('400s on an interior path that names a file rather than a directory', async () => {
+    const res = await ask(`${zipLibPath}!/box.stl`, 4)
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { error: string }).error).toMatch(/not a directory/)
+  })
+
+  it('400s on a nested archive, in the archive grammar the listing uses', async () => {
+    const res = await ask(`${deepZipLibPath}!/nest/inner.zip`, 4)
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { error: string }).error).toMatch(/nested zips/)
   })
 
   it('is a path route: the not-ready state envelope, like every other', async () => {

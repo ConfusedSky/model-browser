@@ -53,7 +53,7 @@ import {
 } from './semantic'
 import type { SnapshotStore } from './snapshot'
 import { VPathError } from './vpath'
-import { ZipError, extractEntry } from './zip'
+import { ZipError, type ZipDirCache, extractEntry } from './zip'
 
 const ORBIT_AXES: readonly OrbitAxis[] = ['x', '-x', 'y', '-y', 'z', '-z']
 /**
@@ -327,8 +327,14 @@ async function walkRanked(
   library: Library,
   libPath: string,
   collectionRootFs: string,
+  /**
+   * Carried for symmetry with `walkOnly` and because the signature must not lie:
+   * no archive interior reaches here, since `scopeWithin` refuses a virtual path
+   * structurally and sends it down `walkOnly` (D8).
+   */
+  zips?: ZipDirCache,
 ): Promise<{ entries: DirEntry[]; learned: Learned }> {
-  const finds = await peek(library, libPath, PEEK_MAX_FINDS)
+  const finds = await peek(library, libPath, PEEK_MAX_FINDS, zips)
   if (finds.length === 0) return { entries: finds, learned: NOTHING_LEARNED }
   const asked = finds.map((e) => e.path)
   const { poses, answered } = await posesAsked(library, asked, collectionRootFs)
@@ -426,6 +432,13 @@ async function posedFirstPeek(
    * is allowed to do.
    */
   resolved?: { status: IndexAvailability; collectionRootFs: string | undefined },
+  /**
+   * The archive layer, for the interior half of a peek
+   * (`archive-interior-sheets` D3). Threaded through here because neither route
+   * calls `peek` directly — both arrive through the closures below — so this is
+   * where a cache handed in at the route reaches it.
+   */
+  zips?: ZipDirCache,
 ): Promise<{ entries: DirEntry[]; collectionRootFs: string | undefined; learned: Learned }> {
   // Handed back beside the sheet rather than re-probed by the caller: this
   // function already asks, the answer is what the preview layer records its
@@ -437,7 +450,11 @@ async function posedFirstPeek(
     entries: DirEntry[]
     collectionRootFs: string | undefined
     learned: Learned
-  }> => ({ entries: await peek(library, libPath, n), collectionRootFs, learned: NOTHING_LEARNED })
+  }> => ({
+    entries: await peek(library, libPath, n, zips),
+    collectionRootFs,
+    learned: NOTHING_LEARNED,
+  })
   if (status.state !== 'ready' || collectionRootFs === undefined) return walkOnly()
   // The collection's reach, asked about the folder rather than about its finds
   // — the same call, one level up. `null` is every way it can fail to reach:
@@ -469,7 +486,7 @@ async function posedFirstPeek(
 
   const sheet = [...fromIndex]
   const seen = new Set(sheet.map((e) => e.path))
-  const walked = await walkRanked(library, libPath, collectionRootFs)
+  const walked = await walkRanked(library, libPath, collectionRootFs, zips)
   for (const entry of walked.entries) {
     if (sheet.length >= n) break
     if (seen.has(entry.path)) continue
@@ -592,6 +609,27 @@ export function createApp(
    * stays the only place a fact is attached, so there is one annotation path
    * rather than two that could come to disagree about what a field means.
    */
+  /**
+   * Is this held sheet derived from an archive that has since been rewritten?
+   * (`archive-interior-sheets` D9.)
+   *
+   * An interior entry and every cell of its sheet carry the **containing
+   * archive's** mtime — `listZipDir` and the interior peek both emit
+   * `zipStat.mtimeMs` — so a sheet whose cells disagree with the tile above them
+   * was derived against a version of the archive that is gone. That is a check
+   * no filesystem directory could offer, and it is why interiors need no
+   * revalidation route: the key validates itself at emission, on exactly the
+   * listing that would otherwise serve it stale.
+   *
+   * Only interiors are asked. A filesystem directory's sheet holds models from
+   * anywhere in its subtree, whose mtimes have nothing to do with the folder's,
+   * and comparing them would drop every sheet on every listing.
+   */
+  function staleInterior(dir: DirEntry, preview: readonly DirEntry[]): boolean {
+    if (!dir.path.includes('!/')) return false
+    return preview.some((cell) => cell.mtime !== dir.mtime)
+  }
+
   function annotate(entries: DirEntry[]): void {
     for (const entry of entries) {
       const thumb = cache.annotate(entry.path, entry.mtime)
@@ -608,7 +646,12 @@ export function createApp(
         // The sheet a tile draws by default. A tile asking for more cells still
         // asks `/api/peek`, which is the only place a wider sheet is derived.
         const preview = layers.previewFor(entry.path, PEEK_DEFAULT)
-        if (preview !== undefined) {
+        if (preview !== undefined && staleInterior(entry, preview)) {
+          // The archive under this sheet has been rewritten. Dropped rather
+          // than served, and re-derived by the fill or the client's peek like
+          // any sheet that was never held (`archive-interior-sheets` D9).
+          layers.forgetPreview(entry.path, PEEK_DEFAULT)
+        } else if (preview !== undefined) {
           // The cells are model tiles too, and carry what the caches know
           // exactly as the models beside their folder do — or a revisit,
           // where the sheet rides the listing, would cost a lookup per cell
@@ -859,6 +902,7 @@ export function createApp(
             dirPath,
             PEEK_DEFAULT,
             resolved,
+            snapshots?.archiveCache(),
           )
           if (collectionRootFs !== undefined && !rootUnmoved(collectionRootFs)) return
           // Recorded before any naming pass, for `/api/peek`'s reason: the
@@ -1129,7 +1173,7 @@ export function createApp(
       applyDisplayNames(listing.entries, await overrides.store())
       return c.json(listing)
     }
-    const listing = await listDir(library, libPath)
+    const listing = await listDir(library, libPath, snapshots?.archiveCache())
     // Same order as the flat branch, for its reason — fill, annotate, name.
     await fillAnnotations(fillKey(libPath, false, undefined, folderMatching), listing.entries)
     annotate(listing.entries)
@@ -1294,7 +1338,13 @@ export function createApp(
     // `pose` to every cell — a wire change to a shape another capability owns.
     // The fill's own derivations record, so a *listing's* carried sheet arrives
     // posed either way, which is where the client's preview wave reads from.
-    const { entries, collectionRootFs } = await posedFirstPeek(library, libPath, n)
+    const { entries, collectionRootFs } = await posedFirstPeek(
+      library,
+      libPath,
+      n,
+      undefined,
+      snapshots?.archiveCache(),
+    )
     // Recorded **before** the naming pass, so an override name a later request
     // removes cannot survive inside the layer: what is kept is the choice — the
     // models and their order — never how they were labelled on one request.

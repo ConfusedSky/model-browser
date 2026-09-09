@@ -155,6 +155,15 @@ The bound governs determinism more than I/O here — the central directory is in
 memory once read — but keeping one constant is what makes "a sheet is a glance"
 mean one thing across both sources.
 
+**It does not go through `takeStep`, and that matters to a neighbour.** The
+interior walk has no `FlatWalk` — there is no filesystem level, no `visited`
+set, no `dirMtimes` — so it counts with a plain counter of its own.
+`search-cancellation` states that `takeStep` has exactly two call sites and that
+a peek must not inherit its cancellation token; both stay true, and an interior
+peek is exempt by construction rather than by an exception someone has to
+remember. Verified after implementation: the two call sites are `listFsDir`'s
+and `walkZip`'s, unchanged.
+
 ### D5. No confinement or cycle machinery inside an archive
 
 `peekLevel`'s `realpath`/`within` checks and its `visited` set exist because a

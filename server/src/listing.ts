@@ -343,6 +343,7 @@ async function listZipDir(
   zipFsPath: string,
   zipLibPath: string,
   prefix: string,
+  zips?: ZipDirCache,
 ): Promise<DirEntry[]> {
   let zipStat, zipEntries
   try {
@@ -354,7 +355,11 @@ async function listZipDir(
     // '<host path>'`, a 500 naming the operator's filesystem. Same taxonomy as
     // `walkZip`'s: a corrupt archive is a `ZipError` and says so, an unreadable
     // one is this library entry failing and is named by its library path.
-    zipEntries = await listZipEntries(zipFsPath)
+    // Through the archive layer since `archive-interior-sheets` D3: without it
+    // this read and the interior peeks that follow it each paid their own tail
+    // read of the same archive, because a listing populated nothing. The
+    // listing is what reaches an archive first, so it is what should warm it.
+    zipEntries = await listZipEntries(zipFsPath, zips)
   } catch (err) {
     if (err instanceof ZipError) throw err
     throw new ListingError(404, `cannot read zip: ${zipLibPath}`)
@@ -472,7 +477,11 @@ async function requireArchive(fsPath: string, libPath: string): Promise<void> {
   }
 }
 
-export async function listDir(library: Library, libPath: string): Promise<DirListing> {
+export async function listDir(
+  library: Library,
+  libPath: string,
+  zips?: ZipDirCache,
+): Promise<DirListing> {
   const { fsPath, entry } = await library.resolve(libPath)
   const realTop = library.realTop()
   const libHalf = libHalfOf(libPath)
@@ -483,12 +492,12 @@ export async function listDir(library: Library, libPath: string): Promise<DirLis
       return { path: libPath, entries: wire(await listFsDir(fsPath, libHalf, realTop)) }
     }
     if (/\.zip$/i.test(fsPath)) {
-      return { path: libPath, entries: await listZipDir(fsPath, libHalf, '') }
+      return { path: libPath, entries: await listZipDir(fsPath, libHalf, '', zips) }
     }
     throw new ListingError(400, `not a directory or zip: ${libPath}`)
   }
   await requireArchive(fsPath, libPath)
-  return { path: libPath, entries: await listZipDir(fsPath, libHalf, entry) }
+  return { path: libPath, entries: await listZipDir(fsPath, libHalf, entry, zips) }
 }
 
 /**
@@ -563,6 +572,139 @@ async function peekLevel(
 }
 
 /**
+ * Up to `n` models found inside an **archive's** directory — the interior half
+ * of a peek (`archive-interior-sheets` D2). The archive's names are a flat
+ * list, so a "level" is the names directly under a prefix: files with no
+ * further slash, and the distinct first segments of the ones that have one.
+ *
+ * Ordering is **code-point**, not `sortEntries`' `localeCompare`, for the reason
+ * `listFsDir` gives at its own sort: ICU collation is locale-dependent, so a
+ * bound cutting under it cuts differently on two machines holding the same
+ * library.
+ *
+ * The budget is charged **one step per distinct immediate child** (D4) — the
+ * dirent analogue, and the only reading under which "the same entry bound as a
+ * directory" means anything. Not `walkZip`'s rule, which charges every entry
+ * under the prefix at every depth and would spend a hundred steps at a parent
+ * on one subdirectory of a hundred models.
+ *
+ * No confinement or cycle guard: an entry name is data inside a file the
+ * resolver already confined, and a name list is finite (D5). A nested archive
+ * is skipped rather than descended into, as `listZipDir` skips it.
+ */
+function peekArchiveLevel(
+  names: readonly { name: string; size: number }[],
+  zipLibPath: string,
+  zipMtime: number,
+  prefix: string,
+  budget: { left: number },
+  found: DirEntry[],
+  n: number,
+): void {
+  const norm = prefix === '' ? '' : prefix.endsWith('/') ? prefix : `${prefix}/`
+  const models: { name: string; size: number }[] = []
+  const dirs: string[] = []
+  const seen = new Set<string>()
+  for (const e of names) {
+    if (!e.name.startsWith(norm)) continue
+    const rest = e.name.slice(norm.length)
+    if (rest === '') continue
+    const slash = rest.indexOf('/')
+    const child = slash === -1 ? rest : rest.slice(0, slash)
+    if (seen.has(child)) continue
+    seen.add(child)
+    // Charged per distinct immediate child, once, whether it turns out to be a
+    // model, a subdirectory or something ignored — a dirent costs a step on the
+    // filesystem side before anything is known about it either.
+    if (budget.left <= 0) break
+    budget.left--
+    if (slash !== -1) {
+      dirs.push(child)
+      continue
+    }
+    // Nested archives fall out here with everything that is not a model, the
+    // same way `listZipDir` declines to offer them (global D6).
+    if (modelFormat(child) !== undefined) models.push({ name: child, size: e.size })
+  }
+  models.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+  dirs.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+  for (const m of models) {
+    if (found.length >= n) return
+    found.push({
+      name: m.name,
+      path: joinVPath(zipLibPath, `${norm}${m.name}`),
+      kind: 'model',
+      format: modelFormat(m.name),
+      size: m.size,
+      // The containing archive's mtime, as `listZipDir` and `walkZip` emit
+      // (D11): thumbnails are keyed path+mtime, so any other value would make a
+      // sheet cell cache a second image beside the model tile's.
+      mtime: zipMtime,
+    })
+  }
+  for (const d of dirs) {
+    if (found.length >= n || budget.left <= 0) return
+    peekArchiveLevel(names, zipLibPath, zipMtime, `${norm}${d}`, budget, found, n)
+  }
+}
+
+/**
+ * The interior branch of `peek`: the archive is read once, through the layer
+ * when there is one, and the level walk above picks the sheet.
+ *
+ * The refusals are the **listing's**, not a bare empty answer (D10). Before
+ * this change every entry-half path answered `[]`, which hid four different
+ * cases behind one shrug; each is answered here as `listDir` answers it, so a
+ * malformed path and an unreadable archive stop reading like an empty folder.
+ */
+async function peekInArchive(
+  fsPath: string,
+  libPath: string,
+  entry: string,
+  n: number,
+  zips?: ZipDirCache,
+): Promise<DirEntry[]> {
+  // An empty entry half is the archive's own tile by another spelling, and
+  // `/kit.zip` answers `[]` rather than refusing — two spellings of one tile
+  // must not give two answers. It must not fall through: a prefix of `''` would
+  // preview the whole archive, which is the thing the tile's own branch
+  // refuses.
+  if (entry === '') return []
+  // 400 `not an archive` when the filesystem half is not one, exactly as
+  // `listDir` and `gatherFlat` guard it. Without this `listZipEntries` runs on
+  // a directory and raises an untyped errno.
+  await requireArchive(fsPath, libPath)
+  const zipLibPath = libHalfOf(libPath)
+  let zipStat, zipEntries
+  try {
+    zipStat = await stat(fsPath)
+    zipEntries = await listZipEntries(fsPath, zips)
+  } catch (err) {
+    // A corrupt archive — the library holds one zip64 that raises here — says
+    // so, as it does through every other reader. Anything else is this library
+    // entry failing to open and is named by its **library** path: the raw errno
+    // escaping was a 500 naming the operator's filesystem (`listZipDir`).
+    if (err instanceof ZipError) throw err
+    throw new ListingError(404, `cannot read zip: ${zipLibPath}`)
+  }
+  const norm = entry.endsWith('/') ? entry.slice(0, -1) : entry
+  // A prefix that is itself a file entry is not a directory, and a nested zip
+  // is the nested-zip case — `listZipDir`'s taxonomy, so a peek and a listing
+  // refuse the same path the same way.
+  const exactFile = zipEntries.find((e) => e.name === norm)
+  if (exactFile !== undefined) {
+    if (/\.zip$/i.test(exactFile.name)) throw new VPathError('nested zips are unsupported')
+    throw new ListingError(400, `not a directory: ${exactFile.name}`)
+  }
+  const found: DirEntry[] = []
+  peekArchiveLevel(zipEntries, zipLibPath, zipStat.mtimeMs, norm, { left: PEEK_BUDGET }, found, n)
+  // A prefix that matched nothing leaves `found` empty and answers `[]` — an
+  // empty sheet, which is what a directory with nothing previewable answers
+  // everywhere else.
+  return found
+}
+
+/**
  * Up to `n` models found inside a directory — the contact sheet a folder tile
  * draws (D2). Its own request, never merged into a listing: a listing that
  * computed previews would pay one peek per subdirectory up front, on the cold
@@ -580,12 +722,20 @@ async function peekLevel(
  * order it found it, rather than the sorted-and-renamed collection `listFlat`
  * builds.
  */
-export async function peek(library: Library, libPath: string, n: number): Promise<DirEntry[]> {
+export async function peek(
+  library: Library,
+  libPath: string,
+  n: number,
+  zips?: ZipDirCache,
+): Promise<DirEntry[]> {
   const { fsPath, entry } = await library.resolve(libPath)
-  // Neither an archive nor anything inside one is previewed (Non-Goals), and
-  // both answer empty rather than refusing: the client then renders "nothing to
-  // preview" the same way whatever the tile turned out to be.
-  if (entry !== undefined) return []
+  // An archive's own tile is not previewed — that is the branch below, after
+  // the `stat` — but a directory *inside* one is (`archive-interior-sheets`
+  // D1). The refusal that used to stand here tested the path's shape while the
+  // cost it was written for is a listing **of** archives: by the time an
+  // interior tile exists, the request that emitted it has read this archive's
+  // entries already.
+  if (entry !== undefined) return await peekInArchive(fsPath, libPath, entry, n, zips)
   const realTop = library.realTop()
   const s = await stat(fsPath).catch(() => null)
   if (s === null) throw new ListingError(404, `no such path: ${libPath}`)

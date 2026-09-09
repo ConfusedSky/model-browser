@@ -128,9 +128,12 @@ function keyDir(key: string): string {
  *
  * Split structurally rather than on `/` alone, so an archive's interior
  * (`/kit/a.zip!/parts`) yields the archive's own path on the way up rather than
- * a `a.zip!` segment that is nobody's key. A preview is never derived inside an
- * archive today — `peek` refuses them outright — but a list that quietly assumed
- * so would be wrong the day one is.
+ * a `a.zip!` segment that is nobody's key. Previews **are** derived inside
+ * archives since `archive-interior-sheets`, which is the day this anticipated;
+ * note that it does not make this function their invalidation route, since it
+ * walks upward from a change and an interior key is a descendant of the
+ * archive. Their staleness is caught at emission by the archive's own mtime
+ * (that change's D9).
  */
 function selfAndAncestors(dirPath: string): string[] {
   const bang = dirPath.indexOf('!/')
@@ -363,6 +366,25 @@ export class DerivedLayers {
     if (!this.live) return
     this.reroot(collectionRoot)
     this.previews.set(previewKey(dirPath, n), entries.map(copyEntry))
+  }
+
+  /**
+   * Forget one directory's sheet, so the next peek derives it again.
+   *
+   * The narrowest of the three drops, and the only one keyed on a single
+   * directory: `noteDirChanged` walks upward from a change and
+   * `dropPreviewsUnder` walks downward from a root, while this touches exactly
+   * the key it is given. Its caller is emission's own staleness check for an
+   * archive interior (`archive-interior-sheets` D9) — a sheet that contradicts
+   * the archive it was derived from, discovered by the listing that was about
+   * to serve it, with no pass and no changed-directory list in sight.
+   *
+   * Poses are untouched, for the reason the other two give: a rewritten archive
+   * says nothing about the geometry of a model that is still in it.
+   */
+  forgetPreview(dirPath: string, n: number): void {
+    if (!this.live) return
+    this.previews.delete(previewKey(dirPath, n))
   }
 
   /**
