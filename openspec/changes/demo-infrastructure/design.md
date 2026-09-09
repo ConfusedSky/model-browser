@@ -107,6 +107,16 @@ The index image pins by hand what `mini-classify` never wrote down. That is the 
 place only until that repository grows a manifest; the Dockerfile says so, and the pins
 are the runbook's so the two cannot disagree.
 
+*Settled at apply (2026-09-08, the implementing worker's check-in):* mini-classify reaches
+the index image as a BuildKit **named context** (`additional_contexts`), with the build
+context itself `deploy/demo/` and `COPY --from=mini-classify` naming only `serve_api.py`
+and `src/`. The pinned `build.context: <checkout>` was unusable: the development checkout
+is 22 GB and 282,000 files (a venv, two embedding caches, renders) and a `.dockerignore`
+cannot be added to another repository. The box points `MINI_CLASSIFY_DIR` at a clean clone.
+The app image keeps `client/package.json` in its runtime stage so `bun install` sees every
+workspace member; the client's runtime dependencies are dead weight there, accepted for
+correctness over size.
+
 *Alternative — a prebuilt image pushed from this machine.* Rejected: it moves the build
 to a machine that is not the box and adds a registry account for one image nobody else
 pulls.
@@ -141,6 +151,18 @@ withheld.
 The consequence for ordering: the bake (`web-demo-backlog` 1.7) writes thumbnails into
 the cache directory named by the library id, so it runs *after* the app's first start on
 the box, and against the same mount path.
+
+*Settled at apply (2026-09-08):* the corpus rsync ships models only — non-models and dot
+entries excluded by policy even though the app now refuses both — **plus one dot-path,
+`.model-browser/overrides.json`**, copied on its own: it is the operator-authored CC-BY
+credits store (`library-overrides`) that the lightbox reads and the credits page will, and
+a corpus without it is not the demo. `library.json` does **not** travel: the box writes
+its own marker on first start, and that id names the cache directory the bake fills — the
+runbook checks that the logged id is not this machine's. And the index's ROOT under
+`--no-volume` is not decorative: it selects which cached entries are served and is the
+`collectionRoot` the app maps through `libPathOf`, so both containers must see the corpus
+at the same mount path or the index covers nothing; `run-params.json`'s recorded root
+differs, and the index's startup "mismatch" advisory is expected output.
 
 ### D5: The caches are one bind mount named by `MODEL_BROWSER_CACHE`
 
@@ -202,7 +224,10 @@ the index and the caches land where they should.
 
 Docker Engine and the Compose plugin from Docker's apt repository, the 2 GB swapfile the
 probe runbook already used (measured untouched at 2.43 GB peak, kept as a floor under an
-OOM), a Hetzner cloud firewall admitting 22, 80 and 443 inbound and nothing else, DNS
+OOM), `vm.overcommit_memory=1` made permanent under `/etc/sysctl.d/` (the runbook's
+addendum: SigLIP's 4.5 GB checkpoint fails to mmap on a 4 GB box once the app holds
+memory — `unable to mmap 4546331880 bytes`, state `wedged` — and this is the setting that
+lets it; it belongs in the deployment's preparation, not in an operator's memory), a Hetzner cloud firewall admitting 22, 80 and 443 inbound and nothing else, DNS
 `A` and `AAAA` records for `models` at Namecheap pointing at the box, and a clone of this
 repository under `/opt/model-browser`. Restart-on-reboot is Compose's `restart:
 unless-stopped`, not a systemd unit. All of it is a page in `deploy/demo/README.md`,
