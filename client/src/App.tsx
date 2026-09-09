@@ -551,7 +551,13 @@ export default function App() {
    */
   const libraryRef = useRef<LibraryState | null>(null)
   libraryRef.current = libraryState
-  libraryIdRef.current = libraryState?.state === 'ready' ? libraryState.id : null
+  /**
+   * The ready library's id, named rather than written straight into the ref:
+   * the local-framing overlay effect below depends on it, and a value only ever
+   * assigned to a ref is one no effect can wait for.
+   */
+  const libraryId = libraryState?.state === 'ready' ? libraryState.id : null
+  libraryIdRef.current = libraryId
 
   /**
    * A command's brief report, shown on the path bar's transient line (task
@@ -1218,10 +1224,18 @@ export default function App() {
    * A plain effect rather than a latch, because the overlay is idempotent and
    * `features` resolves once per session — the report effect above stops
    * asking the moment it is non-null.
+   *
+   * **And the library id is the second thing it waits for.** The three boot
+   * requests race, and a listing that lands before `/api/library` seeds its
+   * tiles while `framingKey` has no id to file a framing under, so the store
+   * reads as empty and a returning visitor's kept framings are missing from
+   * the first grid until the next navigation. So the effect fires when the
+   * *last* of report and id arrives, and again only if the id changes — a
+   * repointed root — which the overlay's idempotence makes free.
    */
   useEffect(() => {
-    if (features?.thumbWrites === false) applyLocalFramings()
-  }, [features, applyLocalFramings])
+    if (features?.thumbWrites === false && libraryId !== null) applyLocalFramings()
+  }, [features, libraryId, applyLocalFramings])
 
   // Mirrored after commit, not during render: a render React discards must not
   // leave the delta reading state that never landed.

@@ -2570,6 +2570,43 @@ describe('a kept framing wins over the one the listing carried', () => {
     expect(api.putThumb).not.toHaveBeenCalled()
   })
 
+  it('reaches a tile the listing seeded before the library id landed', async () => {
+    // The other half of that race, and the one the report cannot rescue on its
+    // own: `/api/library` can land *last* of the three boot requests, and a
+    // tile seeded while the id is unknown gets no overlay however loudly the
+    // report says writes are off — `framingKey` answers `null` with no library
+    // to file a framing under, so the store reads as empty. App's effect
+    // therefore waits on the id as well as the report.
+    writeLocalFraming(PATH, { camera: KEPT, axis: '-x' }, undefined, LIB)
+    const api = fakeApi()
+    let id: string | null = null
+    const readId = (): string | null => id
+    await render(
+      <Harness
+        entries={annotated()}
+        api={api}
+        lru={fakeLru()}
+        queue={new RenderQueue(2)}
+        features={() => OFF}
+        libraryId={readId}
+      />,
+    )
+    await settle()
+    // The control, and the bug itself: the report was known and off the whole
+    // time, and the seed still found nothing to lay over the listing's camera.
+    expect(lastThumbs.get(PATH)!.camera).toEqual(CAMERA)
+
+    id = 'lib-a'
+    await applyAfterReport()
+
+    expect(lastThumbs.get(PATH)!.camera).toEqual(KEPT)
+    expect(lastThumbs.get(PATH)!.axis).toBe('-x')
+    // An overlay here too: the id arriving questions no pixels.
+    expect(lastThumbs.get(PATH)!.url).toBe(thumbImageUrl(PATH, 1, true, 5))
+    expect(api.getThumb).not.toHaveBeenCalled()
+    expect(api.putThumb).not.toHaveBeenCalled()
+  })
+
   it('reaches a tile the lookup answered before the report landed', async () => {
     // The second arrival point, and the one a re-run of the sweep would charge
     // a fresh lookup for: this tile carries no annotation the sweep can seed
