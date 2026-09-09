@@ -350,7 +350,26 @@ if you want a browser without a certificate warning.
 The index will not become ready without a checkpoint in the `hf` volume: either
 run the `setup` profile once (§3.1, 4.3 GB) or, if this machine already has the
 model under `~/.cache/huggingface`, mount that directory at `/hf` for the
-rehearsal.
+rehearsal with a second compose file that replaces the volume on the one target:
+
+```yaml
+# hf-local.yaml — rehearsal only
+services:
+  index:
+    volumes:
+      - ~/.cache/huggingface:/hf:ro
+```
+
+```sh
+CADDYFILE=Caddyfile.local CACHE_DIR=/tmp/model-browser-demo-cache \
+  docker compose -f deploy/demo/compose.yaml -f hf-local.yaml up --build
+```
+
+Rehearsed this way on 2026-09-08 (buildx 0.35, the index image built through the
+named context in 55 s): the app answered the demo posture and the client at `/`,
+`/api/library` without `top`, a foreign `Origin` 403, `http://` a 308, the index
+was ready in 19 s from this machine's cache, and a meaning search through Caddy
+answered library paths with no host string in the body.
 
 ## 9. The memory budget (D10)
 

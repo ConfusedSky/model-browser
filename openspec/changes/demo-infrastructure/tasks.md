@@ -40,7 +40,7 @@
       `/api/library` 200 `{"state":"ready","id":"5358d071-…","root":"/"}` (no `top`), `/`
       200 the client's `<!doctype html>`. `clientDist`'s default resolving with no env var
       is therefore measured, not read
-
+      **Re-run from merged main by the coordinator, 2026-09-08, after `docker-buildx` was installed:** the index image built through the named context (55 s), `up --build` under `Caddyfile.local` with the host's HF cache mounted at `/hf` via an override file (README §8); every runbook check answered as written and the stack came down clean, `demo_caddy_data` kept
 ## 3. The index image
 
 - [x] 3.1 `deploy/demo/index.Dockerfile`: `python:3.12-slim`, CPU torch from the wheel
@@ -87,7 +87,7 @@
       `COPY` (`sed 's/--from=mini-classify //'`) — every pin, ENV and the CMD are the
       committed file's. The named-context mechanism itself is verified only by
       `docker compose config` and by the engine's own error naming the feature
-
+      **Re-run from merged main by the coordinator, 2026-09-08, after `docker-buildx` was installed:** the index image built through the named context (55 s), `up --build` under `Caddyfile.local` with the host's HF cache mounted at `/hf` via an override file (README §8); every runbook check answered as written and the stack came down clean, `demo_caddy_data` kept
 ## 4. Caddy
 
 - [x] 4.1 `deploy/demo/Caddyfile`: `models.masamaeda.com` site; `encode zstd gzip`;
@@ -146,7 +146,7 @@
       reaching the index across the shared namespace with no address configured, which is
       D1's whole claim. End to end, `POST /api/semantic {"text":"a dragon","path":"/"}`
       returns library-path entries. `docker compose down` keeps the volumes
-
+      **Re-run from merged main by the coordinator, 2026-09-08, after `docker-buildx` was installed:** the index image built through the named context (55 s), `up --build` under `Caddyfile.local` with the host's HF cache mounted at `/hf` via an override file (README §8); every runbook check answered as written and the stack came down clean, `demo_caddy_data` kept
 ## 6. The runbook
 
 - [x] 6.1 `deploy/demo/README.md`: box preparation (§1), populating the volumes (the
