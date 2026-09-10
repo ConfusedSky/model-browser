@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
+import { SCENE_FRAMES } from '../../shared/frames'
 import { CAMERA_EPSILON, type CameraState, type OrbitAxis } from '../../shared/types'
 import {
   applyState,
@@ -21,7 +22,7 @@ function boundsAt(center: THREE.Vector3, radius: number): Bounds {
   return { center, radius, box }
 }
 
-function roundTrip(state: CameraState, bounds: Bounds, axis?: OrbitAxis): CameraState {
+function roundTrip(state: CameraState, bounds: Bounds, axis: OrbitAxis): CameraState {
   const pos = statePosition(state, bounds, axis)
   const target = stateTarget(state, bounds)
   return captureState(pos, target, bounds, axis)
@@ -37,7 +38,7 @@ function expectClose(a: CameraState, b: CameraState): void {
 describe('bounds-relative camera state', () => {
   it('capture(apply(state)) round-trips', () => {
     const bounds = boundsAt(new THREE.Vector3(5, 2, -3), 7)
-    expectClose(roundTrip(STATE, bounds), STATE)
+    expectClose(roundTrip(STATE, bounds, 'z'), STATE)
   })
 
   it('survives a re-scaled re-export: same state, different bounds → same view', () => {
@@ -45,12 +46,12 @@ describe('bounds-relative camera state', () => {
     const inches = boundsAt(new THREE.Vector3(0.39, 0, 0), 1)
 
     // The state is unit-free: capturing from either sized world recovers it.
-    expectClose(roundTrip(STATE, mm), STATE)
-    expectClose(roundTrip(STATE, inches), STATE)
+    expectClose(roundTrip(STATE, mm, 'z'), STATE)
+    expectClose(roundTrip(STATE, inches, 'z'), STATE)
 
     // And the framing is identical: distance-to-target scales with the radius.
-    const posMm = statePosition(STATE, mm)
-    const posIn = statePosition(STATE, inches)
+    const posMm = statePosition(STATE, mm, 'z')
+    const posIn = statePosition(STATE, inches, 'z')
     expect(posMm.distanceTo(stateTarget(STATE, mm)) / mm.radius).toBeCloseTo(
       posIn.distanceTo(stateTarget(STATE, inches)) / inches.radius,
       6,
@@ -60,7 +61,7 @@ describe('bounds-relative camera state', () => {
   it('applyState aims the camera at the state target', () => {
     const bounds = boundsAt(new THREE.Vector3(0, 0, 0), 2)
     const camera = new THREE.PerspectiveCamera(40, 1)
-    applyState(camera, STATE, bounds)
+    applyState(camera, STATE, bounds, 'z')
     const forward = new THREE.Vector3()
     camera.getWorldDirection(forward)
     const toTarget = stateTarget(STATE, bounds).sub(camera.position).normalize()
@@ -81,11 +82,19 @@ describe('bounds-relative camera state', () => {
     }
   })
 
-  it('the default axis reproduces the historical world-Y representation', () => {
+  it('the y frame is unchanged from the scene table: the historical world-Y representation', () => {
+    // There is no default axis any more (file-frame-spindle D2) — but the `y`
+    // frame, which every un-framed model used to be drawn about, is a fixed
+    // point of the re-derivation, so an OBJ at its default reads as it always
+    // did. Assert it against the pre-bake table the derivation starts from.
+    const { s, a, b } = frameFor('y')
+    expect([s.toArray(), a.toArray(), b.toArray()]).toEqual([
+      SCENE_FRAMES.y.s,
+      SCENE_FRAMES.y.a,
+      SCENE_FRAMES.y.b,
+    ])
     const bounds = boundsAt(new THREE.Vector3(1, 2, 3), 4)
-    const legacy = statePosition(STATE, bounds) // axis omitted
     const explicit = statePosition(STATE, bounds, 'y')
-    expect(legacy.distanceTo(explicit)).toBeLessThan(1e-9)
     // The world-Y formula the client used before spindle frames existed:
     const dist = STATE.distR * bounds.radius
     const manual = stateTarget(STATE, bounds).add(

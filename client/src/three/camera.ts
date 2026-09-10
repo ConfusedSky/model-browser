@@ -1,5 +1,8 @@
 import * as THREE from 'three'
 import type { CameraState, OrbitAxis } from '../../../shared/types'
+import { FILE_FRAMES, type FrameTriples } from '../../../shared/frames'
+
+export { defaultAxisFor } from '../../../shared/frames'
 
 export interface Bounds {
   center: THREE.Vector3
@@ -29,20 +32,20 @@ export interface SpindleFrame {
 }
 
 /**
- * Turntable frame per spindle axis: `s` is the spindle (yaw axis, also camera
- * up); (a, b) span the yaw plane, chosen with a×b = −s so a rightward drag
- * spins the same visual direction under every spindle. Negated axes swap
- * (a, b), which preserves the invariant. The 'y' frame reproduces the
- * historical world-Y az/el exactly.
+ * Turntable frame per spindle axis, in the model file's own coordinates:
+ * `s` is the spindle (yaw axis, also camera up); (a, b) span the yaw plane,
+ * chosen with a×b = −s so a rightward drag spins the same visual direction
+ * under every spindle. The table is `FILE_FRAMES` (shared/frames.ts) lifted
+ * into `Vector3`s — the derivation from the pre-bake scene table lives there,
+ * not here. The 'y' frame is unchanged from that scene table, so an OBJ at the
+ * default reads exactly as it always did.
  */
-const FRAMES: Record<OrbitAxis, SpindleFrame> = {
-  y: { s: new THREE.Vector3(0, 1, 0), a: new THREE.Vector3(1, 0, 0), b: new THREE.Vector3(0, 0, 1) },
-  '-y': { s: new THREE.Vector3(0, -1, 0), a: new THREE.Vector3(0, 0, 1), b: new THREE.Vector3(1, 0, 0) },
-  x: { s: new THREE.Vector3(1, 0, 0), a: new THREE.Vector3(0, 0, 1), b: new THREE.Vector3(0, 1, 0) },
-  '-x': { s: new THREE.Vector3(-1, 0, 0), a: new THREE.Vector3(0, 1, 0), b: new THREE.Vector3(0, 0, 1) },
-  z: { s: new THREE.Vector3(0, 0, 1), a: new THREE.Vector3(0, 1, 0), b: new THREE.Vector3(1, 0, 0) },
-  '-z': { s: new THREE.Vector3(0, 0, -1), a: new THREE.Vector3(1, 0, 0), b: new THREE.Vector3(0, 1, 0) },
-}
+const FRAMES: Record<OrbitAxis, SpindleFrame> = Object.fromEntries(
+  (Object.entries(FILE_FRAMES) as [OrbitAxis, FrameTriples][]).map(([axis, { s, a, b }]) => [
+    axis,
+    { s: new THREE.Vector3(...s), a: new THREE.Vector3(...a), b: new THREE.Vector3(...b) },
+  ]),
+) as Record<OrbitAxis, SpindleFrame>
 
 export function frameFor(axis: OrbitAxis): SpindleFrame {
   return FRAMES[axis]
@@ -57,7 +60,7 @@ function stateDirection(state: CameraState, frame: SpindleFrame): THREE.Vector3 
 }
 
 /** World-space position for a bounds- and spindle-relative state. */
-export function statePosition(state: CameraState, bounds: Bounds, axis: OrbitAxis = 'y'): THREE.Vector3 {
+export function statePosition(state: CameraState, bounds: Bounds, axis: OrbitAxis): THREE.Vector3 {
   const target = stateTarget(state, bounds)
   const dist = state.distR * bounds.radius
   return target.add(stateDirection(state, frameFor(axis)).multiplyScalar(dist))
@@ -71,7 +74,7 @@ export function applyState(
   camera: THREE.PerspectiveCamera,
   state: CameraState,
   bounds: Bounds,
-  axis: OrbitAxis = 'y',
+  axis: OrbitAxis,
 ): void {
   const target = stateTarget(state, bounds)
   camera.position.copy(statePosition(state, bounds, axis))
@@ -87,7 +90,7 @@ export function captureState(
   position: THREE.Vector3,
   target: THREE.Vector3,
   bounds: Bounds,
-  axis: OrbitAxis = 'y',
+  axis: OrbitAxis,
 ): CameraState {
   const { s, a, b } = frameFor(axis)
   const offset = position.clone().sub(target)

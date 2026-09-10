@@ -109,15 +109,17 @@ describe('STL shading normals derive from winding', () => {
   it('a healthy file is unchanged: parsed normals reproduce its stored field', () => {
     const parsed = parsedNormals(craftStl((winding) => winding))
     assertNormalsMatchWinding(parsed)
-    // The stored field, carried through parseModel's Z-up → Y-up rotateX(-π/2),
-    // is (x, z, −y) — the parsed normals must land exactly there.
+    // parseModel applies no rotation (file-frame-spindle: models render in
+    // their file's coordinates), so the parsed normals are the stored field
+    // verbatim — (x, y, z), not the (x, z, −y) the retired Z-up → Y-up bake
+    // used to carry them through.
     for (let f = 0; f < TET.length; f++) {
       const [x, y, z] = windingNormal(TET[f]!)
       for (let v = 0; v < 3; v++) {
         const i = f * 9 + v * 3
         expect(parsed.normal[i]!).toBeCloseTo(x, 5)
-        expect(parsed.normal[i + 1]!).toBeCloseTo(z, 5)
-        expect(parsed.normal[i + 2]!).toBeCloseTo(-y, 5)
+        expect(parsed.normal[i + 1]!).toBeCloseTo(y, 5)
+        expect(parsed.normal[i + 2]!).toBeCloseTo(z, 5)
       }
     }
   })

@@ -1,12 +1,21 @@
 export type EntryKind = 'dir' | 'zip' | 'model'
 
+/**
+ * The three model formats the app reads. One definition for the wire
+ * (`DirEntry.format`), the client's loader (`parseModel`) and the per-format
+ * default spindle (`defaultAxisFor`, shared/frames.ts): the server assigns
+ * `kind: 'model'` only through these same three extensions (`MODEL_EXT`,
+ * server/src/listing.ts).
+ */
+export type ModelFormat = 'stl' | '3mf' | 'obj'
+
 export interface DirEntry {
   name: string
   /** Virtual path: plain fs path, or `zip.zip!/inner/entry` for zip contents. */
   path: string
   kind: EntryKind
   /** Model format, present when kind === 'model'. */
-  format?: 'stl' | '3mf' | 'obj'
+  format?: ModelFormat
   size: number
   /** mtime (ms). For zip entries this is the containing zip's mtime. */
   mtime: number

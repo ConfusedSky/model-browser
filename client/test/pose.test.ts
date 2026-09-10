@@ -1,17 +1,21 @@
 // The index's pose, expressed in this app's camera model.
 //
-// Two transforms have to compose correctly and neither is visible in the
-// numbers on the wire: the index measures its angles after rotating the mesh so
-// `up` points at +Z, and this app's STL loader bakes `rotateX(-π/2)` into every
-// mesh (file is Z-up, the scene is Y-up). Getting either wrong renders a model
-// lying down, which is exactly what shipped before these tests existed.
+// The index measures its angles after rotating the mesh so `up` points at +Z,
+// and reports `up` and `azimuth_zero` in the file's coordinates. Since
+// file-frame-spindle this app renders every model in those same coordinates
+// — no rotation is baked into STL geometry on load — so the index's up axis is
+// the spindle, literally, and the only transform left to get right is the
+// azimuth offset derived from `azimuth_zero`. Getting that wrong renders a
+// model from the wrong side; getting the axis wrong rendered models lying
+// down, which is exactly what shipped before these tests existed.
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
+import { axisOfTriple, FILE_FRAMES } from '../../shared/frames'
 import type { IndexPose, OrbitAxis } from '../../shared/types'
 import { boundsOf, DEFAULT_CAMERA, statePosition } from '../src/three/camera'
 import { axisOf, cameraForPose } from '../src/three/pose'
 
-const UP: Record<string, [number, number, number]> = {
+const UP: Record<OrbitAxis, [number, number, number]> = {
   x: [1, 0, 0],
   '-x': [-1, 0, 0],
   y: [0, 1, 0],
@@ -48,9 +52,6 @@ function indexCameraDirection(up: [number, number, number], azDeg: number, elDeg
   return inZUp.applyMatrix4(rotationToZUp(up).clone().transpose())
 }
 
-/** models.ts bakes rotateX(-π/2) into STL geometry: file (x,y,z) → scene (x,z,-y). */
-const toScene = (v: THREE.Vector3): THREE.Vector3 => new THREE.Vector3(v.x, v.z, -v.y)
-
 function pose(up: [number, number, number], az: number, el: number): IndexPose {
   return {
     up,
@@ -61,16 +62,19 @@ function pose(up: [number, number, number], az: number, el: number): IndexPose {
   }
 }
 
+const deg = (rad: number): number => (rad * 180) / Math.PI
+
 describe('index pose → camera', () => {
-  it('maps a file up axis to the spindle it becomes in the scene', () => {
-    // The bug this pins: a file Y-up model was mapped to the `y` spindle, which
-    // in the scene is 90° from its actual up, so it rendered lying down.
-    expect(axisOf(UP.y!)).toBe('-z')
-    expect(axisOf(UP.z!)).toBe('y')
-    expect(axisOf(UP['-y']!)).toBe('z')
-    expect(axisOf(UP['-z']!)).toBe('-y')
-    expect(axisOf(UP.x!)).toBe('x')
-    expect(axisOf(UP['-x']!)).toBe('-x')
+  it("the index's up axis IS the spindle", () => {
+    // Both are measured in the file's coordinates, so no mapping sits between
+    // them: `[0,0,1]` is `z`. (Before file-frame-spindle a file-Z up became the
+    // scene's `y` through the STL bake, and `[0,1,0]` became `-z`.)
+    expect(axisOf(UP.z)).toBe('z')
+    expect(axisOf(UP.y)).toBe('y')
+    expect(axisOf(UP['-z'])).toBe('-z')
+    expect(axisOf(UP.x)).toBe('x')
+    expect(axisOf(UP['-x'])).toBe('-x')
+    expect(axisOf(UP['-y'])).toBe('-y')
   })
 
   it('an up axis outside the six is a fault, not a rounding', () => {
@@ -79,7 +83,7 @@ describe('index pose → camera', () => {
   })
 
   it('an azimuth_zero not perpendicular to up is malformed, not projected', () => {
-    const p = { ...pose(UP.y!, 0, 0), azimuth_zero: [0, 1, 0] as [number, number, number] }
+    const p = { ...pose(UP.y, 0, 0), azimuth_zero: [0, 1, 0] as [number, number, number] }
     expect(cameraForPose(p, DEFAULT_CAMERA)).toBeNull()
   })
 
@@ -87,8 +91,9 @@ describe('index pose → camera', () => {
     // The whole chain in one assertion, against a direction derived from the
     // index's own rotation rather than from a table this app maintains: for
     // each of the six ups and a spread of views, the camera this app computes
-    // must point where the index's camera pointed, once both are in scene
-    // space. A round-trip would pass under any consistent error; this cannot.
+    // must point where the index's camera pointed. Both are in file space now,
+    // so the comparison is direct. A round-trip would pass under any
+    // consistent error; this cannot.
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2))
     const bounds = boundsOf(mesh)
     for (const [name, up] of Object.entries(UP)) {
@@ -96,7 +101,7 @@ describe('index pose → camera', () => {
         for (const elDeg of [-20, 0, 20]) {
           const out = cameraForPose(pose(up, azDeg, elDeg), DEFAULT_CAMERA)
           expect(out, `${name} @${azDeg}/${elDeg}`).not.toBeNull()
-          const want = toScene(indexCameraDirection(up, azDeg, elDeg)).normalize()
+          const want = indexCameraDirection(up, azDeg, elDeg).normalize()
           const got = statePosition(out!.camera, bounds, out!.axis)
             .sub(bounds.center)
             .normalize()
@@ -106,36 +111,59 @@ describe('index pose → camera', () => {
     }
   })
 
-  it('keeps the model upright: camera up is the model up, in scene space', () => {
+  it('derives az as the front azimuth plus atan2(a·u₀, b·u₀) in the file frame, about axisOfTriple(up)', () => {
+    // The derivation itself, spelled out against the shared table (D4): the
+    // spindle is the up vector's own axis, and the offset is `azimuth_zero`
+    // re-measured in that spindle's file frame. `u₀` is any perpendicular to
+    // `up` here, not only the one the index's rotation produces, so the cell
+    // holds for an index whose rotation convention changes.
+    for (const [name, up] of Object.entries(UP) as [OrbitAxis, [number, number, number]][]) {
+      const { a, b } = FILE_FRAMES[name]
+      for (const u0 of [a, b, [-a[0], -a[1], -a[2]] as const, [-b[0], -b[1], -b[2]] as const]) {
+        const p: IndexPose = { ...pose(up, 30, 20), azimuth_zero: [u0[0], u0[1], u0[2]] }
+        const out = cameraForPose(p, DEFAULT_CAMERA)!
+        expect(out.axis, name).toBe(axisOfTriple(up))
+        const offset = Math.atan2(
+          a[0] * u0[0] + a[1] * u0[1] + a[2] * u0[2],
+          b[0] * u0[0] + b[1] * u0[1] + b[2] * u0[2],
+        )
+        expect(out.camera.az, `${name} u0=${u0.join(',')}`).toBeCloseTo((30 * Math.PI) / 180 + offset, 9)
+        expect(out.camera.el).toBeCloseTo((20 * Math.PI) / 180, 9)
+      }
+    }
+  })
+
+  it("reproduces the spike's posed root samples: Benchy z 90° 20°, bod_test_cube -x 405° 20°", () => {
+    // The (axis, az, el) the pre-change code answered for two of the seven
+    // posed root samples (file-frame-spindle tasks 1.2), with `azimuth_zero`
+    // as the index's own rotation produces it. The same numbers after the bake
+    // and the mapping went together is what lets POSE_VERSION stay at 2.
+    const benchy = cameraForPose(pose(UP.z, 0, 20), DEFAULT_CAMERA)!
+    expect(benchy.axis).toBe('z')
+    expect(deg(benchy.camera.az)).toBeCloseTo(90, 9)
+    expect(deg(benchy.camera.el)).toBeCloseTo(20, 9)
+    const cube = cameraForPose(pose(UP['-x'], 315, 20), DEFAULT_CAMERA)!
+    expect(cube.axis).toBe('-x')
+    expect(deg(cube.camera.az)).toBeCloseTo(405, 9)
+    expect(deg(cube.camera.el)).toBeCloseTo(20, 9)
+  })
+
+  it('keeps the model upright: camera up is the model up, in file space', () => {
     // What "the right way up" means concretely — and what a wrong spindle
-    // breaks, since the spindle is also the camera's up vector.
-    for (const [, up] of Object.entries(UP)) {
+    // breaks, since the spindle is also the camera's up vector (camera.ts
+    // applyState). With no rotation between file and scene, the spindle must
+    // equal the pose's `up` unrotated.
+    for (const [name, up] of Object.entries(UP) as [OrbitAxis, [number, number, number]][]) {
       const out = cameraForPose(pose(up, 90, 20), DEFAULT_CAMERA)!
-      const modelUpInScene = toScene(new THREE.Vector3(...up)).normalize()
-      const { s } = { s: new THREE.Vector3() }
-      void s
-      const camera = new THREE.PerspectiveCamera(40, 1)
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2))
-      const bounds = boundsOf(mesh)
-      camera.position.copy(statePosition(out.camera, bounds, out.axis))
-      // The spindle is the camera's up (camera.ts applyState), so asserting the
-      // spindle equals the model's scene-space up is asserting uprightness.
-      const spindleAxis = out.axis
-      const sign = spindleAxis.startsWith('-') ? -1 : 1
-      const letter = spindleAxis.replace('-', '')
-      const spindle = new THREE.Vector3(
-        letter === 'x' ? sign : 0,
-        letter === 'y' ? sign : 0,
-        letter === 'z' ? sign : 0,
-      )
-      expect(spindle.distanceTo(modelUpInScene)).toBeLessThan(1e-6)
+      const spindle = new THREE.Vector3(...FILE_FRAMES[out.axis].s)
+      expect(spindle.distanceTo(new THREE.Vector3(...up)), name).toBeLessThan(1e-6)
     }
   })
 
   it('a missing front view keeps the axis and falls back to view 0’s angles', () => {
-    const p = { ...pose(UP.y!, 0, 0), front: null }
+    const p = { ...pose(UP.y, 0, 0), front: null }
     const out = cameraForPose(p, DEFAULT_CAMERA)!
-    expect(out.axis).toBe('-z')
+    expect(out.axis).toBe('y')
     expect(out.camera.el).toBe(0)
     expect(out.camera.distR).toBe(DEFAULT_CAMERA.distR)
   })

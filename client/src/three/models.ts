@@ -3,12 +3,28 @@ import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import { ThreeMFLoader } from 'three/examples/jsm/loaders/3MFLoader.js'
 import { unzipSync } from 'fflate'
+import type { DirEntry, ModelFormat } from '../../../shared/types'
 
-export type ModelFormat = 'stl' | '3mf' | 'obj'
+export type { ModelFormat } from '../../../shared/types'
 
 export function formatOf(path: string): ModelFormat | null {
   const m = /\.(stl|3mf|obj)$/i.exec(path)
   return m ? (m[1]!.toLowerCase() as ModelFormat) : null
+}
+
+/**
+ * A model entry's format, from the wire field when the listing carried it and
+ * from the path otherwise. Throws, never defaults, when neither classifies:
+ * the server assigns `kind: 'model'` only through the same three extensions
+ * `formatOf` matches (`MODEL_EXT`, server/src/listing.ts), so a model entry
+ * with an unclassifiable path is a programming error on the wire, and a silent
+ * default would be exactly the hidden convention `file-frame-spindle` removed
+ * (D2).
+ */
+export function formatOfEntry(entry: DirEntry): ModelFormat {
+  const format = entry.format ?? formatOf(entry.path)
+  if (format === null) throw new Error(`not a model: ${entry.path}`)
+  return format
 }
 
 function makeMaterial(): THREE.MeshStandardMaterial {
@@ -29,7 +45,16 @@ function withShadows<T extends THREE.Object3D>(object: T): T {
   return object
 }
 
-/** Parse model bytes into an Object3D with consistent materials. */
+/**
+ * Parse model bytes into an Object3D with consistent materials.
+ *
+ * Models render in their file's own coordinates: no rotation is applied to
+ * any format here. A model stands upright because its spindle defaults to its
+ * format's up convention (`defaultAxisFor`, shared/frames.ts) — STL and 3MF
+ * are Z-up (print bed; 3MF by specification) and get `z`, OBJ is Y-up and gets
+ * `y`. The 3MF loader applies no rotation either (an earlier comment here
+ * claimed it did; `3MFLoader.js` in node_modules rotates nothing).
+ */
 export function parseModel(bytes: ArrayBuffer, format: ModelFormat): THREE.Object3D {
   if (format === 'stl') {
     const geometry = new STLLoader().parse(bytes)
@@ -39,10 +64,6 @@ export function parseModel(bytes: ArrayBuffer, format: ModelFormat): THREE.Objec
     // convention than the vertices. Shade from winding, always (D1).
     geometry.deleteAttribute('normal')
     geometry.computeVertexNormals()
-    // STL is Z-up (print-bed convention); the scene is Y-up. Bake the
-    // conversion into the geometry so models stand upright. (3MFLoader does
-    // this itself; OBJ is conventionally Y-up already.)
-    geometry.rotateX(-Math.PI / 2)
     return withShadows(new THREE.Mesh(geometry, makeMaterial()))
   }
   if (format === 'obj') {
