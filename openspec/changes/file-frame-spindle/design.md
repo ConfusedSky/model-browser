@@ -179,7 +179,8 @@ directory. For an entry with a stored `axis` or `camera` and no `frame` label:
   old code never touches. Sidecars have three writers, all through `writeMeta`: `put`
   (rebuilds fresh), the size-cap write-back in `maintain()` (runs at every server start)
   and the library re-key; the last two spread the previous meta, so they carry the label
-  and only ever advance the mtime of an already-labelled entry.
+  and only ever advance the mtime of a labelled or an unframed entry — never a framed
+  unlabelled one, which is the only shape the refusal keys on.
   On a later run the script **refuses** when the marker exists, a framed sidecar is
   unlabelled, and that sidecar's file mtime is newer than the marker's `at`: the
   conjunction means "a framing written after the migration by code that does not know
@@ -282,11 +283,14 @@ and by the pose mapping (`toSceneSpace` when on), with a pill beside `ssao` labe
 `bake`.
 
 **No thumbnail write reaches any store while the pill exists** — on either side of it
-(Masa, 2026-09-10). Two guards, because one is not enough. The client's is the
-**outermost** decorator on `putThumb` — outside `LocalFramingClient`, so a withheld write
-reaches neither the wire nor `localStorage` (a local framing written under the pill's
-legacy side would be a scene axis stamped as a file one) — and every write path goes
-through it (`useThumbnails`' persist, `ViewerLayer`'s close, `bulkJobs`, the three
+(Masa, 2026-09-10). Two guards, because one is not enough. The client's is the **first
+line of `LocalFramingClient.putThumb`**, before the `keepsFramingsLocally` branch — so a
+withheld write reaches neither the wire nor `localStorage` (a local framing written under
+the pill's legacy side would be a scene axis stamped as a file one). It is not a second
+outer decorator: `LocalFramingClient` is deliberately a class of explicit delegates so a
+new `ApiClient` method fails to compile there, and a throwaway twin of it would be twenty
+one-liners deleted again at 5.2; the first line of the one decorator is outermost for the
+write path, which is the only path that matters. Every write path goes through it (`useThumbnails`' persist, `ViewerLayer`'s close, `bulkJobs`, the three
 `entryActions` commands, the orbit-release persist in `App`). The server's is the
 shipped one: `features.thumbWrites: false` in `~/.config/model-browser/config.json` for
 the test window (restart required), which makes the route refuse. The server-side guard
@@ -294,7 +298,12 @@ exists because the client one only covers bundles that carry it: 3177 serves a s
 `client/dist` whenever one exists (CLAUDE.md), a tab opened before the guard landed keeps
 its bundle, and other sessions restart the dev instance — any of those writes past a
 client-only guard. With the feature off, the shipped `LocalFramingClient` would divert
-framings to `localStorage`, which is why the client guard sits outside it. The reason is the cache key: AO is a key
+framings to `localStorage`, which is why the client guard sits in front of that branch.
+The on-read migration in `readLocalFraming` (D5) is **not** a withheld write: it stores a
+function of what is already stored — a legacy framing's file-convention image plus the
+label — never a pill-side value, since the only path that could store one is `putThumb`,
+so the store converges to the same content whichever side the pill is on. Silencing it
+would break the demo's migration on read. The reason is the cache key: AO is a key
 *dimension* (`<key>.webp` beside `<key>.noao.webp`), so its toggle re-keys and needs no
 invalidation, but the bake has no key dimension — both conventions would file pixels
 under one key, and `statusFor` never checks the axis, so a legacy-convention render
@@ -378,11 +387,13 @@ finding none of them.
 ## Migration Plan
 
 1. Capture the OBJ baselines from the spike worktree (D6) while the old code exists.
-2. Land the code with the pill in place. The server writes nothing while the pill exists
-   (D7), so the cache on this machine is untouched through the whole test window.
-3. Set `features.thumbWrites: false` in the local config and restart the dev instance;
-   `rm -rf client/dist`. Masa's test window: the pill on and off against the real library;
-   the harness passes against its baselines with the pill off (the harness only reads).
+2. Set `features.thumbWrites: false` in the local config, `rm -rf client/dist`, restart
+   the dev instance — **before** the code lands, so the server never runs the new code
+   with only the client guard.
+3. Land the code with the pill in place; both guards are in force (D7), so the cache on
+   this machine is untouched through the whole test window. Masa's test window: the pill
+   on and off against the real library; the harness passes against its baselines with the
+   pill off (the harness only reads).
 4. Stop the dev server. Both guards were in force through the window, so nothing wrote. Run `bun run scripts/migrate-frames.ts` over every
    directory in `~/.cache/model-browser/`; record each run's counts in tasks.
 5. Remove the pill, the legacy paths and the guard; suites and the harness green.

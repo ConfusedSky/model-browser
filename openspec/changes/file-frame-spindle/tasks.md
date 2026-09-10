@@ -97,16 +97,19 @@
       `ssao`, same shape; flipping closes the lightbox and the orbit overlay and drops the
       thumbs map; the flag mirrors into React state like `ssao`; `BulkJobs` and
       `createHoverWarmer` take `lru` as a getter (the `ao` precedent). **`putThumb` is
-      withheld while the pill exists**, on either side, by the outermost client decorator
-      (outside `LocalFramingClient`, so nothing reaches `localStorage` either). Cells: the
+      withheld while the pill exists**, on either side, by the first line of
+      `LocalFramingClient.putThumb` (before the local branch, so nothing reaches
+      `localStorage` from a PUT either; the on-read migration's write-back is not a PUT
+      and stays, D7). Cells: the
       flag off is the default; on, an STL parses rotated and a model still loads (falsify:
       pass the wrong `bake` → the bounding box flips); the two instances hold separate
       parses of one path; a flip re-renders and the warmer's next call reaches the other
-      instance; no PUT and no local write with the pill off either (falsify by removing
-      the guard)
-- [ ] 3.2 Preconditions: `features.thumbWrites: false` in `~/.config/model-browser/config.json`,
-      dev instance restarted, `rm -rf client/dist`, no other browser on 3177 (a pre-guard
-      bundle would write past the client guard; the server's refusal is the belt).
+      instance; no framing is stored from a `putThumb`, on the wire or locally, with the
+      pill off either (falsify by removing the guard)
+- [ ] 3.2 Preconditions, set **before 3.1 lands** (Migration Plan step 2):
+      `features.thumbWrites: false` in `~/.config/model-browser/config.json`, dev instance
+      restarted, `rm -rf client/dist`, no other browser on 3177 (a pre-guard bundle would
+      write past the client guard; the server's refusal is the belt).
       Masa's test window: the pill on and off over the real library — Pikachu (stored
       camera + axis), Main_Complete (`-z` stored), Benchy (posed, no framing), Head
       (`+Y` posed), an OBJ if one is at hand. Known during the window (D7): an orbit is
