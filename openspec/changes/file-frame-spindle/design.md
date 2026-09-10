@@ -167,20 +167,33 @@ directory. For an entry with a stored `axis` or `camera` and no `frame` label:
   (keyed by the OBJ's **unchanged** axis: `x` −90°, `-x` +90°, `z` +90°, `-z` −90°, `y`
   and `-y` 0°; the sign matches `captureState`'s `az = atan2(dir·a, dir·b)`, azimuth
   measured from `b` toward `a`);
-- writes `frame: 2` (1 being the unlabelled scene-axis convention) atomically, the way
-  the cache writes sidecars, and reports counts: read, migrated by relabel, migrated by
+- writes `frame: 2` (1 being the unlabelled scene-axis convention) with a plain
+  `writeFile`, the way `writeMeta` does (truncate-and-write, not temp+rename — the cache
+  has never written sidecars atomically, and a sidecar is one small JSON whose loss the
+  next write repairs); either way the file's mtime advances, which the marker below
+  relies on. Reports counts: read, migrated by relabel, migrated by
   offset, label-only (camera without axis — 0 of the 74 on this machine, so 5.2's
   recorded zero is expected and the unit cell is what exercises the branch), already
   labelled, unclassifiable, skipped (no framing);
 - writes `<cache-dir>/.frame-migration.json` — `{convention: 2, at, counts}` — a file
-  old code never touches (old `put` rebuilds sidecars, nothing else in the directory).
+  old code never touches. Sidecars have three writers, all through `writeMeta`: `put`
+  (rebuilds fresh), the size-cap write-back in `maintain()` (runs at every server start)
+  and the library re-key; the last two spread the previous meta, so they carry the label
+  and only ever advance the mtime of an already-labelled entry.
   On a later run the script **refuses** when the marker exists, a framed sidecar is
   unlabelled, and that sidecar's file mtime is newer than the marker's `at`: the
   conjunction means "a framing written after the migration by code that does not know
   the label", which is a rolled-back server, and relabelling it would turn a file axis
   into `-y`. Unlabelled sidecars older than the marker are the ordinary unframed ones
-  the script skipped. (An earlier draft keyed this on `rig`; `RIG_VERSION` is 7 before
-  and after, so that signal could never fire — the reviewer's catch.)
+  the script skipped. The refusal names the offending sidecars and says the other way
+  it can happen: a directory copied without preserving mtimes (`cp -r` rather than
+  `cp -a` or `rsync -a`, or a restore) resets every sidecar's mtime past the marker's
+  `at`, and the script refuses a good directory — safe, never corrupting, but the
+  operator needs the message to say so. mtime is a sound signal otherwise: `writeMeta`
+  always rewrites the whole file, `utimes` touches render files only (a read never
+  advances a sidecar), and the script's own writes land on entries it labels. (An
+  earlier draft keyed this on `rig`; `RIG_VERSION` is 7 before and after, so that signal
+  could never fire — the reviewer's catch.)
 
 **Cached renders are not deleted.** Under strategy B the relabelled axis with the
 untouched camera draws the same view (D3's measurement), so the 74 renders on this
@@ -268,11 +281,20 @@ flag `legacyBake` (`three/bakeToggle.ts`, mirroring `viewer/aoToggle.ts`) read b
 and by the pose mapping (`toSceneSpace` when on), with a pill beside `ssao` labelled
 `bake`.
 
-**No thumbnail write reaches the server while the pill exists** — on either side of it
-(Masa, 2026-09-10). One guard at `ApiClient.putThumb`, which every write path goes
-through (`useThumbnails`' persist, `ViewerLayer`'s close, `bulkJobs`, the three
-`entryActions` commands, the orbit-release persist in `App`), the way the demo's
-`thumbWrites: false` withholds them. The reason is the cache key: AO is a key
+**No thumbnail write reaches any store while the pill exists** — on either side of it
+(Masa, 2026-09-10). Two guards, because one is not enough. The client's is the
+**outermost** decorator on `putThumb` — outside `LocalFramingClient`, so a withheld write
+reaches neither the wire nor `localStorage` (a local framing written under the pill's
+legacy side would be a scene axis stamped as a file one) — and every write path goes
+through it (`useThumbnails`' persist, `ViewerLayer`'s close, `bulkJobs`, the three
+`entryActions` commands, the orbit-release persist in `App`). The server's is the
+shipped one: `features.thumbWrites: false` in `~/.config/model-browser/config.json` for
+the test window (restart required), which makes the route refuse. The server-side guard
+exists because the client one only covers bundles that carry it: 3177 serves a stale
+`client/dist` whenever one exists (CLAUDE.md), a tab opened before the guard landed keeps
+its bundle, and other sessions restart the dev instance — any of those writes past a
+client-only guard. With the feature off, the shipped `LocalFramingClient` would divert
+framings to `localStorage`, which is why the client guard sits outside it. The reason is the cache key: AO is a key
 *dimension* (`<key>.webp` beside `<key>.noao.webp`), so its toggle re-keys and needs no
 invalidation, but the bake has no key dimension — both conventions would file pixels
 under one key, and `statusFor` never checks the axis, so a legacy-convention render
@@ -281,6 +303,16 @@ well as framings closes that, and it also closes the window D5's label rule guar
 nothing the test session does can stamp or strip a label. The migration script deletes
 renders for framed entries (D5); un-framed entries were rendered about the default, whose
 new frame is the old one, so their pixels stay valid.
+
+The flag mirrors into React state the way `ssao` does (`useState(aoEnabled)` beside the
+module flag, both set on click), so a flip re-renders `App` — without that no consumer
+would ever be handed the other instance. Consumers that memoise over `lru` take it as a
+**getter** (`lru: () => MeshLru`), the precedent `BulkJobs` already sets for `ao`:
+`BulkJobs`'s construction and `createHoverWarmer`'s closure both capture the value today
+and would keep the old instance (or rebuild a job mid-run) after a flip. `useThumbnails`
+keeps `lru` in its sweep deps, so a flip tears the sweep down and restarts it, cancelling
+in-flight lookups — accepted, since the flip drops the thumbs map anyway. `ViewerLayer`
+re-runs its open effect, and the flip closes it first.
 
 Flipping the pill does not clear the mesh LRU: `MeshLru.clear` has no in-use guard, and
 the grid's orbit overlay and any in-flight thumbnail render hold acquired objects across
@@ -348,10 +380,10 @@ finding none of them.
 1. Capture the OBJ baselines from the spike worktree (D6) while the old code exists.
 2. Land the code with the pill in place. The server writes nothing while the pill exists
    (D7), so the cache on this machine is untouched through the whole test window.
-3. Masa's test window: the pill on and off against the real library; the harness passes
-   against its baselines with the pill off (the harness only reads).
-4. Stop the dev server **with the write guard still in the code**, so no server that ran
-   in between could have written. Run `bun run scripts/migrate-frames.ts` over every
+3. Set `features.thumbWrites: false` in the local config and restart the dev instance;
+   `rm -rf client/dist`. Masa's test window: the pill on and off against the real library;
+   the harness passes against its baselines with the pill off (the harness only reads).
+4. Stop the dev server. Both guards were in force through the window, so nothing wrote. Run `bun run scripts/migrate-frames.ts` over every
    directory in `~/.cache/model-browser/`; record each run's counts in tasks.
 5. Remove the pill, the legacy paths and the guard; suites and the harness green.
 6. Start the server. Open models with stored framings (Pikachu, Main_Complete) and confirm

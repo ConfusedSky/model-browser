@@ -63,10 +63,11 @@
       sidecar without it reads as before
 - [ ] 2.2 `scripts/migrate-frames.ts <cache-dir> [--undo]` (D5): walks sidecars, applies
       `migrateAxis` / `swapOffset` by `formatOf(path)`, stamps `frame: 2`, writes
-      atomically, leaves render files alone, writes `.frame-migration.json`, reports the
-      seven counts; an unclassifiable path is reported and untouched; refuses when the
-      marker exists and a framed sidecar is unlabelled with a file mtime newer than the
-      marker's `at` (a rolled-back server, Risks), naming the sidecars. Cells (server/test,
+      with plain `writeFile` like `writeMeta`, leaves render files alone, writes
+      `.frame-migration.json`, reports the seven counts; an unclassifiable path is
+      reported and untouched; refuses when the marker exists and a framed sidecar is
+      unlabelled with a file mtime newer than the marker's `at` (a rolled-back server,
+      Risks), naming the sidecars and the copied-without-mtimes case. Cells (server/test,
       over a temp cache dir): an STL `y` + camera → `z`, camera untouched, render files
       untouched; an STL `-z` → `y`; an STL camera with no axis → label only, axis still
       absent (falsify: default a missing axis to `y` → fails); an OBJ `z` + camera → `z`,
@@ -94,12 +95,19 @@
       at call time (`ViewerLayer`, `useThumbnails`, `bulkJobs`, the hover warmer, the 3MF
       placeholder hook) — keys stay bare paths, nothing is cleared. Pill `bake` beside
       `ssao`, same shape; flipping closes the lightbox and the orbit overlay and drops the
-      thumbs map. **`ApiClient.putThumb` is withheld while the pill exists**, on either
-      side — one guard, the `thumbWrites` shape. Cells: the flag off is the default; on,
-      an STL parses rotated and a model still loads (falsify: pass the wrong `bake` →
-      the bounding box flips); the two instances hold separate parses of one path; no
-      PUT is sent with the pill off either (falsify by removing the guard)
-- [ ] 3.2 Masa's test window: the pill on and off over the real library — Pikachu (stored
+      thumbs map; the flag mirrors into React state like `ssao`; `BulkJobs` and
+      `createHoverWarmer` take `lru` as a getter (the `ao` precedent). **`putThumb` is
+      withheld while the pill exists**, on either side, by the outermost client decorator
+      (outside `LocalFramingClient`, so nothing reaches `localStorage` either). Cells: the
+      flag off is the default; on, an STL parses rotated and a model still loads (falsify:
+      pass the wrong `bake` → the bounding box flips); the two instances hold separate
+      parses of one path; a flip re-renders and the warmer's next call reaches the other
+      instance; no PUT and no local write with the pill off either (falsify by removing
+      the guard)
+- [ ] 3.2 Preconditions: `features.thumbWrites: false` in `~/.config/model-browser/config.json`,
+      dev instance restarted, `rm -rf client/dist`, no other browser on 3177 (a pre-guard
+      bundle would write past the client guard; the server's refusal is the belt).
+      Masa's test window: the pill on and off over the real library — Pikachu (stored
       camera + axis), Main_Complete (`-z` stored), Benchy (posed, no framing), Head
       (`+Y` posed), an OBJ if one is at hand. Known during the window (D7): an orbit is
       not durable across navigation, the library tab's reset count moves for framings
@@ -123,8 +131,8 @@
 
 ## 5. Migrate, remove, land
 
-- [ ] 5.1 Stop the dev server **with the write guard still in the code** (Migration Plan
-      step 4); `bun run scripts/migrate-frames.ts` over **every** directory in
+- [ ] 5.1 Stop the dev server (both guards were in force through the window, Migration
+      Plan step 4); `bun run scripts/migrate-frames.ts` over **every** directory in
       `~/.cache/model-browser/` (four on 2026-09-10 — 18,428 / 1,507 / 122 / 40 sidecars,
       74 framed entries in all — 54 camera+axis, 20 axis-only, 0 camera-only — all STL,
       `0f680186` the only one with `x`-family axes); record each run's seven counts here
@@ -132,8 +140,10 @@
       same counts both ways
 - [ ] 5.2 Delete the pill, `bakeToggle.ts`, the second LRU and the loader's `bake`
       argument, the legacy table, the legacy pose mapping and every branch on the flag,
-      including the `putThumb` guard; `grep -rn "legacyBake\|bakeToggle\|toSceneSpace\|bakeLru"
-      client/src` is empty; suites green; 4.2 re-run; start the server; open Pikachu and
+      including the `putThumb` guard and the getters' second instance;
+      `grep -rn "legacyBake\|bakeToggle\|toSceneSpace\|bakeLru\|meshLoader(" client/src` is
+      empty and `parseModel` is back to two parameters; suites green; 4.2 re-run; restore
+      `thumbWrites` in the local config and restart; start the server; open Pikachu and
       Main_Complete and confirm the stored view is the one shown and their cached renders
       are served as hits (no re-render)
 - [ ] 5.3 `bun run typecheck` and both suites green on merged main
