@@ -5,6 +5,14 @@
       `out/` holds them only inside contact sheets), beside the eleven STL `*_C0.png`
       there (522,728 bytes), into `scripts/frame-ab/baseline/` with the spike's
       `results.json` as the record of the run. After 1.3 lands, C0 cannot be regenerated
+      *(2026-09-10: done in the spike worktree, commit `621e333` — `spike/frame-ab/baseline/`,
+      15 files, 574,622 bytes; STL subtotal 522,728 as recorded. The OBJ frames differ
+      from the committed contact sheets by 1,860 / 2,969 px (max 15 / 18): the AO pass's
+      noise is unseeded per process (`GTAOPass` → `SimplexNoise` → `Math.random`), so
+      AO-on renders are not bit-exact across processes; AO-off renders are 0/0 across
+      three processes. Recorded in D6; the tolerance widened to 5 % with the `-noao`
+      frames carrying the tight check. Follow-up before 1.3 merges: capture
+      `OBJ_axis_{y,z}-noao_C0.png` too. 4.1 moves the set to `scripts/frame-ab/baseline/`)*
 - [ ] 0.2 **Masa, before any of §1–§3 lands** (Migration Plan step 2): `features.thumbWrites:
       false` in `~/.config/model-browser/config.json`, `rm -rf client/dist`, restart the dev
       instance (other sessions may own it — say so in the session), no other browser on
@@ -143,8 +151,9 @@
 - [ ] 4.1 `scripts/frame-ab/`: `run.mjs`, the page, the sample list, the OBJ fixture
       generator, the diff and contact sheet; a config file for the playwright-core and
       chromium paths; a README naming the port, the config, the tolerance and its basis
-      (≤ 2 % pixels, no delta > 96 — measured ≤ 1.8 % / ≤ 60, count spread 6.4 % across
-      processes), and stating plainly that the STL samples are this machine's library
+      (≤ 5 % pixels, no delta > 96, with the `-noao` frames at ≤ 2 % — the bake residual
+      is ≤ 1.8 % / ≤ 60 and the AO pass adds an unseeded-noise floor across processes,
+      D6), and stating plainly that the STL samples are this machine's library
       through a live dev server and only the OBJ fixture travels; the page at
       `client/spike/ab.{html,ts}`, served by `bunx vite --port 5174 --strictPort` from
       `client/`, `spike` added to `client/tsconfig.json`'s `include`;

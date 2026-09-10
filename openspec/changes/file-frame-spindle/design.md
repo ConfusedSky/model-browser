@@ -128,7 +128,8 @@ today's table, and the table moved for four of six spindles. Measured on the L-b
 untouched), 36,716 px / 255 at spindle `z`, restored to 0/0 by the swap offset. The
 migration (D5) covers it.
 
-**Not pixel-identical, and why that is fine.** CB differs from C0 on 0.4–1.8 % of pixels
+**Not pixel-identical, and why that is fine.** (Within one process; across processes an
+AO-noise floor sits on top — D6.) CB differs from C0 on 0.4–1.8 % of pixels
 per STL (240–1147 of 65,536), max channel delta 28–60, mean ≈ 4, 73–85 % of them on an
 edge already present in the baseline. Isolated by elimination: with the key light not
 casting, three of four samples go to 0/0 and the fourth from 1008 to 53 (to 4 with AO off);
@@ -289,13 +290,23 @@ the harness supports is "the same picture on the machine the change was measured
 a machine without the library can run the OBJ fixture alone, which pins the frame math
 but not the shadow residual.
 
-**Tolerance**: ≤ 2 % of pixels differing and no channel delta above **96**. The measured
-residual is ≤ 1.8 % and ≤ 60; the count's cross-process spread in the spike's five
-launches was 235–250 on the cube, a 6.4 % spread (the spike report's "≈ 1 %" was wrong,
-the reviewer's arithmetic), and the magnitude is driver codegen the change does not
-control, so 64 gave 6 % headroom on the number most likely to move. 96 is a bound on
-"a shadow edge moved a texel", still far below the 255 a rotated model produces; the
-README records this basis so a later widening has to argue against it. The runtime
+**Tolerance**: ≤ 5 % of pixels differing and no channel delta above **96**. The measured
+bake residual is ≤ 1.8 % and ≤ 60. On top of it sits a floor the spike did not see
+because it measured within one process: **the AO pass is not deterministic across
+browser processes.** `GTAOPass` builds its noise texture from an unseeded
+`SimplexNoise`, whose permutation table comes from `Math.random`, so two processes
+render the same scene with different AO noise — measured by the task-0.1 worker on the
+L-bracket, three fresh processes, AO on: 1,788–3,035 px / max 14–27 between any pair;
+AO off: 0/0 on every pair, both spindles. That is also the spike's "≈ 6 % count wobble"
+across launches. Since the harness compares a fresh process against stored baselines,
+the AO-on floor (up to ≈ 4.6 % of 65,536) is inside the bound, hence 5 %; the two
+`-noao` STL frames and an AO-off OBJ frame are the harness's bit-exact comparisons and
+carry the tight check (≤ 2 %, the bake residual alone). 96 on the magnitude is a bound
+on "a shadow edge moved a texel" plus AO noise (≤ 27), still far below the 255 a
+rotated model produces; the README records this basis so a later widening has to argue
+against it. The OBJ frames in `baseline/` are one process's sample of the AO noise;
+`OBJ_axis_{y,z}-noao_C0.png` should be captured beside them (task 0.1 follow-up) so the
+OBJ check can be exact too. The runtime
 switches the spike added (`setBake`, `setFrames`, `setPoseMapping`, `setShadows`,
 `setThumbSamples`) do **not** ship; the harness compares against stored baselines
 instead. `renderThumbnailCanvas` (the lossless read-back) does ship, as the harness's
