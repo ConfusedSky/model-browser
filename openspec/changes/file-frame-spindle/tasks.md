@@ -85,7 +85,7 @@
       (falsify: drop `frame` from the write → fails); a read under a storage that refuses
       writes still serves the transformed framing; two reads in one tick agree
 
-## 3. The compare pill (temporary — D7; deleted in 5.1)
+## 3. The compare pill (temporary — D7; deleted in 5.2)
 
 - [ ] 3.1 `three/bakeToggle.ts` module flag; `parseModel(bytes, format, bake)` takes the
       convention as an argument; the frame lookup uses the legacy table when on; the pose
