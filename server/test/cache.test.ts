@@ -18,7 +18,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ThumbGetResponse } from '../../shared/types'
 import { createApp } from '../src/app'
-import { StaleWriteError, ThumbCache } from '../src/cache'
+import { FRAME_CONVENTION, StaleWriteError, ThumbCache } from '../src/cache'
 import { LOOPBACK, libraryFor, makeFixtures, realTempDir } from './helpers'
 
 const cleanups: string[] = []
@@ -1634,5 +1634,118 @@ describe('deletion and conditional writes', () => {
     } finally {
       maintain.mockRestore()
     }
+  })
+})
+
+describe('frame label', () => {
+  // The sidecar as it is on disk — a raw record, not a `Meta`, because what
+  // these cells assert is the JSON text's *shape*: whether a `frame` key is
+  // present at all, not what an absent one reads as.
+  const readSidecar = (cache: ThumbCache): Record<string, unknown> =>
+    JSON.parse(readFileSync(onlyFile(cache.dir, '.json'), 'utf8')) as Record<string, unknown>
+
+  /**
+   * Strip the label from the one sidecar on disk — an entry written by a
+   * server that knew no label, which is what every framed sidecar was before
+   * this change. Forged from a real write rather than hand-built so it carries
+   * exactly the shape `put` writes for everything else.
+   */
+  const unlabel = (cache: ThumbCache): void => {
+    const file = onlyFile(cache.dir, '.json')
+    const { frame: _frame, ...rest } = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>
+    writeFileSync(file, JSON.stringify(rest))
+  }
+
+  const fixture = (): { cache: ThumbCache; path: string } => {
+    const cache = tempCache()
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    return { cache, path: join(fx.dir, 'loose.stl') }
+  }
+
+  it('a write carrying a camera stamps the file convention', async () => {
+    const { cache, path } = fixture()
+    await cache.put(path, { mtime: 1, png: PNG_A, camera: CAM })
+    expect(readSidecar(cache).frame).toBe(FRAME_CONVENTION)
+    expect(FRAME_CONVENTION).toBe(2)
+  })
+
+  it('a write carrying only an axis stamps it too', async () => {
+    const { cache, path } = fixture()
+    await cache.put(path, { mtime: 1, axis: '-x' })
+    expect(readSidecar(cache).frame).toBe(2)
+  })
+
+  it('a discard states the framing, and stamps it', async () => {
+    const { cache, path } = fixture()
+    await cache.put(path, { mtime: 1, png: PNG_A })
+    expect('frame' in readSidecar(cache)).toBe(false)
+    await cache.put(path, { mtime: 1, camera: null })
+    expect(readSidecar(cache).frame).toBe(2)
+  })
+
+  it('a pixels-only write on an unlabelled stored axis preserves the axis and the absence of the label', async () => {
+    // The scenario "A pixels-only write does not claim migration": the write
+    // is silent on both orientation fields, so `merged` keeps a scene axis as
+    // it was — and a label stamped here would tell the migration tool the
+    // axis is already a file axis, when nothing turned it. This is the cell
+    // that fails if `frame` is stamped on every write.
+    const { cache, path } = fixture()
+    await cache.put(path, { mtime: 1, png: PNG_A, axis: '-z' })
+    unlabel(cache)
+    expect('frame' in readSidecar(cache)).toBe(false)
+
+    await cache.put(path, { mtime: 2, png: PNG_NEW, rig: 2 })
+    const sidecar = readSidecar(cache)
+    expect(sidecar.axis).toBe('-z')
+    expect('frame' in sidecar).toBe(false)
+    // …and not written as `null` either: the key is absent from the text.
+    expect(readFileSync(onlyFile(cache.dir, '.json'), 'utf8')).not.toContain('"frame"')
+    expect((await cache.get(path, 2)).axis).toBe('-z')
+  })
+
+  it('a pixels-only write on a labelled entry keeps the label', async () => {
+    const { cache, path } = fixture()
+    await cache.put(path, { mtime: 1, png: PNG_A, camera: CAM, axis: 'z' })
+    await cache.put(path, { mtime: 2, png: PNG_NEW, rig: 2 })
+    const sidecar = readSidecar(cache)
+    expect(sidecar.frame).toBe(2)
+    expect(sidecar.axis).toBe('z')
+    // The sibling render's write is a pixels-only write too.
+    await cache.put(path, { mtime: 2, png: PNG_B, ao: false, rig: 2 })
+    expect(readSidecar(cache).frame).toBe(2)
+  })
+
+  it('the deletion branch keeps the label when it states no framing', async () => {
+    // `png: null` takes its own branch with its own hand-built sidecar; the
+    // scenario "Silence still preserves" reaches it as much as the main write.
+    // This is the cell that fails if that branch's object drops `frame`.
+    const { cache, path } = fixture()
+    await cache.put(path, { mtime: 1, png: PNG_A, camera: CAM })
+    await cache.put(path, { mtime: 1, png: null })
+    const sidecar = readSidecar(cache)
+    expect(sidecar.frame).toBe(2)
+    expect(sidecar.camera).toEqual(CAM)
+    // And a deletion that *does* state the framing stamps it, as any write does.
+    unlabel(cache)
+    await cache.put(path, { mtime: 1, png: null, camera: null })
+    expect(readSidecar(cache).frame).toBe(2)
+  })
+
+  it('an old sidecar without the label reads back exactly as before, and the wire never carries it', async () => {
+    const { cache, path } = fixture()
+    await cache.put(path, { mtime: 1, png: PNG_A, camera: CAM, axis: '-z', rig: 2, lighting: 'camera' })
+    unlabel(cache)
+    const res = await cache.get(path, 1)
+    expect(res.status).toBe('hit')
+    expect(res.camera).toEqual(CAM)
+    expect(res.axis).toBe('-z')
+    expect(res.rig).toBe(2)
+    expect('frame' in res).toBe(false)
+    // A labelled one answers the same: the label is the sidecar's, not the
+    // response's — `ThumbGetResponse` is unchanged.
+    await cache.put(path, { mtime: 1, camera: CAM })
+    expect(readSidecar(cache).frame).toBe(2)
+    expect('frame' in (await cache.get(path, 1))).toBe(false)
   })
 })

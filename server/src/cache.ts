@@ -38,8 +38,24 @@ interface RenderLabels {
 interface Meta extends RenderLabels {
   path: string
   camera?: CameraState
-  /** Orbit spindle axis; undefined reads as 'y' (pre-axis entries). */
+  /**
+   * Orbit spindle axis; undefined means no stored axis. What the entry is then
+   * rendered about is the caller's — the format's default — not this store's.
+   */
   axis?: OrbitAxis
+  /**
+   * The convention the stored `axis` is in (`file-frame-spindle` D5):
+   * `FRAME_CONVENTION` (2) = the file's own axes; absent = the scene
+   * convention that preceded it (STL/3MF axes a quarter turn from the file's),
+   * which is never written as a value. Stored and carried, never interpreted
+   * by the server — the migration script keys on this field's *absence*.
+   *
+   * Written only by a write that states the entry's framing (a camera or an
+   * axis, a value or a discard). A pixels-only write keeps `prev.axis` through
+   * `merged` and would otherwise stamp a still-scene axis as migrated, so it
+   * carries `prev.frame` instead.
+   */
+  frame?: number
   /** The unoccluded sibling's labels; absent when it is not cached. */
   noao?: RenderLabels
   /**
@@ -62,6 +78,13 @@ interface Meta extends RenderLabels {
    */
   gen?: number
 }
+
+/**
+ * The frame label a framing write stamps: the stored axis is in the file's own
+ * axes (`file-frame-spindle` D5). The convention before it, 1, is never
+ * written — an absent label is what names it.
+ */
+export const FRAME_CONVENTION = 2
 
 /**
  * The merge for a three-state field: a value **sets** it, silence **keeps**
@@ -586,6 +609,17 @@ export class ThumbCache {
       throw new StaleWriteError(prev?.gen ?? 0)
     }
 
+    // The frame label (D5): stamped by any write that *states* the framing — a
+    // camera or an axis, a value or a `null` discard, since a discard states
+    // it as much as a value does — and carried unchanged by every other. A
+    // pixels-only write is silent on both fields, so `merged` keeps the stored
+    // axis as it was, in whatever convention it was in: stamping it here would
+    // relabel a scene axis as a file axis without turning it. Both hand-built
+    // sidecars below take this; `undefined` is dropped by `JSON.stringify`, so
+    // an unlabelled entry stays unlabelled on disk.
+    const statesFraming = opts.camera !== undefined || opts.axis !== undefined
+    const frame = statesFraming ? FRAME_CONVENTION : prev?.frame
+
     // Deletion (`bulk-thumbnail-jobs` D3) — a branch of its own, deliberately,
     // never a `null` threaded through the `opts.png !== undefined` tests below.
     // Every one of those would read `null` as pixels: it would adopt this
@@ -619,6 +653,7 @@ export class ThumbCache {
         path,
         camera: merged(opts.camera, prev?.camera),
         axis: merged(opts.axis, prev?.axis),
+        frame,
         gen,
       })
       return gen
@@ -700,6 +735,7 @@ export class ThumbCache {
       ...occluded,
       camera,
       axis,
+      frame,
       gen,
       // Omitted rather than written empty, so an entry that has never held an
       // unoccluded render keeps exactly the sidecar shape it had before this
