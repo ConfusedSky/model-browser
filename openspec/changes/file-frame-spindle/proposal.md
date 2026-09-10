@@ -60,8 +60,9 @@ what the index reports should agree without a mapping.
 
 ### Modified Capabilities
 
-- `model-viewer`: *Per-model orbit spindle* — the spindle is a file axis and the default is
-  the format's convention, not +Y.
+- `model-viewer`: *Upright model display* — no parse-time conversion for any format;
+  upright follows from the spindle default; *Per-model orbit spindle* — the spindle is a
+  file axis and the default is the format's convention, not +Y.
 - `model-thumbnails`: *Camera state stored alongside thumbnails* — a missing axis is
   rendered as the format's default; stored axes are file axes; entries written before
   this change are migrated once and labelled.
@@ -70,7 +71,8 @@ what the index reports should agree without a mapping.
 
 ## Impact
 
-- Client: `three/models.ts` (the bake), `three/camera.ts` (`FRAMES`, and a
+- Client: `shared/frames.ts` (new: the frames as plain triples, the derivation, the
+  migration arithmetic), `three/models.ts` (the bake), `three/camera.ts` (`FRAMES`, and a
   `defaultAxisFor(format)`), `three/pose.ts` (`toSceneSpace` deleted, `axisOf` an exact
   lookup on the file vector), the sixteen `'y'` fallbacks (`camera`, `renderer`,
   `session`, `ViewerLayer`, `useThumbnails`, `bulkJobs`, `entryActions`, `App`) through
@@ -80,7 +82,7 @@ what the index reports should agree without a mapping.
 - Server: `cache.ts` (`frame` label on the sidecar, carried through `put`, never interpreted; not
   on the wire — no client reads it).
 - Scripts: `scripts/migrate-frames.ts` (one-shot over a cache directory), `scripts/frame-ab/`
-  (the A/B harness, from the spike).
+  and `client/spike/ab.{html,ts}` (the A/B harness and its page, from the spike).
 - Tests: camera/pose/models units (frames, defaults, migration transform), client cells for
   the pickers' labels and the default spindle per format, server cells for the label, the
   A/B harness as a task with recorded numbers.

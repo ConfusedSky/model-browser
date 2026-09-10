@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Upright model display
-Models SHALL be displayed in their file's own coordinates: no conversion SHALL be applied to geometry at parse time for any format. A model stands upright because its spindle defaults to its format's up convention — +Z for STL and 3MF, +Y for OBJ — as *Per-model orbit spindle* defines, and that default applies everywhere a model is rendered: thumbnails, orbit overlay, and lightbox.
+Models SHALL be displayed in their file's own coordinates: no conversion SHALL be applied to geometry at parse time for any format. A model stands upright because its spindle defaults to its file format's up convention, as *Per-model orbit spindle* defines, and that default applies everywhere a model is rendered: thumbnails, orbit overlay, and lightbox.
 
 #### Scenario: STL stands upright
 - **WHEN** an STL exported from a slicer (Z-up) is thumbnailed or opened

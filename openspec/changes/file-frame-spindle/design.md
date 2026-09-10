@@ -157,7 +157,7 @@ the picture the code would render after it.
 
 ### D5: One-shot migration script, and a frame label
 
-`scripts/migrate-frames.ts <cache-dir> [--undo]` walks every sidecar in a library's cache
+`scripts/migrate-frames.ts --cache-dir <dir> [--undo]` walks every sidecar in a library's cache
 directory. For an entry with a stored `axis` or `camera` and no `frame` label:
 - format from the sidecar's `path` extension (`formatOf`; a path it cannot classify is
   reported and left untouched — never guessed);
@@ -179,7 +179,7 @@ directory. For an entry with a stored `axis` or `camera` and no `frame` label:
   next write repairs); either way the file's mtime advances, which the marker below
   relies on. Reports counts: read, migrated by relabel, migrated by
   offset, label-only (camera without axis — 0 of the 74 on this machine, so 5.2's
-  recorded zero is expected and the unit cell is what exercises the branch), already
+  recorded zero in 5.1 is expected and the unit cell is what exercises the branch), already
   labelled, unclassifiable, skipped (no framing);
 - writes `<cache-dir>/.frame-migration` — JSON `{convention: 2, at, counts}`, **no
   `.json` extension**: `maintain()`'s existence sweep, the size-cap sweep and
@@ -244,7 +244,9 @@ pure) for an entry without the label, written back labelled, sharing the functio
 the script so there is one implementation. **Where they live**: `shared/frames.ts`, with
 the six frames as plain `[number, number, number]` triples, the derivation (`unbake`,
 the re-key, `migrateAxis`, `swapOffset`) as plain arithmetic, and no import of `three`.
-`shared/` is types-only today and is compiled by both `tsconfig`s, and the server's
+`shared/` already carries runtime values (`CAMERA_EPSILON`, which `server/src/cache.ts`
+imports as a value; `shared/names.ts`'s `baseName`), so a value module there is
+established practice; both `tsconfig`s include `../shared`, and the server's
 (`"types": ["node"]`) has no `three`; the script is typechecked under the server project
 because `server/test` imports it, so a `three` import anywhere on that path breaks
 `bun run typecheck`. `camera.ts` builds its `THREE.Vector3` `FRAMES` from the shared
@@ -378,9 +380,12 @@ skipped, since `putThumb`'s `{dropped: true}` reads as `skipped`. Task 3.2 says 
 that was already migrated in an earlier session is read under legacy frames and shows a
 quarter turn off. That is accepted for a test-only pill and recorded here; the server
 cache is not exposed to it because both guards hold through the window (Migration
-Plan). The pill, the flag, the legacy table, the second LRU instance, `parseModel`'s
-`bake` argument and `toSceneSpace` are deleted in the change's last code task, and the
-archive dry run is gated on `grep` finding none of them.
+Plan). The pill, the flag, the pill's legacy frame **lookup**, the second LRU instance,
+`parseModel`'s `bake` argument and `toSceneSpace` are deleted in the change's last code
+task, and the archive dry run is gated on `grep` finding none of them. The pre-bake
+triples in `shared/frames.ts` are **not** deleted: `migrateAxis` and `swapOffset` are
+derived from the old table and the new, and the browser store's on-read migration (D5)
+is a permanent path, not a test-window one.
 
 ## Risks / Trade-offs
 
@@ -423,8 +428,9 @@ archive dry run is gated on `grep` finding none of them.
    this machine is untouched through the whole test window. Masa's test window: the pill
    on and off against the real library; the harness passes against its baselines with the
    pill off (the harness only reads).
-4. Stop the dev server. Both guards were in force through the window, so nothing wrote. Run `bun run scripts/migrate-frames.ts` over every
-   directory in `~/.cache/model-browser/`; record each run's counts in tasks.
+4. Stop the dev server. Both guards were in force through the window, so nothing wrote.
+   Run `for d in ~/.cache/model-browser/*/; do bun run scripts/migrate-frames.ts --cache-dir "$d"; done`;
+   record each run's counts in tasks.
 5. Remove the pill, the legacy paths and the guard; suites and the harness green.
 6. Start the server. Open models with stored framings (Pikachu, Main_Complete) and confirm
    the stored view is the one shown and their cached renders are served as hits (no

@@ -12,10 +12,10 @@
 
 ## 1. Frames and defaults
 
-- [ ] 1.1 `three/camera.ts`: `FRAMES` becomes the D3 table, derived in code from the
-      current table by R⁻¹ (`unbake(x,y,z) = (x, −z, y)`, re-keyed by the spindle vector's
-      axis) with the derivation kept as the source of truth and the six entries asserted in
-      a unit cell against the design's table; `defaultAxisFor(format: ModelFormat)` (D2) —
+- [ ] 1.1 `FRAMES` becomes the D3 table. The derivation lives once, in `shared/frames.ts`
+      (below): the pre-bake triples, `unbake(x,y,z) = (x, −z, y)`, the re-key by the
+      spindle vector's axis; `three/camera.ts` only lifts the shared triples into
+      `Vector3`s. The six entries asserted in a unit cell against the design's table; `defaultAxisFor(format: ModelFormat)` (D2) —
       an argument that is `null` or `undefined` is a type error, not a default — and
       `formatOfEntry(entry)` in `three/models.ts` (`entry.format ?? formatOf(entry.path)`,
       throwing with the path when neither classifies; cell: a model entry without
@@ -159,15 +159,17 @@
 ## 5. Migrate, remove, land
 
 - [ ] 5.1 Stop the dev server (both guards were in force through the window, Migration
-      Plan step 4); `bun run scripts/migrate-frames.ts` over **every** directory in
+      Plan step 4); `for d in ~/.cache/model-browser/*/; do bun run scripts/migrate-frames.ts --cache-dir "$d"; done` — **every** directory in
       `~/.cache/model-browser/` (four on 2026-09-10 — 18,428 / 1,507 / 122 / 40 sidecars,
       74 framed entries in all — 54 camera+axis, 20 axis-only, 0 camera-only — all STL,
       `0f680186` the only one with `x`-family axes); record each run's seven counts here
       (label-only is expected 0 everywhere); `--undo` then re-run on one id reports the
       same counts both ways
 - [ ] 5.2 Delete the pill, `bakeToggle.ts`, the second LRU and the loader's `bake`
-      argument, the legacy table, the legacy pose mapping and every branch on the flag,
-      including the `putThumb` guard and the getters' second instance;
+      argument, the pill's legacy frame lookup, the legacy pose mapping and every branch
+      on the flag, including the `putThumb` guard and the getters' second instance —
+      **not** `shared/frames.ts`'s pre-bake triples, which `swapOffset` and the permanent
+      on-read migration derive from (D7);
       `grep -rn "legacyBake\|bakeToggle\|toSceneSpace\|bakeLru\|meshLoader(" client/src` is
       empty and `parseModel` is back to two parameters; suites green; 4.2 re-run; restore
       `thumbWrites` in the local config and restart; start the server; open Pikachu and
