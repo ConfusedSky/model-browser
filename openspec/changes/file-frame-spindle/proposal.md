@@ -20,7 +20,7 @@ what the index reports should agree without a mapping.
 - The load-time rotation is removed. A model is rendered in its file's own coordinates,
   and the orbit spindle names a file axis.
 - The default spindle is per format: `+Z` for STL and 3MF (both Z-up by convention), `+Y`
-  for OBJ. One function replaces the fifteen hard-coded `'y'` fallbacks in the client.
+  for OBJ. One function replaces the sixteen hard-coded `'y'` fallbacks in the client.
 - The six spindle frames — the azimuth basis each spindle's camera angles are measured in —
   are redefined as the image of today's frames under the inverse of the bake. Measured
   in the change's own A/B harness: under these frames an STL's stored camera and its
@@ -72,7 +72,7 @@ what the index reports should agree without a mapping.
 
 - Client: `three/models.ts` (the bake), `three/camera.ts` (`FRAMES`, and a
   `defaultAxisFor(format)`), `three/pose.ts` (`toSceneSpace` deleted, `axisOf` an exact
-  lookup on the file vector), the fifteen `'y'` fallbacks (`camera`, `renderer`,
+  lookup on the file vector), the sixteen `'y'` fallbacks (`camera`, `renderer`,
   `session`, `ViewerLayer`, `useThumbnails`, `bulkJobs`, `entryActions`, `App`) through
   a `formatOfEntry` seam, `api/localFramings.ts` (the on-read
   migration), the lightbox and menu axis pickers (unchanged in code — they show the

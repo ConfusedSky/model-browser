@@ -58,13 +58,18 @@ unchanged in code and correct by construction.
 ### D2: Default spindle per format, from one function
 
 `defaultAxisFor(format: ModelFormat): OrbitAxis` in `three/camera.ts` — `z` for `stl` and
-`3mf`, `y` for `obj` — replaces the fifteen `?? 'y'` and `= 'y'` fallbacks: `camera.ts`'s
-`statePosition`, `applyState` and `captureState` (which take `axis` as required instead —
-they have no format in scope); `renderThumbnail`; `ViewerSession`'s constructor;
-`ViewerLayer`'s open, catch, close and discard paths; `useThumbnails`' render site;
-`bulkJobs`' discard path; `entryActions`' `framingAfterDiscard` callers and
-`DEFAULT_ORBIT_AXIS`, retired, whose one consumer in `App` (the tile menu's marked letter,
-`thumbs.get(path)?.axis ?? DEFAULT_ORBIT_AXIS`) takes the entry's format. `OrbitAxis`'s
+`3mf`, `y` for `obj` — replaces the sixteen `?? 'y'` and `= 'y'` fallbacks in two groups.
+**Axis becomes required** where no format is in scope, the default pushed to the caller:
+`camera.ts`'s `statePosition`, `applyState` and `captureState`; `renderThumbnail`
+(`three/renderer.ts`) and `ViewerSession`'s constructor (`viewer/session.ts`), which take
+a parsed `Object3D` and nothing that names the file. **`defaultAxisFor(formatOfEntry(entry))`**
+where an entry is in hand: `ViewerLayer` ×5 — the `sessionAxis` state seed
+(`useState<OrbitAxis>('y')`, which becomes the entry's default at mount), `savedPromise`'s
+resolved branch, its `.then`, its `.catch`, and `liveFramingView`'s `s?.axis ?? axis ?? 'y'`;
+`useThumbnails`' render site; `bulkJobs`' discard path; `entryActions` ×4 — the
+`framingAfterDiscard` callers and `DEFAULT_ORBIT_AXIS`, retired, whose one consumer in
+`App` (the tile menu's marked letter, `thumbs.get(path)?.axis ?? DEFAULT_ORBIT_AXIS`) takes
+the entry's format. `OrbitAxis`'s
 doc comment stops saying "Default 'y'".
 
 `DirEntry.format` is **optional** in `shared/types.ts` ("present when kind === 'model'"),
@@ -91,7 +96,8 @@ different at max delta 255 for every `x`, `-x`, `y`, `-y` sample, the cat side-o
   unchanged axis) — and also patch
   `cameraForPose`, since under today's table its derived offset lands exactly that far
   off (Benchy 90°→0°, bod_test_cube 405°→315°), which would need a `POSE_VERSION` bump
-  and a re-render of every posed thumbnail (3,077 in the primary cache).
+  and a re-render of every posed thumbnail (3,077 sidecars carrying `posed` in the
+  primary cache, the coordinator's census of 2026-09-10 over the same 18,428 sidecars).
 - (B) redefine the table as the image of today's under the inverse bake
   R⁻¹: (x, y, z) ↦ (x, −z, y) applied to `s`, `a`, `b`, re-keyed by the axis the spindle
   vector then names. Derived in code by the spike, matching the coordinator's derivation
@@ -175,8 +181,13 @@ directory. For an entry with a stored `axis` or `camera` and no `frame` label:
   offset, label-only (camera without axis — 0 of the 74 on this machine, so 5.2's
   recorded zero is expected and the unit cell is what exercises the branch), already
   labelled, unclassifiable, skipped (no framing);
-- writes `<cache-dir>/.frame-migration.json` — `{convention: 2, at, counts}` — a file
-  old code never touches. Sidecars have three writers, all through `writeMeta`: `put`
+- writes `<cache-dir>/.frame-migration` — JSON `{convention: 2, at, counts}`, **no
+  `.json` extension**: `maintain()`'s existence sweep, the size-cap sweep and
+  `sweepLegacy` each `readdir` the directory and treat every name ending in `.json` as a
+  sidecar, and a marker named `.frame-migration.json` would parse to a `Meta` with no
+  `path`, fail `sourceExists`, and be `rm`'d on the next server start (the cold
+  reviewer's catch). A name the filter skips is the whole fix. Sidecars have three
+  writers, all through `writeMeta`: `put`
   (rebuilds fresh), the size-cap write-back in `maintain()` (runs at every server start)
   and the library re-key; the last two spread the previous meta, so they carry the label
   and only ever advance the mtime of a labelled or an unframed entry — never a framed
@@ -230,8 +241,16 @@ exactly as they did. A relabel, not a semantic change.
 The same transforms run **on read** in the browser store (`readLocalFraming`, at the
 store boundary — never inside a React updater, which `useThumbnails` documents must be
 pure) for an entry without the label, written back labelled, sharing the functions with
-the script through `shared/` so there is one implementation. The transform is
-value-idempotent, so two readers in one tick converge on the same answer.
+the script so there is one implementation. **Where they live**: `shared/frames.ts`, with
+the six frames as plain `[number, number, number]` triples, the derivation (`unbake`,
+the re-key, `migrateAxis`, `swapOffset`) as plain arithmetic, and no import of `three`.
+`shared/` is types-only today and is compiled by both `tsconfig`s, and the server's
+(`"types": ["node"]`) has no `three`; the script is typechecked under the server project
+because `server/test` imports it, so a `three` import anywhere on that path breaks
+`bun run typecheck`. `camera.ts` builds its `THREE.Vector3` `FRAMES` from the shared
+triples — one source, and the unit cell that asserts D3's table reads the shared one.
+The transform is value-idempotent, so two readers in one tick converge on the same
+answer.
 
 Why a script and not on-read for the server cache: Masa's call (2026-09-10). The local
 cache is on this machine and a run is one command; on-read migration would leave the
@@ -245,15 +264,21 @@ axes (2 × `-x`, 1 × `z`). The task iterates the directory, not a written-down 
 
 ### D6: The A/B harness ships as a script
 
-`scripts/frame-ab/` — the spike's `run.mjs` and `client/spike/ab.{html,ts}`, tidied:
-Vite on a spare port, playwright-core and chromium found from a config file rather than
-hard-coded paths, the sample list, the OBJ fixture generator, the per-pixel diff, the
-contact sheet. Baseline renders (C0, from the pre-change code) are checked in under
+`scripts/frame-ab/` — the spike's `run.mjs`, the sample list, the OBJ fixture generator,
+the per-pixel diff, the contact sheet, a config file for the playwright-core and chromium
+paths. The page stays under the client, at `client/spike/ab.{html,ts}`: it imports the
+app's own modules through Vite, so it needs the client's root and config, and is served by
+`bunx vite --port 5174 --strictPort` from `client/`. It does not ship — `vite.config.ts`
+sets no `build.rollupOptions.input`, so the build's only entry is `client/index.html` — and
+it is typechecked by adding `spike` to `client/tsconfig.json`'s `include`. Baseline
+renders (C0, from the pre-change code) are checked in under
 `scripts/frame-ab/baseline/` as lossless PNGs so the comparison does not need the old
 code to exist: the spike's eleven STL frames (nine samples, two also without AO,
 522,728 bytes) and the L-bracket at `y` and `z`, which the spike wrote only into contact
-sheets and which task 4.1 captures as single frames from the spike worktree **before**
-the bake is removed — after that the old code is gone and C0 cannot be regenerated.
+sheets and which task 0.1 captures as single frames from the spike worktree **before**
+the bake is removed — after that the old code is gone and C0 cannot be regenerated. These
+are the repository's first tracked binaries (`git ls-files` matches no image or model
+today); half a megabyte of fixtures that cannot be regenerated is the reason to start.
 
 **Where it runs.** This machine, and only this machine as shipped: the STL samples are
 nine files at the root of the real library, not in the repo and not redistributable, and
@@ -290,8 +315,10 @@ the pill's legacy side would be a scene axis stamped as a file one). It is not a
 outer decorator: `LocalFramingClient` is deliberately a class of explicit delegates so a
 new `ApiClient` method fails to compile there, and a throwaway twin of it would be twenty
 one-liners deleted again at 5.2; the first line of the one decorator is outermost for the
-write path, which is the only path that matters. Every write path goes through it (`useThumbnails`' persist, `ViewerLayer`'s close, `bulkJobs`, the three
-`entryActions` commands, the orbit-release persist in `App`). The server's is the
+write path, which is the only path that matters. Every write path goes through it — the
+six `putThumb` sites `App` already counts: `useThumbnails`' persist, `bulkJobs`, the
+three `entryActions` commands, and the orbit-release `persist` in `App` (the lightbox's
+close reaches the wire through that last one, not through `ViewerLayer` itself). The server's is the
 shipped one: `features.thumbWrites: false` in `~/.config/model-browser/config.json` for
 the test window (restart required), which makes the route refuse. The server-side guard
 exists because the client one only covers bundles that carry it: 3177 serves a stale
@@ -309,16 +336,17 @@ invalidation, but the bake has no key dimension — both conventions would file 
 under one key, and `statusFor` never checks the axis, so a legacy-convention render
 written during the test would be served as a valid hit after it. Withholding pixels as
 well as framings closes that, and it also closes the window D5's label rule guards:
-nothing the test session does can stamp or strip a label. The migration script deletes
-renders for framed entries (D5); un-framed entries were rendered about the default, whose
-new frame is the old one, so their pixels stay valid.
+nothing the test session does can stamp or strip a label. Cached renders are never
+deleted (D5): every entry, framed or not, draws the same picture under the new frames.
 
 The flag mirrors into React state the way `ssao` does (`useState(aoEnabled)` beside the
 module flag, both set on click), so a flip re-renders `App` — without that no consumer
-would ever be handed the other instance. Consumers that memoise over `lru` take it as a
-**getter** (`lru: () => MeshLru`), the precedent `BulkJobs` already sets for `ao`:
-`BulkJobs`'s construction and `createHoverWarmer`'s closure both capture the value today
-and would keep the old instance (or rebuild a job mid-run) after a flip. `useThumbnails`
+would ever be handed the other instance. `BulkJobs` takes `lru` as a **getter**
+(`lru: () => MeshLru`), the precedent its own `ao: () => boolean` sets, because its
+construction captures the value today and a flip would otherwise rebuild a job mid-run.
+The hover warmer needs nothing: `createHoverWarmer` takes a `warm(path)` callback, not an
+`lru`, and `App` builds it in a `useMemo` keyed on `[lru]`, so a flip that re-renders with
+the other instance rebuilds the warmer around it. `useThumbnails`
 keeps `lru` in its sweep deps, so a flip tears the sweep down and restarts it, cancelling
 in-flight lookups — accepted, since the flip drops the thumbs map anyway. `ViewerLayer`
 re-runs its open effect, and the flip closes it first.
@@ -328,9 +356,10 @@ the grid's orbit overlay and any in-flight thumbnail render hold acquired object
 an await. Instead there are **two LRU instances** for the test window, one per
 convention, built in `App` from one loader factory `meshLoader(api, bake: boolean)` —
 `parseModel` takes `bake` as an argument rather than reading the flag — and every
-consumer that takes `lru` (`ViewerLayer`, `useThumbnails`, `bulkJobs`, the hover warmer,
-the 3MF placeholder hook) is handed `legacyBake ? bakeLru : lru` at call time. Keys stay
-bare paths, so `formatOf(path)` in the loader, `fetchModel`, `lru.warm(p)` and the
+consumer that takes `lru` (`ViewerLayer`, `useThumbnails`, `bulkJobs`, the hover warmer)
+is handed `legacyBake ? bakeLru : lru`. The 3MF placeholder (`App`'s `placeholderRef`,
+called from inside the loader closure) is not an `lru` consumer and needs nothing. Keys
+stay bare paths, so `formatOf(path)` in the loader, `fetchModel`, `lru.warm(p)` and the
 placeholder's `slotsRef.get(path)` all keep working — a key suffix (`<path>#bake`, an
 earlier revision) would have failed `formatOf`'s end-anchored regex and thrown on every
 load with the pill on. Each instance has its own byte budget; the doubled ceiling is
@@ -348,10 +377,10 @@ skipped, since `putThumb`'s `{dropped: true}` reads as `skipped`. Task 3.2 says 
 **A framing migrated on read is in file convention.** With the pill on, a browser framing
 that was already migrated in an earlier session is read under legacy frames and shows a
 quarter turn off. That is accepted for a test-only pill and recorded here; the server
-cache is not exposed to it because the script runs after the pill is gone (Migration
-Plan). The pill, the flag, the legacy table, the LRU key suffix and `toSceneSpace` are
-deleted in the change's last code task, and the archive dry run is gated on `grep`
-finding none of them.
+cache is not exposed to it because both guards hold through the window (Migration
+Plan). The pill, the flag, the legacy table, the second LRU instance, `parseModel`'s
+`bake` argument and `toSceneSpace` are deleted in the change's last code task, and the
+archive dry run is gated on `grep` finding none of them.
 
 ## Risks / Trade-offs
 
