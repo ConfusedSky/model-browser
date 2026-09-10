@@ -20,7 +20,7 @@ what the index reports should agree without a mapping.
 - The load-time rotation is removed. A model is rendered in its file's own coordinates,
   and the orbit spindle names a file axis.
 - The default spindle is per format: `+Z` for STL and 3MF (both Z-up by convention), `+Y`
-  for OBJ. One function replaces the ten hard-coded `'y'` fallbacks in the client.
+  for OBJ. One function replaces the fifteen hard-coded `'y'` fallbacks in the client.
 - The six spindle frames — the azimuth basis each spindle's camera angles are measured in —
   are redefined as the image of today's frames under the inverse of the bake. Measured
   in the change's own A/B harness: under these frames an STL's stored camera and its
@@ -36,15 +36,19 @@ what the index reports should agree without a mapping.
   (`y→z`, `-y→-z`, `z→-y`, `-z→y`, `x`/`-x` unchanged) and leaves the camera untouched,
   and re-expresses the stored camera of any OBJ entry at an `x`, `-x`, `z` or `-z` spindle
   by the frame swap's offset, since OBJ was never baked and its frame moved. Sidecars gain
-  a `frame: 2` label so an entry is migrated once and a pre-migration entry is
-  recognisable. Browsers' local framings (the demo, where server writes are off) carry the
+  a `frame: 2` label — stamped only by writes that carry a camera or an axis, carried
+  through every other write — so an entry is migrated once and a pre-migration entry is
+  recognisable. The script also deletes the migrated entries' renders, which were drawn
+  about the old axis and would otherwise be served as valid hits. Browsers' local framings (the demo, where server writes are off) carry the
   same transform under the same label, applied on read since no script reaches them.
 - The pixel A/B that decided the frame strategy ships as a rerunnable harness
   (`scripts/frame-ab/`), with the baseline renders checked in and a tolerance from the
-  measured residual, so the claim "same picture" can be re-checked on any machine.
+  measured residual, so the claim "same picture" can be re-checked on the machine it was
+  measured on (the samples are the real library's files; the OBJ fixture alone travels).
 - **Temporary, removed before archive**: a corner pill beside `ssao` that flips the live
-  app between the bake and the file frame, read-only for framings on the file-frame side,
-  so both can be seen in the grid and the lightbox while the change is under test.
+  app between the bake and the file frame, so both can be seen in the grid and the
+  lightbox while the change is under test. No thumbnail write reaches the server while
+  the pill exists, on either side of it.
 - Issue #8 closes with this change: the pill and the contact sheet then name the same axis.
 
 ## Capabilities
@@ -71,14 +75,16 @@ what the index reports should agree without a mapping.
   `bulkJobs`, `ViewerLayer`, `session`, `renderer`), `api/localFramings.ts` (the on-read
   migration), the lightbox and menu axis pickers (unchanged in code — they show the
   spindle, which is now a file axis).
-- Server: `cache.ts` (`frame` label on the sidecar, echoed never interpreted, like `rig`).
+- Server: `cache.ts` (`frame` label on the sidecar, carried through `put`, never interpreted; not
+  on the wire — no client reads it).
 - Scripts: `scripts/migrate-frames.ts` (one-shot over a cache directory), `scripts/frame-ab/`
   (the A/B harness, from the spike).
 - Tests: camera/pose/models units (frames, defaults, migration transform), client cells for
   the pickers' labels and the default spindle per format, server cells for the label, the
   A/B harness as a task with recorded numbers.
-- Data: this machine's caches (`~/.cache/model-browser/<id>/`, 29 stored axes and 12
-  cameras across 18,428 sidecars in the primary library) run through the script; the demo
+- Data: this machine's four caches under `~/.cache/model-browser/` (74 framed entries,
+  all STL; the primary holds 29 stored axes and 12 cameras across 18,428 sidecars) run
+  through the script; the demo
   box has no server-side framings (writes are off) and its browsers migrate on read.
 - Records: `docs/web-demo-notes.md` if it names the axis anywhere; issue #8 closed with a
   comment pointing here.
