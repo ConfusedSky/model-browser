@@ -58,12 +58,23 @@ unchanged in code and correct by construction.
 ### D2: Default spindle per format, from one function
 
 `defaultAxisFor(format: ModelFormat): OrbitAxis` in `three/camera.ts` — `z` for `stl` and
-`3mf`, `y` for `obj` — replaces every `?? 'y'` and `= 'y'` fallback: `renderThumbnail`,
-`statePosition`/`applyState`, `ViewerSession`'s constructor, `ViewerLayer`'s open and
-close paths, `useThumbnails`' render site, `bulkJobs`' discard path, and `entryActions`'
-`framingAfterDiscard` callers and `DEFAULT_ORBIT_AXIS`. The format is on every `DirEntry`
-(`format`), which each of those sites already has in hand or one hop away. `OrbitAxis`'s
+`3mf`, `y` for `obj` — replaces the fifteen `?? 'y'` and `= 'y'` fallbacks: `camera.ts`'s
+`statePosition`, `applyState` and `captureState` (which take `axis` as required instead —
+they have no format in scope); `renderThumbnail`; `ViewerSession`'s constructor;
+`ViewerLayer`'s open, catch, close and discard paths; `useThumbnails`' render site;
+`bulkJobs`' discard path; `entryActions`' `framingAfterDiscard` callers and
+`DEFAULT_ORBIT_AXIS`, retired, whose one consumer in `App` (the tile menu's marked letter,
+`thumbs.get(path)?.axis ?? DEFAULT_ORBIT_AXIS`) takes the entry's format. `OrbitAxis`'s
 doc comment stops saying "Default 'y'".
+
+`DirEntry.format` is **optional** in `shared/types.ts` ("present when kind === 'model'"),
+so the call sites hand an optional to a strict function. The seam is `formatOfEntry(entry:
+DirEntry): ModelFormat` beside `formatOf`: `entry.format ?? formatOf(entry.path)`, and if
+that is `null` it throws naming the path. Throwing is right, not a fallback: the server
+assigns `kind: 'model'` only through `MODEL_EXT` (`listing.ts`), the same three
+extensions `formatOf` matches, so a model entry with an unclassifiable path is a
+programming error on the wire, and a silent default would be exactly the hidden
+convention this change removes. `defaultAxisFor` itself never sees `null` or `undefined`.
 
 ### D3: Redefine the six frames as the bake's image — strategy B
 
@@ -92,13 +103,13 @@ different at max delta 255 for every `x`, `-x`, `y`, `-y` sample, the cat side-o
   | `-z` | (0,0,−1) | (0,−1,0) | (1,0,0) | `-y` |
   | `-y` | (0,−1,0) | (0,0,1) | (1,0,0) | `z` |
   | `y` | (0,1,0) | (1,0,0) | (0,0,1) | `-z` — equal to today's `y` |
+  | `x` | (1,0,0) | (0,−1,0) | (0,0,1) | `x` |
+  | `-x` | (−1,0,0) | (0,0,1) | (0,−1,0) | `-x` |
 
   Two fixed points: the new `y` equals today's `y`, and the new `-y` (image of today's
   `z`) equals today's `-y`. Every row keeps `a × b = −s`, since R⁻¹ is a proper rotation
   and the re-key uses R⁻¹s itself, so no spindle's drag direction reverses (the
   reviewer's numerical check, all six rows).
-  | `x` | (1,0,0) | (0,−1,0) | (0,0,1) | `x` |
-  | `-x` | (−1,0,0) | (0,0,1) | (0,−1,0) | `-x` |
 
   Under (B) an STL's stored camera is untouched, the default view is the same picture, and
   `cameraForPose` returns today's axis-migrated answer with the same az/el on all seven
@@ -156,14 +167,28 @@ directory. For an entry with a stored `axis` or `camera` and no `frame` label:
   (keyed by the OBJ's **unchanged** axis: `x` −90°, `-x` +90°, `z` +90°, `-z` −90°, `y`
   and `-y` 0°; the sign matches `captureState`'s `az = atan2(dir·a, dir·b)`, azimuth
   measured from `b` toward `a`);
-- **deletes the entry's render files** (both AO variants): the pixels were drawn about
-  the old axis and nothing else invalidates them — `statusFor` checks `mtime` and recipe
-  labels, never the axis, and D3 bumps no `RIG_VERSION`. The sidecar keeps its camera,
-  axis and label; the next read is a miss and re-renders under the migrated framing;
 - writes `frame: 2` (1 being the unlabelled scene-axis convention) atomically, the way
   the cache writes sidecars, and reports counts: read, migrated by relabel, migrated by
-  offset, label-only (camera without axis), already labelled, unclassifiable, skipped
-  (no framing).
+  offset, label-only (camera without axis — 0 of the 74 on this machine, so 5.2's
+  recorded zero is expected and the unit cell is what exercises the branch), already
+  labelled, unclassifiable, skipped (no framing);
+- writes `<cache-dir>/.frame-migration.json` — `{convention: 2, at, counts}` — a file
+  old code never touches (old `put` rebuilds sidecars, nothing else in the directory).
+  On a later run the script **refuses** when the marker exists, a framed sidecar is
+  unlabelled, and that sidecar's file mtime is newer than the marker's `at`: the
+  conjunction means "a framing written after the migration by code that does not know
+  the label", which is a rolled-back server, and relabelling it would turn a file axis
+  into `-y`. Unlabelled sidecars older than the marker are the ordinary unframed ones
+  the script skipped. (An earlier draft keyed this on `rig`; `RIG_VERSION` is 7 before
+  and after, so that signal could never fire — the reviewer's catch.)
+
+**Cached renders are not deleted.** Under strategy B the relabelled axis with the
+untouched camera draws the same view (D3's measurement), so the 74 renders on this
+machine stay valid: 54 camera+axis entries read the same camera in the same frame, 20
+axis-only entries read `DEFAULT_CAMERA` in the same frame, and there are no
+camera-only entries. An earlier revision deleted them as a belt against renders written
+between the pill's removal and the script; the Migration Plan closes that window by
+ordering instead — the script runs while the write guard is still in the code.
 
 **The label is stamped only by a write that itself carries a camera or an axis**, and it
 is carried through every other write. Two facts about the stores decide this. First,
@@ -172,7 +197,12 @@ prev?.axis)`), so a server that stamped every write would mark a still-scene axi
 migrated on the first tile re-render and the script would skip it forever. Second, `put`
 builds its sidecar fresh — nothing is spread from `prev` — so a field it does not know is
 dropped by the next write; `frame` therefore joins `Meta` explicitly, `put` carries
-`prev.frame` when the write does not set it, and the browser store's `LocalFraming`,
+`prev.frame` when the write does not set it — in **both** of `put`'s hand-built
+sidecars, the main one and the `png === null` deletion branch (`bulk-thumbnail-jobs`
+D3); the size-cap write-back and the library re-key spread the previous meta and carry
+a new field for free — and a **discard** (`camera: null` / `axis: null`) counts as a
+framing write and stamps, since it states the entry's framing as much as a value does;
+and the browser store's `LocalFraming`,
 its read pick and `writeLocalFraming`'s merge carry it the same way. Without that, the
 first orbit after migration erases the label and the next script run relabels `z` to
 `-y`. A cell on each store pins "framing write after migration keeps the label".
@@ -254,10 +284,25 @@ new frame is the old one, so their pixels stay valid.
 
 Flipping the pill does not clear the mesh LRU: `MeshLru.clear` has no in-use guard, and
 the grid's orbit overlay and any in-flight thumbnail render hold acquired objects across
-an await. Instead the flag is part of the LRU key (`<path>` under one convention,
-`<path>#bake` under the other — the shape AO uses for the thumbnail cache), so both
-parses sit side by side and evict on their own clocks. The flip closes an open lightbox
-and the orbit overlay, and drops the thumbs map so tiles re-render into memory only.
+an await. Instead there are **two LRU instances** for the test window, one per
+convention, built in `App` from one loader factory `meshLoader(api, bake: boolean)` —
+`parseModel` takes `bake` as an argument rather than reading the flag — and every
+consumer that takes `lru` (`ViewerLayer`, `useThumbnails`, `bulkJobs`, the hover warmer,
+the 3MF placeholder hook) is handed `legacyBake ? bakeLru : lru` at call time. Keys stay
+bare paths, so `formatOf(path)` in the loader, `fetchModel`, `lru.warm(p)` and the
+placeholder's `slotsRef.get(path)` all keep working — a key suffix (`<path>#bake`, an
+earlier revision) would have failed `formatOf`'s end-anchored regex and thrown on every
+load with the pill on. Each instance has its own byte budget; the doubled ceiling is
+accepted for a test-only window. The flip closes an open lightbox and the orbit overlay
+and drops the thumbs map so tiles re-render into memory only.
+
+**What the withheld writes cost the test window** (the reviewer's trace): tiles do not
+go stale — the displayed pixels come from the locally rendered blob and the PUT's answer
+is used only for the generation, which `useThumbnails` treats as unknown when absent —
+but an orbit is not durable across navigation (the thumbs map is memory-only, so leaving
+and returning shows the server's old render), the library tab's reset count still moves
+for a framing that was never stored, and a bulk generate job reports every entry
+skipped, since `putThumb`'s `{dropped: true}` reads as `skipped`. Task 3.2 says so.
 
 **A framing migrated on read is in file convention.** With the pill on, a browser framing
 that was already migrated in an earlier session is read under legacy frames and shows a
@@ -278,10 +323,9 @@ finding none of them.
   labelled" so a second run reads as a no-op.
 - [A server rolled back to old code writes to a migrated cache] → old `put` rebuilds the
   sidecar and drops `frame`, so a later script run would relabel a file axis again
-  (`z → -y`). Recorded as the one thing `--undo` cannot see; the tasks say to run
-  `--undo` before any rollback of the server on this machine, and the script refuses a
-  directory whose newest sidecar is unlabelled but whose `rig` label postdates the
-  migration (a heuristic, reported, not silent).
+  (`z → -y`). The marker file (D5) makes the script refuse that directory, naming the
+  sidecars newer than the marker; the tasks say to run `--undo` before any rollback of
+  the server on this machine.
 - [Demo browsers have no rollback] → a client rolled back would read file-convention
   framings as scene axes, a quarter turn off, undetectably. Decided (Masa, 2026-09-10):
   demo framings are expendable on rollback — they are per-browser conveniences the demo
@@ -305,13 +349,14 @@ finding none of them.
 2. Land the code with the pill in place. The server writes nothing while the pill exists
    (D7), so the cache on this machine is untouched through the whole test window.
 3. Masa's test window: the pill on and off against the real library; the harness passes
-   against its baselines with the pill off.
-4. Remove the pill and the legacy paths; suites and the harness green.
-5. Stop the dev server. Run `bun run scripts/migrate-frames.ts` over every directory in
-   `~/.cache/model-browser/`; record each run's counts in tasks. Start the server.
-6. Open models with stored framings (Pikachu, Main_Complete) and confirm the stored view
-   is the one shown; a first tile render after the script is a miss for every framed
-   entry, by design. Archive.
+   against its baselines with the pill off (the harness only reads).
+4. Stop the dev server **with the write guard still in the code**, so no server that ran
+   in between could have written. Run `bun run scripts/migrate-frames.ts` over every
+   directory in `~/.cache/model-browser/`; record each run's counts in tasks.
+5. Remove the pill, the legacy paths and the guard; suites and the harness green.
+6. Start the server. Open models with stored framings (Pikachu, Main_Complete) and confirm
+   the stored view is the one shown and their cached renders are served as hits (no
+   re-render, by D5). Archive.
 7. Demo: redeploy; browsers migrate their local framings on first read.
 
 Rollback: the sidecar transform is invertible (relabel back, subtract the offset) and the

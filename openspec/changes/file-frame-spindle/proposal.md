@@ -38,9 +38,10 @@ what the index reports should agree without a mapping.
   by the frame swap's offset, since OBJ was never baked and its frame moved. Sidecars gain
   a `frame: 2` label — stamped only by writes that carry a camera or an axis, carried
   through every other write — so an entry is migrated once and a pre-migration entry is
-  recognisable. The script also deletes the migrated entries' renders, which were drawn
-  about the old axis and would otherwise be served as valid hits. Browsers' local framings (the demo, where server writes are off) carry the
-  same transform under the same label, applied on read since no script reaches them.
+  recognisable; a marker file in the cache directory lets the script refuse a directory a
+  rolled-back server has written to. Cached renders stay valid and are not touched.
+  Browsers' local framings (the demo, where server writes are off) carry the same
+  transform under the same label, applied on read since no script reaches them.
 - The pixel A/B that decided the frame strategy ships as a rerunnable harness
   (`scripts/frame-ab/`), with the baseline renders checked in and a tolerance from the
   measured residual, so the claim "same picture" can be re-checked on the machine it was
@@ -71,8 +72,9 @@ what the index reports should agree without a mapping.
 
 - Client: `three/models.ts` (the bake), `three/camera.ts` (`FRAMES`, and a
   `defaultAxisFor(format)`), `three/pose.ts` (`toSceneSpace` deleted, `axisOf` an exact
-  lookup on the file vector), every `?? 'y'` fallback (`entryActions`, `useThumbnails`,
-  `bulkJobs`, `ViewerLayer`, `session`, `renderer`), `api/localFramings.ts` (the on-read
+  lookup on the file vector), the fifteen `'y'` fallbacks (`camera`, `renderer`,
+  `session`, `ViewerLayer`, `useThumbnails`, `bulkJobs`, `entryActions`, `App`) through
+  a `formatOfEntry` seam, `api/localFramings.ts` (the on-read
   migration), the lightbox and menu axis pickers (unchanged in code — they show the
   spindle, which is now a file axis).
 - Server: `cache.ts` (`frame` label on the sidecar, carried through `put`, never interpreted; not
