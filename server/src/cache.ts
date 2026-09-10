@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { mkdir, readFile, readdir, realpath, rename, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, sep } from 'node:path'
+import { FRAME_CONVENTION } from '../../shared/frames'
 import { CAMERA_EPSILON, type CameraState, type LightingMode, type OrbitAxis, type ThumbGetResponse, type ThumbInfo, type ThumbRenderInfo, type ThumbStatus } from '../../shared/types'
 import { envPositiveInt } from './env'
 import { type Library, LibraryError } from './library'
@@ -79,12 +80,10 @@ interface Meta extends RenderLabels {
   gen?: number
 }
 
-/**
- * The frame label a framing write stamps: the stored axis is in the file's own
- * axes (`file-frame-spindle` D5). The convention before it, 1, is never
- * written — an absent label is what names it.
- */
-export const FRAME_CONVENTION = 2
+// Re-exported so the suite and the migration script read the label from the
+// store that stamps it; the value itself lives in `shared/frames.ts` beside the
+// transforms it labels.
+export { FRAME_CONVENTION }
 
 /**
  * The merge for a three-state field: a value **sets** it, silence **keeps**

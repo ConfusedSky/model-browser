@@ -117,3 +117,12 @@ export function swapOffset(axis: OrbitAxis): number {
 export function defaultAxisFor(format: ModelFormat): OrbitAxis {
   return format === 'obj' ? 'y' : 'z'
 }
+
+/**
+ * The frame label a framing write stamps: the stored axis is in the file's own
+ * axes (`file-frame-spindle` D5). The convention before it, 1, is never
+ * written — an absent label is what names it. One constant for the three
+ * writers that stamp it — `ThumbCache.put`, the migration script and the
+ * browser store's on-read migration — so the label cannot drift between them.
+ */
+export const FRAME_CONVENTION = 2

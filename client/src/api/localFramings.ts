@@ -14,6 +14,8 @@ import type {
   SemanticTuning,
   SimilarListing,
 } from '../../../shared/types'
+import { FRAME_CONVENTION, migrateAxis, swapOffset } from '../../../shared/frames'
+import { formatOf } from '../three/models'
 import { HttpError } from './client'
 import type { ApiClient, ThumbPutResult, ThumbResult, ThumbSave } from './client'
 
@@ -31,6 +33,25 @@ import type { ApiClient, ThumbPutResult, ThumbResult, ThumbSave } from './client
  * refused in others (a private window, blocked site data), and a framing is a
  * convenience: a read that cannot happen reads as "nothing stored" and a write
  * that cannot happen is dropped, exactly as `lib/stored.ts` degrades.
+ *
+ * **Framings held before axes were file axes are migrated on read**
+ * (`file-frame-spindle` D5). A framing without the `frame` label was measured
+ * in the scene convention — STL and 3MF geometry baked a quarter turn about X —
+ * and `readLocalFraming` transforms it to the file convention with the same
+ * functions the server cache's one-shot script uses (`migrateAxis`,
+ * `swapOffset`), writes it back labelled, and serves the transformed value. It
+ * happens *here*, at the store boundary, and never inside a React updater:
+ * `useThumbnails`' rule is that an updater is a pure function of `prev`, which
+ * React may replay, and `applyLocalFramings` only reads through this function.
+ * It happens *forever*, not for a migration window: the script reaches a cache
+ * directory on a machine an operator owns, but no script reaches a visitor's
+ * browser, and a public deployment's framings live only there. And it is not a
+ * write the compare pill withholds (D7): it stores a function of what is
+ * already stored — the held framing's file-convention image plus the label —
+ * never a value from either side of the pill, so the store converges to the
+ * same content whichever side the pill is on. The transform is value-idempotent:
+ * two reads in one tick return the same framing whether or not the second sees
+ * the first's write-back.
  */
 
 /** Just the three calls used here, so a test can pass a plain object. */
@@ -40,6 +61,14 @@ export type FramingStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 export interface LocalFraming {
   camera?: CameraState
   axis?: OrbitAxis
+  /**
+   * The convention `axis` and `camera` are in: `FRAME_CONVENTION` for the
+   * file's own axes, absent for the scene convention that preceded it (never
+   * written as a value — `readLocalFraming` migrates it on sight). Every write
+   * from this module stamps it, so a framing written after a migrated read
+   * keeps the label and is not migrated again.
+   */
+  frame?: number
 }
 
 /** This store's own namespace in a shared `localStorage`. See `framingKey`. */
@@ -115,10 +144,45 @@ export function keepsFramingsLocally(report: FeatureReport | null): boolean {
 }
 
 /**
+ * A scene-convention framing re-expressed in the file convention — the
+ * script's transform (D5), keyed by the path's format: a zip entry's path
+ * (`a.zip!/parts/x.stl`) ends in the model's extension, so `formatOf` reads it.
+ *
+ * - STL / 3MF with an axis: the axis is relabelled (`migrateAxis`), the camera
+ *   untouched — the frames were redefined so the same angles draw the same
+ *   view. A camera with no axis gains none: it drew about the old default `y`
+ *   and draws about the new default `z`, whose frame is the old `y` frame; a
+ *   written axis would withhold an index pose the entry never suppressed.
+ * - OBJ, never baked: the axis keeps its name, and a camera moves by that
+ *   spindle's azimuth offset (`swapOffset`; 0 for `y` and `-y`, the fixed
+ *   points, so the one expression covers every axis).
+ * - A path `formatOf` cannot classify: `null` — nothing is known about the
+ *   frame it was measured in, so it is neither transformed nor labelled. The
+ *   app stores keys for model paths only, but the store is hand-editable.
+ */
+function toFileConvention(path: string, held: LocalFraming): LocalFraming | null {
+  const format = formatOf(path)
+  if (format === null) return null
+  const { camera, axis } = held
+  if (format === 'obj') {
+    const moved =
+      camera !== undefined && axis !== undefined ? { ...camera, az: camera.az + swapOffset(axis) } : camera
+    return { camera: moved, axis, frame: FRAME_CONVENTION }
+  }
+  return { camera, axis: axis === undefined ? undefined : migrateAxis(axis), frame: FRAME_CONVENTION }
+}
+
+/**
  * What this browser holds for `path`, validated. A malformed or hand-edited
  * value reads as nothing stored rather than propagating (`stored.ts`'s rule),
  * and a record holding neither half is `undefined` so callers have one absence
  * to test.
+ *
+ * A framing without the file-convention label is migrated here and written
+ * back labelled (the module comment says why here and why forever). The
+ * write-back is best-effort like every write in this module: a storage that
+ * refuses it still gets the transformed framing served, which is what the
+ * caller renders, and the next read transforms the same bytes the same way.
  */
 export function readLocalFraming(
   path: string,
@@ -142,12 +206,23 @@ export function readLocalFraming(
     return undefined
   }
   if (typeof parsed !== 'object' || parsed === null) return undefined
-  const { camera, axis } = parsed as { camera?: unknown; axis?: unknown }
-  const framing: LocalFraming = {
+  const { camera, axis, frame } = parsed as { camera?: unknown; axis?: unknown; frame?: unknown }
+  const held: LocalFraming = {
     camera: isCamera(camera) ? camera : undefined,
     axis: isAxis(axis) ? axis : undefined,
+    frame: typeof frame === 'number' ? frame : undefined,
   }
-  return framing.camera === undefined && framing.axis === undefined ? undefined : framing
+  if (held.camera === undefined && held.axis === undefined) return undefined
+  if (held.frame === FRAME_CONVENTION) return held
+  const migrated = toFileConvention(path, held)
+  if (migrated === null) return held
+  try {
+    storage.setItem(key, JSON.stringify(migrated))
+  } catch {
+    // Storage refused the write-back — the transformed framing is still the
+    // answer, and the next read transforms the same bytes again.
+  }
+  return migrated
 }
 
 /**
@@ -160,6 +235,12 @@ export function readLocalFraming(
  * abandoned and no later server value could reach it. Once deleted the delta's
  * precedence resumes below this browser: the server's value, then an
  * orientation source, then the default.
+ *
+ * Every write stamps `frame: FRAME_CONVENTION`: a framing this code writes is
+ * in the file convention by construction, and `held` was migrated on the way
+ * in, so the merge of the two is too. Without the stamp the first write after a
+ * migrated read would drop the label and the next read would migrate `z` to
+ * `-y`.
  */
 export function writeLocalFraming(
   path: string,
@@ -177,6 +258,7 @@ export function writeLocalFraming(
   const next: LocalFraming = {
     camera: save.camera === undefined ? held?.camera : (save.camera ?? undefined),
     axis: save.axis === undefined ? held?.axis : (save.axis ?? undefined),
+    frame: FRAME_CONVENTION,
   }
   try {
     if (next.camera === undefined && next.axis === undefined) storage.removeItem(key)

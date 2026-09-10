@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { FRAME_CONVENTION } from '../../shared/frames'
 import type { FeatureReport } from '../../shared/types'
 import { HttpApiClient, HttpError, POSES_MAX, type ThumbSave } from '../src/api/client'
 import {
@@ -627,9 +628,12 @@ describe('withLocalFramings', () => {
     expect(written.gen).toBeUndefined()
     // Only the orientation is kept. The PNG and the three labels that describe
     // pixels are dropped together, for `withoutUnusableRender`'s reason.
+    // The label rides along: a framing this store writes is a file-convention
+    // one, so a later read does not migrate it (file-frame-spindle D5).
     expect(JSON.parse(store.raw.get('mb:framing:lib-a:/m.stl') as string)).toEqual({
       camera: CAM,
       axis: '-z',
+      frame: FRAME_CONVENTION,
     })
   })
 
@@ -857,7 +861,7 @@ describe('withLocalFramings', () => {
     report = OFF
     await api.putThumb({ path: '/m.stl', mtime: 42, camera: CAM })
     expect(fetchFn).toHaveBeenCalledTimes(1)
-    expect(readLocalFraming('/m.stl', store, LIB)).toEqual({ camera: CAM })
+    expect(readLocalFraming('/m.stl', store, LIB)).toEqual({ camera: CAM, frame: FRAME_CONVENTION })
   })
 
   /**
@@ -891,7 +895,7 @@ describe('withLocalFramings', () => {
     // And the refusal is acted on rather than thrown: the same account the
     // gated path gives, so no caller can tell which arrival point kept it.
     expect(written).toEqual({ dropped: true })
-    expect(readLocalFraming('/m.stl', store, LIB)).toEqual({ camera: CAM, axis: '-z' })
+    expect(readLocalFraming('/m.stl', store, LIB)).toEqual({ camera: CAM, axis: '-z', frame: FRAME_CONVENTION })
   })
 
   it('rethrows a refusal of some other capability, keeping nothing', async () => {
