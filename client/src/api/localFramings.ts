@@ -14,8 +14,6 @@ import type {
   SemanticTuning,
   SimilarListing,
 } from '../../../shared/types'
-// TEMPORARY — `file-frame-spindle` D7; deleted by task 5.2 with the guard below.
-import { BAKE_PILL_PRESENT } from '../three/bakeToggle'
 import { HttpError } from './client'
 import type { ApiClient, ThumbPutResult, ThumbResult, ThumbSave } from './client'
 
@@ -263,25 +261,6 @@ class LocalFramingClient implements ApiClient {
    * a refusal of any other field included, rethrows exactly as before.
    */
   async putThumb(save: ThumbSave): Promise<ThumbPutResult> {
-    // TEMPORARY — `file-frame-spindle` D7: while the compare pill exists no
-    // framing or pixels reach the wire or `localStorage` from a PUT, on either
-    // side of the pill — a local framing written under the legacy side would
-    // be a scene axis stamped as a file one, and the bake has no cache-key
-    // dimension to keep the two conventions' pixels apart.
-    // Deleted by task 5.2 with `bakeToggle.ts`. One thing passes, and only to
-    // the local branch: a save that states no framing *value* — camera and
-    // axis each `null` or absent, at least one `null` — is a discard, stores
-    // no convention-bearing value and only removes one, and *reset framing*
-    // must still clear a framing this browser holds (Masa, 2026-09-11). Its
-    // pixels never reach the wire under the pill.
-    if (BAKE_PILL_PRESENT) {
-      const discardsOnly =
-        (save.camera === null || save.axis === null) && save.camera == null && save.axis == null
-      if (discardsOnly && keepsFramingsLocally(this.report())) {
-        writeLocalFraming(save.path, save, this.storage, this.libraryId)
-      }
-      return { dropped: true }
-    }
     if (keepsFramingsLocally(this.report())) {
       writeLocalFraming(save.path, save, this.storage, this.libraryId)
       return { dropped: true }

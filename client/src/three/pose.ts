@@ -1,5 +1,4 @@
 import type { CameraState, IndexPose, OrbitAxis } from '../../../shared/types'
-import { legacyBake } from './bakeToggle'
 import { frameFor } from './camera'
 
 const AXES: { axis: OrbitAxis; v: [number, number, number] }[] = [
@@ -14,17 +13,6 @@ const AXES: { axis: OrbitAxis; v: [number, number, number] }[] = [
 const EXACT = 1e-6
 
 /**
- * TEMPORARY — `file-frame-spindle` D7: the retired scene-space mapping, the
- * image of a file direction under the legacy STL bake `rotateX(-π/2)`,
- * (x, y, z) ↦ (x, z, −y). Applied to `up` and `azimuth_zero` only while the
- * compare pill's flag is on, so the legacy LRU's baked geometry and the pose
- * agree. Deleted by task 5.2 — the archive is gated on this name being gone.
- */
-function toSceneSpace(v: [number, number, number]): [number, number, number] {
-  return legacyBake() ? [v[0], v[2], -v[1]] : v
-}
-
-/**
  * Version of the mapping from an index pose to a camera. Bumped whenever that
  * mapping changes what a posed thumbnail looks like — the same contract as
  * `RIG_VERSION`, and for the same reason: the pixels depend on an input the
@@ -35,11 +23,11 @@ function toSceneSpace(v: [number, number, number]): [number, number, number] {
  * `rotateX(-π/2)` on load, which put the spindle 90° from the model's actual
  * up and rendered models lying down. 2 = the index's axes and the spindle are
  * the same file frame. That was first achieved by mapping the pose into scene
- * space (`toSceneSpace`, now gone); `file-frame-spindle` removed the bake and
- * the mapping together, and the rendered picture is unchanged (design D4: the
- * spindle frames are the bake's image, and the offset derived below is
- * invariant under a rotation applied to both the frame and `azimuth_zero`), so
- * no bump.
+ * space, (x, y, z) ↦ (x, z, −y), the image of a file direction under the bake;
+ * `file-frame-spindle` removed the bake and the mapping together, and the
+ * rendered picture is unchanged (design D4: the spindle frames are the bake's
+ * image, and the offset derived below is invariant under a rotation applied to
+ * both the frame and `azimuth_zero`), so no bump.
  */
 export const POSE_VERSION = 2
 
@@ -56,8 +44,7 @@ export const POSE_VERSION = 2
  * the orientation and say why.
  */
 export function axisOf(up: [number, number, number]): OrbitAxis | null {
-  const scene = toSceneSpace(up)
-  const match = AXES.find(({ v }) => v.every((c, i) => Math.abs(c - scene[i]!) < EXACT))
+  const match = AXES.find(({ v }) => v.every((c, i) => Math.abs(c - up[i]!) < EXACT))
   return match?.axis ?? null
 }
 
@@ -86,7 +73,7 @@ export function cameraForPose(
   const axis = axisOf(pose.up)
   if (axis === null) return null
   const { s, a, b } = frameFor(axis)
-  const u0 = toSceneSpace(pose.azimuth_zero)
+  const u0 = pose.azimuth_zero
   // `azimuth_zero` is perpendicular to `up` by construction; a pose where it is
   // not is malformed in the same way an off-axis `up` is, and gets the same
   // answer rather than a best-effort projection.

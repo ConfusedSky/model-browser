@@ -121,7 +121,7 @@ function harness(
   const acquire = vi.fn().mockResolvedValue(MESH)
   const deps: JobDeps = {
     api: { models, semanticPosesFor: posesFor, getThumb, putThumb },
-    lru: () => ({ acquire }),
+    lru: { acquire },
     queue,
     setThumb,
     refetch,

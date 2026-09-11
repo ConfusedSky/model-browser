@@ -373,7 +373,7 @@
       demo's browsers migrate on read regardless
       *(removed 2026-09-11 — Masa: unreleased, no data to migrate; the merged code was
       reverted in this commit)*
-- [ ] 5.2 Delete the pill, `bakeToggle.ts`, the second LRU and the loader's `bake`
+- [x] 5.2 Delete the pill, `bakeToggle.ts`, the second LRU and the loader's `bake`
       argument, the pill's legacy frame lookup, the legacy pose mapping and every branch
       on the flag, including the `putThumb` guard and the getters' second instance —
       **not** `shared/frames.ts`'s pre-bake triples, which `FILE_FRAMES` and `swapOffset`
@@ -405,6 +405,28 @@
       `thumbWrites` in the local config and restart; start the server; open Pikachu and
       Main_Complete and confirm the stored view is the one shown and their cached renders
       are served as hits (no re-render)
+      *(2026-09-11: deleted in one commit (fable worker), every item on the list above at
+      its listed fate — `bakeToggle.ts`, `bakePillGuard.setup.ts`, `bakeToggle.test.ts`,
+      `bakePill.test.tsx` removed; `parseModel(bytes, format)`; `camera.ts` back to the
+      plain `defaultAxisFor` re-export, `lift` kept as the one lifting helper; `pose.ts`
+      matches `up`/`azimuth_zero` directly and its `POSE_VERSION` comment names the mapping
+      by its formula rather than a symbol that no longer exists; `App.tsx` differs from the
+      pre-pill tree (f5be254^) by the `meshLoader` extraction alone; `BulkJobs` takes `lru`
+      as a value; the `putThumb` guard and its discard exception are gone, the plain
+      `keepsFramingsLocally` branch is first again; `vite.config.ts` back to `{ css: true }`;
+      the harness lost `--mode` altogether (baseline is the only way it runs, the `mode`
+      column with it), `ab.ts` lost `legacy` and assigns `window.ab` through a local cast.
+      Nothing on the list was already gone. The gate grep over client/src, client/spike,
+      scripts/frame-ab and vite.config.ts finds two `legacy`s, both prose and neither the
+      pill's (`renderer.ts`'s `THUMB_LIGHTING` label-type comment; the README's kept
+      in-process run record). Suites: client 943/943 over 65 files (the three deleted files
+      held 10 cells, 7 + 3), server 732 + 3 skipped, typecheck clean, validate
+      `--strict` valid, archive dry run applies (~4). 4.2 re-run without the flag: 22 rows,
+      0 failed, 11 reference; the eleven `-noao` rows at the 2026-09-10 counts exactly
+      (1037/10, 1224/10, 1123/15, 688/15, 447/9, 629/8, 590/8, 922/12, 282/10, OBJ 0/0 ×2).
+      Not done here, for the coordinator: restoring `thumbWrites` in the local config, the
+      restart, and the Pikachu / Main_Complete hit check — the dev instance was read-only
+      for this worker)*
 - [ ] 5.3 `bun run typecheck` and both suites green on merged main
 - [ ] 5.4 Records: `docs/web-demo-notes.md` if it names an axis convention;
       `deploy/demo/README.md`: demo framings held from before the change are expendable

@@ -223,20 +223,20 @@ but the bracket has little occluded area: on the real STLs the plumbing run of 2
 (task 4.1, baseline mode) found **5–23 % of the frame** — the same code in two fresh
 Chromium processes differing by 22.40 % on `bod_test_cube_5s`, 13.62 % on
 `Pikachu_X_Kakashi`, 5.37 % on `xyzCalibration_cube`, and 0/0 on each with AO off — which
-no bound absorbs without also passing a mis-framed model. So the harness has two modes.
-**In-process mode** (2026-09-10, task 4.2; TEMPORARY, it goes with the pill at 5.2) renders
-C0 in the same page through the pill's flag (`setLegacyBake`; `parseModel` with `bake`,
-`frameFor`'s legacy table, the legacy pose mapping — the spike's C0 by construction, and
-checked pixel-identical to the spike's stored `-noao` frames, 0/0 on all four) and gates
-**every** row, AO on and off, STL and OBJ: 22 rows, 0 failed, the STLs at 0.38–1.87 % /
-max 7–15. **Baseline mode**, the one that survives, compares a fresh process against
-`baseline/` and gates the `-noao` rows only — all nine STLs, once the in-process run had
-written the seven `-noao` C0s the spike had not — printing the AO-on rows as reference
-(2026-09-10: 22 rows, 0 failed, 11 reference; the nine `-noao` rows at the in-process
-run's counts exactly, the AO-on rows at 3.9–23.1 %). Seeding the AO noise would make the
-AO-on rows gateable across processes, but it changes production pixels and is a
-`RIG_VERSION` matter for another change. The README records this basis so a later widening
-has to argue against it. The runtime
+no bound absorbs without also passing a mis-framed model. So the harness had two modes for
+a day. **In-process mode** (2026-09-10, task 4.2; TEMPORARY, gone with the pill at 5.2 on
+2026-09-11) rendered C0 in the same page through the pill's flag (`setLegacyBake`;
+`parseModel` with `bake`, `frameFor`'s legacy table, the legacy pose mapping — the spike's
+C0 by construction, and checked pixel-identical to the spike's stored `-noao` frames, 0/0
+on all four) and gated **every** row, AO on and off, STL and OBJ: 22 rows, 0 failed, the
+STLs at 0.38–1.87 % / max 7–15. **Baseline mode**, now the only mode (the `--mode` flag went
+with the other), compares a fresh process against `baseline/` and gates the `-noao` rows
+exactly — nine STL and two OBJ, all nine STLs since the in-process run wrote the seven
+`-noao` C0s the spike had not — printing the AO-on rows as reference (2026-09-10: 22 rows,
+0 failed, 11 reference; the nine `-noao` rows at the in-process run's counts exactly, the
+AO-on rows at 3.9–23.1 %). Seeding the AO noise would make the AO-on rows gateable across
+processes, but it changes production pixels and is a `RIG_VERSION` matter for another
+change. The README records this basis so a later widening has to argue against it. The runtime
 switches the spike added (`setBake`, `setFrames`, `setPoseMapping`, `setShadows`,
 `setThumbSamples`) do **not** ship; the harness compares against stored baselines
 instead. `renderThumbnailCanvas` (the lossless read-back) does ship, as the harness's
@@ -322,6 +322,24 @@ archive dry run is gated on `grep` finding none of them. The pre-bake triples in
 `shared/frames.ts` are **not** deleted: `FILE_FRAMES`, `migrateAxis` and `swapOffset`
 are derived from the old table and the new, and the harness reads the two functions
 (D5/D6).
+
+**Removed 2026-09-11, after the test window** (task 5.2). What the window found: both of
+Masa's live reports — the legacy side lying on its side after the default-spindle fix, and
+the pose apparently ignored — traced to framings held in the browser's `localStorage`
+(`mb:framing:<library>:<path>`, where the client keeps orbits while `thumbWrites` is off): a
+stored axis withholds the pose, which is the spec's own rule, and read against the legacy
+frames on a baked mesh it lays the model down, which is the quarter turn accepted above.
+Neither was a defect in the frames. The guard itself had one: as the first line of `putThumb`
+it also swallowed the discard that *reset framing* sends, so a framing this browser held
+survived every reset — fixed (a save stating no framing value passed to the local branch)
+and then deleted with the guard. Masa's verdict: the pill was understood and added nothing
+the harness's in-process run had not already shown — the change's point is the true up axis,
+and the harness holds the comparison. Deleted: `bakeToggle.ts`, `parseModel`'s `bake`,
+`camera.ts`'s legacy table, `frameFor` branch and `defaultAxisFor` wrapper, `pose.ts`'s
+`toSceneSpace`, `App`'s second LRU and the pill, `BulkJobs`' getter, the `putThumb` guard,
+the vitest `setupFiles` lift, the three pill test files, and the harness's in-process mode.
+Kept: `shared/frames.ts`'s pre-bake triples, `meshLoader` (minus `bake`), and `lift` in
+`camera.ts` as the one lifting helper.
 
 ## Risks / Trade-offs
 

@@ -4,28 +4,22 @@
  * README.md beside this file).
  *
  * Renders every sample with the code the app imports today, through the page
- * at client/spike/ab.html in a headless Chromium, and compares it with the
- * pre-change rendering (C0) of the same sample under the same framing.
+ * at client/spike/ab.html in a headless Chromium, and compares each render
+ * against the baseline the pre-change code produced (baseline/<name>_C0.png).
  *
- *   node scripts/frame-ab/run.mjs                      # baseline mode: today's render vs baseline/<name>_C0.png
- *   node scripts/frame-ab/run.mjs --mode in-process    # TEMPORARY: C0 rendered in the same page through the pill's flag
- *   node scripts/frame-ab/run.mjs --obj-only           # the OBJ fixture alone: no library, no server (either mode)
+ *   node scripts/frame-ab/run.mjs             # STL samples via the dev server on 3177 + the OBJ fixture
+ *   node scripts/frame-ab/run.mjs --obj-only  # the OBJ fixture alone: no library, no server
  *
- * Baseline mode gates only the AO-off rows: the AO pass is not deterministic
- * across browser processes (5–23 % of pixels on a real STL), so an AO-on row
- * is rendered, diffed and printed for reference and never fails the run.
- * In-process mode has no such floor — both sides render in one process — so
- * every row is gated, and it writes the AO-off legacy render of each STL
- * sample as `baseline/<name>-noao_C0.png` where none is stored yet, so that
- * baseline mode can gate all nine STLs exactly once the pill is gone
- * (`file-frame-spindle` task 5.2 deletes the flag, and with it this mode).
+ * Only the AO-off rows are gated: the AO pass is not deterministic across
+ * browser processes (5–23 % of pixels on a real STL), so an AO-on row is
+ * rendered, diffed and printed for reference and never fails the run.
  *
  * Reads config.json (gitignored) over config.example.json. Starts its own Vite
  * on `vitePort` from client/ and stops it on exit. The dev server is only ever
  * read (`/api/library`, `/api/dir`, `/api/file`).
  */
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -40,20 +34,15 @@ const OUT = join(HERE, 'out')
  * within one process. 2 % bounds it; 96 bounds "a shadow edge moved a texel"
  * plus the AO noise of one process, far under the 255 a rotated model
  * produces. The AO pass adds nothing *within* a process (the spike's noise
- * floor was 0/0), so in-process mode gates every row at this bound; across
- * processes it adds an unseeded-noise floor of 5–23 % of pixels on a real STL
- * (README, the plumbing run), which no useful bound absorbs, so baseline mode
- * gates only the AO-off rows and prints the AO-on ones as reference.
+ * floor was 0/0); across processes it adds an unseeded-noise floor of 5–23 %
+ * of pixels on a real STL (README, the plumbing run), which no useful bound
+ * absorbs, so only the AO-off rows are gated and the AO-on ones are printed
+ * as reference.
  */
 const BOUND = { frac: 0.02, max: 96 }
-const MODES = ['baseline', 'in-process']
 
 function parseArgs(argv) {
-  const objOnly = argv.includes('--obj-only')
-  const at = argv.indexOf('--mode')
-  const mode = at === -1 ? 'baseline' : argv[at + 1]
-  if (!MODES.includes(mode)) throw new Error(`--mode must be one of ${MODES.join('|')}, got ${mode}`)
-  return { objOnly, mode }
+  return { objOnly: argv.includes('--obj-only') }
 }
 
 function loadConfig() {
@@ -147,12 +136,11 @@ const slug = (id) => id.replace(/[^A-Za-z0-9._-]/g, '_')
 const rowName = (sample, ao) => `${slug(sample)}${ao ? '' : '-noao'}`
 const baselineFile = (name) => join(BASELINE, `${name}_C0.png`)
 
-/** A row: gated at BOUND, or — baseline mode, AO on — printed for reference only. */
-function row(mode, name, ao, cmp) {
-  const gated = mode === 'in-process' || !ao
+/** A row: gated at BOUND with AO off, printed for reference only with AO on. */
+function row(name, ao, cmp) {
+  const gated = !ao
   const pct = (100 * cmp.diff) / cmp.pixels
   return {
-    mode,
     sample: name,
     ao,
     diff: cmp.diff,
@@ -166,13 +154,13 @@ function row(mode, name, ao, cmp) {
 
 function printTable(rows) {
   const w = Math.max(6, ...rows.map((r) => r.sample.length))
-  const line = (mode, s, ao, d, p, m, b, ok) =>
-    `${mode.padEnd(10)} | ${s.padEnd(w)} | ${ao.padEnd(3)} | ${d.padStart(7)} | ${p.padStart(7)} | ${m.padStart(5)} | ${b.padEnd(13)} | ${ok}`
-  console.log(line('mode', 'sample', 'ao', 'diff px', 'diff %', 'max Δ', 'bound', 'pass'))
-  console.log(`-----------|-${'-'.repeat(w)}-|-----|---------|---------|-------|---------------|-----`)
+  const line = (s, ao, d, p, m, b, ok) =>
+    `${s.padEnd(w)} | ${ao.padEnd(3)} | ${d.padStart(7)} | ${p.padStart(7)} | ${m.padStart(5)} | ${b.padEnd(13)} | ${ok}`
+  console.log(line('sample', 'ao', 'diff px', 'diff %', 'max Δ', 'bound', 'pass'))
+  console.log(`${'-'.repeat(w)}-|-----|---------|---------|-------|---------------|-----`)
   for (const r of rows) {
     const ok = r.pass === null ? '—' : r.pass ? 'ok' : 'FAIL'
-    console.log(line(r.mode, r.sample, r.ao ? 'on' : 'off', String(r.diff), r.pct.toFixed(2), String(r.max), r.bound, ok))
+    console.log(line(r.sample, r.ao ? 'on' : 'off', String(r.diff), r.pct.toFixed(2), String(r.max), r.bound, ok))
   }
 }
 
@@ -192,10 +180,9 @@ function samplesOf(record) {
 
 async function main() {
   const cfg = loadConfig()
-  const { objOnly, mode } = parseArgs(process.argv)
+  const { objOnly } = parseArgs(process.argv)
   mkdirSync(OUT, { recursive: true })
   console.log(`config: ${cfg.source}`)
-  console.log(`mode: ${mode}`)
 
   // The record of the run that produced the baselines: which STL samples, and
   // the framing each C0 was rendered under (a stored camera, or one derived
@@ -227,8 +214,6 @@ async function main() {
   const rows = []
   const notes = []
   const skipped = []
-  const written = []
-  const selfChecks = []
   try {
     const base = await waitForVite(vite, cfg.vitePort, 60000)
     console.log(`vite up at ${base}`)
@@ -262,42 +247,19 @@ async function main() {
       return framing
     }
 
-    /**
-     * One row. `current` is today's render; `legacy` (in-process mode) is the
-     * page's C0 through the pill's flag, else C0 is read from `baseline/`.
-     * In-process mode also holds the legacy AO-off render against the stored
-     * C0 where one exists — it must be pixel-identical, or the flag is not
-     * reproducing the spike and the baselines it writes would be wrong — and
-     * writes the missing STL AO-off baselines.
-     */
-    const judge = async ({ name, ao, current, legacy, stl }) => {
+    /** One row: today's render against the C0 read from `baseline/`. */
+    const judge = async ({ name, ao, current }) => {
       const file = baselineFile(name)
-      const stored = existsSync(file) ? dataUrl(readFileSync(file)) : null
-      let c0
-      if (mode === 'in-process') {
-        c0 = legacy.pngDataUrl
-        writeFileSync(join(OUT, `${name}_C0.png`), bytesOf(c0))
-        if (!ao) {
-          if (stored !== null) {
-            const self = await compare(stored, c0)
-            selfChecks.push({ sample: name, ...self, pass: self.diff === 0 && self.max === 0 })
-          } else if (stl) {
-            writeFileSync(file, bytesOf(c0))
-            written.push({ file, bytes: statSync(file).size })
-          }
-        }
-      } else {
-        if (stored === null) throw new Error(`no baseline for ${name}: ${file}`)
-        c0 = stored
-      }
+      if (!existsSync(file)) throw new Error(`no baseline for ${name}: ${file}`)
+      const c0 = dataUrl(readFileSync(file))
       const cmp = await compare(c0, current.pngDataUrl)
       writeFileSync(join(OUT, `${name}.png`), bytesOf(current.pngDataUrl))
-      const cells = []
-      if (stored !== null) cells.push({ label: 'C0 baseline', pngDataUrl: stored })
-      if (mode === 'in-process') cells.push({ label: 'C0 legacy, in-process', pngDataUrl: c0 })
-      cells.push({ label: 'current', pngDataUrl: current.pngDataUrl })
+      const cells = [
+        { label: 'C0 baseline', pngDataUrl: c0 },
+        { label: 'current', pngDataUrl: current.pngDataUrl },
+      ]
       writeFileSync(join(OUT, `sheet_${name}.png`), bytesOf(await sheet(cells, name)))
-      const r = row(mode, name, ao, cmp)
+      const r = row(name, ao, cmp)
       rows.push(r)
       return r
     }
@@ -307,9 +269,6 @@ async function main() {
     // stored camera is unchanged (its basis and the camera pass through R⁻¹
     // together, D3); a pose goes through cameraForPose exactly as the app does
     // today, and is checked against the az/el the record says C0 rendered at.
-    // The in-process legacy render takes the record's framing as-is — scene
-    // axis, stored camera, the pose through cameraForPose under the flag — which
-    // is C0 by construction, and is checked against the record the same way.
     for (const { path, rec } of stlReason === null ? samplesOf(record) : []) {
       const entry = byPath.get(path)
       if (entry === undefined) {
@@ -318,37 +277,28 @@ async function main() {
       }
       const expectedAxis = await migrate(rec.c0Axis)
       let current
-      let legacy
       let how
       if (rec.storedCamera !== null) {
         current = { path, format: 'stl', axis: expectedAxis, camera: rec.storedCamera }
-        legacy = { path, format: 'stl', axis: rec.c0Axis, camera: rec.storedCamera, legacy: true }
         how = 'stored camera'
       } else if (entry.pose != null) {
         current = { path, format: 'stl', pose: entry.pose }
-        legacy = { path, format: 'stl', pose: entry.pose, legacy: true }
         how = 'pose via cameraForPose'
       } else {
         current = { path, format: 'stl', axis: expectedAxis, camera: rec.c0Camera }
-        legacy = { path, format: 'stl', axis: rec.c0Axis, camera: rec.c0Camera, legacy: true }
         how = 'no pose in the listing; replayed the recorded camera'
       }
       for (const ao of [true, false]) {
         const name = rowName(path, ao)
-        if (mode === 'baseline' && !existsSync(baselineFile(name))) {
-          skipped.push(`${name}: no ${baselineFile(name)} (an in-process run writes it)`)
+        if (!existsSync(baselineFile(name))) {
+          skipped.push(`${name}: no ${baselineFile(name)}`)
           continue
         }
         const t = Date.now()
         const cur = await render({ ...current, ao })
         const framing = framingOf(cur, expectedAxis, rec.c0Camera, rec.c0Axis)
-        let leg
-        if (mode === 'in-process') {
-          leg = await render({ ...legacy, ao })
-          for (const f of framingOf(leg, rec.c0Axis, rec.c0Camera, rec.c0Axis)) framing.push(`legacy: ${f}`)
-        }
         const ms = Date.now() - t
-        const r = await judge({ name, ao, current: cur, legacy: leg, stl: true })
+        const r = await judge({ name, ao, current: cur })
         r.how = how
         r.ms = ms
         if (framing.length > 0) {
@@ -361,7 +311,6 @@ async function main() {
     // ---- The OBJ fixture: never baked, so its axis keeps its name and the
     // default camera the baseline was framed with gains swapOffset(axis) —
     // the scene-to-file conversion of an OBJ camera (0 at `y`, +90° at `z`).
-    // The legacy render is the default camera at the axis under the old table.
     const objText = readFileSync(join(BASELINE, 'lbracket.obj'), 'utf8')
     for (const axis of ['y', 'z']) {
       const camera = { ...defaultCamera, az: defaultCamera.az + (await offset(axis)) }
@@ -370,8 +319,7 @@ async function main() {
         const obj = { path: 'frame-ab:lbracket.obj', format: 'obj', text: objText, axis, ao }
         const t = Date.now()
         const cur = await render({ ...obj, camera })
-        const leg = mode === 'in-process' ? await render({ ...obj, camera: defaultCamera, legacy: true }) : undefined
-        const r = await judge({ name, ao, current: cur, legacy: leg, stl: false })
+        const r = await judge({ name, ao, current: cur })
         r.how = `default camera + swapOffset(${axis})`
         r.ms = Date.now() - t
       }
@@ -381,40 +329,24 @@ async function main() {
     printTable(rows)
     for (const s of skipped) console.log(`skipped: ${s}`)
     for (const n of notes) console.log(`note: ${n}`)
-    for (const c of selfChecks) {
-      console.log(
-        `self-check ${c.sample}: legacy render vs stored C0 — ${c.diff} px / max ${c.max} (must be 0/0): ${c.pass ? 'ok' : 'FAIL'}`,
-      )
-    }
-    if (mode === 'in-process') {
-      console.log(
-        written.length > 0
-          ? `wrote ${written.length} AO-off baseline(s) from the legacy render, for baseline mode after the pill is gone:\n${written
-              .map((w) => `  ${w.file} (${w.bytes} bytes)`)
-              .join('\n')}`
-          : 'wrote no baselines: every STL sample already has its -noao_C0.png',
-      )
-    }
     if (errors.length > 0) console.log(`page errors: ${JSON.stringify(errors)}`)
     writeFileSync(
       join(OUT, 'results.json'),
       JSON.stringify(
-        { when: new Date().toISOString(), mode, config: cfg, stlReason, rows, skipped, notes, selfChecks, written, errors },
+        { when: new Date().toISOString(), config: cfg, stlReason, rows, skipped, notes, errors },
         null,
         2,
       ),
     )
     const failed = rows.filter((r) => r.pass === false)
-    const failedChecks = selfChecks.filter((c) => !c.pass)
     const reference = rows.filter((r) => r.pass === null).length
     console.log(
       `${rows.length} rows, ${failed.length} failed` +
         (reference > 0 ? `, ${reference} reference only` : '') +
-        (failedChecks.length > 0 ? `, ${failedChecks.length} self-check(s) failed` : '') +
         (skipped.length > 0 ? `, ${skipped.length} skipped` : '') +
         `; renders in ${OUT}`,
     )
-    process.exitCode = failed.length > 0 || failedChecks.length > 0 ? 1 : 0
+    process.exitCode = failed.length > 0 ? 1 : 0
   } finally {
     if (browser !== undefined) await browser.close()
     vite.stop()

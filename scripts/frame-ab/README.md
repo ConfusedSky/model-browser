@@ -15,9 +15,8 @@ here are the frames that spike wrote.
 ## Run
 
 ```
-node scripts/frame-ab/run.mjs                    # baseline mode: the nine STL samples + the OBJ fixture, against baseline/
-node scripts/frame-ab/run.mjs --mode in-process  # TEMPORARY (until file-frame-spindle 5.2): C0 rendered in the same page
-node scripts/frame-ab/run.mjs --obj-only         # the OBJ fixture alone: no library, no dev server (either mode)
+node scripts/frame-ab/run.mjs             # the nine STL samples + the OBJ fixture, against baseline/
+node scripts/frame-ab/run.mjs --obj-only  # the OBJ fixture alone: no library, no dev server
 ```
 
 Preconditions, stated plainly:
@@ -42,41 +41,18 @@ The script starts its own Vite on `vitePort` (`bunx vite --port 5174 --strictPor
 at `127.0.0.1:3177`; `apiBase` is what the script itself reads the library and listing from
 and should name the same server.
 
-## Two modes
+## What is gated
 
-`--mode baseline` (the default) is the harness that survives: today's render of each sample
-against the frame the pre-change code wrote, `baseline/<name>_C0.png`, in a fresh browser
-process. Only the `-noao` rows are gated (≤ 2 % / ≤ 96); the AO-on rows are rendered, diffed
-and printed with `bound: reference` and `pass: —`, and never fail the run, because the AO
-pass is not deterministic across processes (next section).
+Today's render of each sample is compared against the frame the pre-change code wrote,
+`baseline/<name>_C0.png`, in a fresh browser process. Only the `-noao` rows are gated
+(≤ 2 % / ≤ 96); the AO-on rows are rendered, diffed and printed with `bound: reference` and
+`pass: —`, and never fail the run, because the AO pass is not deterministic across processes
+(next section).
 
-`--mode in-process` is **TEMPORARY** and goes with `file-frame-spindle` task 5.2 (the pill's
-deletion): both conventions render in **one** page, the way the spike did, so there is no
-cross-process floor and **every** row is gated at ≤ 2 % / ≤ 96 — AO on and off, STL and OBJ.
-The C0 side is not a stored frame but a live render through the compare pill's module flag
-(`setLegacyBake`, `client/src/three/bakeToggle.ts`): the page parses the STL with
-`parseModel(bytes, format, /*bake*/ true)`, `frameFor` answers from the legacy scene table and
-the pose read applies the legacy scene mapping, which is the spike's C0 by construction. Its
-framing is therefore the *legacy* one, taken from the record as-is: the recorded scene axis
-(no `migrateAxis`), the stored camera unchanged, the pose through `cameraForPose` under the
-flag; the OBJ fixture at its axis with the default camera and no `swapOffset`. Each legacy
-render is checked against the record's axis and az/el the same way today's is, and printed as
-a `note:` if it disagrees.
-
-In-process mode does two more things:
-
-- **Self-check.** Where a `-noao_C0.png` is stored, the legacy AO-off render is compared with
-  it and must be pixel-identical (`0 px / max 0` — AO off is deterministic across processes);
-  a difference fails the run, since it would mean the flag is not reproducing the spike.
-- **It writes the missing baselines.** For every STL sample without a `-noao_C0.png` it writes
-  one from the legacy AO-off render (seven of nine on 2026-09-10), so that baseline mode can
-  gate all nine STLs exactly after the pill is gone. The run's footer lists what it wrote.
-  These are legitimate C0s only because the self-check above held on the two the spike
-  wrote.
-
-The page's `render` takes `legacy?: boolean` for this; the import of `setLegacyBake`, the
-branch, `legacyModelCache` and the option are all marked `TEMPORARY` and are on 5.2's delete
-list, with `--mode in-process` and this section.
+For one day (2026-09-10 to 2026-09-11) the harness also had an `--mode in-process` that
+rendered C0 live in the same page through the app's temporary compare pill (`file-frame-spindle`
+D7) and gated every row; it went with the pill (task 5.2). Its run is kept below as history —
+it is where seven of the nine `-noao` baselines came from.
 
 ## Config
 
@@ -120,11 +96,10 @@ gitignored. Exit code 1 if any row fails.
 
 ## Tolerance, and where it comes from
 
-| mode | rows | pixels differing | max channel delta |
-|---|---|---|---|
-| in-process (temporary) | every row, AO on and off | ≤ 2 % of 65,536 | ≤ 96 |
-| baseline | `-noao` rows | ≤ 2 % of 65,536 | ≤ 96 |
-| baseline | AO-on rows | reference only — printed, never gated | |
+| rows | pixels differing | max channel delta |
+|---|---|---|
+| `-noao` rows | ≤ 2 % of 65,536 | ≤ 96 |
+| AO-on rows | reference only — printed, never gated | |
 
 The basis (D6; the spike report `REPORT.md` in the archived change; the runs named below):
 
@@ -145,17 +120,17 @@ The basis (D6; the spike report `REPORT.md` in the archived change; the runs nam
   0/0 on every sample). The L-bracket measured for D6 put the cross-process floor at
   ≈ 4.6 % (1,788–3,035 px / max 14–27 between three fresh processes); the plumbing run
   below showed that the bracket, with little occluded area, was the wrong yardstick. This
-  is why baseline mode cannot gate AO-on rows: no bound absorbs 23 % without also passing a
+  is why the harness cannot gate AO-on rows: no bound absorbs 23 % without also passing a
   mis-framed model. Seeding the noise would make them gateable, but it changes production
   pixels and is therefore a `RIG_VERSION` matter for another change, not this harness's.
-- **So the `-noao` rows are the exact check** in baseline mode, and in-process mode has no
-  floor at all — it is the spike's own comparison, re-run.
+- **So the `-noao` rows are the exact check.** (The in-process run below had no floor at
+  all — it was the spike's own comparison, re-run — which is why it could gate every row.)
 
 A row outside tolerance is a finding, not a threshold to widen. A widening has to argue
 against the numbers above.
 
-**Plumbing run (2026-09-10, task 4.1, baseline mode before it was called that — Chromium
-1228, this machine, the code at that commit, AO-on rows still gated at 5 %):** every `-noao`
+**Plumbing run (2026-09-10, task 4.1 — Chromium 1228, this machine, the code at that
+commit, AO-on rows still gated at 5 %):** every `-noao`
 row and every OBJ row inside its bound; the `-noao` STL rows at 1.41 % / max 12 (`fat_cat`)
 and 0.43 % / max 10 (`xyzCalibration_cube`), which is the spike's residual (951 and 285 px
 within one process). Eight of nine AO-on STL rows were *outside* 5 % — 9–23 % of pixels,
@@ -164,8 +139,9 @@ Chromium processes differs by 22.40 % on `bod_test_cube_5s` (the harness row: 22
 13.62 % on `Pikachu_X_Kakashi` (13.98 %), 5.37 % on `xyzCalibration_cube` (5.52 %), and 0/0
 on each with AO off. That run is what moved the AO-on rows to reference-only.
 
-**In-process run (2026-09-10, task 4.2, `--mode in-process`, Chromium 1228, this machine,
-the pill code present):** 22 rows, 0 failed. The STL rows at 0.38–1.87 % of pixels, max
+**In-process run (2026-09-10, task 4.2, the since-deleted `--mode in-process`, Chromium
+1228, this machine, the compare pill present — before the pill and the mode were removed on
+2026-09-11):** 22 rows, 0 failed. The STL rows at 0.38–1.87 % of pixels, max
 channel delta 7–15, AO on and off alike — the AO-on row of a sample within a few pixels of
 its `-noao` row (`fat_cat` 874 vs 922, `xyzCalibration_cube` 248 vs 282), which is the
 spike's finding that the AO pass adds nothing within a process; the four OBJ rows 0/0. The
@@ -179,9 +155,9 @@ stored `fat_cat-noao` C0 against `out/_fat_cat.stl-noao.png` is 951 px / max 31 
 `xyzCalibration_cube-noao` 285/28 raw, 283/10 composited, against the spike's 285/28 and
 the table's 282/10. The two `-noao` counts match the plumbing run exactly (922/12, 282/10).
 
-**Baseline run (2026-09-10, task 4.2, `--mode baseline`, the same Chromium and commit,
-straight after the in-process run):** 22 rows, 0 failed, 11 reference only. All nine STL
-`-noao` rows gate green against the stored C0s — seven of them the frames the in-process
+**Baseline run (2026-09-10, task 4.2, `--mode baseline` — then a mode, now the only way
+the harness runs — the same Chromium and commit, straight after the in-process run):** 22
+rows, 0 failed, 11 reference only. All nine STL `-noao` rows gate green against the stored C0s — seven of them the frames the in-process
 run had just written — at the **same counts and deltas** the in-process run gave
 (`Pikachu_X_Kakashi` 1,037/10, `Main_Tubeless` 1,224/10, `Main_Complete` 1,123/15,
 `bod_test_cube_5s` 688/15, `3DBenchy` 447/9, `BeardedGentleman` 629/8, `Octopus_sup_v5.6`
@@ -200,7 +176,7 @@ the spike's record of the run that produced the originals — kept beside them b
 the framing source above. They are lossless PNGs of the raw canvas
 (`toDataURL('image/png')`), 902,357 bytes in all (884,473 of PNG), and they are **the
 repository's first tracked binaries**: fixtures that cannot be regenerated, because the code
-that rendered them is gone — the seven from the pill can be, until 5.2 deletes the pill.
+that rendered them is gone — the pill that wrote the seven went on 2026-09-11 (task 5.2).
 
 The AO-on frames are one process's sample of the AO noise, which is why they are reference
 only; the `-noao` frames exist so that every sample has an exact check.
@@ -218,16 +194,13 @@ pass: the failing row is the measurement.
 `cameraForPose`, `DEFAULT_CAMERA`, `formatOf`, `defaultAxisFor`, and `migrateAxis`/`swapOffset`
 from `shared/frames`) and exposes `window.ab`:
 
-- `render({ path, format?, bytes? | text?, axis?, camera?, pose?, ao?, legacy? })` →
+- `render({ path, format?, bytes? | text?, axis?, camera?, pose?, ao? })` →
   `{ axis, camera, pngDataUrl }` — bytes given, else text, else `/api/file?path=`;
-  `legacy` (TEMPORARY, until 5.2) renders the pre-change convention through the pill's flag
-  with the framing taken as legacy, see "Two modes";
 - `compare(pngA, pngB)` → `{ diff, max, pixels }`, both composited over the ground;
 - `sheet([{ label, pngDataUrl }…], title)` → a PNG data URL;
 - `migrateAxis`, `swapOffset`, `defaultCamera`, `thumbSize`.
 
-It has no runtime switches of its own — what renders is what the app renders, and `legacy`
-is the app's own pill flag, gone with it. It typechecks because
-`spike` is in `client/tsconfig.json`'s `include`, and it is **not built into `dist`**:
+It has no runtime switches of its own — what renders is what the app renders. It typechecks
+because `spike` is in `client/tsconfig.json`'s `include`, and it is **not built into `dist`**:
 `client/vite.config.ts` sets no `build.rollupOptions.input`, so `vite build`'s only entry is
 `client/index.html`. Only the dev server serves it.

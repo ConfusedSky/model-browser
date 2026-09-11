@@ -1,26 +1,8 @@
 import * as THREE from 'three'
 import type { CameraState, OrbitAxis } from '../../../shared/types'
-import {
-  FILE_FRAMES,
-  SCENE_FRAMES,
-  defaultAxisFor as fileDefaultAxisFor,
-  type FrameTriples,
-} from '../../../shared/frames'
-import { legacyBake } from './bakeToggle'
-import type { ModelFormat } from '../../../shared/types'
+import { FILE_FRAMES, type FrameTriples } from '../../../shared/frames'
 
-/**
- * TEMPORARY — the compare pill's default spindle (`file-frame-spindle` D7):
- * while `legacyBake()` is on the mesh is baked Y-up, so a model with no stored
- * axis and no pose turns about `y`, the default the old code had — the file
- * convention's `z` lays a baked STL on its side (Masa, 2026-09-11). Every
- * client site imports the default from here, not from `shared/frames`, so the
- * one wrapper covers them all. Deleted by task 5.2, which restores the plain
- * re-export.
- */
-export function defaultAxisFor(format: ModelFormat): OrbitAxis {
-  return legacyBake() ? 'y' : fileDefaultAxisFor(format)
-}
+export { defaultAxisFor } from '../../../shared/frames'
 
 export interface Bounds {
   center: THREE.Vector3
@@ -60,14 +42,6 @@ export interface SpindleFrame {
  */
 const FRAMES: Record<OrbitAxis, SpindleFrame> = lift(FILE_FRAMES)
 
-/**
- * TEMPORARY — the compare pill's legacy lookup (`file-frame-spindle` D7): the
- * pre-bake scene table lifted the same way, selected while `legacyBake()` is
- * on. Deleted with the pill by task 5.2; `SCENE_FRAMES` itself stays, since
- * `migrateAxis` and `swapOffset` derive from it.
- */
-const LEGACY_FRAMES: Record<OrbitAxis, SpindleFrame> = lift(SCENE_FRAMES)
-
 function lift(table: Record<OrbitAxis, FrameTriples>): Record<OrbitAxis, SpindleFrame> {
   return Object.fromEntries(
     (Object.entries(table) as [OrbitAxis, FrameTriples][]).map(([axis, { s, a, b }]) => [
@@ -78,8 +52,7 @@ function lift(table: Record<OrbitAxis, FrameTriples>): Record<OrbitAxis, Spindle
 }
 
 export function frameFor(axis: OrbitAxis): SpindleFrame {
-  // TEMPORARY branch on the pill's flag (D7), deleted by task 5.2.
-  return legacyBake() ? LEGACY_FRAMES[axis] : FRAMES[axis]
+  return FRAMES[axis]
 }
 
 /** Unit view direction (target → camera) for spindle-relative az/el. */

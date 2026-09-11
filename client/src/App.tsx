@@ -40,7 +40,6 @@ import {
   openEntryIn,
   openInApps,
   orbitAxisApplies,
-  renderEntryThumbnail,
   resetFramingLive,
   runCommand,
   setOrbitAxis,
@@ -104,8 +103,6 @@ import {
 } from './state/selectors'
 import { sameListing, SIMILAR_K, toUrlView, type Prefs, type Subject, type View } from './state/view'
 import { MeshLru, type LoadedModel } from './three/lru'
-// TEMPORARY — `file-frame-spindle` D7; deleted by task 5.2.
-import { legacyBake, setLegacyBake } from './three/bakeToggle'
 import { defaultAxisFor } from './three/camera'
 import {
   disposeModel,
@@ -421,15 +418,10 @@ const LIBRARY_STATES: ReadonlySet<string> = new Set(
  * The mesh LRU's loader: bytes through the one client, the 3MF placeholder on
  * the way past, then the parse. `placeholderRef` is read at call time, so the
  * loader can be built before `useThumbnails` hands over `setPlaceholder`.
- *
- * `bake` is TEMPORARY (`file-frame-spindle` D7): the compare pill's second
- * instance parses with the retired STL bake. Task 5.2 deletes the argument and
- * folds this back into the one `useMemo` it was extracted from.
  */
 function meshLoader(
   api: Pick<ApiClient, 'fetchModel'>,
   placeholderRef: { current: (path: string, url: string) => void },
-  bake: boolean,
 ): (path: string) => Promise<LoadedModel<THREE.Object3D>> {
   return async (path) => {
     const format = formatOf(path)
@@ -439,7 +431,7 @@ function meshLoader(
       const preview = embedded3mfThumbnail(bytes)
       if (preview !== null) placeholderRef.current(path, preview)
     }
-    const object = parseModel(bytes, format, bake)
+    const object = parseModel(bytes, format)
     return { object, bytes: geometryBytes(object) }
   }
 }
@@ -484,17 +476,7 @@ export default function App() {
   const queue = useMemo(() => new RenderQueue(2), [])
   const placeholderRef = useRef<(path: string, url: string) => void>(() => {})
   const lru = useMemo(
-    () => new MeshLru<THREE.Object3D>(meshLoader(api, placeholderRef, false), disposeModel),
-    [api],
-  )
-  /**
-   * TEMPORARY — `file-frame-spindle` D7: the compare pill's second instance,
-   * one per convention, so a flip never clears an LRU whose objects an orbit
-   * overlay or an in-flight render still holds. Keys stay bare paths; each
-   * instance has its own budget. Deleted by task 5.2.
-   */
-  const bakeLru = useMemo(
-    () => new MeshLru<THREE.Object3D>(meshLoader(api, placeholderRef, true), disposeModel),
+    () => new MeshLru<THREE.Object3D>(meshLoader(api, placeholderRef), disposeModel),
     [api],
   )
 
@@ -895,15 +877,6 @@ export default function App() {
   }, [viewer?.entry.path])
   // AO preference pill state (persisted per browser profile, aoToggle.ts).
   const [ao, setAoState] = useState(aoEnabled)
-  // TEMPORARY — `file-frame-spindle` D7: the compare pill's state mirror of
-  // `legacyBake`, set beside it on click so a flip re-renders App and every
-  // consumer is handed the other LRU instance. Deleted by task 5.2.
-  const [bake, setBake] = useState(legacyBake())
-  const liveLru = bake ? bakeLru : lru
-  // Read per job entry by `BulkJobs` (its `ao` precedent), so a flip does not
-  // rebuild a running job — `jobs` below keeps the instance out of its deps.
-  const liveLruRef = useRef(liveLru)
-  liveLruRef.current = liveLru
   const trackerRef = useRef(new GestureTracker())
 
   // Set when the next lightbox open comes from history or a deep link. The
@@ -1350,7 +1323,7 @@ export default function App() {
   } = useThumbnails(
     thumbEntries,
     api,
-    liveLru,
+    lru,
     queue,
     // The pill's own state, not a second read of `aoToggle`'s store: this is
     // what makes a press (or, after `adaptive-ao-default`, an automatic
@@ -1413,11 +1386,8 @@ export default function App() {
    * instance would be a second job, whatever the chip said.
    *
    * Every dependency is referentially stable across renders, which is what
-   * keeps that promise: `api` and `queue` are App's own memos, and
-   * `setThumb`/`refetch` are `useCallback([], …)` in `useThumbnails`. `lru` is
-   * a getter over a ref (TEMPORARY, `file-frame-spindle` D7): the compare
-   * pill swaps instances, and a job reads the one in force per entry rather
-   * than being rebuilt by the swap.
+   * keeps that promise: `api`, `queue` and `lru` are App's own memos, and
+   * `setThumb`/`refetch` are `useCallback([], …)` in `useThumbnails`.
    *
    * `ao` is `aoToggle`'s module reader, **not** the `ao` state cell one screen
    * up — and the difference is deliberate rather than incidental. The two hold
@@ -1429,9 +1399,8 @@ export default function App() {
    * with it.
    */
   const jobs = useMemo(
-    () =>
-      new BulkJobs({ api, lru: () => liveLruRef.current, queue, setThumb, refetch, ao: aoEnabled }),
-    [api, queue, setThumb, refetch],
+    () => new BulkJobs({ api, lru, queue, setThumb, refetch, ao: aoEnabled }),
+    [api, lru, queue, setThumb, refetch],
   )
   const job = useBulkJobState(jobs)
 
@@ -2194,7 +2163,7 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const hover = useMemo(() => createHoverWarmer((p) => liveLru.warm(p)), [liveLru])
+  const hover = useMemo(() => createHoverWarmer((p) => lru.warm(p)), [lru])
 
   viewerRef.current = viewer
 
@@ -2615,7 +2584,7 @@ export default function App() {
       // over rather than reimplemented — App has no business resolving an
       // orientation, and the module has no business constructing any of these.
       api,
-      lru: liveLru,
+      lru,
       queue,
       setThumb,
       discardThumbFraming,
@@ -2643,7 +2612,7 @@ export default function App() {
       poses,
       libraryTop,
       api,
-      liveLru,
+      lru,
       queue,
       setThumb,
       discardThumbFraming,
@@ -2652,38 +2621,6 @@ export default function App() {
       say,
     ],
   )
-  // TEMPORARY (`file-frame-spindle` D7): a flip re-renders every visible model
-  // locally through the flipped LRU — the *re-render thumbnail* command's body,
-  // with the host that command gets, pushed through the one render queue as the
-  // bulk path is. Not `refetch`: that restarts the *lookup*, and the server
-  // answers it with its cached pixels, so the tile redrew the same render and
-  // nothing was drawn under the other convention (Masa, 2026-09-11). The PUT
-  // each render ends in is dropped by the pill's guard — the tile shows the
-  // local blob regardless. Before the cache migration (5.1) a model with a
-  // stored scene axis renders a quarter turn off with the pill OFF; expected —
-  // the ON side is the pre-migration truth for those. An effect below
-  // `actionHost` rather than the click handler: the host built around the other
-  // instance exists only after the re-render. The seen-ref keeps a mount, and
-  // the host's own churn, from firing it; a failed model is left showing what
-  // it was and stops none of the others. Deleted by task 5.2.
-  const bakeSeenRef = useRef(bake)
-  useEffect(() => {
-    if (bakeSeenRef.current === bake) return
-    bakeSeenRef.current = bake
-    for (const entry of thumbEntries) {
-      if (entry.kind !== 'model') continue
-      actionHost.queue.push(async () => {
-        try {
-          await renderEntryThumbnail(entry, actionHost, {
-            discardFraming: false,
-            pose: actionHost.poses[entry.path],
-          })
-        } catch {
-          // Swallowed: the flip is a comparison, not a press on this tile.
-        }
-      })
-    }
-  }, [bake, thumbEntries, actionHost])
 
   const onEntryMenu = useCallback(
     (entry: DirEntry, el: HTMLElement | null, at: { x: number; y: number }): void => {
@@ -3542,28 +3479,6 @@ export default function App() {
         >
           ssao
         </button>
-        {/* TEMPORARY — `file-frame-spindle` D7: the compare pill. Flips the
-            module flag and its state mirror, closes the lightbox and the orbit
-            overlay (both live in `viewer`; `closeViewer` covers both), and the
-            effect on `bake` (below `actionHost`) re-renders every visible tile
-            locally through the other instance. Removed by task 5.2 before
-            the change ships. Ordering: `adaptive-ao-default` 1.2 edits this
-            block — whichever lands second rebases. */}
-        <button
-          type="button"
-          aria-pressed={bake}
-          title="Legacy Z-up bake — compare the old rendering; removed before this change ships"
-          onClick={() => {
-            setLegacyBake(!bake)
-            setBake(!bake)
-            closeViewer()
-          }}
-          className={`rounded-full px-2.5 py-1 ${
-            bake ? 'bg-sky-700 text-white' : 'text-zinc-400 hover:text-zinc-200'
-          }`}
-        >
-          bake
-        </button>
       </div>
       {/* D6's table, whole: three items on a container, five on a model, and a
           sixth when the index is answering for the collection it sits in — less
@@ -3599,7 +3514,7 @@ export default function App() {
           scoreScale={scoreScale}
           ao={ao}
           api={api}
-          lru={liveLru}
+          lru={lru}
           tracker={trackerRef.current}
           onPromote={() => setViewer((v) => (v !== null ? { ...v, mode: 'lightbox' } : v))}
           closeSignal={closeSignal}

@@ -54,11 +54,8 @@ function withShadows<T extends THREE.Object3D>(object: T): T {
  * are Z-up (print bed; 3MF by specification) and get `z`, OBJ is Y-up and gets
  * `y`. The 3MF loader applies no rotation either (an earlier comment here
  * claimed it did; `3MFLoader.js` in node_modules rotates nothing).
- *
- * `bake` is TEMPORARY (`file-frame-spindle` D7): true applies the retired STL
- * bake for the compare pill's second LRU instance. Deleted by task 5.2.
  */
-export function parseModel(bytes: ArrayBuffer, format: ModelFormat, bake = false): THREE.Object3D {
+export function parseModel(bytes: ArrayBuffer, format: ModelFormat): THREE.Object3D {
   if (format === 'stl') {
     const geometry = new STLLoader().parse(bytes)
     // Stored STL facet normals are exporter-asserted and redundant with the
@@ -67,9 +64,6 @@ export function parseModel(bytes: ArrayBuffer, format: ModelFormat, bake = false
     // convention than the vertices. Shade from winding, always (D1).
     geometry.deleteAttribute('normal')
     geometry.computeVertexNormals()
-    // TEMPORARY — legacy compare path, D7: the retired Z-up bake, verbatim,
-    // for the pill's second LRU instance. Deleted by task 5.2.
-    if (bake) geometry.rotateX(-Math.PI / 2)
     return withShadows(new THREE.Mesh(geometry, makeMaterial()))
   }
   if (format === 'obj') {
