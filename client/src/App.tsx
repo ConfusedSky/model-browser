@@ -746,6 +746,24 @@ export default function App() {
    * over it, stay stable.
    */
   const [handDelta, setHandDelta] = useState(0)
+  /**
+   * How many times the tab's numbers went stale by more than a hand's ±1 — the
+   * trigger for a *re-derivation*, which `libraryJobs` hands the panel as
+   * `recountKey`. Two moments move it. A job settled having written something:
+   * not every phase, since a launch passes through `deriving` and `confirming`
+   * before it writes, and a reset cancelled at its confirmation wrote nothing,
+   * so recounting on phase alone re-derived the library twice per press of the
+   * very button whose count it was refreshing (Masa, 2026-09-02); and not on
+   * the phase at all, since Cancel sets `cancelled` while the in-flight entry
+   * may still land, so a write a cancel could not recall was missed by a phase
+   * transition (the review's finding). `settled` is the runner's word for "the
+   * loop is over and the counters are final", and `wrote` for what it actually
+   * wrote. And a hand change whose before-state this session could not judge
+   * (`noteFramingChanged`): an orbit released on a tile still loading, after
+   * the caches were emptied, wrote a camera the count then said nothing about
+   * until a job ended or the tab was reopened (Masa, 2026-09-11).
+   */
+  const [jobsEnded, setJobsEnded] = useState(0)
   const thumbsRef = useRef<Map<string, ThumbState>>(new Map())
   const posesRef = useRef<Record<string, IndexPose>>({})
   const noteFramingChanged = useCallback(
@@ -754,14 +772,20 @@ export default function App() {
       // site's own lookup; else the tile's *ready* state (a loading or errored
       // tile carries no framing at all, and reading it as "unframed" made an
       // orbit on a framed model count +1 — one review's finding); else nothing
-      // is known and nothing is said. Not the listing's annotation: after a
-      // reset's own refetch, or a failed render, it still names a camera the
-      // server no longer holds, and a wrong ±1 clamps the button (the next
-      // review's finding).
+      // is known here, and the server is asked instead — every caller signals
+      // after its PUT has landed, so a re-derivation now reads the write. Not
+      // the listing's annotation: after a reset's own refetch, or a failed
+      // render, it still names a camera the server no longer holds, and a
+      // wrong ±1 clamps the button (the next review's finding). Not silence
+      // either: an orbit released before the tile's thumbnail landed stored a
+      // camera the count did not move for (Masa, 2026-09-11). The hand path
+      // stays the rule for a known before-state — a re-derivation is what it
+      // was written to avoid.
+      const recount = (): void => setJobsEnded((n) => n + 1)
       const shown = thumbsRef.current.get(path)
       const before: StoredFraming | undefined =
         known ?? (shown?.status === 'ready' ? { camera: shown.camera, axis: shown.axis } : undefined)
-      if (before === undefined) return
+      if (before === undefined) return recount()
       const after: StoredFraming = {
         camera: write.camera === null ? undefined : (write.camera ?? before.camera),
         axis: write.axis === null ? undefined : (write.axis ?? before.axis),
@@ -769,11 +793,11 @@ export default function App() {
       // The axis rule needs the index's opinion; where this session holds none
       // for the model, an axis-only state cannot be judged — and a guess of
       // "no usable pose" read a chosen axis as −1 and clamped the button shut.
-      // A derivation waves for exactly this; a hand change stays silent.
+      // A derivation waves for exactly this, so one is asked for.
       const pose = posesRef.current[path]
       const axisOnlyUnknown = (s: StoredFraming): boolean =>
         pose === undefined && s.camera === undefined && s.axis !== undefined
-      if (axisOnlyUnknown(before) || axisOnlyUnknown(after)) return
+      if (axisOnlyUnknown(before) || axisOnlyUnknown(after)) return recount()
       const delta =
         (resettable(after.camera, after.axis, pose) ? 1 : 0) -
         (resettable(before.camera, before.axis, pose) ? 1 : 0)
@@ -2835,8 +2859,8 @@ export default function App() {
    * reaches the host through a ref for the same reason: `actionHost` is
    * rebuilt on every pose landing, and a `launch` keyed on it would have made
    * every landing re-enumerate the whole library. `recountKey` is the one
-   * trigger for a *re-derivation*: a job that wrote is exactly when the numbers
-   * went stale by more than a hand's ±1, which `resetAdjust` carries instead.
+   * trigger for a *re-derivation*: when the numbers went stale by more than a
+   * hand's ±1, which `resetAdjust` carries instead (`jobsEnded` names the moments).
    */
   const actionHostRef = useRef(actionHost)
   actionHostRef.current = actionHost
@@ -2850,19 +2874,8 @@ export default function App() {
     },
     [rootScope],
   )
-  /**
-   * How many jobs have settled having written something — the one moment a job
-   * makes the tab's numbers stale. Not every phase: a launch passes through
-   * `deriving` and `confirming` before it writes, and a reset cancelled at its
-   * confirmation wrote nothing, so recounting on phase alone re-derived the
-   * library twice per press of the very button whose count it was refreshing
-   * (Masa, 2026-09-02). And not on the phase at all: Cancel sets `cancelled`
-   * while the in-flight entry may still land, so a write a cancel could not
-   * recall was missed by a phase transition (the review's finding). `settled`
-   * is the runner's word for "the loop is over and the counters are final",
-   * and `wrote` for what it actually wrote.
-   */
-  const [jobsEnded, setJobsEnded] = useState(0)
+  // A job settled having written something moves `jobsEnded` (its doc, beside
+  // `noteFramingChanged`, says why on `settled` and `wrote` and nothing else).
   // Keyed on the run, never the state object: every patch — a Dismiss after
   // the job settled included — builds a new object carrying the same
   // `settled`/`wrote`, and keyed on identity the × re-derived the library.

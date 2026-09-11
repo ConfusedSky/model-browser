@@ -9,9 +9,10 @@
 // reset's consent gates the writes, that the chip outlives the listing that
 // launched it, and that a tab which the feature report can empty is neither
 // offered nor recorded when it is empty.
-import { act } from 'react'
+import { act, useEffect } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DirEntry, DirListing, ThumbInfo, ThumbRenderInfo } from '../../shared/types'
+import type { ViewerSession } from '../src/viewer/session'
 import {
   click,
   container,
@@ -38,6 +39,25 @@ vi.mock('../src/api/client', async () => (await import('./appHarness')).apiClien
 vi.mock('../src/three/renderer', async (importOriginal) =>
   (await import('./appHarness')).rendererModule(importOriginal),
 )
+// The viewer is out of scope: a stub that persists one settled session on
+// mount (persistPut.test.tsx's) stands in for an orbit released on the tile
+// that opened it. What the cells here pin is what App does with that persist —
+// whether the library tab's count moves by hand or by asking the server.
+vi.mock('../src/viewer/ViewerLayer', () => ({
+  default: ({ onPersist }: { onPersist: (s: ViewerSession) => Promise<void> }) => {
+    useEffect(() => {
+      void onPersist({
+        state: ORBITED,
+        axis: '-z',
+        snapshot: () => Promise.resolve(new Blob(['png'])),
+      } as unknown as ViewerSession)
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
+    return null
+  },
+}))
+/** Where the stub's orbit settled — any camera; the count reads only that there is one. */
+const ORBITED = { az: 1, el: 0.2, distR: 2, target: [0, 0, 0] as [number, number, number] }
 
 const NESTED: DirListing = { path: '/models', entries: [dir('Alpha'), dir('Beta')] }
 const BETA: DirListing = { path: '/models/Beta', entries: [] }
@@ -98,6 +118,16 @@ const menuItem = (id: string): HTMLButtonElement =>
   menu()!.querySelector<HTMLButtonElement>(`[data-command="${id}"]`)!
 const tile = (name: string): HTMLButtonElement =>
   tiles().find((t) => (t.getAttribute('title') ?? '') === name)!
+/** Open the orbit on a model tile — a primary press mounts the viewer, and the
+ *  stub above persists at once, as a release would. */
+async function orbit(el: HTMLElement): Promise<void> {
+  await act(async () => {
+    el.dispatchEvent(
+      new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 10, clientY: 10 }),
+    )
+  })
+  await settle()
+}
 /** Raise the menu on a container tile and choose one of its bulk entries. */
 async function launchFrom(name: string, command: string): Promise<void> {
   await secondaryPress(tile(name))
@@ -462,6 +492,53 @@ describe('the library tab', () => {
     await settle()
     expect(libraryButtons()[1]!.textContent).toBe('Reset 0 framings')
     expect(models).toHaveBeenCalledTimes(1)
+    answerSweep()
+    await settle()
+  })
+
+  it('an orbit on a ready tile moves the count by one, by hand', async () => {
+    // The tile is ready and holds no camera; the orbit persists one. The count
+    // must follow — and follow by arithmetic, not by re-deriving the library.
+    const withModel: DirListing = { path: '/models', entries: [dir('Alpha'), model('m.stl')] }
+    enumerated('/', [beneath('/models', 'm.stl')])
+    getThumb.mockResolvedValue({ status: 'hit', pngUrl: 'blob:cached', lighting: THUMB_LIGHTING, rig: RIG_VERSION })
+    await mountApp('/models', withModel)
+    await expandPanel()
+    await click(tabButton('library')!)
+    await settle()
+    expect(libraryButtons()[1]!.textContent).toBe('Reset 0 framings')
+
+    await orbit(tile('m.stl'))
+    expect(putThumb.mock.calls.at(-1)![0]).toMatchObject({ camera: ORBITED })
+    expect(libraryButtons()[1]!.textContent).toBe('Reset 1 framings')
+    // One enumeration for the tab's opening, none for the hand change.
+    expect(models).toHaveBeenCalledTimes(1)
+  })
+
+  it('an orbit on a tile that has not landed re-derives the count', async () => {
+    // A tile whose lookup has not answered carries no before-state, and the
+    // orbit has no lookup of its own to hand over. Saying nothing left the
+    // camera it wrote out of the count until a job ended or the tab was
+    // reopened (Masa, 2026-09-11) — so the server, which holds the write by
+    // the time the persist signals, is asked again.
+    const withModel: DirListing = { path: '/models', entries: [dir('Alpha'), model('m.stl')] }
+    models
+      .mockResolvedValueOnce({ path: '/', complete: true, entries: [beneath('/models', 'm.stl')] })
+      .mockResolvedValue({ path: '/', complete: true, entries: [beneath('/models', 'm.stl', framed())] })
+    // The sweep's lookup, held until the cell is done: a lookup left running
+    // forever would keep the far gate closed for every cell after this one.
+    let answerSweep = (): void => {}
+    getThumb.mockReturnValue(new Promise((r) => { answerSweep = () => r({ status: 'miss' }) }))
+    await mountApp('/models', withModel)
+    await expandPanel()
+    await click(tabButton('library')!)
+    await settle()
+    expect(libraryButtons()[1]!.textContent).toBe('Reset 0 framings')
+
+    await orbit(tile('m.stl'))
+    expect(putThumb.mock.calls.at(-1)![0]).toMatchObject({ camera: ORBITED })
+    expect(models).toHaveBeenCalledTimes(2)
+    expect(libraryButtons()[1]!.textContent).toBe('Reset 1 framings')
     answerSweep()
     await settle()
   })
