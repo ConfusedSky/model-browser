@@ -4,8 +4,9 @@
  * Renders one model through the app's own `renderThumbnailCanvas` — the same
  * staging, chain and readback as every thumbnail, minus the WebP encode — and
  * hands the driver (`scripts/frame-ab/run.mjs`) lossless PNGs to compare
- * against the stored baselines. There are no runtime switches: what renders is
- * whatever the app's modules do today.
+ * against the stored baselines. There are no runtime switches of its own: what
+ * renders is whatever the app's modules do today — except `legacy`, which is
+ * the app's own compare-pill flag (`bakeToggle.ts`, D7) and goes with it.
  *
  * Not part of the app and never built: `vite.config.ts` names no rollup input,
  * so `vite build` bundles `client/index.html` alone. The dev server serves it
@@ -15,6 +16,8 @@
  */
 import type { CameraState, IndexPose, OrbitAxis } from '../../shared/types'
 import { migrateAxis, swapOffset } from '../../shared/frames'
+// TEMPORARY — deleted by file-frame-spindle 5.2 (with `RenderOpts.legacy`).
+import { setLegacyBake } from '../src/three/bakeToggle'
 import { DEFAULT_CAMERA, defaultAxisFor } from '../src/three/camera'
 import { formatOf, parseModel, type ModelFormat } from '../src/three/models'
 import { cameraForPose } from '../src/three/pose'
@@ -42,6 +45,16 @@ interface RenderOpts {
   /** Derived through `cameraForPose` when no `camera` is given — the app's own pose path. */
   pose?: IndexPose
   ao?: boolean
+  /**
+   * TEMPORARY — deleted by file-frame-spindle 5.2. Render the pre-change
+   * convention (the spike's C0) through the compare pill's flag: the STL bake
+   * applied at parse, `frameFor`'s legacy scene table, the pose read's scene
+   * mapping. The framing given is then taken **as the legacy one** — a recorded
+   * scene axis as-is (no `migrateAxis`), a stored camera as-is, a pose through
+   * `cameraForPose` under the flag. An `axis` or a `pose` is required: there is
+   * no legacy default to fall back on.
+   */
+  legacy?: boolean
 }
 
 interface RenderResult {
@@ -67,6 +80,8 @@ interface SheetCell {
 
 const bytesCache = new Map<string, ArrayBuffer>()
 const modelCache = new Map<string, ReturnType<typeof parseModel>>()
+// TEMPORARY — deleted by file-frame-spindle 5.2: the baked parses, apart.
+const legacyModelCache = new Map<string, ReturnType<typeof parseModel>>()
 
 async function bytesFor(opts: RenderOpts): Promise<ArrayBuffer> {
   if (opts.bytes !== undefined) return opts.bytes
@@ -88,21 +103,36 @@ function formatFor(opts: RenderOpts): ModelFormat {
 
 async function render(opts: RenderOpts): Promise<RenderResult> {
   const format = formatFor(opts)
-  let object = modelCache.get(opts.path)
-  if (object === undefined) {
-    object = parseModel(await bytesFor(opts), format)
-    modelCache.set(opts.path, object)
+  const legacy = opts.legacy === true
+  const bytes = await bytesFor(opts)
+  // TEMPORARY — deleted by file-frame-spindle 5.2: the flag is on from the
+  // parse through the readback — `parseModel`'s bake, `cameraForPose`'s scene
+  // mapping and `frameFor`'s table all read it — and off again before anything
+  // else on this page can render. Nothing here is async while it is set.
+  if (legacy) {
+    if (opts.axis === undefined && opts.pose === undefined) throw new Error(`legacy render of ${opts.path} needs an axis or a pose`)
+    setLegacyBake(true)
   }
-  let axis = opts.axis ?? defaultAxisFor(format)
-  let camera = opts.camera ?? DEFAULT_CAMERA
-  if (opts.camera === undefined && opts.pose !== undefined) {
-    const derived = cameraForPose(opts.pose, DEFAULT_CAMERA)
-    if (derived === null) throw new Error(`cameraForPose returned null for ${opts.path}`)
-    axis = derived.axis
-    camera = derived.camera
+  try {
+    const cache = legacy ? legacyModelCache : modelCache
+    let object = cache.get(opts.path)
+    if (object === undefined) {
+      object = parseModel(bytes, format, legacy)
+      cache.set(opts.path, object)
+    }
+    let axis = opts.axis ?? defaultAxisFor(format)
+    let camera = opts.camera ?? DEFAULT_CAMERA
+    if (opts.camera === undefined && opts.pose !== undefined) {
+      const derived = cameraForPose(opts.pose, DEFAULT_CAMERA)
+      if (derived === null) throw new Error(`cameraForPose returned null for ${opts.path}`)
+      axis = derived.axis
+      camera = derived.camera
+    }
+    const canvas = renderThumbnailCanvas(object, camera, axis, opts.ao ?? true)
+    return { axis, camera, pngDataUrl: canvas.toDataURL('image/png') }
+  } finally {
+    if (legacy) setLegacyBake(false)
   }
-  const canvas = renderThumbnailCanvas(object, camera, axis, opts.ao ?? true)
-  return { axis, camera, pngDataUrl: canvas.toDataURL('image/png') }
 }
 
 async function decode(pngDataUrl: string): Promise<HTMLImageElement> {

@@ -228,10 +228,91 @@
       el) under the new `cameraForPose` — D4 confirmed live. Follow-up in flight: an
       in-process mode through the pill's flag (the spike's own zero-noise method) for 4.2,
       `-noao` baselines for all nine STLs, and baseline mode gating `-noao` rows only)*
-- [ ] 4.2 Run it on main with the pill code present and `legacyBake` off: every sample
+- [x] 4.2 Run it on main with the pill code present and `legacyBake` off: every sample
       within tolerance; paste the table here
       with the max per sample. A sample outside tolerance is a finding, not a threshold to
-      widen
+      widen.
+      **Done 2026-09-10** (Chromium 1228, this machine, the pill code present, both runs
+      against the live dev server on 3177, library `97ecc020…`, 73 entries at `/`; the
+      `legacyBake` flag is off for every `current` render and on only inside the page's
+      legacy renders of the in-process run). The harness gained `--mode in-process|baseline`
+      for this (README "Two modes"; D6): in-process renders C0 through the pill's flag in the
+      same page and gates every row; baseline gates the `-noao` rows only, AO-on rows
+      reference only (the plumbing run's 5–23 % cross-process AO floor). Every gated row
+      passed; no finding. The in-process run wrote the seven missing `-noao_C0.png` STL
+      baselines (308,327 bytes) after its self-check found the flag pixel-identical (0/0) to
+      the spike's four stored `-noao` frames. Both tables verbatim (`page errors: 404` is Chromium's
+      `/favicon.ico` request, which the page declares none of — the console error's URL
+      read with a probe on the same page; the spike's record carries the same string):
+
+      `node scripts/frame-ab/run.mjs --mode in-process`
+      ```
+      mode       | sample                        | ao  | diff px |  diff % | max Δ | bound         | pass
+      -----------|-------------------------------|-----|---------|---------|-------|---------------|-----
+      in-process | _Pikachu_X_Kakashi.stl        | on  |     919 |    1.40 |    10 | ≤ 2 % / ≤ 96  | ok
+      in-process | _Pikachu_X_Kakashi.stl-noao   | off |    1037 |    1.58 |    10 | ≤ 2 % / ≤ 96  | ok
+      in-process | _Main_Tubeless.stl            | on  |    1110 |    1.69 |    10 | ≤ 2 % / ≤ 96  | ok
+      in-process | _Main_Tubeless.stl-noao       | off |    1224 |    1.87 |    10 | ≤ 2 % / ≤ 96  | ok
+      in-process | _Main_Complete.stl            | on  |     997 |    1.52 |    14 | ≤ 2 % / ≤ 96  | ok
+      in-process | _Main_Complete.stl-noao       | off |    1123 |    1.71 |    15 | ≤ 2 % / ≤ 96  | ok
+      in-process | _bod_test_cube_5s.stl         | on  |     815 |    1.24 |    15 | ≤ 2 % / ≤ 96  | ok
+      in-process | _bod_test_cube_5s.stl-noao    | off |     688 |    1.05 |    15 | ≤ 2 % / ≤ 96  | ok
+      in-process | _3DBenchy.stl                 | on  |     433 |    0.66 |     9 | ≤ 2 % / ≤ 96  | ok
+      in-process | _3DBenchy.stl-noao            | off |     447 |    0.68 |     9 | ≤ 2 % / ≤ 96  | ok
+      in-process | _BeardedGentleman.stl         | on  |     582 |    0.89 |     8 | ≤ 2 % / ≤ 96  | ok
+      in-process | _BeardedGentleman.stl-noao    | off |     629 |    0.96 |     8 | ≤ 2 % / ≤ 96  | ok
+      in-process | _Octopus_sup_v5.6.stl         | on  |     516 |    0.79 |     8 | ≤ 2 % / ≤ 96  | ok
+      in-process | _Octopus_sup_v5.6.stl-noao    | off |     590 |    0.90 |     8 | ≤ 2 % / ≤ 96  | ok
+      in-process | _fat_cat.stl                  | on  |     874 |    1.33 |     9 | ≤ 2 % / ≤ 96  | ok
+      in-process | _fat_cat.stl-noao             | off |     922 |    1.41 |    12 | ≤ 2 % / ≤ 96  | ok
+      in-process | _xyzCalibration_cube.stl      | on  |     248 |    0.38 |     7 | ≤ 2 % / ≤ 96  | ok
+      in-process | _xyzCalibration_cube.stl-noao | off |     282 |    0.43 |    10 | ≤ 2 % / ≤ 96  | ok
+      in-process | OBJ_axis_y                    | on  |       0 |    0.00 |     0 | ≤ 2 % / ≤ 96  | ok
+      in-process | OBJ_axis_y-noao               | off |       0 |    0.00 |     0 | ≤ 2 % / ≤ 96  | ok
+      in-process | OBJ_axis_z                    | on  |       0 |    0.00 |     0 | ≤ 2 % / ≤ 96  | ok
+      in-process | OBJ_axis_z-noao               | off |       0 |    0.00 |     0 | ≤ 2 % / ≤ 96  | ok
+      self-check _fat_cat.stl-noao: legacy render vs stored C0 — 0 px / max 0 (must be 0/0): ok
+      self-check _xyzCalibration_cube.stl-noao: legacy render vs stored C0 — 0 px / max 0 (must be 0/0): ok
+      self-check OBJ_axis_y-noao: legacy render vs stored C0 — 0 px / max 0 (must be 0/0): ok
+      self-check OBJ_axis_z-noao: legacy render vs stored C0 — 0 px / max 0 (must be 0/0): ok
+      wrote 7 AO-off baseline(s) from the legacy render, for baseline mode after the pill is gone:
+        /home/masa/Documents/model-browser/.claude/worktrees/agent-a04d6136fa7f54c6a/scripts/frame-ab/baseline/_Pikachu_X_Kakashi.stl-noao_C0.png (54335 bytes)
+        /home/masa/Documents/model-browser/.claude/worktrees/agent-a04d6136fa7f54c6a/scripts/frame-ab/baseline/_Main_Tubeless.stl-noao_C0.png (57090 bytes)
+        /home/masa/Documents/model-browser/.claude/worktrees/agent-a04d6136fa7f54c6a/scripts/frame-ab/baseline/_Main_Complete.stl-noao_C0.png (59989 bytes)
+        /home/masa/Documents/model-browser/.claude/worktrees/agent-a04d6136fa7f54c6a/scripts/frame-ab/baseline/_bod_test_cube_5s.stl-noao_C0.png (35850 bytes)
+        /home/masa/Documents/model-browser/.claude/worktrees/agent-a04d6136fa7f54c6a/scripts/frame-ab/baseline/_3DBenchy.stl-noao_C0.png (20699 bytes)
+        /home/masa/Documents/model-browser/.claude/worktrees/agent-a04d6136fa7f54c6a/scripts/frame-ab/baseline/_BeardedGentleman.stl-noao_C0.png (47749 bytes)
+        /home/masa/Documents/model-browser/.claude/worktrees/agent-a04d6136fa7f54c6a/scripts/frame-ab/baseline/_Octopus_sup_v5.6.stl-noao_C0.png (32615 bytes)
+      22 rows, 0 failed; renders in /home/masa/Documents/model-browser/.claude/worktrees/agent-a04d6136fa7f54c6a/scripts/frame-ab/out
+      ```
+      `node scripts/frame-ab/run.mjs --mode baseline`
+      ```
+      mode       | sample                        | ao  | diff px |  diff % | max Δ | bound         | pass
+      -----------|-------------------------------|-----|---------|---------|-------|---------------|-----
+      baseline   | _Pikachu_X_Kakashi.stl        | on  |    9216 |   14.06 |    75 | reference     | —
+      baseline   | _Pikachu_X_Kakashi.stl-noao   | off |    1037 |    1.58 |    10 | ≤ 2 % / ≤ 96  | ok
+      baseline   | _Main_Tubeless.stl            | on  |   10331 |   15.76 |    45 | reference     | —
+      baseline   | _Main_Tubeless.stl-noao       | off |    1224 |    1.87 |    10 | ≤ 2 % / ≤ 96  | ok
+      baseline   | _Main_Complete.stl            | on  |   11409 |   17.41 |    88 | reference     | —
+      baseline   | _Main_Complete.stl-noao       | off |    1123 |    1.71 |    15 | ≤ 2 % / ≤ 96  | ok
+      baseline   | _bod_test_cube_5s.stl         | on  |   15104 |   23.05 |    51 | reference     | —
+      baseline   | _bod_test_cube_5s.stl-noao    | off |     688 |    1.05 |    15 | ≤ 2 % / ≤ 96  | ok
+      baseline   | _3DBenchy.stl                 | on  |    2543 |    3.88 |    45 | reference     | —
+      baseline   | _3DBenchy.stl-noao            | off |     447 |    0.68 |     9 | ≤ 2 % / ≤ 96  | ok
+      baseline   | _BeardedGentleman.stl         | on  |    8867 |   13.53 |    35 | reference     | —
+      baseline   | _BeardedGentleman.stl-noao    | off |     629 |    0.96 |     8 | ≤ 2 % / ≤ 96  | ok
+      baseline   | _Octopus_sup_v5.6.stl         | on  |    5907 |    9.01 |    51 | reference     | —
+      baseline   | _Octopus_sup_v5.6.stl-noao    | off |     590 |    0.90 |     8 | ≤ 2 % / ≤ 96  | ok
+      baseline   | _fat_cat.stl                  | on  |    7634 |   11.65 |    26 | reference     | —
+      baseline   | _fat_cat.stl-noao             | off |     922 |    1.41 |    12 | ≤ 2 % / ≤ 96  | ok
+      baseline   | _xyzCalibration_cube.stl      | on  |    3596 |    5.49 |    27 | reference     | —
+      baseline   | _xyzCalibration_cube.stl-noao | off |     282 |    0.43 |    10 | ≤ 2 % / ≤ 96  | ok
+      baseline   | OBJ_axis_y                    | on  |    1864 |    2.84 |    18 | reference     | —
+      baseline   | OBJ_axis_y-noao               | off |       0 |    0.00 |     0 | ≤ 2 % / ≤ 96  | ok
+      baseline   | OBJ_axis_z                    | on  |    3006 |    4.59 |    19 | reference     | —
+      baseline   | OBJ_axis_z-noao               | off |       0 |    0.00 |     0 | ≤ 2 % / ≤ 96  | ok
+      22 rows, 0 failed, 11 reference only; renders in /home/masa/Documents/model-browser/.claude/worktrees/agent-a04d6136fa7f54c6a/scripts/frame-ab/out
+      ```
 
 ## 5. Migrate, remove, land
 

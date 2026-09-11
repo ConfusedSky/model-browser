@@ -297,23 +297,35 @@ the harness supports is "the same picture on the machine the change was measured
 a machine without the library can run the OBJ fixture alone, which pins the frame math
 but not the shadow residual.
 
-**Tolerance**: ≤ 5 % of pixels differing and no channel delta above **96**. The measured
-bake residual is ≤ 1.8 % and ≤ 60. On top of it sits a floor the spike did not see
-because it measured within one process: **the AO pass is not deterministic across
-browser processes.** `GTAOPass` builds its noise texture from an unseeded
-`SimplexNoise`, whose permutation table comes from `Math.random`, so two processes
-render the same scene with different AO noise — measured by the task-0.1 worker on the
-L-bracket, three fresh processes, AO on: 1,788–3,035 px / max 14–27 between any pair;
-AO off: 0/0 on every pair, both spindles. That is also the spike's "≈ 6 % count wobble"
-across launches. Since the harness compares a fresh process against stored baselines,
-the AO-on floor (up to ≈ 4.6 % of 65,536) is inside the bound, hence 5 %; the two
-`-noao` STL frames and an AO-off OBJ frame are the harness's bit-exact comparisons and
-carry the tight check (≤ 2 %, the bake residual alone). 96 on the magnitude is a bound
-on "a shadow edge moved a texel" plus AO noise (≤ 27), still far below the 255 a
-rotated model produces; the README records this basis so a later widening has to argue
-against it. The OBJ frames in `baseline/` are one process's sample of the AO noise;
-`OBJ_axis_{y,z}-noao_C0.png` should be captured beside them (task 0.1 follow-up) so the
-OBJ check can be exact too. The runtime
+**Tolerance**: ≤ 2 % of pixels differing and no channel delta above **96**, on every row
+the harness gates. The measured bake residual is ≤ 1.8 % and ≤ 60 (the spike, raw RGBA;
+≤ 1.87 % / ≤ 15 composited over the ground in the harness's runs), so 2 % bounds the count
+and 96 bounds "a shadow edge moved a texel" with room, still far below the 255 a rotated
+model produces. Which rows are gated depends on the mode, because of a floor the spike did
+not see, having measured within one process: **the AO pass is not deterministic across
+browser processes.** `GTAOPass` builds its noise texture from an unseeded `SimplexNoise`,
+whose permutation table comes from `Math.random`, so two processes render the same scene
+with different AO noise while one process renders it the same way every time (the spike's
+noise floor, 0/0). The L-bracket the task-0.1 worker measured put that floor at ≈ 4.6 %
+(three fresh processes, AO on: 1,788–3,035 px / max 14–27 between any pair; AO off: 0/0),
+but the bracket has little occluded area: on the real STLs the plumbing run of 2026-09-10
+(task 4.1, baseline mode) found **5–23 % of the frame** — the same code in two fresh
+Chromium processes differing by 22.40 % on `bod_test_cube_5s`, 13.62 % on
+`Pikachu_X_Kakashi`, 5.37 % on `xyzCalibration_cube`, and 0/0 on each with AO off — which
+no bound absorbs without also passing a mis-framed model. So the harness has two modes.
+**In-process mode** (2026-09-10, task 4.2; TEMPORARY, it goes with the pill at 5.2) renders
+C0 in the same page through the pill's flag (`setLegacyBake`; `parseModel` with `bake`,
+`frameFor`'s legacy table, the legacy pose mapping — the spike's C0 by construction, and
+checked pixel-identical to the spike's stored `-noao` frames, 0/0 on all four) and gates
+**every** row, AO on and off, STL and OBJ: 22 rows, 0 failed, the STLs at 0.38–1.87 % /
+max 7–15. **Baseline mode**, the one that survives, compares a fresh process against
+`baseline/` and gates the `-noao` rows only — all nine STLs, once the in-process run had
+written the seven `-noao` C0s the spike had not — printing the AO-on rows as reference
+(2026-09-10: 22 rows, 0 failed, 11 reference; the nine `-noao` rows at the in-process
+run's counts exactly, the AO-on rows at 3.9–23.1 %). Seeding the AO noise would make the
+AO-on rows gateable across processes, but it changes production pixels and is a
+`RIG_VERSION` matter for another change. The README records this basis so a later widening
+has to argue against it. The runtime
 switches the spike added (`setBake`, `setFrames`, `setPoseMapping`, `setShadows`,
 `setThumbSamples`) do **not** ship; the harness compares against stored baselines
 instead. `renderThumbnailCanvas` (the lossless read-back) does ship, as the harness's
