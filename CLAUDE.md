@@ -219,9 +219,14 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   - Thumbnail cache: `~/.cache/model-browser/<library-id>/<sha256(library path)>.{png,json}`.
     The .json sidecar's `path` is the **library** path (`/Kit/x.stl`), not the filesystem one,
     so map a fixture by its library path — hashing its `/run/media/…` path finds nothing.
-    Alongside it: `{mtime, lighting, rig, posed}` — grep those to verify a RIG_VERSION sweep.
-    `rm -rf` the id directory (or the whole cache dir) to force re-renders during visual
-    tuning
+    Alongside it: `{mtime, lighting, rig, posed, frame}` — grep those to verify a RIG_VERSION
+    sweep. `frame: 2` says the stored `axis` is a file axis (`file-frame-spindle`); absent
+    means the pre-2026-09-10 scene convention, which `scripts/migrate-frames.ts --cache-dir
+    <id dir>` converts once and records in `<id dir>/.frame-migration` (no `.json` — the
+    sweeps would eat it). Run `--undo` before rolling the server back to code that predates
+    the label: old `put` rebuilds sidecars and drops it, and a later forward run would turn
+    a file axis again. `rm -rf` the id directory (or the whole cache dir) to force
+    re-renders during visual tuning
   - Orbit/lightbox E2E persists path-keyed cameras — tile thumbnails later re-render from
     the new angles; that is not a pixel regression. The pointerup also queues a full
     thumbnail re-render (persist), so wait ~5s before frame-time measurements

@@ -205,7 +205,7 @@
 
 ## 4. The harness (D6)
 
-- [ ] 4.1 `scripts/frame-ab/`: `run.mjs`, the page, the sample list, the OBJ fixture
+- [x] 4.1 `scripts/frame-ab/`: `run.mjs`, the page, the sample list, the OBJ fixture
       generator, the diff and contact sheet; a config file for the playwright-core and
       chromium paths; a README naming the port, the config, the tolerance and its basis
       (≤ 5 % pixels, no delta > 96, with the `-noao` frames at ≤ 2 % — the bake residual
@@ -217,6 +217,17 @@
       `renderThumbnailCanvas` in `renderer.ts` as the lossless path, with
       `renderThumbnail` refactored onto it (same staging, `toBlob` last) and a cell that
       the two agree on a fixture's pixels
+      *(2026-09-10: merged as 7da47a5 (fable worker); 17 baselines checked in, 624,531 bytes
+      in 22 new files, the repo's first tracked binaries. `renderThumbnail` refactored onto
+      `renderThumbnailCanvas`, one cell. The plumbing run found the real per-process AO
+      floor: 5–23 % of pixels on real STLs (bod_test_cube 22.4 % between two fresh Chromium
+      processes running the SAME code; 0/0 with AO off), far above the L-bracket's 4.6 %,
+      so AO-on rows cannot be gated across processes at all. The `-noao` rows reproduced
+      the spike's residual to within a few pixels (922 vs 951; 282 vs 285) — the bake
+      claim, measured again. All seven posed samples reproduced the record's (axis, az,
+      el) under the new `cameraForPose` — D4 confirmed live. Follow-up in flight: an
+      in-process mode through the pill's flag (the spike's own zero-noise method) for 4.2,
+      `-noao` baselines for all nine STLs, and baseline mode gating `-noao` rows only)*
 - [ ] 4.2 Run it on main with the pill code present and `legacyBake` off: every sample
       within tolerance; paste the table here
       with the max per sample. A sample outside tolerance is a finding, not a threshold to
