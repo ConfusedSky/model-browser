@@ -22,14 +22,15 @@ const EXACT = 1e-6
  * 1 = read the index's axes as scene axes while STL geometry was baked
  * `rotateX(-π/2)` on load, which put the spindle 90° from the model's actual
  * up and rendered models lying down. 2 = the index's axes and the spindle are
- * the same file frame. That was first achieved by mapping the pose into scene
- * space, (x, y, z) ↦ (x, z, −y), the image of a file direction under the bake;
- * `file-frame-spindle` removed the bake and the mapping together, and the
- * rendered picture is unchanged (design D4: the spindle frames are the bake's
- * image, and the offset derived below is invariant under a rotation applied to
- * both the frame and `azimuth_zero`), so no bump.
+ * the same file frame (`file-frame-spindle` removed the bake and the mapping
+ * together; the picture was unchanged, so no bump then). 3 = a posed render
+ * records the orientation it was drawn under (`poseKey`, `pose-rerender` D3):
+ * a `posed: 2` render carries no key, so it cannot be told from one drawn
+ * under an opinion the index has since changed — and Masa's stale tiles were
+ * exactly that (2026-09-11). The bump re-renders every posed thumbnail once,
+ * lazily on its next visit, and every render from here on carries its key.
  */
-export const POSE_VERSION = 2
+export const POSE_VERSION = 3
 
 /**
  * The index's up axis as one of the six spindles — by **exact lookup**, never a

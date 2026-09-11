@@ -1,17 +1,10 @@
-## 1. The index becoming ready reaches a landed listing (D1, D2)
+## 1. The index becoming ready — rejected
 
-- [ ] 1.1 `App.tsx`: `indexReady` (`state.index?.state === 'ready'`) as a dependency of the
-      listing-wave effect and of the preview wave; `askedPreviewPoses` cleared on the ready
-      edge. The availability read gains a 10 s timer while the index reports `absent`,
-      beside the 2 s timer while `warming`; nothing while ready. Comments say why on both
-      (the live sequence: index off at landing, on 20 s later, no re-ask through 80 s)
-- [ ] 1.2 Cells (`client/test/poseRerender.test.tsx`, the investigating worker's file): the
-      two failing (i) cells go green — warming→ready under a landed listing asks once and
-      re-renders the un-posed tile; absent→ready through the 10 s timer (fake timers) is
-      noticed and asks once; a same-state re-read asks nothing and renders nothing; the
-      away-and-back control stays green; `poseWave.test.tsx` and `thumbnailQueue.test.tsx`
-      byte-unchanged. Falsify: drop `indexReady` from the deps → the first cell fails; drop
-      the absent timer → the second fails
+- [x] 1.1 *(rejected 2026-09-11 — Masa: no polling for the index; a navigation is the
+      trigger, and his tiles had not updated even on a navigation, so this was not the
+      bug. The worker's readiness/timer commit (30bfbda in its worktree) was left off
+      main; `poseRerender.test.tsx` keeps the three not-a-hole cells and the navigation
+      control, nothing about readiness)*
 
 ## 2. A posed render records the pose it was drawn under (D3)
 
@@ -48,11 +41,16 @@
       cells; dropping the compare fails the A→B cell (`expected "spy" to be called 1
       times, but got 0 times`)
 
+- [x] 2.4 `POSE_VERSION` 2 → 3 (D3), with the version's history in its comment: the
+      keyless posed renders re-render once on their next visit and gain a key
+      *(2026-09-11: client 952/952 after the bump — no fixture hard-codes the client's
+      version; the server's `posed: 2` fixtures are opaque labels it never interprets)*
+
 ## 3. Land it
 
 - [ ] 3.1 `bun run typecheck` and both suites green on merged main
-- [ ] 3.2 Live, read-only where possible: with the dev instance up, stop the index, load
-      the root, start the index, and watch — within 10 s the client reads it ready, one
-      poses POST fires, and un-posed tiles re-render (a `blob:` image and a PUT with
-      `posed` and `poseKey`); record the timings here
+- [ ] 3.2 Live, read-only: with the dev instance up and the index ready, load the root
+      and watch the posed tiles — each `posed: 2` sidecar re-renders once (a `blob:` image,
+      then a PUT carrying `posed: 3` and a `poseKey`), a second load is all hits; record a
+      before/after sidecar here
 - [ ] 3.3 `openspec validate pose-rerender --strict`; archive dry run on a fresh copy

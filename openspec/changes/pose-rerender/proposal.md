@@ -13,19 +13,20 @@ its old picture forever: the staleness test has nothing to compare.
 
 ## What Changes
 
-- The pose wave re-asks when the index becomes ready under a landed listing: the wave
-  effects take the index's readiness as an input, and the preview wave's "already asked"
-  set is cleared on that edge. An absent index is noticed while the tab stays open: the
-  availability read repeats every 10 s while the index is absent (the server's own absent
-  TTL; it answers from its probe cache), beside the existing 2 s poll while warming.
 - A render made under a pose records the pose it was drawn under, as a key of what the
   pixels depended on — the spindle and the front angles `cameraForPose` derived — in a new
   optional label `poseKey` beside `posed`. The client's staleness test compares the key
-  when the render carries one; a render without a key is judged on the mapping version
-  alone, so the renders labelled before this change are not swept. The server stores and
-  echoes the label like the others and includes it in the sibling-render comparison.
+  when the render carries one; the server stores and echoes it like the other labels and
+  includes it in the sibling-render comparison.
+- `POSE_VERSION` goes 2 → 3, so every posed render already on disk — keyless, and so
+  unable to say what it was drawn under — is re-rendered once, lazily on its next visit,
+  and carries its key from then on.
+- No polling for the index (Masa): a navigation remains the trigger, and the server's
+  five-minute pose memo is the bound on how long a changed opinion takes to reach it.
+  The first finding above stands as a finding only.
 
-Out of scope: any change to what a pose is, how the index derives it, or `POSE_VERSION`.
+Out of scope: any change to what a pose is, how the index derives it, or the server's
+pose layer.
 
 ## Capabilities
 
@@ -35,9 +36,6 @@ Out of scope: any change to what a pose is, how the index derives it, or `POSE_V
 
 ### Modified Capabilities
 
-- `semantic-search`: ADDED *The index becoming ready reaches a landed listing* — a listing
-  on screen when the index turns ready is asked for its poses once, and an absent index
-  is re-read at a slow cadence.
 - `model-thumbnails`: MODIFIED *Recipe-labelled thumbnails* — a posed render records the
   orientation it was drawn under; a labelled render whose orientation the source has
   since changed needs re-render; a render labelled before the key existed is compared on
@@ -45,13 +43,14 @@ Out of scope: any change to what a pose is, how the index derives it, or `POSE_V
 
 ## Impact
 
-- Client: `App.tsx` (the listing and preview wave effects' deps, the availability read's
-  cadence), `hooks/useThumbnails.ts` (`usable`'s pose test, the render PUT's labels),
-  `three/pose.ts` (`poseKeyOf`).
-- Shared: `ThumbSave`, `ThumbRenderInfo`, `ThumbResult` gain `poseKey?: string`.
+- Client: `hooks/useThumbnails.ts` (`usable`'s pose test, the render PUT's labels),
+  `lib/entryActions.ts` (the re-render command's PUT and `isCurrentRender`),
+  `three/pose.ts` (`poseKeyOf`, `POSE_VERSION` 3), `api/client.ts` (the two client types).
+- Shared: `ThumbRenderInfo`, `ThumbGetResponse`, `ThumbPutRequest` gain `poseKey?: string`.
 - Server: `cache.ts` (`RenderLabels`, `renderLabels`, `hasLabels`, `renderInfo`, `put`'s
   label carry-over, the sibling-invalidation compare), `app.ts` (PUT passthrough).
 - Tests: `client/test/poseRerender.test.tsx` (new; the reproducing cells go green),
   `thumbnailQueue.test.tsx` (its "changed by value" cell stays green by the
   compare-when-present rule), server cache cells for the label.
-- Data: the 92 posed sidecars on this machine carry no `poseKey` and are left alone.
+- Data: the 92 posed sidecars on this machine carry `posed: 2` and no key; each re-renders
+  once on its next visit under version 3 and gains a key.
