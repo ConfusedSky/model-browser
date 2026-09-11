@@ -161,7 +161,7 @@
       `swapOffset` is 0 at y/−y by derivation. The named test file did not exist — created;
       three assertions in apiClient.test.ts gained the label. 11 cells; falsified: drop
       `frame` from the write → the re-read migrates z→−y; skip the transform → 8 fail)*
-- [ ] 3.1 `three/bakeToggle.ts` module flag; `parseModel(bytes, format, bake)` takes the
+- [x] 3.1 `three/bakeToggle.ts` module flag; `parseModel(bytes, format, bake)` takes the
       convention as an argument; the frame lookup uses the legacy table when on; the pose
       read applies the legacy mapping when on; **two `MeshLru` instances** in `App` from
       one `meshLoader(api, bake)` factory, consumers handed `legacyBake ? bakeLru : lru`
@@ -182,6 +182,18 @@
       parses of one path; a flip re-renders and the warmer's next call reaches the other
       instance; no framing is stored from a `putThumb`, on the wire or locally, with the
       pill off either (falsify by removing the guard)
+      *(2026-09-10: merged as f5be254 (fable worker). Guard as `BAKE_PILL_PRESENT`, a
+      constant not a flag read, first line of `LocalFramingClient.putThumb`; two LRU
+      instances from `meshLoader(api, placeholderRef, bake)`; the thumbs "drop" is a
+      per-path `refetch` over the visible models from an effect keyed on the flag, since
+      no drop-all exists; `actionHost` was a fifth `lru` consumer, handed `liveLru` too.
+      The suite-wide guard lift is a vitest `setupFiles` mock (`bakePillGuard.setup.ts`),
+      with `bakeToggle.test.ts` unmocking it as the falsification target — approved at
+      check-in. 7 cells; falsified: invert the bake test → both parse cells; delete the
+      guard line → the guard cell. Merged main: client 960/960, typecheck clean. The
+      worker's 5.2 delete list is in its report and is the brief for 5.2. With this merge
+      the dev instance's client bundle carries the guard, so the incident window is closed
+      from the client side; the server-side refusal (0.2) is still pending)*
 - [ ] 3.2 Masa's test window (0.2 in force): the pill on and off over the real library — Pikachu (stored
       camera + axis), Main_Complete (`-z` stored), Benchy (posed, no framing), Head
       (`+Y` posed), an OBJ if one is at hand. Known during the window (D7): an orbit is
