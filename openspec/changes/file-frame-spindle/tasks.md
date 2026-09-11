@@ -432,9 +432,6 @@
       the two sentences on browser-held framings (c38f64d); CLAUDE.md's cache bullet is
       back to `{mtime, lighting, rig, posed}` (the label went with the migration). Open:
       the issue #8 comment above, for Masa to post or approve)*
-- [x] 5.5 `openspec validate file-frame-spindle --strict`; archive dry run on a fresh copy;
+- [ ] 5.5 `openspec validate file-frame-spindle --strict`; archive dry run on a fresh copy;
       after archiving, the applied `model-viewer`, `model-thumbnails` and `semantic-search`
       text carries no change-scoped prose
-      *(2026-09-11: valid under --strict; dry run on a fresh copy `~ 4`; archived after the
-      final opus review's GO on the record fixes (afea891); the applied text checked for
-      HTML comments and change-scoped prose after the archive — see the commit)*

@@ -2,9 +2,7 @@
 
 ## Purpose
 TBD - created by archiving change model-browser-v1. Update Purpose after archive.
-
 ## Requirements
-
 ### Requirement: Drag-to-orbit on grid tiles via shared overlay canvas
 The client SHALL hold exactly one WebGL context for the entire app — a single renderer shared by the in-grid orbit overlay, the lightbox, and the thumbnail render queue. On mousedown over a model tile, the canvas SHALL overlay that tile's thumbnail image area — not the whole tile — so the file name label below remains visible throughout the interaction, and the live view SHALL match the static thumbnail's framing and color at the moment of handoff (no size jump, no brightness shift). On release the overlay persists until the pointer leaves the tile or the user scrolls/resizes, which dismisses it back to the static thumbnail. After an orbit drag, dismissal triggered by the pointer leaving the tile (or by the release landing outside it) SHALL hold the live view in place until the refreshed thumbnail has been applied to the tile and is ready to paint, so the overlay unmounts onto pixels matching the live view; if thumbnail persistence fails or exceeds a short timeout (~1.5s), the overlay SHALL dismiss anyway. Scroll/resize dismissal SHALL remain immediate. A held dismissal SHALL NOT interrupt or cancel a newer interaction begun before it completes. A press released without exceeding a small movement threshold (~5px) SHALL NOT be treated as an orbit; it is a click and opens the lightbox instead.
 
@@ -138,22 +136,18 @@ Clicking a model tile — a press released without exceeding the drag threshold 
 - **THEN** the model neither orbits nor zooms and the lightbox stays open
 
 ### Requirement: Upright model display
-Models SHALL be displayed in their file's own coordinates: no conversion SHALL be applied to geometry at parse time for any format. A model stands upright because its spindle defaults to its file format's up convention, as *Per-model orbit spindle* defines, and that default applies everywhere a model is rendered: thumbnails, orbit overlay, and lightbox.
+Models SHALL be displayed print-bed-up: STL geometry SHALL be converted from its Z-up convention to the scene's Y-up at parse time (baked into the geometry), 3MF via its loader's built-in conversion, and OBJ (conventionally Y-up) loaded as-is. The conversion applies everywhere a model is rendered — thumbnails, orbit overlay, and lightbox.
 
 #### Scenario: STL stands upright
 - **WHEN** an STL exported from a slicer (Z-up) is thumbnailed or opened
-- **THEN** the model appears standing on its print bed in the default three-quarter view, not lying on its back, with its spindle at +Z
+- **THEN** the model appears standing on its print bed in the default three-quarter view, not lying on its back
 
 ### Requirement: Per-model orbit spindle
-Every model SHALL orbit as a clamped turntable around its spindle axis: horizontal drag rotates around the spindle, vertical drag tilts toward/away from it clamped short of the poles, and the camera's up vector is locked to the spindle. The spindle SHALL be one of ±X/±Y/±Z **in the model file's own coordinates**: a model is rendered as its file describes it, with no rotation applied on load, so the spindle a user chooses, the axis a thumbnail stores and the up axis an index reports all name the same direction. The default spindle SHALL be the file format's up convention — +Z for STL and 3MF, +Y for OBJ — and every surface that draws a model with no stored axis SHALL draw it about that default, from one definition. Drag direction SHALL feel consistent across all six spindles (a rightward drag spins the same visual direction). The in-grid orbit overlay and the lightbox SHALL both honor the model's stored spindle, and the axis controls in the lightbox and on a model tile's menu SHALL name the spindle in those same file coordinates.
+Every model SHALL orbit as a clamped turntable around its spindle axis: horizontal drag rotates around the spindle, vertical drag tilts toward/away from it clamped short of the poles, and the camera's up vector is locked to the spindle. The spindle SHALL be one of ±X/±Y/±Z, defaulting to +Y. Drag direction SHALL feel consistent across all six spindles (a rightward drag spins the same visual direction). The in-grid orbit overlay and the lightbox SHALL both honor the model's stored spindle.
 
 #### Scenario: Default spindle
 - **WHEN** a model with no stored axis is orbited
-- **THEN** it turns around its format's up axis — +Z for an STL or 3MF, +Y for an OBJ — and the lightbox's axis control marks that axis
-
-#### Scenario: A print-bed model reads as Z-up
-- **WHEN** an STL whose height runs along its file's Z axis is opened with no stored axis
-- **THEN** it stands upright, the axis control marks Z, and the axis agrees with what an external tool reports for the file
+- **THEN** it turns around +Y — its natural up after upright display conversion
 
 #### Scenario: Overridden spindle honored everywhere
 - **WHEN** a model's axis has been overridden and the user orbits it from the grid overlay
@@ -326,3 +320,4 @@ its answer ignored once the subject has moved on.
 #### Scenario: The subject moves on
 - **WHEN** the viewer subject changes before the previous subject's overrides answer arrives
 - **THEN** the late answer is not rendered for the new subject
+
