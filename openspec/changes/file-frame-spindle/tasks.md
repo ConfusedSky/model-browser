@@ -28,8 +28,9 @@
       fallback and cached as a hit; after 17:01:53: nothing. The other three caches: nothing.
       Ordering constraint the tasks never stated: 2.1 before 1.3 mislabels scene axes, 1.3
       before 2.1 (or 1.3 before 1.4) caches lying-down renders — 0.2 is what makes either
-      order safe, and it must precede the FIRST merge, not the test window. Recovery is
-      Masa's call, recorded when made)*
+      order safe, and it must precede the FIRST merge, not the test window. Recovery:
+      moot — Masa deleted every cache directory on 2026-09-11 during the test window
+      ("no need for migration any more"); the 106 framed entries went with them)*
       *(2026-09-10 17:59: done — `features.thumbWrites: false` in the config, dev instance
       restarted at 17:59:51, `/api/features` answers `thumbWrites: false`; `client/dist`
       (a 2026-09-07 pre-change bundle 3177 was serving) removed by the coordinator at
@@ -329,9 +330,12 @@
       same counts both ways — true only if nothing was written between the two runs: an
       undo also converts entries the new server wrote fresh (correctly — it is a convention
       translation, not an edit log — the reviewer's probe), so its counts exceed the
-      forward run's by however many landed in between. Before this run: the incident's
-      three window-1 sidecars must have their label stripped (0.2's note) or the script
-      skips them as migrated
+      forward run's by however many landed in between. 2026-09-11: the caches were
+      deleted by Masa before this ran, so there is nothing to migrate on this machine;
+      the server recreates a library's directory on its next write, so once `thumbWrites`
+      is restored (5.2) run the script over each new directory so it carries the marker
+      (`convention: 2`) with zero counts — the tool's real test is its 17 cells, and the
+      demo's browsers migrate on read regardless
 - [ ] 5.2 Delete the pill, `bakeToggle.ts`, the second LRU and the loader's `bake`
       argument, the pill's legacy frame lookup, the legacy pose mapping and every branch
       on the flag, including the `putThumb` guard and the getters' second instance —
