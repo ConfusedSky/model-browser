@@ -81,8 +81,9 @@ export const FILE_FRAMES: Record<OrbitAxis, FrameTriples> = Object.fromEntries(
 ) as Record<OrbitAxis, FrameTriples>
 
 /**
- * The file axis a stored scene axis names for a format that was baked (STL,
- * 3MF): the spindle vector's image under R⁻¹. y→z, -y→-z, z→-y, -z→y, x→x,
+ * The file axis a stored scene axis names for the one format that was baked
+ * (STL — 3MF never was, despite an old comment; it migrates like OBJ): the
+ * spindle vector's image under R⁻¹. y→z, -y→-z, z→-y, -z→y, x→x,
  * -x→-x — derived, so the two tables cannot drift apart from this.
  */
 export function migrateAxis(sceneAxis: OrbitAxis): OrbitAxis {
@@ -94,7 +95,7 @@ function dot(u: Triple, v: Triple): number {
 }
 
 /**
- * Radians to add to a stored `az` for a format that was never baked (OBJ):
+ * Radians to add to a stored `az` for a format that was never baked (OBJ, 3MF):
  * its spindle keeps its name, but the frame that name selects moved from
  * `SCENE_FRAMES[axis]` to `FILE_FRAMES[axis]`. A direction at old azimuth θ is
  * `a_old sinθ cosφ + b_old cosθ cosφ + s sinφ`; re-measured in the new frame,
