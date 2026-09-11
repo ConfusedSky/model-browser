@@ -1,4 +1,5 @@
 import type { CameraState, IndexPose, OrbitAxis } from '../../../shared/types'
+import { legacyBake } from './bakeToggle'
 import { frameFor } from './camera'
 
 const AXES: { axis: OrbitAxis; v: [number, number, number] }[] = [
@@ -11,6 +12,17 @@ const AXES: { axis: OrbitAxis; v: [number, number, number] }[] = [
 ]
 
 const EXACT = 1e-6
+
+/**
+ * TEMPORARY — `file-frame-spindle` D7: the retired scene-space mapping, the
+ * image of a file direction under the legacy STL bake `rotateX(-π/2)`,
+ * (x, y, z) ↦ (x, z, −y). Applied to `up` and `azimuth_zero` only while the
+ * compare pill's flag is on, so the legacy LRU's baked geometry and the pose
+ * agree. Deleted by task 5.2 — the archive is gated on this name being gone.
+ */
+function toSceneSpace(v: [number, number, number]): [number, number, number] {
+  return legacyBake() ? [v[0], v[2], -v[1]] : v
+}
 
 /**
  * Version of the mapping from an index pose to a camera. Bumped whenever that
@@ -44,7 +56,8 @@ export const POSE_VERSION = 2
  * the orientation and say why.
  */
 export function axisOf(up: [number, number, number]): OrbitAxis | null {
-  const match = AXES.find(({ v }) => v.every((c, i) => Math.abs(c - up[i]!) < EXACT))
+  const scene = toSceneSpace(up)
+  const match = AXES.find(({ v }) => v.every((c, i) => Math.abs(c - scene[i]!) < EXACT))
   return match?.axis ?? null
 }
 
@@ -73,7 +86,7 @@ export function cameraForPose(
   const axis = axisOf(pose.up)
   if (axis === null) return null
   const { s, a, b } = frameFor(axis)
-  const u0 = pose.azimuth_zero
+  const u0 = toSceneSpace(pose.azimuth_zero)
   // `azimuth_zero` is perpendicular to `up` by construction; a pose where it is
   // not is malformed in the same way an off-axis `up` is, and gets the same
   // answer rather than a best-effort projection.

@@ -16,6 +16,8 @@ import type {
 } from '../../../shared/types'
 import { FRAME_CONVENTION, migrateAxis, swapOffset } from '../../../shared/frames'
 import { formatOf } from '../three/models'
+// TEMPORARY — `file-frame-spindle` D7; deleted by task 5.2 with the guard below.
+import { BAKE_PILL_PRESENT } from '../three/bakeToggle'
 import { HttpError } from './client'
 import type { ApiClient, ThumbPutResult, ThumbResult, ThumbSave } from './client'
 
@@ -342,6 +344,14 @@ class LocalFramingClient implements ApiClient {
    * a refusal of any other field included, rethrows exactly as before.
    */
   async putThumb(save: ThumbSave): Promise<ThumbPutResult> {
+    // TEMPORARY — `file-frame-spindle` D7: while the compare pill exists no
+    // framing or pixels reach the wire or `localStorage` from a PUT, on either
+    // side of the pill — a local framing written under the legacy side would
+    // be a scene axis stamped as a file one, and the bake has no cache-key
+    // dimension to keep the two conventions' pixels apart. The on-read
+    // migration's write-back in `readLocalFraming` is NOT this and stays.
+    // Deleted by task 5.2 with `bakeToggle.ts`.
+    if (BAKE_PILL_PRESENT) return { dropped: true }
     if (keepsFramingsLocally(this.report())) {
       writeLocalFraming(save.path, save, this.storage, this.libraryId)
       return { dropped: true }

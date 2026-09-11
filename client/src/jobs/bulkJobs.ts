@@ -123,7 +123,11 @@ export interface Derivation {
 
 export interface JobDeps {
   api: Pick<ApiClient, 'models' | 'getThumb' | 'putThumb' | 'semanticPosesFor'>
-  lru: Pick<MeshLru<THREE.Object3D>, 'acquire'>
+  /** A getter, like `ao` below: read per entry at render time, so the instance
+   *  in force then is the one used. TEMPORARY shape (`file-frame-spindle` D7 —
+   *  the compare pill swaps instances under a running job); task 5.2 restores
+   *  the plain value. */
+  lru: () => Pick<MeshLru<THREE.Object3D>, 'acquire'>
   queue: Pick<RenderQueue, 'push' | 'whenResumed'>
   setThumb: ActionHost['setThumb']
   /** `useThumbnails`' per-path restart, for the in-memory half of a reset: an
@@ -480,7 +484,9 @@ export class BulkJobs {
             async () => {
               this.patchRun(token, { waiting: false })
               try {
-                const outcome = await renderEntryThumbnail(job.entry, this.deps, {
+                // `lru` read here, per entry (TEMPORARY, D7 — see `JobDeps`).
+                const deps = { ...this.deps, lru: this.deps.lru() }
+                const outcome = await renderEntryThumbnail(job.entry, deps, {
                   discardFraming: false,
                   pose: job.pose,
                   ifGen: job.gen,

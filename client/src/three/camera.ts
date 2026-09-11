@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import type { CameraState, OrbitAxis } from '../../../shared/types'
-import { FILE_FRAMES, type FrameTriples } from '../../../shared/frames'
+import { FILE_FRAMES, SCENE_FRAMES, type FrameTriples } from '../../../shared/frames'
+import { legacyBake } from './bakeToggle'
 
 export { defaultAxisFor } from '../../../shared/frames'
 
@@ -40,15 +41,28 @@ export interface SpindleFrame {
  * not here. The 'y' frame is unchanged from that scene table, so an OBJ at the
  * default reads exactly as it always did.
  */
-const FRAMES: Record<OrbitAxis, SpindleFrame> = Object.fromEntries(
-  (Object.entries(FILE_FRAMES) as [OrbitAxis, FrameTriples][]).map(([axis, { s, a, b }]) => [
-    axis,
-    { s: new THREE.Vector3(...s), a: new THREE.Vector3(...a), b: new THREE.Vector3(...b) },
-  ]),
-) as Record<OrbitAxis, SpindleFrame>
+const FRAMES: Record<OrbitAxis, SpindleFrame> = lift(FILE_FRAMES)
+
+/**
+ * TEMPORARY — the compare pill's legacy lookup (`file-frame-spindle` D7): the
+ * pre-bake scene table lifted the same way, selected while `legacyBake()` is
+ * on. Deleted with the pill by task 5.2; `SCENE_FRAMES` itself stays, since
+ * `migrateAxis` and `swapOffset` derive from it.
+ */
+const LEGACY_FRAMES: Record<OrbitAxis, SpindleFrame> = lift(SCENE_FRAMES)
+
+function lift(table: Record<OrbitAxis, FrameTriples>): Record<OrbitAxis, SpindleFrame> {
+  return Object.fromEntries(
+    (Object.entries(table) as [OrbitAxis, FrameTriples][]).map(([axis, { s, a, b }]) => [
+      axis,
+      { s: new THREE.Vector3(...s), a: new THREE.Vector3(...a), b: new THREE.Vector3(...b) },
+    ]),
+  ) as Record<OrbitAxis, SpindleFrame>
+}
 
 export function frameFor(axis: OrbitAxis): SpindleFrame {
-  return FRAMES[axis]
+  // TEMPORARY branch on the pill's flag (D7), deleted by task 5.2.
+  return legacyBake() ? LEGACY_FRAMES[axis] : FRAMES[axis]
 }
 
 /** Unit view direction (target → camera) for spindle-relative az/el. */
