@@ -1,9 +1,26 @@
 import * as THREE from 'three'
 import type { CameraState, OrbitAxis } from '../../../shared/types'
-import { FILE_FRAMES, SCENE_FRAMES, type FrameTriples } from '../../../shared/frames'
+import {
+  FILE_FRAMES,
+  SCENE_FRAMES,
+  defaultAxisFor as fileDefaultAxisFor,
+  type FrameTriples,
+} from '../../../shared/frames'
 import { legacyBake } from './bakeToggle'
+import type { ModelFormat } from '../../../shared/types'
 
-export { defaultAxisFor } from '../../../shared/frames'
+/**
+ * TEMPORARY — the compare pill's default spindle (`file-frame-spindle` D7):
+ * while `legacyBake()` is on the mesh is baked Y-up, so a model with no stored
+ * axis and no pose turns about `y`, the default the old code had — the file
+ * convention's `z` lays a baked STL on its side (Masa, 2026-09-11). Every
+ * client site imports the default from here, not from `shared/frames`, so the
+ * one wrapper covers them all. Deleted by task 5.2, which restores the plain
+ * re-export.
+ */
+export function defaultAxisFor(format: ModelFormat): OrbitAxis {
+  return legacyBake() ? 'y' : fileDefaultAxisFor(format)
+}
 
 export interface Bounds {
   center: THREE.Vector3

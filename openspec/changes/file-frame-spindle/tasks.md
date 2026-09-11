@@ -344,7 +344,9 @@
       permanent improvement (wave-2 review #2): it loses its `bake` parameter only. The
       delete surface is the pill worker's list (its commit f5be254 message and report):
       `bakeToggle.ts`; `parseModel`'s third parameter; `camera.ts`'s `LEGACY_FRAMES`,
-      the `frameFor` branch and the two imports; `pose.ts`'s `toSceneSpace` and its two
+      the `frameFor` branch, the `defaultAxisFor` wrapper (back to the plain re-export
+      of `shared/frames`' — it defaults a baked mesh to the old spindle `y`, 2026-09-11)
+      and the two imports; `pose.ts`'s `toSceneSpace` and its two
       call sites; `App.tsx`'s `bakeLru`, `bake`/`setBake`, `liveLru`, `liveLruRef`,
       `bakeSeenRef` + its effect (and the `renderEntryThumbnail` import only it uses —
       the effect re-renders the visible tiles locally since 2026-09-11), the `liveLru`
