@@ -51,9 +51,19 @@
 
 ## 3. Land it
 
-- [ ] 3.1 `bun run typecheck` and both suites green on merged main
-- [ ] 3.2 Live, read-only: with the dev instance up and the index ready, load the root
+- [x] 3.1 `bun run typecheck` and both suites green on merged main
+      *(2026-09-11 on c583695: both typechecks exit 0; client 67 files / 952; server 23 files /
+      737 — the index server was up, so `indexContract` ran)*
+- [x] 3.2 Live, read-only: with the dev instance up and the index ready, load the root
       and watch the posed tiles — each keyless `posed: 2` sidecar re-renders once (a `blob:`
       image, then a PUT carrying `posed: 2` and a `poseKey`), a second load is all hits;
       record a before/after sidecar here
+      *(2026-09-11, coordinator, headless against the dev instance with the index ready. The
+      root had already been swept by Masa's live tab (19 keyed posed renders; 75 keyless
+      left in other folders), so the sequence was driven in `/Nautilus_Gears/files`:
+      `connector_bar_v2.STL`'s AO-off render read `{hit, posed: 2, rig: 7}` with no key;
+      first load → the tile went to a `blob:` image at 3.8 s (re-rendered locally) and the
+      sidecar then read `{hit, posed: 2, poseKey: "z:6.2832:0.3491"}`; second load → the
+      tile was served as `/api/thumb` (a hit), nothing rendered. The remaining keyless
+      renders sweep the same way, one folder per visit)*
 - [ ] 3.3 `openspec validate pose-rerender --strict`; archive dry run on a fresh copy
