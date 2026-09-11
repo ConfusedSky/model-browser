@@ -13,7 +13,7 @@
       three processes. Recorded in D6; the tolerance widened to 5 % with the `-noao`
       frames carrying the tight check. Follow-up before 1.3 merges: capture
       `OBJ_axis_{y,z}-noao_C0.png` too. 4.1 moves the set to `scripts/frame-ab/baseline/`)*
-- [ ] 0.2 **Masa, before any of §1–§3 lands** (Migration Plan step 2): `features.thumbWrites:
+- [x] 0.2 **Masa, before any of §1–§3 lands** (Migration Plan step 2): `features.thumbWrites:
       false` in `~/.config/model-browser/config.json`, `rm -rf client/dist`, restart the dev
       instance (other sessions may own it — say so in the session), no other browser on
       3177. From here until 5.2 restores it, nothing can write a sidecar
@@ -30,6 +30,10 @@
       before 2.1 (or 1.3 before 1.4) caches lying-down renders — 0.2 is what makes either
       order safe, and it must precede the FIRST merge, not the test window. Recovery is
       Masa's call, recorded when made)*
+      *(2026-09-10 17:59: done — `features.thumbWrites: false` in the config, dev instance
+      restarted at 17:59:51, `/api/features` answers `thumbWrites: false`; `client/dist`
+      (a 2026-09-07 pre-change bundle 3177 was serving) removed by the coordinator at
+      ~17:50. Both guards in force from here)*
 
 ## 1. Frames and defaults
 
