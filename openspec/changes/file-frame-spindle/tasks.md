@@ -332,9 +332,29 @@
       argument, the pill's legacy frame lookup, the legacy pose mapping and every branch
       on the flag, including the `putThumb` guard and the getters' second instance —
       **not** `shared/frames.ts`'s pre-bake triples, which `swapOffset` and the permanent
-      on-read migration derive from (D7);
-      `grep -rn "legacyBake\|bakeToggle\|toSceneSpace\|bakeLru\|meshLoader(" client/src` is
-      empty and `parseModel` is back to two parameters; suites green; 4.2 re-run; restore
+      on-read migration derive from (D7), and **not** the `meshLoader` extraction, a
+      permanent improvement (wave-2 review #2): it loses its `bake` parameter only. The
+      delete surface is the pill worker's list (its commit f5be254 message and report):
+      `bakeToggle.ts`; `parseModel`'s third parameter; `camera.ts`'s `LEGACY_FRAMES`,
+      the `frameFor` branch and the two imports; `pose.ts`'s `toSceneSpace` and its two
+      call sites; `App.tsx`'s `bakeLru`, `bake`/`setBake`, `liveLru`, `liveLruRef`,
+      `bakeSeenRef` + its effect, the `liveLru` hand-offs (back to `lru`), the pill
+      button and its comment, and `lru` back into the `jobs` memo's deps and value;
+      `bulkJobs.ts`'s `JobDeps.lru` back to a plain value and the deps spread;
+      `localFramings.ts`'s `BAKE_PILL_PRESENT` import and guard; `vite.config.ts`'s
+      `setupFiles` line; `client/test/bakePillGuard.setup.ts`, `bakeToggle.test.ts`,
+      `bakePill.test.tsx`; `bulkJobs.test.ts`'s getter back to a value; in the harness:
+      `client/spike/ab.ts`'s `setLegacyBake` import, `RenderOpts.legacy`,
+      `legacyModelCache` and the `legacy` branch, `run.mjs`'s `--mode in-process` and
+      the README's in-process paragraphs (baseline mode stays). While in those files, the
+      review's nits: `pose.ts`'s `POSE_VERSION` comment stops saying `toSceneSpace` is
+      "now gone" in the interim (it will be true then); `client/spike/ab.ts` assigns
+      `window.ab` through a local cast, not a `declare global` that leaks into `src`'s
+      type program; `writeLocalFraming` carries an existing label on an unclassifiable
+      key (`held?.frame`) rather than dropping it; the localFramings cell titled
+      "…touching the camera and adding no axis" is retitled to say the camera is unchanged.
+      `grep -rn "legacyBake\|bakeToggle\|toSceneSpace\|bakeLru" client/src client/spike
+      scripts/frame-ab` is empty and `parseModel` is back to two parameters; suites green; 4.2 re-run; restore
       `thumbWrites` in the local config and restart; start the server; open Pikachu and
       Main_Complete and confirm the stored view is the one shown and their cached renders
       are served as hits (no re-render)
