@@ -204,7 +204,7 @@
       worker's 5.2 delete list is in its report and is the brief for 5.2. With this merge
       the dev instance's client bundle carries the guard, so the incident window is closed
       from the client side; the server-side refusal (0.2) is still pending)*
-- [ ] 3.2 Masa's test window (0.2 in force): the pill on and off over the real library — Pikachu (stored
+- [x] 3.2 Masa's test window (0.2 in force): the pill on and off over the real library — Pikachu (stored
       camera + axis), Main_Complete (`-z` stored), Benchy (posed, no framing), Head
       (`+Y` posed), an OBJ if one is at hand. Known during the window (D7): an orbit is
       not durable across navigation, the library tab's reset count moves for framings
@@ -233,6 +233,15 @@
       axis read against the legacy frames on a baked mesh — D7's accepted quarter turn).
       Both symptoms, one cause. Fix for the test: clear the `mb:framing:` keys; the legacy
       side cannot show a framed model right and is not meant to)*
+      *(Closed 2026-09-11. Masa: "Bake off is correct" — the new rendering, index off, pure
+      defaults — and, once the framings held in the browser's localStorage were cleared,
+      the poses showed. Verdict: the pill is understood and should be removed; the
+      change's point is the true up axis, and the harness's in-process run had already
+      shown the two renderings equal. Two things came out of the window worth keeping: the
+      spec's "a stored axis withholds the pose" rule is easy to mistake for a bug when the
+      store is invisible (a browser-held framing survives a hard reload and a cache
+      clear), and *reset framing* must reach that store — it did before the pill and does
+      again after it)*
 
 ## 4. The harness (D6)
 
