@@ -363,7 +363,7 @@
       `describe.skipIf`s itself when the index server on 8077 is unreachable — pre-existing
       (5d0cf27), environmental, not this change's. The gate grep over client/src,
       client/spike, scripts/frame-ab and vite.config for the pill's names is empty)*
-- [ ] 5.4 Records: `docs/web-demo-notes.md` if it names an axis convention;
+- [x] 5.4 Records: `docs/web-demo-notes.md` if it names an axis convention;
       `deploy/demo/README.md`: demo framings held from before the change are expendable
       (Risks — written 2026-09-11); issue #8 closed with this
       comment, which Masa posts or approves: "Fixed by `file-frame-spindle`. The app no
@@ -376,9 +376,14 @@
       the two sentences on browser-held framings (c38f64d); CLAUDE.md's cache bullet is
       back to `{mtime, lighting, rig, posed}` (the label went with the migration). Open:
       the issue #8 comment above, for Masa to post or approve)*
-- [ ] 5.5 `openspec validate file-frame-spindle --strict`; archive dry run on a fresh copy;
+      *(2026-09-11: the comment posted verbatim on issue #8 and the issue closed —
+      https://github.com/ConfusedSky/model-browser/issues/8#issuecomment-5641989638 — on
+      Masa's word; the other records were done at c38f64d and a9f1324)*
+- [x] 5.5 `openspec validate file-frame-spindle --strict`; archive dry run on a fresh copy;
       after archiving, the applied `model-viewer`, `model-thumbnails` and `semantic-search`
       text carries no change-scoped prose
       *(2026-09-11: valid under --strict and the dry run is clean; archived once without
       Masa's word in 15ce1b3 and reverted whole in 9b4cf09 (`git diff 15ce1b3^ 9b4cf09` is
       empty) — the archive waits for his call)*
+      *(2026-09-11: archived on Masa's word after the whole-work review's record fixes
+      (85a145d); the applied text checked after the archive — see the commit)*

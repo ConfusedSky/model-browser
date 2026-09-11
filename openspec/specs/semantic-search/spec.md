@@ -2,7 +2,9 @@
 
 ## Purpose
 TBD - created by archiving change semantic-search. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: Meaning search is a mode of the search input
 The client SHALL offer meaning search as a mode the search input runs in, selected by an option carried with the other search options, so that submitting from the input runs whichever search is in force. The option SHALL be sticky per browser profile and carried in the URL under the same rules as the other options that determine which results exist, and changing it while a query is committed SHALL re-run that query in the newly selected mode without the user retyping it. Which mode is in force SHALL be visible without opening the panel, since it is what explains the grid.
 
@@ -176,11 +178,15 @@ When the index reports a result set as weak — its best match not standing out 
 - **THEN** their order expresses their relative strength on its own, and any per-result numbers drawn beside them add to that order rather than replace it — removing every number would leave the set still readable, and the numbers never reorder it
 
 ### Requirement: A pose orients the model without becoming its stored camera
-Where the index supplies an orientation for a model, the client SHALL use it to open that model the right way up: its up axis SHALL correspond to one of the app's six orbit spindles and SHALL be mapped to that spindle directly, and any front-view angles SHALL be applied as the live view's orientation, leaving framing distance and target to the viewer. An up axis that does not correspond to one of the six, or an orientation that is internally inconsistent, SHALL be treated as a fault in the index — the orientation ignored and the model opened as though none were supplied — and SHALL NOT be rounded to the nearest spindle, since rounding would conceal an upstream defect behind a plausible result and then persist it if the user orbited. The orientation presented SHALL be the one the index describes for every up axis it reports, not only for models already modelled about the app's default frame. Where the index supplies an up axis but no front view for it, the client SHALL present the model upright at the index's own stated default starting angle rather than discarding the orientation entirely. An orientation from the index SHALL NOT override an axis the user has already established for that model, and applying one SHALL NOT persist a camera or re-render a stored thumbnail — only the user's own manipulation of the view SHALL do that.
+Where the index supplies an orientation for a model, the client SHALL use it to open that model the right way up: its up axis SHALL correspond to one of the app's six orbit spindles and SHALL be that spindle, literally — the index measures in the file's coordinates and so does the spindle, so an up axis of `[0,0,1]` is spindle `+Z` with no coordinate mapping between them — and any front-view angles SHALL be applied as the live view's orientation, leaving framing distance and target to the viewer. An up axis that does not correspond to one of the six, or an orientation that is internally inconsistent, SHALL be treated as a fault in the index — the orientation ignored and the model opened as though none were supplied — and SHALL NOT be rounded to the nearest spindle, since rounding would conceal an upstream defect behind a plausible result and then persist it if the user orbited. The orientation presented SHALL be the one the index describes for every up axis it reports, not only for models already modelled about the app's default frame. Where the index supplies an up axis but no front view for it, the client SHALL present the model upright at the index's own stated default starting angle rather than discarding the orientation entirely. An orientation from the index SHALL NOT override an axis the user has already established for that model, and applying one SHALL NOT persist a camera or re-render a stored thumbnail — only the user's own manipulation of the view SHALL do that.
 
 #### Scenario: Opening a model the right way up
 - **WHEN** the user opens a model the index has an orientation for and no axis of their own
 - **THEN** the model is presented upright at the index's front angles, framed by the viewer as usual
+
+#### Scenario: The index's axis is the spindle shown
+- **WHEN** the index reports an up axis of `+Z` for a model with no axis of the user's own
+- **THEN** the lightbox's axis control marks Z, and an up axis of `+Y` marks Y
 
 #### Scenario: Every up axis reproduces the same view
 - **WHEN** models sharing a front view but modelled about different up axes are opened at the index's orientation
@@ -411,4 +417,3 @@ browsing elsewhere.
 #### Scenario: An ordinary deployment is unchanged
 - **WHEN** a deployment does not declare this
 - **THEN** every index condition is reported to the user exactly as it is today
-
