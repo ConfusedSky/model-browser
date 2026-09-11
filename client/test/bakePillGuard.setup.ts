@@ -7,7 +7,8 @@
 // permanent contract — a PUT reaches the wire, or the local store on a refusing
 // deployment. So the guard constant alone is lifted for the whole suite here;
 // the flag and its setter stay real. `bakeToggle.test.ts` opens with
-// `vi.unmock` and is the one file that exercises the guard.
+// `vi.unmock` and is the file that exercises the guard; `bakePill.test.tsx`
+// unmocks it too, so the flip's local renders are seen to write nothing.
 import { vi } from 'vitest'
 
 vi.mock('../src/three/bakeToggle', async (importOriginal) => ({

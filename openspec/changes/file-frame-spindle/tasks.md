@@ -342,7 +342,9 @@
       `bakeToggle.ts`; `parseModel`'s third parameter; `camera.ts`'s `LEGACY_FRAMES`,
       the `frameFor` branch and the two imports; `pose.ts`'s `toSceneSpace` and its two
       call sites; `App.tsx`'s `bakeLru`, `bake`/`setBake`, `liveLru`, `liveLruRef`,
-      `bakeSeenRef` + its effect, the `liveLru` hand-offs (back to `lru`), the pill
+      `bakeSeenRef` + its effect (and the `renderEntryThumbnail` import only it uses —
+      the effect re-renders the visible tiles locally since 2026-09-11), the `liveLru`
+      hand-offs (back to `lru`), the pill
       button and its comment, and `lru` back into the `jobs` memo's deps and value;
       `bulkJobs.ts`'s `JobDeps.lru` back to a plain value and the deps spread;
       `localFramings.ts`'s `BAKE_PILL_PRESENT` import and guard; `vite.config.ts`'s

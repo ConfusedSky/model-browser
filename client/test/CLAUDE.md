@@ -7,6 +7,12 @@
   is hoisted so each file still declares the two mocks, resolving their factories through the
   harness (`(await import('./appHarness')).apiClientModule()`); the harness must not statically
   import App or the factories would cycle
+- Import `./appHarness` **before** any `../src/...` module in an app-mount test (the
+  existing files do; bakePill.test.tsx did not, 2026-09-11). With `../src/three/renderer`
+  imported first, its mock factory is what loads the harness, and the app's own importers
+  (`entryActions`' `renderThumbnail`) then get the *real* renderer — the harness spy counts
+  nothing while "Error creating WebGL context" prints — even though the test's own
+  `renderer` import is the spy. Probed with the harness moved to the top: the spy counts
 - Renderer mocks: spread `...(await importOriginal<typeof import('../src/three/renderer')>())`
   and override only what the test drives — hand-listed factories go stale on new exports, and a
   stubbed `stageModel` fails as `Cannot destructure property 'pivot' of undefined`

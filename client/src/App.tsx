@@ -40,6 +40,7 @@ import {
   openEntryIn,
   openInApps,
   orbitAxisApplies,
+  renderEntryThumbnail,
   resetFramingLive,
   runCommand,
   setOrbitAxis,
@@ -1366,19 +1367,6 @@ export default function App() {
     readLibraryId,
   )
   placeholderRef.current = setPlaceholder
-  // TEMPORARY (`file-frame-spindle` D7): a flip drops every tile's picture and
-  // restarts its lookup through `useThumbnails`' per-path `refetch` — the same
-  // restart a bulk reset's in-memory half takes — so tiles re-render into
-  // memory under the other convention. An effect rather than the click
-  // handler: the sweep publishes its `start` for the new instance only after
-  // the re-render, and this effect is declared after the hook, so it runs
-  // after that. Deleted by task 5.2.
-  const bakeSeenRef = useRef(bake)
-  useEffect(() => {
-    if (bakeSeenRef.current === bake) return
-    bakeSeenRef.current = bake
-    for (const entry of thumbEntries) if (entry.kind === 'model') refetch(entry.path)
-  }, [bake, thumbEntries, refetch])
 
   /**
    * The one moment the sweep cannot cover (review F4): a report that resolves
@@ -2664,6 +2652,38 @@ export default function App() {
       say,
     ],
   )
+  // TEMPORARY (`file-frame-spindle` D7): a flip re-renders every visible model
+  // locally through the flipped LRU — the *re-render thumbnail* command's body,
+  // with the host that command gets, pushed through the one render queue as the
+  // bulk path is. Not `refetch`: that restarts the *lookup*, and the server
+  // answers it with its cached pixels, so the tile redrew the same render and
+  // nothing was drawn under the other convention (Masa, 2026-09-11). The PUT
+  // each render ends in is dropped by the pill's guard — the tile shows the
+  // local blob regardless. Before the cache migration (5.1) a model with a
+  // stored scene axis renders a quarter turn off with the pill OFF; expected —
+  // the ON side is the pre-migration truth for those. An effect below
+  // `actionHost` rather than the click handler: the host built around the other
+  // instance exists only after the re-render. The seen-ref keeps a mount, and
+  // the host's own churn, from firing it; a failed model is left showing what
+  // it was and stops none of the others. Deleted by task 5.2.
+  const bakeSeenRef = useRef(bake)
+  useEffect(() => {
+    if (bakeSeenRef.current === bake) return
+    bakeSeenRef.current = bake
+    for (const entry of thumbEntries) {
+      if (entry.kind !== 'model') continue
+      actionHost.queue.push(async () => {
+        try {
+          await renderEntryThumbnail(entry, actionHost, {
+            discardFraming: false,
+            pose: actionHost.poses[entry.path],
+          })
+        } catch {
+          // Swallowed: the flip is a comparison, not a press on this tile.
+        }
+      })
+    }
+  }, [bake, thumbEntries, actionHost])
 
   const onEntryMenu = useCallback(
     (entry: DirEntry, el: HTMLElement | null, at: { x: number; y: number }): void => {
@@ -3525,7 +3545,8 @@ export default function App() {
         {/* TEMPORARY — `file-frame-spindle` D7: the compare pill. Flips the
             module flag and its state mirror, closes the lightbox and the orbit
             overlay (both live in `viewer`; `closeViewer` covers both), and the
-            effect on `bake` restarts every tile. Removed by task 5.2 before
+            effect on `bake` (below `actionHost`) re-renders every visible tile
+            locally through the other instance. Removed by task 5.2 before
             the change ships. Ordering: `adaptive-ao-default` 1.2 edits this
             block — whichever lands second rebases. */}
         <button
