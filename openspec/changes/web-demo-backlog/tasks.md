@@ -96,6 +96,16 @@
       be taken against the real origin, not the SSH tunnel. The thumbnail half split out
       the same day as `hover-prefetch-thumbnails`, gated on that measurement and on the
       CDN question: HTTP/2 and an edge cache may leave it worth nothing
+- [ ] 1.10 the library tab's *reset framings* under `thumbWrites: false` — found 2026-09-11
+      while `file-frame-spindle` was tested with the demo's flag on a local library: the
+      count is adjusted client-side on every orbit (`noteFramingChanged`/`handDelta`), but
+      with writes refused those orbits land in this browser's `localStorage`
+      (`LocalFramingClient`), while the job enumerates the **server's** cache through
+      `/api/models` — which holds none — so the count climbs and the reset resets nothing.
+      The demo offers `reset` under writes-off (`SidePanel`'s ops) and so has the same
+      hole for every visitor. Either the count and the job read the local store in that
+      mode (enumerate `mb:framing:<library>:` keys; reset removes them), or `reset` is
+      withheld with `generate`. A `public-deployment` follow-up, not `file-frame-spindle`'s
 
 ## 2. Decisions to record in `docs/web-demo-notes.md` (answer + date on the item)
 
