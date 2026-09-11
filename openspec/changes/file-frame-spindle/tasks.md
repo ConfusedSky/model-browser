@@ -212,6 +212,18 @@
       in the file convention reads a quarter turn off with the pill on. Record
       what was looked at and any difference seen beyond the shadow penumbra here, before
       the pill is removed
+      *(2026-09-11, coordinator's headless check on the live dev instance at c38f64d, index
+      on, caches empty, both guards on, AO off: tiles for fat_cat / 3DBenchy /
+      xyzCalibration_cube diffed against the spike's `-noao` C0 baselines composited the
+      same way — pill OFF max Δ 47/56/45, pill ON max Δ 46/56/47 (lossy-WebP noise; a
+      quarter turn or a default view would be ≈ 255), and a control against a default-view
+      render of fat_cat from the harness page gave max Δ 163. So on a fresh load both sides
+      stand and the pose is applied. Masa's two reports — legacy side on its side after the
+      6a7ac2a fix, pose ignored with the index back on — did not reproduce; the first
+      matches a tab that had not reloaded the fixed camera module, the second the pose wave
+      running once per listing landing (its effect keys on the wave id, not on index
+      availability), so a listing landed while the index was off has no poses until the
+      next navigation — pre-existing behaviour, not this change's)*
 
 ## 4. The harness (D6)
 
