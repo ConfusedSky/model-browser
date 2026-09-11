@@ -268,8 +268,20 @@ class LocalFramingClient implements ApiClient {
     // side of the pill — a local framing written under the legacy side would
     // be a scene axis stamped as a file one, and the bake has no cache-key
     // dimension to keep the two conventions' pixels apart.
-    // Deleted by task 5.2 with `bakeToggle.ts`.
-    if (BAKE_PILL_PRESENT) return { dropped: true }
+    // Deleted by task 5.2 with `bakeToggle.ts`. One thing passes, and only to
+    // the local branch: a save that states no framing *value* — camera and
+    // axis each `null` or absent, at least one `null` — is a discard, stores
+    // no convention-bearing value and only removes one, and *reset framing*
+    // must still clear a framing this browser holds (Masa, 2026-09-11). Its
+    // pixels never reach the wire under the pill.
+    if (BAKE_PILL_PRESENT) {
+      const discardsOnly =
+        (save.camera === null || save.axis === null) && save.camera == null && save.axis == null
+      if (discardsOnly && keepsFramingsLocally(this.report())) {
+        writeLocalFraming(save.path, save, this.storage, this.libraryId)
+      }
+      return { dropped: true }
+    }
     if (keepsFramingsLocally(this.report())) {
       writeLocalFraming(save.path, save, this.storage, this.libraryId)
       return { dropped: true }

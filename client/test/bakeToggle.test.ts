@@ -134,4 +134,29 @@ describe('putThumb guard while the pill exists', () => {
     expect(await remote.putThumb(save)).toEqual({ dropped: true })
     expect(inner.putThumb).not.toHaveBeenCalled()
   })
+
+  it('lets a discard through to the local branch, so reset framing still clears a held framing', async () => {
+    const inner = { putThumb: vi.fn().mockResolvedValue({ gen: 5 }) } as unknown as ApiClient
+    const off = { thumbWrites: false } as FeatureReport
+    // A held framing, then a reset's save: pixels plus `null` for both halves.
+    const held = storage()
+    held.getItem = () => JSON.stringify({ camera: save.camera, axis: 'z' })
+    const local = withLocalFramings(inner, () => off, held, () => 'lib')
+    const reset: ThumbSave = { path: '/m.stl', mtime: 42, png: save.png, camera: null, axis: null }
+    expect(await local.putThumb(reset)).toEqual({ dropped: true })
+    expect(held.removeItem).toHaveBeenCalledTimes(1)
+    expect(held.setItem).not.toHaveBeenCalled()
+    expect(inner.putThumb).not.toHaveBeenCalled()
+    // A camera-only discard keeps the held axis: a write, not a removal.
+    const partial = storage()
+    partial.getItem = () => JSON.stringify({ camera: save.camera, axis: 'z' })
+    const local2 = withLocalFramings(inner, () => off, partial, () => 'lib')
+    await local2.putThumb({ path: '/m.stl', mtime: 42, camera: null })
+    expect(partial.setItem).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(partial.setItem.mock.calls[0]![1] as string)).toEqual({ axis: 'z' })
+    // On a writing deployment the discard's pixels still never reach the wire.
+    const remote = withLocalFramings(inner, () => null, storage(), () => 'lib')
+    expect(await remote.putThumb(reset)).toEqual({ dropped: true })
+    expect(inner.putThumb).not.toHaveBeenCalled()
+  })
 })
