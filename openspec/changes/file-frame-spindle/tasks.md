@@ -1,6 +1,6 @@
 ## 0. Before the old code goes
 
-- [ ] 0.1 Capture the L-bracket OBJ's C0 frames at spindles `y` and `z` as single lossless
+- [x] 0.1 Capture the L-bracket OBJ's C0 frames at spindles `y` and `z` as single lossless
       PNGs from the spike worktree (`agent-af1bc1b75df6032ae`, commit `f3442dd`; its
       `out/` holds them only inside contact sheets), beside the eleven STL `*_C0.png`
       there (522,728 bytes), into `scripts/frame-ab/baseline/` with the spike's
@@ -20,7 +20,7 @@
 
 ## 1. Frames and defaults
 
-- [ ] 1.1 `FRAMES` becomes the D3 table. The derivation lives once, in `shared/frames.ts`
+- [x] 1.1 `FRAMES` becomes the D3 table. The derivation lives once, in `shared/frames.ts`
       (below): the pre-bake triples, `unbake(x,y,z) = (x, −z, y)`, the re-key by the
       spindle vector's axis; `three/camera.ts` only lifts the shared triples into
       `Vector3`s. The six entries asserted in a unit cell against the design's table; `defaultAxisFor(format: ModelFormat)` (D2) —
@@ -40,7 +40,7 @@
       `swapOffset`'s six values in degrees with the sign checked against `captureState`
       (a direction vector round-trips through old frame → offset → new frame); a camera
       round-trip about every spindle still exact
-- [ ] 1.2 `three/pose.ts`: delete `toSceneSpace`; `axisOf` matches the file vector;
+- [x] 1.2 `three/pose.ts`: delete `toSceneSpace`; `axisOf` matches the file vector;
       `cameraForPose` unchanged otherwise; `POSE_VERSION` stays 2 and its comment says
       why ("2 = poses carried into scene space" is no longer the meaning — the mapping is
       gone and the pictures are the same, D4). Cells: `up [0,0,1]` → `z`, `[0,1,0]` → `y`,
@@ -49,13 +49,19 @@
       restoring `toSceneSpace`. Existing cells adjusted: `pose.test.ts` "maps a file up
       axis to the spindle it becomes in the scene" (now: is the spindle) and "keeps the
       model upright: camera up is the model up, in scene space" (now: in file space)
-- [ ] 1.3 `three/models.ts`: the STL bake removed; the comment about 3MF corrected (the
+- [x] 1.3 `three/models.ts`: the STL bake removed; the comment about 3MF corrected (the
       loader rotates nothing; the format is Z-up by specification, which is why its default
       is `z`). Cell: an STL fixture's bounding box after parse equals its file's.
       `client/test/stlNormals.test.ts`'s "a healthy file is unchanged" cell asserts the
       stored field carried through the rotation — rewritten to assert the field verbatim
       (semantics-is-the-point, named in the report)
-- [ ] 1.4 The remaining eleven of the sixteen `'y'` fallbacks replaced by
+      *(2026-09-10: 1.1–1.3 merged as 3736fa8 (fable worker): `shared/frames.ts` derives
+      `FILE_FRAMES` from `SCENE_FRAMES` under R⁻¹, `migrateAxis`, `swapOffset`,
+      `defaultAxisFor`; `ModelFormat` moved to shared/types; `formatOfEntry` throws on an
+      unclassifiable path. Falsified: `toSceneSpace` restored → 6 pose cells; a/b swapped in
+      two FILE_FRAMES rows → the D3-table cell, a×b, both swapOffset cells; rotateX restored →
+      the bbox cell and stlNormals. 40 cells across the five files; typecheck clean)*
+- [x] 1.4 The remaining eleven of the sixteen `'y'` fallbacks replaced by
       `defaultAxisFor(formatOfEntry(entry))` (five became required in 1.1) — `ViewerLayer`
       ×5: the `sessionAxis` state seed (`useState<OrbitAxis>('y')` → the entry's default),
       `savedPromise`'s resolved branch, its `.then`, its `.catch`, `liveFramingView`'s
@@ -73,7 +79,17 @@
 
 ## 2. The stores
 
-- [ ] 2.1 Server `cache.ts`: `frame?: number` on `Meta`; `put` stamps `frame: 2` only when
+      *(2026-09-10: merged as e4b9d91 (fable worker). Sixteen sites; five made required,
+      eleven take `defaultAxisFor(formatOfEntry(entry))`; `DEFAULT_ORBIT_AXIS` deleted;
+      `ThumbResult.axis`'s "(read as 'y')" comment fixed too. Nine existing cells moved to
+      file-frame answers (the four named plus orbitAxisMenu ×2, openInApps ×2, thumbnailQueue
+      ×3 — all "un-framed STL is y" → z); five test-file callers pass `'y'` explicitly where
+      the axis is immaterial. New: STL lightbox marks Z, OBJ marks Y, the menu agrees, a +Y
+      pose marks Y with no flip (issue #8). Falsified: `axisOf` [0,1,0]→'-z' fails the posed
+      cells; `defaultAxisFor` always 'y' fails 8, always 'z' fails the OBJ cells. Merged main:
+      client 952/952, server 754/754, typecheck clean; `grep "'y'" client/src` is the letter
+      list and the frame tables only)*
+- [x] 2.1 Server `cache.ts`: `frame?: number` on `Meta`; `put` stamps `frame: 2` only when
       the write carries a `camera` or `axis` (a discard, `null`, counts), and carries
       `prev.frame` otherwise — in both hand-built sidecars, the main write and the
       `png === null` deletion branch (the size-cap write-back and the re-key spread the
@@ -83,7 +99,11 @@
       write → fails); a pixels-only write on a labelled entry keeps the label; the
       deletion branch keeps it (falsify: drop it from that branch → fails); an old
       sidecar without it reads as before
-- [ ] 2.2 `scripts/migrate-frames.ts --cache-dir <dir> [--undo]` (D5), the shape of
+      *(2026-09-10: merged as e3072cb (fable worker); `FRAME_CONVENTION` moved to
+      shared/frames.ts by 2.3 with a re-export from cache.ts. Seven cells; falsified: stamp on
+      every write → the pixels-only cell (`expected true to be false` on `'frame' in sidecar`);
+      drop it from the deletion branch → `expected undefined to be 2`)*
+- [x] 2.2 `scripts/migrate-frames.ts --cache-dir <dir> [--undo]` (D5), the shape of
       `gen-overrides.ts`: named flags with an unknown-flag refusal, an exported core
       `migrateFrames(options): Promise<MigrateResult>` with an injected `report` and a
       structured count object, a `pathToFileURL(process.argv[1])` main guard so
@@ -105,7 +125,14 @@
       framed sidecar touched after the marker → the run refuses (falsify: drop the mtime
       test → it relabels `z` to `-y`). Falsify: swap two rows of `migrateAxis` → the STL
       cells fail
-- [ ] 2.3 `api/localFramings.ts`: `LocalFraming` gains `frame`; `readLocalFraming`
+      *(2026-09-10: merged as 87d4a08 (fable worker). Format from listing.ts's exported
+      `modelFormat` (the `MODEL_EXT` wrapper); inverse axis by search over `migrateAxis`;
+      `--undo` never refuses; refusal reads everything before writing anything. 14 cells;
+      falsified: default a missing axis to 'y' → the camera-only cell; drop the mtime test →
+      the refusal cell resolves with `relabelled: 1` (the rolled-back `z` turned to `-y`);
+      swap two SCENE_FRAMES bodies → cells 1/2. Also run under Bun on a scratch dir: forward,
+      undo byte-identical, bad flags exit 1)*
+- [x] 2.3 `api/localFramings.ts`: `LocalFraming` gains `frame`; `readLocalFraming`
       transforms an unlabelled entry (format from the path — a zip entry's path ends in
       the model's extension) at the store boundary, never inside a React updater
       (`useThumbnails`' updater rule), and writes it back labelled; `writeLocalFraming`
@@ -116,6 +143,11 @@
 
 ## 3. The compare pill (temporary — D7; deleted in 5.2)
 
+      *(2026-09-10: merged as fdbe141 (fable worker). The transform lives in
+      `toFileConvention` at the store boundary; OBJ offset applied uniformly since
+      `swapOffset` is 0 at y/−y by derivation. The named test file did not exist — created;
+      three assertions in apiClient.test.ts gained the label. 11 cells; falsified: drop
+      `frame` from the write → the re-read migrates z→−y; skip the transform → 8 fail)*
 - [ ] 3.1 `three/bakeToggle.ts` module flag; `parseModel(bytes, format, bake)` takes the
       convention as an argument; the frame lookup uses the legacy table when on; the pose
       read applies the legacy mapping when on; **two `MeshLru` instances** in `App` from
