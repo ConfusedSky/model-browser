@@ -32,7 +32,7 @@ import {
 } from './appHarness'
 import { AXIS_DIVIDER_CLASS, axisPillClass, flipPillClass } from '../src/lib/entryActions'
 import { DEFAULT_CAMERA } from '../src/three/camera'
-import { POSE_VERSION } from '../src/three/pose'
+import { cameraForPose, POSE_VERSION, poseKeyOf } from '../src/three/pose'
 import { RIG_VERSION, THUMB_LIGHTING } from '../src/three/renderer'
 
 vi.mock('../src/api/client', async () => (await import('./appHarness')).apiClientModule())
@@ -449,7 +449,9 @@ describe('picking a spindle', () => {
       pngUrl: 'blob:stored',
       lighting: THUMB_LIGHTING,
       rig: RIG_VERSION,
-      posed: POSE_VERSION, // already drawn at the pose: the sweep leaves it alone
+      // Already drawn at this very pose, key and all: the sweep leaves it alone.
+      posed: POSE_VERSION,
+      poseKey: poseKeyOf(cameraForPose(POSE, DEFAULT_CAMERA)!),
     })
     await mountAppAtCurrentUrl(
       `/?path=/models&similar=${encodeURIComponent('/models/hero.stl')}`,

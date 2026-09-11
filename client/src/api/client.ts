@@ -91,7 +91,7 @@ export interface ThumbSave {
   rig?: number
   posed?: number
   /** `poseKeyOf` over what the pose resolved to, beside `posed`'s version
-   *  (`pose-rerender` D3); absent when unposed. */
+   *  (`pose-rerender` D2); absent when unposed. */
   poseKey?: string
   /**
    * Which render these pixels and labels are: `true` the occluded one, `false`

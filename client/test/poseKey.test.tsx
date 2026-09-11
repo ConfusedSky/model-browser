@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
-// A render made under one pose records which (`pose-rerender` D3). Before the
+// A render made under one pose records which (`pose-rerender` D2). Before the
 // key, a posed render carried `posed: POSE_VERSION` — the mapping's version,
 // not the pose's value — so when the index later held a different opinion of
 // the model the pixels were never stale: two waves, zero renders (the first
-// cell, failing on main). The key is compared only where a render carries one,
-// so the posed renders already in every cache stay hits (the third cell).
+// cell, failing on main). A posed render without a key is stale, the rule the
+// lighting and rig labels already follow, so the posed renders already in
+// every cache are re-rendered once and gain their key (the third cell).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DirListing, IndexPose, PosesResponse } from '../../shared/types'
 import {
@@ -55,7 +56,8 @@ const KEY_B = poseKeyOf(cameraForPose(POSE_B, DEFAULT_CAMERA)!)
 const UNPOSED_HIT = { status: 'hit', pngUrl: 'blob:hero', lighting: THUMB_LIGHTING, rig: RIG_VERSION }
 /** A render drawn under pose A by this client: the version and the key. */
 const HIT_UNDER_A = { ...UNPOSED_HIT, posed: POSE_VERSION, poseKey: KEY_A }
-/** A render drawn under some pose before the key existed: the version alone. */
+/** A render drawn under some pose before the key existed: the version alone,
+ *  which cannot say what orientation it was drawn under. */
 const HIT_PRE_KEY = { ...UNPOSED_HIT, posed: POSE_VERSION }
 
 async function awayAndBack(): Promise<void> {
@@ -121,17 +123,30 @@ describe('a render made under a different pose', () => {
     expect(renderThumbnail).not.toHaveBeenCalled()
   })
 
-  it('a render labelled before the key existed is not swept: current `posed`, no key, is a hit under any pose', async () => {
+  it('a posed render without a key is re-rendered once and gains its key', async () => {
     // The 92 posed sidecars on the investigating machine, and every cache
-    // written before this change: judged on the mapping version alone.
+    // written before this change: a `posed` label with no key cannot say what
+    // the pixels were drawn under, so it is stale the way a render missing its
+    // rig label is (Masa, 2026-09-11: "rerender if the key doesn't exist
+    // instead of ignoring it") — one render, recording the key.
     getThumb.mockImplementation(() => Promise.resolve(HIT_PRE_KEY))
-    semanticPosesFor.mockResolvedValueOnce(WAVE_A).mockResolvedValueOnce(WAVE_B)
+    semanticPosesFor.mockResolvedValueOnce(WAVE_A)
     await mountApp('/models', LISTING)
     await settle()
+    await settle()
+
+    expect(renderThumbnail).toHaveBeenCalledTimes(1)
+    expect(lastPut()?.posed).toBe(POSE_VERSION)
+    expect(lastPut()?.poseKey).toBe(KEY_A)
+
+    // The server echoes what was written; the next landing under the same
+    // opinion is a hit — once, not on every visit.
+    getThumb.mockImplementation(() => Promise.resolve({ ...HIT_PRE_KEY, poseKey: lastPut()?.poseKey }))
+    semanticPosesFor.mockResolvedValueOnce(WAVE_A)
     await awayAndBack()
 
     expect(semanticPosesFor).toHaveBeenCalledTimes(2)
-    expect(renderThumbnail).not.toHaveBeenCalled()
+    expect(renderThumbnail).toHaveBeenCalledTimes(1)
   })
 
   it('control: the same shape with the hit un-posed does re-render on the second landing', async () => {

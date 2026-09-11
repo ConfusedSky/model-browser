@@ -34,7 +34,7 @@ import {
 } from './appHarness'
 import { setSearchMode, setSearchTuning, TUNING_DEFAULTS } from '../src/lib/searchOptions'
 import { DEFAULT_CAMERA } from '../src/three/camera'
-import { cameraForPose, POSE_VERSION } from '../src/three/pose'
+import { cameraForPose, POSE_VERSION, poseKeyOf } from '../src/three/pose'
 import { RIG_VERSION, THUMB_LIGHTING } from '../src/three/renderer'
 import { setAoEnabled } from '../src/viewer/aoToggle'
 
@@ -682,6 +682,7 @@ describe('meaning search', () => {
               lighting: THUMB_LIGHTING,
               rig: RIG_VERSION,
               posed: POSE_VERSION,
+              poseKey: poseKeyOf(cameraForPose(POSE, DEFAULT_CAMERA)!),
             }
           : { status: 'miss' },
       ),

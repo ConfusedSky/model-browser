@@ -37,7 +37,8 @@ Not a hole: a pose carried at emission, or arriving by wave, over a hit labelled
 - A posed render records what it was drawn under, so a changed opinion is detectable and
   re-rendered on the next visit after the server re-asks.
 - The posed renders already on disk, which carry no key, are re-rendered once — lazily,
-  on their next visit — since a changed opinion is what Masa's stale tiles were.
+  on their next visit, because the missing key itself is stale — since a changed opinion
+  is what Masa's stale tiles were.
 
 **Non-Goals:**
 - Any polling for the index becoming ready, or any readiness input to the pose waves
@@ -55,7 +56,7 @@ is ready." The pose waves stay keyed on the landing; the availability read stays
 mount, on a path change and while warming. A user who starts the index after landing
 navigates once.
 
-### D2: A pose key beside the mapping version, compared only when present
+### D2: A pose key beside the mapping version, compared always: an absent key is stale, the other labels' rule
 
 A new optional label `poseKey?: string` on the wire (`ThumbRenderInfo`,
 `ThumbGetResponse`, `ThumbPutRequest`) and on the client's `ThumbSave`/`ThumbResult`,
@@ -65,41 +66,44 @@ value is what the pixels depended on and nothing else: `poseKeyOf` =
 `${axis}:${az.toFixed(4)}:${el.toFixed(4)}` from `cameraForPose`'s answer — `source` and
 `confidence` are excluded because they do not touch pixels, and the raw
 `up`/`azimuth_zero`/`front` because two poses that derive the same camera should not
-re-render. `usable` adds `labels.poseKey !== undefined && labels.poseKey !==
-poseKeyFor(pose)` to `poseStale`, and both posed writers — the sweep's render and
-`entryActions`' re-render/reset command — send the key. Compared only when present, so a
-keyless render is judged on the mapping version alone; that is what keeps
-`thumbnailQueue`'s "changed by value … keeping its image" cell true, and it is why D3 is
-needed for the renders already on disk.
+re-render. `usable` adds `labels.poseKey !== poseKeyFor(pose)` to `poseStale`, and both posed
+writers — the sweep's render and `entryActions`' re-render/reset command (whose
+`isCurrentRender` delegates to `usable`) — send the key. Compared always: an absent key
+is not equal to the key, so a posed render that carries none is stale, exactly as a hit
+missing its lighting or rig label is (*Recipe-labelled thumbnails*: "including entries
+where either value is absent"). Masa, 2026-09-11: "Wouldn't it be better to rerender if
+the key doesn't exist instead of ignoring it. I don't like the compare when present
+rule." So the renders already on disk are re-rendered once, lazily, on their next visit,
+and the version needs no bump. The by-value cells in `thumbnailQueue` and the other
+fixtures that meant "already drawn at this pose" now carry the key, since a keyless
+posed hit means the opposite.
 
-### D3: `POSE_VERSION` 2 → 3 re-renders the keyless posed renders once
+### D3: ~~`POSE_VERSION` 2 → 3 re-renders the keyless posed renders once~~ — struck
 
-The 92 posed sidecars on this machine carry `posed: 2` and no key. Under D2 alone they
-stay hits whatever the index now says — the very failure reported. The recorded mechanism
-for "the posed recipe changed" is the version: a `posed: 2` render is not current under
-version 3, so each is re-rendered once, lazily on its next visit, through the normal
-queue with camera and axis preserved, and every render from then on carries its key.
-Cost: one render pass over posed thumbnails per listing visited; on the demo the tiles
-render locally anyway. Chosen over "treat a missing key as stale", which would be the
-same sweep expressed as a second rule beside the version and would have broken the two
-by-value cells that pin "an unchanged opinion issues nothing".
+Considered and reverted the same day (2026-09-11) — the version bump was the
+compare-when-present rule's crutch: with a keyless posed render judged on the version
+alone, only a new version could sweep the 92 `posed: 2` sidecars on this machine. Under
+D2 as it now stands the missing key is the staleness, so the same one sweep happens
+lazily, per visit, with `POSE_VERSION` at 2 and its meaning unchanged (the mapping's
+version, bumped only when the mapping changes the picture).
 
 ## Risks / Trade-offs
 
 - [A pose whose derived camera differs in the fifth decimal re-renders] → `toFixed(4)`
   rounds below what a 256² render can show; a real re-classification moves degrees.
-- [Every posed thumbnail re-renders once after the bump] → lazily, per listing visited,
-  through the queue that already paces renders; the pixels are the same where the opinion
-  is unchanged, so nothing visible flickers — each image is kept until its replacement.
+- [Every posed thumbnail on disk re-renders once, its key missing] → lazily, per listing
+  visited, through the queue that already paces renders; the pixels are the same where
+  the opinion is unchanged, so nothing visible flickers — each image is kept until its
+  replacement.
 - [A changed opinion takes up to five minutes plus a navigation to show] → the server's
   pose TTL, the recorded convergence bound; a library reload drops the layer at once.
 
 ## Migration Plan
 
-None for data: the label is optional, and the version bump does the one sweep that is
-wanted, lazily. Nothing is run by hand.
+None for data: the label is optional on the wire, and its absence on a posed render is
+what does the one sweep that is wanted — lazily, per visit. Nothing is run by hand.
 
 ## Open Questions
 
-- None. Masa rejected polling on 2026-09-11; the compare-when-present rule and the
-  version bump were the coordinator's calls the same day.
+- None. Masa rejected polling on 2026-09-11 and, the same day, the compare-when-present
+  rule (with the version bump that propped it up): an absent key is stale.

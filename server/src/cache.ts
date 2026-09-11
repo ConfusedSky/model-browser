@@ -21,7 +21,7 @@ interface RenderLabels {
   /** Pose recipe version the PNG was rendered under; same contract as `rig`. */
   posed?: number
   /** The orientation the PNG was drawn under, where a pose framed it; same
-   *  contract as `rig` — stored, echoed, never interpreted (`pose-rerender` D3). */
+   *  contract as `rig` — stored, echoed, never interpreted (`pose-rerender` D2). */
   poseKey?: string
 }
 
@@ -703,7 +703,7 @@ export class ThumbCache {
       !moved &&
       camera === undefined &&
       axis === undefined &&
-      // The key beside the version (`pose-rerender` D3): two renders drawn
+      // The key beside the version (`pose-rerender` D2): two renders drawn
       // under the same mapping but different opinions differ in orientation
       // exactly as a posed and an unposed pair do. A render carrying no key
       // beside one that does is read as different too — the keyless one was

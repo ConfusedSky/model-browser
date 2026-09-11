@@ -441,13 +441,21 @@ function fakeCache(): Pick<ApiClient, 'getThumb' | 'putThumb'> {
     lighting?: LightingMode
     rig?: number
     posed?: number
+    poseKey?: string
   }
   const rows = new Map<string, Row>()
   return {
     getThumb: async (path: string, mtime: number) => {
       const row = rows.get(path)
       if (row === undefined) return { status: 'miss' as const }
-      const labels = { camera: row.camera, axis: row.axis, lighting: row.lighting, rig: row.rig, posed: row.posed }
+      const labels = {
+        camera: row.camera,
+        axis: row.axis,
+        lighting: row.lighting,
+        rig: row.rig,
+        posed: row.posed,
+        poseKey: row.poseKey,
+      }
       if (row.mtime !== mtime || row.png === undefined) return { status: 'stale' as const, ...labels }
       return { status: 'hit' as const, ...labels, pngUrl: 'blob:cached' }
     },
@@ -462,6 +470,7 @@ function fakeCache(): Pick<ApiClient, 'getThumb' | 'putThumb'> {
         lighting: fresh ? save.lighting : (save.lighting ?? prev?.lighting),
         rig: fresh ? save.rig : (save.rig ?? prev?.rig),
         posed: fresh ? save.posed : (save.posed ?? prev?.posed),
+        poseKey: fresh ? save.poseKey : (save.poseKey ?? prev?.poseKey),
       })
       // This fake models pixels and labels, not cache validators: it issues no
       // generations, and every caller treats an absent one as "not known yet".
@@ -472,8 +481,8 @@ function fakeCache(): Pick<ApiClient, 'getThumb' | 'putThumb'> {
 
 describe('what the next visit makes of the pixels', () => {
   it('a posed re-render is a hit on the next visit, not another re-render', async () => {
-    // The whole reason a "pixels only" write still declares lighting, rig and
-    // the pose recipe. Drop any one of them and the cache clears that label,
+    // The whole reason a "pixels only" write still declares lighting, rig, the
+    // pose recipe and the pose key. Drop any one of them and the cache clears that label,
     // the sweep's hit test fails on it, and this tile re-renders on every
     // single visit — for ever, since each re-render writes the same silence.
     ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true

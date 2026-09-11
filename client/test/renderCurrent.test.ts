@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { CameraState, IndexPose, ThumbRenderInfo } from '../../shared/types'
 import { isCurrentRender } from '../src/hooks/useThumbnails'
-import { POSE_VERSION } from '../src/three/pose'
+import { DEFAULT_CAMERA } from '../src/three/camera'
+import { cameraForPose, POSE_VERSION, poseKeyOf } from '../src/three/pose'
 import { RIG_VERSION, THUMB_LIGHTING } from '../src/three/renderer'
 
 // ─── bulk-thumbnail-jobs 1.1 / thumbnail-image-serving 2.2 ──────────────────
@@ -69,8 +70,14 @@ describe('isCurrentRender', () => {
     // before that opinion existed keep a default angle for ever unless this
     // clause calls them stale.
     expect(isCurrentRender(current(), undefined, undefined, POSE)).toBe(false)
-    // …and at the current recipe they are current again.
-    expect(isCurrentRender(current({ posed: POSE_VERSION }), undefined, undefined, POSE)).toBe(true)
+    // …and at the current recipe, recording this very pose, they are current again.
+    const poseKey = poseKeyOf(cameraForPose(POSE, DEFAULT_CAMERA)!)
+    expect(
+      isCurrentRender(current({ posed: POSE_VERSION, poseKey }), undefined, undefined, POSE),
+    ).toBe(true)
+    // A posed render that cannot say which orientation it was drawn under is
+    // stale, like one missing its rig label (`pose-rerender` D2).
+    expect(isCurrentRender(current({ posed: POSE_VERSION }), undefined, undefined, POSE)).toBe(false)
   })
 
   it('an owned entry ignores the pose entirely', () => {

@@ -82,10 +82,11 @@ function release(url: string): void {
  * interprets; `poseStale` is the pose's own rule: only where nothing of the
  * user's is stored does the index's opinion make an un-posed render stale —
  * or, where the render says which orientation it was drawn under, one drawn
- * under a different opinion than the index now holds (`pose-rerender` D3).
- * The key is compared only when the render carries one: a render labelled
- * before the key existed is judged on the mapping version alone, so the
- * posed renders already in every cache are not swept.
+ * under a different opinion than the index now holds (`pose-rerender` D2).
+ * The key is compared always: a posed render that carries none cannot say
+ * what it was drawn under and is stale, the rule the lighting and rig labels
+ * already follow ("including entries where either value is absent") — the
+ * one pass that brings every posed render under the key.
  */
 function usable(
   labels: { lighting?: LightingMode; rig?: number; posed?: number; poseKey?: string },
@@ -97,8 +98,7 @@ function usable(
     pose !== undefined &&
     camera === undefined &&
     axis === undefined &&
-    (labels.posed !== POSE_VERSION ||
-      (labels.poseKey !== undefined && labels.poseKey !== poseKeyFor(pose)))
+    (labels.posed !== POSE_VERSION || labels.poseKey !== poseKeyFor(pose))
   return labels.lighting === THUMB_LIGHTING && labels.rig === RIG_VERSION && !poseStale
 }
 
@@ -910,7 +910,7 @@ export function useThumbnails(
                     rig: RIG_VERSION,
                     posed: posed !== null ? POSE_VERSION : undefined,
                     // And which orientation, so a changed opinion is
-                    // detectable later (`pose-rerender` D3).
+                    // detectable later (`pose-rerender` D2).
                     poseKey: posed !== null ? poseKeyOf(posed) : undefined,
                     // The same reading the lookup used, not a fresh one: these
                     // pixels are what that answer asked for.

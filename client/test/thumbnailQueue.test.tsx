@@ -10,7 +10,7 @@ import { resetLookupQueueForTests, useThumbnails, type ThumbState } from '../src
 import { thumbImageUrl } from '../src/api/thumbUrl'
 import type { MeshLru } from '../src/three/lru'
 import { DEFAULT_CAMERA } from '../src/three/camera'
-import { POSE_VERSION } from '../src/three/pose'
+import { cameraForPose, POSE_VERSION, poseKeyOf } from '../src/three/pose'
 import { RenderQueue, type Band } from '../src/three/queue'
 import { renderThumbnail, RIG_VERSION, THUMB_LIGHTING } from '../src/three/renderer'
 
@@ -549,6 +549,9 @@ const POSE: IndexPose = {
   confidence: 0.9,
   front: { view: 5, azimuth_deg: 225, elevation_deg: 20 },
 }
+/** What a render drawn under `POSE` records beside the version (`pose-rerender`
+ *  D2): a posed hit without it is stale, like one without its rig label. */
+const POSE_KEY = poseKeyOf(cameraForPose(POSE, DEFAULT_CAMERA)!)
 /** The same pose, rebuilt — what a re-landing hands the hook (1.2a). */
 const clonePose = (p: IndexPose): IndexPose => ({
   ...p,
@@ -901,7 +904,7 @@ describe('the sweep reconciles its entries instead of resetting them', () => {
     // The rule 1.2a exists for: a meaning search over the tiles on screen
     // replaces `entries` and `poses` together, and the overlapping hits are the
     // same path at the same mtime.
-    const api = fakeCache(() => freshHit({ posed: POSE_VERSION }))
+    const api = fakeCache(() => freshHit({ posed: POSE_VERSION, poseKey: POSE_KEY }))
     const lru = mesh()
     const queue = new RenderQueue(2)
 
@@ -948,7 +951,7 @@ describe('the sweep reconciles its entries instead of resetting them', () => {
     // and, since `pose-for-every-model`, on every wave — and the map's identity
     // is now what re-runs the sweep, so reference comparison of the poses
     // *inside* it would re-look-up every tile on every one.
-    const api = fakeCache(() => freshHit({ posed: POSE_VERSION }))
+    const api = fakeCache(() => freshHit({ posed: POSE_VERSION, poseKey: POSE_KEY }))
     const lru = mesh()
     const queue = new RenderQueue(2)
 
@@ -989,7 +992,7 @@ describe('the sweep reconciles its entries instead of resetting them', () => {
     // dependency list this effect never re-runs at all and the wave is inert;
     // with it, the by-value walk above touches the one entry the index spoke
     // about and leaves the other exactly as it is.
-    const api = fakeCache(() => freshHit({ posed: POSE_VERSION }))
+    const api = fakeCache(() => freshHit({ posed: POSE_VERSION, poseKey: POSE_KEY }))
     const lru = mesh()
     const queue = new RenderQueue(2)
     // Held in a const and passed to both renders: a fresh array would make this

@@ -26,7 +26,8 @@ import {
   type JobScope,
 } from '../src/jobs/bulkJobs'
 import { RenderQueue } from '../src/three/queue'
-import { POSE_VERSION } from '../src/three/pose'
+import { DEFAULT_CAMERA } from '../src/three/camera'
+import { cameraForPose, POSE_VERSION, poseKeyOf } from '../src/three/pose'
 import { RIG_VERSION, THUMB_LIGHTING } from '../src/three/renderer'
 import { setAoEnabled } from '../src/viewer/aoToggle'
 
@@ -169,8 +170,17 @@ describe('what a generate derivation keeps', () => {
         // opinion is an input to the pixels, and a render drawn before it
         // arrived is behind.
         model('unposed', { pose: POSE, thumb: thumb() }),
-        // Current: same labels, and posed at the version in force.
-        model('current', { pose: POSE, thumb: thumb({ ao: currentRender({ posed: POSE_VERSION }) }) }),
+        // Current: same labels, posed at the version in force and recording
+        // this very pose (a keyless posed render is stale, `pose-rerender` D2).
+        model('current', {
+          pose: POSE,
+          thumb: thumb({
+            ao: currentRender({
+              posed: POSE_VERSION,
+              poseKey: poseKeyOf(cameraForPose(POSE, DEFAULT_CAMERA)!),
+            }),
+          }),
+        }),
         // Owned: a stored camera beats the index's opinion (semantic-search
         // D5), so a missing pose label is not staleness here.
         model('owned', {

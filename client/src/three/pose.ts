@@ -23,14 +23,12 @@ const EXACT = 1e-6
  * `rotateX(-π/2)` on load, which put the spindle 90° from the model's actual
  * up and rendered models lying down. 2 = the index's axes and the spindle are
  * the same file frame (`file-frame-spindle` removed the bake and the mapping
- * together; the picture was unchanged, so no bump then). 3 = a posed render
- * records the orientation it was drawn under (`poseKey`, `pose-rerender` D3):
- * a `posed: 2` render carries no key, so it cannot be told from one drawn
- * under an opinion the index has since changed — and Masa's stale tiles were
- * exactly that (2026-09-11). The bump re-renders every posed thumbnail once,
- * lazily on its next visit, and every render from here on carries its key.
+ * together; the picture was unchanged, so no bump then). The orientation a
+ * posed render was drawn under is its own label, `poseKey` (`pose-rerender`
+ * D2), whose absence is stale like the lighting and rig labels' — so the key
+ * needed no version bump.
  */
-export const POSE_VERSION = 3
+export const POSE_VERSION = 2
 
 /**
  * The index's up axis as one of the six spindles — by **exact lookup**, never a
@@ -100,7 +98,7 @@ export function cameraForPose(
 
 /**
  * The label a render drawn under a pose records beside `POSE_VERSION`: which
- * orientation it was drawn under (`pose-rerender` D3). Over `cameraForPose`'s
+ * orientation it was drawn under (`pose-rerender` D2). Over `cameraForPose`'s
  * answer rather than the pose's raw fields, because the answer is what the
  * pixels depended on and nothing else — two opinions that derive the same
  * view should not re-render, and `source` and `confidence` touch no pixel.

@@ -16,11 +16,13 @@ its old picture forever: the staleness test has nothing to compare.
 - A render made under a pose records the pose it was drawn under, as a key of what the
   pixels depended on — the spindle and the front angles `cameraForPose` derived — in a new
   optional label `poseKey` beside `posed`. The client's staleness test compares the key
-  when the render carries one; the server stores and echoes it like the other labels and
-  includes it in the sibling-render comparison.
-- `POSE_VERSION` goes 2 → 3, so every posed render already on disk — keyless, and so
+  always — a posed render that carries none is stale, as one missing its lighting or rig
+  label is; the server stores and echoes it like the other labels and includes it in the
+  sibling-render comparison.
+- The missing key is the one sweep: every posed render already on disk — keyless, and so
   unable to say what it was drawn under — is re-rendered once, lazily on its next visit,
-  and carries its key from then on.
+  and carries its key from then on. `POSE_VERSION` stays 2 (a bump to 3 was tried and
+  reverted the same day; the mapping did not change).
 - No polling for the index (Masa): a navigation remains the trigger, and the server's
   five-minute pose memo is the bound on how long a changed opinion takes to reach it.
   The first finding above stands as a finding only.
@@ -38,19 +40,20 @@ pose layer.
 
 - `model-thumbnails`: MODIFIED *Recipe-labelled thumbnails* — a posed render records the
   orientation it was drawn under; a labelled render whose orientation the source has
-  since changed needs re-render; a render labelled before the key existed is compared on
-  the mapping version alone.
+  since changed needs re-render; a render labelled before the key existed is stale and
+  re-rendered once, gaining its key.
 
 ## Impact
 
 - Client: `hooks/useThumbnails.ts` (`usable`'s pose test, the render PUT's labels),
   `lib/entryActions.ts` (the re-render command's PUT and `isCurrentRender`),
-  `three/pose.ts` (`poseKeyOf`, `POSE_VERSION` 3), `api/client.ts` (the two client types).
+  `three/pose.ts` (`poseKeyOf`; `POSE_VERSION` stays 2), `api/client.ts` (the two client
+  types).
 - Shared: `ThumbRenderInfo`, `ThumbGetResponse`, `ThumbPutRequest` gain `poseKey?: string`.
 - Server: `cache.ts` (`RenderLabels`, `renderLabels`, `hasLabels`, `renderInfo`, `put`'s
   label carry-over, the sibling-invalidation compare), `app.ts` (PUT passthrough).
 - Tests: `client/test/poseRerender.test.tsx` (new; the reproducing cells go green),
-  `thumbnailQueue.test.tsx` (its "changed by value" cell stays green by the
-  compare-when-present rule), server cache cells for the label.
+  `thumbnailQueue.test.tsx` (its two by-value cells' posed fixtures carry the key, since
+  a keyless posed hit is now stale), server cache cells for the label.
 - Data: the 92 posed sidecars on this machine carry `posed: 2` and no key; each re-renders
-  once on its next visit under version 3 and gains a key.
+  once on its next visit because the key is missing, and gains one.

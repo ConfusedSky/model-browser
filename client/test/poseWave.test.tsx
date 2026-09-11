@@ -39,7 +39,8 @@ import {
   unmountApp,
 } from './appHarness'
 import { setSearchMode, setSearchTuning, TUNING_DEFAULTS } from '../src/lib/searchOptions'
-import { POSE_VERSION } from '../src/three/pose'
+import { DEFAULT_CAMERA } from '../src/three/camera'
+import { cameraForPose, POSE_VERSION, poseKeyOf } from '../src/three/pose'
 import { RIG_VERSION, THUMB_LIGHTING } from '../src/three/renderer'
 import { setAoEnabled } from '../src/viewer/aoToggle'
 
@@ -122,6 +123,9 @@ const POSE: IndexPose = {
   confidence: 0.9,
   front: { view: 5, azimuth_deg: 225, elevation_deg: 20 },
 }
+/** What a render drawn under `POSE` records: without it a posed hit is stale
+ *  (`pose-rerender` D2), so `fresh` carries it. */
+const POSE_KEY = poseKeyOf(cameraForPose(POSE, DEFAULT_CAMERA)!)
 /** What the wave answers with: three of the four models, `quiet.stl` left out —
  *  an index that holds no orientation for a model simply omits it. */
 const WAVE: PosesResponse = {
@@ -178,7 +182,8 @@ function cached(path: string): Record<string, unknown> {
   const base = { status: 'hit', lighting: THUMB_LIGHTING, rig: RIG_VERSION }
   const name = path.slice(path.lastIndexOf('/') + 1)
   if (name === 'aimed.stl') return { ...base, pngUrl: 'blob:aimed', camera: CAM }
-  if (name === 'fresh.stl') return { ...base, pngUrl: 'blob:fresh', posed: POSE_VERSION }
+  if (name === 'fresh.stl')
+    return { ...base, pngUrl: 'blob:fresh', posed: POSE_VERSION, poseKey: POSE_KEY }
   if (name === 'quiet.stl') return { ...base, pngUrl: 'blob:quiet' }
   return { ...base, pngUrl: 'blob:hero' }
 }

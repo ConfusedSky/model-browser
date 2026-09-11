@@ -636,7 +636,7 @@ export async function renderEntryThumbnail(
       lighting: THUMB_LIGHTING,
       rig: RIG_VERSION,
       posed: posed ? POSE_VERSION : undefined,
-      // And which orientation (`pose-rerender` D3). When `posed`, `camera` and
+      // And which orientation (`pose-rerender` D2). When `posed`, `camera` and
       // `axis` are exactly what the pose resolved to on either branch above,
       // so the key is taken from them rather than resolved a second time.
       poseKey: posed ? poseKeyOf({ camera, axis }) : undefined,

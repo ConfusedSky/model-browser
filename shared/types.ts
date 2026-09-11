@@ -301,9 +301,9 @@ export interface ThumbGetResponse {
   posed?: number
   /**
    * The orientation the PNG was drawn under, where a pose framed it — the
-   * pose's *value* beside `posed`'s version (`pose-rerender` D3). Absent on
-   * renders labelled before the key existed, which the client then judges on
-   * `posed` alone rather than sweeping.
+   * pose's *value* beside `posed`'s version (`pose-rerender` D2). Absent on
+   * renders labelled before the key existed, which the client re-renders once
+   * — a posed render with no key is stale like one with no rig label.
    */
   poseKey?: string
   /** base64 PNG, present when status === 'hit'. */
@@ -387,7 +387,7 @@ export interface ThumbPutRequest {
   posed?: number
   /**
    * What the pixels depended on when a pose framed them, and nothing else
-   * (`pose-rerender` D3): `poseKeyOf` over the camera and axis the pose
+   * (`pose-rerender` D2): `poseKeyOf` over the camera and axis the pose
    * resolved to — `${axis}:${az}:${el}` at four decimals — not the pose's raw
    * fields, so two opinions that derive the same view do not re-render, and
    * not its `source` or `confidence`, which touch no pixel. Stored and echoed
