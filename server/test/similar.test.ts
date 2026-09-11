@@ -19,6 +19,8 @@ import { LOOPBACK, libraryFor, realTempDir, stlBytes } from './helpers'
 const root = realTempDir('mb-sim-')
 writeFileSync(join(root, 'hero.stl'), stlBytes(1))
 writeFileSync(join(root, 'base.stl'), stlBytes(2))
+// A file that is not a model, for the anchor the route must not call one.
+writeFileSync(join(root, 'notes.txt'), 'not a model')
 // A kit, for the collection that covers only part of the library further down.
 mkdirSync(join(root, 'Kits'), { recursive: true })
 writeFileSync(join(root, 'Kits', 'anchor.stl'), stlBytes(3))
@@ -388,6 +390,20 @@ describe('a model’s neighbours', () => {
     // would say "not indexed" about a model that was.
     expect(body).not.toHaveProperty('anchor')
     expect(body.entries).toHaveLength(1)
+  })
+
+  it('omits the anchor when the path is not a model, rather than answering a model entry without a format', async () => {
+    // The route checks containment, not extension, so a hand-made request can
+    // name any file in the collection. It stats fine, but `kind: 'model'` is
+    // assigned only through the three extensions (`ModelFormat`, file-frame-
+    // spindle D2) — the client's `formatOfEntry` throws on a model entry it
+    // cannot classify — so the anchor is omitted the way a deleted one is.
+    stubIndex(READY, RESULT)
+    const res = await post({ path: '/notes.txt' })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { entries: { path: string }[]; anchor?: unknown }
+    expect(body).not.toHaveProperty('anchor')
+    expect(body.entries.map((e) => e.path)).toEqual(['/base.stl'])
   })
 })
 

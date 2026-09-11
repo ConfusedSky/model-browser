@@ -2,7 +2,7 @@ import { constants as fsConstants } from 'node:fs'
 import { access, readdir, realpath, stat } from 'node:fs/promises'
 import { join, posix, sep } from 'node:path'
 import { baseName } from '../../shared/names'
-import type { DirEntry, DirListing } from '../../shared/types'
+import type { DirEntry, DirListing, ModelFormat } from '../../shared/types'
 import { envPositiveInt } from './env'
 import type { Library } from './library'
 import type { SnapshotEntry, SnapshotStore, TreeSnapshot } from './snapshot'
@@ -33,9 +33,9 @@ export class RevalidationError extends Error {}
 const MODEL_EXT = /\.(stl|3mf|obj)$/i
 
 /** The format a name — or a whole path — ends in, undefined when it is not a model. */
-export function modelFormat(name: string): 'stl' | '3mf' | 'obj' | undefined {
+export function modelFormat(name: string): ModelFormat | undefined {
   const m = MODEL_EXT.exec(name)
-  return m ? (m[1]!.toLowerCase() as 'stl' | '3mf' | 'obj') : undefined
+  return m ? (m[1]!.toLowerCase() as ModelFormat) : undefined
 }
 
 /**

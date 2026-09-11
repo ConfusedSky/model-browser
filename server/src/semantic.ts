@@ -797,13 +797,21 @@ export async function modelEntryAt(
   libPath: string,
   name: string,
 ): Promise<DirEntry | null> {
+  // Format first, and `null` without it: `kind: 'model'` is assigned only
+  // through `MODEL_EXT`'s three extensions everywhere on the wire (`ModelFormat`,
+  // shared/types.ts; file-frame-spindle D2), and the client's `formatOfEntry`
+  // throws on a model entry it cannot classify. A hit, a peek candidate or an
+  // anchor naming some other file is dropped the way a moved-away one is — it
+  // could not be thumbnailed or posed anyway.
+  const format = modelFormat(full)
+  if (format === undefined) return null
   const s = await stat(full).catch(() => null)
   if (s === null || !s.isFile()) return null
   return {
     name,
     path: libPath,
     kind: 'model' as const,
-    format: modelFormat(full),
+    format,
     size: s.size,
     mtime: s.mtimeMs,
   }

@@ -31,6 +31,8 @@ import { LOOPBACK, libraryFor, realTempDir, stlBytes } from './helpers'
 // beneath the top, and outside it altogether — get their own describes below.
 const root = realTempDir('mb-sem-')
 writeFileSync(join(root, 'dragon.stl'), stlBytes(1))
+// A file that is not a model, for the hit the join must refuse to call one.
+writeFileSync(join(root, 'notes.txt'), 'not a model')
 mkdirSync(join(root, 'kits'), { recursive: true })
 writeFileSync(join(root, 'kits', 'a.stl'), stlBytes(2))
 // A collection the library does not hold — a sibling of the top, not under it.
@@ -459,6 +461,20 @@ describe('semantic query', () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as { entries: { path: string }[] }
     expect(body.entries.map((e) => e.path)).toEqual(['/dragon.stl'])
+  })
+
+  it('a hit naming a file that is not a model is dropped, never a model entry without a format', async () => {
+    // `kind: 'model'` is assigned only through the three extensions
+    // (`ModelFormat`, file-frame-spindle D2), and the client's `formatOfEntry`
+    // throws on a model entry it cannot classify — in a render path. The file
+    // exists and stats fine; what it lacks is a format, so `modelEntryAt`
+    // answers `null` and the hit is dropped like a moved-away one.
+    stubIndex(READY, { ...result, results: [hit('notes.txt'), hit('kits/a.stl')] })
+    const res = await post({ text: 'notes' })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { entries: { path: string; kind: string; format?: string }[] }
+    expect(body.entries.map((e) => e.path)).toEqual(['/kits/a.stl'])
+    expect(body.entries[0]).toMatchObject({ kind: 'model', format: 'stl' })
   })
 
   it('a 503 racing the warmup folds back into warming', async () => {

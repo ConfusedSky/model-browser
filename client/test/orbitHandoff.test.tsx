@@ -247,8 +247,39 @@ describe('an index pose survives into the live session', () => {
     // the moment you dragged. A posed thumbnail deliberately stores no axis,
     // and the cache used to answer the default for that absence, so the viewer
     // read a stored orientation where there was none. The pose is read in file
-    // coordinates (file-frame-spindle D4): `up` [0, 1, 0] is the `y` spindle,
-    // so the picker must show Y, not flipped — and not the STL default Z.
+    // coordinates (file-frame-spindle D4): `up` [0, -1, 0] is the `-y` spindle,
+    // so the picker must show Y *and* flip — not the STL default Z, and not
+    // the unsigned Y. A signed axis on purpose: `[0, 1, 0]` would expect `['Y']`,
+    // which a picker ignoring the sign entirely also answers.
+    const { props } = makeProps()
+    const posed: React.ComponentProps<typeof ViewerLayer> = {
+      ...props,
+      viewer: { ...props.viewer, mode: 'lightbox' as const },
+      api: {
+        getThumb: vi.fn().mockResolvedValue({ status: 'hit', posed: 2 }),
+        overrides: vi.fn().mockResolvedValue({}),
+      } as unknown as ApiClient,
+      pose: {
+        up: [0, -1, 0] as [number, number, number],
+        azimuth_zero: [1, 0, 0] as [number, number, number],
+        source: 'siglip',
+        confidence: 0.9,
+        front: { view: 6, azimuth_deg: 270, elevation_deg: 20 },
+      },
+    }
+    await render(posed as unknown as ReturnType<typeof makeProps>['props'])
+
+    const pressed = Array.from(
+      container!.querySelectorAll<HTMLButtonElement>('[aria-label="Orbit axis"] button'),
+    ).filter((b) => b.getAttribute('aria-pressed') === 'true')
+    // Y *and* the flip toggle: the spindle is '-y', not 'y'. Asserting the
+    // whole pressed set is what distinguishes the right axis from its negation.
+    expect(pressed.map((b) => b.textContent)).toEqual(['Y', 'flip'])
+  })
+
+  it('a +Y pose marks Y with no flip — issue #8’s cross-check, the unsigned case on purpose', async () => {
+    // The −y sibling above is what pins the sign; this one pins that an
+    // unsigned pose on an STL is read as Y, not as the format's default Z.
     const { props } = makeProps()
     const posed: React.ComponentProps<typeof ViewerLayer> = {
       ...props,
@@ -270,8 +301,6 @@ describe('an index pose survives into the live session', () => {
     const pressed = Array.from(
       container!.querySelectorAll<HTMLButtonElement>('[aria-label="Orbit axis"] button'),
     ).filter((b) => b.getAttribute('aria-pressed') === 'true')
-    // Y and *not* the flip toggle: the spindle is 'y', not '-y'. Asserting the
-    // whole pressed set is what distinguishes the right axis from its negation.
     expect(pressed.map((b) => b.textContent)).toEqual(['Y'])
   })
 })

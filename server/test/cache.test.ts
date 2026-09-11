@@ -1748,4 +1748,52 @@ describe('frame label', () => {
     expect(readSidecar(cache).frame).toBe(2)
     expect('frame' in (await cache.get(path, 1))).toBe(false)
   })
+
+  it('the size-cap write-back carries the label across an eviction', async () => {
+    // `maintain()`'s size-cap pass rewrites the evicted entry's sidecar from a
+    // spread of the fresh meta (D5: "the last two spread the previous meta, so
+    // they carry the label"). Nothing else pins that — this is the cell that
+    // fails if that write-back hand-builds its object.
+    const cache = tempCache(10) // tiny cap: any two pngs exceed it
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const a = join(fx.dir, 'loose.stl')
+    const b = fx.zipPath
+    const tick = () => new Promise((r) => setTimeout(r, 5))
+    await cache.put(a, { mtime: 1, png: Buffer.from('aaaaaaaa'), camera: CAM, axis: 'z' })
+    await tick()
+    await cache.put(b, { mtime: 1, png: Buffer.from('bbbbbbbb') })
+    await tick()
+    await cache.get(b, 1) // b is now more recently read than a
+    await cache.maintain()
+
+    const resA = await cache.get(a, 1)
+    expect(resA.status).toBe('stale') // a's png is the one evicted
+    const sidecars = readdirSync(cache.dir).filter((f) => f.endsWith('.json'))
+    const labelled = sidecars
+      .map((f) => JSON.parse(readFileSync(join(cache.dir, f), 'utf8')) as Record<string, unknown>)
+      .filter((m) => m.axis === 'z')
+    expect(labelled).toHaveLength(1)
+    expect(labelled[0]!.frame).toBe(2)
+    expect(labelled[0]!.mtime).toBeUndefined()
+  })
+
+  it('the library re-key carries the label across the migration', async () => {
+    // `migrate` moves a flat sidecar under the library id from a spread of the
+    // meta it read (`{ ...meta, path: libPath }`). Same reason as above: the
+    // label rides on the spread and nothing else pins it.
+    const base = tempDir('mb-cache-')
+    const lib = makeLibraryTree('lib-relabel')
+    const legacy = new ThumbCache(base) // no library: yesterday's flat layout
+    await legacy.put(lib.model, { mtime: 3, png: PNG_A, camera: CAM, axis: '-x' })
+    expect(readSidecar(legacy).frame).toBe(2)
+
+    const cache = new ThumbCache(base, CAP, 32, libraryFor(lib.top))
+    await cache.maintain()
+    expect(jsons(base)).toHaveLength(0) // nothing left flat
+    const moved = JSON.parse(readFileSync(onlyFile(join(base, 'lib-relabel'), '.json'), 'utf8')) as Record<string, unknown>
+    expect(moved.path).toBe(LIB)
+    expect(moved.axis).toBe('-x')
+    expect(moved.frame).toBe(2)
+  })
 })
