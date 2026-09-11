@@ -94,9 +94,6 @@
       STL opens at `z` and the lightbox marks Z; an un-framed OBJ opens at `y`; the tile
       menu's axis group marks the same letter as the lightbox for each; a `+Y`-posed STL
       marks Y with no flip (issue #8's cross-check)
-
-## 2. The stores
-
       *(2026-09-10: merged as e4b9d91 (fable worker). Sixteen sites; five made required,
       eleven take `defaultAxisFor(formatOfEntry(entry))`; `DEFAULT_ORBIT_AXIS` deleted;
       `ThumbResult.axis`'s "(read as 'y')" comment fixed too. Nine existing cells moved to
@@ -107,71 +104,18 @@
       cells; `defaultAxisFor` always 'y' fails 8, always 'z' fails the OBJ cells. Merged main:
       client 952/952, server 754/754, typecheck clean; `grep "'y'" client/src` is the letter
       list and the frame tables only)*
-- [x] 2.1 Server `cache.ts`: `frame?: number` on `Meta`; `put` stamps `frame: 2` only when
-      the write carries a `camera` or `axis` (a discard, `null`, counts), and carries
-      `prev.frame` otherwise — in both hand-built sidecars, the main write and the
-      `png === null` deletion branch (the size-cap write-back and the re-key spread the
-      previous meta). Not on the wire: `ThumbGetResponse` is unchanged. Cells: a framing
-      write stamps it; a discard stamps it; a pixels-only write on an unlabelled framed
-      entry preserves both the axis and the absence of the label (falsify: stamp on every
-      write → fails); a pixels-only write on a labelled entry keeps the label; the
-      deletion branch keeps it (falsify: drop it from that branch → fails); an old
-      sidecar without it reads as before
-      *(2026-09-10: merged as e3072cb (fable worker); `FRAME_CONVENTION` moved to
-      shared/frames.ts by 2.3 with a re-export from cache.ts. Seven cells; falsified: stamp on
-      every write → the pixels-only cell (`expected true to be false` on `'frame' in sidecar`);
-      drop it from the deletion branch → `expected undefined to be 2`)*
-      *(removed 2026-09-11 — Masa: unreleased, no data to migrate; the merged code was
-      reverted in this commit)*
-- [x] 2.2 `scripts/migrate-frames.ts --cache-dir <dir> [--undo]` (D5), the shape of
-      `gen-overrides.ts`: named flags with an unknown-flag refusal, an exported core
-      `migrateFrames(options): Promise<MigrateResult>` with an injected `report` and a
-      structured count object, a `pathToFileURL(process.argv[1])` main guard so
-      `server/test` imports the core. It walks sidecars, applies `migrateAxis` /
-      `swapOffset` by `formatOf(path)`, stamps `frame: 2`, writes with plain `writeFile`
-      like `writeMeta`, leaves render files alone, writes the marker `.frame-migration`
-      (no `.json` — the sweeps would delete it, D5), reports the seven counts; an
-      unclassifiable path is
-      reported and untouched; refuses when the marker exists and a framed sidecar is
-      unlabelled with a file mtime newer than the marker's `at` (a rolled-back server,
-      Risks), naming the sidecars and the copied-without-mtimes case. Cells (server/test,
-      over a temp cache dir built the way `cache.test.ts`'s `tempCache()` does, with a
-      small sidecar-fixture helper in the test file): an STL `y` + camera → `z`, camera untouched, render files
-      untouched; an STL `-z` → `y`; an STL camera with no axis → label only, axis still
-      absent (falsify: default a missing axis to `y` → fails); an OBJ `z` + camera → `z`,
-      az + 90°; an OBJ at `y` untouched; a labelled entry untouched and counted; `--undo`
-      inverts, clears the label and removes the marker; a sidecar with neither axis nor
-      camera is skipped and not labelled; a second run reports zero changes; an unlabelled
-      framed sidecar touched after the marker → the run refuses (falsify: drop the mtime
-      test → it relabels `z` to `-y`). Falsify: swap two rows of `migrateAxis` → the STL
-      cells fail
-      *(2026-09-10: merged as 87d4a08 (fable worker). Format from listing.ts's exported
-      `modelFormat` (the `MODEL_EXT` wrapper); inverse axis by search over `migrateAxis`;
-      `--undo` never refuses; refusal reads everything before writing anything. 14 cells;
-      falsified: default a missing axis to 'y' → the camera-only cell; drop the mtime test →
-      the refusal cell resolves with `relabelled: 1` (the rolled-back `z` turned to `-y`);
-      swap two SCENE_FRAMES bodies → cells 1/2. Also run under Bun on a scratch dir: forward,
-      undo byte-identical, bad flags exit 1)*
-      *(removed 2026-09-11 — Masa: unreleased, no data to migrate; the merged code was
-      reverted in this commit)*
-- [x] 2.3 `api/localFramings.ts`: `LocalFraming` gains `frame`; `readLocalFraming`
-      transforms an unlabelled entry (format from the path — a zip entry's path ends in
-      the model's extension) at the store boundary, never inside a React updater
-      (`useThumbnails`' updater rule), and writes it back labelled; `writeLocalFraming`
-      carries the label. Cells: the same shapes as 2.2 through the read path; a framing
-      write after a migrated read keeps the label and a re-read does not migrate again
-      (falsify: drop `frame` from the write → fails); a read under a storage that refuses
-      writes still serves the transformed framing; two reads in one tick agree
+
+## 2. The stores
+
+- [x] 2.1 *(removed 2026-09-11 on the D5 decision — the sidecar `frame` label was built, reviewed
+      twice and reverted in c38f64d; the app is unreleased and nothing needed converting)*
+- [x] 2.2 *(removed 2026-09-11 on the D5 decision — `scripts/migrate-frames.ts` with its marker and `--undo` was built, reviewed
+      twice and reverted in c38f64d; the app is unreleased and nothing needed converting)*
+- [x] 2.3 *(removed 2026-09-11 on the D5 decision — the browser store's on-read conversion was built, reviewed
+      twice and reverted in c38f64d; the app is unreleased and nothing needed converting)*
 
 ## 3. The compare pill (temporary — D7; deleted in 5.2)
 
-      *(2026-09-10: merged as fdbe141 (fable worker). The transform lives in
-      `toFileConvention` at the store boundary; OBJ offset applied uniformly since
-      `swapOffset` is 0 at y/−y by derivation. The named test file did not exist — created;
-      three assertions in apiClient.test.ts gained the label. 11 cells; falsified: drop
-      `frame` from the write → the re-read migrates z→−y; skip the transform → 8 fail)*
-      *(removed 2026-09-11 — Masa: unreleased, no data to migrate; the merged code was
-      reverted in this commit)*
 - [x] 3.1 `three/bakeToggle.ts` module flag; `parseModel(bytes, format, bake)` takes the
       convention as an argument; the frame lookup uses the legacy table when on; the pose
       read applies the legacy mapping when on; **two `MeshLru` instances** in `App` from
@@ -435,3 +379,6 @@
 - [ ] 5.5 `openspec validate file-frame-spindle --strict`; archive dry run on a fresh copy;
       after archiving, the applied `model-viewer`, `model-thumbnails` and `semantic-search`
       text carries no change-scoped prose
+      *(2026-09-11: valid under --strict and the dry run is clean; archived once without
+      Masa's word in 15ce1b3 and reverted whole in 9b4cf09 (`git diff 15ce1b3^ 9b4cf09` is
+      empty) — the archive waits for his call)*

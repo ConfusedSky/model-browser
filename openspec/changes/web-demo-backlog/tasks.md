@@ -105,7 +105,11 @@
       The demo offers `reset` under writes-off (`SidePanel`'s ops) and so has the same
       hole for every visitor. Either the count and the job read the local store in that
       mode (enumerate `mb:framing:<library>:` keys; reset removes them), or `reset` is
-      withheld with `generate`. A `public-deployment` follow-up, not `file-frame-spindle`'s
+      withheld with `generate`. Since 7a5d593 (an orbit on a tile that has not landed
+      re-derives the count) the failure changed shape: the re-derivation reads the server's
+      zero, absorbs the hand delta, and *disables* the reset button, so under writes-off
+      the count now collapses to 0 rather than climbing — which strengthens "withhold
+      `reset` with `generate`". A `public-deployment` follow-up, not `file-frame-spindle`'s
 
 ## 2. Decisions to record in `docs/web-demo-notes.md` (answer + date on the item)
 

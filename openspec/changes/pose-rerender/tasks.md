@@ -16,6 +16,10 @@
       `client/src/api/client.ts`, so all five carry it, and `HttpApiClient` maps it on
       GET, sends it on PUT, and `withoutUnusableRender` strips it with the other pixel
       labels
+      *(Corrected 2026-09-11 after the whole-work review: three of the five sites'
+      comments — `ThumbRenderInfo.poseKey`, `ThumbPutRequest.poseKey`, `ThumbResult.poseKey`
+      — still said "compared only when present", the rule Masa rejected; rewritten to the
+      shipped rule in the record commit that follows a61a484)*
 - [x] 2.2 `server/src/cache.ts`: `RenderLabels.poseKey`, carried by `renderLabels`,
       `hasLabels`, `renderInfo`, `put`'s label carry-over (cleared with the other labels
       when pixels are replaced undeclared), and the sibling-invalidation compare; `app.ts`
@@ -50,6 +54,9 @@
 - [x] 2.4 *(reverted 2026-09-11 — the key's absence is stale, so the version stays 2)*
 
 ## 3. Land it
+
+- [x] 3.0 Records: CLAUDE.md's thumbnail-cache bullet lists `poseKey` beside `posed` and
+      says what it is *(2026-09-11, in the record commit after a61a484)*
 
 - [x] 3.1 `bun run typecheck` and both suites green on merged main
       *(2026-09-11 on c583695: both typechecks exit 0; client 67 files / 952; server 23 files /

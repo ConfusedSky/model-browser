@@ -174,7 +174,7 @@ What was built and removed: a `frame: 2` label on the sidecar and the local fram
 stamped by framing writes and carried through the rest; `scripts/migrate-frames.ts` with
 its `.frame-migration` marker, its rolled-back-server refusal and its `--undo`; and
 `readLocalFraming`'s on-read transform with write-back — built, reviewed twice, removed on
-the decision (the commit that rewrote this section). `SCENE_FRAMES`, `migrateAxis` and
+the decision (c38f64d). `SCENE_FRAMES`, `migrateAxis` and
 `swapOffset` in `shared/frames.ts` stay: `FILE_FRAMES` is derived from the scene table
 (D3), the harness (D6) uses the two functions to express the spike's scene-convention
 framings in file terms, and `client/test/frames.test.ts` pins them. `shared/frames.ts` holds the six frames as plain
@@ -246,6 +246,12 @@ instead. `renderThumbnailCanvas` (the lossless read-back) does ship, as the harn
 render path, beside `renderThumbnail`.
 
 ### D7: A temporary compare pill, removed before archive
+
+*(A record, not a design in force: the pill was built 2026-09-10 and deleted 2026-09-11
+in 4d00018; nothing below is on main. The body is kept as it was written, present tense
+and all, because it is what the reviews argued against — the closing paragraph says what
+the test window found and why the pill went. D5 is the same kind of record for the
+migration.)*
 
 Masa wants to see both renderings in the app while testing (2026-09-10). A module-level
 flag `legacyBake` (`three/bakeToggle.ts`, mirroring `viewer/aoToggle.ts`) read by

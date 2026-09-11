@@ -219,7 +219,8 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   - Thumbnail cache: `~/.cache/model-browser/<library-id>/<sha256(library path)>.{png,json}`.
     The .json sidecar's `path` is the **library** path (`/Kit/x.stl`), not the filesystem one,
     so map a fixture by its library path — hashing its `/run/media/…` path finds nothing.
-    Alongside it: `{mtime, lighting, rig, posed}` — grep those to verify a RIG_VERSION sweep.
+    Alongside it: `{mtime, lighting, rig, posed, poseKey}` — grep those to verify a RIG_VERSION
+    sweep; `poseKey` is the orientation a posed render was drawn under (`pose-rerender`).
     `rm -rf` the id directory (or the whole cache dir) to force re-renders during visual
     tuning
   - Orbit/lightbox E2E persists path-keyed cameras — tile thumbnails later re-render from

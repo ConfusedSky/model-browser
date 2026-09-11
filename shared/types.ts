@@ -81,7 +81,8 @@ export interface ThumbRenderInfo {
   rig?: number
   posed?: number
   /** The orientation the render was drawn under, where a source framed it —
-   *  see `ThumbSave.poseKey`. Compared by the client only when present. */
+   *  see `ThumbSave.poseKey`. A posed render without it, or with a different
+   *  one, is stale — the lighting and rig labels' rule. */
   poseKey?: string
 }
 
@@ -391,9 +392,10 @@ export interface ThumbPutRequest {
    * resolved to — `${axis}:${az}:${el}` at four decimals — not the pose's raw
    * fields, so two opinions that derive the same view do not re-render, and
    * not its `source` or `confidence`, which touch no pixel. Stored and echoed
-   * by the server like `posed`; compared by the client only where a render
-   * carries one, so images labelled before the key existed are not swept.
-   * Absent when unposed.
+   * by the server like `posed`; a posed render that lacks it, or carries a
+   * different one, is stale — the same rule as a missing lighting or rig
+   * label — so every render labelled before the key existed is re-rendered
+   * once and gains one. Absent when unposed.
    */
   poseKey?: string
   /**

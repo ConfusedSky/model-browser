@@ -106,6 +106,14 @@ function usable(
  * The key a render drawn under `pose` records — `poseKeyOf` over what the
  * pose resolves to, or nothing where it resolves to nothing (a malformed
  * pose frames no render, so there is nothing to record or compare).
+ *
+ * Known gap, pre-existing and untouched here: a pose that resolves to
+ * nothing leaves `posed` unset on the render, and `usable`'s
+ * `labels.posed !== POSE_VERSION` then reads that render as stale on every
+ * visit — an identical re-render and re-upload each time for a model whose
+ * index pose is malformed. Rare (the index emits only the six unit axes) and
+ * recorded rather than fixed: a label saying "framed by no pose on purpose"
+ * is its fix, and belongs to a change about the index's faults.
  */
 function poseKeyFor(pose: IndexPose): string | undefined {
   const resolved = cameraForPose(pose, DEFAULT_CAMERA)

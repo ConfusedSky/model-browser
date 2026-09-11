@@ -8,8 +8,8 @@ measurement rather than a sentence: baseline renders from the pre-change code, a
 that renders the same samples with the code the app imports today and diffs them pixel by
 pixel (design D6).
 
-The spike that produced the numbers is archived at
-`openspec/changes/file-frame-spindle/` (its `design.md` D3 and D6 quote them); the baselines
+The spike that produced the numbers lives on the branch `worktree-agent-af1bc1b75df6032ae`
+(commit 7305e6c: `spike/frame-ab/REPORT.md` and the raw `out/*.json`), not in the tree.
 here are the frames that spike wrote.
 
 ## Run
@@ -101,7 +101,7 @@ gitignored. Exit code 1 if any row fails.
 | `-noao` rows | ≤ 2 % of 65,536 | ≤ 96 |
 | AO-on rows | reference only — printed, never gated | |
 
-The basis (D6; the spike report `REPORT.md` in the archived change; the runs named below):
+The basis (D6; the spike's `REPORT.md`, kept on the branch `worktree-agent-af1bc1b75df6032ae` (commit 7305e6c), not in the tree; the runs named below):
 
 - **The bake residual** is what the harness measures. Within one process the change moves
   240–1,147 pixels per STL (0.4–1.8 % of the frame), mean channel delta ≈ 4, 73–85 % of

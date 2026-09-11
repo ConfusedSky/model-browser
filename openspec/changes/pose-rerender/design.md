@@ -95,6 +95,11 @@ version, bumped only when the mapping changes the picture).
   visited, through the queue that already paces renders; the pixels are the same where
   the opinion is unchanged, so nothing visible flickers — each image is kept until its
   replacement.
+- [A pose that resolves to no camera re-renders every visit] → pre-existing and untouched:
+  `cameraForPose` answers null for a malformed pose, the render is written with no
+  `posed`, and `usable` reads it as stale on every visit. Rare (the index emits only the
+  six unit axes), recorded beside `poseKeyFor`; the fix is a "framed by no pose on
+  purpose" label and belongs with the index's faults, not here.
 - [A changed opinion takes up to five minutes plus a navigation to show] → the server's
   pose TTL, the recorded convergence bound; a library reload drops the layer at once.
 

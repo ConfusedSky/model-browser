@@ -41,7 +41,8 @@ export interface ThumbResult {
   posed?: number
   /** The orientation the PNG was drawn under, where a pose framed it
    *  (`ThumbPutRequest.poseKey`); absent when unposed or labelled before the
-   *  key existed, and compared by `useThumbnails` only when present. */
+   *  key existed — and a posed render without it is stale to `useThumbnails`,
+   *  as one without its lighting or rig label is. */
   poseKey?: string
   /** Object URL for the cached PNG, present on 'hit'. */
   pngUrl?: string
