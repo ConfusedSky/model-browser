@@ -1,0 +1,6 @@
+{
+  "playwrightCore": "/home/masa/.npm/_npx/9833c18b2d85bc59/node_modules/playwright-core",
+  "chromium": "/home/masa/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome",
+  "vitePort": 5174,
+  "apiBase": "http://127.0.0.1:3177"
+}

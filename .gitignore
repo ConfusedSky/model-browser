@@ -6,3 +6,7 @@ dist/
 
 # A local rehearsal of the demo stack that was run without CACHE_DIR (deploy/demo/compose.yaml)
 deploy/demo/cache/
+
+# frame-ab harness (scripts/frame-ab/README.md): per-run renders, and the machine-local config
+scripts/frame-ab/out/
+scripts/frame-ab/config.json

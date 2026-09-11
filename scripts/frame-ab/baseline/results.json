@@ -1,0 +1,957 @@
+{
+  "tables": {
+    "current": {
+      "x": {
+        "s": [
+          1,
+          0,
+          0
+        ],
+        "a": [
+          0,
+          0,
+          1
+        ],
+        "b": [
+          0,
+          1,
+          0
+        ]
+      },
+      "-x": {
+        "s": [
+          -1,
+          0,
+          0
+        ],
+        "a": [
+          0,
+          1,
+          0
+        ],
+        "b": [
+          0,
+          0,
+          1
+        ]
+      },
+      "y": {
+        "s": [
+          0,
+          1,
+          0
+        ],
+        "a": [
+          1,
+          0,
+          0
+        ],
+        "b": [
+          0,
+          0,
+          1
+        ]
+      },
+      "-y": {
+        "s": [
+          0,
+          -1,
+          0
+        ],
+        "a": [
+          0,
+          0,
+          1
+        ],
+        "b": [
+          1,
+          0,
+          0
+        ]
+      },
+      "z": {
+        "s": [
+          0,
+          0,
+          1
+        ],
+        "a": [
+          0,
+          1,
+          0
+        ],
+        "b": [
+          1,
+          0,
+          0
+        ]
+      },
+      "-z": {
+        "s": [
+          0,
+          0,
+          -1
+        ],
+        "a": [
+          1,
+          0,
+          0
+        ],
+        "b": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    "rotated": {
+      "x": {
+        "s": [
+          1,
+          0,
+          0
+        ],
+        "a": [
+          0,
+          -1,
+          0
+        ],
+        "b": [
+          0,
+          0,
+          1
+        ]
+      },
+      "-x": {
+        "s": [
+          -1,
+          0,
+          0
+        ],
+        "a": [
+          0,
+          0,
+          1
+        ],
+        "b": [
+          0,
+          -1,
+          0
+        ]
+      },
+      "y": {
+        "s": [
+          0,
+          1,
+          0
+        ],
+        "a": [
+          1,
+          0,
+          0
+        ],
+        "b": [
+          0,
+          0,
+          1
+        ]
+      },
+      "-y": {
+        "s": [
+          0,
+          -1,
+          0
+        ],
+        "a": [
+          0,
+          0,
+          1
+        ],
+        "b": [
+          1,
+          0,
+          0
+        ]
+      },
+      "z": {
+        "s": [
+          0,
+          0,
+          1
+        ],
+        "a": [
+          1,
+          0,
+          0
+        ],
+        "b": [
+          0,
+          -1,
+          0
+        ]
+      },
+      "-z": {
+        "s": [
+          0,
+          0,
+          -1
+        ],
+        "a": [
+          0,
+          -1,
+          0
+        ],
+        "b": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    "migrate": {
+      "x": "x",
+      "-x": "-x",
+      "y": "z",
+      "-y": "-z",
+      "z": "-y",
+      "-z": "y"
+    },
+    "offsetDeg": {
+      "x": 90,
+      "-x": -90,
+      "y": -90,
+      "-y": 90,
+      "z": 0,
+      "-z": 0
+    }
+  },
+  "swapOffsetDeg": {
+    "x": -90,
+    "-x": 90,
+    "y": 0,
+    "-y": 0,
+    "z": 90,
+    "-z": -90
+  },
+  "results": [
+    {
+      "sample": "/Pikachu_X_Kakashi.stl",
+      "ao": true,
+      "storedCamera": {
+        "az": -0.2346018366025519,
+        "el": 0.023598775598298656,
+        "distR": 2.4000000000000004,
+        "target": [
+          0,
+          0,
+          0
+        ]
+      },
+      "c0Axis": "y",
+      "c0Camera": {
+        "az": -0.2346018366025519,
+        "el": 0.023598775598298656,
+        "distR": 2.4000000000000004,
+        "target": [
+          0,
+          0,
+          0
+        ]
+      },
+      "newAxis": "z",
+      "offsetDeg": -90,
+      "noiseFloor": {
+        "diff": 0,
+        "maxDelta": 0,
+        "pixels": 65536
+      },
+      "noiseFloorWebp": {
+        "diff": 0,
+        "maxDelta": 0,
+        "pixels": 65536
+      },
+      "CB": {
+        "diff": 920,
+        "maxDelta": 39,
+        "pixels": 65536
+      },
+      "CA0": {
+        "diff": 22924,
+        "maxDelta": 255,
+        "pixels": 65536
+      },
+      "CA1": {
+        "diff": 920,
+        "maxDelta": 39,
+        "pixels": 65536
+      }
+    },
+    {
+      "sample": "/Main_Tubeless.stl",
+      "ao": true,
+      "storedCamera": null,
+      "c0Axis": "-z",
+      "c0Camera": {
+        "az": 6.283185307179586,
+        "el": 0.3490658503988659,
+        "distR": 2.4,
+        "target": [
+          0,
+          0,
+          0
+        ]
+      },
+      "newAxis": "y",
+      "offsetDeg": 0,
+      "noiseFloor": {
+        "diff": 0,
+        "maxDelta": 0,
+        "pixels": 65536
+      },
+      "noiseFloorWebp": {
+        "diff": 0,
+        "maxDelta": 0,
+        "pixels": 65536
+      },
+      "CB": {
+        "diff": 1147,
+        "maxDelta": 37,
+        "pixels": 65536
+      },
+      "CA0": {
+        "diff": 1147,
+        "maxDelta": 37,
+        "pixels": 65536
+      },
+      "CA1": {
+        "diff": 1147,
+        "maxDelta": 37,
+        "pixels": 65536
+      }
+    },
+    {
+      "sample": "/Main_Complete.stl",
+      "ao": true,
+      "storedCamera": {
+        "az": 0.2853981633974477,
+        "el": 0.2835987755982987,
+        "distR": 2.4000000000000004,
+        "target": [
+          0,
+          0,
+          0
+        ]
+      },
+      "c0Axis": "-z",
+      "c0Camera": {
+        "az": 0.2853981633974477,
+        "el": 0.2835987755982987,
+        "distR": 2.4000000000000004,
+        "target": [
+          0,
+          0,
+          0
+        ]
+      },
+      "newAxis": "y",
+      "offsetDeg": 0,
+      "noiseFloor": {
+        "diff": 0,
+        "maxDelta": 0,
+        "pixels": 65536
+      },
+      "noiseFloorWebp": {
+        "diff": 0,
+        "maxDelta": 0,
+        "pixels": 65536
+      },
+      "CB": {
+        "diff": 1015,
+        "maxDelta": 29,
+        "pixels": 65536
+      },
+      "CA0": {
+        "diff": 1015,
+        "maxDelta": 29,
+        "pixels": 65536
+      },
+      "CA1": {
+        "diff": 1015,
+        "maxDelta": 29,
+        "pixels": 65536
+      }
+    },
+    {
+      "sample": "/bod_test_cube_5s.stl",
+      "ao": true,
+      "storedCamera": null,
+      "c0Axis": "-x",
+      "c0Camera": {
+        "az": 7.0685834705770345,
+        "el": 0.3490658503988659,
+        "distR": 2.4,
+        "target": [
+          0,
+          0,
+          0
+        ]
+      },
+      "newAxis": "-x",
+      "offsetDeg": -90,
+      "noiseFloor": {
+        "diff": 0,
+        "maxDelta": 0,
+        "pixels": 65536
+      },
+      "noiseFloorWebp": {
+        "diff": 0,
+        "maxDelta": 0,
+        "pixels": 65536
+      },
+      "CB": {
+        "diff": 814,
+        "maxDelta": 60,
+        "pixels": 65536
+      },
+      "CA0": {
+        "diff": 44669,
+        "maxDelta": 255,
+        "pixels": 65536
+      },
+      "CA1": {
+        "diff": 814,
+        "maxDelta": 60,
+        "pixels": 65536
+      }
+    },
+    {
+      "sample": "/3DBenchy.stl",
+      "ao": true,
+      "storedCamera": null,
+      "c0Axis": "y",
+      "c0Camera": {
+        "az": 1.5707963267948966,
+        "el": 0.3490658503988659,
+        "distR": 2.4,
+        "target": [
+          0,
+          0,
+          0
+        ]
+      },
+      "newAxis": "z",
+      "offsetDeg": -90,
+      "noiseFloor": {
+        "diff": 0,
+        "maxDelta": 0,
+        "pixels": 65536
+      },
+      "noiseFloorWebp": {
+        "diff": 0,
+        "maxDelta": 0,
+        "pixels": 65536
+      },
+      "CB": {
+        "diff": 459,
+        "maxDelta": 34,
+        "pixels": 65536
+      },
+      "CA0": {
+        "diff": 25198,
+        "maxDelta": 255,
+        "pixels": 65536
+      },
+      "CA1": {
+        "diff": 459,
+        "maxDelta": 34,
+        "pixels": 65536
+      }
+    },
+    {
+      "sample": "/BeardedGentleman.stl",
+      "ao": true,
+      "storedCamera": null,
+      "c0Axis": "y",
+      "c0Camera": {
+        "az": 4.71238898038469,
+        "el": 0.3490658503988659,
+        "distR": 2.4,
+        "target": [
+          0,
+          0,
+          0
+        ]
+      },
+      "newAxis": "z",
+      "offsetDeg": -90,
+      "noiseFloor": {
+        "diff": 0,
+        "maxDelta": 0,
+        "pixels": 65536
+      },
+      "noiseFloorWebp": {
+        "diff": 0,
+        "maxDelta": 0,
+        "pixels": 65536
+      },
+      "CB": {
+        "diff": 584,
+        "maxDelta": 32,
+        "pixels": 65536
+      },
+      "CA0": {
+        "diff": 17877,
+        "maxDelta": 255,
+        "pixels": 65536
+      },
+      "CA1": {
+        "diff": 584,
+        "maxDelta": 32,
+        "pixels": 65536
+      }
+    },
+    {
+      "sample": "/Octopus_sup_v5.6.stl",
+      "ao": true,
+      "storedCamera": null,
+      "c0Axis": "y",
+      "c0Camera": {
+        "az": 6.283185307179586,
+        "el": 0.3490658503988659,
+        "distR": 2.4,
+        "target": [
+          0,
+          0,
+          0
+        ]
+      },
+      "newAxis": "z",
+      "offsetDeg": -90,
+      "noiseFloor": {
+        "diff": 0,
+        "maxDelta": 0,
+        "pixels": 65536
+      },
+      "noiseFloorWebp": {
+        "diff": 0,
+        "maxDelta": 0,
+        "pixels": 65536
+      },
+      "CB": {
+        "diff": 549,
+        "maxDelta": 33,
+        "pixels": 65536
+      },
+      "CA0": {
+        "diff": 4818,
+        "maxDelta": 255,
+        "pixels": 65536
+      },
+      "CA1": {
+        "diff": 549,
+        "maxDelta": 33,
+        "pixels": 65536
+      }
+    },
+    {
+      "sample": "/fat_cat.stl",
+      "ao": true,
+      "storedCamera": null,
+      "c0Axis": "y",
+      "c0Camera": {
+        "az": 6.283185307179586,
+        "el": 0.3490658503988659,
+        "distR": 2.4,
+        "target": [
+          0,
+          0,
+          0
+        ]
+      },
+      "newAxis": "z",
+      "offsetDeg": -90,
+      "noiseFloor": {
+        "diff": 0,
+        "maxDelta": 0,
+        "pixels": 65536
+      },
+      "noiseFloorWebp": {
+        "diff": 0,
+        "maxDelta": 0,
+        "pixels": 65536
+      },
+      "CB": {
+        "diff": 904,
+        "maxDelta": 31,
+        "pixels": 65536
+      },
+      "CA0": {
+        "diff": 29006,
+        "maxDelta": 255,
+        "pixels": 65536
+      },
+      "CA1": {
+        "diff": 904,
+        "maxDelta": 31,
+        "pixels": 65536
+      }
+    },
+    {
+      "sample": "/fat_cat.stl-noao",
+      "ao": false,
+      "storedCamera": null,
+      "c0Axis": "y",
+      "c0Camera": {
+        "az": 6.283185307179586,
+        "el": 0.3490658503988659,
+        "distR": 2.4,
+        "target": [
+          0,
+          0,
+          0
+        ]
+      },
+      "newAxis": "z",
+      "offsetDeg": -90,
+      "noiseFloor": {
+        "diff": 0,
+        "maxDelta": 0,
+        "pixels": 65536
+      },
+      "noiseFloorWebp": {
+        "diff": 0,
+        "maxDelta": 0,
+        "pixels": 65536
+      },
+      "CB": {
+        "diff": 951,
+        "maxDelta": 31,
+        "pixels": 65536
+      },
+      "CA0": {
+        "diff": 28996,
+        "maxDelta": 255,
+        "pixels": 65536
+      },
+      "CA1": {
+        "diff": 951,
+        "maxDelta": 31,
+        "pixels": 65536
+      }
+    },
+    {
+      "sample": "/xyzCalibration_cube.stl",
+      "ao": true,
+      "storedCamera": null,
+      "c0Axis": "y",
+      "c0Camera": {
+        "az": 1.5707963267948966,
+        "el": 0.3490658503988659,
+        "distR": 2.4,
+        "target": [
+          0,
+          0,
+          0
+        ]
+      },
+      "newAxis": "z",
+      "offsetDeg": -90,
+      "noiseFloor": {
+        "diff": 0,
+        "maxDelta": 0,
+        "pixels": 65536
+      },
+      "noiseFloorWebp": {
+        "diff": 0,
+        "maxDelta": 0,
+        "pixels": 65536
+      },
+      "CB": {
+        "diff": 240,
+        "maxDelta": 28,
+        "pixels": 65536
+      },
+      "CA0": {
+        "diff": 5617,
+        "maxDelta": 123,
+        "pixels": 65536
+      },
+      "CA1": {
+        "diff": 240,
+        "maxDelta": 28,
+        "pixels": 65536
+      }
+    },
+    {
+      "sample": "/xyzCalibration_cube.stl-noao",
+      "ao": false,
+      "storedCamera": null,
+      "c0Axis": "y",
+      "c0Camera": {
+        "az": 1.5707963267948966,
+        "el": 0.3490658503988659,
+        "distR": 2.4,
+        "target": [
+          0,
+          0,
+          0
+        ]
+      },
+      "newAxis": "z",
+      "offsetDeg": -90,
+      "noiseFloor": {
+        "diff": 0,
+        "maxDelta": 0,
+        "pixels": 65536
+      },
+      "noiseFloorWebp": {
+        "diff": 0,
+        "maxDelta": 0,
+        "pixels": 65536
+      },
+      "CB": {
+        "diff": 285,
+        "maxDelta": 28,
+        "pixels": 65536
+      },
+      "CA0": {
+        "diff": 4398,
+        "maxDelta": 107,
+        "pixels": 65536
+      },
+      "CA1": {
+        "diff": 285,
+        "maxDelta": 28,
+        "pixels": 65536
+      }
+    }
+  ],
+  "objRows": [
+    {
+      "sample": "OBJ(axis y)",
+      "swapOffsetDeg": 0,
+      "noiseFloor": {
+        "diff": 0,
+        "maxDelta": 0,
+        "pixels": 65536
+      },
+      "CB": {
+        "diff": 0,
+        "maxDelta": 0,
+        "pixels": 65536
+      },
+      "CBfix": {
+        "diff": 0,
+        "maxDelta": 0,
+        "pixels": 65536
+      },
+      "CA0": {
+        "diff": 0,
+        "maxDelta": 0,
+        "pixels": 65536
+      }
+    },
+    {
+      "sample": "OBJ(axis z)",
+      "swapOffsetDeg": 90,
+      "noiseFloor": {
+        "diff": 0,
+        "maxDelta": 0,
+        "pixels": 65536
+      },
+      "CB": {
+        "diff": 36716,
+        "maxDelta": 255,
+        "pixels": 65536
+      },
+      "CBfix": {
+        "diff": 0,
+        "maxDelta": 0,
+        "pixels": 65536
+      },
+      "CA0": {
+        "diff": 0,
+        "maxDelta": 0,
+        "pixels": 65536
+      }
+    }
+  ],
+  "poseCameras": [
+    {
+      "path": "/Main_Tubeless.stl",
+      "scene_current": {
+        "axis": "-z",
+        "azDeg": 360,
+        "elDeg": 20,
+        "az": 6.283185307179586,
+        "el": 0.3490658503988659
+      },
+      "file_rotated": {
+        "axis": "y",
+        "azDeg": 360,
+        "elDeg": 20,
+        "az": 6.283185307179586,
+        "el": 0.3490658503988659
+      },
+      "file_current": {
+        "axis": "y",
+        "azDeg": 360,
+        "elDeg": 20,
+        "az": 6.283185307179586,
+        "el": 0.3490658503988659
+      }
+    },
+    {
+      "path": "/bod_test_cube_5s.stl",
+      "scene_current": {
+        "axis": "-x",
+        "azDeg": 404.99999999999994,
+        "elDeg": 20,
+        "az": 7.0685834705770345,
+        "el": 0.3490658503988659
+      },
+      "file_rotated": {
+        "axis": "-x",
+        "azDeg": 404.99999999999994,
+        "elDeg": 20,
+        "az": 7.0685834705770345,
+        "el": 0.3490658503988659
+      },
+      "file_current": {
+        "axis": "-x",
+        "azDeg": 315,
+        "elDeg": 20,
+        "az": 5.497787143782138,
+        "el": 0.3490658503988659
+      }
+    },
+    {
+      "path": "/3DBenchy.stl",
+      "scene_current": {
+        "axis": "y",
+        "azDeg": 90,
+        "elDeg": 20,
+        "az": 1.5707963267948966,
+        "el": 0.3490658503988659
+      },
+      "file_rotated": {
+        "axis": "z",
+        "azDeg": 90,
+        "elDeg": 20,
+        "az": 1.5707963267948966,
+        "el": 0.3490658503988659
+      },
+      "file_current": {
+        "axis": "z",
+        "azDeg": 0,
+        "elDeg": 20,
+        "az": 0,
+        "el": 0.3490658503988659
+      }
+    },
+    {
+      "path": "/BeardedGentleman.stl",
+      "scene_current": {
+        "axis": "y",
+        "azDeg": 270,
+        "elDeg": 20,
+        "az": 4.71238898038469,
+        "el": 0.3490658503988659
+      },
+      "file_rotated": {
+        "axis": "z",
+        "azDeg": 270,
+        "elDeg": 20,
+        "az": 4.71238898038469,
+        "el": 0.3490658503988659
+      },
+      "file_current": {
+        "axis": "z",
+        "azDeg": 180,
+        "elDeg": 20,
+        "az": 3.141592653589793,
+        "el": 0.3490658503988659
+      }
+    },
+    {
+      "path": "/Octopus_sup_v5.6.stl",
+      "scene_current": {
+        "axis": "y",
+        "azDeg": 360,
+        "elDeg": 20,
+        "az": 6.283185307179586,
+        "el": 0.3490658503988659
+      },
+      "file_rotated": {
+        "axis": "z",
+        "azDeg": 360,
+        "elDeg": 20,
+        "az": 6.283185307179586,
+        "el": 0.3490658503988659
+      },
+      "file_current": {
+        "axis": "z",
+        "azDeg": 270,
+        "elDeg": 20,
+        "az": 4.71238898038469,
+        "el": 0.3490658503988659
+      }
+    },
+    {
+      "path": "/fat_cat.stl",
+      "scene_current": {
+        "axis": "y",
+        "azDeg": 360,
+        "elDeg": 20,
+        "az": 6.283185307179586,
+        "el": 0.3490658503988659
+      },
+      "file_rotated": {
+        "axis": "z",
+        "azDeg": 360,
+        "elDeg": 20,
+        "az": 6.283185307179586,
+        "el": 0.3490658503988659
+      },
+      "file_current": {
+        "axis": "z",
+        "azDeg": 270,
+        "elDeg": 20,
+        "az": 4.71238898038469,
+        "el": 0.3490658503988659
+      }
+    },
+    {
+      "path": "/xyzCalibration_cube.stl",
+      "scene_current": {
+        "axis": "y",
+        "azDeg": 90,
+        "elDeg": 20,
+        "az": 1.5707963267948966,
+        "el": 0.3490658503988659
+      },
+      "file_rotated": {
+        "axis": "z",
+        "azDeg": 90,
+        "elDeg": 20,
+        "az": 1.5707963267948966,
+        "el": 0.3490658503988659
+      },
+      "file_current": {
+        "axis": "z",
+        "azDeg": 0,
+        "elDeg": 20,
+        "az": 0,
+        "el": 0.3490658503988659
+      }
+    }
+  ],
+  "skipped": [
+    "/Head.stl (52.5 MB)",
+    "/walker_robot.stl (68.0 MB)",
+    "/streetlamp.stl (50.9 MB)"
+  ],
+  "errors": [
+    "Failed to load resource: the server responded with a status of 404 (Not Found)"
+  ]
+}

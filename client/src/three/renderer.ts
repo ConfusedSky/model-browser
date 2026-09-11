@@ -377,22 +377,24 @@ export function unstage(
 }
 
 /**
- * Render a model to a transparent `THUMB_SIZE`² WebP through the thumbnail
- * post-process chain on the shared renderer (never the visible canvas).
+ * Render a model to a transparent `THUMB_SIZE`² canvas through the thumbnail
+ * post-process chain on the shared renderer (never the visible canvas): the
+ * lossless half of `renderThumbnail`, which is this followed by the WebP
+ * encode. Arguments as `renderThumbnail`'s.
  *
- * `ao` is the occlusion recipe these pixels are drawn under — the caller's
- * reading of the AO preference, never read here: this function is called from
- * four sites and each one must file its pixels under the value it also sent to
- * the cache, so the read belongs to the caller that PUTs (D4/D4a). The default
- * is the occluded recipe, which is what every thumbnail was before occlusion
- * became a dimension of the key.
+ * Exported for the frame-ab harness (`scripts/frame-ab/`, `file-frame-spindle`
+ * D6), which compares a fresh render against stored baselines pixel by pixel
+ * and so reads the canvas back losslessly rather than decoding the q0.8 WebP
+ * the app writes. One implementation: the same staging, chain, readback and
+ * teardown serve both, and the one-`WebGLRenderer` rule holds because both go
+ * through `getRenderer()` and `getThumbChain()`.
  */
-export function renderThumbnail(
+export function renderThumbnailCanvas(
   object: THREE.Object3D,
   state: CameraState = DEFAULT_CAMERA,
   axis: OrbitAxis,
   ao = true,
-): Promise<Blob> {
+): HTMLCanvasElement {
   const r = getRenderer()
   const lit = makeScene()
   const { scene, rig } = lit
@@ -446,7 +448,27 @@ export function renderThumbnail(
     image.data.set(pixels.subarray(src, src + rowBytes), y * rowBytes)
   }
   ctx.putImageData(image, 0, 0)
+  return canvas
+}
 
+/**
+ * Render a model to a transparent `THUMB_SIZE`² WebP: `renderThumbnailCanvas`,
+ * then the encode.
+ *
+ * `ao` is the occlusion recipe these pixels are drawn under — the caller's
+ * reading of the AO preference, never read here: this function is called from
+ * four sites and each one must file its pixels under the value it also sent to
+ * the cache, so the read belongs to the caller that PUTs (D4/D4a). The default
+ * is the occluded recipe, which is what every thumbnail was before occlusion
+ * became a dimension of the key.
+ */
+export function renderThumbnail(
+  object: THREE.Object3D,
+  state: CameraState = DEFAULT_CAMERA,
+  axis: OrbitAxis,
+  ao = true,
+): Promise<Blob> {
+  const canvas = renderThumbnailCanvas(object, state, axis, ao)
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {
       if (blob === null) reject(new Error('toBlob failed'))
