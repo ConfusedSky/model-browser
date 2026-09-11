@@ -38,8 +38,8 @@ import type { ApiClient, ThumbPutResult, ThumbResult, ThumbSave } from './client
  *
  * **Framings held before axes were file axes are migrated on read**
  * (`file-frame-spindle` D5). A framing without the `frame` label was measured
- * in the scene convention — STL and 3MF geometry baked a quarter turn about X —
- * and `readLocalFraming` transforms it to the file convention with the same
+ * in the scene convention — STL geometry baked a quarter turn about X; OBJ and
+ * 3MF were never turned — and `readLocalFraming` transforms it to the file convention with the same
  * functions the server cache's one-shot script uses (`migrateAxis`,
  * `swapOffset`), writes it back labelled, and serves the transformed value. It
  * happens *here*, at the store boundary, and never inside a React updater:
@@ -150,14 +150,22 @@ export function keepsFramingsLocally(report: FeatureReport | null): boolean {
  * script's transform (D5), keyed by the path's format: a zip entry's path
  * (`a.zip!/parts/x.stl`) ends in the model's extension, so `formatOf` reads it.
  *
- * - STL / 3MF with an axis: the axis is relabelled (`migrateAxis`), the camera
- *   untouched — the frames were redefined so the same angles draw the same
- *   view. A camera with no axis gains none: it drew about the old default `y`
- *   and draws about the new default `z`, whose frame is the old `y` frame; a
- *   written axis would withhold an index pose the entry never suppressed.
- * - OBJ, never baked: the axis keeps its name, and a camera moves by that
- *   spindle's azimuth offset (`swapOffset`; 0 for `y` and `-y`, the fixed
- *   points, so the one expression covers every axis).
+ * - STL with an axis — the one format that was baked (`rotateX(-π/2)` sat
+ *   inside `parseModel`'s STL branch): the axis is relabelled (`migrateAxis`),
+ *   the camera untouched — the frames were redefined so the same angles draw
+ *   the same view. A camera with no axis gains none: it drew about the old
+ *   default `y` and draws about the new default `z`, whose frame is the old
+ *   `y` frame; a written axis would withhold an index pose the entry never
+ *   suppressed.
+ * - OBJ and 3MF, never baked (the 3MF loader rotates nothing): a stored axis
+ *   is already a file axis and keeps its name, and a camera stored with one
+ *   moves by that spindle's azimuth offset (`swapOffset`; 0 for `y` and `-y`,
+ *   the fixed points, so the one expression covers every axis). A camera with
+ *   no axis is left untouched and labelled: an OBJ drew about the old default
+ *   `y`, a fixed point; a 3MF drew in `SCENE_FRAMES.y` about un-rotated Z-up
+ *   geometry — a lying-down picture, the bug the proposal names — and the new
+ *   default `z` stands it up. There is no "same picture" to preserve; the view
+ *   changing is the fix.
  * - A path `formatOf` cannot classify: `null` — nothing is known about the
  *   frame it was measured in, so it is neither transformed nor labelled. The
  *   app stores keys for model paths only, but the store is hand-editable.
@@ -166,12 +174,12 @@ function toFileConvention(path: string, held: LocalFraming): LocalFraming | null
   const format = formatOf(path)
   if (format === null) return null
   const { camera, axis } = held
-  if (format === 'obj') {
-    const moved =
-      camera !== undefined && axis !== undefined ? { ...camera, az: camera.az + swapOffset(axis) } : camera
-    return { camera: moved, axis, frame: FRAME_CONVENTION }
+  if (format === 'stl') {
+    return { camera, axis: axis === undefined ? undefined : migrateAxis(axis), frame: FRAME_CONVENTION }
   }
-  return { camera, axis: axis === undefined ? undefined : migrateAxis(axis), frame: FRAME_CONVENTION }
+  const moved =
+    camera !== undefined && axis !== undefined ? { ...camera, az: camera.az + swapOffset(axis) } : camera
+  return { camera: moved, axis, frame: FRAME_CONVENTION }
 }
 
 /**
@@ -238,11 +246,14 @@ export function readLocalFraming(
  * precedence resumes below this browser: the server's value, then an
  * orientation source, then the default.
  *
- * Every write stamps `frame: FRAME_CONVENTION`: a framing this code writes is
- * in the file convention by construction, and `held` was migrated on the way
- * in, so the merge of the two is too. Without the stamp the first write after a
- * migrated read would drop the label and the next read would migrate `z` to
- * `-y`.
+ * A write to a classifiable path stamps `frame: FRAME_CONVENTION`: a framing
+ * this code writes is in the file convention by construction, and `held` was
+ * migrated on the way in, so the merge of the two is too. Without the stamp
+ * the first write after a migrated read would drop the label and the next read
+ * would migrate `z` to `-y`. A path `formatOf` cannot classify is the one
+ * `toFileConvention` refused: the read served `held` untransformed and
+ * unlabelled, and stamping it here would assert an untransformed scene axis
+ * to be a file axis — so it stays unlabelled.
  */
 export function writeLocalFraming(
   path: string,
@@ -260,7 +271,7 @@ export function writeLocalFraming(
   const next: LocalFraming = {
     camera: save.camera === undefined ? held?.camera : (save.camera ?? undefined),
     axis: save.axis === undefined ? held?.axis : (save.axis ?? undefined),
-    frame: FRAME_CONVENTION,
+    frame: formatOf(path) === null ? undefined : FRAME_CONVENTION,
   }
   try {
     if (next.camera === undefined && next.axis === undefined) storage.removeItem(key)

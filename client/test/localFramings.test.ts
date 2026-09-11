@@ -91,6 +91,41 @@ describe('readLocalFraming migrates an unlabelled framing', () => {
     expect(stored(store, '/k/b.obj')).toEqual({ camera: CAM, axis: 'y', frame: FRAME_CONVENTION })
   })
 
+  it("re-expresses a 3MF camera at spindle z like an OBJ's: the axis was never baked and keeps its name", () => {
+    // The old `rotateX(-π/2)` sat inside `parseModel`'s STL branch and the 3MF
+    // loader rotates nothing, so a held 3MF axis was already a file axis and
+    // its camera was measured in `SCENE_FRAMES[axis]` — OBJ's situation.
+    const store = memStorage()
+    seed(store, '/k/c.3mf', { camera: CAM, axis: 'z' })
+
+    const read = readLocalFraming('/k/c.3mf', store, LIB)
+    expect(read?.axis).toBe('z')
+    expect(read?.frame).toBe(FRAME_CONVENTION)
+    expect(read?.camera?.az).toBeCloseTo(Math.PI / 4 + Math.PI / 2, 10)
+    expect((stored(store, '/k/c.3mf') as { axis: string; camera: CameraState }).axis).toBe('z')
+  })
+
+  it('leaves a 3MF camera at spindle y untouched, labelled', () => {
+    const store = memStorage()
+    seed(store, '/k/c.3mf', { camera: CAM, axis: 'y' })
+
+    expect(readLocalFraming('/k/c.3mf', store, LIB)).toEqual({ camera: CAM, axis: 'y', frame: FRAME_CONVENTION })
+    expect(stored(store, '/k/c.3mf')).toEqual({ camera: CAM, axis: 'y', frame: FRAME_CONVENTION })
+  })
+
+  it('labels a 3MF camera without an axis, touching the camera and adding no axis', () => {
+    // It drew in `SCENE_FRAMES.y` about un-rotated Z-up geometry (lying down)
+    // and the new default `z` stands it up — no same picture to preserve, so
+    // the camera is served as held and only the label is written.
+    const store = memStorage()
+    seed(store, '/k/c.3mf', { camera: CAM })
+
+    const read = readLocalFraming('/k/c.3mf', store, LIB)
+    expect(read).toEqual({ camera: CAM, frame: FRAME_CONVENTION })
+    expect(read?.axis).toBeUndefined()
+    expect(stored(store, '/k/c.3mf')).toEqual({ camera: CAM, frame: FRAME_CONVENTION })
+  })
+
   it('serves a labelled framing as is, touching nothing', () => {
     const store = memStorage()
     seed(store, '/k/a.stl', { camera: CAM, axis: 'z', frame: FRAME_CONVENTION })
@@ -159,5 +194,18 @@ describe('readLocalFraming migrates an unlabelled framing', () => {
     expect(readLocalFraming('/k/notes.txt', store, LIB)).toEqual({ camera: CAM, axis: 'y' })
     expect(setItem).not.toHaveBeenCalled()
     expect(stored(store, '/k/notes.txt')).toEqual({ camera: CAM, axis: 'y' })
+  })
+
+  it('does not stamp a write to an unclassifiable key the read refused to transform', () => {
+    // The read served the held axis untransformed; a stamp here would assert
+    // that untransformed scene axis to be a file axis.
+    const store = memStorage()
+    seed(store, '/k/c.txt', { axis: 'y' })
+    expect(readLocalFraming('/k/c.txt', store, LIB)).toEqual({ axis: 'y' })
+
+    writeLocalFraming('/k/c.txt', { camera: CAM }, store, LIB)
+
+    expect(stored(store, '/k/c.txt')).toEqual({ camera: CAM, axis: 'y' })
+    expect(readLocalFraming('/k/c.txt', store, LIB)).toEqual({ camera: CAM, axis: 'y' })
   })
 })

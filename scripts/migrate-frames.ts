@@ -17,17 +17,24 @@
  * no `frame` label (the scene convention, 1, which was never written as a
  * value):
  *
- * - STL / 3MF with an axis: the axis is relabelled to the file axis it named
- *   (`migrateAxis`, derived from the two frame tables), the camera untouched —
- *   the spindle frames were redefined so the same angles draw the same view.
- * - STL / 3MF with a camera and no axis: the label alone. The entry drew about
- *   the old default `y` and draws about the new default `z`, whose frame is
- *   the old `y` frame; writing an axis would withhold an index pose the entry
+ * - STL with an axis (the one format that was baked — `rotateX(-π/2)` sat
+ *   inside `parseModel`'s STL branch): the axis is relabelled to the file axis
+ *   it named (`migrateAxis`, derived from the two frame tables), the camera
+ *   untouched — the spindle frames were redefined so the same angles draw the
+ *   same view.
+ * - STL with a camera and no axis: the label alone. The entry drew about the
+ *   old default `y` and draws about the new default `z`, whose frame is the
+ *   old `y` frame; writing an axis would withhold an index pose the entry
  *   never suppressed.
- * - OBJ (never baked): the axis keeps its name, but four of the six frames
- *   moved under that name, so a stored camera at `x`/`-x`/`z`/`-z` has
- *   `swapOffset(axis)` added to its azimuth. At `y`/`-y` (or with no axis —
- *   the old default `y`) the offset is 0, so the label alone.
+ * - OBJ and 3MF (never baked — the 3MF loader rotates nothing): the axis keeps
+ *   its name, but four of the six frames moved under that name, so a stored
+ *   camera at `x`/`-x`/`z`/`-z` has `swapOffset(axis)` added to its azimuth.
+ *   At `y`/`-y` the offset is 0, so the label alone. An OBJ camera with no
+ *   axis drew about the old default `y`, a fixed point: label alone. A 3MF
+ *   camera with no axis is labelled and otherwise untouched, and its view
+ *   *changes*: it drew in `SCENE_FRAMES.y` about un-rotated Z-up geometry —
+ *   lying down, the bug the proposal names — and the new default `z` stands
+ *   it up. There is no same picture to preserve; the view changing is the fix.
  *
  * Then `frame: FRAME_CONVENTION` is stamped and the sidecar rewritten with a
  * plain `writeFile`, the way `writeMeta` does, every other field carried
@@ -49,9 +56,8 @@
 import { readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { migrateAxis, swapOffset } from '../shared/frames'
+import { FRAME_CONVENTION, migrateAxis, swapOffset } from '../shared/frames'
 import type { CameraState, ModelFormat, OrbitAxis } from '../shared/types'
-import { FRAME_CONVENTION } from '../server/src/cache'
 import { modelFormat } from '../server/src/listing'
 
 /** The run record's name. No `.json`: `maintain()` treats every `*.json` as a sidecar. */
@@ -80,9 +86,9 @@ export interface MigrateOptions {
 export interface MigrateResult {
   /** Sidecars (`*.json`) found in the directory. */
   read: number
-  /** STL/3MF axes relabelled (or, under `--undo`, put back). */
+  /** STL axes relabelled (or, under `--undo`, put back). */
   relabelled: number
-  /** OBJ cameras with the swap offset added (or subtracted). */
+  /** OBJ and 3MF cameras with the swap offset added (or subtracted). */
   reExpressed: number
   /** Framed sidecars that only gained (or lost) the label. */
   labelOnly: number
@@ -142,23 +148,31 @@ type Outcome = 'relabelled' | 'reExpressed' | 'labelOnly'
 function transform(meta: Sidecar, format: ModelFormat, undo: boolean): { next: Sidecar; outcome: Outcome } {
   const next: Sidecar = { ...meta }
   let outcome: Outcome = 'labelOnly'
-  if (format === 'obj') {
-    // Never baked: the axis keeps its name. A camera at a spindle whose frame
-    // moved is re-measured in the new frame by the offset; at `y`/`-y`, and
-    // with no axis (the old default `y`), the offset is 0 and nothing moves.
-    if (has(meta.camera) && has(meta.axis)) {
-      const offset = swapOffset(meta.axis)
-      if (offset !== 0) {
-        next.camera = { ...meta.camera, az: meta.camera.az + (undo ? -offset : offset) }
-        outcome = 'reExpressed'
-      }
+  if (format === 'stl') {
+    // The one baked format: a stored scene axis is relabelled to the file
+    // axis it named. A camera with no axis gains none (see the header): the
+    // label alone says the entry has been seen.
+    if (has(meta.axis)) {
+      next.axis = undo ? unmigrateAxis(meta.axis) : migrateAxis(meta.axis)
+      outcome = 'relabelled'
     }
-  } else if (has(meta.axis)) {
-    next.axis = undo ? unmigrateAxis(meta.axis) : migrateAxis(meta.axis)
-    outcome = 'relabelled'
+  } else if (has(meta.camera) && has(meta.axis)) {
+    // OBJ and 3MF were never baked (the old `rotateX(-π/2)` sat inside the
+    // STL branch; the 3MF loader rotates nothing), so a stored axis is already
+    // a file axis and keeps its name. A camera at a spindle whose frame moved
+    // is re-measured in the new frame by the offset; at `y`/`-y` the offset
+    // is 0 and nothing moves.
+    const offset = swapOffset(meta.axis)
+    if (offset !== 0) {
+      next.camera = { ...meta.camera, az: meta.camera.az + (undo ? -offset : offset) }
+      outcome = 'reExpressed'
+    }
   }
-  // A camera with no axis on a baked format gains none (see the header): the
-  // label alone says the entry has been seen.
+  // Camera and no axis, OBJ or 3MF: the camera is left untouched and labelled.
+  // OBJ drew about the old default `y`, a fixed point. A 3MF drew in
+  // `SCENE_FRAMES.y` about un-rotated Z-up geometry — a lying-down picture,
+  // the bug the proposal names — and the new default `z` stands it up: there
+  // is no "same picture" to preserve, and the view changing is the fix.
   if (undo) delete next.frame
   else next.frame = FRAME_CONVENTION
   return { next, outcome }
@@ -237,7 +251,14 @@ export async function migrateFrames(opts: MigrateOptions): Promise<MigrateResult
       const newer: string[] = []
       for (const e of entries) {
         if (e.problem !== undefined || !framed(e.meta) || e.meta.frame !== undefined) continue
-        if ((await stat(e.file)).mtimeMs > since) newer.push(e.file)
+        // One millisecond of margin: `at` is an ISO string, whole milliseconds,
+        // taken after the run's last write, while `mtimeMs` carries the
+        // sub-millisecond part. A sidecar this script wrote at 1000.7 ms sits
+        // under a marker saying 1000, so a zero-margin `>` would read the
+        // script's own output as newer than its marker (it is skipped today
+        // only because it is labelled). Anything a rolled-back server writes
+        // lands whole milliseconds later.
+        if ((await stat(e.file)).mtimeMs > since + 1) newer.push(e.file)
       }
       if (newer.length > 0) {
         throw new Error(
@@ -254,8 +275,10 @@ export async function migrateFrames(opts: MigrateOptions): Promise<MigrateResult
   const counts = { relabelled: 0, reExpressed: 0, labelOnly: 0, alreadyLabelled: 0, unclassifiable: 0, skipped: 0 }
   for (const e of entries) {
     if (e.unreadable !== true && !framed(e.meta)) {
-      // Pixels only: nothing to migrate, and the label is never written to an
-      // entry with no framing — whatever its path.
+      // Pixels only: nothing to migrate. This script never labels such an
+      // entry, whatever its path; the server may have, via a discard
+      // (`camera: null` stamps `frame` and leaves the entry unframed) — either
+      // way there is nothing to migrate.
       counts.skipped++
       continue
     }
@@ -280,13 +303,16 @@ export async function migrateFrames(opts: MigrateOptions): Promise<MigrateResult
   if (undo) {
     await rm(marker, { force: true })
   } else {
+    // `at` is read *after* the last sidecar write, so every mtime this run
+    // produced is at or under it — the refusal's one-millisecond margin
+    // covers the sub-millisecond part the ISO string drops.
     await writeFile(marker, JSON.stringify({ convention: FRAME_CONVENTION, at: now().toISOString(), counts }))
   }
 
   const result: MigrateResult = { read: entries.length, ...counts, marker }
   report(
     `${undo ? 'undid' : 'migrated'} ${cacheDir}: ${result.read} sidecars read, ${result.relabelled} axes ` +
-      `${undo ? 'put back' : 'relabelled'}, ${result.reExpressed} OBJ cameras ${undo ? 'restored' : 're-expressed'}, ` +
+      `${undo ? 'put back' : 'relabelled'}, ${result.reExpressed} OBJ/3MF cameras ${undo ? 'restored' : 're-expressed'}, ` +
       `${result.labelOnly} label-only, ${result.alreadyLabelled} ${undo ? 'without the label' : 'already labelled'}, ` +
       `${result.unclassifiable} unclassifiable, ${result.skipped} unframed; marker ${undo ? 'removed' : 'written'}: ${marker}`,
   )

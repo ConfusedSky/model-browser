@@ -162,18 +162,25 @@ the picture the code would render after it.
 directory. For an entry with a stored `axis` or `camera` and no `frame` label:
 - format from the sidecar's `path` extension (`formatOf`; a path it cannot classify is
   reported and left untouched — never guessed);
-- STL / 3MF with a stored axis: `axis ← migrateAxis(axis)` where `migrateAxis` is
+- STL with a stored axis — the one format that was baked (the old `rotateX(-π/2)` sat
+  inside `parseModel`'s STL branch): `axis ← migrateAxis(axis)` where `migrateAxis` is
   `y→z, -y→-z, z→-y, -z→y, x→x, -x→-x` — derived in code from the two tables (the spindle
-  vector's image under R⁻¹), never typed; camera untouched. A camera with **no** axis
+  vector's image under R⁻¹), never typed; camera untouched. An STL camera with **no** axis
   gains none: the entry drew about the old default `y` and will draw about the new
   default `z`, whose frame is the old `y` frame, so the camera reads unchanged — and
   writing an axis would withhold an index pose the entry never suppressed;
-- OBJ: axis untouched; if a camera is stored and the spindle (stored or the old default
-  `y`) is one whose frame moved, `camera.az += swapOffset(axis)` with `swapOffset` derived
-  the way `cameraForPose` derives its own, from the old and new bases of that spindle
-  (keyed by the OBJ's **unchanged** axis: `x` −90°, `-x` +90°, `z` +90°, `-z` −90°, `y`
-  and `-y` 0°; the sign matches `captureState`'s `az = atan2(dir·a, dir·b)`, azimuth
-  measured from `b` toward `a`);
+- OBJ and 3MF — never baked (`3MFLoader.js` rotates nothing, whatever the comment beside
+  the old bake claimed), so a stored axis was already a file axis and its camera was
+  measured in `SCENE_FRAMES[axis]`: axis untouched; if a camera and an axis are both
+  stored and the spindle is one whose frame moved, `camera.az += swapOffset(axis)` with
+  `swapOffset` derived the way `cameraForPose` derives its own, from the old and new bases
+  of that spindle (keyed by the **unchanged** axis: `x` −90°, `-x` +90°, `z` +90°, `-z`
+  −90°, `y` and `-y` 0°; the sign matches `captureState`'s `az = atan2(dir·a, dir·b)`,
+  azimuth measured from `b` toward `a`). A camera with **no** axis is left untouched and
+  labelled: an OBJ drew about the old default `y`, a fixed point; a 3MF drew in
+  `SCENE_FRAMES.y` about un-rotated Z-up geometry — a lying-down picture, the bug the
+  proposal names — and the new default `z` stands it up, so there is no "same picture"
+  to preserve and the view changing is the fix;
 - writes `frame: 2` (1 being the unlabelled scene-axis convention) with a plain
   `writeFile`, the way `writeMeta` does (truncate-and-write, not temp+rename — the cache
   has never written sidecars atomically, and a sidecar is one small JSON whose loss the

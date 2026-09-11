@@ -1,10 +1,10 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { CameraState, OrbitAxis } from '../../shared/types'
 import { MARKER_FILE, USAGE, migrateFrames, parseArgs } from '../../scripts/migrate-frames'
-import { FRAME_CONVENTION } from '../src/cache'
+import { FRAME_CONVENTION } from '../../shared/frames'
 
 /**
  * The migration's core, exercised as a function over a temp cache directory
@@ -124,6 +124,35 @@ describe('migrate-frames', () => {
     expect(readSidecar(dir, 'b')).toMatchObject({ camera: CAM, frame: FRAME_CONVENTION })
   })
 
+  it('re-expresses a 3MF camera at spindle z like an OBJ: the axis was never baked, so it keeps its name', async () => {
+    // The old `rotateX(-π/2)` sat inside `parseModel`'s STL branch and the 3MF
+    // loader rotates nothing, so a stored 3MF axis was already a file axis and
+    // its camera was measured in `SCENE_FRAMES[axis]` — OBJ's situation.
+    const dir = tempDir()
+    sidecar(dir, 'a', { path: '/kit/a.3mf', camera: CAM, axis: 'z' })
+    const result = await migrateFrames({ cacheDir: dir, report: quiet })
+    expect(result).toMatchObject({ ...ZERO, reExpressed: 1 })
+    const after = readSidecar(dir, 'a')
+    expect(after.axis).toBe('z')
+    expect((after.camera as CameraState).az).toBeCloseTo(Math.PI / 4 + Math.PI / 2, 12)
+    expect(after.frame).toBe(FRAME_CONVENTION)
+  })
+
+  it('labels a 3MF at spindle y, and a 3MF camera with no axis, touching neither', async () => {
+    const dir = tempDir()
+    sidecar(dir, 'a', { path: '/kit/a.3mf', camera: CAM, axis: 'y' })
+    // Camera only: it drew in `SCENE_FRAMES.y` about un-rotated Z-up geometry
+    // (lying down) and the new default `z` stands it up — no same picture to
+    // preserve, so the camera is left as it is and only the label is written.
+    sidecar(dir, 'b', { path: '/kit/b.3mf', camera: CAM })
+    const result = await migrateFrames({ cacheDir: dir, report: quiet })
+    expect(result).toMatchObject({ ...ZERO, labelOnly: 2 })
+    expect(readSidecar(dir, 'a')).toMatchObject({ axis: 'y', camera: CAM, frame: FRAME_CONVENTION })
+    const b = readSidecar(dir, 'b')
+    expect(b).toMatchObject({ camera: CAM, frame: FRAME_CONVENTION })
+    expect('axis' in b).toBe(false)
+  })
+
   it('leaves a labelled entry untouched and counts it', async () => {
     const dir = tempDir()
     const file = sidecar(dir, 'a', { path: '/kit/a.stl', camera: CAM, axis: 'z', frame: FRAME_CONVENTION })
@@ -238,6 +267,46 @@ describe('migrate-frames', () => {
     // been written: the second run is the idempotent one.
     const second = await migrateFrames({ cacheDir: dir, report: quiet, now: () => new Date(Date.now() + 3600_000) })
     expect(second).toMatchObject({ ...ZERO, alreadyLabelled: 1, skipped: 1 })
+  })
+
+  it('does not refuse a sidecar the run itself wrote — the marker drops the sub-millisecond its mtime keeps', async () => {
+    const dir = tempDir()
+    const file = sidecar(dir, 'a', { path: '/kit/a.stl', camera: CAM, axis: 'y' })
+    await migrateFrames({ cacheDir: dir, report: quiet })
+    const since = Date.parse(readMarker(dir).at)
+
+    /** Strip the label without moving the mtime: write beside, rename over, put the times back. */
+    const stripLabel = (): void => {
+      const st = statSync(file)
+      const { frame: _frame, ...unlabelled } = readSidecar(dir, 'a')
+      const tmp = `${file}.tmp`
+      writeFileSync(tmp, JSON.stringify(unlabelled))
+      renameSync(tmp, file)
+      utimesSync(file, st.atimeMs / 1000, st.mtimeMs / 1000)
+      // `utimes` takes seconds as a double: the round-trip keeps the fraction to ~1 µs.
+      expect(statSync(file).mtimeMs).toBeCloseTo(st.mtimeMs, 2)
+      expect('frame' in readSidecar(dir, 'a')).toBe(false)
+    }
+
+    // What the marker's `at` truncated: the run's own write, at or under `at`
+    // to the millisecond but carrying a fraction past it. Not a rolled-back
+    // server's signature, so not refused.
+    stripLabel()
+    expect(statSync(file).mtimeMs).toBeLessThanOrEqual(since + 1)
+    const again = await migrateFrames({ cacheDir: dir, report: quiet })
+    expect(again).toMatchObject({ ...ZERO, relabelled: 1 })
+
+    // The worst case the truncation permits, pinned rather than left to the
+    // clock: a fraction short of the next whole millisecond after `at`.
+    stripLabel()
+    utimesSync(file, (since + 0.9) / 1000, (since + 0.9) / 1000)
+    const worst = await migrateFrames({ cacheDir: dir, report: quiet, now: () => new Date(since) })
+    expect(worst).toMatchObject({ ...ZERO, relabelled: 1 })
+
+    // Five seconds past the marker is the signature, and is refused.
+    stripLabel()
+    utimesSync(file, (since + 5000) / 1000, (since + 5000) / 1000)
+    await expect(migrateFrames({ cacheDir: dir, report: quiet })).rejects.toThrow(file)
   })
 
   it('refuses an unknown flag and a missing --cache-dir with the usage line', () => {
