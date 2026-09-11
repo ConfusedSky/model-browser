@@ -80,6 +80,9 @@ export interface ThumbRenderInfo {
   lighting?: LightingMode
   rig?: number
   posed?: number
+  /** The orientation the render was drawn under, where a source framed it —
+   *  see `ThumbSave.poseKey`. Compared by the client only when present. */
+  poseKey?: string
 }
 
 /**
@@ -296,6 +299,13 @@ export interface ThumbGetResponse {
    * wrong while looking perfectly fresh.
    */
   posed?: number
+  /**
+   * The orientation the PNG was drawn under, where a pose framed it — the
+   * pose's *value* beside `posed`'s version (`pose-rerender` D3). Absent on
+   * renders labelled before the key existed, which the client then judges on
+   * `posed` alone rather than sweeping.
+   */
+  poseKey?: string
   /** base64 PNG, present when status === 'hit'. */
   png?: string
   /**
@@ -375,6 +385,17 @@ export interface ThumbPutRequest {
   rig?: number
   /** Pose recipe version the PNG was rendered under; absent when unposed. */
   posed?: number
+  /**
+   * What the pixels depended on when a pose framed them, and nothing else
+   * (`pose-rerender` D3): `poseKeyOf` over the camera and axis the pose
+   * resolved to — `${axis}:${az}:${el}` at four decimals — not the pose's raw
+   * fields, so two opinions that derive the same view do not re-render, and
+   * not its `source` or `confidence`, which touch no pixel. Stored and echoed
+   * by the server like `posed`; compared by the client only where a render
+   * carries one, so images labelled before the key existed are not swept.
+   * Absent when unposed.
+   */
+  poseKey?: string
   /**
    * Which render these pixels and labels are: `true` — or absent — the
    * occluded one, `false` the unoccluded sibling. Absent means occluded

@@ -14,7 +14,7 @@ import { NO_LIBRARY, keepsFramingsLocally, readLocalFraming } from '../api/local
 import { DEFAULT_CAMERA, defaultAxisFor } from '../three/camera'
 import type { MeshLru } from '../three/lru'
 import { formatOfEntry } from '../three/models'
-import { cameraForPose, POSE_VERSION } from '../three/pose'
+import { cameraForPose, POSE_VERSION, poseKeyOf } from '../three/pose'
 import { RenderQueue, type Band } from '../three/queue'
 import { RIG_VERSION, renderThumbnail, THUMB_LIGHTING } from '../three/renderer'
 
@@ -80,17 +80,36 @@ function release(url: string): void {
  * so the two cannot drift (`thumbnail-image-serving` D2/D3). The labels are
  * compared against the client's own constants, which the server never
  * interprets; `poseStale` is the pose's own rule: only where nothing of the
- * user's is stored does the index's opinion make an un-posed render stale.
+ * user's is stored does the index's opinion make an un-posed render stale —
+ * or, where the render says which orientation it was drawn under, one drawn
+ * under a different opinion than the index now holds (`pose-rerender` D3).
+ * The key is compared only when the render carries one: a render labelled
+ * before the key existed is judged on the mapping version alone, so the
+ * posed renders already in every cache are not swept.
  */
 function usable(
-  labels: { lighting?: LightingMode; rig?: number; posed?: number },
+  labels: { lighting?: LightingMode; rig?: number; posed?: number; poseKey?: string },
   camera: CameraState | undefined,
   axis: OrbitAxis | undefined,
   pose: IndexPose | undefined,
 ): boolean {
   const poseStale =
-    pose !== undefined && camera === undefined && axis === undefined && labels.posed !== POSE_VERSION
+    pose !== undefined &&
+    camera === undefined &&
+    axis === undefined &&
+    (labels.posed !== POSE_VERSION ||
+      (labels.poseKey !== undefined && labels.poseKey !== poseKeyFor(pose)))
   return labels.lighting === THUMB_LIGHTING && labels.rig === RIG_VERSION && !poseStale
+}
+
+/**
+ * The key a render drawn under `pose` records — `poseKeyOf` over what the
+ * pose resolves to, or nothing where it resolves to nothing (a malformed
+ * pose frames no render, so there is nothing to record or compare).
+ */
+function poseKeyFor(pose: IndexPose): string | undefined {
+  const resolved = cameraForPose(pose, DEFAULT_CAMERA)
+  return resolved === null ? undefined : poseKeyOf(resolved)
 }
 
 /**
@@ -890,6 +909,9 @@ export function useThumbnails(
                     lighting: THUMB_LIGHTING,
                     rig: RIG_VERSION,
                     posed: posed !== null ? POSE_VERSION : undefined,
+                    // And which orientation, so a changed opinion is
+                    // detectable later (`pose-rerender` D3).
+                    poseKey: posed !== null ? poseKeyOf(posed) : undefined,
                     // The same reading the lookup used, not a fresh one: these
                     // pixels are what that answer asked for.
                     ao,

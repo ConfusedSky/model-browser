@@ -50,7 +50,7 @@ import { indexCovers } from '../state/selectors'
 import { DEFAULT_CAMERA, defaultAxisFor } from '../three/camera'
 import type { MeshLru } from '../three/lru'
 import { formatOfEntry } from '../three/models'
-import { cameraForPose, POSE_VERSION } from '../three/pose'
+import { cameraForPose, POSE_VERSION, poseKeyOf } from '../three/pose'
 import type { RenderQueue } from '../three/queue'
 import { RIG_VERSION, renderThumbnail, THUMB_LIGHTING } from '../three/renderer'
 import { aoEnabled } from '../viewer/aoToggle'
@@ -567,7 +567,13 @@ export async function renderEntryThumbnail(
     !discardFraming &&
     cached.pngUrl !== undefined &&
     isCurrentRender(
-      { state: cached.status, lighting: cached.lighting, rig: cached.rig, posed: cached.posed },
+      {
+        state: cached.status,
+        lighting: cached.lighting,
+        rig: cached.rig,
+        posed: cached.posed,
+        poseKey: cached.poseKey,
+      },
       cached.camera,
       cached.axis,
       opts.pose,
@@ -630,6 +636,10 @@ export async function renderEntryThumbnail(
       lighting: THUMB_LIGHTING,
       rig: RIG_VERSION,
       posed: posed ? POSE_VERSION : undefined,
+      // And which orientation (`pose-rerender` D3). When `posed`, `camera` and
+      // `axis` are exactly what the pose resolved to on either branch above,
+      // so the key is taken from them rather than resolved a second time.
+      poseKey: posed ? poseKeyOf({ camera, axis }) : undefined,
       // The generation the caller last saw (D4). The server refuses the write
       // — 412, nothing written — when the entry has moved past it.
       ifGen: opts.ifGen,

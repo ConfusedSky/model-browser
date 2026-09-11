@@ -366,6 +366,33 @@ describe('ThumbCache maintenance', () => {
     expect(res.rig).toBe(2)
   })
 
+  it('round-trips the pose key like the rig: kept across partial puts, echoed on stale reads, cleared on unlabeled png puts', async () => {
+    // `pose-rerender` D3: the key is a label of the pixels, with the same
+    // contract as `rig` — stored and echoed, never interpreted, and gone when
+    // the pixels are replaced without it.
+    const cache = tempCache()
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const path = join(fx.dir, 'loose.stl')
+    await cache.put(path, { mtime: 1, png: Buffer.from('png'), camera: CAM, rig: 2, posed: 2, poseKey: 'z:3.9270:0.3491' })
+    expect((await cache.get(path, 1)).poseKey).toBe('z:3.9270:0.3491')
+    // A camera-only put that moves nothing must not drop it (one that moves
+    // the camera clears every recipe label, the key included — the rig's rule).
+    await cache.put(path, { mtime: 1, camera: CAM })
+    expect((await cache.get(path, 1)).poseKey).toBe('z:3.9270:0.3491')
+    // It rides along on a stale read (new mtime)…
+    expect((await cache.get(path, 5)).poseKey).toBe('z:3.9270:0.3491')
+    // …and on the missing-png stale branch.
+    for (const f of readdirSync(cache.dir)) if (f.endsWith('.webp')) unlinkSync(join(cache.dir, f))
+    const missing = await cache.get(path, 1)
+    expect(missing.status).toBe('stale')
+    expect(missing.poseKey).toBe('z:3.9270:0.3491')
+    // A PNG-replacing put without it clears it — old label, new pixels.
+    await cache.put(path, { mtime: 2, png: Buffer.from('png2'), rig: 2, posed: 2 })
+    expect((await cache.get(path, 2)).posed).toBe(2)
+    expect((await cache.get(path, 2)).poseKey).toBeUndefined()
+  })
+
   it('tests virtual-path existence against the containing zip, not the entry', async () => {
     const cache = tempCache()
     const fx = makeFixtures()
@@ -1087,6 +1114,35 @@ describe('ThumbCache occlusion renders', () => {
     expect(sibling.status).toBe('hit')
     expect(sibling.rig).toBe(2)
     expect(sibling.posed).toBe(2)
+  })
+
+  it('invalidates the sibling when an unowned entry’s two renders record different pose keys, and not when they agree', async () => {
+    // `pose-rerender` D3: the same mapping version under two opinions is a
+    // difference in the orientation drawn, exactly as posed-beside-unposed is.
+    const cache = tempCache()
+    const fx = makeFixtures()
+    cleanups.push(fx.dir)
+    const path = join(fx.dir, 'loose.stl')
+    await cache.put(path, { mtime: 1, png: PNG_A, rig: 2, lighting: 'camera', posed: 2, poseKey: 'y:3.9270:0.3491' })
+    // The same key: the sibling stands.
+    await cache.put(path, { mtime: 1, png: PNG_B, ao: false, rig: 2, lighting: 'camera', posed: 2, poseKey: 'y:3.9270:0.3491' })
+    let sibling = await cache.get(path, 1, true)
+    expect(sibling.status).toBe('hit')
+    expect(sibling.rig).toBe(2)
+    expect(sibling.poseKey).toBe('y:3.9270:0.3491')
+
+    // Re-classified: the unoccluded render is redrawn under another opinion.
+    await cache.put(path, { mtime: 1, png: PNG_B, ao: false, rig: 2, lighting: 'camera', posed: 2, poseKey: 'y:0.7854:0.3491' })
+    const written = await cache.get(path, 1, false)
+    expect(written.status).toBe('hit')
+    expect(written.poseKey).toBe('y:0.7854:0.3491')
+    sibling = await cache.get(path, 1, true)
+    expect(sibling.status).toBe('hit') // mtime and pixels stay, so the tile never blanks
+    expect(Buffer.from(sibling.png as string, 'base64')).toEqual(PNG_A)
+    expect(sibling.rig).toBeUndefined()
+    expect(sibling.lighting).toBeUndefined()
+    expect(sibling.posed).toBeUndefined()
+    expect(sibling.poseKey).toBeUndefined()
   })
 
   it('exempts an owned entry: the stored orientation is what both its renders are drawn under', async () => {

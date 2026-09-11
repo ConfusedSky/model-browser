@@ -2144,6 +2144,9 @@ export function createApp(
     if (body.rig !== undefined && typeof body.rig !== 'number') {
       return c.json({ error: `invalid rig: ${String(body.rig)}` }, 400)
     }
+    if (body.poseKey !== undefined && typeof body.poseKey !== 'string') {
+      return c.json({ error: `invalid poseKey: ${String(body.poseKey)}` }, 400)
+    }
     // Three states here too, as on the axis: absence keeps the pixels, a string
     // replaces them, `null` deletes both renders (`bulk-thumbnail-jobs` D3).
     // This is the hop a deletion is most easily lost at — the `!== undefined`
@@ -2178,6 +2181,7 @@ export function createApp(
         lighting: body.lighting,
         rig: body.rig,
         posed: body.posed,
+        poseKey: body.poseKey,
         ao: body.ao,
         ifGen: body.ifGen,
       })

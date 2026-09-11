@@ -96,3 +96,16 @@ export function cameraForPose(
     },
   }
 }
+
+/**
+ * The label a render drawn under a pose records beside `POSE_VERSION`: which
+ * orientation it was drawn under (`pose-rerender` D3). Over `cameraForPose`'s
+ * answer rather than the pose's raw fields, because the answer is what the
+ * pixels depended on and nothing else — two opinions that derive the same
+ * view should not re-render, and `source` and `confidence` touch no pixel.
+ * Four decimals of a radian is well below what a 256² render can show; a
+ * real re-classification moves degrees.
+ */
+export function poseKeyOf(resolved: { camera: CameraState; axis: OrbitAxis }): string {
+  return `${resolved.axis}:${resolved.camera.az.toFixed(4)}:${resolved.camera.el.toFixed(4)}`
+}

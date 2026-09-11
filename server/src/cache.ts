@@ -20,6 +20,9 @@ interface RenderLabels {
   rig?: number
   /** Pose recipe version the PNG was rendered under; same contract as `rig`. */
   posed?: number
+  /** The orientation the PNG was drawn under, where a pose framed it; same
+   *  contract as `rig` — stored, echoed, never interpreted (`pose-rerender` D3). */
+  poseKey?: string
 }
 
 /**
@@ -135,7 +138,13 @@ function clearRecipe(labels: RenderLabels): RenderLabels {
  */
 function renderLabels(from: RenderLabels | null | undefined): RenderLabels {
   if (from === null || from === undefined) return {}
-  return { mtime: from.mtime, lighting: from.lighting, rig: from.rig, posed: from.posed }
+  return {
+    mtime: from.mtime,
+    lighting: from.lighting,
+    rig: from.rig,
+    posed: from.posed,
+    poseKey: from.poseKey,
+  }
 }
 
 function hasLabels(labels: RenderLabels): boolean {
@@ -143,7 +152,8 @@ function hasLabels(labels: RenderLabels): boolean {
     labels.mtime !== undefined ||
     labels.lighting !== undefined ||
     labels.rig !== undefined ||
-    labels.posed !== undefined
+    labels.posed !== undefined ||
+    labels.poseKey !== undefined
   )
 }
 
@@ -206,6 +216,7 @@ function renderInfo(
   if (labels.lighting !== undefined) out.lighting = labels.lighting
   if (labels.rig !== undefined) out.rig = labels.rig
   if (labels.posed !== undefined) out.posed = labels.posed
+  if (labels.poseKey !== undefined) out.poseKey = labels.poseKey
   return out
 }
 
@@ -496,6 +507,7 @@ export class ThumbCache {
     const lighting = labels.lighting
     const rig = labels.rig
     const posed = labels.posed
+    const poseKey = labels.poseKey
     // Per render, but with the entry's camera: this render was written before,
     // or the model has an orientation stored, and either way the client has
     // something to re-render from. An axis alone is not enough — an entry
@@ -503,12 +515,14 @@ export class ThumbCache {
     // The predicate is `statusFor`, shared with the listing annotation so the
     // two can never come to disagree about what a cached render is.
     const status = statusFor(labels, meta.camera, mtime)
-    if (status !== 'hit') return { body: { status, camera: meta.camera, axis, lighting, rig, posed, gen } }
+    if (status !== 'hit') {
+      return { body: { status, camera: meta.camera, axis, lighting, rig, posed, poseKey, gen } }
+    }
     let png
     try {
       png = await readFile(this.renderFile(dir, key, ao))
     } catch {
-      return { body: { status: 'stale', camera: meta.camera, axis, lighting, rig, posed, gen } }
+      return { body: { status: 'stale', camera: meta.camera, axis, lighting, rig, posed, poseKey, gen } }
     }
     // LRU clock for size-cap eviction is the png file's mtime. Bumping it via
     // utimes (instead of rewriting the meta json) keeps reads race-free
@@ -517,7 +531,7 @@ export class ThumbCache {
     // clock, so reading one never defends the other from the cap (D3).
     const now = new Date()
     await utimes(this.renderFile(dir, key, ao), now, now).catch(() => {})
-    return { body: { status: 'hit', camera: meta.camera, axis, lighting, rig, posed, gen }, png }
+    return { body: { status: 'hit', camera: meta.camera, axis, lighting, rig, posed, poseKey, gen }, png }
   }
 
   /**
@@ -552,7 +566,7 @@ export class ThumbCache {
    * conditional — it **throws `StaleWriteError`**, having written nothing, when
    * the entry has moved past the generation the caller named (D4).
    */
-  async put(path: string, opts: { mtime: number; png?: Buffer | null; camera?: CameraState | null; axis?: OrbitAxis | null; lighting?: LightingMode; rig?: number; posed?: number; ao?: boolean; ifGen?: number }): Promise<number> {
+  async put(path: string, opts: { mtime: number; png?: Buffer | null; camera?: CameraState | null; axis?: OrbitAxis | null; lighting?: LightingMode; rig?: number; posed?: number; poseKey?: string; ao?: boolean; ifGen?: number }): Promise<number> {
     const dir = await this.entryDir()
     const key = this.key(path)
     const ao = opts.ao ?? true
@@ -637,6 +651,7 @@ export class ThumbCache {
       lighting: opts.png !== undefined ? opts.lighting : (opts.lighting ?? prevMine.lighting),
       rig: opts.png !== undefined ? opts.rig : (opts.rig ?? prevMine.rig),
       posed: opts.png !== undefined ? opts.posed : (opts.posed ?? prevMine.posed),
+      poseKey: opts.png !== undefined ? opts.poseKey : (opts.poseKey ?? prevMine.poseKey),
     }
     let theirs: RenderLabels = prevTheirs
 
@@ -688,7 +703,13 @@ export class ThumbCache {
       !moved &&
       camera === undefined &&
       axis === undefined &&
-      mine.posed !== theirs.posed
+      // The key beside the version (`pose-rerender` D3): two renders drawn
+      // under the same mapping but different opinions differ in orientation
+      // exactly as a posed and an unposed pair do. A render carrying no key
+      // beside one that does is read as different too — the keyless one was
+      // labelled before the key existed and nothing says what it was drawn
+      // under — which is one invalidation per pre-key sibling, once.
+      (mine.posed !== theirs.posed || mine.poseKey !== theirs.poseKey)
     ) {
       theirs = clearRecipe(theirs)
     }

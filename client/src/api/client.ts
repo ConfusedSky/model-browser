@@ -39,6 +39,10 @@ export interface ThumbResult {
   rig?: number
   /** Pose recipe version the PNG was rendered under; absent when unposed. */
   posed?: number
+  /** The orientation the PNG was drawn under, where a pose framed it
+   *  (`ThumbPutRequest.poseKey`); absent when unposed or labelled before the
+   *  key existed, and compared by `useThumbnails` only when present. */
+  poseKey?: string
   /** Object URL for the cached PNG, present on 'hit'. */
   pngUrl?: string
   /**
@@ -86,6 +90,9 @@ export interface ThumbSave {
   lighting?: LightingMode
   rig?: number
   posed?: number
+  /** `poseKeyOf` over what the pose resolved to, beside `posed`'s version
+   *  (`pose-rerender` D3); absent when unposed. */
+  poseKey?: string
   /**
    * Which render these pixels and labels are: `true` the occluded one, `false`
    * the unoccluded sibling. Absent means occluded — what every PUT meant
@@ -408,8 +415,8 @@ async function okOrThrow(res: Response): Promise<void> {
  * orbit release, the axis set, and the reframe — so dropping the request whole
  * would lose a user's orientation on every browser that cannot encode WebP, and
  * report success while doing it. So the pixels leave, and with them the three
- * labels that describe pixels: sending `lighting`, `rig` or `posed` without a
- * render would relabel the *stored* render as current, which is the one lie
+ * labels that describe pixels: sending `lighting`, `rig`, `posed` or `poseKey`
+ * without a render would relabel the *stored* render as current, which is the one lie
  * worse than dropping the write. The rest travels, and `ThumbCache.put` treats
  * an orientation write without pixels exactly as it always has — the stored
  * render's recipe labels are cleared, so it reads as needing re-render, and a
@@ -420,7 +427,7 @@ async function okOrThrow(res: Response): Promise<void> {
  */
 function withoutUnusableRender(save: ThumbSave): ThumbSave | null {
   if (!(save.png instanceof Blob) || save.png.type === THUMB_MIME) return save
-  const { png: _pixels, lighting: _lighting, rig: _rig, posed: _posed, ...rest } = save
+  const { png: _pixels, lighting: _lighting, rig: _rig, posed: _posed, poseKey: _poseKey, ...rest } = save
   return rest.camera === undefined && rest.axis === undefined ? null : rest
 }
 
@@ -608,6 +615,7 @@ export class HttpApiClient implements ApiClient {
       lighting: body.lighting,
       rig: body.rig,
       posed: body.posed,
+      poseKey: body.poseKey,
       gen: body.gen,
       pngUrl: body.png !== undefined ? base64ToBlobUrl(body.png) : undefined,
     }
@@ -670,6 +678,7 @@ export class HttpApiClient implements ApiClient {
         lighting: write.lighting,
         rig: write.rig,
         posed: write.posed,
+        poseKey: write.poseKey,
         ao: write.ao,
         ifGen: write.ifGen,
       }),
