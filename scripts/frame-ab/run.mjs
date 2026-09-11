@@ -360,7 +360,7 @@ async function main() {
 
     // ---- The OBJ fixture: never baked, so its axis keeps its name and the
     // default camera the baseline was framed with gains swapOffset(axis) —
-    // what the D5 migration does to a stored OBJ camera (0 at `y`, +90° at `z`).
+    // the scene-to-file conversion of an OBJ camera (0 at `y`, +90° at `z`).
     // The legacy render is the default camera at the axis under the old table.
     const objText = readFileSync(join(BASELINE, 'lbracket.obj'), 'utf8')
     for (const axis of ['y', 'z']) {

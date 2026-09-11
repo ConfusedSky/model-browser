@@ -316,11 +316,9 @@ that ships has a `RIG_VERSION` newer than the bake's, every tile re-renders on
 every visit, for every visitor, forever. So:
 
 A visitor's framings live in their browser's `localStorage` (`thumbWrites` is off). Since
-`file-frame-spindle` they carry a `frame: 2` label meaning the stored axis is the model
-file's own; a framing held from before is converted on first read and labelled. There is
-no rollback for those: a client rolled back to pre-label code would read a file axis as a
-scene axis, a quarter turn off, so demo framings are expendable across such a rollback —
-they are per-browser conveniences the demo never promised to keep.
+`file-frame-spindle` the stored axis is the model file's own, and a framing held from
+before that change reads a quarter turn off — expendable, per-browser conveniences the
+demo never promised to keep.
 
 * bake with the **client build that ships**, and
 * **re-bake before deploying a build whose `RIG_VERSION` has moved.**

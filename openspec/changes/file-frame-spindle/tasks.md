@@ -121,6 +121,8 @@
       shared/frames.ts by 2.3 with a re-export from cache.ts. Seven cells; falsified: stamp on
       every write → the pixels-only cell (`expected true to be false` on `'frame' in sidecar`);
       drop it from the deletion branch → `expected undefined to be 2`)*
+      *(removed 2026-09-11 — Masa: unreleased, no data to migrate; the merged code was
+      reverted in this commit)*
 - [x] 2.2 `scripts/migrate-frames.ts --cache-dir <dir> [--undo]` (D5), the shape of
       `gen-overrides.ts`: named flags with an unknown-flag refusal, an exported core
       `migrateFrames(options): Promise<MigrateResult>` with an injected `report` and a
@@ -150,6 +152,8 @@
       the refusal cell resolves with `relabelled: 1` (the rolled-back `z` turned to `-y`);
       swap two SCENE_FRAMES bodies → cells 1/2. Also run under Bun on a scratch dir: forward,
       undo byte-identical, bad flags exit 1)*
+      *(removed 2026-09-11 — Masa: unreleased, no data to migrate; the merged code was
+      reverted in this commit)*
 - [x] 2.3 `api/localFramings.ts`: `LocalFraming` gains `frame`; `readLocalFraming`
       transforms an unlabelled entry (format from the path — a zip entry's path ends in
       the model's extension) at the store boundary, never inside a React updater
@@ -166,6 +170,8 @@
       `swapOffset` is 0 at y/−y by derivation. The named test file did not exist — created;
       three assertions in apiClient.test.ts gained the label. 11 cells; falsified: drop
       `frame` from the write → the re-read migrates z→−y; skip the transform → 8 fail)*
+      *(removed 2026-09-11 — Masa: unreleased, no data to migrate; the merged code was
+      reverted in this commit)*
 - [x] 3.1 `three/bakeToggle.ts` module flag; `parseModel(bytes, format, bake)` takes the
       convention as an argument; the frame lookup uses the legacy table when on; the pose
       read applies the legacy mapping when on; **two `MeshLru` instances** in `App` from
@@ -180,8 +186,7 @@
       **`putThumb` is
       withheld while the pill exists**, on either side, by the first line of
       `LocalFramingClient.putThumb` (before the local branch, so nothing reaches
-      `localStorage` from a PUT either; the on-read migration's write-back is not a PUT
-      and stays, D7). Cells: the
+      `localStorage` from a PUT either, D7). Cells: the
       flag off is the default; on, an STL parses rotated and a model still loads (falsify:
       pass the wrong `bake` → the bounding box flips); the two instances hold separate
       parses of one path; a flip re-renders and the warmer's next call reaches the other
@@ -204,7 +209,7 @@
       (`+Y` posed), an OBJ if one is at hand. Known during the window (D7): an orbit is
       not durable across navigation, the library tab's reset count moves for framings
       never stored, a bulk generate reports every entry skipped, and a browser framing
-      migrated in an earlier session reads a quarter turn off with the pill on. Record
+      in the file convention reads a quarter turn off with the pill on. Record
       what was looked at and any difference seen beyond the shadow penumbra here, before
       the pill is removed
 
@@ -336,11 +341,13 @@
       is restored (5.2) run the script over each new directory so it carries the marker
       (`convention: 2`) with zero counts — the tool's real test is its 17 cells, and the
       demo's browsers migrate on read regardless
+      *(removed 2026-09-11 — Masa: unreleased, no data to migrate; the merged code was
+      reverted in this commit)*
 - [ ] 5.2 Delete the pill, `bakeToggle.ts`, the second LRU and the loader's `bake`
       argument, the pill's legacy frame lookup, the legacy pose mapping and every branch
       on the flag, including the `putThumb` guard and the getters' second instance —
-      **not** `shared/frames.ts`'s pre-bake triples, which `swapOffset` and the permanent
-      on-read migration derive from (D7), and **not** the `meshLoader` extraction, a
+      **not** `shared/frames.ts`'s pre-bake triples, which `FILE_FRAMES` and `swapOffset`
+      derive from and the harness uses (D5/D7), and **not** the `meshLoader` extraction, a
       permanent improvement (wave-2 review #2): it loses its `bake` parameter only. The
       delete surface is the pill worker's list (its commit f5be254 message and report):
       `bakeToggle.ts`; `parseModel`'s third parameter; `camera.ts`'s `LEGACY_FRAMES`,
@@ -362,9 +369,7 @@
       review's nits: `pose.ts`'s `POSE_VERSION` comment stops saying `toSceneSpace` is
       "now gone" in the interim (it will be true then); `client/spike/ab.ts` assigns
       `window.ab` through a local cast, not a `declare global` that leaks into `src`'s
-      type program; `writeLocalFraming` carries an existing label on an unclassifiable
-      key (`held?.frame`) rather than dropping it; the localFramings cell titled
-      "…touching the camera and adding no axis" is retitled to say the camera is unchanged.
+      type program.
       `grep -rn "legacyBake\|bakeToggle\|toSceneSpace\|bakeLru" client/src client/spike
       scripts/frame-ab` is empty and `parseModel` is back to two parameters; suites green; 4.2 re-run; restore
       `thumbWrites` in the local config and restart; start the server; open Pikachu and
@@ -372,10 +377,8 @@
       are served as hits (no re-render)
 - [ ] 5.3 `bun run typecheck` and both suites green on merged main
 - [ ] 5.4 Records: `docs/web-demo-notes.md` if it names an axis convention;
-      `deploy/demo/README.md`: browsers migrate local framings on first read, and demo
-      framings are expendable on a client rollback (Risks); CLAUDE.md's thumbnail-cache
-      bullet gains `frame` beside `rig`/`posed`, the `.frame-migration` marker, and the
-      rule "run `--undo` before rolling the server back"; issue #8 closed with this
+      `deploy/demo/README.md`: demo framings held from before the change are expendable
+      (Risks — written 2026-09-11); issue #8 closed with this
       comment, which Masa posts or approves: "Fixed by `file-frame-spindle`. The app no
       longer rotates STL geometry on load, so the axis pill names the file's own axis: a
       `+Z` model reads Z, and the contact sheet and the pill agree. The cross-check is now

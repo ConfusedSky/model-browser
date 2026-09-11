@@ -32,11 +32,11 @@ azimuth offset (CA1, strategy A).
 - Render every model in its file's coordinates; the spindle, the sidecar, the index and
   the pickers name one direction one way.
 - Per-format default spindle from a single definition.
-- Existing stored framings keep drawing the view they drew, migrated once by a script.
 - The pixel comparison that justified the frame strategy stays rerunnable.
 - A temporary in-app switch to compare the two renderings during the change's test.
 
 **Non-Goals:**
+- Migrating stored framings: the app is unreleased and no store holds any that matter (D5).
 - Changing what the pickers look like or how the flip pill composes with a letter press.
 - Re-rendering the thumbnail cache. The measured residual is invisible and cached pixels
   stay valid; a `RIG_VERSION` bump is not warranted (see D3).
@@ -51,7 +51,7 @@ azimuth offset (CA1, strategy A).
 The alternative was to keep the bake and translate letters at the two pickers. That leaves
 `axis: "y"` in a sidecar meaning the file's Z, keeps `toSceneSpace`, and adds a second
 mapping on top of the first. Masa's call (2026-09-10): stored data must read as reality,
-even at the cost of a migration. So the rotation goes, and every axis in the client is a
+even at the cost of a migration (a cost that turned out not to fall due — D5). So the rotation goes, and every axis in the client is a
 file axis. `parseModel` for STL is then parse, normals from winding, done; OBJ and 3MF are
 unchanged in code and correct by construction.
 
@@ -91,9 +91,9 @@ different at max delta 255 for every `x`, `-x`, `y`, `-y` sample, the cat side-o
 0 differing pixels on every probe sample):
 
 - (A) keep the table, add an azimuth offset per axis pair to every stored camera
-  (keyed by the **pre-migration scene axis**: `x` +90°, `-x` −90°, `y` −90°, `-y` +90°,
-  `z` 0°, `-z` 0°; not the same six as D5's `swapOffset`, which is keyed by an OBJ's
-  unchanged axis) — and also patch
+  (keyed by the **scene axis**: `x` +90°, `-x` −90°, `y` −90°, `-y` +90°,
+  `z` 0°, `-z` 0°; not the same six as `swapOffset` in `shared/frames.ts`, which is keyed
+  by an OBJ's unchanged axis) — and also patch
   `cameraForPose`, since under today's table its derived offset lands exactly that far
   off (Benchy 90°→0°, bod_test_cube 405°→315°), which would need a `POSE_VERSION` bump
   and a re-render of every posed thumbnail (3,077 sidecars carrying `posed` in the
@@ -125,8 +125,9 @@ different at max delta 255 for every `x`, `-x`, `y`, `-y` sample, the cat side-o
 (B) it is. Its one cost: OBJ was never baked, so its stored cameras were measured in
 today's table, and the table moved for four of six spindles. Measured on the L-bracket:
 0/0 at spindle `y` (the new `y` equals the old, so every un-posed OBJ at the default is
-untouched), 36,716 px / 255 at spindle `z`, restored to 0/0 by the swap offset. The
-migration (D5) covers it.
+untouched), 36,716 px / 255 at spindle `z`, restored to 0/0 by the swap offset. No store
+holds an OBJ camera (D5), so nothing is re-expressed; `swapOffset` records the offset for
+the harness (D6).
 
 **Not pixel-identical, and why that is fine.** (Within one process; across processes an
 AO-noise floor sits on top — D6.) CB differs from C0 on 0.4–1.8 % of pixels
@@ -156,121 +157,31 @@ spindle directly" becomes literally true. `POSE_VERSION` stays at 2: the spike s
 same az/el for every posed sample, so a posed thumbnail rendered before the change is
 the picture the code would render after it.
 
-### D5: One-shot migration script, and a frame label
+### D5: No stored-data migration
 
-`scripts/migrate-frames.ts --cache-dir <dir> [--undo]` walks every sidecar in a library's cache
-directory. For an entry with a stored `axis` or `camera` and no `frame` label:
-- format from the sidecar's `path` extension (`formatOf`; a path it cannot classify is
-  reported and left untouched — never guessed);
-- STL with a stored axis — the one format that was baked (the old `rotateX(-π/2)` sat
-  inside `parseModel`'s STL branch): `axis ← migrateAxis(axis)` where `migrateAxis` is
-  `y→z, -y→-z, z→-y, -z→y, x→x, -x→-x` — derived in code from the two tables (the spindle
-  vector's image under R⁻¹), never typed; camera untouched. An STL camera with **no** axis
-  gains none: the entry drew about the old default `y` and will draw about the new
-  default `z`, whose frame is the old `y` frame, so the camera reads unchanged — and
-  writing an axis would withhold an index pose the entry never suppressed;
-- OBJ and 3MF — never baked (`3MFLoader.js` rotates nothing, whatever the comment beside
-  the old bake claimed), so a stored axis was already a file axis and its camera was
-  measured in `SCENE_FRAMES[axis]`: axis untouched; if a camera and an axis are both
-  stored and the spindle is one whose frame moved, `camera.az += swapOffset(axis)` with
-  `swapOffset` derived the way `cameraForPose` derives its own, from the old and new bases
-  of that spindle (keyed by the **unchanged** axis: `x` −90°, `-x` +90°, `z` +90°, `-z`
-  −90°, `y` and `-y` 0°; the sign matches `captureState`'s `az = atan2(dir·a, dir·b)`,
-  azimuth measured from `b` toward `a`). A camera with **no** axis is left untouched and
-  labelled: an OBJ drew about the old default `y`, a fixed point; a 3MF drew in
-  `SCENE_FRAMES.y` about un-rotated Z-up geometry — a lying-down picture, the bug the
-  proposal names — and the new default `z` stands it up, so there is no "same picture"
-  to preserve and the view changing is the fix;
-- writes `frame: 2` (1 being the unlabelled scene-axis convention) with a plain
-  `writeFile`, the way `writeMeta` does (truncate-and-write, not temp+rename — the cache
-  has never written sidecars atomically, and a sidecar is one small JSON whose loss the
-  next write repairs); either way the file's mtime advances, which the marker below
-  relies on. Reports counts: read, migrated by relabel, migrated by
-  offset, label-only (camera without axis — 0 of the 74 on this machine, so 5.2's
-  recorded zero in 5.1 is expected and the unit cell is what exercises the branch), already
-  labelled, unclassifiable, skipped (no framing);
-- writes `<cache-dir>/.frame-migration` — JSON `{convention: 2, at, counts}`, **no
-  `.json` extension**: `maintain()`'s existence sweep, the size-cap sweep and
-  `sweepLegacy` each `readdir` the directory and treat every name ending in `.json` as a
-  sidecar, and a marker named `.frame-migration.json` would parse to a `Meta` with no
-  `path`, fail `sourceExists`, and be `rm`'d on the next server start (the cold
-  reviewer's catch). A name the filter skips is the whole fix. Sidecars have three
-  writers, all through `writeMeta`: `put`
-  (rebuilds fresh), the size-cap write-back in `maintain()` (runs at every server start)
-  and the library re-key; the last two spread the previous meta, so they carry the label
-  and only ever advance the mtime of a labelled or an unframed entry — never a framed
-  unlabelled one, which is the only shape the refusal keys on.
-  On a later run the script **refuses** when the marker exists, a framed sidecar is
-  unlabelled, and that sidecar's file mtime is newer than the marker's `at`: the
-  conjunction means "a framing written after the migration by code that does not know
-  the label", which is a rolled-back server, and relabelling it would turn a file axis
-  into `-y`. Unlabelled sidecars older than the marker are the ordinary unframed ones
-  the script skipped. The refusal names the offending sidecars and says the other way
-  it can happen: a directory copied without preserving mtimes (`cp -r` rather than
-  `cp -a` or `rsync -a`, or a restore) resets every sidecar's mtime past the marker's
-  `at`, and the script refuses a good directory — safe, never corrupting, but the
-  operator needs the message to say so. mtime is a sound signal otherwise: `writeMeta`
-  always rewrites the whole file, `utimes` touches render files only (a read never
-  advances a sidecar), and the script's own writes land on entries it labels. (An
-  earlier draft keyed this on `rig`; `RIG_VERSION` is 7 before and after, so that signal
-  could never fire — the reviewer's catch.)
+The app is unreleased — Masa, 2026-09-11: "I haven't released this yet so the migration
+task doesn't apply anywhere." This machine's caches were deleted before any migration ran
+(tasks 0.2 and 5.1); the demo's server-side cache holds no framings, since writes are off
+there; and its visitors' browser framings are expendable (Risks). So there is no frame
+label, no script and no on-read migration: a stored axis is a file axis, full stop, and a
+framing held from before the change reads a quarter turn off — nowhere on this machine,
+and on the demo a per-browser convenience the demo never promised to keep.
 
-**Cached renders are not deleted.** Under strategy B the relabelled axis with the
-untouched camera draws the same view (D3's measurement), so the 74 renders on this
-machine stay valid: 54 camera+axis entries read the same camera in the same frame, 20
-axis-only entries read `DEFAULT_CAMERA` in the same frame, and there are no
-camera-only entries. An earlier revision deleted them as a belt against renders written
-between the pill's removal and the script; the Migration Plan closes that window by
-ordering instead — the script runs while the write guard is still in the code.
-
-**The label is stamped only by a write that itself carries a camera or an axis**, and it
-is carried through every other write. Two facts about the stores decide this. First,
-`ThumbCache.put` keeps the previous axis on a pixels-only write (`merged(opts.axis,
-prev?.axis)`), so a server that stamped every write would mark a still-scene axis as
-migrated on the first tile re-render and the script would skip it forever. Second, `put`
-builds its sidecar fresh — nothing is spread from `prev` — so a field it does not know is
-dropped by the next write; `frame` therefore joins `Meta` explicitly, `put` carries
-`prev.frame` when the write does not set it — in **both** of `put`'s hand-built
-sidecars, the main one and the `png === null` deletion branch (`bulk-thumbnail-jobs`
-D3); the size-cap write-back and the library re-key spread the previous meta and carry
-a new field for free — and a **discard** (`camera: null` / `axis: null`) counts as a
-framing write and stamps, since it states the entry's framing as much as a value does;
-and the browser store's `LocalFraming`,
-its read pick and `writeLocalFraming`'s merge carry it the same way. Without that, the
-first orbit after migration erases the label and the next script run relabels `z` to
-`-y`. A cell on each store pins "framing write after migration keeps the label".
-
-A stored axis of `y` today is mostly **not a choice**: the orbit-release persist sends
-the session's axis, which for an un-framed model is the default, so a user who merely
-orbited an STL stored `axis: 'y'` — 24 of the primary cache's 29. Migration relabels
-them `z`; they were stored before and are stored after, so they withhold an index pose
-exactly as they did. A relabel, not a semantic change.
-
-The same transforms run **on read** in the browser store (`readLocalFraming`, at the
-store boundary — never inside a React updater, which `useThumbnails` documents must be
-pure) for an entry without the label, written back labelled, sharing the functions with
-the script so there is one implementation. **Where they live**: `shared/frames.ts`, with
-the six frames as plain `[number, number, number]` triples, the derivation (`unbake`,
-the re-key, `migrateAxis`, `swapOffset`) as plain arithmetic, and no import of `three`.
-`shared/` already carries runtime values (`CAMERA_EPSILON`, which `server/src/cache.ts`
-imports as a value; `shared/names.ts`'s `baseName`), so a value module there is
-established practice; both `tsconfig`s include `../shared`, and the server's
-(`"types": ["node"]`) has no `three`; the script is typechecked under the server project
-because `server/test` imports it, so a `three` import anywhere on that path breaks
-`bun run typecheck`. `camera.ts` builds its `THREE.Vector3` `FRAMES` from the shared
-triples — one source, and the unit cell that asserts D3's table reads the shared one.
-The transform is value-idempotent, so two readers in one tick converge on the same
-answer.
-
-Why a script and not on-read for the server cache: Masa's call (2026-09-10). The local
-cache is on this machine and a run is one command; on-read migration would leave the
-server carrying a compatibility path forever. Browsers are the exception because no
-script can reach them, and the demo's framings live only there.
-
-**Census** (the reviewer's probe, 2026-09-10, `~/.cache/model-browser/*/`): four ids, not
-three — 18,428 / 1,507 / 122 / 40 sidecars holding 12+34+1+7 cameras and 29+36+2+7 stored
-axes, 74 framed entries in all, every one `.stl`, `0f680186` the only one with `x`-family
-axes (2 × `-x`, 1 × `z`). The task iterates the directory, not a written-down list.
+What was built and removed: a `frame: 2` label on the sidecar and the local framing,
+stamped by framing writes and carried through the rest; `scripts/migrate-frames.ts` with
+its `.frame-migration` marker, its rolled-back-server refusal and its `--undo`; and
+`readLocalFraming`'s on-read transform with write-back — built, reviewed twice, removed on
+the decision (the commit that rewrote this section). `SCENE_FRAMES`, `migrateAxis` and
+`swapOffset` in `shared/frames.ts` stay: `FILE_FRAMES` is derived from the scene table
+(D3), the harness (D6) uses the two functions to express the spike's scene-convention
+framings in file terms, and `client/test/frames.test.ts` pins them. `shared/frames.ts` holds the six frames as plain
+`[number, number, number]` triples and the derivation (`unbake`, the re-key, `migrateAxis`,
+`swapOffset`) as plain arithmetic, with no import of `three`: `shared/` already carries
+runtime values (`CAMERA_EPSILON`, which `server/src/cache.ts` imports as a value;
+`shared/names.ts`'s `baseName`), both `tsconfig`s include `../shared`, and the server's
+(`"types": ["node"]`) has no `three`, so a `three` import there breaks `bun run typecheck`.
+`camera.ts` builds its `THREE.Vector3` `FRAMES` from the shared triples — one source, and
+the unit cell that asserts D3's table reads the shared one.
 
 ### D6: The A/B harness ships as a script
 
@@ -358,18 +269,13 @@ exists because the client one only covers bundles that carry it: 3177 serves a s
 its bundle, and other sessions restart the dev instance — any of those writes past a
 client-only guard. With the feature off, the shipped `LocalFramingClient` would divert
 framings to `localStorage`, which is why the client guard sits in front of that branch.
-The on-read migration in `readLocalFraming` (D5) is **not** a withheld write: it stores a
-function of what is already stored — a legacy framing's file-convention image plus the
-label — never a pill-side value, since the only path that could store one is `putThumb`,
-so the store converges to the same content whichever side the pill is on. Silencing it
-would break the demo's migration on read. The reason is the cache key: AO is a key
+The reason is the cache key: AO is a key
 *dimension* (`<key>.webp` beside `<key>.noao.webp`), so its toggle re-keys and needs no
 invalidation, but the bake has no key dimension — both conventions would file pixels
 under one key, and `statusFor` never checks the axis, so a legacy-convention render
 written during the test would be served as a valid hit after it. Withholding pixels as
-well as framings closes that, and it also closes the window D5's label rule guards:
-nothing the test session does can stamp or strip a label. Cached renders are never
-deleted (D5): every entry, framed or not, draws the same picture under the new frames.
+well as framings closes that. Cached renders are never deleted: every entry, framed or
+not, draws the same picture under the new frames (D3).
 
 The flag mirrors into React state the way `ssao` does (`useState(aoEnabled)` beside the
 module flag, both set on click), so a flip re-renders `App` — without that no consumer
@@ -406,36 +312,25 @@ and returning shows the server's old render), the library tab's reset count stil
 for a framing that was never stored, and a bulk generate job reports every entry
 skipped, since `putThumb`'s `{dropped: true}` reads as `skipped`. Task 3.2 says so.
 
-**A framing migrated on read is in file convention.** With the pill on, a browser framing
-that was already migrated in an earlier session is read under legacy frames and shows a
-quarter turn off. That is accepted for a test-only pill and recorded here; the server
-cache is not exposed to it because both guards hold through the window (Migration
-Plan). The pill, the flag, the pill's legacy frame **lookup**, the second LRU instance,
-`parseModel`'s `bake` argument and `toSceneSpace` are deleted in the change's last code
-task, and the archive dry run is gated on `grep` finding none of them. The pre-bake
-triples in `shared/frames.ts` are **not** deleted: `migrateAxis` and `swapOffset` are
-derived from the old table and the new, and the browser store's on-read migration (D5)
-is a permanent path, not a test-window one.
+**A stored framing is in the file convention.** With the pill on, a browser framing
+written under the file convention is read under legacy frames and shows a quarter turn
+off. That is accepted for a test-only pill and recorded here; the server cache is not
+exposed to it because both guards hold through the window (Migration Plan). The pill,
+the flag, the pill's legacy frame **lookup**, the second LRU instance, `parseModel`'s
+`bake` argument and `toSceneSpace` are deleted in the change's last code task, and the
+archive dry run is gated on `grep` finding none of them. The pre-bake triples in
+`shared/frames.ts` are **not** deleted: `FILE_FRAMES`, `migrateAxis` and `swapOffset`
+are derived from the old table and the new, and the harness reads the two functions
+(D5/D6).
 
 ## Risks / Trade-offs
 
-- [A stored OBJ camera at a moved spindle is missed by the migration] → the script
-  reports the offset-migrated count; the local cache today holds 0 OBJ entries, so the
-  count here is expected to be 0 and a non-zero is a finding to look at. The L-bracket
-  unit cell pins the transform.
-- [The migration runs twice] → the frame label, carried through every write of both
-  stores (D5) and stamped only by framing writes; the script's report names "already
-  labelled" so a second run reads as a no-op.
-- [A server rolled back to old code writes to a migrated cache] → old `put` rebuilds the
-  sidecar and drops `frame`, so a later script run would relabel a file axis again
-  (`z → -y`). The marker file (D5) makes the script refuse that directory, naming the
-  sidecars newer than the marker; the tasks say to run `--undo` before any rollback of
-  the server on this machine.
-- [Demo browsers have no rollback] → a client rolled back would read file-convention
-  framings as scene axes, a quarter turn off, undetectably. Decided (Masa, 2026-09-10):
-  demo framings are expendable on rollback — they are per-browser conveniences the demo
-  never promised to keep — and the deploy README says so.
-- [A framing migrated on read is shown under the pill's legacy side] → accepted for the
+- [A demo browser holds a framing from before the change] → it reads a file axis where a
+  scene axis was stored, a quarter turn off, undetectably. Decided (Masa, 2026-09-10 and
+  2026-09-11): demo framings are expendable — they are per-browser conveniences the demo
+  never promised to keep — and the deploy README says so. The same goes for a client
+  rolled back after the change.
+- [A file-convention framing is shown under the pill's legacy side] → accepted for the
   test window (D7).
 - [A cached thumbnail differs from a fresh render in the shadow penumbra] → measured
   ≤ 60/255 on ≤ 1.8 % of pixels; not visible; recorded here so a future pixel comparison
@@ -458,21 +353,14 @@ is a permanent path, not a test-window one.
    this machine is untouched through the whole test window. Masa's test window: the pill
    on and off against the real library; the harness passes against its baselines with the
    pill off (the harness only reads).
-4. Stop the dev server. Both guards were in force through the window, so nothing wrote.
-   Run `for d in ~/.cache/model-browser/*/; do bun run scripts/migrate-frames.ts --cache-dir "$d"; done`;
-   record each run's counts in tasks.
+4. Masa's test window (task 3.2), both guards in force throughout.
 5. Remove the pill, the legacy paths and the guard; suites and the harness green.
-6. Start the server. Open models with stored framings (Pikachu, Main_Complete) and confirm
-   the stored view is the one shown and their cached renders are served as hits (no
-   re-render, by D5). Archive.
-7. Demo: redeploy; browsers migrate their local framings on first read.
+6. Start the server; restore `thumbWrites`. Archive.
+7. Demo: redeploy. Nothing stored is converted (D5).
 
-Rollback: the sidecar transform is invertible (relabel back, subtract the offset) and the
-label says which entries to invert; the script takes `--undo`. Run it **before** any
-rollback of the server, since old code erases the label (Risks). Demo browsers are not
-rolled back (Risks).
+Rollback: nothing stored needs inverting (D5); a framing written after the change and read
+by code from before it is a quarter turn off, which is the accepted cost (Risks).
 
 ## Open Questions
 
-- None blocking. Whether the demo's `deploy/demo/README.md` needs a line about browsers'
-  local framings migrating on read is decided at the record task.
+- None.

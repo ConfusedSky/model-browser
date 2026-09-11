@@ -2,9 +2,8 @@ import type { ModelFormat, OrbitAxis } from './types'
 
 /**
  * Spindle frames as plain arithmetic, shared by the client (`three/camera.ts`
- * lifts them into `Vector3`s), the browser store's on-read migration and the
- * cache migration script. No `three` import: the server project compiles
- * `shared/` and has no `three` (file-frame-spindle D5).
+ * lifts them into `Vector3`s) and the frame-ab harness. No `three` import: the
+ * server project compiles `shared/` and has no `three`.
  */
 
 export type Triple = readonly [number, number, number]
@@ -24,10 +23,9 @@ export interface FrameTriples {
 /**
  * The frames camera angles were measured in while STL geometry was baked Y-up
  * (`geometry.rotateX(-π/2)` in `parseModel`, removed by file-frame-spindle):
- * the scene-axis convention, `frame` label 1. Kept permanently, not only for
- * the migration window — `migrateAxis` and `swapOffset` derive from this table
- * and the file table, and the browser store migrates an unlabelled framing on
- * read forever (D5/D7).
+ * the scene-axis convention. Kept as the table `FILE_FRAMES` is derived from,
+ * and as the legacy convention the compare pill and the frame-ab harness
+ * reproduce (D3/D6/D7).
  */
 export const SCENE_FRAMES: Record<OrbitAxis, FrameTriples> = {
   y: { s: [0, 1, 0], a: [1, 0, 0], b: [0, 0, 1] },
@@ -81,10 +79,12 @@ export const FILE_FRAMES: Record<OrbitAxis, FrameTriples> = Object.fromEntries(
 ) as Record<OrbitAxis, FrameTriples>
 
 /**
- * The file axis a stored scene axis names for the one format that was baked
- * (STL — 3MF never was, despite an old comment; it migrates like OBJ): the
- * spindle vector's image under R⁻¹. y→z, -y→-z, z→-y, -z→y, x→x,
- * -x→-x — derived, so the two tables cannot drift apart from this.
+ * A scene-convention axis converted to the file convention, for the one format
+ * that was baked (STL — 3MF never was, despite an old comment; it converts
+ * like OBJ, by `swapOffset`): the spindle vector's image under R⁻¹. y→z,
+ * -y→-z, z→-y, -z→y, x→x, -x→-x — derived, so the two tables cannot drift
+ * apart from this. Used by the frame-ab harness to render the spike's recorded
+ * scene-convention framings under the file convention.
  */
 export function migrateAxis(sceneAxis: OrbitAxis): OrbitAxis {
   return axisOfTriple(unbake(SCENE_FRAMES[sceneAxis].s))
@@ -95,9 +95,10 @@ function dot(u: Triple, v: Triple): number {
 }
 
 /**
- * Radians to add to a stored `az` for a format that was never baked (OBJ, 3MF):
- * its spindle keeps its name, but the frame that name selects moved from
- * `SCENE_FRAMES[axis]` to `FILE_FRAMES[axis]`. A direction at old azimuth θ is
+ * Radians to add to a scene-convention `az` to express it in the file
+ * convention, for a format that was never baked (OBJ, 3MF): its spindle keeps
+ * its name, but the frame that name selects moved from `SCENE_FRAMES[axis]` to
+ * `FILE_FRAMES[axis]`. Used where `migrateAxis` is. A direction at old azimuth θ is
  * `a_old sinθ cosφ + b_old cosθ cosφ + s sinφ`; re-measured in the new frame,
  * `θ' = atan2(d·a_new, d·b_new)`, and the difference is the θ = 0 direction
  * (`b_old`) re-measured there. `x` −90°, `-x` +90°, `z` +90°, `-z` −90°, `y`
@@ -118,12 +119,3 @@ export function swapOffset(axis: OrbitAxis): number {
 export function defaultAxisFor(format: ModelFormat): OrbitAxis {
   return format === 'obj' ? 'y' : 'z'
 }
-
-/**
- * The frame label a framing write stamps: the stored axis is in the file's own
- * axes (`file-frame-spindle` D5). The convention before it, 1, is never
- * written — an absent label is what names it. One constant for the three
- * writers that stamp it — `ThumbCache.put`, the migration script and the
- * browser store's on-read migration — so the label cannot drift between them.
- */
-export const FRAME_CONVENTION = 2

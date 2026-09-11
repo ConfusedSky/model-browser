@@ -1,5 +1,5 @@
-// The spindle frames in file coordinates, and the arithmetic the migration
-// derives from the pre-bake table (file-frame-spindle D3/D5).
+// The spindle frames in file coordinates, and the scene-to-file conversion
+// derived from the pre-bake table (file-frame-spindle D3).
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
 import type { OrbitAxis } from '../../shared/types'

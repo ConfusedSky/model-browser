@@ -108,7 +108,7 @@ in the old scene convention, and the script re-expresses it in the file conventi
 |---|---|
 | a stored camera at scene axis A | the camera unchanged, at `migrateAxis(A)` (D3: basis and camera pass through R⁻¹ together) |
 | the index's pose | the listing's pose through `cameraForPose`, the app's own path; the axis and az/el it derives are checked against the record and a mismatch is printed as a note |
-| the default camera (the OBJ fixture) | the default camera with `az + swapOffset(axis)` — what the D5 migration does to a stored OBJ camera: 0 at `y`, +90° at `z` |
+| the default camera (the OBJ fixture) | the default camera with `az + swapOffset(axis)` — the scene-to-file conversion of an OBJ camera: 0 at `y`, +90° at `z` |
 
 Names: an STL row is its library path with every character outside `[A-Za-z0-9._-]` replaced
 by `_`, plus `-noao` for the AO-off render (`_fat_cat.stl-noao`); the OBJ rows are

@@ -31,17 +31,12 @@ what the index reports should agree without a mapping.
   pose-version bump, so it loses on migration cost, not on pixels.
 - The index pose is read in file coordinates directly: the scene-space mapping in the pose
   module is deleted, and an index `up` of `[0,0,1]` is spindle `z`.
-- **BREAKING for stored data, migrated once**: a stored axis on an STL or 3MF entry means a
-  scene axis today and a file axis after; a one-shot script re-labels every such axis
-  (`y→z`, `-y→-z`, `z→-y`, `-z→y`, `x`/`-x` unchanged) and leaves the camera untouched,
-  and re-expresses the stored camera of any OBJ entry at an `x`, `-x`, `z` or `-z` spindle
-  by the frame swap's offset, since OBJ was never baked and its frame moved. Sidecars gain
-  a `frame: 2` label — stamped only by writes that carry a camera or an axis, carried
-  through every other write — so an entry is migrated once and a pre-migration entry is
-  recognisable; a marker file in the cache directory lets the script refuse a directory a
-  rolled-back server has written to. Cached renders stay valid and are not touched.
-  Browsers' local framings (the demo, where server writes are off) carry the same
-  transform under the same label, applied on read since no script reaches them.
+- **No stored-data migration**: a stored axis on an STL or 3MF entry meant a scene axis
+  before this change and means a file axis after it, and nothing converts between them —
+  the app is unreleased (Masa, 2026-09-11), this machine's caches were deleted, the demo's
+  server cache holds no framings (writes are off there), and a framing a demo browser held
+  from before the change reads a quarter turn off, which is accepted (design D5). Cached
+  renders stay valid and are not touched.
 - The pixel A/B that decided the frame strategy ships as a rerunnable harness
   (`scripts/frame-ab/`), with the baseline renders checked in and a tolerance from the
   measured residual, so the claim "same picture" can be re-checked on the machine it was
@@ -64,31 +59,28 @@ what the index reports should agree without a mapping.
   upright follows from the spindle default; *Per-model orbit spindle* — the spindle is a
   file axis and the default is the format's convention, not +Y.
 - `model-thumbnails`: *Camera state stored alongside thumbnails* — a missing axis is
-  rendered as the format's default; stored axes are file axes; entries written before
-  this change are migrated once and labelled.
+  rendered as the format's default; stored axes are file axes; nothing written before
+  this change is converted.
 - `semantic-search`: *A pose orients the model without becoming its stored camera* — the
   index's up axis is the spindle, literally, with no coordinate mapping between them.
 
 ## Impact
 
 - Client: `shared/frames.ts` (new: the frames as plain triples, the derivation, the
-  migration arithmetic), `three/models.ts` (the bake), `three/camera.ts` (`FRAMES`, and a
-  `defaultAxisFor(format)`), `three/pose.ts` (`toSceneSpace` deleted, `axisOf` an exact
-  lookup on the file vector), the sixteen `'y'` fallbacks (`camera`, `renderer`,
-  `session`, `ViewerLayer`, `useThumbnails`, `bulkJobs`, `entryActions`, `App`) through
-  a `formatOfEntry` seam, `api/localFramings.ts` (the on-read
-  migration), the lightbox and menu axis pickers (unchanged in code — they show the
-  spindle, which is now a file axis).
-- Server: `cache.ts` (`frame` label on the sidecar, carried through `put`, never interpreted; not
-  on the wire — no client reads it).
-- Scripts: `scripts/migrate-frames.ts` (one-shot over a cache directory), `scripts/frame-ab/`
-  and `client/spike/ab.{html,ts}` (the A/B harness and its page, from the spike).
-- Tests: camera/pose/models units (frames, defaults, migration transform), client cells for
-  the pickers' labels and the default spindle per format, server cells for the label, the
-  A/B harness as a task with recorded numbers.
-- Data: this machine's four caches under `~/.cache/model-browser/` (74 framed entries,
-  all STL; the primary holds 29 stored axes and 12 cameras across 18,428 sidecars) run
-  through the script; the demo
-  box has no server-side framings (writes are off) and its browsers migrate on read.
+  scene-to-file conversion the harness uses), `three/models.ts` (the bake),
+  `three/camera.ts` (`FRAMES`, and a `defaultAxisFor(format)`), `three/pose.ts`
+  (`toSceneSpace` deleted, `axisOf` an exact lookup on the file vector), the sixteen `'y'`
+  fallbacks (`camera`, `renderer`, `session`, `ViewerLayer`, `useThumbnails`, `bulkJobs`,
+  `entryActions`, `App`) through a `formatOfEntry` seam, the lightbox and menu axis
+  pickers (unchanged in code — they show the spindle, which is now a file axis).
+- Server: nothing — `cache.ts` stores the axis as it did; it is a file axis by the
+  client's construction.
+- Scripts: `scripts/frame-ab/` and `client/spike/ab.{html,ts}` (the A/B harness and its
+  page, from the spike).
+- Tests: camera/pose/models units (frames, defaults, the scene-to-file conversion), client
+  cells for the pickers' labels and the default spindle per format, the A/B harness as a
+  task with recorded numbers.
+- Data: nothing to migrate — the app is unreleased, this machine's caches were deleted,
+  and the demo holds no server-side framings (D5).
 - Records: `docs/web-demo-notes.md` if it names the axis anywhere; issue #8 closed with a
   comment pointing here.
