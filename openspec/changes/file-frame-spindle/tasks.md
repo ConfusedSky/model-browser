@@ -223,7 +223,16 @@
       matches a tab that had not reloaded the fixed camera module, the second the pose wave
       running once per listing landing (its effect keys on the wave id, not on index
       availability), so a listing landed while the index was off has no poses until the
-      next navigation — pre-existing behaviour, not this change's)*
+      next navigation — pre-existing behaviour, not this change's). After Masa emptied the
+      cache and hard-reloaded, both reports persisted — so the difference was browser
+      state, and there is one store a reload keeps: framings held in `localStorage`
+      (`mb:framing:<library>:<path>`, where the client keeps orbits while `thumbWrites`
+      is off). Reproduced headless by injecting one: `{axis:'z'}` for fat_cat → pill OFF
+      max Δ 160 vs the posed baseline (a stored axis withholds the pose — the spec's own
+      rule), pill ON max Δ 187 and the saved tile is the cat on its side (a file-convention
+      axis read against the legacy frames on a baked mesh — D7's accepted quarter turn).
+      Both symptoms, one cause. Fix for the test: clear the `mb:framing:` keys; the legacy
+      side cannot show a framed model right and is not meant to)*
 
 ## 4. The harness (D6)
 
