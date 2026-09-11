@@ -17,6 +17,19 @@
       false` in `~/.config/model-browser/config.json`, `rm -rf client/dist`, restart the dev
       instance (other sessions may own it — say so in the session), no other browser on
       3177. From here until 5.2 restores it, nothing can write a sidecar
+      *(INCIDENT 2026-09-10: not in force when §1–§2 merged. The dev instance is
+      `bun --watch` over the primary checkout, so it ran each merge live. Three code
+      windows hit the primary cache (`97ecc020`): label landed 16:43:57 (e3072cb) → bake
+      removed 16:48:57 (3736fa8): 3 framed sidecars stamped `frame: 2` over SCENE axes
+      (y, y, −y, all with cameras — genuine orbits on a correctly displayed model, wrongly
+      labelled; the script would skip them forever) + 33 renders (correct); bake removed →
+      default fixed 17:01:53 (e4b9d91): 27 sidecars (24 orbits, 1 axis-only, 2 discards,
+      all labelled) + 178 renders, every un-framed STL drawn lying down about the `y`
+      fallback and cached as a hit; after 17:01:53: nothing. The other three caches: nothing.
+      Ordering constraint the tasks never stated: 2.1 before 1.3 mislabels scene axes, 1.3
+      before 2.1 (or 1.3 before 1.4) caches lying-down renders — 0.2 is what makes either
+      order safe, and it must precede the FIRST merge, not the test window. Recovery is
+      Masa's call, recorded when made)*
 
 ## 1. Frames and defaults
 
@@ -205,7 +218,12 @@
       74 framed entries in all — 54 camera+axis, 20 axis-only, 0 camera-only — all STL,
       `0f680186` the only one with `x`-family axes); record each run's seven counts here
       (label-only is expected 0 everywhere); `--undo` then re-run on one id reports the
-      same counts both ways
+      same counts both ways — true only if nothing was written between the two runs: an
+      undo also converts entries the new server wrote fresh (correctly — it is a convention
+      translation, not an edit log — the reviewer's probe), so its counts exceed the
+      forward run's by however many landed in between. Before this run: the incident's
+      three window-1 sidecars must have their label stripped (0.2's note) or the script
+      skips them as migrated
 - [ ] 5.2 Delete the pill, `bakeToggle.ts`, the second LRU and the loader's `bake`
       argument, the pill's legacy frame lookup, the legacy pose mapping and every branch
       on the flag, including the `putThumb` guard and the getters' second instance —
