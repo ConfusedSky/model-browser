@@ -427,7 +427,12 @@
       Not done here, for the coordinator: restoring `thumbWrites` in the local config, the
       restart, and the Pikachu / Main_Complete hit check — the dev instance was read-only
       for this worker)*
-- [ ] 5.3 `bun run typecheck` and both suites green on merged main
+- [x] 5.3 `bun run typecheck` and both suites green on merged main
+      *(2026-09-11 on 4d00018, the pill removed: both typechecks exit 0; client 65 files /
+      943; server 22 files / 732 passed, 3 skipped in `indexContract.test.ts`, which
+      `describe.skipIf`s itself when the index server on 8077 is unreachable — pre-existing
+      (5d0cf27), environmental, not this change's. The gate grep over client/src,
+      client/spike, scripts/frame-ab and vite.config for the pill's names is empty)*
 - [ ] 5.4 Records: `docs/web-demo-notes.md` if it names an axis convention;
       `deploy/demo/README.md`: demo framings held from before the change are expendable
       (Risks — written 2026-09-11); issue #8 closed with this
@@ -436,6 +441,11 @@
       `+Z` model reads Z, and the contact sheet and the pill agree. The cross-check is now
       the direct one — a `+Y` model reads Y with no flip. Provenance turned out not to be
       needed once the two tools spoke the same frame." 
+      *(2026-09-11: `docs/web-demo-notes.md` names no axis convention (its two "axis"
+      hits are the retired axis-lighting mode) — no edit; `deploy/demo/README.md` carries
+      the two sentences on browser-held framings (c38f64d); CLAUDE.md's cache bullet is
+      back to `{mtime, lighting, rig, posed}` (the label went with the migration). Open:
+      the issue #8 comment above, for Masa to post or approve)*
 - [ ] 5.5 `openspec validate file-frame-spindle --strict`; archive dry run on a fresh copy;
       after archiving, the applied `model-viewer`, `model-thumbnails` and `semantic-search`
       text carries no change-scoped prose
