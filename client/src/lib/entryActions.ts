@@ -47,8 +47,9 @@ import type { JobOperation, JobScope } from '../jobs/bulkJobs'
 import { expandLibraryPath } from './libraryPath'
 import type { Action } from '../state/reducer'
 import { indexCovers } from '../state/selectors'
-import { DEFAULT_CAMERA } from '../three/camera'
+import { DEFAULT_CAMERA, defaultAxisFor } from '../three/camera'
 import type { MeshLru } from '../three/lru'
+import { formatOfEntry } from '../three/models'
 import { cameraForPose, POSE_VERSION } from '../three/pose'
 import type { RenderQueue } from '../three/queue'
 import { RIG_VERSION, renderThumbnail, THUMB_LIGHTING } from '../three/renderer'
@@ -590,14 +591,17 @@ export async function renderEntryThumbnail(
     // What the model resolves to once its own orientation is gone —
     // resolved by the shared rule, which the lightbox panel's live reset
     // reads too, so the two surfaces cannot disagree about the same model.
-    ;({ camera, axis, posed } = framingAfterDiscard(opts.pose, cached.axis ?? 'y'))
+    ;({ camera, axis, posed } = framingAfterDiscard(
+      opts.pose,
+      cached.axis ?? defaultAxisFor(formatOfEntry(entry)),
+    ))
   } else {
     // Exactly the sweep's resolution (useThumbnails' dropStale): the stored
     // camera/axis, else the pose when *both* are absent, else the default.
     const fromPose = cached.camera === undefined && cached.axis === undefined ? pose : null
     posed = fromPose !== null
     camera = cached.camera ?? fromPose?.camera ?? DEFAULT_CAMERA
-    axis = cached.axis ?? fromPose?.axis ?? 'y'
+    axis = cached.axis ?? fromPose?.axis ?? defaultAxisFor(formatOfEntry(entry))
   }
   // `posed` says a usable pose replaced the orientation, which is exactly
   // when the stored axis goes with it.
@@ -762,12 +766,16 @@ export function resetFramingLive(
 ): void {
   // The resolved axis is read for real: `reframe` moves the open session about
   // it, or records it for an open still in flight (`pendingReframeRef`). The
-  // `'y'` stands in only when there is no view at all — nothing on screen and
-  // nothing pending, so the resolved framing is applied to nothing — and in a
-  // pose-less discard, where `framingAfterDiscard` echoes the kept axis back
-  // and the landing handler re-reads the kept value from its own `getThumb`
-  // rather than trusting a read the thumbs map may not have settled for.
-  const framing = framingAfterDiscard(host.poses[entry.path], view?.axis ?? 'y')
+  // format's default stands in only when there is no view at all — nothing on
+  // screen and nothing pending, so the resolved framing is applied to nothing
+  // — and in a pose-less discard, where `framingAfterDiscard` echoes the kept
+  // axis back and the landing handler re-reads the kept value from its own
+  // `getThumb` rather than trusting a read the thumbs map may not have settled
+  // for.
+  const framing = framingAfterDiscard(
+    host.poses[entry.path],
+    view?.axis ?? defaultAxisFor(formatOfEntry(entry)),
+  )
   void host.api
     .putThumb({
       path: entry.path,
@@ -859,11 +867,6 @@ export const flipPillClass = (active: boolean): string =>
   `rounded-full px-2.5 py-1 ${active ? 'bg-amber-700 text-white' : 'text-zinc-400 hover:text-zinc-200'}`
 /** What `flip` says it does, on both surfaces. */
 export const FLIP_TITLE = 'Negate the spindle axis (+axis ↔ −axis)'
-
-/** The spindle a model with none stored is framed about — the `'y'` the sweep
- *  (`useThumbnails`' axis fallback) and the viewer already fall back to, named here so
- *  the menu can mark a model that has never been given one. */
-export const DEFAULT_ORBIT_AXIS: OrbitAxis = 'y'
 
 /**
  * Whether the menu raised on this entry, on this surface, offers the axis group.

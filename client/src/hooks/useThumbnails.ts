@@ -11,8 +11,9 @@ import type {
 } from '../../../shared/types'
 import type { ApiClient } from '../api/client'
 import { NO_LIBRARY, keepsFramingsLocally, readLocalFraming } from '../api/localFramings'
-import { DEFAULT_CAMERA } from '../three/camera'
+import { DEFAULT_CAMERA, defaultAxisFor } from '../three/camera'
 import type { MeshLru } from '../three/lru'
+import { formatOfEntry } from '../three/models'
 import { cameraForPose, POSE_VERSION } from '../three/pose'
 import { RenderQueue, type Band } from '../three/queue'
 import { RIG_VERSION, renderThumbnail, THUMB_LIGHTING } from '../three/renderer'
@@ -870,7 +871,7 @@ export function useThumbnails(
                       ? cameraForPose(pose, DEFAULT_CAMERA)
                       : null
                   const camera = cached.camera ?? posed?.camera ?? DEFAULT_CAMERA
-                  const axis = cached.axis ?? posed?.axis ?? 'y'
+                  const axis = cached.axis ?? posed?.axis ?? defaultAxisFor(formatOfEntry(entry))
                   const png = await renderThumbnail(object, camera, axis, ao)
                   // Above the PUT, not only below it. `queue.suspend()` cannot
                   // stop a job that already started (`whenResumed`'s own note),

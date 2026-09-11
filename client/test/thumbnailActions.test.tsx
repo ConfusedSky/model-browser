@@ -194,7 +194,9 @@ describe('the index’s orientation reaches the command', () => {
     await invoke('Kits/neighbour.stl', 'resetFraming')
 
     const resolved = cameraForPose(POSE, DEFAULT_CAMERA)!
-    expect(resolved.axis).toBe('z')
+    // The fixture's `up` is [0, -1, 0]: spindle `-y` in file coordinates, which
+    // is what the pose names (file-frame-spindle D4) — not the STL default `z`.
+    expect(resolved.axis).toBe('-y')
     // Rendered at the index's orientation entire — its axis as well as its
     // angles — rather than at the default about the axis it used to have.
     // The harness's stub is declared argument-less; the call is (object, camera, axis).

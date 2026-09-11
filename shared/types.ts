@@ -194,7 +194,9 @@ export interface ResolvedOverrides {
 
 /**
  * Orbit spindle axis: the model turns around this axis, camera up locked to
- * it. Sign is part of the value (six spindles). Default 'y'.
+ * it. Sign is part of the value (six spindles). No default here: an
+ * un-framed model turns about its format's up axis, `defaultAxisFor`
+ * (shared/frames.ts).
  */
 export type OrbitAxis = 'x' | '-x' | 'y' | '-y' | 'z' | '-z'
 
@@ -202,8 +204,10 @@ export type OrbitAxis = 'x' | '-x' | 'y' | '-y' | 'z' | '-z'
  * Bounds- and spindle-relative camera state: azimuth/elevation (radians)
  * measured in the model's spindle frame (its stored OrbitAxis), distance in
  * multiples of the bounding-sphere radius, target relative to the bounding-box
- * center in radius units. Never world coordinates. Under the default 'y'
- * spindle this equals the historical world-Y representation.
+ * center in radius units. Never world coordinates. The `y` frame is the
+ * historical world-Y one; an STL's default is now `z`, whose frame is that
+ * same one turned with the geometry, so old STL cameras read unchanged
+ * (file-frame-spindle D3).
  */
 export interface CameraState {
   az: number

@@ -78,7 +78,7 @@ const NESTED: DirListing = {
   entries: [dir('Alpha'), zipEntry('kit.zip'), model('widget.stl')],
 }
 const CAM: CameraState = { az: 1.2, el: 0.3, distR: 2.5, target: [0, 0, 0] }
-/** File-space `up` (0,-1,0) is scene +Z: a pose the app can express, present
+/** File-space `up` (0,-1,0) is the `-y` spindle: a pose the app can express, present
  *  throughout so that "the pick ignores it" is an assertion and not a vacuum. */
 const POSE: IndexPose = {
   up: [0, -1, 0],
@@ -177,16 +177,26 @@ describe('the group is offered on model tiles and nowhere else', () => {
     expect(axes().filter((b) => b.getAttribute('aria-checked') === 'true')).toHaveLength(1)
   })
 
-  it('marks the default on a model that has never been given one', async () => {
-    // Not "nothing marked": a model with no stored axis is framed about 'y',
-    // and the menu says what is true of it rather than what is stored.
+  it('marks the default on a model that has never been given one — its format’s up axis', async () => {
+    // Not "nothing marked": a model with no stored axis is framed about its
+    // format's up axis (file-frame-spindle D2), and the menu says what is true
+    // of it rather than what is stored. An STL is Z-up; an OBJ is Y-up. The
+    // lightbox's picker marks the same letters (orbitHandoff.test.tsx).
     stored(undefined)
-    await mountApp('/models', NESTED)
+    await mountApp('/models', {
+      path: '/models',
+      entries: [model('widget.stl'), { ...model('bracket.obj'), format: 'obj' }],
+    })
     await settle()
 
     await secondaryPress(tile('widget.stl'))
+    expect(markedAxis()).toBe('z')
+    expect(flipped()).toBe(false) // 'z' is not a negated spindle
+    await escape()
+
+    await secondaryPress(tile('bracket.obj'))
     expect(markedAxis()).toBe('y')
-    expect(flipped()).toBe(false) // 'y' is not a negated spindle
+    expect(flipped()).toBe(false)
   })
 
   it('draws the picker’s four buttons above the commands, not six pills', async () => {
@@ -452,11 +462,11 @@ describe('picking a spindle', () => {
 
     await secondaryPress(tile('Kits/neighbour.stl'))
     // Nothing of the user's is stored, so the pose is what frames it — and the
-    // menu marks the default, not the pose's spindle: the pose is advisory and
-    // the model has no axis of its own.
-    expect(markedAxis()).toBe('y')
+    // menu marks the default (`z`, the STL's up axis), not the pose's spindle
+    // (`-y`): the pose is advisory and the model has no axis of its own.
+    expect(markedAxis()).toBe('z')
     expect(flipped()).toBe(false)
-    await click(flip()!) // 'y' negated
+    await click(flip()!) // 'z' negated
     await settle()
 
     const [, , axis] = renderThumbnail.mock.calls.at(-1)! as unknown as [
@@ -464,12 +474,12 @@ describe('picking a spindle', () => {
       CameraState,
       OrbitAxis,
     ]
-    expect(axis).toBe('-y')
+    expect(axis).toBe('-z')
     const put = putThumb.mock.calls
       .map(([body]) => body as Record<string, unknown>)
       .filter((b) => b.path === neighbour)
       .at(-1)!
-    expect(put.axis).toBe('-y')
+    expect(put.axis).toBe('-z')
     expect(put.camera).toBeNull()
     expect(put.posed).toBeUndefined()
   })

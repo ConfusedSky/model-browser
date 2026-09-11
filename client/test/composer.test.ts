@@ -131,7 +131,7 @@ describe('render paths go through the chains, never renderer.render', () => {
     const composed = vi.spyOn(live.composer, 'render').mockImplementation(() => {})
     const direct = vi.spyOn(getRenderer(), 'render')
 
-    const session = new ViewerSession(makeMesh())
+    const session = new ViewerSession(makeMesh(), 'y')
     session.render(200, 200)
 
     expect(composed).toHaveBeenCalledOnce()
@@ -150,7 +150,7 @@ describe('render paths go through the chains, never renderer.render', () => {
 
     // happy-dom has no 2d canvas context, so the PNG encode at the very end
     // throws — well after the readback this test is about.
-    expect(() => renderThumbnail(makeMesh())).toThrow('2d context unavailable')
+    expect(() => renderThumbnail(makeMesh(), undefined, 'y')).toThrow('2d context unavailable')
 
     expect(composed).toHaveBeenCalledOnce()
     expect(direct).not.toHaveBeenCalled()
@@ -270,7 +270,7 @@ describe('both paths render under the same occlusion preference', () => {
 
   it('with the preference off, the tile and the overlay over it are both unoccluded', () => {
     setAoEnabled(false)
-    const session = new ViewerSession(makeMesh())
+    const session = new ViewerSession(makeMesh(), 'y')
     try {
       // The thumbnail the tile shows: rendered under the caller's reading.
       expect(thumbOccluded(() => renderThumbnail(makeMesh(), undefined, 'y', false))).toBe(false)
@@ -282,9 +282,9 @@ describe('both paths render under the same occlusion preference', () => {
   })
 
   it('with the preference on, both are occluded — the shipped recipe, unchanged', () => {
-    const session = new ViewerSession(makeMesh())
+    const session = new ViewerSession(makeMesh(), 'y')
     try {
-      expect(thumbOccluded(() => renderThumbnail(makeMesh()))).toBe(true)
+      expect(thumbOccluded(() => renderThumbnail(makeMesh(), undefined, 'y'))).toBe(true)
       expect(liveOccluded(session)).toBe(true)
     } finally {
       session.close()
@@ -299,7 +299,7 @@ describe('both paths render under the same occlusion preference', () => {
     // store set the *other* way, which is the only way to tell a passed value
     // from a fresh read.
     setAoEnabled(true)
-    const session = new ViewerSession(makeMesh())
+    const session = new ViewerSession(makeMesh(), 'y')
     try {
       expect(thumbOccluded(() => session.snapshot(false))).toBe(false)
     } finally {

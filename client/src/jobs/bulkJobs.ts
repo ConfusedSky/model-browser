@@ -27,7 +27,9 @@ import type { DirEntry, IndexPose } from '../../../shared/types'
 import { HttpError, type ApiClient } from '../api/client'
 import { isCurrentRender } from '../hooks/useThumbnails'
 import { framingAfterDiscard, renderEntryThumbnail, resettable, type ActionHost } from '../lib/entryActions'
+import { defaultAxisFor } from '../three/camera'
 import type { MeshLru } from '../three/lru'
+import { formatOfEntry } from '../three/models'
 import type { RenderQueue } from '../three/queue'
 
 export type JobOperation = 'generate' | 'reset'
@@ -514,7 +516,10 @@ export class BulkJobs {
         // null`, which does not read it — and that is exactly why the axis rule
         // can be decided without rendering anything. The annotation's axis is
         // passed because it is the truthful answer to "what is stored".
-        const { posed } = framingAfterDiscard(job.pose, job.entry.thumb?.axis ?? 'y')
+        const { posed } = framingAfterDiscard(
+          job.pose,
+          job.entry.thumb?.axis ?? defaultAxisFor(formatOfEntry(job.entry)),
+        )
         try {
           const written = await this.deps.api.putThumb({
             path: job.entry.path,

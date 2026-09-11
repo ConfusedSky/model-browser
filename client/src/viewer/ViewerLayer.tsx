@@ -37,7 +37,8 @@ import { expandLibraryPath } from '../lib/libraryPath'
 import { SCALE_BADGE, Z_LABEL, type ScoreScale } from '../lib/scoreScale'
 import { GestureTracker, nativeMenuRequested } from '../lib/gesture'
 import type { MeshLru } from '../three/lru'
-import { DEFAULT_CAMERA } from '../three/camera'
+import { DEFAULT_CAMERA, defaultAxisFor } from '../three/camera'
+import { formatOfEntry } from '../three/models'
 import { cameraForPose } from '../three/pose'
 import { getRenderer } from '../three/renderer'
 import { liveRenderSize } from './renderSize'
@@ -247,7 +248,16 @@ export default function ViewerLayer({
   actionNote = null,
 }: Props) {
   const [session, setSession] = useState<ViewerSession | null>(null)
-  const [sessionAxis, setSessionAxis] = useState<OrbitAxis>('y')
+  /**
+   * The spindle this model turns about when nothing names one: its format's
+   * up axis, from the one definition (file-frame-spindle D2). Read at the
+   * state seed, at every branch of the saved-framing read, and by the live
+   * view a reset moves, so the picker, the session and the reset agree.
+   */
+  const fallbackAxis = defaultAxisFor(formatOfEntry(viewer.entry))
+  // The seed is overwritten by the open's answer before the picker (gated on
+  // `session`) draws; it is the entry's default so no letter is fixed here.
+  const [sessionAxis, setSessionAxis] = useState<OrbitAxis>(fallbackAxis)
   /** Mesh-load failure message — the viewer shows it instead of dismissing. */
   const [loadError, setLoadError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
@@ -376,7 +386,7 @@ export default function ViewerLayer({
     pendingReframeRef.current = null
     const savedPromise: Promise<{ camera?: CameraState; axis: OrbitAxis }> =
       camera !== undefined
-        ? Promise.resolve({ camera, axis: axis ?? 'y' })
+        ? Promise.resolve({ camera, axis: axis ?? fallbackAxis })
         : api
             .getThumb(viewer.entry.path, viewer.entry.mtime)
             .then((r) => {
@@ -384,12 +394,12 @@ export default function ViewerLayer({
               openedFromPoseRef.current = posed
               return {
                 camera: posed ? fromPose.camera : r.camera,
-                axis: r.axis ?? (posed ? fromPose.axis : ('y' as OrbitAxis)),
+                axis: r.axis ?? (posed ? fromPose.axis : fallbackAxis),
               }
             })
             .catch(() => {
               openedFromPoseRef.current = fromPose !== null
-              return { camera: fromPose?.camera, axis: fromPose?.axis ?? ('y' as OrbitAxis) }
+              return { camera: fromPose?.camera, axis: fromPose?.axis ?? fallbackAxis }
             })
     void Promise.all([lru.acquire(viewer.entry.path), savedPromise])
       .then(([object, saved]) => {
@@ -407,7 +417,7 @@ export default function ViewerLayer({
         // A posed discard installs the pose's own axis; a pose-less one *keeps*
         // the stored axis (`framingAfterDiscard`, whose PUT sends no axis). The
         // press could only read the axis the thumbs map held at that moment —
-        // during a pending open that can still be the `'y'` fallback while the
+        // during a pending open that can still be the format's default while the
         // store holds another spindle — so the kept axis is named by `saved`,
         // the same answer the store's keep is measured against, not by the
         // press's blind read.
@@ -774,7 +784,7 @@ export default function ViewerLayer({
       // With no session, the spindle the model is stored about — the same value
       // the session would have opened at, so what a pose-less reset keeps is
       // the same either way.
-      axis: s?.axis ?? axis ?? 'y',
+      axis: s?.axis ?? axis ?? fallbackAxis,
       reframe: (nextCamera, nextAxis, posed) => {
         if (s !== null) {
           s.reframe(nextCamera, nextAxis)

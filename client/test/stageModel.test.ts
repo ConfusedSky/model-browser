@@ -199,7 +199,7 @@ describe('contact floor', () => {
   })
 
   it('disposes its geometry and material when the session closes', () => {
-    const session = new ViewerSession(makeMesh(new THREE.Vector3(1, 2, 3)))
+    const session = new ViewerSession(makeMesh(new THREE.Vector3(1, 2, 3)), 'y')
     const floor = sessionFloor(session)
     const geometry = vi.spyOn(floor.geometry, 'dispose')
     const material = vi.spyOn(floor.material, 'dispose')
@@ -212,7 +212,7 @@ describe('contact floor', () => {
 describe('unstage', () => {
   it('returns a thumbnail-borrowed object to the live session that owns it', () => {
     const mesh = makeMesh(new THREE.Vector3(5, 0, -2))
-    const session = new ViewerSession(mesh)
+    const session = new ViewerSession(mesh, 'y')
     const sessionPivot = mesh.parent
 
     // What renderThumbnail does: remember the parent, stage into its own

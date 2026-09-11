@@ -74,7 +74,7 @@ describe('AO toggle', () => {
   it('the live view follows the flag per render', () => {
     const chain = getLiveChain(100, 100)
     vi.spyOn(chain.composer, 'render').mockImplementation(() => {})
-    const session = new ViewerSession(makeMesh())
+    const session = new ViewerSession(makeMesh(), 'y')
 
     setAoEnabled(false)
     session.render(100, 100)
@@ -124,7 +124,7 @@ describe('AO toggle', () => {
 
     setAoEnabled(false)
     // happy-dom has no 2d canvas; the throw is after the render this asserts.
-    expect(() => renderThumbnail(makeMesh())).toThrow('2d context unavailable')
+    expect(() => renderThumbnail(makeMesh(), undefined, 'y')).toThrow('2d context unavailable')
     expect(gtaoOf(chain).enabled).toBe(true)
   })
 })

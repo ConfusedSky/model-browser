@@ -154,7 +154,9 @@ describe('re-render thumbnail', () => {
     // the label the next sweep sees `poseStale` and renders the tile again.
     const h = harness({ status: 'hit' }, { [HERO.path]: POSE })
     const resolved = cameraForPose(POSE, DEFAULT_CAMERA)!
-    expect(resolved.axis).toBe('z') // the fixture is not the default spindle
+    // The fixture's `up` is [0, -1, 0], spindle `-y` in file coordinates (D4) —
+    // not the STL default `z`, so a posed axis is distinguishable from the default.
+    expect(resolved.axis).toBe('-y')
     run('reRenderThumbnail', h.host)
     await flush()
 

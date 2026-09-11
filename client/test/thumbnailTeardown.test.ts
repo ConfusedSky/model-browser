@@ -45,7 +45,7 @@ describe('renderThumbnail teardown', () => {
     // happy-dom has no 2d canvas context, so the encode step at the very end
     // throws — after the finally block that owns teardown, which is the point
     // of this test.
-    expect(() => renderThumbnail(mesh)).toThrow('2d context unavailable')
+    expect(() => renderThumbnail(mesh, undefined, 'y')).toThrow('2d context unavailable')
 
     // Not just today's caster: whichever lights stageModel switched on, none
     // leaks its 2048² depth texture.

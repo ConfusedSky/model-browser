@@ -31,7 +31,6 @@ import { BulkJobs, useBulkJobState, type JobOperation } from './jobs/bulkJobs'
 import {
   commandsFor,
   containingFolder,
-  DEFAULT_ORBIT_AXIS,
   JOB_BUSY,
   resettable,
   type FramingWrite,
@@ -104,7 +103,15 @@ import {
 } from './state/selectors'
 import { sameListing, SIMILAR_K, toUrlView, type Prefs, type Subject, type View } from './state/view'
 import { MeshLru } from './three/lru'
-import { disposeModel, embedded3mfThumbnail, formatOf, geometryBytes, parseModel } from './three/models'
+import { defaultAxisFor } from './three/camera'
+import {
+  disposeModel,
+  embedded3mfThumbnail,
+  formatOf,
+  formatOfEntry,
+  geometryBytes,
+  parseModel,
+} from './three/models'
 import { POSE_VERSION } from './three/pose'
 import { RenderQueue, type Band } from './three/queue'
 import { RIG_VERSION, THUMB_LIGHTING } from './three/renderer'
@@ -2675,7 +2682,7 @@ export default function App() {
    */
   const menuAxis = useMemo<OrbitAxis | null>(() => {
     if (menu === null || !orbitAxisApplies(menu.entry, menuExcludes(menu.surface))) return null
-    return thumbs.get(menu.entry.path)?.axis ?? DEFAULT_ORBIT_AXIS
+    return thumbs.get(menu.entry.path)?.axis ?? defaultAxisFor(formatOfEntry(menu.entry))
   }, [menu, thumbs])
   /** An axis chosen from the menu: the shared body, through the one host. The
    *  spindle already in force goes with it — re-choosing it is a no-op, and that

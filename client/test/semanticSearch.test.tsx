@@ -497,9 +497,11 @@ describe('meaning search', () => {
     const call = renderThumbnail.mock.calls.at(-1)
     expect(call).toBeDefined()
     const [, camera, axis] = call! as unknown as [unknown, { az: number; el: number }, string]
-    // A file Y-up model is the `-z` spindle in the scene (the loader bakes
-    // rotateX(-π/2) into STL), and the derived offset puts azimuth 225 at 315°.
-    expect(axis).toBe('-z')
+    // The pose is read in file coordinates, exactly (file-frame-spindle D4):
+    // the fixture's `up` is [0, 1, 0], so the spindle is `y` — the letter the
+    // index names, with no coordinate mapping between them. The derived
+    // offset puts azimuth 225 at 315°, unchanged by the frame change (D3).
+    expect(axis).toBe('y')
     expect((camera.az * 180) / Math.PI).toBeCloseTo(315, 4)
     expect((camera.el * 180) / Math.PI).toBeCloseTo(20, 4)
 

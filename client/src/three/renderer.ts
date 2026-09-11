@@ -390,7 +390,7 @@ export function unstage(
 export function renderThumbnail(
   object: THREE.Object3D,
   state: CameraState = DEFAULT_CAMERA,
-  axis: OrbitAxis = 'y',
+  axis: OrbitAxis,
   ao = true,
 ): Promise<Blob> {
   const r = getRenderer()

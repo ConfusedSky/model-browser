@@ -242,12 +242,13 @@ describe('orbit → thumbnail handoff', () => {
 })
 
 describe('an index pose survives into the live session', () => {
-  it('a posed thumbnail stores no axis, and the viewer must not read that as y', async () => {
+  it('a posed thumbnail stores no axis, and the viewer must not read that as the default', async () => {
     // The symptom: the tile rendered at the pose and the live view abandoned it
     // the moment you dragged. A posed thumbnail deliberately stores no axis,
-    // and the cache used to answer 'y' for that absence, so the viewer read a
-    // stored orientation where there was none. File Y-up is the '-z' spindle in
-    // the scene, so the axis picker must show Z, flipped.
+    // and the cache used to answer the default for that absence, so the viewer
+    // read a stored orientation where there was none. The pose is read in file
+    // coordinates (file-frame-spindle D4): `up` [0, 1, 0] is the `y` spindle,
+    // so the picker must show Y, not flipped — and not the STL default Z.
     const { props } = makeProps()
     const posed: React.ComponentProps<typeof ViewerLayer> = {
       ...props,
@@ -269,9 +270,38 @@ describe('an index pose survives into the live session', () => {
     const pressed = Array.from(
       container!.querySelectorAll<HTMLButtonElement>('[aria-label="Orbit axis"] button'),
     ).filter((b) => b.getAttribute('aria-pressed') === 'true')
-    // Z *and* the flip toggle: the spindle is '-z', not 'z'. Asserting both is
-    // what distinguishes the right axis from its negation.
-    expect(pressed.map((b) => b.textContent)).toEqual(['Z', 'flip'])
+    // Y and *not* the flip toggle: the spindle is 'y', not '-y'. Asserting the
+    // whole pressed set is what distinguishes the right axis from its negation.
+    expect(pressed.map((b) => b.textContent)).toEqual(['Y'])
+  })
+})
+
+describe('an un-framed model opens about its format’s up axis', () => {
+  // Nothing stored, no pose: the spindle is the format's up convention, from
+  // the one definition (`defaultAxisFor`, file-frame-spindle D2). STL is Z-up,
+  // OBJ Y-up; the tile menu marks the same letters (orbitAxisMenu.test.tsx).
+  const pressed = (): string[] =>
+    Array.from(
+      container!.querySelectorAll<HTMLButtonElement>('[aria-label="Orbit axis"] button'),
+    )
+      .filter((b) => b.getAttribute('aria-pressed') === 'true')
+      .map((b) => b.textContent ?? '')
+
+  it('an STL in the lightbox marks Z, not flipped', async () => {
+    const { props } = makeProps()
+    await render({ ...props, viewer: { ...props.viewer, mode: 'lightbox' as const } })
+    expect(pressed()).toEqual(['Z'])
+  })
+
+  it('an OBJ in the lightbox marks Y, not flipped', async () => {
+    const { props } = makeProps()
+    const obj = {
+      ...props.viewer,
+      mode: 'lightbox' as const,
+      entry: { ...ENTRY, name: 'bracket.obj', path: '/models/bracket.obj', format: 'obj' as const },
+    }
+    await render({ ...props, viewer: obj })
+    expect(pressed()).toEqual(['Y'])
   })
 })
 

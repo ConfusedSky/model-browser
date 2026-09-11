@@ -7,7 +7,7 @@ import { AXIS_TWEEN_MS, ViewerSession } from '../src/viewer/session'
 const EL_LIMIT = Math.PI / 2 - 0.01
 const AXES: OrbitAxis[] = ['x', '-x', 'y', '-y', 'z', '-z']
 
-function makeSession(axis?: OrbitAxis, now?: () => number): ViewerSession {
+function makeSession(axis: OrbitAxis = 'y', now?: () => number): ViewerSession {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshBasicMaterial())
   return new ViewerSession(mesh, axis, undefined, now)
 }

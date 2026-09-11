@@ -30,7 +30,8 @@ import { thumbImageUrl } from './thumbUrl'
 export interface ThumbResult {
   status: ThumbStatus
   camera?: CameraState
-  /** Stored spindle axis; absent when the path is unknown (read as 'y'). */
+  /** Stored spindle axis; absent when the path is unknown (the caller falls
+   *  back to the format's default, `defaultAxisFor`). */
   axis?: OrbitAxis
   /** Lighting mode the PNG was rendered with; absent on pre-lighting entries. */
   lighting?: LightingMode

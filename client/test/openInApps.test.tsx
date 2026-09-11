@@ -494,15 +494,14 @@ describe('the keyboard, across two pill groups', () => {
     await arrow('ArrowUp') // into the open-in row, at the default
     expect(focusedEl().dataset.appId).toBe(F3D.id)
     await arrow('ArrowUp') // on into the axis row above it
-    // 'y' is the spindle this model is framed about with none stored, and the
-    // axis group is entered at the letter in force rather than at `flip` —
-    // which here is also proof the crossing rule fired: 'y' is the middle
-    // button of the row, not the one the step arrived at.
-    expect(focusedEl().dataset.axis).toBe('y')
-    // Down walks on through the row it is in — 'z', then `flip` — and only
-    // then crosses into the open-in row, at its default.
-    await arrow('ArrowDown')
+    // 'z' is the spindle an STL is framed about with none stored (its
+    // format's up axis, file-frame-spindle D2), and the axis group is entered
+    // at the letter in force rather than at `flip` — which here is also proof
+    // the crossing rule fired: the step arrived from below, where the nearest
+    // button is `flip`, not 'z'.
     expect(focusedEl().dataset.axis).toBe('z')
+    // Down walks on through the row it is in — `flip` — and only then
+    // crosses into the open-in row, at its default.
     await arrow('ArrowDown')
     expect(focusedEl().dataset.axis).toBe('flip')
     await arrow('ArrowDown')
@@ -517,7 +516,7 @@ describe('the keyboard, across two pill groups', () => {
     await arrow('End')
     expect(focusedEl().dataset.command).toBe('openWith') // the last row
     await arrow('ArrowDown') // wrap
-    expect(focusedEl().dataset.axis).toBe('y')
+    expect(focusedEl().dataset.axis).toBe('z') // the STL's default, the letter in force
   })
 
   it('launches the focused pill by the same body the pointer reaches', async () => {

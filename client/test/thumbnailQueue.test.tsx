@@ -471,7 +471,8 @@ describe('the sweep follows the occlusion preference', () => {
     await settle()
 
     expect(api.getThumb).toHaveBeenCalledWith('/models/m0.stl', 1, false)
-    expect(vi.mocked(renderThumbnail)).toHaveBeenCalledWith(obj, DEFAULT_CAMERA, 'y', false)
+    // 'z': an STL with no stored axis renders about its format's up axis (D2).
+    expect(vi.mocked(renderThumbnail)).toHaveBeenCalledWith(obj, DEFAULT_CAMERA, 'z', false)
     expect(vi.mocked(api.putThumb).mock.calls[0]![0].ao).toBe(false)
   })
 
@@ -487,7 +488,7 @@ describe('the sweep follows the occlusion preference', () => {
     await settle()
 
     expect(api.getThumb).toHaveBeenCalledWith('/models/m0.stl', 1, true)
-    expect(vi.mocked(renderThumbnail)).toHaveBeenCalledWith(obj, DEFAULT_CAMERA, 'y', true)
+    expect(vi.mocked(renderThumbnail)).toHaveBeenCalledWith(obj, DEFAULT_CAMERA, 'z', true)
     expect(vi.mocked(api.putThumb).mock.calls[0]![0].ao).toBe(true)
     // That the on-request is *byte-identical* to the one this client sent
     // before renders were keyed by occlusion is the ApiClient's contract, not
@@ -1617,7 +1618,7 @@ describe('visible-first ordering and deferral', () => {
     await settle()
 
     expect(vi.mocked(renderThumbnail)).toHaveBeenCalledTimes(1)
-    expect(vi.mocked(renderThumbnail)).toHaveBeenCalledWith(obj, DEFAULT_CAMERA, 'y', false)
+    expect(vi.mocked(renderThumbnail)).toHaveBeenCalledWith(obj, DEFAULT_CAMERA, 'z', false)
     expect(vi.mocked(api.putThumb).mock.calls[0]![0].ao).toBe(false)
   })
 

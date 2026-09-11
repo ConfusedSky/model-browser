@@ -69,7 +69,7 @@ export class ViewerSession {
 
   constructor(
     readonly object: THREE.Object3D,
-    axis: OrbitAxis = 'y',
+    axis: OrbitAxis,
     initial: CameraState = DEFAULT_CAMERA,
     private readonly now: () => number = () => performance.now(),
   ) {
