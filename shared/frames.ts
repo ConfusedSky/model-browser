@@ -24,8 +24,7 @@ export interface FrameTriples {
  * The frames camera angles were measured in while STL geometry was baked Y-up
  * (`geometry.rotateX(-π/2)` in `parseModel`, removed by file-frame-spindle):
  * the scene-axis convention. Kept as the table `FILE_FRAMES` is derived from,
- * and as the legacy convention the compare pill and the frame-ab harness
- * reproduce (D3/D6/D7).
+ * and as the legacy convention the frame-ab harness reproduces (D3/D6).
  */
 export const SCENE_FRAMES: Record<OrbitAxis, FrameTriples> = {
   y: { s: [0, 1, 0], a: [1, 0, 0], b: [0, 0, 1] },

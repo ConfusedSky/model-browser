@@ -51,7 +51,7 @@ const HERO: DirEntry = {
 const CAM = { az: 1, el: 0.25, distR: 3, target: [0, 0, 0] as [number, number, number] }
 const MESH = {} as THREE.Object3D
 
-/** A pose the app can express: file-space `up` (0,-1,0) is scene +Z, and
+/** A pose the app can express: file-space `up` (0,-1,0) is the `-y` spindle, and
  *  `azimuth_zero` is perpendicular to it. Deliberately not 'y' — the axis has
  *  to be visibly different from the default for "the axis moved" to mean
  *  anything. */

@@ -33,7 +33,7 @@ azimuth offset (CA1, strategy A).
   the pickers name one direction one way.
 - Per-format default spindle from a single definition.
 - The pixel comparison that justified the frame strategy stays rerunnable.
-- A temporary in-app switch to compare the two renderings during the change's test.
+- (Was: a temporary in-app switch for the test window — built, used, removed; D7.)
 
 **Non-Goals:**
 - Migrating stored framings: the app is unreleased and no store holds any that matter (D5).
@@ -42,7 +42,7 @@ azimuth offset (CA1, strategy A).
   stay valid; a `RIG_VERSION` bump is not warranted (see D3).
 - Any change to mini-classify or the index's pose format.
 - Provenance of the axis (index / stored / default) in the UI — issue #8's suggestion,
-  made unnecessary by the pill and the contact sheet agreeing.
+  made unnecessary by the axis control and the contact sheet agreeing.
 
 ## Decisions
 
@@ -57,7 +57,7 @@ unchanged in code and correct by construction.
 
 ### D2: Default spindle per format, from one function
 
-`defaultAxisFor(format: ModelFormat): OrbitAxis` in `three/camera.ts` — `z` for `stl` and
+`defaultAxisFor(format: ModelFormat): OrbitAxis` in `shared/frames.ts`, re-exported by `three/camera.ts` — `z` for `stl` and
 `3mf`, `y` for `obj` — replaces the sixteen `?? 'y'` and `= 'y'` fallbacks in two groups.
 **Axis becomes required** where no format is in scope, the default pushed to the caller:
 `camera.ts`'s `statePosition`, `applyState` and `captureState`; `renderThumbnail`
@@ -139,7 +139,10 @@ and a `rotateX(+π/2); rotateX(−π/2)` round trip under C0 gives 0/0). It is t
 map's texel grid landing sub-texel differently in the rotated world. So cached thumbnails
 are not re-rendered: nothing structural moves and no pixel differs by more than 60/255.
 `RIG_VERSION` is not bumped, on the same reasoning the AO-dimension change used — a
-render that is visibly the same picture is not a new recipe.
+render that is visibly the same picture is not a new recipe. One consequence worth
+knowing: because the table is the bake's image, re-introducing the bake fails only the
+two geometry cells (`models.test.ts`'s bounding box, `stlNormals`' healthy file) — every
+thumbnail, viewer and pose cell compensates by construction. Those two are the guard.
 
 `CameraState.target` is the one part of a stored camera that is **not** spindle-relative:
 `captureState` writes it as `target − bounds.center` in world axes, so under R⁻¹ a non-zero
@@ -185,7 +188,7 @@ the unit cell that asserts D3's table reads the shared one.
 
 ### D6: The A/B harness ships as a script
 
-`scripts/frame-ab/` — the spike's `run.mjs`, the sample list, the OBJ fixture generator,
+`scripts/frame-ab/` — the spike's `run.mjs`, the sample list, the L-bracket OBJ as a file,
 the per-pixel diff, the contact sheet, a config file for the playwright-core and chromium
 paths. The page stays under the client, at `client/spike/ab.{html,ts}`: it imports the
 app's own modules through Vite, so it needs the client's root and config, and is served by
@@ -291,7 +294,7 @@ re-runs its open effect, and the flip closes it first.
 
 Flipping the pill does not clear the mesh LRU: `MeshLru.clear` has no in-use guard, and
 the grid's orbit overlay and any in-flight thumbnail render hold acquired objects across
-an await. Instead there are **two LRU instances** for the test window, one per
+an await. Instead there were **two LRU instances** for the test window, one per
 convention, built in `App` from one loader factory `meshLoader(api, bake: boolean)` —
 `parseModel` takes `bake` as an argument rather than reading the flag — and every
 consumer that takes `lru` (`ViewerLayer`, `useThumbnails`, `bulkJobs`, the hover warmer)
@@ -348,8 +351,6 @@ Kept: `shared/frames.ts`'s pre-bake triples, `meshLoader` (minus `bake`), and `l
   2026-09-11): demo framings are expendable — they are per-browser conveniences the demo
   never promised to keep — and the deploy README says so. The same goes for a client
   rolled back after the change.
-- [A file-convention framing is shown under the pill's legacy side] → accepted for the
-  test window (D7).
 - [A cached thumbnail differs from a fresh render in the shadow penumbra] → measured
   ≤ 60/255 on ≤ 1.8 % of pixels; not visible; recorded here so a future pixel comparison
   against an old cache does not read it as a regression.
@@ -362,6 +363,8 @@ Kept: `shared/frames.ts`'s pre-bake triples, `meshLoader` (minus `bake`), and `l
   measured, and the tasks say so.
 
 ## Migration Plan
+
+*(Steps 1–5 were executed 2026-09-10/11 and stand as the record: baselines captured from the spike; both write guards set before the test window — after an incident in which they were not, task 0.2's note; the code landed with the pill; Masa's test window; the pill removed.)*
 
 1. Capture the OBJ baselines from the spike worktree (D6) while the old code exists.
 2. Set `features.thumbWrites: false` in the local config, `rm -rf client/dist`, restart

@@ -356,23 +356,9 @@
 
 ## 5. Migrate, remove, land
 
-- [ ] 5.1 Stop the dev server (both guards were in force through the window, Migration
-      Plan step 4); `for d in ~/.cache/model-browser/*/; do bun run scripts/migrate-frames.ts --cache-dir "$d"; done` — **every** directory in
-      `~/.cache/model-browser/` (four on 2026-09-10 — 18,428 / 1,507 / 122 / 40 sidecars,
-      74 framed entries in all — 54 camera+axis, 20 axis-only, 0 camera-only — all STL,
-      `0f680186` the only one with `x`-family axes); record each run's seven counts here
-      (label-only is expected 0 everywhere); `--undo` then re-run on one id reports the
-      same counts both ways — true only if nothing was written between the two runs: an
-      undo also converts entries the new server wrote fresh (correctly — it is a convention
-      translation, not an edit log — the reviewer's probe), so its counts exceed the
-      forward run's by however many landed in between. 2026-09-11: the caches were
-      deleted by Masa before this ran, so there is nothing to migrate on this machine;
-      the server recreates a library's directory on its next write, so once `thumbWrites`
-      is restored (5.2) run the script over each new directory so it carries the marker
-      (`convention: 2`) with zero counts — the tool's real test is its 17 cells, and the
-      demo's browsers migrate on read regardless
-      *(removed 2026-09-11 — Masa: unreleased, no data to migrate; the merged code was
-      reverted in this commit)*
+- [x] 5.1 *(removed 2026-09-11 on the D5 decision — the app is unreleased and the caches were
+      deleted, so there was nothing to migrate; the script, its marker and undo, and the
+      sidecar label were built, reviewed twice and reverted in c38f64d)*
 - [x] 5.2 Delete the pill, `bakeToggle.ts`, the second LRU and the loader's `bake`
       argument, the pill's legacy frame lookup, the legacy pose mapping and every branch
       on the flag, including the `putThumb` guard and the getters' second instance —

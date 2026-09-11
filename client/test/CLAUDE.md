@@ -8,7 +8,7 @@
   harness (`(await import('./appHarness')).apiClientModule()`); the harness must not statically
   import App or the factories would cycle
 - Import `./appHarness` **before** any `../src/...` module in an app-mount test (the
-  existing files do; bakePill.test.tsx did not, 2026-09-11). With `../src/three/renderer`
+  existing files do; a pill test deleted with the compare pill did not, 2026-09-11). With `../src/three/renderer`
   imported first, its mock factory is what loads the harness, and the app's own importers
   (`entryActions`' `renderThumbnail`) then get the *real* renderer — the harness spy counts
   nothing while "Error creating WebGL context" prints — even though the test's own

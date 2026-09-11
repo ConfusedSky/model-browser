@@ -41,11 +41,9 @@ what the index reports should agree without a mapping.
   (`scripts/frame-ab/`), with the baseline renders checked in and a tolerance from the
   measured residual, so the claim "same picture" can be re-checked on the machine it was
   measured on (the samples are the real library's files; the OBJ fixture alone travels).
-- **Temporary, removed before archive**: a corner pill beside `ssao` that flips the live
-  app between the bake and the file frame, so both can be seen in the grid and the
-  lightbox while the change is under test. No thumbnail write reaches the server while
-  the pill exists, on either side of it.
-- Issue #8 closes with this change: the pill and the contact sheet then name the same axis.
+- A temporary corner pill beside `ssao` flipped the live app between the two conventions
+  for the test window and was removed before archive (design D7 records what it found).
+- Issue #8 closes with this change: the axis control and the contact sheet name the same axis.
 
 ## Capabilities
 
@@ -73,8 +71,10 @@ what the index reports should agree without a mapping.
   fallbacks (`camera`, `renderer`, `session`, `ViewerLayer`, `useThumbnails`, `bulkJobs`,
   `entryActions`, `App`) through a `formatOfEntry` seam, the lightbox and menu axis
   pickers (unchanged in code — they show the spindle, which is now a file axis).
-- Server: nothing — `cache.ts` stores the axis as it did; it is a file axis by the
-  client's construction.
+- Server: `semantic.ts`'s `modelEntryAt` reads the format first and answers no entry for a
+  file that is not a model, so a query hit or a similarity anchor can never put a
+  `kind: 'model'` entry without a format on the wire — the wire-side half of
+  `formatOfEntry`'s throw (two server cells).
 - Scripts: `scripts/frame-ab/` and `client/spike/ab.{html,ts}` (the A/B harness and its
   page, from the spike).
 - Tests: camera/pose/models units (frames, defaults, the scene-to-file conversion), client

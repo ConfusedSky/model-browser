@@ -70,7 +70,7 @@ vi.mock('../src/viewer/ViewerLayer', () => ({
 const NESTED: DirListing = { path: '/models', entries: [dir('Alpha'), model('widget.stl')] }
 const WIDGET = '/models/widget.stl'
 const CAM: CameraState = { az: 1.2, el: 0.3, distR: 2.5, target: [0, 0, 0] }
-/** File-space `up` (0,-1,0) is scene +Z — a spindle that is not the default. */
+/** File-space `up` (0,-1,0) is the `-y` spindle — a spindle that is not the default. */
 const POSE: IndexPose = {
   up: [0, -1, 0],
   azimuth_zero: [1, 0, 0],

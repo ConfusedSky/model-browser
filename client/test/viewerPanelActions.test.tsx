@@ -90,7 +90,7 @@ const ANCHORED = {
  *  that ends up at the default can only have been re-framed. */
 const STORED = { az: 1.25, el: -0.4, distR: 4.5, target: [0, 0, 0] as [number, number, number] }
 
-/** An orientation the index can express: file-space `up` (0,-1,0) is scene +Z,
+/** An orientation the index can express: file-space `up` (0,-1,0) is the `-y` spindle,
  *  and `azimuth_zero` is perpendicular to it. Module-scope because two describes
  *  need it — the body's posed case, and the wave-fed one that pins the label a
  *  close writes when a discard resolves to it. */

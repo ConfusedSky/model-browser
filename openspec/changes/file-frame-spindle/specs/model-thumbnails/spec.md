@@ -21,7 +21,7 @@ The server SHALL store each model's camera (orientation) state and its orbit axi
 
 #### Scenario: Pre-existing entries read as +Y
 - **WHEN** a cache entry written before axis support is served, holding a camera and no axis
-- **THEN** the +Y such an entry was written against is the frame the format's default now carries, so it renders about that default with its camera interpreted unchanged, and it keeps no axis
+- **THEN** it keeps no axis and renders about its format's default: for STL the frame of that default is the frame the entry's +Y was measured in, so the camera is interpreted unchanged; for OBJ the default is +Y itself; for 3MF, which was never turned on load, the camera is re-measured about +Z, and the picture standing where it lay is the correction the format needed
 
 #### Scenario: Discarding an orientation is not writing one
 - **WHEN** a model's stored camera is discarded and its thumbnail is rendered again
