@@ -27,8 +27,18 @@ its old picture forever: the staleness test has nothing to compare.
   five-minute pose memo is the bound on how long a changed opinion takes to reach it.
   The first finding above stands as a finding only.
 
+- Added 2026-09-11 after the second live test: closing the lightbox without having
+  orbited or zoomed writes nothing — no camera, no thumbnail — where before it stored
+  whatever camera the lightbox opened at, which with the index down was the default, and
+  a stored camera then withheld the pose forever. And a thumbnail drawn under a pose is
+  re-rendered at the default framing when the source is settled to hold none for the
+  model (the index answered none, or is known to be absent), so the tile shows what the
+  lightbox will open at; while nobody knows yet (the index warming, the ask unanswered)
+  the render stands. The wave's answer carries `null` for the paths it settled as none,
+  the shape the listing already uses.
+
 Out of scope: any change to what a pose is, how the index derives it, or the server's
-pose layer.
+pose layer beyond the wave route's answer shape.
 
 ## Capabilities
 
@@ -41,17 +51,23 @@ pose layer.
 - `model-thumbnails`: MODIFIED *Recipe-labelled thumbnails* — a posed render records the
   orientation it was drawn under; a labelled render whose orientation the source has
   since changed needs re-render; a render labelled before the key existed is stale and
-  re-rendered once, gaining its key.
+  re-rendered once, gaining its key; a render drawn under an orientation the source is
+  settled to no longer hold is re-rendered at the default framing.
+- `model-viewer`: MODIFIED *Lightbox expanded view* — a close persists only after the
+  user manipulated the view; an untouched close writes nothing.
 
 ## Impact
 
-- Client: `hooks/useThumbnails.ts` (`usable`'s pose test, the render PUT's labels),
+- Client: `viewer/ViewerLayer.tsx` (`closeLightbox`), `App.tsx` (`persist` loses its
+  `posed` option; `carriedPoses` files `null`; the wave files every answer), `state/reducer.ts`
+  and the pose map's type (`IndexPose | null`), `hooks/useThumbnails.ts` (`usable`'s pose test, the render PUT's labels),
   `lib/entryActions.ts` (the re-render command's PUT and `isCurrentRender`),
   `three/pose.ts` (`poseKeyOf`; `POSE_VERSION` stays 2), `api/client.ts` (the two client
   types).
 - Shared: `ThumbRenderInfo`, `ThumbGetResponse`, `ThumbPutRequest` gain `poseKey?: string`.
 - Server: `cache.ts` (`RenderLabels`, `renderLabels`, `hasLabels`, `renderInfo`, `put`'s
-  label carry-over, the sibling-invalidation compare), `app.ts` (PUT passthrough).
+  label carry-over, the sibling-invalidation compare), `app.ts` (PUT passthrough; the
+  `POST /api/semantic/poses` answer carries `null` for settled negatives).
 - Tests: `client/test/poseRerender.test.tsx` (new; the reproducing cells go green),
   `thumbnailQueue.test.tsx` (its two by-value cells' posed fixtures carry the key, since
   a keyless posed hit is now stale), server cache cells for the label.

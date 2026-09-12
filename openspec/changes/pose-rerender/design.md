@@ -31,6 +31,22 @@ Not a hole: a pose carried at emission, or arriving by wave, over a hit labelled
 `posed` — the reload case — re-renders (three passing cells), which is the mechanism
 `pose-for-every-model` built.
 
+3. **Second live test, 2026-09-11 (after D2 landed): a camera nobody chose.** Masa reset
+   every framing, stopped the index, restarted the server, loaded the root and opened one
+   model. The tile showed its posed render (a front view); the lightbox opened at the
+   default three-quarter view, because the viewer takes its pose from the wave and the
+   wave had none; and closing the lightbox untouched **stored the default camera** and
+   re-rendered the tile under it. With the index back, the next load re-rendered nothing:
+   a stored camera wins over the pose (*Recipe-labelled thumbnails*: "a model the user
+   has oriented is a hit whatever the source holds"). Reproduced headless: pointer-up on
+   the tile at 4.5 s, lightbox open at 9.8 s, Escape at 9.8 s, `PUT /api/thumb` at
+   11.0 s carrying `camera {az 0.785, el 0.524, distR 2.4}` — `DEFAULT_CAMERA` — and
+   `axis z`. The writer is `closeLightbox` (`ViewerLayer`): `decided = everManipulated ||
+   !unowned`, and `unowned` is only "opened from a pose" or "framing discarded", so with
+   no pose in hand an untouched close records a decision the user never made. The sidecars
+   Masa reset at 17:48:56 were the five models he had opened. Two rules change (D4, D5)
+   and one writer is corrected (D6).
+
 ## Goals / Non-Goals
 
 **Goals:**
@@ -78,6 +94,72 @@ and the version needs no bump. The by-value cells in `thumbnailQueue` and the ot
 fixtures that meant "already drawn at this pose" now carry the key, since a keyless
 posed hit means the opposite.
 
+### D4: An untouched lightbox close writes nothing
+
+`model-viewer`'s "Esc or clicking outside SHALL close it, persisting camera state and
+thumbnail like an orbit release" predates poses; the one carve-out since
+(`pose-for-every-model`: opened from a pose and never touched → pixels only) left every
+other untouched close storing whatever camera the lightbox happened to open at. Masa,
+2026-09-11: "An untouched close should not store a camera." The rule becomes: a close
+persists — camera, axis and thumbnail, like an orbit release — only after the user
+manipulated the view (`ViewerSession.everManipulated`: an orbit or a zoom); a close that
+follows no manipulation writes nothing at all, neither camera nor pixels. Nothing is lost
+by writing no pixels: the view an untouched lightbox shows is either the tile's own
+framing (a stored camera, or the pose in hand — the same picture) or the default (no pose
+in hand), and D5 makes the tile follow that case through the grid's own queue. The axis
+control keeps its immediate persist (`changeAxis` → `onPersist`), which is a decision by
+itself and is unchanged. The reset-from-panel path keeps its guarantee for free: a reset
+clears `everManipulated`, so a close after it writes nothing, which is what "SHALL NOT
+have that discarded orientation written back" always meant. `openedFromPoseRef` and the
+`posed` option of `App.tsx`'s `persist` lose their only reader (D6).
+
+### D5: No pose in hand is a pose state — the thumbnail shows what the lightbox would
+
+Masa, 2026-09-11: "the thumbnail should be redrawn in the default camera if there is no
+pose." Today a posed render with no pose in hand is a hit (`usable`'s `pose !==
+undefined` guard), on the theory that a posed picture beats none while the index is
+down. The theory loses to the lightbox: the viewer opens at the default when no pose is
+in hand, so the tile and the view disagree, and D4's untouched close no longer papers
+over it. The rule becomes: where the source is **settled** to hold no orientation for a
+model it would otherwise frame, a render drawn under an orientation (`posed` or
+`poseKey` present) is stale and is re-rendered at the default framing, recording no
+orientation; where the ask is **unsettled** the render stands.
+
+Settled means the index answered, or is known not to be there; unsettled means nobody
+knows yet. On the wire the two roads already share one shape for the positive case, and
+now share it for the negative: a listing entry carries `pose: null` when the server asked
+and the index had none (listing-tree-cache §6.9), and the wave's `PosesResponse.poses`
+becomes `Record<string, IndexPose | null>` — `null` for every asked path the index
+settled as none, and for every asked path when the server's status memo says the index
+is `absent`, `wedged` or `volume-gone` (the lightbox shows the default in all three);
+paths are **omitted** — unsettled — when the index is `warming` or its status is not
+known (a cold memo, a failed ask), so a startup's warm-up does not redraw a folder at the
+default and again posed sixteen seconds later. `posesListingAsked`'s `answered` is the
+server's existing knowledge of the first case; the status memo (`memoisedStatus`) is the
+second. The client files the whole map, nulls included: `carriedPoses` stops skipping
+`null`, the wave's "empty answer is not filed" guard goes (an all-`null` answer is an
+answer — that cell's semantics are the point), `usable` reads `pose === null` as "no pose:
+a render labelled `posed` or carrying a key is stale", `undefined` as "unknown: the
+render stands", and the re-render site already writes no `posed`/`poseKey` when
+`cameraForPose` answers nothing — so the default render is unlabelled and is a hit until
+the source holds an orientation again, when *An image that predates the source's current
+mapping is re-rendered* takes over. `cameraForPose`, `poseKeyFor`, `resettable` and the
+viewer's `pose` prop accept `null` as they accept `undefined`. `wavePaths`' `===
+undefined` filter is unchanged: a `null` stays settled and is not re-asked.
+
+Accepted cost (Masa's call): an index that goes away and comes back redraws each posed
+tile twice — once at the default, once posed — per folder visited in each state. That is
+the price of the tile always showing what the lightbox will open at.
+
+### D6: The lightbox's persist was a third posed writer, keyless — retired by D4
+
+D2 named two posed writers, the sweep's render and `entryActions`' command; there was a
+third: `App.tsx`'s `persist` with `posed: true`, reached only by the untouched close of
+a lightbox opened from a pose, and it never sent `poseKey`. Under D2 such a render is
+stale on its next visit — one wasted re-render per such close, not a loop. D4 removes the
+only caller that set `posed`, so the option and `openedFromPoseRef` go rather than gain a
+key: `persist` writes a camera or nothing.
+
 ### D3: ~~`POSE_VERSION` 2 → 3 re-renders the keyless posed renders once~~ — struck
 
 Considered and reverted the same day (2026-09-11) — the version bump was the
@@ -102,6 +184,12 @@ version, bumped only when the mapping changes the picture).
   purpose" label and belongs with the index's faults, not here.
 - [A changed opinion takes up to five minutes plus a navigation to show] → the server's
   pose TTL, the recorded convergence bound; a library reload drops the layer at once.
+- [An index that flaps redraws every posed tile twice per folder] → D5, accepted; warming
+  is unsettled, so the common flap — a restart — costs nothing until the index is ready.
+- [A model with a stored camera from an earlier untouched close never re-poses] → the
+  cameras already stored this way are indistinguishable from chosen ones; the global
+  reset (thumbnail-jobs) is the way out, and Masa ran it on 2026-09-11 for the five
+  affected. Nothing migrates.
 
 ## Migration Plan
 
@@ -111,4 +199,6 @@ what does the one sweep that is wanted — lazily, per visit. Nothing is run by 
 ## Open Questions
 
 - None. Masa rejected polling on 2026-09-11 and, the same day, the compare-when-present
-  rule (with the version bump that propped it up): an absent key is stale.
+  rule (with the version bump that propped it up): an absent key is stale. Later the same
+  day: an untouched close stores no camera (D4), and no pose in hand redraws at the
+  default (D5).

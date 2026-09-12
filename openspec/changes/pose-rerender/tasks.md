@@ -75,3 +75,63 @@
       tile was served as `/api/thumb` (a hit), nothing rendered. The remaining keyless
       renders sweep the same way, one folder per visit)*
 - [ ] 3.3 `openspec validate pose-rerender --strict`; archive dry run on a fresh copy
+      *(re-run as 5.3 after §4)*
+
+## 4. The untouched close and the settled absence (D4–D6, 2026-09-11)
+
+- [ ] 4.1 `viewer/ViewerLayer.tsx` `closeLightbox`: settle and persist only when
+      `s.everManipulated`; otherwise dismiss and write nothing. `openedFromPoseRef` and
+      `framingDiscardedRef` lose their readers in the close (keep `framingDiscardedRef`
+      only if something else reads it — check). `App.tsx` `persist` loses its `posed`
+      option (D6): it writes a camera with the pixels, or is not called. Cells
+      (`viewerPanelActions` / `persistPut` neighbourhood, or a new `lightboxClose.test.tsx`):
+      open → Escape with no manipulation → zero PUTs, thumb state unchanged, for each of
+      the three openings (stored camera, pose in hand, nothing in hand); open → orbit →
+      Escape → one PUT carrying the camera (unchanged behaviour, the control); open from a
+      pose → Escape → zero PUTs (was: pixels with `posed` and no key). Falsify: restore
+      `decided = everManipulated || !unowned` → the nothing-in-hand cell fails
+- [ ] 4.2 The wire: `PosesResponse.poses` becomes `Record<string, IndexPose | null>`
+      (`shared/types.ts`, documented: `null` is a settled absence). Server
+      `POST /api/semantic/poses`: every asked path the index did not name is `null` when
+      `posesListingAsked` reports `answered`, or when `memoisedStatus()` says `absent`,
+      `wedged` or `volume-gone`; omitted (unsettled) when warming or the status is
+      unknown. `layers.recordPoses` keeps receiving the positive map. Cells
+      (`server/test/poses.test.ts`): ready index, two paths asked, one posed → the other
+      is `null`; index absent (fetch refused) → both `null`; index warming (503 status)
+      → both omitted; the GET route unchanged. Falsify: drop the absent branch → the
+      absent cell fails
+- [ ] 4.3 Client map: `App.tsx` `carriedPoses` files `null` (it currently skips `== null`
+      — the comment there says why it skipped; rewrite it); the wave effect files every
+      answer, empty included, and `poseWave.test.tsx`'s "does not file an empty answer at
+      all" cell is rewritten as semantics-is-the-point (an all-`null` answer is filed;
+      a wave that fails still says nothing); `state/reducer.ts` and the `poses` memo
+      chain carry `IndexPose | null`; `cameraForPose`, `poseKeyFor`, `resettable`, the
+      viewer's `pose` prop and `bulkJobs`' `pose: entry.pose ?? wave[path]` accept
+      `null` (check each `??` — `null ?? x` is `x`, which for the bulk generate path
+      means a settled `null` on the entry falls to the wave's `null`: fine, but say so).
+      `wavePaths`' `=== undefined` filter unchanged
+- [ ] 4.4 `useThumbnails.ts` `usable`: `pose === null` and `camera === undefined` and
+      `axis === undefined` and (`labels.posed !== undefined` or `labels.poseKey !==
+      undefined`) → stale; `pose === undefined` → the render stands (as today). The
+      re-render site writes no `posed` and no `poseKey` when `cameraForPose` answers
+      nothing (already the case — assert it). Cells (`poseRerender.test.tsx` or
+      `poseKey.test.tsx`): posed hit + wave answers `null` → one render, PUT without
+      `posed`/`poseKey`, then a hit; posed hit + no wave answer (undefined) → hit, zero
+      renders; unlabelled hit + `null` → hit; the default render + pose arrives later →
+      re-rendered posed (the existing mechanism, as the control). Falsify: drop the
+      `null` branch → the first cell fails; treat `undefined` as `null` → the second fails
+- [ ] 4.5 Records: `client/src/three/pose.ts`'s `POSE_VERSION` history comment gains the
+      settled-absence sentence; `useThumbnails`' `usable` doc says the three pose states;
+      CLAUDE.md's cache bullet unchanged (no new label)
+
+## 5. Land §4
+
+- [ ] 5.1 `bun run typecheck` and both suites green on merged main
+- [ ] 5.2 Live, read-only apart from what the app itself writes: with the dev instance up
+      and the index **stopped by Masa** (never by a worker or this session), load the root
+      → posed tiles re-render at the default once (PUTs without `posed`), a second load is
+      hits; open a model and close untouched → no PUT; with the index back (Masa) and a
+      navigation → the tiles re-render posed. Record the sidecar before/after here
+- [ ] 5.3 `openspec validate pose-rerender --strict`; archive dry run on a fresh copy;
+      collision check against `credits-completion` and `adaptive-ao-default`'s
+      `model-viewer` deltas (different requirements — verified 2026-09-11 at drafting)
