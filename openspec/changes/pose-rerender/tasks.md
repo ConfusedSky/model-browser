@@ -74,8 +74,8 @@
       sidecar then read `{hit, posed: 2, poseKey: "z:6.2832:0.3491"}`; second load → the
       tile was served as `/api/thumb` (a hit), nothing rendered. The remaining keyless
       renders sweep the same way, one folder per visit)*
-- [ ] 3.3 `openspec validate pose-rerender --strict`; archive dry run on a fresh copy
-      *(re-run as 5.3 after §4)*
+- [x] 3.3 `openspec validate pose-rerender --strict`; archive dry run on a fresh copy
+      *(re-run as 5.3 after §4 — done there)*
 
 ## 4. The untouched close and the settled absence (D4–D6, 2026-09-11)
 
@@ -161,6 +161,10 @@
       watcher had captured the pre-fix sequence at 18:14:59–18:15:04 (three closes writing
       camera + axis z, then the reset keeping the axis); the post-fix run left nothing
       stored and nothing counted)*
-- [ ] 5.3 `openspec validate pose-rerender --strict`; archive dry run on a fresh copy;
+- [x] 5.3 `openspec validate pose-rerender --strict`; archive dry run on a fresh copy;
       collision check against `credits-completion` and `adaptive-ao-default`'s
       `model-viewer` deltas (different requirements — verified 2026-09-11 at drafting)
+      *(2026-09-11 after the cold review's fixes: valid under --strict; the dry run applies
+      four MODIFIED blocks (~4) and `unjudged-framing-recount` archives after it on the same
+      fresh copy; the reviewer ran the six pairings with the other active changes in both
+      orders, all clean; the applied text carries no change-scoped prose and no comments)*

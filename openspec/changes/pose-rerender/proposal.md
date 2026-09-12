@@ -71,15 +71,20 @@ pose layer beyond the wave route's answer shape.
 - Client: `viewer/ViewerLayer.tsx` (`closeLightbox`), `App.tsx` (`persist` loses its
   `posed` option; `carriedPoses` files `null`; the wave files every answer), `state/reducer.ts`
   and the pose map's type (`IndexPose | null`), `hooks/useThumbnails.ts` (`usable`'s pose test, the render PUT's labels),
-  `lib/entryActions.ts` (the re-render command's PUT and `isCurrentRender`),
+  `lib/entryActions.ts` (the re-render command's PUT and `isCurrentRender`; `resettable`,
+  `framingAfterDiscard`, the discards' `axis: null`, `resetFramingLive`'s two PUTs),
+  `jobs/bulkJobs.ts` (`resettable`'s arity, `needsPose`, the settled-null read, the reset's
+  `axis: null`),
   `three/pose.ts` (`poseKeyOf`; `POSE_VERSION` stays 2), `api/client.ts` (the two client
   types).
-- Shared: `ThumbRenderInfo`, `ThumbGetResponse`, `ThumbPutRequest` gain `poseKey?: string`.
+- Shared: `ThumbRenderInfo`, `ThumbGetResponse`, `ThumbPutRequest` gain `poseKey?: string`;
+  `PosesResponse.poses` becomes `Record<string, IndexPose | null>`.
 - Server: `cache.ts` (`RenderLabels`, `renderLabels`, `hasLabels`, `renderInfo`, `put`'s
   label carry-over, the sibling-invalidation compare), `app.ts` (PUT passthrough; the
   `POST /api/semantic/poses` answer carries `null` for settled negatives).
-- Tests: `client/test/poseRerender.test.tsx` (new; the reproducing cells go green),
-  `thumbnailQueue.test.tsx` (its two by-value cells' posed fixtures carry the key, since
-  a keyless posed hit is now stale), server cache cells for the label.
+- Tests: `client/test/poseRerender.test.tsx`, `poseKey.test.tsx` and `lightboxClose.test.tsx`
+  (new), `thumbnailQueue.test.tsx` (its by-value cells' posed fixtures carry the key, since
+  a keyless posed hit is now stale), server cache and poses-route cells; the twenty test
+  files the D4–D7 commits touched are named in tasks 4.1–4.6.
 - Data: the 92 posed sidecars on this machine carry `posed: 2` and no key; each re-renders
   once on its next visit because the key is missing, and gains one.

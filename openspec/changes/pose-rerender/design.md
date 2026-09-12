@@ -13,7 +13,7 @@ main and confirmed against the dev instance by the investigating worker:
    navigation*, so this was not what he hit. The mechanism stays as it is.
 
 2. **A render made under one pose is never stale under another.** `usable`'s pose test
-   (`useThumbnails`) is `pose !== undefined && camera === undefined && axis === undefined
+   (`useThumbnails`) at the time was `pose !== undefined && camera === undefined && axis === undefined
    && labels.posed !== POSE_VERSION`: the label is the mapping recipe's version, not the
    pose. `samePose` retires the slot and re-looks-up when the pose changes by value, but
    the hit then passes `usable`. Cell: a hit labelled `posed: 2` rendered under pose A
@@ -102,7 +102,9 @@ thumbnail like an orbit release" predates poses; the one carve-out since
 other untouched close storing whatever camera the lightbox happened to open at. Masa,
 2026-09-11: "An untouched close should not store a camera." The rule becomes: a close
 persists — camera, axis and thumbnail, like an orbit release — only after the user
-manipulated the view (`ViewerSession.everManipulated`: an orbit or a zoom); a close that
+manipulated the view (`ViewerSession.everManipulated`: an orbit, a zoom or an axis change —
+`setAxis` sets it too, so a close after the axis control's own immediate persist writes
+the same view a second time, pre-existing and unchanged); a close that
 follows no manipulation writes nothing at all, neither camera nor pixels. Nothing is lost
 by writing no pixels: the view an untouched lightbox shows is either the tile's own
 framing (a stored camera, or the pose in hand — the same picture) or the default (no pose
@@ -219,9 +221,11 @@ kept one; the bulk reset and both per-model discards send `axis: null`
 unconditionally. The chosen-axis case this rule used to protect (a user's axis surviving
 a reset when no pose could replace it) is given up on purpose: reset means "as if the
 user had never set one", and a chosen axis is something the user set. The `entry-actions`
-scenario titled *With nothing to replace it, the axis stays* keeps its title and states the
-opposite in its body: the archive refuses a renamed scenario, and a title is the handle a
-rewrite is made under.
+scenario titled *With nothing to replace it, the axis stays* cannot be renamed — the archive
+refuses a block that drops an existing title — so it stays as a two-line marker whose body
+says the rule it names is gone and points at *With nothing to replace it, the axis goes
+too*, the scenario that states the rule (the cold review of 2026-09-11 found the hatch:
+the tool requires every existing title to be carried, not that none be added).
 
 Considered and set aside (Masa, 2026-09-11): keep the leftover axis but let a pose whose
 axis matches it apply anyway. It would have closed this reproduction — the pose's axis

@@ -223,9 +223,11 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
     sweep; `poseKey` is the orientation a posed render was drawn under (`pose-rerender`).
     `rm -rf` the id directory (or the whole cache dir) to force re-renders during visual
     tuning
-  - Orbit/lightbox E2E persists path-keyed cameras — tile thumbnails later re-render from
-    the new angles; that is not a pixel regression. The pointerup also queues a full
-    thumbnail re-render (persist), so wait ~5s before frame-time measurements
+  - Orbit E2E persists path-keyed cameras — tile thumbnails later re-render from the new
+    angles; that is not a pixel regression. The orbit's pointerup also queues a full
+    thumbnail re-render (persist), so wait ~5s before frame-time measurements. A lightbox
+    opened and closed **untouched** writes nothing (`pose-rerender` D4): to get a write,
+    orbit, zoom or change the axis inside it first
   - Playwright MCP writes files only under the repo root or `.playwright-mcp/`; and
     `browser_run_code_unsafe` has no require()/import — move bytes via in-page fetch/canvas,
     or serve them over localhost with a CORS header

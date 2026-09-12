@@ -7,7 +7,7 @@ The client SHALL also offer, on a model, a distinct action that gives up the ori
 
 The action SHALL discard the stored axis along with the camera, whatever is available to replace them: an up axis together with the angles measured about it are one thing and cannot be taken apart, since angles measured about one axis do not describe a view about another, and a model with nothing of its own is what "had the user never set one" means. What the model then resolves to is the orientation the view's own answer supplies where there is one and the client can express it, and otherwise the default about the file's own axis. An axis kept back by a reset would be a framing the model still holds: not counted while no orientation could replace it, counted and withholding that orientation the moment one could — a reset that has to be run twice.
 
-Re-rendering SHALL never change the model's orbit axis.
+The re-render action SHALL never change the model's orbit axis.
 
 Both actions SHALL be offered on every model, including one whose thumbnail is currently missing or failed, and SHALL NOT be offered on entries that are not models. Both SHALL leave the entry's file untouched: they replace a cached rendering, never the model.
 
@@ -32,6 +32,10 @@ Both actions SHALL be offered on every model, including one whose thumbnail is c
 - **THEN** the axis is discarded with the camera and the model is framed by that orientation entire, rather than by the default about the axis it used to have
 
 #### Scenario: With nothing to replace it, the axis stays
+- **WHEN** a reader looks for the rule this title once named — an axis kept back by a reset because no orientation could replace it
+- **THEN** there is no such rule: the axis goes with the camera whatever is available to replace them, as *With nothing to replace it, the axis goes too* states
+
+#### Scenario: With nothing to replace it, the axis goes too
 - **WHEN** the user gives up the orientation of a model the index supplies none for, whose orbit axis they had chosen
 - **THEN** the camera and the axis are both discarded and the model is framed by default about the file's own axis; when the index later supplies an orientation for it, that orientation applies without a second reset, and the model is not counted as holding a framing in between
 
