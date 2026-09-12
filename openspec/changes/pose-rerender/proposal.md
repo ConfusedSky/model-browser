@@ -37,6 +37,11 @@ its old picture forever: the staleness test has nothing to compare.
   the render stands. The wave's answer carries `null` for the paths it settled as none,
   the shape the listing already uses.
 
+- Added the same day, from Masa's step-by-step reproduction: a reset gives up the axis
+  along with the camera, always. Before, a reset run while no pose was in hand kept the
+  axis, which read as nothing until the index returned and then counted as a framing
+  again and withheld the pose — a reset that had to be run twice.
+
 Out of scope: any change to what a pose is, how the index derives it, or the server's
 pose layer beyond the wave route's answer shape.
 
@@ -55,6 +60,11 @@ pose layer beyond the wave route's answer shape.
   settled to no longer hold is re-rendered at the default framing.
 - `model-viewer`: MODIFIED *Lightbox expanded view* — a close persists only after the
   user manipulated the view; an untouched close writes nothing.
+- `entry-actions`: MODIFIED *Refreshing a model's thumbnail and its framing* — giving up
+  a framing discards the axis with the camera whatever is available to replace them.
+- `thumbnail-jobs`: MODIFIED *Bulk jobs are derived, scoped, and re-derivable* — reset
+  touches and counts every model holding a stored camera or axis. (`unjudged-framing-recount`
+  modifies a different requirement of the same capability; either archives first.)
 
 ## Impact
 

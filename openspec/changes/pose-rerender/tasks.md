@@ -120,6 +120,23 @@
       renders; unlabelled hit + `null` → hit; the default render + pose arrives later →
       re-rendered posed (the existing mechanism, as the control). Falsify: drop the
       `null` branch → the first cell fails; treat `undefined` as `null` → the second fails
+- [ ] 4.6 The reset gives up the axis (D7): `framingAfterDiscard` returns the pose's
+      camera and axis where usable, else `DEFAULT_CAMERA` about `defaultAxisFor(format)`
+      — its `keptAxis` parameter goes; `resettable(camera, axis)` is `camera !== undefined
+      || axis !== undefined` (the `pose` parameter goes, and every caller with it);
+      `renderEntryThumbnail`'s discard branch, `resetFramingLive`'s discard PUT and
+      `bulkJobs`' reset PUT send `axis: null` unconditionally; the bulk reset's wave no
+      longer needs poses for `reset` (`needsPose` for reset becomes false — the count and
+      the derivation read the wire's `framed`); the hand delta (`noteFramingChanged`)
+      follows `resettable`'s new arity. Cells: a model with axis only and no pose is
+      counted and reset (was: neither); reset with no pose in hand → PUT `camera: null,
+      axis: null`, the tile re-renders about the file's default axis; reset with a pose
+      → as before; the lightbox panel reset re-frames to the default axis when no pose.
+      Existing cells whose subject was "the axis stays" are rewritten
+      (semantics-is-the-point) — `entryActions`/`viewerPanelActions`/`bulkJobs` cells
+      named "With nothing to replace it, the axis stays" or asserting a kept axis.
+      Falsify: restore `axis: dropAxis ? null : undefined` → the no-pose reset cell fails;
+      restore the pose gate in `resettable` → the axis-only count cell fails
 - [ ] 4.5 Records: `client/src/three/pose.ts`'s `POSE_VERSION` history comment gains the
       settled-absence sentence; `useThumbnails`' `usable` doc says the three pose states;
       CLAUDE.md's cache bullet unchanged (no new label)

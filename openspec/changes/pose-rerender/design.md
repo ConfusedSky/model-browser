@@ -160,6 +160,31 @@ stale on its next visit — one wasted re-render per such close, not a loop. D4 
 only caller that set `posed`, so the option and `openedFromPoseRef` go rather than gain a
 key: `persist` writes a camera or nothing.
 
+### D7: A reset gives up the axis too
+
+Masa's step-by-step, 2026-09-11: index off, server restarted, three lightboxes opened
+(and closed untouched — D4's writer, storing a default camera and `axis: z` on each),
+framings reset, index on, server restarted, and "the framings were back". A cache
+watcher over the reproduction saw both writes: the three closes at 18:14:59–18:15:00
+(camera + axis z + pixels, no pose labels), then the reset at 18:15:04 clearing the
+camera and **keeping** `axis: z` on each. That is `entry-actions`' rule as written —
+"where the view supplies none … discard the camera alone and leave the axis" — and
+`resettable`'s companion: an axis with no usable pose is not counted. With the index
+off the count read zero; with it on, the same leftover axis had a pose to be replaced
+by, so it was counted again and, being a stored axis, withheld that pose from the
+tile. A reset that has to be run twice, and a stored `z` that says nothing an STL's
+own default does not say (`file-frame-spindle`).
+
+The rule becomes: a reset discards the axis with the camera, always. The model then
+resolves to the pose where one is in hand, else the default about the file's own axis
+(`defaultAxisFor`). `resettable` becomes `camera !== undefined || axis !== undefined`
+— the wire's `framed` — shared by the count, the bulk derivation and the hand delta as
+before. `framingAfterDiscard` returns the pose's axis or the file default, never the
+kept one; the bulk reset and both per-model discards send `axis: null`
+unconditionally. The chosen-axis case this rule used to protect (a user's axis surviving
+a reset when no pose could replace it) is given up on purpose: reset means "as if the
+user had never set one", and a chosen axis is something the user set.
+
 ### D3: ~~`POSE_VERSION` 2 → 3 re-renders the keyless posed renders once~~ — struck
 
 Considered and reverted the same day (2026-09-11) — the version bump was the
