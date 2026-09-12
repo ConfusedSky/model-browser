@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setAoEnabled } from '../src/viewer/aoToggle'
 import type { AppsReport, DirEntry, DirListing, IndexPose } from '../../shared/types'
 import { MENU_ITEM_CLASS } from '../src/components/EntryMenu'
+import { HttpError } from '../src/api/client'
 import {
   CHOOSER_FAILED,
   LAUNCH_FAILED,
@@ -149,6 +150,7 @@ interface Body {
   camera?: unknown
   axis?: unknown
   posed?: unknown
+  ifGen?: number
 }
 const writesFor = (path: string): Body[] =>
   putThumb.mock.calls.map(([b]) => b as Body).filter((b) => b.path === path)
@@ -692,6 +694,84 @@ describe('reset framing from the panel', () => {
     expect(writesFor(FOUND).filter((b) => b.camera !== undefined && b.camera !== null)).toEqual([])
   })
 
+  it('the queued re-render is pinned to what it read: an orbit landing first wins, and the render is skipped', async () => {
+    // The race the pin exists for. The reset's re-render waits behind the open
+    // view's suspension; at the close it passes the gate and issues its lookup,
+    // and the user orbits the same tile before it renders. Unpinned, the job
+    // would render from the pre-orbit lookup and PUT pixels with no camera
+    // field — the orbit's camera beside the reset's picture, a hit forever.
+    // Pinned to the generation its lookup read, the write is refused (412 →
+    // `'skipped'`) and the orbit is the last word.
+    await openStoredModel()
+    putThumb.mockClear()
+    await click(action('resetFraming'))
+    await settle()
+
+    // Play the server's conditional write: nothing stored after the discard,
+    // generation 4; a camera-bearing PUT moves the generation, and a pinned
+    // PUT behind it is refused.
+    let gen = 4
+    let stored: Record<string, unknown> = {}
+    const answer = (): Record<string, unknown> => ({
+      status: 'hit',
+      pngUrl: 'blob:stored',
+      lighting: THUMB_LIGHTING,
+      rig: RIG_VERSION,
+      gen,
+      ...stored,
+    })
+    putThumb.mockImplementation((body: { camera?: unknown; ifGen?: number }) => {
+      if (body.ifGen !== undefined && body.ifGen !== gen) {
+        return Promise.reject(new HttpError(412, 'moved'))
+      }
+      if (body.camera !== undefined && body.camera !== null) stored = { camera: body.camera, axis: 'z' }
+      gen++
+      return Promise.resolve({ gen })
+    })
+    // The job's own lookup is held open: it answers with what the server held
+    // at the close — generation 4 — only after the orbit below has landed.
+    let release = (): void => {}
+    const held = new Promise<Record<string, unknown>>((resolve) => {
+      release = () => resolve(snapshot)
+    })
+    let snapshot: Record<string, unknown> = {}
+    getThumb.mockImplementationOnce(() => held).mockImplementation(() => Promise.resolve(answer()))
+
+    await click(closeButton())
+    await wait(250)
+    expect(dialog()).toBeNull()
+    snapshot = answer()
+    expect(snapshot.gen).toBe(4)
+
+    // Orbit the tile in the grid before the render lands.
+    const t = tile('Alpha/found.stl')
+    await act(async () => {
+      t.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 50, clientY: 50, button: 0 }))
+    })
+    await settle()
+    await act(async () => {
+      window.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 90, clientY: 60 }))
+      window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: 500, clientY: 500 }))
+    })
+    await settle()
+    const orbited = cameraWrites(FOUND)
+    expect(orbited.length).toBe(1)
+    expect(gen).toBe(5)
+
+    release()
+    await wait(2000) // past the overlay's persist hold, which held the queue
+    await settle()
+
+    // The job's PUT was pinned to the generation it read and refused; the
+    // orbit's camera is what the server holds, and nothing redrew the tile.
+    const pinned = writesFor(FOUND).filter((b) => b.png !== undefined && b.camera === undefined)
+    expect(pinned.length).toBe(1)
+    expect(pinned[0]!.ifGen).toBe(4)
+    expect(stored.camera).toEqual(orbited[0]!.camera)
+    expect(gen).toBe(5)
+    putThumb.mockResolvedValue({})
+  })
+
   it('discards a framing given up while the mesh was still loading', async () => {
     // The same race one step earlier, and the one the session's own refs could
     // not see: the panel is up over the spinner, so the press finds no session
@@ -991,7 +1071,7 @@ describe('resetFramingLive', () => {
   const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
 
   it('hands a posed model back to the index — camera and axis together', async () => {
-    const h = harness({ [ENTRY.path]: POSE })
+    const h = harness({ [ENTRY.path]: POSE }, { gen: 3 })
     resetFramingLive(ENTRY, h.host, h.view)
 
     expect(h.put).toHaveBeenCalledWith({
@@ -1011,7 +1091,8 @@ describe('resetFramingLive', () => {
     expect(h.discard).toHaveBeenCalledWith(ENTRY.path)
 
     // The pixels, queued: drawn at the pose (the store now holds nothing of
-    // the user's) and recording it, with no camera field — the discard stands.
+    // the user's) and recording it, with no camera field — the discard stands
+    // — and pinned to the generation the job's own lookup read.
     h.put.mockClear()
     await h.runQueued()
     expect(h.put).toHaveBeenCalledTimes(1)
@@ -1020,11 +1101,28 @@ describe('resetFramingLive', () => {
       posed: POSE_VERSION,
       lighting: THUMB_LIGHTING,
       rig: RIG_VERSION,
+      ifGen: 3,
     })
     expect(h.put.mock.calls[0]![0].png).toBeDefined()
     expect(h.put.mock.calls[0]![0].camera).toBeUndefined()
     expect(h.put.mock.calls[0]![0].axis).toBeUndefined()
     expect(h.put.mock.calls[0]![0].poseKey).toBeDefined()
+  })
+
+  it('a refused pin is the designed outcome: skipped, nothing reported, the map untouched', async () => {
+    // The server moved the entry between the job's lookup and its write — an
+    // orbit landed first. 412 is `'skipped'`, not a failure: no sentence for
+    // the user, and the session map keeps what the orbit wrote.
+    const h = harness({}, { gen: 3 })
+    resetFramingLive(ENTRY, h.host, h.view)
+    await flush()
+    h.put.mockClear()
+    h.put.mockRejectedValueOnce(new HttpError(412, 'moved'))
+    await h.runQueued()
+    expect(h.put).toHaveBeenCalledTimes(1)
+    expect(h.put.mock.calls[0]![0].ifGen).toBe(3)
+    expect(h.report).not.toHaveBeenCalled()
+    expect(h.setThumb).not.toHaveBeenCalled()
   })
 
   it('discards the axis too when the view knows no pose — the default about the file’s own axis', async () => {

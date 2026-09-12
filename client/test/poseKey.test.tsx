@@ -198,6 +198,22 @@ describe('the source settled to hold nothing (`pose-rerender` D5)', () => {
     expect(renderThumbnail).toHaveBeenCalledTimes(1)
   })
 
+  it('a listing entry carrying null over a posed render re-renders it unlabelled — the carried road', async () => {
+    // The same settle, arriving at emission rather than by wave: the server
+    // asked and the index held none, so the entry carries `pose: null`
+    // (listing-tree-cache §6.9), `carriedPoses` files it, and the wave never
+    // asks about it. The sweep's rule is one, whichever road the null took.
+    getThumb.mockImplementation(() => Promise.resolve(HIT_UNDER_A))
+    await mountApp('/models', { path: '/models', entries: [{ ...HERO, pose: null }] })
+    await settle()
+    await settle()
+
+    expect(semanticPosesFor).not.toHaveBeenCalled()
+    expect(renderThumbnail).toHaveBeenCalledTimes(1)
+    expect(lastPut()?.posed).toBeUndefined()
+    expect(lastPut()?.poseKey).toBeUndefined()
+  })
+
   it('a posed hit with no answer stands — unsettled is not none', async () => {
     // The index warming, or the ask unanswered: the wave's map has no key for
     // the model, and a render that says what it was drawn under keeps saying it.

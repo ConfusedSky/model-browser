@@ -528,6 +528,13 @@ export async function renderEntryThumbnail(
     /** The generation the caller last saw, making the write conditional (D4).
      *  Absent for a user's press, which is unconditional by definition. */
     ifGen?: number
+    /** Pin the write to the generation this body's *own* lookup read, so a
+     *  write the user makes between that lookup and the render wins and this
+     *  one is refused (412 → `'skipped'`). A queued follow-up asks for it — the
+     *  panel reset's re-render, which waits behind the open view's suspension
+     *  and can be overtaken by an orbit on the same tile; a user's press never
+     *  does (`pose-rerender` D4). Takes precedence over `ifGen`. */
+    pinToLookup?: boolean
     /** Answer `'current'` rather than re-render when the lookup says the stored
      *  render is already current. The job asks for it; a command never does. */
     skipIfCurrent?: boolean
@@ -637,9 +644,10 @@ export async function renderEntryThumbnail(
       // `axis` are exactly what the pose resolved to on either branch above,
       // so the key is taken from them rather than resolved a second time.
       poseKey: posed ? poseKeyOf({ camera, axis }) : undefined,
-      // The generation the caller last saw (D4). The server refuses the write
+      // The generation the caller last saw (D4), or the one this body's own
+      // lookup read when the caller pinned to it. The server refuses the write
       // — 412, nothing written — when the entry has moved past it.
-      ifGen: opts.ifGen,
+      ifGen: opts.pinToLookup === true ? cached.gen : opts.ifGen,
     })
     .catch((err: unknown) => {
       // The entry moved under us: the user orbited this model after the job
@@ -702,13 +710,14 @@ export async function renderEntryThumbnail(
 function refreshThumbnail(
   entry: DirEntry,
   host: ActionHost,
-  opts: { discardFraming: boolean },
+  opts: { discardFraming: boolean; pinToLookup?: boolean },
 ): void {
-  const { discardFraming } = opts
+  const { discardFraming, pinToLookup } = opts
   host.queue.push(async () => {
     try {
       await renderEntryThumbnail(entry, host, {
         discardFraming,
+        pinToLookup,
         // The landing's map, which covers this tile by construction: the
         // command is pressed on something on screen.
         pose: host.poses[entry.path],
@@ -761,7 +770,11 @@ export const RESET_FAILED = 'Could not reset the framing.'
  *   the stored orientation *then* and drawing whatever it finds: the pose or
  *   the default when the user left the reset alone (pixels labelled posed
  *   where a pose framed them, no camera field, so the discard stands), or
- *   the orbit they made after it (pixels only, their camera untouched).
+ *   the orbit they made after it (pixels only, their camera untouched) —
+ *   and pinned to the generation its own lookup read, so an orbit that lands
+ *   *between* that lookup and the render wins outright: the render is refused
+ *   (412, `'skipped'`) rather than filing pre-orbit pixels beside the orbit's
+ *   camera as a hit that nothing would ever redraw.
  *   Until `pose-rerender` D4 the closing persist drew these pixels; a close
  *   that writes nothing left the tile showing the discarded framing. A
  *   queued *discard* was tried instead and measured wrong: reset → orbit →
@@ -809,7 +822,7 @@ export function resetFramingLive(
       () => host.report(RESET_FAILED),
     )
   view?.reframe(framing.camera, framing.axis)
-  refreshThumbnail(entry, host, { discardFraming: false })
+  refreshThumbnail(entry, host, { discardFraming: false, pinToLookup: true })
 }
 
 /*

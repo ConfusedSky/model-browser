@@ -120,7 +120,12 @@ immediate discard (camera and axis, the map's discard and the count's delta with
 the live re-frame, and queues a plain re-render (`refreshThumbnail` without the discard)
 behind the suspension the open view holds, which lands right after the close and draws
 whatever is stored *then*: the pose or the default when the user left the reset alone,
-their orbit when they made one after it. The one-PUT shape — the tile menu's
+their orbit when they made one after it — and pinned to the generation its own lookup
+read (`ifGen: cached.gen`, `renderEntryThumbnail`'s `pinToLookup`): an orbit landing
+between that lookup and the render moves the generation, the render is refused (412,
+`'skipped'`) and the orbit's pixels and camera are the last word, where an unpinned write
+would have filed pre-orbit pixels beside the orbit's camera as a hit nothing redraws. The
+rule: a queued follow-up pins; a user's press does not. The one-PUT shape — the tile menu's
 discard+render body queued whole — was tried first and measured wrong: reset → orbit →
 close wrote `[camera, camera, camera:null]`, the queued discard reading the cache after
 the gate and landing last, so the orbit made after the reset was thrown away. **`persist`
@@ -161,8 +166,9 @@ a render labelled `posed` or carrying a key is stale", `undefined` as "unknown: 
 render stands", and the re-render site already writes no `posed`/`poseKey` when
 `cameraForPose` answers nothing — so the default render is unlabelled and is a hit until
 the source holds an orientation again, when *An image that predates the source's current
-mapping is re-rendered* takes over. `cameraForPose`, `poseKeyFor`, `resettable` and the
-viewer's `pose` prop accept `null` as they accept `undefined`. `wavePaths`' `===
+mapping is re-rendered* takes over. `cameraForPose`, `poseKeyFor`, `framingAfterDiscard`
+and the viewer's `pose` prop accept `null` as they accept `undefined` (`resettable` reads
+no pose at all since D7). `wavePaths`' `===
 undefined` filter is unchanged: a `null` stays settled and is not re-asked.
 
 Accepted cost (Masa's call): an index that goes away and comes back redraws each posed
@@ -212,7 +218,10 @@ before. `framingAfterDiscard` returns the pose's axis or the file default, never
 kept one; the bulk reset and both per-model discards send `axis: null`
 unconditionally. The chosen-axis case this rule used to protect (a user's axis surviving
 a reset when no pose could replace it) is given up on purpose: reset means "as if the
-user had never set one", and a chosen axis is something the user set.
+user had never set one", and a chosen axis is something the user set. The `entry-actions`
+scenario titled *With nothing to replace it, the axis stays* keeps its title and states the
+opposite in its body: the archive refuses a renamed scenario, and a title is the handle a
+rewrite is made under.
 
 Considered and set aside (Masa, 2026-09-11): keep the leftover axis but let a pose whose
 axis matches it apply anyway. It would have closed this reproduction — the pose's axis
@@ -251,6 +260,11 @@ version, bumped only when the mapping changes the picture).
   cameras already stored this way are indistinguishable from chosen ones; the global
   reset (thumbnail-jobs) is the way out, and Masa ran it on 2026-09-11 for the five
   affected. Nothing migrates.
+- [D5 does not reach the meaning and similarity grids] → their poses ride the hits
+  (`SemanticListing.poses`, `SimilarListing.poses`) in the positive shape only, with no
+  `null` for a hit the index holds no orientation for, and no wave fires for them — so a
+  posed tile on those grids whose model the index has since settled as none keeps its posed
+  render until it is visited on a plain listing. Recorded, not fixed here.
 
 ## Migration Plan
 

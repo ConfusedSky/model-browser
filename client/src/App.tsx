@@ -1401,7 +1401,7 @@ export default function App() {
   // leave the delta reading state that never landed.
   useEffect(() => {
     thumbsRef.current = thumbs
-  }, [thumbs, poses])
+  }, [thumbs])
   /**
    * The one bulk-job runner for this app (`bulk-thumbnail-jobs` D2). One
    * instance, built once: it *is* the "one job at a time" rule — a second

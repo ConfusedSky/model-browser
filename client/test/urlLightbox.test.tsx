@@ -27,6 +27,35 @@ const NESTED: DirListing = {
 const search = () => window.location.search
 const dialog = () => container.querySelector('[role="dialog"]')
 const pop = () => act(async () => window.dispatchEvent(new PopStateEvent('popstate')))
+const WIDGET = '/models/widget.stl'
+/** The close's own write, told apart from the sweep's: a camera rides only on
+ *  a persist, never on a background render (`useThumbnails`' sweep PUT). */
+const cameraWrites = (): unknown[] =>
+  putThumb.mock.calls
+    .map(([b]) => b as { path: string; camera?: unknown })
+    .filter((b) => b.path === WIDGET && b.camera !== undefined && b.camera !== null)
+
+/** Drag on the open lightbox's canvas, then clear the release's own write:
+ *  an untouched close writes nothing (`pose-rerender` D4), so it is the close
+ *  after a manipulation whose camera write says the close ran. */
+async function orbit(): Promise<void> {
+  const canvas = dialog()!.querySelector<HTMLElement>('.cursor-grab')!
+  await act(async () => {
+    canvas.dispatchEvent(
+      new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 100, clientY: 100 }),
+    )
+  })
+  await act(async () => {
+    const move = (x: number, y: number): void => {
+      window.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: x, clientY: y }))
+    }
+    move(160, 100) // beyond the drag threshold
+    move(200, 120)
+    window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: 200, clientY: 120 }))
+  })
+  await settle()
+  putThumb.mockClear()
+}
 
 /** The pointer route: press the model tile, release without a drag — promote. */
 async function openByPointer(): Promise<void> {
@@ -62,13 +91,14 @@ describe('lightbox history', () => {
   it('browser back closes with persist, and forward re-opens without pushing', async () => {
     await openByPointer()
     const len = window.history.length
+    await orbit()
 
     // Back: the browser rewinds the URL (model gone) and fires popstate.
     window.history.replaceState(null, '', '/?path=%2Fmodels')
     await pop()
     await wait(200)
     expect(dialog()).toBeNull()
-    expect(putThumb).toHaveBeenCalled() // the close was the persisting teardown
+    expect(cameraWrites().length).toBeGreaterThan(0) // the close was the persisting teardown
     expect(window.history.length).toBe(len)
 
     // Forward: model param returns; re-open must not mint a new entry.
@@ -81,6 +111,7 @@ describe('lightbox history', () => {
 
   it('✕ on a pushed lightbox goes through history.back — one close path', async () => {
     await openByPointer()
+    await orbit()
     const back = vi.spyOn(window.history, 'back').mockImplementation(() => {
       // Play the browser: rewind the URL and fire popstate.
       window.history.replaceState(null, '', '/?path=%2Fmodels')
@@ -92,7 +123,7 @@ describe('lightbox history', () => {
     await wait(200)
     expect(back).toHaveBeenCalledOnce()
     expect(dialog()).toBeNull()
-    expect(putThumb).toHaveBeenCalled()
+    expect(cameraWrites().length).toBeGreaterThan(0)
     expect(search()).not.toContain('model=')
     back.mockRestore()
   })
@@ -103,6 +134,7 @@ describe('lightbox history', () => {
     await mountAppAtCurrentUrl('/?path=%2Fmodels&model=%2Fmodels%2Fwidget.stl', NESTED)
     await wait(200)
     expect(dialog()).not.toBeNull() // restored once the listing contained it
+    await orbit()
 
     const back = vi.spyOn(window.history, 'back')
     const len = window.history.length
@@ -112,7 +144,7 @@ describe('lightbox history', () => {
     await wait(200)
     expect(back).not.toHaveBeenCalled() // nothing behind this entry — back would leave the app
     expect(dialog()).toBeNull()
-    expect(putThumb).toHaveBeenCalled()
+    expect(cameraWrites().length).toBeGreaterThan(0)
     expect(search()).not.toContain('model=')
     expect(window.history.length).toBe(len)
     expect(container.querySelector('main')).not.toBeNull() // still mounted
@@ -182,6 +214,7 @@ describe('lightbox history', () => {
 
   it('the backdrop closes like every other affordance', async () => {
     await openByPointer()
+    await orbit()
     const back = vi.spyOn(window.history, 'back').mockImplementation(() => {
       window.history.replaceState(null, '', '/?path=%2Fmodels')
       window.dispatchEvent(new PopStateEvent('popstate'))
@@ -195,7 +228,7 @@ describe('lightbox history', () => {
     await wait(200)
     expect(back).toHaveBeenCalledOnce()
     expect(dialog()).toBeNull()
-    expect(putThumb).toHaveBeenCalled() // same persisting teardown as ✕ and Escape
+    expect(cameraWrites().length).toBeGreaterThan(0) // same persisting teardown as ✕ and Escape
     expect(search()).not.toContain('model=')
     back.mockRestore()
   })
