@@ -105,7 +105,7 @@
       The demo offers `reset` under writes-off (`SidePanel`'s ops) and so has the same
       hole for every visitor. Either the count and the job read the local store in that
       mode (enumerate `mb:framing:<library>:` keys; reset removes them), or `reset` is
-      withheld with `generate`. Since 7a5d593 (an orbit on a tile that has not landed
+      withheld with `generate`. Since caa00be (an orbit on a tile that has not landed
       re-derives the count) the failure changed shape: the re-derivation reads the server's
       zero, absorbs the hand delta, and *disables* the reset button, so under writes-off
       the count now collapses to 0 rather than climbing — which strengthens "withhold

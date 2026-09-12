@@ -19,7 +19,7 @@
       *(Corrected 2026-09-11 after the whole-work review: three of the five sites'
       comments — `ThumbRenderInfo.poseKey`, `ThumbPutRequest.poseKey`, `ThumbResult.poseKey`
       — still said "compared only when present", the rule Masa rejected; rewritten to the
-      shipped rule in the record commit that follows a61a484)*
+      shipped rule in the record commit that follows b612de0)*
 - [x] 2.2 `server/src/cache.ts`: `RenderLabels.poseKey`, carried by `renderLabels`,
       `hasLabels`, `renderInfo`, `put`'s label carry-over (cleared with the other labels
       when pixels are replaced undeclared), and the sibling-invalidation compare; `app.ts`
@@ -52,15 +52,15 @@
       echoes `poseKey` like the server
 
 - [x] 2.4 *(reverted 2026-09-11 — the key's absence is stale, so the version stays 2:
-      b4f8ab3 bumped it to 3, c583695 reverted that)*
+      554bf6a bumped it to 3, 7e182a1 reverted that)*
 
 ## 3. Land it
 
 - [x] 3.0 Records: CLAUDE.md's thumbnail-cache bullet lists `poseKey` beside `posed` and
-      says what it is *(2026-09-11, in the record commit after a61a484)*
+      says what it is *(2026-09-11, in the record commit after b612de0)*
 
 - [x] 3.1 `bun run typecheck` and both suites green on merged main
-      *(2026-09-11 on c583695: both typechecks exit 0; client 67 files / 952; server 23 files /
+      *(2026-09-11 on 7e182a1: both typechecks exit 0; client 67 files / 952; server 23 files /
       737 — the index server was up, so `indexContract` ran)*
 - [x] 3.2 Live, read-only: with the dev instance up and the index ready, load the root
       and watch the posed tiles — each keyless `posed: 2` sidecar re-renders once (a `blob:`
@@ -90,7 +90,7 @@
       Escape → one PUT carrying the camera (unchanged behaviour, the control); open from a
       pose → Escape → zero PUTs (was: pixels with `posed` and no key). Falsify: restore
       `decided = everManipulated || !unowned` → the nothing-in-hand cell fails
-      *(2026-09-11, fable worker ebef6c4 + 4277713, opus-reviewed: `closeLightbox` persists only when `everManipulated`; `openedFromPoseRef`/`framingDiscardedRef` deleted; `persist(session)` lost both options. `lightboxClose.test.tsx` 4 cells; `urlLightbox`'s four cells orbit first and assert the camera write after the close (they passed with the persist stubbed out before that). Falsified: close always persists → `expected "spy" to not be called at all, but actually been called 1 times`; persist stubbed → urlLightbox `4 failed`, `expected 0 to be greater than 0`)*
+      *(2026-09-11, fable worker 8bf83fe + 30aff15, opus-reviewed: `closeLightbox` persists only when `everManipulated`; `openedFromPoseRef`/`framingDiscardedRef` deleted; `persist(session)` lost both options. `lightboxClose.test.tsx` 4 cells; `urlLightbox`'s four cells orbit first and assert the camera write after the close (they passed with the persist stubbed out before that). Falsified: close always persists → `expected "spy" to not be called at all, but actually been called 1 times`; persist stubbed → urlLightbox `4 failed`, `expected 0 to be greater than 0`)*
 - [x] 4.2 The wire: `PosesResponse.poses` becomes `Record<string, IndexPose | null>`
       (`shared/types.ts`, documented: `null` is a settled absence). Server
       `POST /api/semantic/poses`: every asked path the index did not name is `null` when
@@ -145,17 +145,17 @@
 - [x] 4.5 Records: `client/src/three/pose.ts`'s `POSE_VERSION` history comment gains the
       settled-absence sentence; `useThumbnails`' `usable` doc says the three pose states;
       CLAUDE.md's cache bullet unchanged (no new label)
-      *(2026-09-11: `POSE_VERSION` comment and `usable`'s doc updated in ebef6c4; CLAUDE.md's cache bullet unchanged)*
+      *(2026-09-11: `POSE_VERSION` comment and `usable`'s doc updated in 8bf83fe; CLAUDE.md's cache bullet unchanged)*
 ## 5. Land §4
 
 - [x] 5.1 `bun run typecheck` and both suites green on merged main
-      *(2026-09-11 on 4277713, merged main: client 68 files / 964 passed; server 23 files / 742 passed; `bun run typecheck` both Done, exit 0; the index was up so `indexContract` ran)*
+      *(2026-09-11 on 30aff15, merged main: client 68 files / 964 passed; server 23 files / 742 passed; `bun run typecheck` both Done, exit 0; the index was up so `indexContract` ran)*
 - [x] 5.2 Live, read-only apart from what the app itself writes: with the dev instance up
       and the index **stopped by Masa** (never by a worker or this session), load the root
       → posed tiles re-render at the default once (PUTs without `posed`), a second load is
       hits; open a model and close untouched → no PUT; with the index back (Masa) and a
       navigation → the tiles re-render posed. Record the sidecar before/after here
-      *(2026-09-11, Masa, live on a5f743a: the seven-step sequence — index off, server
+      *(2026-09-11, Masa, live on 2a5ec10: the seven-step sequence — index off, server
       restarted, three lightboxes opened and closed untouched, framings reset, index on,
       server restarted, app reloaded — and "the framings stayed reset". The coordinator's
       watcher had captured the pre-fix sequence at 18:14:59–18:15:04 (three closes writing

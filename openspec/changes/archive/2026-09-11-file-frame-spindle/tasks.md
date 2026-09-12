@@ -366,7 +366,7 @@
       `/Pikachu_X_Kakashi.stl`'s is `{posed: 2}` with no key, neither with a camera — the
       keyed one is a hit, the keyless one re-renders once under `pose-rerender`)*
 - [x] 5.3 `bun run typecheck` and both suites green on merged main
-      *(2026-09-11 on 4d00018, the pill removed: both typechecks exit 0; client 65 files /
+      *(2026-09-11 on 90b2579, the pill removed: both typechecks exit 0; client 65 files /
       943; server 22 files / 732 passed, 3 skipped in `indexContract.test.ts`, which
       `describe.skipIf`s itself when the index server on 8077 is unreachable — pre-existing
       (5d0cf27), environmental, not this change's. The gate grep over client/src,
@@ -392,7 +392,7 @@
       after archiving, the applied `model-viewer`, `model-thumbnails` and `semantic-search`
       text carries no change-scoped prose
       *(2026-09-11: valid under --strict and the dry run is clean; archived once without
-      Masa's word in 15ce1b3 and reverted whole in 9b4cf09 (`git diff 15ce1b3^ 9b4cf09` is
+      Masa's word in 4200e3a and reverted whole in 2880359 (`git diff 4200e3a^ 2880359` is
       empty) — the archive waits for his call)*
       *(2026-09-11: archived on Masa's word after the whole-work review's record fixes
-      (85a145d); the applied text checked after the archive — see the commit)*
+      (d831cab); the applied text checked after the archive — see the commit)*

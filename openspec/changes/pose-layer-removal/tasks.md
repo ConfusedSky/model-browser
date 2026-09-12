@@ -79,7 +79,7 @@
 
 - [ ] 2.1 Confirm `client/test/listingRefresh.test.tsx` "a listing whose models all carry
       poses asks nothing at all" and "names the unposed models only" cover a landing with
-      poses attached issuing no wave (they exist as of 85a145d — grep them before ticking),
+      poses attached issuing no wave (they exist as of d831cab — grep them before ticking),
       and that `poseRerender.test.tsx` "a pose carried at emission over an un-annotated
       entry re-renders the tile with `posed`" covers the fresh-pose re-render. Verify:
       `cd client && bunx vitest run test/listingRefresh.test.tsx test/poseRerender.test.tsx`
@@ -104,7 +104,7 @@
       numbers (the dev root gets repointed by other sessions).
 - [ ] 3.2 Index not started: the same navigation. Expect the listing unposed with no added
       latency (compare `/api/dir` timing against 3.1's), and the client's wave firing exactly
-      as at 85a145d — one `POST /api/semantic/poses` per landing with models, answered `{}`.
+      as at d831cab — one `POST /api/semantic/poses` per landing with models, answered `{}`.
 - [ ] 3.3 Index stopped mid-session after 3.1 (kill :8077 with the `ready` memo warm):
       navigate once. Expect one emission that takes at most `POSE_ASK_TIMEOUT_MS` longer
       and emits unposed, the memo reset (`/api/semantic/status` answers `absent` on the

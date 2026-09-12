@@ -248,7 +248,7 @@ render path, beside `renderThumbnail`.
 ### D7: A temporary compare pill, removed before archive
 
 *(A record, not a design in force: the pill was built 2026-09-10 and deleted 2026-09-11
-in 4d00018; nothing below is on main. The body is kept as it was written, present tense
+in 90b2579; nothing below is on main. The body is kept as it was written, present tense
 and all, because it is what the reviews argued against — the closing paragraph says what
 the test window found and why the pill went. D5 is the same kind of record for the
 migration.)*
