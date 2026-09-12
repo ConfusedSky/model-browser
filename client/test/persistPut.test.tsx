@@ -55,11 +55,12 @@ vi.mock('../src/three/renderer', async (importOriginal) => ({
   }),
 }))
 // The viewer itself is out of scope: a stub that persists one settled session
-// on mount lets this file pin App's persist PUT payload alone. What it passes
-// as options is a test's to choose — `{camera: false}` is the one close
-// ViewerLayer makes that way: a posed view the user never touched.
+// on mount lets this file pin App's persist PUT payload alone. `persist` takes
+// no options since `pose-rerender` D4/D6: every caller is a decision of the
+// user's (an orbit release, an axis change, a close after one), so the write
+// is always camera, axis and pixels — the untouched close that once asked for
+// pixels only, labelled posed, writes nothing and is no longer a caller.
 const opts = vi.hoisted(() => ({
-  persist: undefined as { camera?: boolean } | undefined,
   // What the stub session's `snapshot` was handed — the value `persist`
   // captured before its await, which must also be the one on the PUT.
   snapshotAo: undefined as boolean | undefined,
@@ -72,21 +73,18 @@ vi.mock('../src/viewer/ViewerLayer', () => ({
   default: ({
     onPersist,
   }: {
-    onPersist: (s: ViewerSession, o?: { camera?: boolean }) => Promise<void>
+    onPersist: (s: ViewerSession) => Promise<void>
   }) => {
     useEffect(() => {
-      void onPersist(
-        {
-          state: SETTLED,
-          axis: '-z',
-          snapshot: (ao?: boolean) => {
-            opts.snapshotAo = ao
-            opts.duringSnapshot?.()
-            return Promise.resolve(new Blob(['png']))
-          },
-        } as unknown as ViewerSession,
-        opts.persist,
-      )
+      void onPersist({
+        state: SETTLED,
+        axis: '-z',
+        snapshot: (ao?: boolean) => {
+          opts.snapshotAo = ao
+          opts.duringSnapshot?.()
+          return Promise.resolve(new Blob(['png']))
+        },
+      } as unknown as ViewerSession)
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
     return null
@@ -96,7 +94,6 @@ vi.mock('../src/viewer/ViewerLayer', () => ({
 
 const { default: App } = await import('../src/App')
 const { RIG_VERSION, THUMB_LIGHTING } = await import('../src/three/renderer')
-const { POSE_VERSION } = await import('../src/three/pose')
 const { setAoEnabled } = await import('../src/viewer/aoToggle')
 
 const MODEL = {
@@ -115,7 +112,6 @@ let container: HTMLElement
 const settle = () => act(() => new Promise((r) => setTimeout(r, 30)))
 
 beforeEach(async () => {
-  opts.persist = undefined
   opts.snapshotAo = undefined
   opts.duringSnapshot = undefined
   // A module closure, so localStorage.clear() in afterEach does not reset it
@@ -180,28 +176,6 @@ describe('orbit-release persist PUT', () => {
     expect(save.lighting).toBe(THUMB_LIGHTING)
     expect(save.rig).toBe(RIG_VERSION)
     expect(save.posed).toBeUndefined()
-  })
-
-  it('labels the pixels of a posed view the user never touched', async () => {
-    // The close that declines to write a camera still writes a picture, and
-    // that picture was rendered at the index's pose. Unlabelled, the grid reads
-    // it as stale on the next visit and renders the same view a second time —
-    // the pose is an input to the pixels the cache key does not carry.
-    opts.persist = { camera: false }
-    const tile = container.querySelector<HTMLButtonElement>('[data-model-tile]')!
-    await act(async () => {
-      tile.dispatchEvent(
-        new PointerEvent('pointerdown', { button: 0, bubbles: true, clientX: 10, clientY: 10 }),
-      )
-    })
-    await settle()
-
-    const save = putThumb.mock.calls[0]![0] as Record<string, unknown>
-    expect(save.png).toBeInstanceOf(Blob)
-    // Still not the user's orientation: pixels only (semantic-search D5).
-    expect(save.camera).toBeUndefined()
-    expect(save.axis).toBeUndefined()
-    expect(save.posed).toBe(POSE_VERSION)
   })
 })
 

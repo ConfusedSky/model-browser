@@ -151,7 +151,7 @@ const rebuiltPose = (p: IndexPose): IndexPose => ({
 })
 const freshWave = (): PosesResponse => ({
   poses: Object.fromEntries(
-    Object.entries(WAVE.poses).map(([path, pose]) => [path, rebuiltPose(pose)]),
+    Object.entries(WAVE.poses).map(([path, pose]) => [path, pose === null ? null : rebuiltPose(pose)]),
   ),
 })
 
@@ -299,18 +299,35 @@ describe('a listing asks for its poses', () => {
     expect(tileImages()).toEqual(drawn)
   })
 
-  it('does not file an empty answer at all — the preview wave’s guard, here too', async () => {
-    // The cost the cell above cannot see. `{}` names no pose for any tile, but
-    // filing it still moves the slot `null` → `{}` — a new `listingPoses`
-    // identity, a rebuilt `poses` memo, and a reconcile walk of every tile in
-    // `useThumbnails` — paid once per landing over an index that knows nothing
-    // about this folder, which is every folder outside the indexed collection.
-    // Silence is already what an empty answer means; now it also costs nothing.
+  it('files an answer made only of settled absences — null is an answer, not silence', async () => {
+    // Inverted 2026-09-11 (`pose-rerender` D5). This cell pinned that an empty
+    // answer was *not* filed, to spare a reconcile walk per landing over an
+    // index that knew nothing. The wire now carries `null` for every asked path
+    // the index settled as holding no orientation, and that `null` is what makes
+    // a posed render stale — so an answer made only of nulls must reach the
+    // sweep, and the guard that skipped "empty" went with it.
+    semanticPosesFor.mockResolvedValue({
+      poses: Object.fromEntries(Object.keys(WAVE.poses).map((path) => [path, null])),
+    })
     await mountApp('/models', LISTING)
     await settle()
 
     expect(semanticPosesFor).toHaveBeenCalledTimes(1)
-    expect(dispatched.types).not.toContain('listingPoses')
+    expect(dispatched.types).toContain('listingPoses')
+  })
+
+  it('files an empty answer too — unsettled, and a walk that issues nothing', async () => {
+    // An empty map now means the index is warming or the ask went unanswered:
+    // nobody knows yet, so every render stands. Filing it costs the reconcile
+    // walk the old guard saved, and that walk finds every pose unchanged.
+    await mountApp('/models', LISTING)
+    await settle()
+    getThumb.mockClear()
+    await settle()
+
+    expect(dispatched.types).toContain('listingPoses')
+    expect(lookedUp()).toEqual([])
+    expect(renderThumbnail).not.toHaveBeenCalled()
   })
 
   it('does file an answer that says something — the guard is emptiness, not the wave', async () => {

@@ -478,14 +478,14 @@ const names = (entries: DirEntry[]) => entries.map((e) => e.name)
 /** The paths form of the same supply: the entries a listing landed, by name. */
 const posesFor = async (
   paths: readonly string[],
-): Promise<Record<string, IndexPose>> => {
+): Promise<Record<string, IndexPose | null>> => {
   const res = await app.request('/api/semantic/poses', {
     method: 'POST',
     headers: { ...LOOPBACK, 'content-type': 'application/json' },
     body: JSON.stringify({ paths }),
   })
   expect(res.status).toBe(200)
-  return ((await res.json()) as { poses: Record<string, IndexPose> }).poses
+  return ((await res.json()) as { poses: Record<string, IndexPose | null> }).poses
 }
 
 /** The same POST, with whatever body a cell wants to send. */
@@ -1333,6 +1333,8 @@ describe('the paths route, for the listings a directory cannot name', () => {
       await posesFor(['/mixed/c.stl', '/mixed/a.stl', '/nest/sub/q.stl', '/only/one.stl']),
     ).toEqual({
       '/mixed/c.stl': POSE,
+      // Asked, and the index named no pose: settled as none (`pose-rerender` D5).
+      '/mixed/a.stl': null,
       '/nest/sub/q.stl': POSE,
       '/only/one.stl': POSE,
     })
@@ -1352,13 +1354,24 @@ describe('the paths route, for the listings a directory cannot name', () => {
     expect(await posesFor(['//mixed/./c.stl'])).toEqual({ '/mixed/c.stl': POSE })
   })
 
-  it('drops what the library refuses instead of failing the whole answer', async () => {
+  it('drops what the library refuses from the ask, and settles it as none in the answer', async () => {
     // A stale tile, a model outside the library, a path inside an archive: each
     // is silent on its own, and the good entries beside them still get poses.
+    // The index is never asked about them — and since `pose-rerender` D5 the
+    // answer says so: a path spelled like a library path (the archive entry
+    // included — `canonicalLibPath` accepts the `!/` form) that the index
+    // cannot be asked about is settled as `null`: it cannot frame what is not
+    // there. Only a string that is not a library path at all is left out,
+    // never having been a question (the next cell).
     stubIndex({ posed: [fs('mixed', 'c.stl'), join(outsideFs, 'secret.stl')] })
     expect(
       await posesFor(['/gone.stl', '/links/escape.stl', '/mix2/kit.zip!/box.stl', '/mixed/c.stl']),
-    ).toEqual({ '/mixed/c.stl': POSE })
+    ).toEqual({
+      '/mixed/c.stl': POSE,
+      '/gone.stl': null,
+      '/links/escape.stl': null,
+      '/mix2/kit.zip!/box.stl': null,
+    })
     expect(sent[0]!.paths).toEqual([fs('mixed', 'c.stl')])
   })
 
@@ -1389,8 +1402,9 @@ describe('the paths route, for the listings a directory cannot name', () => {
   it('refuses more than one upstream call’s worth, and takes exactly that many', async () => {
     stubIndex({})
     const one = Array.from({ length: POSES_MAX }, () => '/mixed/a.stl')
-    // At the bound: taken, and it is one request out for one request in.
-    expect(await posesFor(one)).toEqual({})
+    // At the bound: taken, and it is one request out for one request in — and
+    // one settled absence back, since the index named nothing.
+    expect(await posesFor(one)).toEqual({ '/mixed/a.stl': null })
     expect(sent).toHaveLength(1)
     expect(sent[0]!.paths).toHaveLength(1) // one real path, named 1024 times
 
@@ -1403,13 +1417,19 @@ describe('the paths route, for the listings a directory cannot name', () => {
   })
 
   it('an index that cannot answer costs it nothing either', async () => {
-    for (const stub of [
-      { status: 'refused' as const },
-      { status: { ...READY, ready: false, elapsed: 3 } },
-      { status: { ...READY, collection_root: join(libTop, 'nest') } },
-    ]) {
+    // Never a failure, and never a request upstream. What comes back says which
+    // kind of "cannot" it was (`pose-rerender` D5): an absent index and a
+    // collection that does not cover the path are *settled* — the live view
+    // opens at the default, so the path is `null` — while a warming one has
+    // settled nothing, and the path is left out.
+    for (const [stub, answer] of [
+      [{ status: 'refused' as const }, { '/mixed/c.stl': null }],
+      [{ status: { ...READY, ready: false, elapsed: 3 } }, {}],
+      [{ status: { ...READY, collection_root: join(libTop, 'nest') } }, { '/mixed/c.stl': null }],
+    ] as const) {
+      resetIndexStatus()
       stubIndex(stub)
-      expect(await posesFor(['/mixed/c.stl'])).toEqual({})
+      expect(await posesFor(['/mixed/c.stl'])).toEqual(answer)
       expect(sent).toHaveLength(0)
     }
   })
@@ -1436,6 +1456,56 @@ describe('the paths route, for the listings a directory cannot name', () => {
     })
     rmSync(home, { recursive: true, force: true })
     rmSync(cache, { recursive: true, force: true })
+  })
+})
+
+describe('a settled absence reaches the wire (`pose-rerender` D5)', () => {
+  // The POST route files `null` for every asked path the index did not name
+  // when it answered, and for every asked path when the status memo says there
+  // is no index to ask — absent, wedged, or its volume gone. Warming, or a memo
+  // the ask itself reset, settles nothing: those paths are left out, so a
+  // startup's warm-up does not redraw a folder at the default and again posed
+  // sixteen seconds later. The GET form keeps the positive map.
+  const TWO = ['/mixed/c.stl', '/mixed/a.stl']
+
+  it('a ready index that names one of two asked paths settles the other as null', async () => {
+    stubIndex({ posed: [fs('mixed', 'c.stl')] })
+    expect(await posesFor(TWO)).toEqual({ '/mixed/c.stl': POSE, '/mixed/a.stl': null })
+    expect(sent).toHaveLength(1)
+  })
+
+  it('an absent index settles every asked path as null, asking nothing', async () => {
+    stubIndex({ status: 'refused' })
+    expect(await posesFor(TWO)).toEqual({ '/mixed/c.stl': null, '/mixed/a.stl': null })
+    expect(sent).toHaveLength(0)
+  })
+
+  it('a wedged index and a gone volume settle the same way', async () => {
+    for (const status of [
+      { ...READY, ready: false, elapsed: 3, failure: 'CacheUnusable' },
+      { ...READY, volume: { present: false } },
+    ]) {
+      resetIndexStatus()
+      stubIndex({ status })
+      expect(await posesFor(TWO)).toEqual({ '/mixed/c.stl': null, '/mixed/a.stl': null })
+      expect(sent).toHaveLength(0)
+    }
+  })
+
+  it('a warming index settles nothing: every asked path is left out', async () => {
+    stubIndex({ status: { ...READY, ready: false, elapsed: 3 } })
+    expect(await posesFor(TWO)).toEqual({})
+    expect(sent).toHaveLength(0)
+  })
+
+  it('the GET form still answers the positive map only', async () => {
+    stubIndex({ posed: [fs('mixed', 'c.stl')] })
+    const answer = await posesOf('/mixed')
+    expect(answer['/mixed/c.stl']).toEqual(POSE)
+    expect(Object.values(answer).some((p) => p === null)).toBe(false)
+    resetIndexStatus()
+    stubIndex({ status: 'refused' })
+    expect(await posesOf('/mixed')).toEqual({})
   })
 })
 

@@ -26,7 +26,7 @@ import type * as THREE from 'three'
 import type { DirEntry, IndexPose } from '../../../shared/types'
 import { HttpError, type ApiClient } from '../api/client'
 import { isCurrentRender } from '../hooks/useThumbnails'
-import { framingAfterDiscard, renderEntryThumbnail, resettable, type ActionHost } from '../lib/entryActions'
+import { renderEntryThumbnail, resettable, type ActionHost } from '../lib/entryActions'
 import { defaultAxisFor } from '../three/camera'
 import type { MeshLru } from '../three/lru'
 import { formatOfEntry } from '../three/models'
@@ -112,8 +112,9 @@ export interface JobEntry {
   entry: DirEntry
   /** The write generation at launch — every write is conditional on it (D4). */
   gen: number
-  /** The index's orientation: the enumeration's own, else the job's wave. */
-  pose: IndexPose | undefined
+  /** The index's orientation: the enumeration's own — a settled `null`
+   *  included — else the job's wave. */
+  pose: IndexPose | null | undefined
 }
 
 export interface Derivation {
@@ -178,16 +179,12 @@ function keeps(operation: JobOperation, c: JobEntry, ao: boolean): boolean {
   const { thumb } = c.entry
   if (operation === 'reset') {
     // `framed` is the server's word for "a camera **or** an axis is stored"
-    // (M4). It overcounts one case a reset would not change: an axis alone
-    // where no usable pose would replace it — the per-model rule keeps that
-    // axis (D3), so such a model reads "framed" forever and a count that
-    // offered it promised a reset that resets nothing (Masa, live: a subtree
-    // reset left its models in the library's count, 2026-09-02). Kept exactly
-    // when the discard changes something: a camera, or an axis a usable pose
-    // replaces — asked of the shared rule, never restated. (`framed` is not
-    // consulted: the server spells the camera and axis whenever either is
-    // stored, so the rule's own answer already implies it.)
-    return thumb !== undefined && resettable(thumb.camera, thumb.axis, c.pose)
+    // (M4), and since `pose-rerender` D7 that is exactly what a reset changes
+    // — both are given up, whatever the index holds — asked of the shared
+    // rule, never restated. (`framed` itself is not consulted: the server
+    // spells the camera and axis whenever either is stored, so the rule's own
+    // answer already implies it.)
+    return thumb !== undefined && resettable(thumb.camera, thumb.axis)
   }
   // An absent annotation means nothing is cached, not "unknown": the server's
   // index is seeded by the startup sweep and learns every write, so an entry
@@ -281,18 +278,12 @@ export class BulkJobs {
     // with no pose in the enumeration, so a full wave is sixteen index requests — paid
     // once per opening of the tab and once per press of Reset before Masa
     // objected. Only *generate* needs the index's opinion of every unowned
-    // model (a render whose `posed` is behind is stale). A *reset* consults a
-    // pose exactly where an axis is stored — that is what decides whether the
-    // axis goes with the camera — and a *count* only where the axis is stored
-    // alone, since a camera makes the model resettable whatever the index says.
-    // The generate count can miss a pose-stale render the layer has not
-    // learned yet; a generate launch's full wave still finds it.
-    const needsPose = (e: DirEntry): boolean =>
-      purpose === 'generate'
-        ? true
-        : purpose === 'reset'
-          ? e.thumb?.axis !== undefined
-          : e.thumb?.axis !== undefined && e.thumb.camera === undefined
+    // model (a render whose `posed` is behind is stale). A *reset* and a
+    // *count* need none (`pose-rerender` D7): a reset gives up the camera and
+    // the axis whatever the index holds, so the wire's `framed` is the whole
+    // answer. The generate count can miss a pose-stale render the layer has
+    // not learned yet; a generate launch's full wave still finds it.
+    const needsPose = (_e: DirEntry): boolean => purpose === 'generate'
     // Only the models the enumeration could not answer for. The tree cache's
     // pose layer rides an enumeration as it rides a listing, so asking about a
     // model that already carries one would be asking the library what the index
@@ -308,7 +299,7 @@ export class BulkJobs {
         : await this.deps.api
             .semanticPosesFor(unknown)
             .then((r) => r.poses)
-            .catch(() => ({}) as Record<string, IndexPose>)
+            .catch(() => ({}) as Record<string, IndexPose | null>)
     // Read once for the whole scan: a preference toggled mid-derivation must
     // not have half the scope judged against one variant and half the other.
     const ao = this.deps.ao()
@@ -320,7 +311,10 @@ export class BulkJobs {
     const candidates = models.map((entry) => ({
       entry,
       gen: entry.thumb?.gen ?? 0,
-      pose: entry.pose ?? wave[entry.path],
+      // Not `??`: a settled `null` on the entry is an answer (`pose-rerender`
+      // D5) and such an entry was never in `unknown`, so `??` would fall to a
+      // wave that has no key for it and read the settle as unsettled.
+      pose: entry.pose !== undefined ? entry.pose : wave[entry.path],
     }))
     return { candidates, incomplete: !listing.complete, ao }
   }
@@ -511,23 +505,15 @@ export class BulkJobs {
           )
         })
       } else {
-        // No queue, no mesh, no render (D3): reset is a write. The axis
-        // argument here is immaterial — `posed` is `cameraForPose(pose) !==
-        // null`, which does not read it — and that is exactly why the axis rule
-        // can be decided without rendering anything. The annotation's axis is
-        // passed because it is the truthful answer to "what is stored".
-        const { posed } = framingAfterDiscard(
-          job.pose,
-          job.entry.thumb?.axis ?? defaultAxisFor(formatOfEntry(job.entry)),
-        )
+        // No queue, no mesh, no render (D3): reset is a write.
         try {
           const written = await this.deps.api.putThumb({
             path: job.entry.path,
             mtime: job.entry.mtime,
             // The discard, exactly as the per-model action writes it: the
-            // camera always, the axis only where a usable pose replaces it.
+            // camera and the axis, both (`pose-rerender` D7).
             camera: null,
-            axis: posed ? null : undefined,
+            axis: null,
             // And the pixels go with it — both variants were drawn under the
             // orientation just given up (D3).
             png: null,

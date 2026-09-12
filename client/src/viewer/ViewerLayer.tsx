@@ -57,7 +57,7 @@ interface Props {
   camera: CameraState | undefined
   axis: OrbitAxis | undefined
   /** The index's orientation for this model, when it has one. Advisory (D5). */
-  pose: IndexPose | undefined
+  pose: IndexPose | null | undefined
   /** What the index scored this model at, when it was opened from a scored
    *  result. Absent for a model opened from any ordinary listing. */
   score: IndexScore | undefined
@@ -80,10 +80,9 @@ interface Props {
   /** Increments when App wants the persisting close to run (url-navigation D3). */
   closeSignal: number
   onDismiss: () => void
-  onPersist: (
-    session: ViewerSession,
-    opts?: { camera?: boolean; posed?: boolean },
-  ) => Promise<void>
+  /** Write the view — camera, axis and pixels — after a manipulation: an
+   *  orbit release, an axis change, or the close that follows one. */
+  onPersist: (session: ViewerSession) => Promise<void>
   onLoadError: (message: string) => void
   /**
    * Raise the shared entry menu on this viewer's own entry, at the pointer.
@@ -277,22 +276,6 @@ export default function ViewerLayer({
   const canvasHostRef = useRef<HTMLDivElement>(null)
   /**
    * Whether the orientation on screen is the index's rather than the user's —
-   * set when the session opens at a pose, and re-decided by a framing reset,
-   * which installs exactly such an orientation (or the default). Read on close
-   * to decide what may be written and how the pixels are labelled.
-   */
-  const openedFromPoseRef = useRef(false)
-  /**
-   * Whether a *reset framing* in this session discarded the model's stored
-   * orientation. Separate from the ref above because the two disagree in the
-   * case that matters: a reset with no usable pose leaves the view at the
-   * default, which came from no index and must still never be written back —
-   * writing it would store an orientation the user did not choose, and D7's
-   * whole point is that a stored default is worse than nothing (it disqualifies
-   * the model from ever being posed).
-   */
-  const framingDiscardedRef = useRef(false)
-  /**
    * A framing reset that landed **before this session existed** — the panel and
    * the menu are both up while the mesh loads, so the press can arrive over the
    * spinner, when `liveFramingView` has no session to re-frame.
@@ -300,27 +283,17 @@ export default function ViewerLayer({
    * Without this the discard would reach only the store: the effect below
    * captured the `camera` prop (or the `getThumb` answer) *before* the press and
    * does not re-run when the discard clears it, so the session would open at the
-   * orientation just given up, with `framingDiscardedRef` still false — and the
-   * close would read that as a decision and write it back, undoing the press.
+   * orientation just given up — and an orbit from there would have the close
+   * write a camera built on it.
    *
-   * Consumed in the effect's landing handler and nowhere else, which is the
-   * ordering-safe place rather than a convenient one: `savedPromise`'s own
-   * `.then` writes `openedFromPoseRef` too, and it is only inside the
-   * `Promise.all` handler that it is *certain* to have already run — anywhere
-   * earlier the two writes race, and the saved read would win half the time.
+   * Consumed in the effect's landing handler, where the session is built from
+   * it, and nowhere else.
    *
    * The framing itself is not recomputed here: it is the one `resetFramingLive`
    * already resolved through `framingAfterDiscard`, handed over by `reframe`, so
-   * this component learns no second copy of D7's rule. The one exception is the
-   * pose-less discard's *axis*, which that rule says is kept, not resolved —
-   * the landing handler reads the kept value from its own `getThumb` answer,
-   * because the press could only see the thumbs map's possibly-unsettled copy.
+   * this component learns no second copy of the rule.
    */
-  const pendingReframeRef = useRef<{
-    camera: CameraState
-    axis: OrbitAxis
-    posed: boolean
-  } | null>(null)
+  const pendingReframeRef = useRef<{ camera: CameraState; axis: OrbitAxis } | null>(null)
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   // A pointer-opened viewer mounts mid-press (orbit); a keyboard-opened one
   // mounts directly in lightbox mode with no pointer down.
@@ -375,14 +348,10 @@ export default function ViewerLayer({
     // the user's own and wins, and applying a pose persists nothing — the
     // sidecar is written by orbiting, not by opening (semantic-search D5).
     const fromPose = cameraForPose(pose, DEFAULT_CAMERA)
-    // Whether this session opened at an orientation the index suggested rather
-    // than one the user stored — read on close, to decide what may be written.
-    openedFromPoseRef.current = false
     // A new session has discarded nothing yet — a held dismissal can keep this
     // component mounted across entries, and a reframe recorded for the open
     // that was in flight must not be adopted by the one replacing it. The next
     // open re-reads a cache the store half has already updated anyway.
-    framingDiscardedRef.current = false
     pendingReframeRef.current = null
     const savedPromise: Promise<{ camera?: CameraState; axis: OrbitAxis }> =
       camera !== undefined
@@ -391,38 +360,23 @@ export default function ViewerLayer({
             .getThumb(viewer.entry.path, viewer.entry.mtime)
             .then((r) => {
               const posed = r.camera === undefined && r.axis === undefined && fromPose !== null
-              openedFromPoseRef.current = posed
               return {
                 camera: posed ? fromPose.camera : r.camera,
                 axis: r.axis ?? (posed ? fromPose.axis : fallbackAxis),
               }
             })
-            .catch(() => {
-              openedFromPoseRef.current = fromPose !== null
-              return { camera: fromPose?.camera, axis: fromPose?.axis ?? fallbackAxis }
-            })
+            .catch(() => ({ camera: fromPose?.camera, axis: fromPose?.axis ?? fallbackAxis }))
     void Promise.all([lru.acquire(viewer.entry.path), savedPromise])
       .then(([object, saved]) => {
         if (!alive) return
         // A framing reset pressed while this open was in flight wins over the
         // orientation the open resolved: `saved` is the very thing the press
-        // gave up. Read here and not earlier because `savedPromise` has now
-        // certainly settled, so this assignment to `openedFromPoseRef` is the
-        // last one rather than a racing one.
+        // gave up.
         const discarded = pendingReframeRef.current
-        if (discarded !== null) {
-          pendingReframeRef.current = null
-          openedFromPoseRef.current = discarded.posed
-        }
-        // A posed discard installs the pose's own axis; a pose-less one *keeps*
-        // the stored axis (`framingAfterDiscard`, whose PUT sends no axis). The
-        // press could only read the axis the thumbs map held at that moment —
-        // during a pending open that can still be the format's default while the
-        // store holds another spindle — so the kept axis is named by `saved`,
-        // the same answer the store's keep is measured against, not by the
-        // press's blind read.
-        const axisAt =
-          discarded !== null && discarded.posed ? discarded.axis : saved.axis
+        if (discarded !== null) pendingReframeRef.current = null
+        // A discard resolves the axis with the camera — the pose's, or the
+        // file's own default (`pose-rerender` D7) — so a pending one names it.
+        const axisAt = discarded !== null ? discarded.axis : saved.axis
         const s = new ViewerSession(object, axisAt, discarded?.camera ?? saved.camera)
         sessionRef.current = s
         setSession(s)
@@ -540,7 +494,7 @@ export default function ViewerLayer({
     if (s !== null) {
       const p = s
         .settle(renderNow)
-        .then(() => onPersist(s, { camera: true }))
+        .then(() => onPersist(s))
         .finally(() => {
           if (pendingPersistRef.current === p) pendingPersistRef.current = null
         })
@@ -659,29 +613,22 @@ export default function ViewerLayer({
 
   async function closeLightbox(): Promise<void> {
     const s = sessionRef.current
-    if (s !== null) {
+    // A close persists — camera, axis and pixels, like an orbit release — only
+    // after the user manipulated the view (`pose-rerender` D4): an orbit, a
+    // zoom or an axis change. Untouched, it writes nothing at all. What an
+    // untouched lightbox shows records no decision of the user's — their
+    // stored camera, the index's orientation, or the default — and a camera
+    // stored by such a close would outlive every orientation the source later
+    // holds for the model ("a stored camera wins"), which with the index down
+    // stored the default and withheld the pose forever. No pixels either: the
+    // tile already shows the same framing, or the grid's own sweep follows
+    // the pose state (D5). A framing reset clears the claim
+    // (`ViewerSession.reframe`) and redraws the tile itself, so a close after
+    // one writes nothing unless the user orbited again — which is what "not
+    // written back by the close that follows" always meant.
+    if (s !== null && s.everManipulated) {
       await s.settle(renderNow) // no-op if already level (e.g. Esc mid-drag aside)
-      // Always persists — `model-viewer` requires a close to save camera and
-      // thumbnail like an orbit release does. What it may not save is an
-      // orientation the *index* suggested and the user never touched: that
-      // would become their stored camera after one open, and "a stored axis
-      // wins" would then keep it forever, outliving the re-classification that
-      // would have corrected it (semantic-search D5). So the pixels go either
-      // way; the camera goes only when it records a decision.
-      //
-      // A framing reset is the second view that records none, and the strictest
-      // one: the user pressed a button to give the stored orientation up, so a
-      // close that wrote *any* camera back — the discarded one, or the default
-      // it resolved to — would undo the press. Orbiting after the reset is a
-      // new decision and does get written, which is why `everManipulated` still
-      // leads (`reframe` cleared it, so only a later drag can set it again).
-      const unowned = openedFromPoseRef.current || framingDiscardedRef.current
-      const decided = s.everManipulated || !unowned
-      // The pose label describes the pixels, so it follows what is on screen
-      // and not what may be written: a reset that found no usable pose leaves
-      // the view at the default, and labelling those pixels posed would tell
-      // the grid a pose it has never applied is already in force.
-      await onPersist(s, { camera: decided, posed: openedFromPoseRef.current && !s.everManipulated })
+      await onPersist(s)
     }
     onDismiss()
   }
@@ -781,25 +728,21 @@ export default function ViewerLayer({
   function liveFramingView(): LiveFramingView {
     const s = sessionRef.current
     return {
-      // With no session, the spindle the model is stored about — the same value
-      // the session would have opened at, so what a pose-less reset keeps is
-      // the same either way.
-      axis: s?.axis ?? axis ?? fallbackAxis,
-      reframe: (nextCamera, nextAxis, posed) => {
+      reframe: (nextCamera, nextAxis) => {
         if (s !== null) {
           s.reframe(nextCamera, nextAxis)
           runTweenLoop()
         } else {
           // Nothing on screen to move yet; the open in flight adopts this
           // instead of the orientation it resolved before the press.
-          pendingReframeRef.current = { camera: nextCamera, axis: nextAxis, posed }
+          pendingReframeRef.current = { camera: nextCamera, axis: nextAxis }
         }
         setSessionAxis(nextAxis)
-        // The view on screen is now the index's orientation or the
-        // default — either way not the user's, and the close must not
-        // write it back over the discard just made.
-        openedFromPoseRef.current = posed
-        framingDiscardedRef.current = true
+        // The view on screen is now the index's orientation or the default —
+        // either way not the user's. `s.reframe` gave up the session's claim,
+        // so the close that follows writes nothing unless the user orbits
+        // again; the pixels are the reset's own render, queued behind this
+        // view's suspension (`resetFramingLive`).
       },
     }
   }

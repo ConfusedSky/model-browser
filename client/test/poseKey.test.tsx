@@ -7,7 +7,7 @@
 // lighting and rig labels already follow, so the posed renders already in
 // every cache are re-rendered once and gain their key (the third cell).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DirListing, IndexPose, PosesResponse } from '../../shared/types'
+import type { CameraState, DirListing, IndexPose, OrbitAxis, PosesResponse } from '../../shared/types'
 import {
   dir,
   getThumb,
@@ -156,5 +156,83 @@ describe('a render made under a different pose', () => {
     await awayAndBack()
     expect(renderThumbnail).toHaveBeenCalledTimes(1)
     expect(lastPut()?.poseKey).toBe(KEY_B)
+  })
+})
+
+describe('the source settled to hold nothing (`pose-rerender` D5)', () => {
+  // Three pose states reach `usable`: a pose, `null` (settled: asked and none,
+  // or the index known absent) and `undefined` (unsettled: warming, or an ask
+  // nobody answered). A render drawn under an orientation is stale under a
+  // settle — the live view opens at the default, so the tile redraws there,
+  // recording no orientation — and stands while nobody knows.
+  const NONE: PosesResponse = { poses: { '/models/hero.stl': null } }
+  const shot = (i: number): [CameraState, OrbitAxis] => {
+    const call = renderThumbnail.mock.calls[i] as unknown as [unknown, CameraState, OrbitAxis]
+    return [call[1], call[2]]
+  }
+
+  it('a posed hit under a settled absence is re-rendered at the default, recording no orientation, then is a hit', async () => {
+    getThumb.mockImplementation(() => Promise.resolve(HIT_UNDER_A))
+    semanticPosesFor.mockResolvedValueOnce(NONE)
+    await mountApp('/models', LISTING)
+    await settle()
+    await settle()
+
+    expect(renderThumbnail).toHaveBeenCalledTimes(1)
+    const [camera, axis] = shot(0)
+    expect(camera.az).toBeCloseTo(DEFAULT_CAMERA.az)
+    expect(camera.el).toBeCloseTo(DEFAULT_CAMERA.el)
+    expect(axis).toBe('z') // the STL default, no pose in force
+    // The render site writes no `posed` and no `poseKey` when nothing framed
+    // it — the default render is unlabelled, and no camera rides along.
+    expect(lastPut()?.posed).toBeUndefined()
+    expect(lastPut()?.poseKey).toBeUndefined()
+    expect(lastPut()?.camera).toBeUndefined()
+
+    // The server echoes the unlabelled render; the same settle again is a hit.
+    getThumb.mockImplementation(() => Promise.resolve(UNPOSED_HIT))
+    semanticPosesFor.mockResolvedValueOnce(NONE)
+    await awayAndBack()
+
+    expect(semanticPosesFor).toHaveBeenCalledTimes(2)
+    expect(renderThumbnail).toHaveBeenCalledTimes(1)
+  })
+
+  it('a posed hit with no answer stands — unsettled is not none', async () => {
+    // The index warming, or the ask unanswered: the wave's map has no key for
+    // the model, and a render that says what it was drawn under keeps saying it.
+    getThumb.mockImplementation(() => Promise.resolve(HIT_UNDER_A))
+    semanticPosesFor.mockResolvedValueOnce({ poses: {} })
+    await mountApp('/models', LISTING)
+    await settle()
+    await settle()
+
+    expect(semanticPosesFor).toHaveBeenCalledTimes(1)
+    expect(renderThumbnail).not.toHaveBeenCalled()
+  })
+
+  it('an unlabelled hit under a settled absence is a hit', async () => {
+    getThumb.mockImplementation(() => Promise.resolve(UNPOSED_HIT))
+    semanticPosesFor.mockResolvedValueOnce(NONE)
+    await mountApp('/models', LISTING)
+    await settle()
+    await settle()
+
+    expect(renderThumbnail).not.toHaveBeenCalled()
+  })
+
+  it('control: the default render is re-rendered posed once the source holds an orientation again', async () => {
+    // The existing mechanism (*An image that predates the source's current
+    // mapping is re-rendered*): the settle above leaves an unlabelled render,
+    // and the next landing whose wave carries a pose redraws it under that pose.
+    getThumb.mockImplementation(() => Promise.resolve(UNPOSED_HIT))
+    semanticPosesFor.mockResolvedValueOnce(NONE).mockResolvedValueOnce(WAVE_A)
+    await mountApp('/models', LISTING)
+    await settle()
+    await awayAndBack()
+
+    expect(renderThumbnail).toHaveBeenCalledTimes(1)
+    expect(lastPut()?.posed).toBe(POSE_VERSION)
+    expect(lastPut()?.poseKey).toBe(KEY_A)
   })
 })

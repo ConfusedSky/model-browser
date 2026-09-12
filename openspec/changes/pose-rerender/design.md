@@ -113,6 +113,24 @@ clears `everManipulated`, so a close after it writes nothing, which is what "SHA
 have that discarded orientation written back" always meant. `openedFromPoseRef` and the
 `posed` option of `App.tsx`'s `persist` lose their only reader (D6).
 
+Two consequences found while landing it (2026-09-11). **The panel's reset redraws the
+tile itself.** `resetFramingLive` sent a png-less discard and relied on the closing
+persist to draw the re-framed view — a close that now writes nothing. It keeps the
+immediate discard (camera and axis, the map's discard and the count's delta with it) and
+the live re-frame, and queues a plain re-render (`refreshThumbnail` without the discard)
+behind the suspension the open view holds, which lands right after the close and draws
+whatever is stored *then*: the pose or the default when the user left the reset alone,
+their orbit when they made one after it. The one-PUT shape — the tile menu's
+discard+render body queued whole — was tried first and measured wrong: reset → orbit →
+close wrote `[camera, camera, camera:null]`, the queued discard reading the cache after
+the gate and landing last, so the orbit made after the reset was thrown away. **`persist`
+lost both options**, not only `posed`: with the close manipulated-only, no caller
+declines the camera, so it always writes camera, axis and pixels. And the writer was
+wider than a tile click: a browser back after a forward-restored lightbox runs the same
+close, so history navigation with no tile click was storing cameras too — the stack
+capture that found it showed every write in that sequence coming from `closeLightbox`,
+half a second after the close, and no on-open writer.
+
 ### D5: No pose in hand is a pose state — the thumbnail shows what the lightbox would
 
 Masa, 2026-09-11: "the thumbnail should be redrawn in the default camera if there is no
@@ -150,6 +168,17 @@ undefined` filter is unchanged: a `null` stays settled and is not re-asked.
 Accepted cost (Masa's call): an index that goes away and comes back redraws each posed
 tile twice — once at the default, once posed — per folder visited in each state. That is
 the price of the tile always showing what the lightbox will open at.
+
+Three readings pinned while landing it (2026-09-11). The bulk job's candidate pose is
+`entry.pose !== undefined ? entry.pose : wave[path]`, not `??`: a settled `null` on the
+entry is an answer, and such an entry is never in the job's own wave, so `??` would fall
+to a wave with no key for it and read the settle as unsettled. The preview wave keeps
+its empty-answer guard — an empty map now means nothing was settled, so a no-op merge
+is the right reading — while an answer carrying `null`s is not empty and is filed. On
+the POST route, a canonical path that does not resolve (a stale tile, a symlink out of
+the library, an archive entry) is filed `null` too when the ask is settled — the index
+cannot frame what is not there — while a string that is not a library path at all was
+never a question and is omitted.
 
 ### D6: The lightbox's persist was a third posed writer, keyless — retired by D4
 

@@ -160,15 +160,17 @@ describe('reset framing moves where the lightbox opens the model', () => {
     await settle()
 
     await invoke('widget.stl', 'resetFraming')
-    // The cache was told to give it up…
+    // The cache was told to give it up — camera and axis both, whether or not
+    // a pose could replace them (`pose-rerender` D7; this cell pinned the kept
+    // `-x` until 2026-09-11, and a kept axis was the framing that "came back")…
     const put = putThumb.mock.calls.at(-1)![0] as Record<string, unknown>
     expect(put.camera).toBeNull()
+    expect(put.axis).toBeNull()
     // …and so was the session, which is what the viewer reads. A model has one
     // stored orientation, not one per surface.
     await invoke('widget.stl', 'open')
     expect(opened.camera).toBeUndefined()
-    // Nothing supplied a replacement axis, so the user's own stands.
-    expect(opened.axis).toBe('-x')
+    expect(opened.axis).toBeUndefined() // the viewer resolves the file's own axis
   })
 })
 

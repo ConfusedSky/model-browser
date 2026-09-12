@@ -14,22 +14,25 @@
 // takes the open lightbox with it through the persisting close.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DirListing } from '../../shared/types'
+import type { DirListing, IndexPose } from '../../shared/types'
 import {
   click,
   container,
   dir,
+  getThumb,
   indexAvailability,
   listDir,
   model,
   mountApp,
   putThumb,
+  semanticPosesFor,
   settle,
   similar,
   tiles,
   unmountApp,
   wait,
 } from './appHarness'
+import { RIG_VERSION, THUMB_LIGHTING } from '../src/three/renderer'
 
 import { ViewerSession } from '../src/viewer/session'
 
@@ -39,6 +42,22 @@ vi.mock('../src/three/renderer', async (importOriginal) =>
 )
 
 const NESTED: DirListing = { path: '/models', entries: [dir('Alpha'), model('widget.stl')] }
+/** A `-y` pose for the widget: its spindle is not the STL default, so a live
+ *  re-frame to it is visible on the lightbox's axis control. */
+const POSE: IndexPose = {
+  up: [0, -1, 0],
+  azimuth_zero: [1, 0, 0],
+  source: 'test',
+  confidence: 1,
+  front: { view: 0, azimuth_deg: 40, elevation_deg: 20 },
+}
+/** The lightbox axis control's marked letters — `['Y', 'flip']` for `-y`. */
+const markedAxes = (): string[] =>
+  Array.from(
+    dialog()?.querySelectorAll<HTMLButtonElement>('[aria-label="Orbit axis"] button') ?? [],
+  )
+    .filter((b) => b.getAttribute('aria-pressed') === 'true')
+    .map((b) => b.textContent ?? '')
 const NEIGHBOURS = {
   path: '/models',
   entries: [model('Alpha/near.stl')],
@@ -162,8 +181,30 @@ beforeEach(async () => {
   listDir.mockResolvedValue(NESTED)
 })
 afterEach(async () => {
+  getThumb.mockResolvedValue({ status: 'miss' })
+  semanticPosesFor.mockResolvedValue({ poses: {} })
   await unmountApp()
 })
+
+/** Drag on the open lightbox's canvas — the manipulation an untouched close
+ *  lacks, since `pose-rerender` D4 made such a close write nothing. */
+async function orbitInLightbox(): Promise<void> {
+  const canvas = dialog()!.querySelector<HTMLElement>('.cursor-grab')!
+  await act(async () => {
+    canvas.dispatchEvent(
+      new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 100, clientY: 100 }),
+    )
+  })
+  await act(async () => {
+    const move = (x: number, y: number): void => {
+      window.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: x, clientY: y }))
+    }
+    move(160, 100) // beyond the drag threshold
+    move(200, 120)
+    window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: 200, clientY: 120 }))
+  })
+  await settle()
+}
 
 describe('the menu on a viewer surface', () => {
   it('a secondary press on the orbiting model raises the tile’s whole menu', async () => {
@@ -224,7 +265,30 @@ describe('the menu on a viewer surface', () => {
   })
 
   it("the lightbox menu's Reset framing runs the live body, not the queued one", async () => {
+    // The live body re-frames the open view *now*; the queued body (the tile
+    // menu's) would sit behind the suspension the open view holds and move
+    // nothing until close. Read off the lightbox's axis control: the widget is
+    // stored about `z` and the index holds a `-y` pose, so a live reset flips
+    // the marked spindle while the dialog is still open. Its store half is the
+    // png-less discard, sent now; the pixels follow after the close
+    // (`resetFramingLive`, since `pose-rerender` D4), so no render lands while
+    // the dialog is up.
+    await unmountApp()
+    getThumb.mockResolvedValue({
+      status: 'hit',
+      camera: { az: 1.25, el: -0.4, distR: 4.5, target: [0, 0, 0] },
+      axis: 'z',
+      pngUrl: 'blob:stored',
+      lighting: THUMB_LIGHTING,
+      rig: RIG_VERSION,
+    })
+    semanticPosesFor.mockResolvedValue({ poses: { '/models/widget.stl': POSE } })
+    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models' })
+    await mountApp('/models', NESTED)
+    listDir.mockResolvedValue(NESTED)
+    await settle()
     await openLightbox()
+    expect(markedAxes()).toEqual(['Z'])
     await secondaryPress(dialog()!)
     putThumb.mockClear()
     const reset = Array.from(menu()!.querySelectorAll('button')).find(
@@ -232,14 +296,13 @@ describe('the menu on a viewer surface', () => {
     )!
     await click(reset as HTMLElement)
     await settle()
-    // The live body's store half is a pixel-less discard PUT — sent NOW, not
-    // queued behind the suspension the open view holds (which is what the
-    // generic body would do, and it would then sit until close and lose to
-    // the closing persist). Its arrival while the lightbox is still open is
-    // what proves the routing.
+
+    expect(dialog()).not.toBeNull()
+    expect(markedAxes()).toEqual(['Y', 'flip'])
     const discard = putThumb.mock.calls.find((c) => c[0].camera === null)
     expect(discard).toBeDefined()
-    expect(dialog()).not.toBeNull()
+    expect(discard![0].png).toBeUndefined()
+    expect(putThumb.mock.calls.filter((c) => c[0].png !== undefined)).toEqual([])
   })
 
   it('confirms a copy in the panel, not on the bar it is covering', async () => {
@@ -348,6 +411,11 @@ describe('the menu on a viewer surface', () => {
     expect(dialog()).not.toBeNull()
     putThumb.mockClear()
 
+    // Orbited first, and the release's own write cleared: an untouched close
+    // writes nothing (`pose-rerender` D4), so it is the close after a
+    // manipulation whose camera write says the close ran.
+    await orbitInLightbox()
+    putThumb.mockClear()
     await secondaryPress(dialog()!)
     await click(item('findSimilar'))
     await wait(250)

@@ -36,7 +36,7 @@ import { resetLookupQueueForTests } from '../src/hooks/useThumbnails'
 import { thumbImageUrl } from '../src/api/thumbUrl'
 import { aoEnabled } from '../src/viewer/aoToggle'
 import { DEFAULT_CAMERA } from '../src/three/camera'
-import { cameraForPose } from '../src/three/pose'
+import { cameraForPose, POSE_VERSION } from '../src/three/pose'
 
 vi.mock('../src/api/client', async () => (await import('./appHarness')).apiClientModule())
 vi.mock('../src/three/renderer', async (importOriginal) =>
@@ -697,6 +697,38 @@ describe('a sheet cell follows the index', () => {
       (c) => c[0].path === '/models/a/m0.stl' && c[0].posed !== undefined,
     )
     expect(posedPut).toBeDefined()
+  })
+
+  it('re-renders a posed preview at the default when the previews’ wave settles it as none', async () => {
+    // `pose-rerender` D5 on the previews' road. The wave answers `null` for a
+    // path the index settled as holding no orientation, and the merge files it
+    // — its empty-answer guard is about `{}` (nothing settled), not about
+    // nulls. The sweep reads the `null` over a posed render as stale and redraws
+    // the cell at the default, recording no orientation.
+    peek.mockResolvedValue(found(1))
+    semanticPosesFor.mockImplementation((paths: string[]) =>
+      Promise.resolve(
+        paths.includes('/models/a/m0.stl') ? { poses: { '/models/a/m0.stl': null } } : { poses: {} },
+      ),
+    )
+    getThumb.mockResolvedValue({
+      status: 'hit',
+      pngUrl: 'blob:posed',
+      lighting: THUMB_LIGHTING,
+      rig: RIG_VERSION,
+      posed: POSE_VERSION,
+      poseKey: 'y:1.0000:0.3491',
+    })
+    await mountApp('/models', ONE_FOLDER)
+    await intersect(dirTile('/models/a'))
+    await settle()
+
+    const put = putThumb.mock.calls.find(
+      (c) => c[0].path === '/models/a/m0.stl' && c[0].png !== undefined,
+    )
+    expect(put).toBeDefined()
+    expect(put![0].posed).toBeUndefined()
+    expect(put![0].poseKey).toBeUndefined()
   })
 })
 

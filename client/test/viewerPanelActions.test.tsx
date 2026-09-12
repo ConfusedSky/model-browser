@@ -167,6 +167,36 @@ async function openLightbox(name: string): Promise<void> {
   await wait(150)
 }
 
+/** Drag on the open lightbox's canvas — the manipulation an untouched close
+ *  lacks, since `pose-rerender` D4 made such a close write nothing. */
+async function orbit(): Promise<void> {
+  const canvas = dialog()!.querySelector<HTMLElement>('.cursor-grab')!
+  await act(async () => {
+    canvas.dispatchEvent(
+      new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 100, clientY: 100 }),
+    )
+  })
+  await act(async () => {
+    const move = (x: number, y: number): void => {
+      window.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: x, clientY: y }))
+    }
+    move(160, 100) // beyond the drag threshold
+    move(200, 120)
+    window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: 200, clientY: 120 }))
+  })
+  await settle()
+}
+/** The lightbox axis control's marked letters — `['Y', 'flip']` for `-y`. */
+const pressedAxes = (): string[] =>
+  Array.from(
+    dialog()?.querySelectorAll<HTMLButtonElement>('[aria-label="Orbit axis"] button') ?? [],
+  )
+    .filter((b) => b.getAttribute('aria-pressed') === 'true')
+    .map((b) => b.textContent ?? '')
+/** The camera writes for a path — a null is a discard, not a camera. */
+const cameraWrites = (path: string): Body[] =>
+  writesFor(path).filter((b) => b.camera !== undefined && b.camera !== null)
+
 beforeEach(async () => {
   // Written under the old on-default; `ao-default-off` flipped the unset read.
   // Pinned on so the framing/orientation assertions keep their shape.
@@ -402,6 +432,10 @@ describe('the panel’s launch actions (the 4.3 reversal, open-in-slicer L10)', 
 describe('a panel action that changes the view', () => {
   it('reveal navigates, marks the entry, and takes the lightbox out through the persisting close', async () => {
     await openLightbox('Alpha/found.stl')
+    // Orbited first, and the release's own write cleared: an untouched close
+    // writes nothing (`pose-rerender` D4), so it is the close after a
+    // manipulation whose camera write says the close ran.
+    await orbit()
     putThumb.mockClear()
 
     await click(action('reveal'))
@@ -480,6 +514,7 @@ describe('a panel action that changes the view', () => {
   it('find similar lands the similarity view and leaves the same way', async () => {
     similar.mockResolvedValue(NEIGHBOURS)
     await openLightbox('Alpha/found.stl')
+    await orbit() // as *reveal* above: the close after a manipulation is the one that writes
     putThumb.mockClear()
 
     await click(action('findSimilar'))
@@ -523,7 +558,7 @@ describe('reset framing from the panel', () => {
     expect(dialog()).not.toBeNull()
   }
 
-  it('discards the stored orientation, re-frames the open view, and the close does not undo it', async () => {
+  it('discards the stored orientation now, and the pixels follow after the close — two PUTs, no camera', async () => {
     await openStoredModel()
     putThumb.mockClear()
     renderThumbnail.mockClear()
@@ -532,41 +567,92 @@ describe('reset framing from the panel', () => {
     await settle()
 
     // The store half: the camera is *discarded* (null, the third thing a write
-    // can say), not overwritten with a default — and no pixels ride along,
-    // because the closing persist is what redraws them. Nothing in this view
-    // knows a pose for the model, so the axis it is framed about stays.
+    // can say), not overwritten with a default — and the axis with it, whether
+    // or not a pose could replace it (`pose-rerender` D7). No pixels ride along.
     const discards = writesFor(FOUND).filter((b) => b.camera === null)
     expect(discards.length).toBe(1)
-    expect(discards[0]!.axis).toBeUndefined()
+    expect(discards[0]!.axis).toBeNull()
     expect(discards[0]!.png).toBeUndefined()
+    // The pixels are queued behind the suspension the open view holds: nothing
+    // is drawn while the lightbox is up.
+    expect(renderThumbnail).not.toHaveBeenCalled()
+    // The server has taken the discard; the queued re-render reads it back.
+    getThumb.mockResolvedValue({
+      status: 'hit',
+      pngUrl: 'blob:stored',
+      lighting: THUMB_LIGHTING,
+      rig: RIG_VERSION,
+    })
 
     await click(closeButton())
     await wait(250)
     expect(dialog()).toBeNull()
+    await settle()
 
-    // The live half, read off what the closing persist snapshotted: the session
-    // was re-framed to what the model now resolves to, not left sitting at the
-    // orientation just discarded.
-    // The live half, read off what the closing persist snapshotted — the only
+    // The close wrote nothing — a reset clears the session's claim, and an
+    // untouched close persists nothing (`pose-rerender` D4). The queued
+    // re-render then drew the tile at what the model resolves to: the default
+    // about the file's own axis (`z` for an STL, not the stored `y`) — the one
     // render in this case, since the tile's own thumbnail was a complete hit.
+    expect(cameraWrites(FOUND)).toEqual([])
     expect(renderThumbnail.mock.calls.length).toBe(1)
     const snapshot = renderThumbnail.mock.calls[0] as unknown as [unknown, typeof STORED, string]
     expect(snapshot[1].az).toBeCloseTo(DEFAULT_CAMERA.az)
     expect(snapshot[1].el).toBeCloseTo(DEFAULT_CAMERA.el)
     expect(snapshot[1].distR).toBeCloseTo(DEFAULT_CAMERA.distR)
-    expect(snapshot[2]).toBe('y') // the spindle stayed: nothing here knows a pose
-
-    // And the one that matters: the close persisted pixels and no camera at
-    // all. A close that wrote one — the discarded orientation, or the default
-    // it resolved to — would resurrect what the user just gave up, which is the
-    // race that keeps this command out of the right-click menu.
-    expect(writesFor(FOUND).filter((b) => b.camera !== undefined && b.camera !== null)).toEqual([])
+    expect(snapshot[2]).toBe('z')
     const pixels = writesFor(FOUND).filter((b) => b.png !== undefined)
     expect(pixels.length).toBe(1)
-    // Unlabelled, too: declining the camera usually means the index framed
-    // this view, but here nothing did — labelling these default-framed pixels
-    // posed would tell the grid a pose it has never applied is in force.
+    // No camera field at all: the discard stands. Unlabelled, too — nothing
+    // framed these default pixels, and labelling them posed would tell the grid
+    // a pose it has never applied is in force.
+    expect(pixels[0]!.camera).toBeUndefined()
     expect(pixels[0]!.posed).toBeUndefined()
+    expect(writesFor(FOUND).length).toBe(2)
+  })
+
+  it('an orbit made after the reset is the last word — the queued pixels keep it', async () => {
+    // The control for the shape above, measured before it was chosen: a queued
+    // *discard* (the tile menu's body) read the cache after the close and wrote
+    // [camera, camera, camera:null] — the orbit the user made after the reset,
+    // thrown away by the reset's own write landing last. The discard goes now
+    // and the queued job only redraws, so whatever is stored when it runs — the
+    // orbit — is what it draws and keeps.
+    await openStoredModel()
+    putThumb.mockClear()
+    await click(action('resetFraming'))
+    await settle()
+    expect(writesFor(FOUND).filter((b) => b.camera === null).length).toBe(1)
+
+    await orbit()
+    const orbited = cameraWrites(FOUND)
+    expect(orbited.length).toBe(1)
+    // The server holds the orbit now; the queued re-render reads it back.
+    getThumb.mockResolvedValue({
+      status: 'hit',
+      camera: orbited[0]!.camera,
+      axis: 'y',
+      pngUrl: 'blob:stored',
+      lighting: THUMB_LIGHTING,
+      rig: RIG_VERSION,
+    })
+
+    await click(closeButton())
+    await wait(250)
+    expect(dialog()).toBeNull()
+    await settle()
+
+    const writes = writesFor(FOUND)
+    // Nothing after the orbit nulls the camera, and the last write — the
+    // queued pixels — carries no camera field: keep.
+    expect(writes.slice(writes.indexOf(orbited[0]!) + 1).filter((b) => b.camera === null)).toEqual([])
+    const last = writes[writes.length - 1]!
+    expect(last.png).toBeDefined()
+    expect(last.camera).toBeUndefined()
+    // And it was drawn at the orbit, not at the discarded default: the orbit
+    // kept the session's distance, which no drag changes.
+    const shot = renderThumbnail.mock.calls.at(-1) as unknown as [unknown, typeof STORED, string]
+    expect(shot[1].distR).toBeCloseTo((orbited[0]!.camera as typeof STORED).distR)
   })
 
   it('discards an orbit made before it, so the close cannot write that orbit back', async () => {
@@ -612,9 +698,8 @@ describe('reset framing from the panel', () => {
     // (`liveFramingView` had nothing to hand over) while the pending open has
     // already resolved the saved camera it is going to build with. The discard
     // that happened *before* the session existed has to reach it anyway, or the
-    // view opens at the orientation just given up and the closing persist —
-    // which reads `everManipulated` and finds a session that recorded no
-    // discard — writes it straight back.
+    // view opens at the orientation just given up — and an orbit from there
+    // would write a camera built on it.
     let land = (): void => {}
     const held = new Promise<ArrayBuffer>((resolve) => {
       land = () => resolve(tinyStl())
@@ -638,35 +723,34 @@ describe('reset framing from the panel', () => {
     })
     await settle()
 
+    // The session opened at what the model resolves to *after* the discard —
+    // the default. An untouched close would show nothing (it writes nothing,
+    // `pose-rerender` D4), so orbit: a drag keeps the session's distance, and
+    // the default's distance is not the stored one.
+    await orbit()
     await click(closeButton())
     await wait(250)
     expect(dialog()).toBeNull()
 
-    // The session opened at what the model resolves to *after* the discard, so
-    // the pixels the close filed are the default-framed ones and no camera
-    // rides with them. A close that wrote one would have undone the press.
-    expect(writesFor(FOUND).filter((b) => b.camera !== undefined && b.camera !== null)).toEqual([])
-    expect(renderThumbnail.mock.calls.length).toBe(1)
-    const snapshot = renderThumbnail.mock.calls[0] as unknown as [unknown, typeof STORED, string]
-    expect(snapshot[1].az).toBeCloseTo(DEFAULT_CAMERA.az)
-    expect(snapshot[1].el).toBeCloseTo(DEFAULT_CAMERA.el)
-    expect(snapshot[1].distR).toBeCloseTo(DEFAULT_CAMERA.distR)
+    const written = cameraWrites(FOUND)
+    expect(written.length).toBeGreaterThan(0)
+    for (const w of written) {
+      expect((w.camera as typeof STORED).distR).toBeCloseTo(DEFAULT_CAMERA.distR)
+    }
   })
 
-  it('labels the close with the pose the discard installed, when the saved read lands after the press', async () => {
-    // The other half of the landing handler, and the only thing that pins it:
-    // the saved read writes `openedFromPoseRef` too, so a press that lands
-    // between the request and its answer has its verdict overwritten unless the
-    // handler re-asserts it — which is safe there and only there, because
-    // `Promise.all` has by then awaited the very promise that does the
-    // overwriting.
+  it('re-frames to the pose the discard installed when the saved read lands after the press, and the pixels record it', async () => {
+    // The other half of the landing handler, and the only thing that pins it: a
+    // press that lands between the request and its answer has its framing
+    // overwritten by the saved read unless the handler adopts the pending
+    // discard — which is safe there and only there, because `Promise.all` has
+    // by then awaited the very promise that would overwrite it.
     //
-    // The two verdicts disagree exactly here: the model HAS a usable pose (so
-    // the discard resolves to it, `posed`), while the stored answer carries an
-    // axis (so the open would not have been the index's). What the pixels are
-    // is not in doubt — the session opens at the pose either way — so the label
-    // is the whole assertion: unlabelled, the grid reads posed pixels as stale
-    // and redraws this tile on every visit.
+    // The two disagree exactly here: the model HAS a usable pose (so the
+    // discard resolves to it), while the stored answer carries an axis (so the
+    // open would not have been the index's). Read off the axis control while
+    // the lightbox is up — the pose's spindle, not the stored one — and off the
+    // queued re-render after the close, which draws the pose and records it.
     let answer = (): void => {}
     const saved = new Promise<unknown>((resolve) => {
       answer = () =>
@@ -699,6 +783,8 @@ describe('reset framing from the panel', () => {
     await settle()
     // The pose is what it resolved to — camera and axis handed back together.
     expect(writesFor(FOUND).filter((b) => b.camera === null && b.axis === null).length).toBe(1)
+    // The server has taken both halves; the queued re-render reads that back.
+    getThumb.mockResolvedValue({ status: 'hit', pngUrl: 'blob:stored', lighting: THUMB_LIGHTING, rig: RIG_VERSION })
 
     // Only now does the saved read land, with its own opposite verdict.
     await act(async () => {
@@ -706,42 +792,43 @@ describe('reset framing from the panel', () => {
       await saved
     })
     await settle()
+    const resolved = cameraForPose(POSE, DEFAULT_CAMERA)!
+    expect(resolved.axis).toBe('-y')
+    expect(pressedAxes()).toEqual(['Y', 'flip']) // the pose's spindle, not the stored `y`
     putThumb.mockClear()
     renderThumbnail.mockClear()
 
     await click(closeButton())
     await wait(250)
     expect(dialog()).toBeNull()
+    await settle()
 
+    // The close wrote nothing; the queued pixels were drawn at the pose and say so.
+    expect(cameraWrites(FOUND)).toEqual([])
     const pixels = writesFor(FOUND).filter((b) => b.png !== undefined)
     expect(pixels.length).toBe(1)
     expect(pixels[0]!.posed).toBe(POSE_VERSION)
     expect(pixels[0]!.camera).toBeUndefined()
-    // And the label describes the pixels: the snapshot really was taken at the
-    // index's orientation, not at the default.
-    const resolved = cameraForPose(POSE, DEFAULT_CAMERA)!
     const shot = renderThumbnail.mock.calls[0] as unknown as [unknown, typeof STORED, string]
     expect(shot[1].az).toBeCloseTo(resolved.camera.az)
     expect(shot[2]).toBe(resolved.axis)
   })
 
-  it('a pose-less discard over the spinner keeps the stored spindle, not the y fallback', async () => {
-    // The press can only read the axis the thumbs map holds at that moment,
-    // and during a pending open that is still the `'y'` fallback while the
-    // store holds another spindle. A pose-less discard *keeps* the stored
-    // axis (its PUT sends no axis), so adopting the press's blind read at
-    // landing framed 'y' pixels for a tile whose stored axis stayed 'z' —
-    // the close then filed a snapshot the next open would not reproduce.
-    // The landing handler must take the kept axis from its own `getThumb`
-    // answer instead.
+  it('a pose-less discard over the spinner re-frames about the file’s own axis, not the stored one', async () => {
+    // Inverted 2026-09-11 (`pose-rerender` D7): this cell pinned that a
+    // pose-less discard *kept* the stored spindle, read back from the landing
+    // handler's own `getThumb` rather than the press's blind read. The axis
+    // goes with the camera now, so the landing handler adopts the pending
+    // discard's axis — the file's default — over the stored one. Read off the
+    // axis control while the lightbox is up, and off the queued re-render after
+    // the close.
     let answer = (): void => {}
     const saved = new Promise<unknown>((resolve) => {
       answer = () =>
         resolve({
           status: 'hit',
-          // An axis and no camera, and no pose anywhere: the discard resolves
-          // pose-less, so this axis is exactly what it promises to keep.
-          axis: 'z',
+          // A chosen axis and no camera, and no pose anywhere.
+          axis: '-x',
           pngUrl: 'blob:stored',
           lighting: THUMB_LIGHTING,
           rig: RIG_VERSION,
@@ -759,26 +846,29 @@ describe('reset framing from the panel', () => {
 
     await click(action('resetFraming'))
     await settle()
-    // Pose-less: the camera is discarded and the axis is kept — no axis field.
-    expect(writesFor(FOUND).filter((b) => b.camera === null && b.axis === undefined).length).toBe(1)
+    // Pose-less or not: the camera and the axis are both discarded.
+    expect(writesFor(FOUND).filter((b) => b.camera === null && b.axis === null).length).toBe(1)
+    // The server has taken both; the queued re-render reads that back.
+    getThumb.mockResolvedValue({ status: 'hit', pngUrl: 'blob:stored', lighting: THUMB_LIGHTING, rig: RIG_VERSION })
 
     await act(async () => {
       answer()
       await saved
     })
     await settle()
+    expect(pressedAxes()).toEqual(['Z']) // the file's axis, not the stored `-x`
     putThumb.mockClear()
     renderThumbnail.mockClear()
 
     await click(closeButton())
     await wait(250)
     expect(dialog()).toBeNull()
+    await settle()
 
-    // The snapshot the close files is taken about the spindle the store kept.
+    // The queued pixels are drawn about the file's axis at the default camera.
     expect(renderThumbnail.mock.calls.length).toBe(1)
     const shot = renderThumbnail.mock.calls[0] as unknown as [unknown, typeof STORED, string]
     expect(shot[2]).toBe('z')
-    // And at the discarded camera — the press's half that *was* resolved blind.
     expect(shot[1].az).toBeCloseTo(DEFAULT_CAMERA.az)
     expect(shot[1].el).toBeCloseTo(DEFAULT_CAMERA.el)
   })
@@ -808,22 +898,26 @@ describe('reset framing from the panel', () => {
     await settle()
     putThumb.mockClear()
 
-    // Out through *reveal* rather than the ✕: this lightbox was pointer-opened,
-    // so its close runs `history.back`, which the harness's stubbed URL cannot
-    // survive. The persisting close is the same one either way — App's watcher
-    // answering a view that no longer names the model.
+    // An untouched close writes nothing (`pose-rerender` D4), so orbit: the
+    // drag keeps the session's distance, which says what the neighbour opened
+    // at. Out through *reveal* rather than the ✕: this lightbox was
+    // pointer-opened, so its close runs `history.back`, which the harness's
+    // stubbed URL cannot survive. The persisting close is the same one either
+    // way — App's watcher answering a view that no longer names the model.
+    await orbit()
     await click(action('reveal'))
     await wait(250)
     expect(dialog()).toBeNull()
 
-    // The neighbour opened at its own stored orientation and the close wrote it
-    // back — it was never discarded. Inheriting the pending reframe would have
-    // opened it at the default and written that instead.
+    // The neighbour opened at its own stored orientation — it was never
+    // discarded. Inheriting the pending reframe would have opened it at the
+    // default, whose distance is not the stored one.
     const OTHER = '/models/Alpha/other.stl'
-    const written = writesFor(OTHER).filter((b) => b.camera !== undefined && b.camera !== null)
+    const written = cameraWrites(OTHER)
     expect(written.length).toBeGreaterThan(0)
-    expect((written[0]!.camera as typeof STORED).az).toBeCloseTo(STORED.az)
-    expect((written[0]!.camera as typeof STORED).distR).toBeCloseTo(STORED.distR)
+    for (const w of written) {
+      expect((w.camera as typeof STORED).distR).toBeCloseTo(STORED.distR)
+    }
   })
 })
 
@@ -846,24 +940,52 @@ describe('resetFramingLive', () => {
     put: ReturnType<typeof vi.fn>
     discard: ReturnType<typeof vi.fn>
     report: ReturnType<typeof vi.fn>
+    setThumb: ReturnType<typeof vi.fn>
     view: LiveFramingView & { reframe: ReturnType<typeof vi.fn> }
+    /** Run what the reset pushed on the render queue — the pixels, which in
+     *  the app wait behind the open view's suspension and land after close. */
+    runQueued: () => Promise<void>
   }
-  function harness(poses: Record<string, IndexPose> = {}): Harness {
-    const put = vi.fn().mockResolvedValue(undefined)
+  /** `stored` is what the cache answers the queued re-render — the server's
+   *  echo *after* the discard, which the store half made a moment earlier. */
+  function harness(
+    poses: Record<string, IndexPose> = {},
+    stored: Record<string, unknown> = {},
+  ): Harness {
+    const put = vi.fn().mockResolvedValue({ gen: 2 })
     const discard = vi.fn()
     const report = vi.fn()
+    const setThumb = vi.fn()
+    const queued: (() => Promise<void>)[] = []
     return {
       put,
       discard,
       report,
+      setThumb,
       host: {
         poses,
-        api: { putThumb: put },
+        api: {
+          putThumb: put,
+          getThumb: vi.fn().mockResolvedValue({
+            status: 'hit',
+            pngUrl: 'blob:stored',
+            lighting: THUMB_LIGHTING,
+            rig: RIG_VERSION,
+            ...stored,
+          }),
+        },
+        lru: { acquire: vi.fn().mockResolvedValue({}) },
+        queue: { push: (job: () => Promise<void>) => queued.push(job), whenResumed: () => Promise.resolve() },
+        setThumb,
         discardThumbFraming: discard,
         report,
         framingChanged: vi.fn(),
       } as unknown as ActionHost,
-      view: { axis: 'y', reframe: vi.fn() },
+      view: { reframe: vi.fn() },
+      runQueued: async () => {
+        expect(queued).toHaveLength(1)
+        await queued[0]!()
+      },
     }
   }
   const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
@@ -883,26 +1005,64 @@ describe('resetFramingLive', () => {
       ao: true,
     })
     const resolved = cameraForPose(POSE, DEFAULT_CAMERA)!
-    expect(h.view.reframe).toHaveBeenCalledWith(resolved.camera, resolved.axis, true)
-    expect(resolved.axis).not.toBe('y') // the axis really moved
+    expect(h.view.reframe).toHaveBeenCalledWith(resolved.camera, resolved.axis)
+    expect(resolved.axis).not.toBe('z') // the axis really moved off the file default
     await flush()
-    expect(h.discard).toHaveBeenCalledWith(ENTRY.path, true)
+    expect(h.discard).toHaveBeenCalledWith(ENTRY.path)
+
+    // The pixels, queued: drawn at the pose (the store now holds nothing of
+    // the user's) and recording it, with no camera field — the discard stands.
+    h.put.mockClear()
+    await h.runQueued()
+    expect(h.put).toHaveBeenCalledTimes(1)
+    expect(h.put.mock.calls[0]![0]).toMatchObject({
+      path: ENTRY.path,
+      posed: POSE_VERSION,
+      lighting: THUMB_LIGHTING,
+      rig: RIG_VERSION,
+    })
+    expect(h.put.mock.calls[0]![0].png).toBeDefined()
+    expect(h.put.mock.calls[0]![0].camera).toBeUndefined()
+    expect(h.put.mock.calls[0]![0].axis).toBeUndefined()
+    expect(h.put.mock.calls[0]![0].poseKey).toBeDefined()
   })
 
-  it('keeps the axis when the view knows no pose, and still discards the camera', async () => {
-    const h = harness()
+  it('discards the axis too when the view knows no pose — the default about the file’s own axis', async () => {
+    // Inverted 2026-09-11 (`pose-rerender` D7): this cell pinned `axis:
+    // undefined` (keep) and a re-frame about the view's own spindle. A kept
+    // axis was the framing that "came back" once the index could replace it.
+    const h = harness({}, { axis: '-x' })
     resetFramingLive(ENTRY, h.host, h.view)
 
     expect(h.put).toHaveBeenCalledWith({
       path: ENTRY.path,
       mtime: ENTRY.mtime,
       camera: null,
-      axis: undefined, // absence keeps; there is nothing better to fall back to
+      axis: null,
       ao: true,
     })
-    expect(h.view.reframe).toHaveBeenCalledWith(DEFAULT_CAMERA, 'y', false)
+    expect(h.view.reframe).toHaveBeenCalledWith(DEFAULT_CAMERA, 'z')
     await flush()
-    expect(h.discard).toHaveBeenCalledWith(ENTRY.path, false)
+    expect(h.discard).toHaveBeenCalledWith(ENTRY.path)
+
+    // The pixels, queued: the store has taken the discard, so the re-render
+    // finds nothing stored and draws the default about the file's axis,
+    // unlabelled — nothing framed them — and with no camera field.
+    h.put.mockClear()
+    ;(h.host.api.getThumb as ReturnType<typeof vi.fn>).mockResolvedValue({
+      status: 'hit',
+      pngUrl: 'blob:stored',
+      lighting: THUMB_LIGHTING,
+      rig: RIG_VERSION,
+    })
+    await h.runQueued()
+    expect(h.put).toHaveBeenCalledTimes(1)
+    expect(h.put.mock.calls[0]![0].png).toBeDefined()
+    expect(h.put.mock.calls[0]![0].camera).toBeUndefined()
+    expect(h.put.mock.calls[0]![0].posed).toBeUndefined()
+    const shot = renderThumbnail.mock.calls.at(-1) as unknown as [unknown, typeof STORED, string]
+    expect(shot[2]).toBe('z')
+    expect(shot[1].az).toBeCloseTo(DEFAULT_CAMERA.az)
   })
 
   it('still discards with no session, and reports a write that did not land', async () => {

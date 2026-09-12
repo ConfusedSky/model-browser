@@ -26,7 +26,10 @@ const EXACT = 1e-6
  * together; the picture was unchanged, so no bump then). The orientation a
  * posed render was drawn under is its own label, `poseKey` (`pose-rerender`
  * D2), whose absence is stale like the lighting and rig labels' — so the key
- * needed no version bump.
+ * needed no version bump. Nor is a settled absence one: where the index is
+ * asked and holds none, or is known not to be there, a render that records an
+ * orientation is stale and redraws at the default, recording none (D5) — the
+ * same version, no orientation, the picture the live view opens at.
  */
 export const POSE_VERSION = 2
 
@@ -65,10 +68,12 @@ export function axisOf(up: [number, number, number]): OrbitAxis | null {
  * commonest up axis) among them.
  */
 export function cameraForPose(
-  pose: IndexPose | undefined,
+  pose: IndexPose | null | undefined,
   base: CameraState,
 ): { camera: CameraState; axis: OrbitAxis } | null {
-  if (pose === undefined) return null
+  // `null` (a settled absence) and `undefined` (unsettled) both frame nothing;
+  // telling them apart is the sweep's business (`useThumbnails`' `usable`).
+  if (pose == null) return null
   const axis = axisOf(pose.up)
   if (axis === null) return null
   const { s, a, b } = frameFor(axis)

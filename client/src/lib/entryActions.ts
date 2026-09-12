@@ -35,6 +35,7 @@ import type {
   FeatureReport,
   IndexAvailability,
   IndexPose,
+  ModelFormat,
   OrbitAxis,
 } from '../../../shared/types'
 import type { ApiClient, ThumbSave } from '../api/client'
@@ -164,7 +165,7 @@ export interface ActionHost extends Feedback, LibraryTop {
    * parameter instead of reading a host (D7); this field is what the
    * *command's* wrapper passes into it.
    */
-  poses: Record<string, IndexPose>
+  poses: Record<string, IndexPose | null>
   /**
    * The one ApiClient (architecture D1), narrowed to what these bodies ask of
    * it. The thumbnail commands need both cache halves — the stored orientation
@@ -191,9 +192,10 @@ export interface ActionHost extends Feedback, LibraryTop {
    *  what the tile draws and what the lightbox opens at, so a command that
    *  wrote only to the cache would not take effect until the next load (4b.4). */
   setThumb: (path: string, state: ThumbState) => void
-  /** The same map's framing-only discard, for the one command that gives an
-   *  orientation up without drawing anything (`resetFramingLive`). */
-  discardThumbFraming: (path: string, dropAxis: boolean) => void
+  /** The same map's framing-only discard — camera and axis both — for the one
+   *  command that gives an orientation up before anything redraws it
+   *  (`resetFramingLive`). */
+  discardThumbFraming: (path: string) => void
   /**
    * App's one call into the job runner (`bulk-thumbnail-jobs` D2): start
    * `(operation, scope)`, or surface the job already running.
@@ -414,19 +416,17 @@ export type FramingWrite = Pick<ThumbSave, 'camera' | 'axis'>
  * bulk reset's derivation, the library tab's count and the hand-change delta
  * all ask, so a button can never offer a reset that resets nothing.
  *
- * A stored camera is always given up. A stored axis is given up only where a
- * usable index orientation replaces it (D7 — "usable" is `cameraForPose`'s
- * answer); an axis the rule keeps is not a framing a reset can touch, and a
- * model holding only such an axis is not "resettable" however `framed` it
- * reads on the wire (found live: a subtree reset that left its models in the
- * library's count, 2026-09-02).
+ * A stored camera or a stored axis: either is given up, so either counts —
+ * the wire's `framed`. Until `pose-rerender` D7 an axis was given up only
+ * where a usable index orientation replaced it, and an axis alone with no
+ * such pose was not counted; Masa's reproduction (index off, three untouched
+ * closes storing `axis: z`, a reset that cleared the cameras and kept the
+ * axes, index on) showed what that left behind: an axis that counted as a
+ * framing again the moment a pose could replace it, and withheld that pose —
+ * a reset that had to be run twice.
  */
-export function resettable(
-  camera: CameraState | undefined,
-  axis: OrbitAxis | undefined,
-  pose: IndexPose | undefined,
-): boolean {
-  return camera !== undefined || (axis !== undefined && cameraForPose(pose, DEFAULT_CAMERA) !== null)
+export function resettable(camera: CameraState | undefined, axis: OrbitAxis | undefined): boolean {
+  return camera !== undefined || axis !== undefined
 }
 
 /** A model's stored orientation as a caller knows it: both fields, or absent. */
@@ -434,30 +434,32 @@ export type StoredFraming = { camera: CameraState | undefined; axis: OrbitAxis |
 
 /**
  * What a model resolves to once its own stored orientation is given up — the
- * one reading of D7's rule, for every surface that gives one up.
+ * one reading of the rule, for every surface that gives one up.
  *
  * A discarded orientation resolves the way an untouched model resolves, as far
  * as the view can know it: the index's pose where the view's landed answer
- * carries a usable one, the default otherwise. "Usable" is `cameraForPose`'s
- * answer and nothing else — a malformed pose (off-axis `up`, a non-perpendicular
- * `azimuth_zero`) is not usable, and a pose with no cached front view
- * deliberately *is*, since the thumbnail sweep applies that one too.
+ * carries a usable one, else the default about the file's own axis
+ * (`defaultAxisFor`). "Usable" is `cameraForPose`'s answer and nothing else — a
+ * malformed pose (off-axis `up`, a non-perpendicular `azimuth_zero`) is not
+ * usable, and a pose with no cached front view deliberately *is*, since the
+ * thumbnail sweep applies that one too.
  *
- * `posed` carries both halves of what a caller does with the answer: it is the
- * label these pixels get, and it is exactly when the stored **axis** goes as
- * well. Half a pose is not a pose (`useThumbnails` offers one only when neither
- * a camera nor an axis is stored), and with no pose to replace it the axis
- * stays — framing the model by default about its own spindle rather than laying
- * a Z-up model on its side for a spindle nobody asked for.
+ * The stored axis is never kept (`pose-rerender` D7): an up axis and the
+ * angles measured about it are one thing, and "had the user never set one" is
+ * a model with nothing of its own. The kept axis this used to return where no
+ * pose could replace it was a framing the model still held — not counted
+ * while nothing could replace it, counted and withholding the pose the moment
+ * something could. `posed` is the label these pixels get: drawn under the
+ * pose, or unlabelled at the default.
  */
 export function framingAfterDiscard(
-  pose: IndexPose | undefined,
-  keptAxis: OrbitAxis,
+  pose: IndexPose | null | undefined,
+  format: ModelFormat,
 ): { camera: CameraState; axis: OrbitAxis; posed: boolean } {
   const resolved = cameraForPose(pose, DEFAULT_CAMERA)
   return {
     camera: resolved?.camera ?? DEFAULT_CAMERA,
-    axis: resolved?.axis ?? keptAxis,
+    axis: resolved?.axis ?? defaultAxisFor(format),
     posed: resolved !== null,
   }
 }
@@ -520,8 +522,9 @@ export async function renderEntryThumbnail(
   opts: {
     discardFraming: boolean
     /** The index's orientation for this model, from whatever the caller holds:
-     *  the landing's map for a command, the job's own wave for a job. */
-    pose: IndexPose | undefined
+     *  the landing's map for a command, the job's own wave for a job. `null`
+     *  is a settled absence (`pose-rerender` D5): rendered at the default. */
+    pose: IndexPose | null | undefined
     /** The generation the caller last saw, making the write conditional (D4).
      *  Absent for a user's press, which is unconditional by definition. */
     ifGen?: number
@@ -597,10 +600,7 @@ export async function renderEntryThumbnail(
     // What the model resolves to once its own orientation is gone —
     // resolved by the shared rule, which the lightbox panel's live reset
     // reads too, so the two surfaces cannot disagree about the same model.
-    ;({ camera, axis, posed } = framingAfterDiscard(
-      opts.pose,
-      cached.axis ?? defaultAxisFor(formatOfEntry(entry)),
-    ))
+    ;({ camera, axis, posed } = framingAfterDiscard(opts.pose, formatOfEntry(entry)))
   } else {
     // Exactly the sweep's resolution (useThumbnails' dropStale): the stored
     // camera/axis, else the pose when *both* are absent, else the default.
@@ -609,9 +609,6 @@ export async function renderEntryThumbnail(
     camera = cached.camera ?? fromPose?.camera ?? DEFAULT_CAMERA
     axis = cached.axis ?? fromPose?.axis ?? defaultAxisFor(formatOfEntry(entry))
   }
-  // `posed` says a usable pose replaced the orientation, which is exactly
-  // when the stored axis goes with it.
-  const dropAxis = discardFraming && posed
 
   const object = await deps.lru.acquire(entry.path)
   await deps.queue.whenResumed()
@@ -632,7 +629,7 @@ export async function renderEntryThumbnail(
       // clears every label a PNG-bearing PUT omits, so an unlabelled write
       // fails the hit test forever and re-renders the tile on every visit.
       camera: discardFraming ? null : undefined,
-      axis: dropAxis ? null : undefined,
+      axis: discardFraming ? null : undefined,
       lighting: THUMB_LIGHTING,
       rig: RIG_VERSION,
       posed: posed ? POSE_VERSION : undefined,
@@ -663,7 +660,7 @@ export async function renderEntryThumbnail(
   if (discardFraming) {
     deps.framingChanged?.(
       entry.path,
-      { camera: null, axis: dropAxis ? null : undefined },
+      { camera: null, axis: null },
       { camera: cached.camera, axis: cached.axis },
     )
   }
@@ -671,7 +668,7 @@ export async function renderEntryThumbnail(
     status: 'ready',
     url: URL.createObjectURL(png),
     camera: discardFraming ? undefined : cached.camera,
-    axis: dropAxis ? undefined : cached.axis,
+    axis: discardFraming ? undefined : cached.axis,
     // The PUT above moved the generation; the echo keeps the tile's next
     // fetch cacheable (setThumb adopts absence as "re-learn").
     gen: written.gen,
@@ -725,76 +722,73 @@ function refreshThumbnail(
   })
 }
 
-/** The failure sentence for a discard the store did not accept. */
-export const RESET_FAILED = 'Could not reset the framing.'
-
 /**
  * The open view a live *reset framing* re-frames — the lightbox's session,
  * described by the two things this command needs of it and nothing else.
  */
 export interface LiveFramingView {
-  /** The spindle the view is on: what the model keeps when there is no usable
-   *  pose to replace it. */
-  readonly axis: OrbitAxis
   /**
    * Move the live view to `camera` about `axis`, giving up the session's claim
-   * on the orientation so the closing persist does not write it back. `posed`
-   * says the orientation came from the index, which is what the close labels
-   * its pixels with.
+   * on the orientation so the close that follows writes nothing
+   * (`ViewerSession.reframe`).
    */
-  reframe: (camera: CameraState, axis: OrbitAxis, posed: boolean) => void
+  reframe: (camera: CameraState, axis: OrbitAxis) => void
 }
+
+/** The failure sentence for a discard the store did not accept. */
+export const RESET_FAILED = 'Could not reset the framing.'
 
 /**
  * *Reset framing* pressed on the surface that is **showing** the model — the
- * lightbox's info panel (D6's margin, follow-up 6.6).
+ * lightbox's info panel (D6's margin, follow-up 6.6), and since 2026-09-01
+ * the menu raised on the lightbox, which App routes here when the raise
+ * carried the live view. Three parts, two now and one later:
  *
- * The lightbox's info panel — and, since 2026-09-01, the menu raised on the
- * lightbox, which App routes here when the raise carried the live view. It is
- * a different body from the tile menu's, not the same one on a second surface. `refreshThumbnail` would queue a render behind
- * the suspension the viewer itself holds, sit there until the lightbox closed,
- * and then lose a coin-flip against the closing persist. Here the two halves
- * are done where they can actually happen:
- *
- * - **the store half**, now: discard the stored camera, and the axis with it
- *   exactly when a usable pose replaces it. A png-less PUT, deliberately —
+ * - **the store half**, now: discard the stored camera and axis (both, D7). A
+ *   png-less PUT, deliberately —
  *   `cache.put` keeps the mtime and every label a PNG-less write omits, so the
- *   tile keeps the pixels it has until something redraws them.
+ *   tile keeps the pixels it has until something redraws them — followed by
+ *   the thumbs map's own discard (4b.4).
  * - **the live half**, now: re-frame the open session to what the model
- *   resolves to, which is also what redraws those pixels — the lightbox's
- *   closing persist snapshots the live view, so the panel needs no *re-render*
- *   item of its own.
+ *   resolves to, by the shared rule (`framingAfterDiscard`), so this surface
+ *   and the tile menu's cannot disagree about the same model. The session
+ *   gives up its claim on the orientation with the move
+ *   (`ViewerSession.reframe`), so the close that follows writes nothing
+ *   unless the user orbits again (`pose-rerender` D4).
+ * - **the pixels**, later: a plain re-render (`refreshThumbnail` without the
+ *   discard), pushed on the render queue, where it waits behind the
+ *   suspension the open view holds and lands right after the close — reading
+ *   the stored orientation *then* and drawing whatever it finds: the pose or
+ *   the default when the user left the reset alone (pixels labelled posed
+ *   where a pose framed them, no camera field, so the discard stands), or
+ *   the orbit they made after it (pixels only, their camera untouched).
+ *   Until `pose-rerender` D4 the closing persist drew these pixels; a close
+ *   that writes nothing left the tile showing the discarded framing. A
+ *   queued *discard* was tried instead and measured wrong: reset → orbit →
+ *   close wrote [camera, camera, camera:null] — the discard, reading the
+ *   cache after the gate, landed last and threw the orbit away.
  *
  * With no session (the panel is up while the mesh loads, or after it failed)
- * there is nothing to re-frame and the store half still runs: the discard is
- * about what is stored, not about what is on screen.
+ * there is nothing to re-frame and the other two parts still run: the discard
+ * is about what is stored, not about what is on screen.
  */
 export function resetFramingLive(
   entry: DirEntry,
   host: ActionHost,
   view: LiveFramingView | null,
 ): void {
-  // The resolved axis is read for real: `reframe` moves the open session about
-  // it, or records it for an open still in flight (`pendingReframeRef`). The
-  // format's default stands in only when there is no view at all — nothing on
-  // screen and nothing pending, so the resolved framing is applied to nothing
-  // — and in a pose-less discard, where `framingAfterDiscard` echoes the kept
-  // axis back and the landing handler re-reads the kept value from its own
-  // `getThumb` rather than trusting a read the thumbs map may not have settled
-  // for.
-  const framing = framingAfterDiscard(
-    host.poses[entry.path],
-    view?.axis ?? defaultAxisFor(formatOfEntry(entry)),
-  )
+  // Resolved from the pose and the file's format alone (`pose-rerender` D7):
+  // nothing stored survives a reset, so nothing stored is read.
+  const framing = framingAfterDiscard(host.poses[entry.path], formatOfEntry(entry))
   void host.api
     .putThumb({
       path: entry.path,
       mtime: entry.mtime,
       // `null` is the discard the store gained for this (4b.2); `undefined`
-      // still means keep. No png and no labels: the labels describe pixels,
-      // and this write does not touch them.
+      // still means keep. Both go (D7). No png and no labels: the labels
+      // describe pixels, and this write does not touch them.
       camera: null,
-      axis: framing.posed ? null : undefined,
+      axis: null,
       // Declared for completeness, and it decides nothing here: with no PNG
       // and no labels there is no "written render" for the value to select.
       // The discard is the entry's — `ThumbCache.put` invalidates *both*
@@ -809,12 +803,13 @@ export function resetFramingLive(
       // at the orientation just given up (4b.4).
       () => {
         // No lookup here to hand over a before-state; App reads the tile's.
-        host.framingChanged(entry.path, { camera: null, axis: framing.posed ? null : undefined })
-        host.discardThumbFraming(entry.path, framing.posed)
+        host.framingChanged(entry.path, { camera: null, axis: null })
+        host.discardThumbFraming(entry.path)
       },
       () => host.report(RESET_FAILED),
     )
-  view?.reframe(framing.camera, framing.axis, framing.posed)
+  view?.reframe(framing.camera, framing.axis)
+  refreshThumbnail(entry, host, { discardFraming: false })
 }
 
 /*

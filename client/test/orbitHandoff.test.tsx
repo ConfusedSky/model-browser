@@ -335,12 +335,14 @@ describe('an un-framed model opens about its format’s up axis', () => {
 })
 
 describe('an index pose is advisory', () => {
-  it('opening at a pose and closing without touching it stores no camera', async () => {
-    // The failure this pins: the index's suggestion becoming the user's stored
+  it('opening at a pose and closing without touching it writes nothing', async () => {
+    // The failure this pinned: the index's suggestion becoming the user's stored
     // orientation after a single open — durable, invisible, and thereafter
-    // winning over the re-classification that would have corrected it. The
-    // pixels are still saved, because model-viewer requires a close to persist
-    // a thumbnail like an orbit release does; only the camera is withheld.
+    // winning over the re-classification that would have corrected it. Until
+    // `pose-rerender` D4 the close still saved the *pixels* (labelled posed and
+    // keyless, no camera); an untouched close now persists nothing at all — the
+    // tile already shows this framing, and the grid's own sweep follows the
+    // pose state, so the close has nothing to add and a camera to withhold.
     const { props } = makeProps()
     const posed: React.ComponentProps<typeof ViewerLayer> = {
       ...props,
@@ -356,21 +358,13 @@ describe('an index pose is advisory', () => {
     await render(posed as unknown as ReturnType<typeof makeProps>['props'])
 
     // ✕ raises a close *intent*; App answers by bumping closeSignal, which is
-    // what runs the persisting close (url-navigation D3).
+    // what runs the close (url-navigation D3).
     await act(async () => {
       root!.render(<ViewerLayer {...posed} closeSignal={1} />)
     })
     await act(async () => {})
 
-    expect(posed.onPersist).toHaveBeenCalled()
-    // The label travels with the decision now rather than being derived from
-    // it: declining the camera and labelling the pixels posed came apart when
-    // a framing reset gained the power to decline one without the other (6.6),
-    // so this close says both. Same write as before — the pose's pixels,
-    // labelled, and no camera.
-    expect((posed.onPersist as ReturnType<typeof vi.fn>).mock.calls[0]![1]).toEqual({
-      camera: false,
-      posed: true,
-    })
+    expect(posed.onDismiss).toHaveBeenCalled()
+    expect(posed.onPersist).not.toHaveBeenCalled()
   })
 })

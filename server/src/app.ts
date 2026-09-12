@@ -1761,7 +1761,22 @@ export function createApp(
     // negatives alike: `recordPoses` writes `recordedAt` on every path it is
     // handed, so the horizon is measured from the last time the index said so.
     layers.recordPoses(await collectionRoot(), poses, answered ? canonical : [])
-    const answer: PosesResponse = { poses }
+    // The answer carries the negatives too (`pose-rerender` D5): `null` for
+    // every asked path the index did not name when it *answered*, or when the
+    // status memo says there is no index to ask — absent, wedged, or its
+    // volume gone — since the live view opens at the default in all three and
+    // the tile should show the same. A path is left out, unsettled, while the
+    // index is warming or the memo is cold (a failed ask resets it): a
+    // startup's warm-up must not redraw a folder at the default and again
+    // posed sixteen seconds later. A canonical path that does not resolve is
+    // settled too — the index cannot frame what is not there; one that is not
+    // a library path at all was never asked and is not here.
+    const memo = memoisedStatus()?.status.state
+    const settled =
+      answered || memo === 'absent' || memo === 'wedged' || memo === 'volume-gone'
+    const filed: Record<string, IndexPose | null> = { ...poses }
+    if (settled) for (const p of canonical) filed[p] ??= null
+    const answer: PosesResponse = { poses: filed }
     return c.json(answer)
   })
 

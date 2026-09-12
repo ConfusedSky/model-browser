@@ -87,18 +87,28 @@ function release(url: string): void {
  * what it was drawn under and is stale, the rule the lighting and rig labels
  * already follow ("including entries where either value is absent") — the
  * one pass that brings every posed render under the key.
+ *
+ * Three pose states (`pose-rerender` D5). A **pose**: the render must have
+ * been drawn under this one — version and key. **`null`**, a settled absence
+ * — the index was asked and holds none, or is known not to be there: a render
+ * that records an orientation (`posed` or `poseKey`) is stale and redraws at
+ * the default, recording none, so the tile shows what the live view opens at.
+ * **`undefined`**, unsettled — the index warming, the ask unanswered: nobody
+ * knows yet, and the render stands whatever it records.
  */
 function usable(
   labels: { lighting?: LightingMode; rig?: number; posed?: number; poseKey?: string },
   camera: CameraState | undefined,
   axis: OrbitAxis | undefined,
-  pose: IndexPose | undefined,
+  pose: IndexPose | null | undefined,
 ): boolean {
+  const unowned = camera === undefined && axis === undefined
   const poseStale =
-    pose !== undefined &&
-    camera === undefined &&
-    axis === undefined &&
-    (labels.posed !== POSE_VERSION || labels.poseKey !== poseKeyFor(pose))
+    unowned &&
+    (pose === null
+      ? labels.posed !== undefined || labels.poseKey !== undefined
+      : pose !== undefined &&
+        (labels.posed !== POSE_VERSION || labels.poseKey !== poseKeyFor(pose)))
   return labels.lighting === THUMB_LIGHTING && labels.rig === RIG_VERSION && !poseStale
 }
 
@@ -115,7 +125,7 @@ function usable(
  * recorded rather than fixed: a label saying "framed by no pose on purpose"
  * is its fix, and belongs to a change about the index's faults.
  */
-function poseKeyFor(pose: IndexPose): string | undefined {
+function poseKeyFor(pose: IndexPose | null | undefined): string | undefined {
   const resolved = cameraForPose(pose, DEFAULT_CAMERA)
   return resolved === null ? undefined : poseKeyOf(resolved)
 }
@@ -145,8 +155,9 @@ interface EntrySlot {
   generation: number
   /** The occlusion recipe this slot's current generation was started under. */
   ao: boolean
-  /** The index's opinion this generation was started under, kept for by-value comparison. */
-  pose: IndexPose | undefined
+  /** The index's opinion this generation was started under, kept for by-value
+   *  comparison — a settled `null` is an opinion too (`pose-rerender` D5). */
+  pose: IndexPose | null | undefined
   /** Cancel handles for this generation's in-flight work. */
   cancels: (() => void)[]
   /**
@@ -225,8 +236,11 @@ function sameVec3(a: [number, number, number], b: [number, number, number]): boo
  * changed on every landing and re-look-up the whole grid — against the
  * requirement's "an entry whose opinion is unchanged SHALL issue nothing".
  */
-function samePose(a: IndexPose | undefined, b: IndexPose | undefined): boolean {
-  if (a === undefined || b === undefined) return a === b
+function samePose(a: IndexPose | null | undefined, b: IndexPose | null | undefined): boolean {
+  // `null` and `undefined` are different states (`pose-rerender` D5) — an
+  // ask settling to none is a change worth re-evaluating, so only the same
+  // one of them is equal.
+  if (a == null || b == null) return a === b
   if (!sameVec3(a.up, b.up) || !sameVec3(a.azimuth_zero, b.azimuth_zero)) return false
   if (a.source !== b.source || a.confidence !== b.confidence) return false
   if (a.front === null || b.front === null) return a.front === b.front
@@ -263,8 +277,8 @@ function sameBands(a: ReadonlyMap<string, Band>, b: ReadonlyMap<string, Band>): 
  * The pose clause is the one that needs saying. A pose is an input to the
  * pixels that path+mtime does not carry — the same shape as a RIG_VERSION
  * bump. Without it, a thumbnail rendered before the index had an opinion keeps
- * its default angle forever, and the orientation appears only once the user
- * opens the model and the lightbox's close persists a posed snapshot. It
+ * its default angle forever — nothing else draws a tile posed, since the
+ * lightbox's close writes nothing the user did not frame (`pose-rerender` D4). It
  * applies only where nothing of the user's is stored, because that is the only
  * case a re-render poses: with a stored camera or axis the render computes
  * `posed = null` and PUTs unlabelled pixels, so the label could never arrive
@@ -281,7 +295,7 @@ export function isCurrentRender(
   render: ThumbRenderInfo | undefined,
   camera: CameraState | undefined,
   axis: OrbitAxis | undefined,
-  pose: IndexPose | undefined,
+  pose: IndexPose | null | undefined,
 ): boolean {
   // The recipe half is `usable` — the sweep's own test, landed by
   // `thumbnail-image-serving` 2.2 — so the two cannot drift; this adds only
@@ -323,7 +337,7 @@ export function useThumbnails(
    * the cache holds no camera or axis of its own: the index's opinion is a
    * default, never an override of the user's (semantic-search D5).
    */
-  poses: Record<string, IndexPose> = {},
+  poses: Record<string, IndexPose | null> = {},
   /**
    * What "a different listing is on screen" means for the band ranking's
    * reset — App's own `entries`, the landing's array. Not `entries` above,
@@ -492,19 +506,21 @@ export function useThumbnails(
   }, [])
 
   /**
-   * Give up the framing a tile is carrying without touching its pixels — the
-   * in-memory half of *reset framing* pressed from the open lightbox
-   * (entry-context-menu D7's margin).
+   * Give up the framing a tile is carrying — camera and axis both
+   * (`pose-rerender` D7) — without touching its pixels: the in-memory half of
+   * *reset framing* pressed from the open lightbox (entry-context-menu D7's
+   * margin).
    *
    * `setThumb` cannot express this: it replaces the whole entry, and the
-   * caller has no URL to put back. Nor should it mint one — the lightbox's
-   * closing persist redraws this tile from the re-framed view, so a render
-   * here would be a second one nobody asked for.
+   * caller has no URL to put back. Nor should it mint one — the reset queues
+   * its own re-render, which lands after the lightbox closes and hands the
+   * tile its picture then (`resetFramingLive`), so a render here would be a
+   * second one nobody asked for.
    *
    * A path with nothing in the map is left alone: there is nothing to discard,
    * and inventing a `ready` entry with no image would blank the tile.
    */
-  const discardThumbFraming = useCallback((path: string, dropAxis: boolean) => {
+  const discardThumbFraming = useCallback((path: string) => {
     // The discard's PUT (resetFramingLive's, pixel-less) moved the entry's
     // generation on the server, and its echo is not plumbed this far — so the
     // learned number is stale the moment this runs. Cleared for the same
@@ -515,9 +531,9 @@ export function useThumbnails(
     setThumbs((prev) => {
       const cur = prev.get(path)
       if (cur === undefined) return prev
-      if (cur.camera === undefined && (!dropAxis || cur.axis === undefined)) return prev
+      if (cur.camera === undefined && cur.axis === undefined) return prev
       const next = new Map(prev)
-      next.set(path, { ...cur, camera: undefined, axis: dropAxis ? undefined : cur.axis })
+      next.set(path, { ...cur, camera: undefined, axis: undefined })
       return next
     })
   }, [])

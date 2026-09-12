@@ -363,12 +363,14 @@ describe('the pose wave asks only about what the listing did not carry', () => {
     expect(semanticPosesFor).not.toHaveBeenCalled()
   })
 
-  it('does not file a null pose as an orientation', async () => {
-    // The guarded merge, and why it needs a guard rather than the filter's luck:
-    // `carriedPoses` builds the map the thumbnail sweep and the viewer read, and
-    // a `null` filed there would be handed on as if it were an orientation.
-    // `poses[path]` must stay absent for a known-unposed model — the same shape
-    // it has when nobody ever asked.
+  it('files a null pose as a settled absence — the viewer opens at the default, knowing it', async () => {
+    // Inverted 2026-09-11 (`pose-rerender` D5). `carriedPoses` builds the map the
+    // thumbnail sweep and the viewer read, and a `null` filed there is the server
+    // saying it asked and the index holds none — a *state*, not an orientation.
+    // The sweep reads it as "a render drawn under an orientation is stale, redraw
+    // at the default"; the viewer opens at the default either way and is handed
+    // the `null` so both read one map. Only absence — never asked — stays
+    // `undefined`, and that is what the wave asks about.
     await mountAppAtCurrentUrl('/?path=%2Fmodels&model=%2Fmodels%2Fquiet.stl', {
       path: '/models',
       entries: [POSED, { ...model('quiet.stl'), pose: null }],
@@ -376,6 +378,6 @@ describe('the pose wave asks only about what the listing did not carry', () => {
     await settle()
 
     expect(viewerProps.last).not.toBeNull()
-    expect(viewerProps.last!.pose).toBeUndefined()
+    expect(viewerProps.last!.pose).toBeNull()
   })
 })

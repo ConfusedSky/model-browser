@@ -100,7 +100,7 @@ export interface Landed {
   /** How many cleared the floor before the count cut them, where the index
    *  reports it (D9). Absent from a plain listing and from an older index. */
   matched?: number
-  poses?: Record<string, IndexPose>
+  poses?: Record<string, IndexPose | null>
   /**
    * What the index scored each tile at, keyed by path as `poses` is. Optional
    * for the same reason the rest of this residue is: only a scored answer has
@@ -191,7 +191,7 @@ export interface SearchState {
    * is still on screen until its successor lands, and dropping its poses there
    * would un-pose every tile of a grid that is about to be replaced anyway.
    */
-  listingPoses: Record<string, IndexPose> | null
+  listingPoses: Record<string, IndexPose | null> | null
   /** Monotonic asking-event counter. */
   lastId: number
 }
@@ -251,7 +251,7 @@ export type Action =
    * D3). `id` is the landing this wave was fired for — `Result.id` — and is
    * what drops one that answers about a view the user has left.
    */
-  | { type: 'listingPoses'; id: number; poses: Record<string, IndexPose> }
+  | { type: 'listingPoses'; id: number; poses: Record<string, IndexPose | null> }
   /**
    * Ask the answer on screen again, because it said it was stale
    * (`listing-tree-cache` §5.2). `id` is the answer it is for — `Result.id`,

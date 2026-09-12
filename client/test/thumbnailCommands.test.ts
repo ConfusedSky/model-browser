@@ -223,10 +223,15 @@ describe('reset framing', () => {
     expect(put.camera).toBeNull()
   })
 
-  it('keeps the axis when the pose offered is malformed, and when there is none at all', async () => {
-    // Trading a real axis for 'y' with nothing to replace it would lay a Z-up
-    // model on its side — the failure D7 refuses. "Usable" is `cameraForPose`'s
-    // answer and nothing else.
+  it('discards the axis too when the pose offered is malformed or absent: the default about the file’s own axis', async () => {
+    // Inverted 2026-09-11 (`pose-rerender` D7). This cell pinned that an axis
+    // with nothing to replace it was kept, so a Z-up model was not laid on its
+    // side. Masa's reproduction showed what a kept axis is: a framing the model
+    // still holds, not counted while no pose could replace it and withholding
+    // the pose the moment one could — a reset that had to be run twice. The
+    // axis goes with the camera now, and the model resolves to the default
+    // about the file's own axis (`defaultAxisFor`: `z` for an STL). "Usable"
+    // is still `cameraForPose`'s answer and nothing else.
     for (const poses of [{}, { [HERO.path]: POSE_OFF_AXIS }]) {
       expect(cameraForPose(poses[HERO.path], DEFAULT_CAMERA)).toBeNull()
       const h = harness({ status: 'hit', camera: CAM, axis: '-x' }, poses)
@@ -234,13 +239,13 @@ describe('reset framing', () => {
       run('resetFraming', h.host)
       await flush()
 
-      // Framed by default about the axis the user established.
-      expect(renderThumbnail).toHaveBeenCalledWith(MESH, DEFAULT_CAMERA, '-x', true)
+      // Framed by default about the file's axis, not the one the user chose.
+      expect(renderThumbnail).toHaveBeenCalledWith(MESH, DEFAULT_CAMERA, 'z', true)
       const put = h.putThumb.mock.calls[0]![0] as Record<string, unknown>
       expect(put.camera).toBeNull()
-      expect(put.axis).toBeUndefined() // kept
+      expect(put.axis).toBeNull()
       expect(put.posed).toBeUndefined()
-      expect(h.setThumb.mock.calls[0]![1]).toMatchObject({ camera: undefined, axis: '-x' })
+      expect(h.setThumb.mock.calls[0]![1]).toMatchObject({ camera: undefined, axis: undefined })
     }
   })
 
@@ -655,7 +660,8 @@ describe('the core the generate job runs directly', () => {
     expect(outcome).toBe('skipped')
     const framingChanged = vi.mocked(h.host.framingChanged!)
     expect(framingChanged).toHaveBeenCalledOnce()
-    expect(framingChanged.mock.calls[0]![1]).toEqual({ camera: null, axis: undefined })
+    // Both halves go with a discard (`pose-rerender` D7), pose or no pose.
+    expect(framingChanged.mock.calls[0]![1]).toEqual({ camera: null, axis: null })
   })
 
   it('rethrows a refusal that is not a moved generation', async () => {

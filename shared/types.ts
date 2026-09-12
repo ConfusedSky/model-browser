@@ -625,17 +625,23 @@ export interface SimilarListing {
  * this is how they reach a *browsing* one, so the same model is oriented the
  * same way on a meaning grid and on the listing it lives in.
  *
- * Keyed by library path, like every `poses` map in this file, and holding only
- * the models the index has an orientation for: a missing key is "no pose", and
- * an index that is absent, warming, or does not cover the browsed location
- * answers `{}` rather than failing — the listing itself never depends on it.
+ * Keyed by library path, like every `poses` map in this file. Three states per
+ * asked path, the same three a listing entry's `pose` has (`pose-rerender`
+ * D5): a pose; `null`, a **settled absence** — the index answered and holds
+ * none, or is known not to be there (absent, wedged, its volume gone), so a
+ * render drawn under an orientation is stale and the tile redraws at the
+ * default, what the live view opens at; and a **missing key**, unsettled —
+ * the index is warming or the ask went unanswered, and nobody knows yet, so a
+ * render stands. The GET form (`?path=`) still answers the positive map only.
+ * An index that cannot be asked never fails the request — the listing itself
+ * never depends on it.
  *
  * Its own request, never a field on `DirListing`: a listing must cost nothing
  * when the index is down, and a pose arriving as a second wave is what the
  * thumbnail sweep's reconciler is built for (D3).
  */
 export interface PosesResponse {
-  poses: Record<string, IndexPose>
+  poses: Record<string, IndexPose | null>
 }
 
 /**

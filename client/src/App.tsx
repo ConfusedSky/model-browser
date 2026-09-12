@@ -172,7 +172,7 @@ const NO_ENTRIES: DirEntry[] = []
 /** Nothing to ask the index about — the same stability rule as `NO_ENTRIES`,
  *  for the wave effect's dependency rather than for the sweep's. */
 const NO_PATHS: string[] = []
-const NO_POSES: Record<string, IndexPose> = {}
+const NO_POSES: Record<string, IndexPose | null> = {}
 const NO_SCORES: Record<string, IndexScore> = {}
 /**
  * No folder has been previewed yet. One module-level map rather than a fresh
@@ -765,7 +765,6 @@ export default function App() {
    */
   const [jobsEnded, setJobsEnded] = useState(0)
   const thumbsRef = useRef<Map<string, ThumbState>>(new Map())
-  const posesRef = useRef<Record<string, IndexPose>>({})
   const noteFramingChanged = useCallback(
     (path: string, write: FramingWrite, known?: StoredFraming) => {
       // The before-state, from the most authoritative reading available: the
@@ -790,17 +789,11 @@ export default function App() {
         camera: write.camera === null ? undefined : (write.camera ?? before.camera),
         axis: write.axis === null ? undefined : (write.axis ?? before.axis),
       }
-      // The axis rule needs the index's opinion; where this session holds none
-      // for the model, an axis-only state cannot be judged — and a guess of
-      // "no usable pose" read a chosen axis as −1 and clamped the button shut.
-      // A derivation waves for exactly this, so one is asked for.
-      const pose = posesRef.current[path]
-      const axisOnlyUnknown = (s: StoredFraming): boolean =>
-        pose === undefined && s.camera === undefined && s.axis !== undefined
-      if (axisOnlyUnknown(before) || axisOnlyUnknown(after)) return recount()
+      // No index opinion needed (`pose-rerender` D7): a camera or an axis is
+      // a framing, and a reset gives up both.
       const delta =
-        (resettable(after.camera, after.axis, pose) ? 1 : 0) -
-        (resettable(before.camera, before.axis, pose) ? 1 : 0)
+        (resettable(after.camera, after.axis) ? 1 : 0) -
+        (resettable(before.camera, before.axis) ? 1 : 0)
       if (delta !== 0) setHandDelta((d) => d + delta)
     },
     [],
@@ -1141,7 +1134,7 @@ export default function App() {
     // the listing wave confirms the same value, which merges to no change.
     setPreviewPoses((prev) => {
       if (prev === NO_POSES) return prev
-      const kept: Record<string, IndexPose> = {}
+      const kept: Record<string, IndexPose | null> = {}
       let count = 0
       for (const e of entries) {
         const pose = prev[e.path]
@@ -1168,7 +1161,7 @@ export default function App() {
    * Same failure-is-silence and staleness rules as the peek itself: no abort,
    * and an answer for a listing the user has left is dropped by the token.
    */
-  const [previewPoses, setPreviewPoses] = useState<Record<string, IndexPose>>(NO_POSES)
+  const [previewPoses, setPreviewPoses] = useState<Record<string, IndexPose | null>>(NO_POSES)
   const askedPreviewPoses = useRef<Set<string>>(new Set())
   useEffect(() => {
     if (libraryState?.state !== 'ready' || previews.size === 0) return
@@ -1199,6 +1192,11 @@ export default function App() {
         if (listingRef.current !== asked) return
         // An empty answer merges nothing and must not churn `poses` identity —
         // a sweep walk per silent index reply would be paid by every landing.
+        // Empty now means *unsettled* — the index warming, the ask unanswered
+        // (`pose-rerender` D5) — so a no-op is also the right reading. An
+        // answer that carries `null`s is not empty: those are settled
+        // absences, filed like poses, and they are what redraws a posed cell
+        // at the default.
         if (Object.keys(res.poses).length === 0) return
         setPreviewPoses((prev) => ({ ...prev, ...res.poses }))
       },
@@ -1252,15 +1250,16 @@ export default function App() {
    * them, and `poses` stays the very reference it was before this existed.
    */
   const carriedPoses = useMemo(() => {
-    let found: Record<string, IndexPose> | null = null
+    let found: Record<string, IndexPose | null> | null = null
     for (const e of thumbEntries) {
-      // `== null` catches both wire states that are *not* an orientation
-      // (listing-tree-cache §6.9): absent, meaning the server has not derived
-      // one, and an explicit `null`, meaning it asked and the index has none.
-      // The two waves treat both as settled and neither asks; this map is only
-      // for orientations, and a `null` filed here would reach the sweep and the
-      // viewer as if it were one.
-      if (e.pose == null) continue
+      // Both states the server can settle are filed (`pose-rerender` D5): an
+      // orientation, and the explicit `null` that says it asked and the index
+      // holds none (listing-tree-cache §6.9). The sweep reads the `null` as
+      // "a render drawn under an orientation is stale — redraw at the
+      // default", the viewer as "open at the default"; only absence — the
+      // server has not derived one — stays out, and that is what the wave
+      // below asks about.
+      if (e.pose === undefined) continue
       found ??= {}
       found[e.path] = e.pose
     }
@@ -1402,7 +1401,6 @@ export default function App() {
   // leave the delta reading state that never landed.
   useEffect(() => {
     thumbsRef.current = thumbs
-    posesRef.current = poses
   }, [thumbs, poses])
   /**
    * The one bulk-job runner for this app (`bulk-thumbnail-jobs` D2). One
@@ -1723,15 +1721,15 @@ export default function App() {
     if (waveId === null || wavePaths.length === 0 || !libraryReady) return
     void api.semanticPosesFor(wavePaths).then(
       (res) => {
-        // The preview wave's guard, on the wave that fires far more often. An
-        // empty answer names no pose for any tile, but filing it still moves
-        // the slot `null` → `{}`, which is a new `listingPoses` identity, a
-        // rebuilt `poses` memo and a reconcile walk of the whole grid in
-        // `useThumbnails` — paid once per landing over an index that knows
-        // nothing about this folder, which is the common case off the indexed
-        // collection. Silence is what it already means; now it also costs
-        // nothing.
-        if (Object.keys(res.poses).length === 0) return
+        // Filed whole, `null`s included (`pose-rerender` D5): `null` is the
+        // index settled as holding no orientation, which is what makes a
+        // posed render stale, so an answer that says only that is still an
+        // answer. The guard that skipped an empty map to save a reconcile
+        // walk went with it — an empty answer now means an unsettled index
+        // (warming, or unanswered), the walk it costs issues nothing (the
+        // by-value compare finds every pose unchanged), and a guard here
+        // would be a second copy of a rule the preview wave keeps only
+        // because its merge is a true no-op.
         dispatch({ type: 'listingPoses', id: waveId, poses: res.poses })
       },
       () => {},
@@ -2945,7 +2943,7 @@ export default function App() {
   }
 
   const persist = useCallback(
-    async (session: ViewerSession, opts: { camera?: boolean; posed?: boolean } = {}) => {
+    async (session: ViewerSession) => {
       const entry = viewer?.entry
       if (entry === undefined) return
       try {
@@ -2981,38 +2979,29 @@ export default function App() {
             path: entry.path,
             mtime: entry.mtime,
             png,
-            // Omitted when this view records no decision of the user's — see
-            // ViewerLayer's close path. An absent camera leaves whatever was
-            // stored (nothing, for a posed model) rather than writing the
-            // index's suggestion into their sidecar.
-            camera: opts.camera === false ? undefined : state,
-            axis: opts.camera === false ? undefined : axis,
+            // Every caller is a decision of the user's — an orbit release, an
+            // axis change, or a close after one (`pose-rerender` D4) — so the
+            // camera and axis always ride with the pixels, and no `posed`
+            // label does: a view the user framed depends on no pose. The
+            // untouched close that once persisted pixels only, labelled posed
+            // and keyless, writes nothing now (D6).
+            camera: state,
+            axis,
             lighting: THUMB_LIGHTING,
             rig: RIG_VERSION,
-            // The pose is an input to these pixels the cache key does not
-            // carry, exactly like `rig`. Declining the camera usually says the
-            // view was the index's and the user never touched it, so that same
-            // condition labels the picture: unlabelled, the grid would read
-            // these posed pixels as stale and render them a second time.
-            //
-            // Usually, not always — a framing reset that found no usable pose
-            // also declines the camera while showing the default (D7's margin),
-            // and labelling *that* would claim a pose these pixels never had.
-            // The caller says so when the two come apart.
-            posed: (opts.posed ?? opts.camera === false) ? POSE_VERSION : undefined,
             // The captured reading, not a second one — see above.
             ao,
           }),
         ])
         // A persisted orbit is the user framing a model by hand — the library
-        // tab's reset count has to know (D5). Not for a pixels-only persist,
-        // and before the map is updated: that is where the before-state is.
-        if (opts.camera !== false) noteFramingChanged(entry.path, { camera: state, axis })
+        // tab's reset count has to know (D5). Before the map is updated: that
+        // is where the before-state is.
+        noteFramingChanged(entry.path, { camera: state, axis })
         setThumb(entry.path, {
           status: 'ready',
           url,
-          camera: opts.camera === false ? undefined : state,
-          axis: opts.camera === false ? undefined : axis,
+          camera: state,
+          axis,
           // The write this pass just made moved the entry's generation; handing
           // the echo over is what keeps the tile's next fetch cacheable instead
           // of demoting it to a revalidation (setThumb adopts absence as

@@ -41,18 +41,6 @@ vi.mock('../src/three/renderer', async (importOriginal) => ({
   renderThumbnail,
 }))
 
-// `framingAfterDiscard` is `entry-actions`' rule and is covered there; what
-// this suite pins is that the reset op *asks* it rather than carrying a second
-// reading of the discard. Spread again, and the spy keeps the real body — the
-// answer has to be the real one for the `axis: null` assertions to mean
-// anything.
-const framingAfterDiscard = vi.hoisted(() => vi.fn())
-vi.mock('../src/lib/entryActions', async (importOriginal) => {
-  const real = await importOriginal<typeof import('../src/lib/entryActions')>()
-  framingAfterDiscard.mockImplementation(real.framingAfterDiscard)
-  return { ...real, framingAfterDiscard }
-})
-
 const SCOPE: JobScope = { path: '/kit', label: 'kit' }
 const MESH = {} as THREE.Object3D
 /** A stored camera — what `framed` spells on the wire beside the flag. */
@@ -145,8 +133,6 @@ beforeEach(() => {
   // three of these first passed while asserting nothing.
   renderThumbnail.mockReset()
   renderThumbnail.mockImplementation(() => Promise.resolve(new Blob(['png'])))
-  // Cleared, never reset: the spy's body is `entry-actions`' real rule.
-  framingAfterDiscard.mockClear()
   // The object-URL pair is browser API the core uses; there is no DOM here.
   URL.createObjectURL = vi.fn(() => 'blob:test')
   URL.revokeObjectURL = vi.fn()
@@ -202,6 +188,33 @@ describe('what a generate derivation keeps', () => {
     ])
   })
 
+  it('a settled null on the entry is an answer: a render drawn under a pose is behind it', async () => {
+    // `pose-rerender` D5. The enumeration carries `pose: null` where the server
+    // asked and the index holds none; such an entry is never in the job's own
+    // wave, so a `??` over the wave would read the settle as unsettled, judge
+    // the posed render current, and drop a tile that should redraw at the
+    // default.
+    const h = harness(
+      listing([
+        model('settled-none', {
+          pose: null,
+          thumb: thumb({
+            ao: currentRender({
+              posed: POSE_VERSION,
+              poseKey: poseKeyOf(cameraForPose(POSE, DEFAULT_CAMERA)!),
+            }),
+          }),
+        }),
+      ]),
+    )
+
+    const derived = await h.jobs.derive('generate', SCOPE)
+
+    expect(paths(derived.entries)).toEqual(['/kit/settled-none.stl'])
+    expect(derived.entries[0]!.pose).toBeNull()
+    expect(h.posesFor).not.toHaveBeenCalled()
+  })
+
   it('reads the variant for the occlusion setting in force, not the other one', async () => {
     const entries = [model('m', { thumb: thumb({ ao: currentRender(), noao: { state: 'miss' } }) })]
     const on = harness(listing(entries), { ao: true })
@@ -234,11 +247,12 @@ describe('what a reset derivation keeps', () => {
         model('framed', { thumb: thumb({ framed: true, camera: CAMERA }) }),
         model('unframed', { thumb: thumb({ framed: false }) }),
         model('no-annotation'),
-        // An axis alone, and no usable pose to replace it: the per-model rule
-        // keeps that axis, so a reset changes nothing here — not counted, or
-        // the button would offer a reset that resets nothing (found live).
+        // An axis alone with no usable pose to replace it is a framing too
+        // (`pose-rerender` D7): given up and counted. It used to be kept and
+        // left out, and Masa's reproduction found it counted again — and
+        // withholding the pose — the moment the index came back.
         model('axis-only-poseless', { pose: POSE_OFF_AXIS, thumb: thumb({ framed: true, axis: 'z' }) }),
-        // The same axis where a usable pose replaces it: given up, so counted.
+        // The same axis where a usable pose replaces it: given up, counted.
         model('axis-only-posed', { pose: POSE, thumb: thumb({ framed: true, axis: 'z' }) }),
         // A camera is always given up.
         model('camera', {
@@ -249,6 +263,7 @@ describe('what a reset derivation keeps', () => {
 
     expect(paths((await h.jobs.derive('reset', SCOPE)).entries)).toEqual([
       '/kit/framed.stl',
+      '/kit/axis-only-poseless.stl',
       '/kit/axis-only-posed.stl',
       '/kit/camera.stl',
     ])
@@ -405,15 +420,17 @@ describe('the generate run', () => {
 describe('the reset run', () => {
   const framedListing = listing([
     model('posed', { pose: POSE, thumb: thumb({ framed: true, axis: '-x' }) }),
-    // A camera beside the kept axis, so this one is in the derivation at all:
-    // an axis alone with no usable pose is exactly what a reset leaves alone.
+    // No usable pose, an axis and a camera: both go all the same (`pose-rerender` D7).
     model('poseless', {
       pose: POSE_OFF_AXIS,
       thumb: thumb({ framed: true, axis: 'z', camera: { az: 1, el: 0.2, distR: 3, target: [0, 0, 0] } }),
     }),
   ])
 
-  it('empties each entry with one write, dropping the axis exactly where a usable pose replaces it', async () => {
+  it('empties each entry with one write, dropping the camera and the axis whatever the index holds', async () => {
+    // Inverted 2026-09-11 (`pose-rerender` D7): the axis used to go only where
+    // a usable pose replaced it, and this cell pinned `axis: undefined` for the
+    // poseless model. A kept axis was the framing that "came back".
     const h = harness(framedListing)
 
     h.jobs.launch('reset', SCOPE)
@@ -423,10 +440,8 @@ describe('the reset run', () => {
 
     expect(h.putThumb.mock.calls.map((c) => c[0])).toEqual([
       { path: '/kit/posed.stl', mtime: 7, camera: null, axis: null, png: null, ifGen: 1 },
-      { path: '/kit/poseless.stl', mtime: 7, camera: null, axis: undefined, png: null, ifGen: 1 },
+      { path: '/kit/poseless.stl', mtime: 7, camera: null, axis: null, png: null, ifGen: 1 },
     ])
-    // The discard rule is asked, never restated: `entry-actions` owns it.
-    expect(framingAfterDiscard.mock.calls.map((c) => c[0])).toEqual([POSE, POSE_OFF_AXIS])
     expect(h.jobs.state).toMatchObject({ phase: 'done', total: 2, done: 2 })
   })
 
@@ -664,45 +679,33 @@ describe('counting a scope', () => {
 })
 
 describe('what a count asks the index about', () => {
-  it('waves only over the axis-only models whose rule needs a pose, and a derivation over all the unknown', async () => {
+  it('a count and a reset ask nothing; a generate derivation waves over all the unknown', async () => {
+    // Inverted 2026-09-11 (`pose-rerender` D7): a count used to wave over the
+    // axis-only models and a reset over every stored axis, because the pose
+    // decided whether the axis went with the camera. Both go now whatever the
+    // index holds, so the wire's `framed` is the whole answer and neither asks.
     const h = harness(
       listing([
         model('unposed-plain'),
         model('unposed-axis-only', { thumb: thumb({ framed: true, axis: 'z' }) }),
         model('unposed-camera', { thumb: thumb({ framed: true, camera: { az: 1, el: 0.2, distR: 3, target: [0, 0, 0] } }) }),
         model('posed-axis-only', { pose: POSE, thumb: thumb({ framed: true, axis: 'z' }) }),
+        model('camera-and-axis', { thumb: thumb({ framed: true, axis: 'z', camera: { az: 1, el: 0.2, distR: 3, target: [0, 0, 0] } }) }),
       ]),
     )
-    await h.jobs.count(SCOPE)
-    // One request, naming exactly the model a count cannot judge without the index.
-    expect(h.posesFor.mock.calls.map((c) => c[0])).toEqual([['/kit/unposed-axis-only.stl']])
-    h.posesFor.mockClear()
-    // A reset consults the index wherever an axis is stored — with or without a
-    // camera, since the pose decides whether the axis goes with it.
+    expect(await h.jobs.count(SCOPE)).toMatchObject({ reset: 4 })
+    expect(h.posesFor).not.toHaveBeenCalled()
     await h.jobs.derive('reset', SCOPE)
-    expect(h.posesFor.mock.calls.map((c) => c[0])).toEqual([['/kit/unposed-axis-only.stl']])
-    h.posesFor.mockClear()
+    expect(h.posesFor).not.toHaveBeenCalled()
     await h.jobs.derive('generate', SCOPE)
     expect(h.posesFor.mock.calls.map((c) => c[0])).toEqual([
-      ['/kit/unposed-plain.stl', '/kit/unposed-axis-only.stl', '/kit/unposed-camera.stl'],
+      [
+        '/kit/unposed-plain.stl',
+        '/kit/unposed-axis-only.stl',
+        '/kit/unposed-camera.stl',
+        '/kit/camera-and-axis.stl',
+      ],
     ])
-  })
-
-  it('makes no request at all when nothing axis-only is unposed', async () => {
-    const h = harness(listing([model('unposed-plain'), model('unposed-camera', { thumb: thumb({ framed: true, camera: { az: 1, el: 0.2, distR: 3, target: [0, 0, 0] } }) })]))
-    await h.jobs.count(SCOPE)
-    expect(h.posesFor).not.toHaveBeenCalled()
-    // Nor does a reset over the same models: no axis is stored anywhere here.
-    await h.jobs.derive('reset', SCOPE)
-    expect(h.posesFor).not.toHaveBeenCalled()
-  })
-
-  it('a reset asks about a stored axis beside a camera, which a count does not need', async () => {
-    const h = harness(listing([model('camera-and-axis', { thumb: thumb({ framed: true, axis: 'z', camera: { az: 1, el: 0.2, distR: 3, target: [0, 0, 0] } }) })]))
-    await h.jobs.count(SCOPE)
-    expect(h.posesFor).not.toHaveBeenCalled()
-    await h.jobs.derive('reset', SCOPE)
-    expect(h.posesFor.mock.calls.map((c) => c[0])).toEqual([['/kit/camera-and-axis.stl']])
   })
 })
 
