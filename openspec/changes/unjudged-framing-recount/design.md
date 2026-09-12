@@ -27,6 +27,13 @@ exists to avoid. No storm: `noteFramingChanged` is unreachable from a pixels-onl
 (App guards it on `opts.camera !== false`), bursts coalesce in one state update, and the
 panel's effect returns early unless the library tab is open.
 
+*(2026-09-11, later: `pose-rerender` D7 makes `resettable` read the camera and axis alone, so
+the axis-only exit no longer exists — the pose no longer decides whether a stored axis
+counts — and its D4/D6 remove `persist`'s `camera: false` option, so the "unreachable from
+a pixels-only persist" sentence holds vacuously: every persist now writes a camera. The
+not-landed exit and its recount are unchanged; the scenario in the delta names only that
+case and stays true. Either change archives first.)*
+
 ## Risks / Trade-offs
 
 - [One `/api/models` re-derivation per orbit on a not-yet-landed tile] → bounded by how
