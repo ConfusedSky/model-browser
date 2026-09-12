@@ -79,7 +79,7 @@
 
 ## 4. The untouched close and the settled absence (D4–D6, 2026-09-11)
 
-- [ ] 4.1 `viewer/ViewerLayer.tsx` `closeLightbox`: settle and persist only when
+- [x] 4.1 `viewer/ViewerLayer.tsx` `closeLightbox`: settle and persist only when
       `s.everManipulated`; otherwise dismiss and write nothing. `openedFromPoseRef` and
       `framingDiscardedRef` lose their readers in the close (keep `framingDiscardedRef`
       only if something else reads it — check). `App.tsx` `persist` loses its `posed`
@@ -90,7 +90,8 @@
       Escape → one PUT carrying the camera (unchanged behaviour, the control); open from a
       pose → Escape → zero PUTs (was: pixels with `posed` and no key). Falsify: restore
       `decided = everManipulated || !unowned` → the nothing-in-hand cell fails
-- [ ] 4.2 The wire: `PosesResponse.poses` becomes `Record<string, IndexPose | null>`
+      *(2026-09-11, fable worker ebef6c4 + 4277713, opus-reviewed: `closeLightbox` persists only when `everManipulated`; `openedFromPoseRef`/`framingDiscardedRef` deleted; `persist(session)` lost both options. `lightboxClose.test.tsx` 4 cells; `urlLightbox`'s four cells orbit first and assert the camera write after the close (they passed with the persist stubbed out before that). Falsified: close always persists → `expected "spy" to not be called at all, but actually been called 1 times`; persist stubbed → urlLightbox `4 failed`, `expected 0 to be greater than 0`)*
+- [x] 4.2 The wire: `PosesResponse.poses` becomes `Record<string, IndexPose | null>`
       (`shared/types.ts`, documented: `null` is a settled absence). Server
       `POST /api/semantic/poses`: every asked path the index did not name is `null` when
       `posesListingAsked` reports `answered`, or when `memoisedStatus()` says `absent`,
@@ -100,7 +101,8 @@
       is `null`; index absent (fetch refused) → both `null`; index warming (503 status)
       → both omitted; the GET route unchanged. Falsify: drop the absent branch → the
       absent cell fails
-- [ ] 4.3 Client map: `App.tsx` `carriedPoses` files `null` (it currently skips `== null`
+      *(2026-09-11: `PosesResponse.poses: Record<string, IndexPose | null>`; the POST route files `null` for every canonical path not named when `answered` or the memo is absent/wedged/volume-gone, omits on warming or a cold memo — memo read once per request; `POSES_MAX` is both the route bound and the chunk size so one request is one chunk. Unresolvable-but-canonical paths `null`, unspellable omitted, both asserted. Five cells in `poses.test.ts`. Falsified: absent branch dropped → `expected {} to deeply equal { '/mixed/c.stl': null, …(1) }`)*
+- [x] 4.3 Client map: `App.tsx` `carriedPoses` files `null` (it currently skips `== null`
       — the comment there says why it skipped; rewrite it); the wave effect files every
       answer, empty included, and `poseWave.test.tsx`'s "does not file an empty answer at
       all" cell is rewritten as semantics-is-the-point (an all-`null` answer is filed;
@@ -110,7 +112,8 @@
       `null` (check each `??` — `null ?? x` is `x`, which for the bulk generate path
       means a settled `null` on the entry falls to the wave's `null`: fine, but say so).
       `wavePaths`' `=== undefined` filter unchanged
-- [ ] 4.4 `useThumbnails.ts` `usable`: `pose === null` and `camera === undefined` and
+      *(2026-09-11: `carriedPoses` skips only `undefined`; the listing wave files every answer (the empty-answer guard is gone, `poseWave`'s cell rewritten); the preview wave keeps its guard and files nulls when carried (`folderSheets` cell); `samePose` `a == null || b == null → a === b`; `bulkJobs` `entry.pose !== undefined ? entry.pose : wave[path]`; `cameraForPose`/`poseKeyFor`/`framingAfterDiscard`/viewer prop accept `null`. Falsified: guard restored → `expected [ 'restore', 'index', 'landing' ] to include 'listingPoses'`; `== null` skip → `expected undefined to be null`; bulk `??` → `expected [] to deeply equal [ '/kit/settled-none.stl' ]`)*
+- [x] 4.4 `useThumbnails.ts` `usable`: `pose === null` and `camera === undefined` and
       `axis === undefined` and (`labels.posed !== undefined` or `labels.poseKey !==
       undefined`) → stale; `pose === undefined` → the render stands (as today). The
       re-render site writes no `posed` and no `poseKey` when `cameraForPose` answers
@@ -120,7 +123,8 @@
       renders; unlabelled hit + `null` → hit; the default render + pose arrives later →
       re-rendered posed (the existing mechanism, as the control). Falsify: drop the
       `null` branch → the first cell fails; treat `undefined` as `null` → the second fails
-- [ ] 4.6 The reset gives up the axis (D7): `framingAfterDiscard` returns the pose's
+      *(2026-09-11: `usable` — `null` over `posed`/`poseKey` is stale, `undefined` stands; the settled-none render writes no `posed`/`poseKey`, asserted. `poseKey.test.tsx` gained five cells incl. the carried-road one (a listing `pose: null` over a posed render). Falsified: null branch dropped → `expected "spy" to be called 1 times, but got 0 times`; undefined-as-null → `expected "spy" to not be called at all, but actually been called 1 times`)*
+- [x] 4.6 The reset gives up the axis (D7): `framingAfterDiscard` returns the pose's
       camera and axis where usable, else `DEFAULT_CAMERA` about `defaultAxisFor(format)`
       — its `keptAxis` parameter goes; `resettable(camera, axis)` is `camera !== undefined
       || axis !== undefined` (the `pose` parameter goes, and every caller with it);
@@ -137,13 +141,15 @@
       named "With nothing to replace it, the axis stays" or asserting a kept axis.
       Falsify: restore `axis: dropAxis ? null : undefined` → the no-pose reset cell fails;
       restore the pose gate in `resettable` → the axis-only count cell fails
-- [ ] 4.5 Records: `client/src/three/pose.ts`'s `POSE_VERSION` history comment gains the
+      *(2026-09-11: `resettable(camera, axis)`; `framingAfterDiscard(pose, format)`; every discard sends `axis: null`; bulk `needsPose` true only for generate; the panel reset is an immediate png-less discard plus a queued re-render pinned by `pinToLookup` (ifGen = the gen it read; a refused pin is `skipped`) — the unpinned shape lost an orbit made before the render landed. Falsified: `axis: framing.posed ? null : undefined` restored → `expected undefined to be null`; pose gate in `resettable` → `expected [ Array(2) ] to deeply equal [ '/kit/framed.stl', …(3) ]`; pin dropped → `expected undefined to be 4`)*
+- [x] 4.5 Records: `client/src/three/pose.ts`'s `POSE_VERSION` history comment gains the
       settled-absence sentence; `useThumbnails`' `usable` doc says the three pose states;
       CLAUDE.md's cache bullet unchanged (no new label)
-
+      *(2026-09-11: `POSE_VERSION` comment and `usable`'s doc updated in ebef6c4; CLAUDE.md's cache bullet unchanged)*
 ## 5. Land §4
 
-- [ ] 5.1 `bun run typecheck` and both suites green on merged main
+- [x] 5.1 `bun run typecheck` and both suites green on merged main
+      *(2026-09-11 on 4277713, merged main: client 68 files / 964 passed; server 23 files / 742 passed; `bun run typecheck` both Done, exit 0; the index was up so `indexContract` ran)*
 - [ ] 5.2 Live, read-only apart from what the app itself writes: with the dev instance up
       and the index **stopped by Masa** (never by a worker or this session), load the root
       → posed tiles re-render at the default once (PUTs without `posed`), a second load is
