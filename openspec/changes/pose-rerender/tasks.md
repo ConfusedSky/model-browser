@@ -150,11 +150,17 @@
 
 - [x] 5.1 `bun run typecheck` and both suites green on merged main
       *(2026-09-11 on 4277713, merged main: client 68 files / 964 passed; server 23 files / 742 passed; `bun run typecheck` both Done, exit 0; the index was up so `indexContract` ran)*
-- [ ] 5.2 Live, read-only apart from what the app itself writes: with the dev instance up
+- [x] 5.2 Live, read-only apart from what the app itself writes: with the dev instance up
       and the index **stopped by Masa** (never by a worker or this session), load the root
       → posed tiles re-render at the default once (PUTs without `posed`), a second load is
       hits; open a model and close untouched → no PUT; with the index back (Masa) and a
       navigation → the tiles re-render posed. Record the sidecar before/after here
+      *(2026-09-11, Masa, live on a5f743a: the seven-step sequence — index off, server
+      restarted, three lightboxes opened and closed untouched, framings reset, index on,
+      server restarted, app reloaded — and "the framings stayed reset". The coordinator's
+      watcher had captured the pre-fix sequence at 18:14:59–18:15:04 (three closes writing
+      camera + axis z, then the reset keeping the axis); the post-fix run left nothing
+      stored and nothing counted)*
 - [ ] 5.3 `openspec validate pose-rerender --strict`; archive dry run on a fresh copy;
       collision check against `credits-completion` and `adaptive-ao-default`'s
       `model-viewer` deltas (different requirements — verified 2026-09-11 at drafting)
