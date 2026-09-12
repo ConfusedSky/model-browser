@@ -185,6 +185,13 @@ unconditionally. The chosen-axis case this rule used to protect (a user's axis s
 a reset when no pose could replace it) is given up on purpose: reset means "as if the
 user had never set one", and a chosen axis is something the user set.
 
+Considered and set aside (Masa, 2026-09-11): keep the leftover axis but let a pose whose
+axis matches it apply anyway. It would have closed this reproduction — the pose's axis
+was `z` and so was the leftover — but not the general case (a leftover `x` against a
+`z` pose still withholds, still counts), and it makes a stored axis mean two things:
+"withholds the pose" when it differs, "does not" when it matches. Discarding it is one
+rule.
+
 ### D3: ~~`POSE_VERSION` 2 → 3 re-renders the keyless posed renders once~~ — struck
 
 Considered and reverted the same day (2026-09-11) — the version bump was the
