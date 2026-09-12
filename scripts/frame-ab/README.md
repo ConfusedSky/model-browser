@@ -9,8 +9,8 @@ that renders the same samples with the code the app imports today and diffs them
 pixel (design D6).
 
 The spike that produced the numbers lives on the branch `worktree-agent-af1bc1b75df6032ae`
-(commit 7305e6c: `spike/frame-ab/REPORT.md` and the raw `out/*.json`), not in the tree.
-here are the frames that spike wrote.
+(commit 7305e6c: `spike/frame-ab/REPORT.md` and the raw `out/*.json`), not in the tree;
+the baselines here are the frames that spike wrote.
 
 ## Run
 

@@ -51,7 +51,8 @@
       `orbitAxisMenu` (the ignored-pose cell); `thumbnailCommands`' fake cache stores and
       echoes `poseKey` like the server
 
-- [x] 2.4 *(reverted 2026-09-11 — the key's absence is stale, so the version stays 2)*
+- [x] 2.4 *(reverted 2026-09-11 — the key's absence is stale, so the version stays 2:
+      b4f8ab3 bumped it to 3, c583695 reverted that)*
 
 ## 3. Land it
 

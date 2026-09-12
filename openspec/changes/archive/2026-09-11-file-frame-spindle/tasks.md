@@ -107,11 +107,11 @@
 
 ## 2. The stores
 
-- [x] 2.1 *(removed 2026-09-11 on the D5 decision — the sidecar `frame` label was built, reviewed
+- [x] 2.1 *(removed 2026-09-11 on the D5 decision — the sidecar `frame` label was built (e3072cb), reviewed
       twice and reverted in c38f64d; the app is unreleased and nothing needed converting)*
-- [x] 2.2 *(removed 2026-09-11 on the D5 decision — `scripts/migrate-frames.ts` with its marker and `--undo` was built, reviewed
+- [x] 2.2 *(removed 2026-09-11 on the D5 decision — `scripts/migrate-frames.ts` with its marker and `--undo` was built (87d4a08), reviewed
       twice and reverted in c38f64d; the app is unreleased and nothing needed converting)*
-- [x] 2.3 *(removed 2026-09-11 on the D5 decision — the browser store's on-read conversion was built, reviewed
+- [x] 2.3 *(removed 2026-09-11 on the D5 decision — the browser store's on-read conversion was built (fdbe141), reviewed
       twice and reverted in c38f64d; the app is unreleased and nothing needed converting)*
 
 ## 3. The compare pill (temporary — D7; deleted in 5.2)
@@ -357,6 +357,14 @@
       Not done here, for the coordinator: restoring `thumbWrites` in the local config, the
       restart, and the Pikachu / Main_Complete hit check — the dev instance was read-only
       for this worker)*
+      *(2026-09-11, coordinator, after the second-pass review asked where these were recorded:
+      the restore is done — `~/.config/model-browser/config.json` carries only `root` and
+      `/api/features` answers `thumbWrites: true` on the running 3177 — and the Pikachu /
+      Main_Complete hit check was not run as written: Masa deleted every cache before 5.2
+      landed, so there were no stored views to be served as hits; today
+      `/Main_Complete.stl`'s sidecar is `{posed: 2, poseKey: "-z:4.7124:0.3491"}` and
+      `/Pikachu_X_Kakashi.stl`'s is `{posed: 2}` with no key, neither with a camera — the
+      keyed one is a hit, the keyless one re-renders once under `pose-rerender`)*
 - [x] 5.3 `bun run typecheck` and both suites green on merged main
       *(2026-09-11 on 4d00018, the pill removed: both typechecks exit 0; client 65 files /
       943; server 22 files / 732 passed, 3 skipped in `indexContract.test.ts`, which
@@ -374,7 +382,8 @@
       *(2026-09-11: `docs/web-demo-notes.md` names no axis convention (its two "axis"
       hits are the retired axis-lighting mode) — no edit; `deploy/demo/README.md` carries
       the two sentences on browser-held framings (c38f64d); CLAUDE.md's cache bullet is
-      back to `{mtime, lighting, rig, posed}` (the label went with the migration). Open:
+      back to `{mtime, lighting, rig, posed}` (the label went with the migration; `pose-rerender`
+      3.0 has since added `poseKey` to it). Open:
       the issue #8 comment above, for Masa to post or approve)*
       *(2026-09-11: the comment posted verbatim on issue #8 and the issue closed —
       https://github.com/ConfusedSky/model-browser/issues/8#issuecomment-5641989638 — on
