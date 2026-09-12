@@ -6,16 +6,18 @@ giving up the framings stored beneath a folder — as explicit, scoped, cancella
 that derive their work from the entries themselves, never from a journal, so that
 resuming is relaunching, interactive rendering always comes first, and the numbers a
 launcher shows are the numbers a job would touch.
+
 ## Requirements
+
 ### Requirement: Bulk jobs are derived, scoped, and re-derivable
 The client SHALL offer bulk thumbnail work as jobs of two operations over a scope — a
 subtree or the whole library. *Generate* SHALL render and store a thumbnail for each
 model in scope whose thumbnail is missing or stale, touching no current entry. *Reset*
 SHALL apply the same give-up-the-orientation semantics the per-model action defines
-(`entry-actions`) to each model in scope whose stored orientation that rule would
-change: a stored camera, or a stored axis where an orientation source would replace it.
-An axis that rule keeps is neither touched nor counted, so a count never offers a reset
-that resets nothing; the derivation and the counts SHALL share that one definition.
+(`entry-actions`) to each model in scope holding a stored orientation — a camera, an
+axis, or both — and SHALL count exactly those models, so that a count never offers a
+reset that resets nothing and a reset never leaves a model that a later count would
+offer again; the derivation and the counts SHALL share that one definition.
 Reset SHALL delete each such model's cached renders rather than redraw them, so no image
 remains that was rendered from a discarded camera and the job renders nothing —
 redrawing is *generate*'s work, or the next visit's. A reset MAY leave an on-screen tile in its scope
@@ -86,7 +88,7 @@ not this capability's.
 
 #### Scenario: The count follows the user's own hand
 - **WHEN** the library tab is open and the user orbits a model, chooses its axis, or gives its framing up from its tile or the viewer
-- **THEN** the reset count moves accordingly at once, by the change that hand made — not by re-deriving the scope, which happens only when the tab opens or a job that wrote something ends
+- **THEN** the reset count moves accordingly at once, by the change that hand made — not by re-deriving the scope, which happens when the tab opens, when a job that wrote something ends, or when this session cannot judge the hand's change (the tile's own thumbnail had not landed, so its before-state is unknown), in which case the scope is re-derived once after the write lands rather than the change going uncounted
 
 #### Scenario: The button is honest
 - **WHEN** the user opens the library tab
@@ -103,4 +105,3 @@ not this capability's.
 #### Scenario: The chip outlives the folder that launched it
 - **WHEN** the user launches a subtree job from a context menu and navigates elsewhere
 - **THEN** the job continues, and the chip still shows its progress and offers cancel
-

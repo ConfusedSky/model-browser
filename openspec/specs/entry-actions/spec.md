@@ -2,7 +2,9 @@
 
 ## Purpose
 TBD - created by archiving change entry-context-menu. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: Entry actions are defined once and offered on every surface that hosts them
 The client SHALL define each action available on a listing entry once, and every surface offering that action SHALL invoke that definition rather than reimplementing it. The surfaces are a context menu — raised on a grid tile, or on the live view of a model — and the expanded viewer's information panel. An action SHALL behave identically whichever surface invoked it.
 
@@ -124,9 +126,9 @@ The client SHALL offer, on a model, an action that renders its thumbnail again u
 
 The client SHALL also offer, on a model, a distinct action that gives up the orientation stored for that model, returning it to however it would be shown had the user never set one. It SHALL **discard** that orientation rather than store a default in its place, and render the thumbnail at whatever the model then resolves to — an orientation the view's own answer supplies for it, the default otherwise. Discarding rather than overwriting is the whole of the action: a stored default is an orientation of the user's own, and would suppress the very source that would otherwise frame the model well. The action is needed because a thumbnail is rendered *from* the stored orientation, so rendering again without discarding it reproduces the same image. Giving up the orientation SHALL also govern where the model opens in the expanded viewer, since a model has one stored orientation rather than one per surface, and SHALL take effect there within the session rather than only after the next load.
 
-What that action discards SHALL follow from what is available to replace it. Where the view's answer supplies an orientation for the model and the client can express it, it SHALL discard the stored axis along with the camera, so that orientation applies entire — an up axis together with the angles measured about it, which are one thing and cannot be taken apart, since angles measured about one axis do not describe a view about another. Where the view supplies none, or the one offered is not usable, it SHALL discard the camera alone and leave the axis, which then frames the model by default about the axis the user established.
+The action SHALL discard the stored axis along with the camera, whatever is available to replace them: an up axis together with the angles measured about it are one thing and cannot be taken apart, since angles measured about one axis do not describe a view about another, and a model with nothing of its own is what "had the user never set one" means. What the model then resolves to is the orientation the view's own answer supplies where there is one and the client can express it, and otherwise the default about the file's own axis. An axis kept back by a reset would be a framing the model still holds: not counted while no orientation could replace it, counted and withholding that orientation the moment one could — a reset that has to be run twice.
 
-Re-rendering SHALL never change the model's orbit axis.
+The re-render action SHALL never change the model's orbit axis.
 
 Both actions SHALL be offered on every model, including one whose thumbnail is currently missing or failed, and SHALL NOT be offered on entries that are not models. Both SHALL leave the entry's file untouched: they replace a cached rendering, never the model.
 
@@ -148,11 +150,15 @@ Both actions SHALL be offered on every model, including one whose thumbnail is c
 
 #### Scenario: Giving up an orientation hands the model back to the index
 - **WHEN** the user gives up the orientation of a model — including one whose axis they had chosen — where the view's own answer supplies that model's orientation and the client can express it
-- **THEN** the axis is discarded with the camera and the model is framed by that orientation entire, rather than by the default about the axis it used to have; where the view supplies none, the axis stands, so the command reaches further from a grid that carries orientations than from a plain listing, which carries none
+- **THEN** the axis is discarded with the camera and the model is framed by that orientation entire, rather than by the default about the axis it used to have
 
 #### Scenario: With nothing to replace it, the axis stays
+- **WHEN** a reader looks for the rule this title once named — an axis kept back by a reset because no orientation could replace it
+- **THEN** there is no such rule: the axis goes with the camera whatever is available to replace them, as *With nothing to replace it, the axis goes too* states
+
+#### Scenario: With nothing to replace it, the axis goes too
 - **WHEN** the user gives up the orientation of a model the index supplies none for, whose orbit axis they had chosen
-- **THEN** the camera is discarded and the axis is kept, and the model is framed by default about that axis rather than about the default one
+- **THEN** the camera and the axis are both discarded and the model is framed by default about the file's own axis; when the index later supplies an orientation for it, that orientation applies without a second reset, and the model is not counted as holding a framing in between
 
 #### Scenario: Re-rendering never moves the axis
 - **WHEN** the user re-renders the thumbnail of a model whose orbit axis they had chosen, whether or not the index supplies an orientation for it
@@ -335,4 +341,3 @@ whose per-model actions remain as they are.
 #### Scenario: A subtree's framings are given up together
 - **WHEN** the user invokes the reset action on a folder and confirms its count
 - **THEN** every model beneath it with a stored orientation is given up exactly as the per-model action would and its cached renders are deleted; nothing is rendered until a visit or a generate job
-
