@@ -53,7 +53,7 @@
       `~/Documents/tests/test-models` (kit dir `miniatures/clustered-hq`); the report's two
       counts are non-zero (D5) — record them here
       *(2026-09-14, coordinator: the previous store kept beside it as `overrides.json.bak-2026-09-14`; run against `miniatures/clustered-hq` as top with `metadata/miniatures.json`: "wrote 444 keys from 454 kits read … with license URL: 444, modified: 444"; 10 stems named no directory and were skipped, as before; the store now carries all six credit fields on all 444 keys, e.g. `/Player_Character_Pack_03_3750572` → `https://creativecommons.org/licenses/by/4.0/`, "re-exported as STL and decimated for display"; re-run after the cold review with the per-value tallies added to the report: 305 × by/4.0, 31 × by-sa/4.0, 29 × by-nd/4.0, 23 × publicdomain/zero/1.0, 22 × by-nc-sa/4.0, 18 × by-nc-nd/4.0, 16 × by-nc/4.0; 372 × "re-exported as STL and decimated for display", 72 × "re-exported as STL")*
-- [ ] 4.3 **Push main first** — the box redeploys with `git pull`, and an origin that stops
+- [x] 4.3 **Push main first** — the box redeploys with `git pull`, and an origin that stops
       before this change rebuilds the four-field app, whose loader drops the two fields
       silently (D1), so the live check would read as a store bug. Then rsync the store to
       the box (the README's **3.2 The corpus** rsync block) and redeploy (`git pull && docker
@@ -61,13 +61,16 @@
       rollback material is the local backup the regeneration left beside the store,
       `miniatures/clustered-hq/.model-browser/overrides.json.bak-2026-09-14` (444 keys,
       four credit fields) — the only copy of the previous store once the rsync lands
-- [ ] 4.4 Verify on `https://models.masamaeda.com`: `/api/overrides?path=<a modified kit>`
+      *(2026-09-14, coordinator on Masa's word: origin already at 32e112e (another session had pushed; `git push` → Everything up-to-date); rsync landed `overrides.json` (209,225 bytes, 444 keys, 444 with `modified`) in `/srv/corpus/miniatures/clustered-hq/.model-browser/` at 22:31:32 box time; `git pull` on the box to 32e112e, `docker compose up -d --build` rebuilt demo-app and demo-index images and recreated demo-app-1 only — caddy (up 5 days) and the index (up 47 h) untouched)*
+- [x] 4.4 Verify on `https://models.masamaeda.com`: `/api/overrides?path=<a modified kit>`
       carries `licenseUrl` and `modified`; the lightbox on a model beneath it shows the
       license as a link and the "this copy" row. The demo's root is the kit directory, so a
       kit's path is `/<stem>`: `/api/overrides?path=/Player_Character_Pack_03_3750572`.
       No shipped kit is unmodified (444/444 carry a phrase), so the no-row case is the
       fixture cell's (`viewerCredits.test.tsx`, "no row and no blank label for an unchanged
       copy"), not a live check. Record the kit path and the wire answer here
-- [ ] 4.5 `openspec validate credits-completion --strict`; archive dry run on a fresh copy;
+      *(2026-09-14, coordinator, live: `GET /api/overrides?path=/Player_Character_Pack_03_3750572` → `{credits: {author: "Valandar", authorUrl, license: "Creative Commons - Attribution", licenseUrl: "https://creativecommons.org/licenses/by/4.0/", modified: "re-exported as STL and decimated for display", sourceUrl: "https://www.thingiverse.com/thing:3750572"}, name: "Player Character Pack 03"}`; headless Chromium as a visitor — root → the kit tile → the `CatfolkRogue.stl` tile → the lightbox: rows author / license / source / modified, the license `dd` an `<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank">Creative Commons - Attribution</a>`, the fourth row `dt` "this copy", `dd` the phrase; the panel's `dt`s read format, size, modified, author, license, source, this copy — the file-date row and the notice row apart. The demo's folder URLs are `/?path=<folder>&model=<path>`, not path-segment URLs)*
+- [x] 4.5 `openspec validate credits-completion --strict`; archive dry run on a fresh copy;
       after archiving, check the applied `library-overrides` and `model-viewer` text
       carries no change-scoped prose
+      *(2026-09-14: valid under --strict; archive dry run on a fresh copy applies ~3 (library-overrides ~2, model-viewer ~1) and the applied text carries no change-scoped prose per the cold review's collapsed grep. The archive itself waits on Masa's word)*
