@@ -152,12 +152,27 @@ export interface DirListing {
 /**
  * Attribution for an entry, as the library's override store holds it. Every
  * field is optional: the corpus metadata this is generated from does not always
- * carry all four, and a partial credit is still a true one.
+ * carry all six, and a partial credit is still a true one.
  */
 export interface OverrideCredits {
   author?: string
   authorUrl?: string
+  /** The license's label as the source page gives it — never normalised here. */
   license?: string
+  /**
+   * The license deed's URI, version included
+   * (`https://creativecommons.org/licenses/by-nd/4.0/`). The URL is what
+   * carries the version; the app infers nothing from the label
+   * (`credits-completion` D3).
+   */
+  licenseUrl?: string
+  /**
+   * What was done to the served copy, in the corpus's own words ("re-exported
+   * as STL and decimated for display"), drawn verbatim as the modification
+   * notice. **Absent means served unchanged**, and draws nothing
+   * (`credits-completion` D2).
+   */
+  modified?: string
   sourceUrl?: string
 }
 

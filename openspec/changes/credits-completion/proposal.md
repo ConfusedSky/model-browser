@@ -1,8 +1,11 @@
 ## Why
 
-The demo has been public since 2026-09-09 and every kit on it is CC-BY. The lightbox
+The demo has been public since 2026-09-09 and serves 444 kits under seven Creative Commons
+licences (BY 305, BY-SA 31, BY-ND 29, CC0 23, BY-NC-SA 22, BY-NC-ND 18, BY-NC 16 — the
+corpus was rewritten 2026-09-11; this paragraph said "every kit on it is CC-BY" until
+2026-09-14). The lightbox
 attribution block names the author, prints the license label as text and links the
-source — but the license asks for two more things the site does not say anywhere: that
+source — but the licences ask for two more things the site does not say anywhere: that
 the served copies are modified (vertex-clustered display copies, some kits passed through
 byte-identical), and a reference to the license itself, its URI where practicable. Both
 were parked on the About page (`web-demo-backlog` 1.5, undrafted) and a credits page (1.8);

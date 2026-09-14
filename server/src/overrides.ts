@@ -155,14 +155,23 @@ export async function loadOverrides(
         delete entry.credits
       } else {
         // An allow-list, not a deny-list: what the app resolves and serves is
-        // exactly the four string fields, built fresh — so an unknown or
+        // exactly the six string fields, built fresh — so an unknown or
         // wrong-typed field in a hand-written store never rides the wire,
         // where the next renderer to iterate it would hand it to React as a
         // child. Unknown fields still live on DISK untouched (the generator
-        // reads raw JSON); they just do not resolve.
+        // reads raw JSON); they just do not resolve — which is what lets a
+        // store written for a newer build ship under an older one
+        // (`credits-completion` D1/D6).
         const held = entry.credits as Record<string, unknown>
         const clean: Record<string, string> = {}
-        for (const field of ['author', 'authorUrl', 'license', 'sourceUrl'] as const) {
+        for (const field of [
+          'author',
+          'authorUrl',
+          'license',
+          'licenseUrl',
+          'modified',
+          'sourceUrl',
+        ] as const) {
           const value = held[field]
           if (typeof value === 'string') clean[field] = value
           else if (value !== undefined) {

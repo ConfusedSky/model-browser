@@ -1,7 +1,7 @@
 /**
  * Generate a library's override store from the corpus metadata
- * (`metadata/miniatures.json`) — the demo's CC-BY credits, and each kit's real
- * title (library-overrides D5).
+ * (`metadata/miniatures.json`) — the demo's Creative Commons credits, and each
+ * kit's real title (library-overrides D5).
  *
  *   bun run scripts/gen-overrides.ts --top <library-top> --metadata <file> [--kits <dir>]
  *
@@ -35,6 +35,8 @@ interface Kit {
   author?: unknown
   author_url?: unknown
   license?: unknown
+  license_url?: unknown
+  modified?: unknown
   source_url?: unknown
 }
 
@@ -60,6 +62,15 @@ export interface GenerateResult {
   escaped: string[]
   /** Stems whose key another stem already wrote this run — reported, keyed once. */
   duplicated: string[]
+  /**
+   * Written keys whose credits carry a license URL, and those carrying a
+   * modified phrase (D5). The corpus and the app agree on `license_url` and
+   * `modified` by convention, not by a shared type, so a rename on either side
+   * would otherwise produce a store that is silently thinner; two zeros here
+   * are the check.
+   */
+  withLicenseUrl: number
+  withModified: number
   /** The store that was written. */
   file: string
 }
@@ -68,16 +79,25 @@ function str(value: unknown): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined
 }
 
-/** The four attribution fields, or undefined when the kit carries none of them. */
+/**
+ * The six attribution fields, or undefined when the kit carries none of them.
+ * A field that is absent or not a string yields no credit field: a kit without
+ * `modified` is one served unchanged, and nothing else in the metadata is read
+ * to infer otherwise (D2).
+ */
 function creditsOf(kit: Kit): OverrideCredits | undefined {
   const credits: OverrideCredits = {}
   const author = str(kit.author)
   const authorUrl = str(kit.author_url)
   const license = str(kit.license)
+  const licenseUrl = str(kit.license_url)
+  const modified = str(kit.modified)
   const sourceUrl = str(kit.source_url)
   if (author !== undefined) credits.author = author
   if (authorUrl !== undefined) credits.authorUrl = authorUrl
   if (license !== undefined) credits.license = license
+  if (licenseUrl !== undefined) credits.licenseUrl = licenseUrl
+  if (modified !== undefined) credits.modified = modified
   if (sourceUrl !== undefined) credits.sourceUrl = sourceUrl
   return Object.keys(credits).length === 0 ? undefined : credits
 }
@@ -175,6 +195,8 @@ export async function generateOverrides(opts: GenerateOptions): Promise<Generate
   const seen = new Set<string>()
   let read = 0
   let written = 0
+  let withLicenseUrl = 0
+  let withModified = 0
 
   for (const kit of kits) {
     const stem = str(kit.stem)
@@ -223,12 +245,15 @@ export async function generateOverrides(opts: GenerateOptions): Promise<Generate
     else entry.credits = credits
     file.entries[key] = entry
     written++
+    if (credits?.licenseUrl !== undefined) withLicenseUrl++
+    if (credits?.modified !== undefined) withModified++
   }
 
   await writeOverrides(top, file)
 
   const storePath = join(top, MARKER_DIR, STORE_FILE)
   report(`wrote ${written} keys from ${read} kits read into ${storePath}`)
+  report(`with license URL: ${withLicenseUrl}, modified: ${withModified}`)
   report(`keys are relative to ${top}; kit folders were looked for under ${kitsDir}`)
   for (const stem of missing) report(`  no directory for stem: ${stem}`)
   if (missing.length > 0) report(`${missing.length} stems named no directory and were skipped`)
@@ -240,7 +265,7 @@ export async function generateOverrides(opts: GenerateOptions): Promise<Generate
   // resolved library, so a running server keeps answering from what it loaded.
   report('the server reads this file once per resolved library — restart it to pick this up')
 
-  return { read, written, missing, escaped, duplicated, file: storePath }
+  return { read, written, missing, escaped, duplicated, withLicenseUrl, withModified, file: storePath }
 }
 
 const USAGE =

@@ -206,14 +206,17 @@ const CREDIT_LINK_CLASS = 'break-all text-sky-400 hover:underline'
  * "there is a row here", and the panel needs no second opinion at render time.
  *
  * `authorUrl` alone is deliberately not enough: it is where a name points, not
- * a name, and a link labelled with nobody credits nobody.
+ * a name, and a link labelled with nobody credits nobody. `licenseUrl` is the
+ * same: a link with no label to hang on. `modified` does count — the notice
+ * that a copy is not the author's file stands on its own.
  */
 function renderableCredits(credits: OverrideCredits | undefined): OverrideCredits | null {
   if (credits === undefined) return null
   const some =
     credits.author !== undefined ||
     credits.license !== undefined ||
-    credits.sourceUrl !== undefined
+    credits.sourceUrl !== undefined ||
+    credits.modified !== undefined
   return some ? credits : null
 }
 
@@ -989,7 +992,10 @@ export default function ViewerLayer({
 
                 A row per field the store actually holds, so a partial credit
                 draws as the part it is rather than as a blank next to a label —
-                the corpus metadata does not always carry all four. */}
+                the corpus metadata does not always carry all six. The order is
+                author, license, source, modified (`credits-completion` D4): the
+                first three say whose work this is and where it came from, the
+                last what was done to this copy, a footnote to them. */}
             {credits !== null && (
               <>
                 {credits.author !== undefined && (
@@ -1016,7 +1022,22 @@ export default function ViewerLayer({
                   <div data-credit="license" className="flex justify-between gap-2">
                     <dt className="text-zinc-500">license</dt>
                     <dd className="min-w-0 break-words text-right text-zinc-300">
-                      {credits.license}
+                      {/* The label stays the corpus's string and links to the
+                          stored deed URL — the URL is what carries the version,
+                          and the app derives nothing from the label (D3). */}
+                      {credits.licenseUrl !== undefined ? (
+                        <a
+                          href={credits.licenseUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={credits.licenseUrl}
+                          className={CREDIT_LINK_CLASS}
+                        >
+                          {credits.license}
+                        </a>
+                      ) : (
+                        credits.license
+                      )}
                     </dd>
                   </div>
                 )}
@@ -1033,6 +1054,20 @@ export default function ViewerLayer({
                       >
                         {hostLabel(credits.sourceUrl)}
                       </a>
+                    </dd>
+                  </div>
+                )}
+                {/* The modification notice: the corpus's phrase, verbatim, and
+                    only where the store holds one — absent means served
+                    unchanged, and an unchanged copy is not labelled (D2).
+                    Addressed as `modified`, labelled "this copy": the list
+                    above already labels the file's date `modified`, and the
+                    phrase is about the copy, not the date (D4). */}
+                {credits.modified !== undefined && (
+                  <div data-credit="modified" className="flex justify-between gap-2">
+                    <dt className="text-zinc-500">this copy</dt>
+                    <dd className="min-w-0 break-words text-right text-zinc-300">
+                      {credits.modified}
                     </dd>
                   </div>
                 )}

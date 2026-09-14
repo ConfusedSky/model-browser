@@ -39,12 +39,21 @@ const NESTED: DirListing = {
   entries: [dir('Alpha'), model('Alpha/found.stl'), model('Alpha/other.stl')],
 }
 
-/** A kit's credits as the generator writes them, from the corpus metadata. */
+/**
+ * A kit's credits as the generator wrote them before `credits-completion`: a
+ * label with no deed URL, and no modified phrase — the copy served unchanged.
+ */
 const CREDITS: OverrideCredits = {
   author: 'Valandar',
   authorUrl: 'https://www.thingiverse.com/Valandar',
   license: 'Creative Commons - Attribution',
   sourceUrl: 'https://www.thingiverse.com/thing:3750572',
+}
+/** The same kit with the two fields the corpus now writes: a linked license and a modified copy. */
+const COMPLETE: OverrideCredits = {
+  ...CREDITS,
+  licenseUrl: 'https://creativecommons.org/licenses/by/4.0/',
+  modified: 're-exported as STL and decimated for display',
 }
 
 const dialog = (): HTMLElement | null => document.querySelector<HTMLElement>('[role="dialog"]')
@@ -98,6 +107,9 @@ describe('the panel credits the model’s source', () => {
     expect(creditValue('author')!.textContent).toBe('Valandar')
     expect(creditLink('author')!.getAttribute('href')).toBe(CREDITS.authorUrl)
     expect(creditValue('license')!.textContent).toBe('Creative Commons - Attribution')
+    // No stored deed URL, so the label is plain text — as it drew before the
+    // URL existed, and as it still draws for a store that never gets one.
+    expect(creditLink('license')).toBeNull()
     // The source link's `href` is the stored URL verbatim; what it *reads* as is
     // `hostLabel`'s business, pinned in its own describe below, unmounted (the
     // harness stubs global `URL` — a constructing subclass since
@@ -112,6 +124,60 @@ describe('the panel credits the model’s source', () => {
       expect(a.getAttribute('target')).toBe('_blank')
       expect(a.getAttribute('rel')).toBe('noreferrer')
     }
+  })
+
+  it('links the license label to its stored URL, in a new tab', async () => {
+    // D3: the label stays the corpus's string and becomes the link's text; the
+    // URL, version and all, is the `href` and the `title`. Same leave-the-site
+    // discipline as the author and source links.
+    overrides.mockResolvedValue({ credits: COMPLETE })
+    await openLightbox('Alpha/found.stl')
+
+    const link = creditLink('license')!
+    expect(link).not.toBeNull()
+    expect(link.textContent).toBe('Creative Commons - Attribution')
+    expect(link.getAttribute('href')).toBe(COMPLETE.licenseUrl)
+    expect(link.getAttribute('title')).toBe(COMPLETE.licenseUrl)
+    expect(link.getAttribute('target')).toBe('_blank')
+    expect(link.getAttribute('rel')).toBe('noreferrer')
+    expect(link.className).toBe(creditLink('author')!.className)
+  })
+
+  it('draws the modified phrase verbatim, as the last row of the block', async () => {
+    // D2/D4: the row is the modification notice, the corpus's wording and
+    // nothing added, after the three rows that say whose work this is.
+    overrides.mockResolvedValue({ credits: COMPLETE })
+    await openLightbox('Alpha/found.stl')
+
+    expect(creditRows()).toEqual(['author', 'license', 'source', 'modified'])
+    // Labelled "this copy", not "modified": the same list already labels the
+    // file's date `modified`, and the phrase is about the copy (D4).
+    expect(creditRow('modified')!.querySelector('dt')!.textContent).toBe('this copy')
+    expect(creditValue('modified')!.textContent).toBe(COMPLETE.modified)
+    expect(creditRow('modified')!.parentElement).toBe(document.querySelector('dl'))
+  })
+
+  it('draws no modified row, and no empty label, for a copy served unchanged', async () => {
+    // Absent means unchanged: the block does not say "this copy: unchanged",
+    // and it leaves no orphaned `dt` where the row would have been. The
+    // absence asserted is the `data-credit="modified"` row's — a `dt` reading
+    // "modified" is the file-date row, which is always there.
+    overrides.mockResolvedValue({ credits: CREDITS })
+    await openLightbox('Alpha/found.stl')
+
+    expect(creditRow('modified')).toBeNull()
+    const labels = Array.from(document.querySelectorAll('dl dt')).map((dt) => dt.textContent)
+    expect(labels).not.toContain('this copy')
+    expect(labels.every((l) => l !== null && l.trim() !== '')).toBe(true)
+  })
+
+  it('counts a modified phrase alone as a block worth drawing', async () => {
+    // The notice that a copy is not the author's file stands on its own; a
+    // store holding only that field still credits something.
+    overrides.mockResolvedValue({ credits: { modified: COMPLETE.modified } })
+    await openLightbox('Alpha/found.stl')
+
+    expect(creditRows()).toEqual(['modified'])
   })
 
   it('sits among the metadata and before the actions', async () => {

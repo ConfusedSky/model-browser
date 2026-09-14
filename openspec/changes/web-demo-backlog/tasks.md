@@ -84,10 +84,17 @@
       source — at the Download action itself, not only on the About page (notes item 4)
 - [ ] 1.7 the corpus bake — preview paths attached to dir entries (the decided shape);
       rides `listing-tree-cache` and `bulk-thumbnail-jobs`
-- [ ] 1.8 the credits page — go-live gate 3.2, and **standing alone** rather than riding
-      the landing page (Masa, 2026-09-03): CC-BY attribution should not wait on that
-      change's copy decisions. The generator exists from `library-overrides`, so this is a
-      route and a rendering. Closes gate 3.2 when it lands
+- [ ] 1.8 the credits page — **downgraded to a courtesy that rides the landing page
+      (1.5), 2026-09-14** (`credits-completion`): the licences ask for attribution "in any
+      reasonable manner", and the lightbox is where each work is shown, so attribution is
+      complete there — author linked, licence label linked to its deed URL with version,
+      source linked, modification indicated per kit. A page listing every kit in one
+      place is a convenience for a reader who wants the whole corpus at once, not a
+      compliance need; it can be generated from the same store whenever 1.5 wants a
+      credits link to point somewhere. No longer a gate. (History: stood alone as gate 3.2
+      from 2026-09-03 — "CC-BY attribution should not wait on that change's copy
+      decisions" — when the lightbox block printed the licence as text and said nothing
+      about modification)
 - [ ] 1.9 hover-warmed listings — drafted 2026-09-03 as `hover-prefetch-listings`,
       **unparked 2026-09-08** when 1.3 landed: folder and zip tiles warm their listing
       after the mesh warm's linger, so a click spends no round trip. Client only, no
@@ -145,9 +152,13 @@
 ## 3. Go-live gates (corpus side, not app work)
 
 - [ ] 3.1 IP pass by eye over the corpus (one Monster Hunter dragon known)
-- [ ] 3.2 Credits page generated from `metadata/miniatures.json` (CC-BY requires displayed
-      attribution) — the generator is 1.1's; the gate is the page existing for the
-      shipped corpus
+- [ ] 3.2 Attribution complete in the lightbox — licence linked, modification indicated
+      (the Creative Commons deeds require displayed attribution and, in 4.0, an
+      indication of modification) — reworded 2026-09-14 from "credits page generated from
+      `metadata/miniatures.json`"; the generator is 1.1's, the fields are
+      `credits-completion`'s, and that change closes this gate when it lands on the box
+      (its tasks 4.2–4.4: regenerated store, redeploy, live verification). The page is
+      1.8, a courtesy
 - [x] 3.3 One paid hour on the actual instance for the query-latency number — **run
       2026-09-04 on a Hetzner CX23** (notes, Measurements: 1.23 s median, over the 1 s bar
       by ~23%; `docs/hetzner-probe-runbook.md`, `scripts/query-probe.py`) and **the host

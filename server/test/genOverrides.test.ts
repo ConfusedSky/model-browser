@@ -15,9 +15,14 @@ import { realTempDir } from './helpers'
  *
  * The fixture metadata mirrors `metadata/miniatures.json`'s real shape: a
  * top-level array of kits carrying `stem`/`name`/`author`/`author_url`/
- * `license`/`source_url`, each with a nested `files[]` whose own `stem` values
- * are file stems and must never become keys.
+ * `license`/`source_url` — and, since `credits-completion`, `license_url` and
+ * `modified` — each with a nested `files[]` whose own `stem` values are file
+ * stems and must never become keys. Only the first kit carries the two newer
+ * fields: the second is the kit served unchanged, whose absence of `modified`
+ * is the point (D2).
  */
+const LICENSE_URL = 'https://creativecommons.org/licenses/by/4.0/'
+const MODIFIED = 're-exported as STL and decimated for display'
 const KITS = [
   {
     thing_id: 3750572,
@@ -26,6 +31,8 @@ const KITS = [
     author: 'Valandar',
     author_url: 'https://www.thingiverse.com/Valandar',
     license: 'Creative Commons - Attribution',
+    license_url: LICENSE_URL,
+    modified: MODIFIED,
     source_url: 'https://www.thingiverse.com/thing:3750572',
     files: [{ name: 'KindleCleric_000.stl', stem: 'KindleCleric_000' }],
   },
@@ -93,6 +100,8 @@ describe('gen-overrides', () => {
         author: 'Valandar',
         authorUrl: 'https://www.thingiverse.com/Valandar',
         license: 'Creative Commons - Attribution',
+        licenseUrl: LICENSE_URL,
+        modified: MODIFIED,
         sourceUrl: 'https://www.thingiverse.com/thing:3750572',
       },
     })
@@ -100,6 +109,94 @@ describe('gen-overrides', () => {
     expect(resolveOverrides(store, `/${PACK}/KindleCleric_000.stl`).credits).toBeDefined()
     // A partial credit is still a credit: this kit carries no author_url.
     expect(resolveOverrides(store, `/${CHEST}`).credits).toBeDefined()
+  })
+
+  it('maps license_url and modified on the kit that carries them, and none on the one that does not', async () => {
+    // The corpus and the app agree on the two field names by convention, not
+    // by a shared type (D5): the mapping is asserted field by field, and the
+    // run's two counts are what a misspelling on either side would zero.
+    const { top, metadata } = fixture()
+    const lines: string[] = []
+    const result = await generateOverrides({ top, metadata, report: (m) => lines.push(m) })
+
+    const store = await loadOverrides(top, () => undefined)
+    const pack = resolveOverrides(store, `/${PACK}`).credits!
+    expect(pack.licenseUrl).toBe(LICENSE_URL)
+    expect(pack.modified).toBe(MODIFIED)
+    // Absent means served unchanged — no field, not an empty one, and nothing
+    // inferred from anything else the kit carries (D2).
+    const chest = resolveOverrides(store, `/${CHEST}`).credits!
+    expect(chest.author).toBe('Someone')
+    expect('licenseUrl' in chest).toBe(false)
+    expect('modified' in chest).toBe(false)
+
+    expect(result.withLicenseUrl).toBe(1)
+    expect(result.withModified).toBe(1)
+    expect(lines).toContain('with license URL: 1, modified: 1')
+  })
+
+  it('maps strings only: a non-string license_url or modified yields no field and no count', async () => {
+    const { top, metadata } = fixture()
+    const typed = structuredClone(KITS) as Record<string, unknown>[]
+    typed[0]!.license_url = 4
+    typed[0]!.modified = true
+    writeFileSync(metadata, JSON.stringify(typed))
+    const lines: string[] = []
+    const result = await generateOverrides({ top, metadata, report: (m) => lines.push(m) })
+
+    const pack = resolveOverrides(await loadOverrides(top, () => undefined), `/${PACK}`).credits!
+    expect(pack.author).toBe('Valandar')
+    expect('licenseUrl' in pack).toBe(false)
+    expect('modified' in pack).toBe(false)
+    expect(result.withLicenseUrl).toBe(0)
+    expect(result.withModified).toBe(0)
+    expect(lines).toContain('with license URL: 0, modified: 0')
+  })
+
+  it('regenerates a four-field store into six fields on a rerun, pose untouched', async () => {
+    // The live deploy's shape: a store written before the corpus carried the
+    // two fields, regenerated from metadata that now does. The keys the
+    // generator owns gain the fields; what it does not own survives.
+    const { top, metadata } = fixture()
+    const fourField = structuredClone(KITS) as Record<string, unknown>[]
+    delete fourField[0]!.license_url
+    delete fourField[0]!.modified
+    writeFileSync(metadata, JSON.stringify(fourField))
+    await generateOverrides({ top, metadata, report: () => undefined })
+
+    const before = await readStore(top)
+    expect(before.entries[`/${PACK}`]).toEqual({
+      name: 'Player Character Pack 03',
+      credits: {
+        author: 'Valandar',
+        authorUrl: 'https://www.thingiverse.com/Valandar',
+        license: 'Creative Commons - Attribution',
+        sourceUrl: 'https://www.thingiverse.com/thing:3750572',
+      },
+    })
+    ;(before.entries[`/${PACK}`] as Record<string, unknown>).pose = { az: 1.5, el: 0.25 }
+    ;(before.entries as Record<string, unknown>)[`/${PACK}/hero.stl`] = { pose: { az: 3 } }
+    writeFileSync(storePath(top), JSON.stringify(before))
+
+    writeFileSync(metadata, JSON.stringify(KITS))
+    const result = await generateOverrides({ top, metadata, report: () => undefined })
+    expect(result.withLicenseUrl).toBe(1)
+    expect(result.withModified).toBe(1)
+
+    const after = await readStore(top)
+    expect(after.entries[`/${PACK}`]).toEqual({
+      name: 'Player Character Pack 03',
+      credits: {
+        author: 'Valandar',
+        authorUrl: 'https://www.thingiverse.com/Valandar',
+        license: 'Creative Commons - Attribution',
+        licenseUrl: LICENSE_URL,
+        modified: MODIFIED,
+        sourceUrl: 'https://www.thingiverse.com/thing:3750572',
+      },
+      pose: { az: 1.5, el: 0.25 },
+    })
+    expect(after.entries[`/${PACK}/hero.stl`]).toEqual({ pose: { az: 3 } })
   })
 
   it('reports a stem naming no directory and writes no dead key for it', async () => {

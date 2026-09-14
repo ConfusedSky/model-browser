@@ -9,15 +9,29 @@ answer to a hand-written store field reaching React as a child; `resolveOverride
 inherits `credits` as one field down the key prefix and so needs nothing; and the
 lightbox's attribution rows in `ViewerLayer.tsx`, one row per field the store holds.
 
-The live store on the box holds 288 kits with author, author URL, license and source URL.
-The license label is Thingiverse's, "Creative Commons - Attribution", printed as text; the
-served kits are vertex-clustered display copies and nothing on the site says so. Both
-facts are what CC-BY asks for beside the author's name (`web-demo-notes` and
-`web-demo-backlog` parked them on the About page and a credits page, neither drafted).
-The corpus side (`model-browser-corpus`) is adding two per-kit metadata fields for them:
-`license_url`, the license URI with its version, taken from the thing page; and
-`modified`, a short phrase for what was done to the served copy, absent for kits passed
-through byte-identical. This change is the app side of those two fields.
+The live store on the box holds four-field credits: author, author URL, license and source
+URL. The license label is Thingiverse's ("Creative Commons - Attribution" and its
+siblings), printed as text; the served kits are vertex-clustered display copies and
+nothing on the site says so. Both facts are what the licences ask for beside the author's
+name (`web-demo-notes` and `web-demo-backlog` parked them on the About page and a credits
+page, neither drafted). The corpus side (`model-browser-corpus`) has written two per-kit
+metadata fields for them: `license_url`, the license URI with its version, taken from the
+thing page; and `modified`, a short phrase for what was done to the served copy, absent
+for kits passed through byte-identical. This change is the app side of those two fields.
+
+*Corrected 2026-09-14* (this paragraph said "288 kits" and "what CC-BY asks for" at
+drafting): the demo serves **444 kits under seven Creative Commons licences** — BY 305,
+BY-SA 31, BY-ND 29, CC0 23, BY-NC-SA 22, BY-NC-ND 18, BY-NC 16 — from a corpus rewritten
+2026-09-11 whose `metadata/miniatures.json` carries `license_url` (the deed URI with
+version, e.g. `https://creativecommons.org/licenses/by-nd/4.0/`) and `modified` on all
+454 entries ("re-exported as STL and decimated for display" on 381, "re-exported as STL"
+on 73). The corpus repo's CLAUDE.md ("NoDerivatives is accepted, after checking") records
+why the modification notice is compliant under every one of the seven: CC 4.0 §2(a)(4)
+licenses all media and formats plus the technical modifications needed for them, and says
+those never produce Adapted Material; decimation is lossy compression, algorithmic and
+authorless; and 4.0 requires indicating modification whether or not adapted material
+resulted — which is what `modified` carries. D2's "absent means unchanged" stays the rule
+although no shipped kit is absent it today; the unmodified case is a fixture case.
 
 Constraints: `/api/overrides` answers are consumed only by the lightbox; the store file is
 read once per library resolution (`createOverrideHolder`), so a rewritten file under a
@@ -62,7 +76,9 @@ A string the corpus writes ("decimated for display"), not a boolean and not a fr
 done — some kits are passed through byte-identical, and which ones is a corpus fact. A
 generic notes field would hold the same phrase but the app could not tell a modification
 notice from any other remark, and `web-demo-backlog` 1.6 wants to warn at Download only for
-altered copies. The row draws the phrase verbatim under the label `modified`; the app adds
+altered copies. The row draws the phrase verbatim — addressed as `modified`
+(`data-credit="modified"`) and labelled "this copy" (2026-09-14; see D4 for why not
+"modified") — and the app adds
 no wording of its own, so the corpus can say "decimated for display" today and something
 more specific later without an app change. Absent means unchanged and draws nothing: the
 block's rule that attribution is displayed where it exists and never advertised as
@@ -82,7 +98,12 @@ what that page says. A kit with a label and no URL draws as it does today.
 The modified row is last. The three existing rows say whose work this is and where it came
 from; the fourth says what was done to this copy, which reads as a footnote to them. It
 uses the block's existing row shape (`data-credit` attribute, `dt`/`dd` pair, right-aligned
-value) so the tests can address it the way they address the others.
+value) so the tests can address it the way they address the others. Its visible label is
+"this copy", not "modified" (found at implementation, 2026-09-14): the same `<dl>` already
+labels the file's date `modified` (`modified (zip)` inside an archive), and two rows under
+one label would read as one fact stated twice — the licence requires indicating that the
+copy was modified, and "this copy" names the thing the phrase is about, so the row reads
+"this copy — re-exported as STL and decimated for display". The mtime row is untouched.
 
 ### D5: The generator reports the two counts
 
@@ -104,6 +125,13 @@ verification reads `/api/overrides` on the live host for a kit known to be modif
 
 - [The corpus spells a field differently] → D5's counts read zero on the run; the task
   that regenerates the store gates on both being non-zero.
+- [A NoDerivatives kit's decimated copy is an adaptation ND forbids distributing] *(added
+  2026-09-14)* → the corpus repo's reading (its CLAUDE.md, "NoDerivatives is accepted,
+  after checking") is that CC 4.0 §2(a)(4)'s technical-modification allowance covers it
+  and that 4.0 wants modification indicated either way, which the `modified` row does.
+  The residual risk is the word "necessary" in that clause: 700k triangles to 5k is not a
+  container swap. The app's part is to show the phrase wherever the store holds one; the
+  reading, and whether to keep ND kits in the corpus, are the corpus's.
 - [A kit's `modified` phrase is long] → the row is a `dd` with `break-words`, like the
   license; a phrase is expected to be a few words, and the corpus owns the wording.
 - [A license URL with no version, or a wrong one] → the app links what it is given; the

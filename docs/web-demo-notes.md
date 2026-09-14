@@ -11,7 +11,12 @@ Corpus: `~/Documents/tests/test-models` (its own repo, `ConfusedSky/model-browse
 read its `NOTES.md` — measured findings on GLB vs STL, dedup, decimation, open
 items). 297 kits, 2,254 shipped models in `miniatures/clustered-hq/` (1.8 GB,
 0.84 MB/model, largest file 5.9 MB), all Thingiverse, **297/297 CC-BY** (no PD in
-the shipped set), no zips. Provenance per kit in `metadata/miniatures.json`
+the shipped set), no zips. *(Stale since the corpus was rewritten 2026-09-11 — noted
+2026-09-14 by `credits-completion`: the demo serves 444 kits under seven Creative Commons
+licences — BY 305, BY-SA 31, BY-ND 29, CC0 23, BY-NC-SA 22, BY-NC-ND 18, BY-NC 16 — and
+the metadata carries each kit's deed URL with version, `license_url`, and a `modified`
+phrase; the corpus repo's CLAUDE.md, "NoDerivatives is accepted, after checking", records
+why the modification notice is compliant under every one of them.)* Provenance per kit in `metadata/miniatures.json`
 (`name`, `author`, `author_url`, `source_url`, `license`, per-file `sha256`) —
 **gitignored, exists only on that disk.** Index: mini-classify `embed-cache-test`,
 2,165 models = 2,254 − ~89 `NON_MODEL_TAGS` drops (consistent, not confirmed by
@@ -85,7 +90,7 @@ own origin"; only its body hardcodes loopback.
 | CPU-only index, fp32, US-located, 4–8 GB | Masa | see Measurements; GPU warmed is tens of ms, CPU 0.3–0.6 s judged acceptable (<1 s) — **but 0.3–0.6 s was an in-process harness on 8 desktop threads; through `POST /query` the same machine is 0.38 s, a 2-vCPU Hetzner CX23 is 1.23 s and misses the bar, and a 4-vCPU projects to ~0.89 s (Measurements, 2026-09-04)**. **US-located relaxed 2026-09-02 (Masa): EU origins back in consideration pending a visitor-latency benchmark** — and therefore round-trip count is a first-class 1.3 design concern; see the EU paragraph in Measurements |
 | **Host: the Hetzner CX23 already probed, as it is** (2 shared vCPU, 4 GB, Falkenstein) | Masa, 2026-09-07 | gate 3.3 measured 1.23 s median on it, over the 1 s bar by ~23%, and that is accepted for launch: getting to deployment outranks the last ~230 ms. The upgrade path if visitors feel it is a resize to a 4-vCPU CX33 or the Modal text-tower fallback in front, and nothing in `public-deployment` or the infrastructure ticket (backlog 1.4) depends on which. This also settles location for launch — an EU box, which the 2026-09-02 relaxation of "US-located" above allowed pending a visitor benchmark that has not been run |
 | Folder tiles get a 2×2 contact sheet — **a main-app change, before the split** (applied 2026-08-31: `folder-contact-sheets`, including the D3 no-reset assertions and the live checks once `ao-refreshes-thumbnails` landed the same day; every task closed, cold-media numbers in its tasks.md 3.4) | Masa | `Grid.tsx` draws sheets from `GET /api/peek` per visible tile, inside amber folder chrome; verified live on the clustered-hq root — 297 folders, 12 peeks on first paint, 10 more per scroll screen, AO toggle re-renders cells with no reset |
-| Credits/provenance shown in the lightbox info panel | Masa | plus a generated credits page for CC-BY |
+| Credits/provenance shown in the lightbox info panel — **the block carries the licence link and the modification notice** (`credits-completion`, 2026-09-14) | Masa | author linked, licence label linked to its deed URL with version, source linked, and a `modified` row with the corpus's phrase where the served copy is not the author's file; a generated credits page is a courtesy riding the landing page (backlog 1.8), not a gate — attribution is complete where the work is shown |
 | ~~Lighting menu hidden in demo mode~~ → **axis lighting mode removed from the main app; camera is the only mode; the pill goes** (implemented: `remove-axis-lighting`, applied 2026-08-31 — row closed) | Masa | the hide was only ever to stop visitors picking axis. Item 9 has the grounding (every sidecar says `camera`, 0 `axis` — 1,758 at this session's count, 1,792 at later reviewers' runs the same day; axis's motivating bug has no counterpart in camera mode) |
 | **SSAO stays a user option** (pill kept), default chosen adaptively by sampling frames; both AO variants baked for the demo | Masa | item 8 has the design: AO becomes a thumbnail recipe dimension, cache keyed by recipe |
 | **`ao-refreshes-thumbnails` (formerly `lighting-refreshes-thumbnails`) is re-targeted, not retired**: its trigger becomes the AO pill | Masa | the mechanism — a toggle re-runs the staleness sweep in place, tiles keep their image while the replacement renders (§2, rewritten in review as a per-entry reconciler), the `poseStale` rule stated and asserted (§2b — the bug it named was already fixed in `28289d1`) — carries over; on the demo the sweep finds the other baked variant, so toggling is instant. Prerequisite: AO as a recipe dimension (item 8). Rename/`opsx:update` the change rather than start a new one |
@@ -930,7 +935,9 @@ All re-runnable; say whose run when quoting.
 - IP pass by eye over the corpus (one Monster Hunter dragon known).
 - ~~`metadata/miniatures.json` backed up or tracked~~ — decided 2026-08-29: regenerable by the
   fetch scripts and gitignored on purpose; not a gate.
-- Credits page generated from it (CC-BY requires displayed attribution).
+- ~~Credits page generated from it (CC-BY requires displayed attribution).~~ → attribution
+  complete in the lightbox — licence linked, modification indicated (backlog 3.2 as
+  reworded 2026-09-14; `credits-completion` closes it).
 - One paid hour on the actual instance for the query-latency number.
 - Optional: Caddy access logs answer "did anyone visit" without an analytics script.
 

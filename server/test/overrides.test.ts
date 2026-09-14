@@ -75,6 +75,9 @@ const CREDITS = {
   license: 'Creative Commons - Attribution',
   sourceUrl: 'https://www.thingiverse.com/thing:3750572',
 }
+/** The two fields `credits-completion` added; kept apart so the four-field cells read as they did. */
+const LICENSE_URL = 'https://creativecommons.org/licenses/by/4.0/'
+const MODIFIED = 're-exported as STL and decimated for display'
 
 describe('loading the store', () => {
   it('treats an absent store as empty, and says nothing about it', async () => {
@@ -134,19 +137,36 @@ describe('loading the store', () => {
     expect(problems[0]).toContain('non-string credits.sourceUrl')
   })
 
-  it('serves only the four credit fields — an unknown one never rides the wire', async () => {
+  it('serves only the six credit fields — an unknown one never rides the wire', async () => {
     // Allow-list, not deny-list (review round two): a store's extra field — an
     // object, say — would otherwise reach /api/overrides and wait for the
     // first renderer that iterates credits to hand it to React as a child.
     // Dropped SILENTLY, unlike a wrong-typed known field: an unknown field is
     // additive evolution (a newer writer's legitimate field on an older
     // reader), not an error — it lives on disk untouched and simply does not
-    // resolve.
+    // resolve. That silence is what lets a store carrying fields a build does
+    // not know ship before that build (`credits-completion` D1/D6). All six
+    // names are in the fixture, so a name dropped from the list shows here.
+    const six = { ...CREDITS, licenseUrl: LICENSE_URL, modified: MODIFIED }
     const { store, problems } = await loadWith(
-      v1({ '/kit': { credits: { author: 'Valandar', note: { deep: [1, 2] } } } }),
+      v1({ '/kit': { credits: { ...six, note: { deep: [1, 2] } } } }),
     )
-    expect(resolveOverrides(store, '/kit')).toEqual({ credits: { author: 'Valandar' } })
+    expect(resolveOverrides(store, '/kit')).toEqual({ credits: six })
     expect(problems).toEqual([])
+  })
+
+  it('drops a wrong-typed modified, reports it, and keeps the rest', async () => {
+    // A known field of the wrong type is an error, unlike an unknown one: a
+    // boolean here is the mistake a hand-writer makes when the field's name
+    // suggests a flag, and it is reported rather than drawn as "true".
+    const { store, problems } = await loadWith(
+      v1({ '/kit': { credits: { ...CREDITS, licenseUrl: LICENSE_URL, modified: true } } }),
+    )
+    expect(resolveOverrides(store, '/kit')).toEqual({
+      credits: { ...CREDITS, licenseUrl: LICENSE_URL },
+    })
+    expect(problems).toHaveLength(1)
+    expect(problems[0]).toContain('non-string credits.modified')
   })
 
   it('drops credits that are not an object at all', async () => {
@@ -195,6 +215,15 @@ describe('field-wise longest-prefix resolution', () => {
   it('carries a kit’s credits down to a file beneath it', async () => {
     const { store } = await loadWith(v1({ '/kit': { credits: CREDITS } }))
     expect(resolveOverrides(store, '/kit/sub/x.stl')).toEqual({ credits: CREDITS })
+  })
+
+  it('carries the license URL and the modified phrase beneath the kit key with the rest', async () => {
+    // `credits` inherits as one field, so the two newer strings ride the same
+    // walk the four older ones do — asserted rather than assumed, since the
+    // lightbox reads them for a model, never for the kit key itself.
+    const six = { ...CREDITS, licenseUrl: LICENSE_URL, modified: MODIFIED }
+    const { store } = await loadWith(v1({ '/kit': { credits: six } }))
+    expect(resolveOverrides(store, '/kit/sub/x.stl')).toEqual({ credits: six })
   })
 
   it('merges per field: a file key holding only a pose keeps the kit’s credits', async () => {

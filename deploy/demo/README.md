@@ -167,9 +167,13 @@ rsync -az \
 ```
 
 `overrides.json` is the override store (`library-overrides`), and on this corpus
-it is the **CC-BY credits** — author, licence and source URL per kit, which the
-lightbox shows and the credits page (`web-demo-backlog` 1.8) will generate from.
-A corpus without it is not the demo.
+it is the **Creative Commons credits** — author, licence, `licenseUrl` (the deed
+URL with version) and source URL per kit, plus `modified` (what was done to the
+served copy; absent means served unchanged) — which the lightbox shows: the
+licence label links to the deed, and the modified phrase is the notice the
+licences require (`credits-completion`). A corpus without it is not the demo.
+The server reads it once per resolved library, so a regenerated store needs the
+app restarted (the `up --build` below does that).
 
 `library.json` beside it must **not** travel. It is the library marker, and D4
 has the box write its own on first start: that id names the cache directory the
