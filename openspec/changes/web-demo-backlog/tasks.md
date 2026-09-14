@@ -152,7 +152,10 @@
 ## 3. Go-live gates (corpus side, not app work)
 
 - [ ] 3.1 IP pass by eye over the corpus (one Monster Hunter dragon known)
-- [ ] 3.2 Attribution complete in the lightbox — licence linked, modification indicated
+- [x] 3.2 Attribution complete in the lightbox — licence linked, modification indicated
+      *(closed 2026-09-14: `credits-completion` archived — the store on the box carries the
+      licence URL and the phrase on all 444 kits, the app at 32e112e draws the linked licence
+      and the "this copy" row, verified on the live host)*
       (the Creative Commons deeds require displayed attribution and, in 4.0, an
       indication of modification) — reworded 2026-09-14 from "credits page generated from
       `metadata/miniatures.json`"; the generator is 1.1's, the fields are
