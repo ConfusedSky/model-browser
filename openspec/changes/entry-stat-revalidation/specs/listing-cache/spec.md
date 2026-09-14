@@ -20,18 +20,18 @@ The server SHALL persist what a recursive walk discovers — entry names, kinds,
 - **THEN** nothing is cached for that root, and the next request traverses rather than inheriting a tree that was never fully examined
 
 ### Requirement: Revalidation is proportional to tree shape
-The server SHALL detect changes by examining each recorded directory's modification time and each recorded file entry's modification time and size, and SHALL re-read only the directories where one of those has moved or where a recorded entry can no longer be examined. A directory whose recorded state is confirmed SHALL NOT be read, and an archive whose identity is unchanged SHALL NOT be opened. A full re-walk SHALL NOT be performed as the routine freshness check. The examinations SHALL be charged to the same work bound a walk is charged to, one per entry examined, so that a tree which fit the bound when walked fits it when revalidated and a tree that has outgrown it is reported rather than served.
+The server SHALL detect changes by examining each recorded directory's modification time, each recorded archive's identity, and each recorded model entry's modification time and size, and SHALL re-read only the directories where one of those has moved or where a recorded entry can no longer be examined. A directory whose recorded state is confirmed SHALL NOT be read, and an archive whose identity is unchanged SHALL NOT be opened. A full re-walk SHALL NOT be performed as the routine freshness check. The examinations SHALL be charged to the same work bound a walk is charged to, one per entry examined, so that a tree which fit the bound when walked fits it when revalidated and a tree that has outgrown it is reported rather than served.
 
 #### Scenario: An unchanged tree revalidates cheaply
 - **WHEN** a cached root is revalidated and nothing beneath it has changed
-- **THEN** the check costs one examination per recorded directory and one per recorded file entry, no directory is read, no archive is opened, and the stored tree is unchanged
+- **THEN** the check costs, beyond what confirming the directories and the archives already costs, one examination per recorded model entry outside an archive — an archive's own entry is confirmed by the examination its identity check already makes — no directory is read, no archive is opened, and the stored entries and directory records are unchanged
 
 #### Scenario: A changed folder is picked up
 - **WHEN** models are added to, removed from, or renamed within a folder and that root is listed again after the revalidation cadence
 - **THEN** the listing reflects the change without the user clearing a cache or restarting the app — validation is time-bounded, never once-per-process
 
 ### Requirement: Freshness on demand
-The server SHALL expose an explicit reload operation that runs the incremental revalidation immediately for the library and reports what it found. A reload SHALL use the same incremental check as routine revalidation — the per-directory and per-entry examination, never a full re-walk — and a listing requested after a completed reload SHALL reflect what the reload discovered, an entry overwritten in place included.
+The server SHALL expose an explicit reload operation that runs the incremental revalidation immediately for the library and reports what it found. A reload SHALL use the same incremental check as routine revalidation — the per-directory, per-archive and per-model-entry examination, never a full re-walk — and a listing requested after a completed reload SHALL reflect what the reload discovered, an entry overwritten in place included.
 
 #### Scenario: The user edited the library elsewhere
 - **WHEN** files were moved on disk outside the app and the user triggers a reload
@@ -44,7 +44,7 @@ The server SHALL expose an explicit reload operation that runs the incremental r
 ## ADDED Requirements
 
 ### Requirement: An entry overwritten in place is seen by the pass
-When revalidation finds a recorded directory's modification time unchanged, it SHALL still examine each recorded file entry in that directory — its modification time and size — before reusing the recorded level. A recorded entry whose modification time or size has moved, or that can no longer be examined, SHALL cause that directory to be re-read as a changed directory is, and SHALL count as a detected change in that directory for every consequence a detected change has: the corrected entry is stored in the snapshot and persisted to durable storage before the pass reports, so that a restart serves the corrected value; the directory's derived preview choice and its ancestors' are re-derived; and every later listing served from the snapshot carries the corrected modification time and size, so that the thumbnail state attached to the entry and the thumbnail the client requests follow the current file rather than the overwritten one. Directories in a reused level are covered by their own visit and SHALL NOT be examined twice; entries inside an archive are covered by the archive's own identity and SHALL NOT be examined individually. An overwrite that preserved both modification time and size is outside what this examination can see, and SHALL be documented as such rather than claimed.
+When revalidation finds a recorded directory's modification time unchanged, it SHALL still examine each recorded model entry in that directory — its modification time and size, following a symbolic link as the walk did — before reusing the recorded level. A recorded entry whose modification time or size has moved, or that can no longer be examined (a link whose target moved or vanished, an entry gone within the directory's modification-time granule), SHALL cause that directory to be re-read as a changed directory is, and SHALL count as a detected change in that directory for every consequence a detected change has: the corrected entry is stored in the snapshot and persisted to durable storage before the pass reports, so that a restart serves the corrected value; the directory's derived preview choice and its ancestors' are re-derived; and every later listing served from the snapshot carries the corrected modification time and size, so that the thumbnail state attached to the entry and the thumbnail the client requests follow the current file rather than the overwritten one. Directories in a reused level are covered by their own visit and SHALL NOT be examined twice. An archive's own entry SHALL be corrected from the examination its identity check already makes — no further examination per archive — and an archive whose modification time moved SHALL count as a detected change in its directory for the preview consequence above, without the directory being re-read; entries inside an archive are covered by the archive's own identity and SHALL NOT be examined individually. An overwrite that preserved both modification time and size is outside what this examination can see, and SHALL be documented as such rather than claimed.
 
 #### Scenario: A re-exported model reaches the flat listing within an interval
 - **WHEN** a model file is rewritten in place so that its modification time or size moves, nothing in its directory is renamed, and the revalidation pass next runs
@@ -59,23 +59,27 @@ When revalidation finds a recorded directory's modification time unchanged, it S
 - **THEN** that folder's preview choice and each of its ancestors' are re-derived, so no sheet cell carries the overwritten file's stamp, while an unchanged sibling folder keeps its choice
 
 #### Scenario: An entry gone within the directory's mtime granule
-- **WHEN** a recorded entry is removed and its directory's modification time reads unchanged
+- **WHEN** a recorded entry is removed and its directory's modification time reads unchanged — whether the entry was a file deleted inside the granule or a symbolic link whose target is gone
 - **THEN** the pass re-reads that directory and the entry is absent from the corrected listing
+
+#### Scenario: A rewritten archive's own tile carries its new stamp
+- **WHEN** an archive is rewritten in place so that its modification time moves and nothing in its directory is renamed
+- **THEN** after the pass the archive's own entry and its interior entries agree on the current modification time, the archive was examined no more times than an unchanged pass examines it, and the directory's preview choice is re-derived
 
 #### Scenario: An unchanged tree is stored byte-identically
 - **WHEN** the pass runs over a tree in which no entry's modification time or size has moved
-- **THEN** the snapshot it stores is identical to the one it loaded
+- **THEN** the entries and the directory records the pass stores are identical to the ones it loaded — the pass's own timestamp is the one field it always rewrites
 
 #### Scenario: The documented blindness
 - **WHEN** a file is overwritten in place by a method that preserves its modification time and size
 - **THEN** the pass, the reload, the folder view and the thumbnail cache all continue to treat the file as unchanged, and the capability says so rather than claiming otherwise
 
 ### Requirement: The tree cache can be switched off
-The listing tree cache SHALL be switchable off by the deployment's configuration — a key in the configuration file, overridable by an environment variable named for it (see `public-deployment`) — and SHALL default to on. With the cache off, every flat listing and deep search SHALL traverse the filesystem as a request did before the cache existed: no snapshot is read or written, no listing carries a staleness marker, no revalidation runs at startup or on a cadence, and a reload reports no cached roots. The switch is a testing affordance and SHALL NOT be the way freshness is obtained in ordinary use; the archive-directory layer, the derived layers and the thumbnail cache are not governed by it.
+The listing tree cache SHALL be switchable off by the deployment's configuration — a key in the configuration file, overridable by an environment variable named for it (see `public-deployment`) — and SHALL default to on. With the cache off, every flat listing and deep search SHALL traverse the filesystem as a request did before the cache existed: no snapshot is read or written, no listing carries a staleness marker, no revalidation runs at startup or on a cadence, and a reload reports no cached roots. The switch is a testing affordance and SHALL NOT be the way freshness is obtained in ordinary use. Off also disables the archive-directory cache, which lives in the same store: browsing or peeking a folder of archives with the cache off re-reads each archive's central directory on every request. The derived layers and the thumbnail cache are untouched by the switch.
 
 #### Scenario: Off means every request walks
 - **WHEN** the cache is switched off and a flat listing is requested twice for a root that was walked before the switch
-- **THEN** both requests traverse the filesystem, neither is marked as served from a cache, and no snapshot is written
+- **THEN** both requests traverse the filesystem, neither is marked as served from a cache, no snapshot is written, and an archive met on the way is read on both requests
 
 #### Scenario: A reload with the cache off
 - **WHEN** the cache is switched off and a reload is requested

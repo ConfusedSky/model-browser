@@ -70,24 +70,62 @@ media, where cold random metadata costs ~15x warm (memory note, verified 2026-08
 
 ### D1: The reuse branch confirms its entries, and a disagreement demotes the directory to a re-read
 
-When `levelFor` finds `held.mtime === s.mtimeMs`, it now stats each recorded
-non-directory child (`kind === 'model' | 'zip'`, at `join(fsDir, basename(e.path))`,
-with `stat` — following symlinks as `listFsDir` does) and compares `mtimeMs` and `size`
-with the record. If every entry agrees, the level is `reusedLevel(held, fsDir)` as
-today. If any entry disagrees — a moved mtime, a moved size, or a `stat` that fails —
-the branch falls through to `listFsDir`, exactly the path a moved *directory* mtime
-takes, and records the directory's library path in a new `FlatWalk.demoted` set.
-`revalidateTree` unions that set into `changedDirs`.
+When `levelFor` finds `held.mtime === s.mtimeMs`, it now stats each recorded model
+child (`kind === 'model'`, at `join(fsDir, basename(e.path))`, with `stat` — following
+symlinks as `listFsDir` does) and compares `mtimeMs` and `size` with the record. If
+every entry agrees, the level is `reusedLevel(held, fsDir)` as today. If any entry
+disagrees — a moved mtime, a moved size, or a `stat` that fails — the branch falls
+through to `listFsDir`, exactly the path a moved *directory* mtime takes, and records
+the directory's library path in a new `FlatWalk.demoted` set. `revalidateTree` unions
+that set into `changedDirs`.
+
+The failing `stat` has two field cases, and the loop treats them as one. The first is
+the granule case: an entry deleted within the parent's mtime resolution. The second is
+the ordinary one — a **symlinked model whose target moved or vanished**. `listFsDir`
+follows links (`stat`, not `lstat`, after the `realpath` confinement check), so the
+walk recorded the target's mtime and size under the link's name; the confirm loop
+follows the same link, and a target that is gone rejects the `stat` while a target
+that was replaced answers a moved stamp. Nothing done to the target touches the
+directory holding the link, so its mtime is exactly as unmoved as in the overwrite
+case, and only the per-entry check can see it.
 
 Directory children are skipped in the loop: their own `levelFor` visit stats them, and
 `walkFsLevel`'s own-entry refresh (`fresh !== e.mtime`) already writes a moved directory
-mtime back into the parent's level. Archive children are stat'd like models — one
-extra stat beside `walkZip`'s own, which is what corrects the archive's own tile.
+mtime back into the parent's level. **Archive children are skipped too, and confirmed
+by the stat `walkZip` already makes** (review, 2026-09-14 — pinned: no third stat per
+archive). `walkZip` stats the archive (`zipStat`) on the revalidation path before the
+archive layer answers, so the pass already holds the archive's current mtime; what it
+did not do was write it to the archive's *own tile* — `walkFsLevel` pushes the reused
+entry (`{ ...e, name }`) before `walkZip` runs, so the tile keeps the recorded stamp
+while the interior entries carry `zipStat.mtimeMs`. The fix is the pattern
+`walkFsLevel` already uses for a directory's own entry from `walk.dirMtimes`: `walkZip`
+records `zipStat.mtimeMs` against the archive's library path (a map on `FlatWalk`
+beside `dirMtimes`), and `walkFsLevel` writes it back into the parent-level entry and
+the pushed container entry after the call, the way the `fresh !== e.mtime` block does
+for a directory. When that mtime differs from the recorded one, the archive's parent
+directory is added to `walk.demoted` so it reaches `changedDirs` and the sheet drop —
+but it is not re-read: the confirm loop's demotion happens *before* the level is
+returned, this one *after*, and the write-back has already corrected the one entry in
+that level the archive's stat speaks for, while the interior is fresh from `walkZip`.
+`walkZip` surfaces no size — its interior entries carry `zipStat.mtimeMs` alone and
+`sameEntries` has nothing of the archive's size to compare — so the zip compare is
+**mtime-only**, which an overwrite always moves; the write-back carries `zipStat.size`
+beside the mtime since the same stat has it in hand, so the tile's size does not stay
+stale either, but the decision reads the mtime.
+
+*The loop closes.* Both `levelFor` branches record the directory's mtime in
+`walk.dirMtimes` — the reuse branch and the `listFsDir` fall-through alike — and a
+demoted directory's mtime did not move, so `revalidateTree`'s `before.get(path) !==
+mtime` filter leaves it **out** of `changedDirs`; task 1.2's union is what puts it in,
+and is load-bearing, not belt-and-braces. The next pass re-stats the demoted
+directory's entries against the record the re-read just corrected, finds them equal,
+and does not demote again: one re-read per overwrite, not one per cadence.
 
 *Why demote rather than patch the entry in place.* Patching (`e.mtime = s.mtimeMs;
 e.size = s.size`) saves one `readdir` per changed directory and needs a second rule
-for the entry that cannot be stat'd (gone within the parent's mtime granule — ns on
-ext4, 10 ms on the exfat volume per `scripts/probe-dir-mtime.py`). Demoting has one
+for the entry that cannot be stat'd — a link whose target vanished, or a file gone
+within the parent's mtime granule (ns on ext4, 10 ms on the exfat volume per
+`scripts/probe-dir-mtime.py`). Demoting has one
 rule — *the recorded level could not be confirmed, so read it* — and reuses everything
 that already exists for a changed directory: `listFsDir`'s confinement and step
 charging, the `changedDirs` list, `noteDirChanged`, the own-entry refresh. The cost of
@@ -106,23 +144,36 @@ the budget that exists to bound it.
 
 ### D2: Cost — warm measured, cold a task for Masa, and where the pass waits
 
-Measured by Masa on 2026-09-14, on his library (ext4 on the removable SSD volume,
-4,863 directories / 13,429 files, warm page cache, python `os.walk` + `os.stat`, one
-run each):
+Two warm measurements exist, and only one has the pass's shape.
 
-| pass | warm |
-|---|---|
-| stat each directory only (today) | 59 ms |
-| stat each directory and every entry (D1) | 98 ms |
+**The real shape** (the cold review, 2026-09-14, on the same ext4 volume, `/dev/sda1`,
+5,077 directories / 14,064 files, warm page cache, two runs each): the path list was
+collected once and then **stat-only loops** were timed — no `readdir`, which is what
+the pass does, since a reused level's names come from the snapshot.
+
+| pass (stat only, no `readdir`) | warm, run 1 | warm, run 2 |
+|---|---|---|
+| stat each directory only (today) | 10.6 ms | 10.0 ms |
+| stat each directory and every file entry (D1) | 39.7 ms | 43.6 ms |
+
+A **~4× multiplier**, not the 1.7× the pair below implies.
+
+**The wrong shape** — recorded so nobody re-reads it as the cost: python `os.walk` +
+`os.stat`, which `readdir`s every directory it visits, so both cells pay a full
+directory read the pass never makes and the ratio between them is diluted by it. The
+reviewer's run on the tree above: 57 / 93 ms. Masa's run on 2026-09-14 (his count of
+the same volume: 4,863 directories / 13,429 files, one run each): 59 / 98 ms. Neither
+pair is the pass; both are kept as the record of what was measured first.
 
 Cold is **not measured**. Do not extrapolate: the memory note records cold metadata at
 0.156 ms/entry on SSD against 2.405 ms/entry on the spinning exfat volume, warm
 media-independent — a cold entry-stat pass on spinning media is, by construction, the
 cold walk minus its `readdir`s and may approach the ~32 s figure the tree cache exists
-to hide. The measurement is task 6.1 (command, drop-caches step and where to record
-it, all spelled there); it produces two numbers per volume, cold directory-only and
-cold with entries, and both go into this table and into `REVALIDATE_TTL_MS`'s comment
-in `listingCache.ts`, replacing "~5.6 s measured cold".
+to hide. The measurement is task 6.1 (a stat-only probe with the real shape: the
+script, the drop-caches step and where to record it are all spelled there); it
+produces two numbers per volume, cold directory-only and cold with entries, and both
+go into this table and into `REVALIDATE_TTL_MS`'s comment in `listingCache.ts`,
+replacing "~5.6 s measured cold".
 
 Where the cost lands today, unchanged by this change: `ListingCache.list` answers a
 snapshot at once, marked, and runs the pass in the background — a browse or a search
@@ -162,13 +213,17 @@ choice: the requirement already says a detected change re-derives, and the sheet
 *choice* is derived from the subtree (posed models first), which a re-export can move.
 No new call, no new symbol in `layers.ts`: the union in D1 is the whole of it.
 
-Poses are not touched. `noteDirChanged` leaves them alone by design ("a pose is a fact
-about a model's geometry"); an overwrite *is* a geometry change, but
-`pose-layer-removal` deletes the held pose entirely — emission asks the index per
-listing — so building a per-entry pose drop here would be code that change removes.
-If this change lands first, an overwritten model's held pose lingers to
-`POSE_ANNOTATION_TTL_MS` (five minutes) or the next reload (`dropAll`); bounded, and
-recorded here rather than fixed. Thumbnail state carries no layer of its own —
+Poses are not touched — a decision, not a deferral. `noteDirChanged` leaves them alone
+by design ("a pose is a fact about a model's geometry"), and an overwrite *is* a
+geometry change; but the held pose is keyed by **path**, and the semantic index it was
+learned from still holds the *old* file's embedding — nothing re-embeds an overwritten
+model — so dropping the held pose would only make the next listing ask the index again
+and get the same old-geometry answer back. It buys nothing until re-embedding exists,
+which is out of scope (Non-Goals) and, for the layer itself, moot once
+`pose-layer-removal` deletes it (emission asks the index per listing). If this change
+lands first, an overwritten model's held pose lingers to `POSE_ANNOTATION_TTL_MS`
+(five minutes) or the next reload (`dropAll`), and the pose it lingers *as* is the one
+the index would answer anyway. Thumbnail state carries no layer of its own —
 `ThumbCache.facts` is keyed by path and `infoFor` derives the state at emission from
 the entry's mtime, so (c) covers it.
 
@@ -218,9 +273,24 @@ false`, passes `undefined` otherwise to `ListingCache` and `createApp`, skips th
 startup pass and the snapshot sweep, and prints `listing cache: off` beside the
 `library … at …` line so a run with the switch on is legible in the log.
 `createApp`'s reload route already answers `{roots: 0, changed: false}` with no store,
-and `ListingCache.list` with no store is `walkFlat` with no marker — that is the
-pre-`listing-tree-cache` behaviour and the header of `listingCache.ts` says so; the
-switch selects it rather than adding a mode.
+and `ListingCache.list` with no store is `walkFlat` with no marker — for the *walk*,
+that is the pre-`listing-tree-cache` behaviour and the header of `listingCache.ts` says
+so; the switch selects it rather than adding a mode.
+
+**Off also turns the archive-directory layer off**, and this is not optional: the
+`ZipDirCache` is `SnapshotStore.archiveCache()` and every route reaches it through the
+store — `snapshots?.archiveCache()` at the three sites in `app.ts` (the annotation
+fill's `posedFirstPeek`, `listDir` in `/api/dir`, `/api/peek`) and
+`store?.archiveCache()` in `walkFlat` and `enumerateModels` — so building no store
+leaves every `listZipEntries` call with `zips` undefined. Browsing or peeking a
+zip-heavy folder then re-reads each archive's central directory on every request,
+which is the cost the layer landed with `listing-tree-cache` (D3 there) to remove —
+"the largest single measured win in this change", per `walkZip`'s own comment. So off
+is pre-`listing-tree-cache` behaviour for the archives as well as for the walk, and a
+tester timing a zip-heavy folder with the switch off is timing both absences at once.
+Stated in the spec delta and in CLAUDE.md's
+sentence on what off costs. The derived layers and the thumbnail cache are untouched
+by the switch.
 
 **Default on.** Masa on 2026-09-14: "I think it would actually be better to have them
 on by default. I think the cache issue that I was seeing had been resolved in a
@@ -284,11 +354,24 @@ for the proportionality cell.
   and reload; measured by task 6.1 before the change is judged done; the second-cadence
   fallback is Open Question 2 and would be its own change.
 - [Charging steps for confirmation stats exhausts the budget on a tree that used to
-  revalidate] → Parity: the tree charged the same steps when walked, and a walk that
-  fit the search budget (200k) fits its revalidation. `RevalidationError` on exhaustion
-  is the existing rule, unchanged.
-- [A demoted directory's `readdir` on a changed level double-stats its entries] → Only
-  for directories that changed, bounded by the change, and buys one rule instead of two.
+  revalidate] → What exhaustion costs, spelled: `gatherFlat` sets `budgetExhausted`,
+  `revalidateTree` throws `RevalidationError`, and `ListingCache.run`'s third branch
+  `store.invalidate(root)`s the snapshot and `dropPreviewsUnder(root)` — the next
+  listing pays the cold walk (~32 s on the spinning volume). Per-entry charging moves a
+  tree *toward* that edge: today's pass charges nothing for a reused level, and after
+  D1 it charges one step per recorded model entry. The bound is parity with the walk
+  and it holds with room: `listFsDir` charges one step per **dirent**, non-model files
+  included, which the confirm loop never sees (it walks the recorded entries, which are
+  models and archives only), so the walk that wrote the snapshot charged strictly more
+  than its revalidation will. A demoted directory double-charges — the confirm loop,
+  then `listFsDir` — bounded by what changed, and buys one rule instead of two. A tree
+  that fit the search budget (200k) when walked therefore fits its revalidation;
+  `RevalidationError` on exhaustion is the existing rule, unchanged.
+- [With the cache off, the snapshot directory's bound is unenforced] → `index.ts` skips
+  `snapshots.maintain()` when it builds no store, so `<cache>/<id>/snapshots/` is
+  neither swept nor capped for the duration of an off run; the files there are whatever
+  the last on run left, untouched. Stated in CLAUDE.md beside the switch; the next on
+  run's startup sweep enforces the bound again.
 - [An env value like `TRUE` or `yes` stops the server] → Deliberate (D5): the error
   names the variable and the four spellings; a test covers it.
 - [The `MODEL_BROWSER_LISTING_CACHE=0` run leaves no snapshot to revalidate, so a later
@@ -315,7 +398,9 @@ and default to today's behaviour.
    affordance. (His 2026-09-11 "off by default … until the invalidation is trusted"
    predates the probes and this change, and he reversed it for that reason.)
 2. **Does cold entry confirmation need a second, longer cadence?** — Deferrable:
-   decided by task 6.1's numbers on the spinning volume, after implementation. If yes,
+   decided by task 6.1's numbers on the spinning volume, after implementation — and
+   read off the **real shape** (D2's stat-only table, ~4× warm), never the `os.walk`
+   pair, whose `readdir` per directory hides most of the multiplier. If yes,
    it is a follow-up change that MODIFIES *An entry overwritten in place is seen by the
    pass* ("within a revalidation interval" becomes "within the entry interval"); the
    code shape is a second stamp beside `validatedAt`. Nothing in this change's tasks
