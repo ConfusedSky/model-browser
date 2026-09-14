@@ -6,7 +6,8 @@ lightbox side panel SHALL show an attribution block: the author (linked to the
 author URL when one is stored), the license (linked to the license URL when
 one is stored, plain text otherwise), a link to the source, and — when the
 store holds a modified phrase — a modified row carrying that phrase verbatim,
-which is the notice that the served copy is not the author's file. The
+which is the notice that the served copy is not the author's file, labelled
+distinctly from the panel's own file-date row so that the two cannot be read as one. The
 block SHALL sit among the model's metadata, before the panel's actions — the
 existing "describes before it offers" rule, which appending after the action
 strip would break. Because credits arrive from a read rather than from the
@@ -30,7 +31,7 @@ its answer ignored once the subject has moved on.
 
 #### Scenario: A license without a URL
 - **WHEN** the resolved credits hold a license and no license URL
-- **THEN** the license label draws as plain text, as it did before the URL was stored
+- **THEN** the license label draws as plain text
 
 #### Scenario: A modified copy
 - **WHEN** the resolved credits hold a modified phrase

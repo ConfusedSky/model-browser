@@ -25,7 +25,10 @@ BY-SA 31, BY-ND 29, CC0 23, BY-NC-SA 22, BY-NC-ND 18, BY-NC 16 — from a corpus
 2026-09-11 whose `metadata/miniatures.json` carries `license_url` (the deed URI with
 version, e.g. `https://creativecommons.org/licenses/by-nd/4.0/`) and `modified` on all
 454 entries ("re-exported as STL and decimated for display" on 381, "re-exported as STL"
-on 73). The corpus repo's CLAUDE.md ("NoDerivatives is accepted, after checking") records
+on 73 — those two counts are over the metadata's 454 entries; the licence counts above are
+over the 444 keys written, where the phrases split 372 / 72). The generator's run report
+carries both tallies as lines (D5), so every figure here is re-run by regenerating the
+store, not retyped. The corpus repo's CLAUDE.md ("NoDerivatives is accepted, after checking") records
 why the modification notice is compliant under the six that ask anything (CC0 asks nothing; showing it there costs nothing): CC 4.0 §2(a)(4)
 licenses all media and formats plus the technical modifications needed for them, and says
 those never produce Adapted Material; decimation is lossy compression, algorithmic and
@@ -138,6 +141,11 @@ verification reads `/api/overrides` on the live host for a kit known to be modif
   The residual risk is the word "necessary" in that clause: 700k triangles to 5k is not a
   container swap. The app's part is to show the phrase wherever the store holds one; the
   reading, and whether to keep ND kits in the corpus, are the corpus's.
+- [A hand-written `modified: ""`] → the loader guards type, not emptiness, and `renderableCredits`
+  tests presence, so an empty phrase draws a labelled blank row; unreachable from the
+  generator (`str()` drops the empty string) and the same treatment `author: ""` has had
+  since `library-overrides` — a store author's mistake, consistent with prior art, not
+  guarded here.
 - [A kit's `modified` phrase is long] → the row is a `dd` with `break-words`, like the
   license; a phrase is expected to be a few words, and the corpus owns the wording.
 - [A license URL with no version, or a wrong one] → the app links what it is given; the
@@ -155,7 +163,9 @@ verification reads `/api/overrides` on the live host for a kit known to be modif
    until the store carries the fields.
 2. When `model-browser-corpus` has written `license_url` and `modified`, regenerate the
    store on the corpus with the generator and check D5's counts.
-3. rsync the store to the box as `deploy/demo/README.md` §3.2 describes; redeploy
+3. Push main — the box pulls from origin, and D1's silent drop would otherwise hide a
+   stale app behind a correct store. Then rsync the store to the box as
+   `deploy/demo/README.md` §3.2 describes; redeploy
    (`git pull && docker compose -f deploy/demo/compose.yaml up -d --build`), which restarts
    the app.
 4. Verify on the live host: `/api/overrides?path=<a modified kit>` carries both fields;

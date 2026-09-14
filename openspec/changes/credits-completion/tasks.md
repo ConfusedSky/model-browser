@@ -42,7 +42,7 @@
       info panel" says the block carries the license link and the modification notice, and
       that the generated credits page is a courtesy, not a gate; deploy/demo/README.md
       rsync block under "Populate the volumes" names the two new fields in its sentence on
-      `overrides.json` (the README has no numbered subsections)
+      `overrides.json` (the README labels it **3.2 The corpus** in prose, not as a heading)
       *(2026-09-14, c5c189a: the notes' decided row and gate line updated, the "297/297 CC-BY" figure annotated with 444 kits under seven CC licences; the README's rsync block names both fields and the restart rule)*
 ## 4. Land it
 
@@ -52,13 +52,22 @@
       fields: `bun run scripts/gen-overrides.ts` against
       `~/Documents/tests/test-models` (kit dir `miniatures/clustered-hq`); the report's two
       counts are non-zero (D5) — record them here
-      *(2026-09-14, coordinator: the previous store kept beside it as `overrides.json.bak-2026-09-14`; run against `miniatures/clustered-hq` as top with `metadata/miniatures.json`: "wrote 444 keys from 454 kits read … with license URL: 444, modified: 444"; 10 stems named no directory and were skipped, as before; the store now carries all six credit fields on all 444 keys, e.g. `/Player_Character_Pack_03_3750572` → `https://creativecommons.org/licenses/by/4.0/`, "re-exported as STL and decimated for display")*
-- [ ] 4.3 rsync the store to the box (the README's "Populate the volumes" rsync block) and redeploy (`git pull && docker
-      compose -f deploy/demo/compose.yaml up -d --build`) so the app re-reads it (D6)
+      *(2026-09-14, coordinator: the previous store kept beside it as `overrides.json.bak-2026-09-14`; run against `miniatures/clustered-hq` as top with `metadata/miniatures.json`: "wrote 444 keys from 454 kits read … with license URL: 444, modified: 444"; 10 stems named no directory and were skipped, as before; the store now carries all six credit fields on all 444 keys, e.g. `/Player_Character_Pack_03_3750572` → `https://creativecommons.org/licenses/by/4.0/`, "re-exported as STL and decimated for display"; re-run after the cold review with the per-value tallies added to the report: 305 × by/4.0, 31 × by-sa/4.0, 29 × by-nd/4.0, 23 × publicdomain/zero/1.0, 22 × by-nc-sa/4.0, 18 × by-nc-nd/4.0, 16 × by-nc/4.0; 372 × "re-exported as STL and decimated for display", 72 × "re-exported as STL")*
+- [ ] 4.3 **Push main first** — the box redeploys with `git pull`, and an origin that stops
+      before this change rebuilds the four-field app, whose loader drops the two fields
+      silently (D1), so the live check would read as a store bug. Then rsync the store to
+      the box (the README's **3.2 The corpus** rsync block) and redeploy (`git pull && docker
+      compose -f deploy/demo/compose.yaml up -d --build`) so the app re-reads it (D6). The
+      rollback material is the local backup the regeneration left beside the store,
+      `miniatures/clustered-hq/.model-browser/overrides.json.bak-2026-09-14` (444 keys,
+      four credit fields) — the only copy of the previous store once the rsync lands
 - [ ] 4.4 Verify on `https://models.masamaeda.com`: `/api/overrides?path=<a modified kit>`
       carries `licenseUrl` and `modified`; the lightbox on a model beneath it shows the
-      license as a link and the modified row; a kit the corpus marks unchanged shows no
-      row. Record the kit paths and the wire answer here
+      license as a link and the "this copy" row. The demo's root is the kit directory, so a
+      kit's path is `/<stem>`: `/api/overrides?path=/Player_Character_Pack_03_3750572`.
+      No shipped kit is unmodified (444/444 carry a phrase), so the no-row case is the
+      fixture cell's (`viewerCredits.test.tsx`, "no row and no blank label for an unchanged
+      copy"), not a live check. Record the kit path and the wire answer here
 - [ ] 4.5 `openspec validate credits-completion --strict`; archive dry run on a fresh copy;
       after archiving, check the applied `library-overrides` and `model-viewer` text
       carries no change-scoped prose

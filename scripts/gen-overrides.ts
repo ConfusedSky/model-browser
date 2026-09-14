@@ -197,6 +197,11 @@ export async function generateOverrides(opts: GenerateOptions): Promise<Generate
   let written = 0
   let withLicenseUrl = 0
   let withModified = 0
+  // Tallies per value, reported so the licence mix and the phrase split are a
+  // line of the run rather than a figure retyped into prose: a change on the
+  // corpus side shows up as a diff of the report.
+  const byLicenseUrl = new Map<string, number>()
+  const byModified = new Map<string, number>()
 
   for (const kit of kits) {
     const stem = str(kit.stem)
@@ -245,8 +250,14 @@ export async function generateOverrides(opts: GenerateOptions): Promise<Generate
     else entry.credits = credits
     file.entries[key] = entry
     written++
-    if (credits?.licenseUrl !== undefined) withLicenseUrl++
-    if (credits?.modified !== undefined) withModified++
+    if (credits?.licenseUrl !== undefined) {
+      withLicenseUrl++
+      byLicenseUrl.set(credits.licenseUrl, (byLicenseUrl.get(credits.licenseUrl) ?? 0) + 1)
+    }
+    if (credits?.modified !== undefined) {
+      withModified++
+      byModified.set(credits.modified, (byModified.get(credits.modified) ?? 0) + 1)
+    }
   }
 
   await writeOverrides(top, file)
@@ -254,6 +265,8 @@ export async function generateOverrides(opts: GenerateOptions): Promise<Generate
   const storePath = join(top, MARKER_DIR, STORE_FILE)
   report(`wrote ${written} keys from ${read} kits read into ${storePath}`)
   report(`with license URL: ${withLicenseUrl}, modified: ${withModified}`)
+  for (const [url, n] of [...byLicenseUrl].sort((a, b) => b[1] - a[1])) report(`  ${n} × ${url}`)
+  for (const [phrase, n] of [...byModified].sort((a, b) => b[1] - a[1])) report(`  ${n} × "${phrase}"`)
   report(`keys are relative to ${top}; kit folders were looked for under ${kitsDir}`)
   for (const stem of missing) report(`  no directory for stem: ${stem}`)
   if (missing.length > 0) report(`${missing.length} stems named no directory and were skipped`)

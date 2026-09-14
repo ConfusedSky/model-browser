@@ -133,6 +133,9 @@ describe('gen-overrides', () => {
     expect(result.withLicenseUrl).toBe(1)
     expect(result.withModified).toBe(1)
     expect(lines).toContain('with license URL: 1, modified: 1')
+    // The per-value tallies: one line per licence URL and per phrase, count first.
+    expect(lines.filter((l) => /^  1 × https:\/\//.test(l))).toHaveLength(1)
+    expect(lines.filter((l) => /^  1 × "/.test(l))).toHaveLength(1)
   })
 
   it('maps strings only: a non-string license_url or modified yields no field and no count', async () => {

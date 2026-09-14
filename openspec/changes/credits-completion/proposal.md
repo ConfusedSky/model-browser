@@ -63,7 +63,7 @@ on the `modified` field this change lands).
   (the allow-list cell "serves only the four credit fields" becomes six),
   `client/test/viewerCredits.test.tsx` (link and row cells).
 - Wire: `/api/overrides` answers carry two optional strings more; no route added.
-- Deploy: one rsync and one app restart on the box; `deploy/demo/README.md` §3.2 already
+- Deploy: a push, one rsync and one app restart on the box; `deploy/demo/README.md` §3.2 (edited: it names the two fields and the restart rule) already
   names the file. Depends on the regenerated store from `model-browser-corpus` — the app
   change can land first with no visible effect.
 - Records: `web-demo-backlog` tasks 1.8 and 3.2; `docs/web-demo-notes.md` decided row.
