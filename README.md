@@ -1,5 +1,7 @@
 # model-browser
 
+**Live demo:** [models.masamaeda.com](https://models.masamaeda.com)
+
 A local browser for a 3D-print model library. Point it at a directory tree full of
 STL/3MF/OBJ files (zips included) and it gives you a thumbnail grid you can orbit,
 search, and send to your slicer.
