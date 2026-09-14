@@ -274,6 +274,23 @@ describe('field-wise longest-prefix resolution', () => {
     expect(resolveOverrides(store, '/kit/a.zip!/parts/x.stl')).toEqual({ credits: inner, pose })
   })
 
+  it('replaces credits as a block: a partial block beneath a kit key drops the rest, it does not merge', async () => {
+    // `resolveOverrides` assigns `credits` whole from the nearest key. A
+    // hand-written per-model `{ credits: { modified } }` therefore replaces the
+    // kit's author, licence and source for that model rather than adding to
+    // them — pinned so nobody writes a partial block expecting a merge
+    // (`credits-completion` review, 2026-09-14).
+    const partial = { modified: 'decimated harder' }
+    const { store } = await loadWith(
+      v1({
+        '/kit': { credits: CREDITS },
+        '/kit/hero.stl': { credits: partial },
+      }),
+    )
+    expect(resolveOverrides(store, '/kit/hero.stl')).toEqual({ credits: partial })
+    expect(resolveOverrides(store, '/kit/other.stl')).toEqual({ credits: CREDITS })
+  })
+
   it('resolves a zip-root lookup exactly as the archive file’s own path does', async () => {
     const { store } = await loadWith(v1({ '/kit/a.zip': { name: 'The Archive', credits: CREDITS } }))
     const asFile = resolveOverrides(store, '/kit/a.zip')

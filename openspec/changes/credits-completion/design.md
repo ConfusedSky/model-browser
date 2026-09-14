@@ -26,7 +26,7 @@ BY-SA 31, BY-ND 29, CC0 23, BY-NC-SA 22, BY-NC-ND 18, BY-NC 16 — from a corpus
 version, e.g. `https://creativecommons.org/licenses/by-nd/4.0/`) and `modified` on all
 454 entries ("re-exported as STL and decimated for display" on 381, "re-exported as STL"
 on 73). The corpus repo's CLAUDE.md ("NoDerivatives is accepted, after checking") records
-why the modification notice is compliant under every one of the seven: CC 4.0 §2(a)(4)
+why the modification notice is compliant under the six that ask anything (CC0 asks nothing; showing it there costs nothing): CC 4.0 §2(a)(4)
 licenses all media and formats plus the technical modifications needed for them, and says
 those never produce Adapted Material; decimation is lossy compression, algorithmic and
 authorless; and 4.0 requires indicating modification whether or not adapted material
@@ -68,6 +68,12 @@ iterates the block. Naming the fields costs one line per stage and buys the prop
 deploy order relies on: a store carrying fields this build does not know is served as if
 they were absent, silently. The spec now says so, since the deploy plan leans on it;
 wrong-typed *known* fields keep reporting, as they do today.
+
+`credits` stays one field of the resolution: the nearest key's block replaces the whole
+block, so a per-model key written with only `modified` drops the kit's author, licence and
+source for that model rather than adding to them. Pinned by a cell in `overrides.test.ts`
+(2026-09-14, the review's one open item); a partial block is a store-author's mistake the
+allow-list cannot catch, and nothing in the tree writes one.
 
 ### D2: `modified` is a phrase, absent means unchanged
 
