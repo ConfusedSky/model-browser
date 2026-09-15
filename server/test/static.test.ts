@@ -21,6 +21,8 @@ writeFileSync(join(dist, 'assets', 'main-abc123.js'), BUNDLE)
 writeFileSync(join(dist, 'assets', 'main-abc123.css'), 'body{margin:0}')
 writeFileSync(join(dist, 'assets', 'logo-abc123.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]))
 writeFileSync(join(dist, 'favicon.ico'), Buffer.from([0, 0, 1, 0]))
+const ABOUT = '<!doctype html><title>about</title>'
+writeFileSync(join(dist, 'about.html'), ABOUT)
 const secret = realTempDir('mb-static-outside-')
 writeFileSync(join(secret, 'secret.txt'), 'not yours')
 
@@ -107,6 +109,23 @@ describe('the static handler', () => {
     }
     const js = await ask('/assets/main-abc123.js', { 'accept-encoding': 'gzip' })
     expect(await js?.text()).toBe(BUNDLE)
+  })
+
+  it('withholds the About page when the introduction is off', async () => {
+    // The page is the visitor introduction's own document (`landing-page`
+    // D2): a deployment declares the introduction in its configuration, and
+    // the build carrying the file is not a declaration. Off, the page is a
+    // 404 — not the entry document, which would draw the app at that address
+    // and read as the page having moved.
+    expect(await (await ask('/about.html'))?.text()).toBe(ABOUT)
+    const withheld = createStaticHandler(dist, { intro: false })
+    const off = await withheld(new Request('http://models.example/about.html'))
+    expect(off?.status).toBe(404)
+    // Only that document: the app and its assets are unaffected.
+    expect((await withheld(new Request('http://models.example/')))?.status).toBe(200)
+    expect(
+      (await withheld(new Request('http://models.example/assets/main-abc123.js')))?.status,
+    ).toBe(200)
   })
 
   it('has nothing to serve when there is no entry document', async () => {

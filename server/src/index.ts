@@ -122,7 +122,7 @@ const app = createApp(
  */
 const dist = clientDist(process.env)
 const client = statSync(dist, { throwIfNoEntry: false })?.isDirectory() === true
-  ? createStaticHandler(dist)
+  ? createStaticHandler(dist, { intro: features.intro })
   : null
 // Said out loud, beside the `library …` line, because the absence is silent and
 // looks exactly like the app being broken: an image that builds the client

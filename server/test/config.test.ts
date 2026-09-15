@@ -262,10 +262,12 @@ describe('the committed demo configuration', () => {
       chatTab: false,
       hostDetails: false,
       maintenance: false,
-      // The one field the demo turns **on**: the deployment a stranger opens is
-      // exactly the one that owes them a sentence saying what this is
-      // (`landing-page` D1). Every other field is as it was.
-      intro: true,
+      // The field the demo will turn **on** — the deployment a stranger opens
+      // is the one that owes them a sentence saying what this is
+      // (`landing-page` D1) — but off since 2026-09-15: the introduction and
+      // its About page went live unreviewed, and they stay withheld until
+      // Masa has read them. Flipping this key is the whole re-enable.
+      intro: false,
     })
     // And nothing else: the file carries no free-text key, and the
     // bake-pins-the-recipe note lives on `demo-infrastructure`'s bake step.
@@ -296,7 +298,7 @@ describe('the committed demo configuration', () => {
       chatTab: false,
       hostDetails: false,
       maintenance: false,
-      intro: true,
+      intro: false,
     })
 
     // `/api/library` rather than a listing: the guard runs before every

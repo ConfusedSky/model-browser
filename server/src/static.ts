@@ -121,8 +121,17 @@ const REVALIDATE = 'no-cache'
  *   `no-cache`;
  * - a request matching no file is answered with the entry document, so a deep
  *   link opened cold resolves in the client rather than 404-ing at the server.
+ *
+ * And one gate: `/about.html` is the visitor introduction's own document
+ * (`landing-page` D2 — everything the banner has no room for), so a deployment
+ * whose `intro` capability is off withholds it with a 404. The build still
+ * carries the file; a deployment declares the introduction in its
+ * configuration, not by what it ships.
  */
-export function createStaticHandler(distDir: string): (req: Request) => Promise<Response | null> {
+export function createStaticHandler(
+  distDir: string,
+  { intro }: { intro: boolean } = { intro: true },
+): (req: Request) => Promise<Response | null> {
   const root = resolvePath(distDir)
   const indexPath = resolvePath(root, 'index.html')
 
@@ -165,6 +174,9 @@ export function createStaticHandler(distDir: string): (req: Request) => Promise<
       return new Response('forbidden', { status: 403 })
     }
     const normalized = posix.normalize(decoded)
+    if (!intro && normalized === '/about.html') {
+      return new Response('not found', { status: 404 })
+    }
     const candidate = resolvePath(root, `.${normalized}`)
     // Belt and braces: whatever the rules above let through must still land
     // under the build, and this is the one check a later rule cannot weaken by
