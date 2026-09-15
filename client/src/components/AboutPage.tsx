@@ -16,7 +16,7 @@
  * was written (D10)**, and each section carries a comment saying which. The
  * page states no accuracy figure and names no location on the machine the
  * server runs on: the first would have to be re-run to stay true and the
- * second is not the viewer's business (`feature-report`). The three
+ * second is not the viewer's business (`feature-report`). The four
  * Limitations examples were run against the deployed index on the day; one
  * that stops reproducing is removed rather than kept as lore.
  */
@@ -301,21 +301,30 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
       {/* source: each example run against this deployment's own index on
           2026-09-15, with the body a visitor's search sends
           (`{"raw":false,"pool":"softmax","top":60,"minScore":0.1}`). First five
-          entries of each run, in order:
+          entries of each run, in order, and the flags the index returned:
 
-          "a submarine" (31 entries) — Giant_Mimic_Miniature_25mm_3761513/
-          Giant_Mimic.stl, Rogue_and_Ranger_Collection_2435041/Quiver.stl,
+          "a bicycle" — 0 entries, `matched: 0`: nothing cleared the 0.10
+          floor, and App renders `Nothing matched "a bicycle"` (the
+          `searchHasNoMatches` branch of `emptyNotice`).
+
+          "a submarine" (31 entries, `weak: false`) — Giant_Mimic_Miniature_25mm_
+          3761513/Giant_Mimic.stl, Rogue_and_Ranger_Collection_2435041/Quiver.stl,
           Singer_Sewing_Machine_Keyring_2662532/miniature_sewing_machine.stl,
           DnD_Longboat_-_Oars_and_Mast_2870994/Longboat.stl,
-          Mini_Borderlands_Loot_Chest_1280412/lid.stl.
+          Mini_Borderlands_Loot_Chest_1280412/lid.stl. Its best hit stood at
+          z 3.55 against mini-classify's WEAK_Z of 2.0 (`src/query.py`), which
+          is why the "Nothing stood out" notice did not fire: the flag is a
+          robust z of the best score over the collection's own spread, set to
+          catch unambiguous noise only.
 
-          "a vampire" (60 entries) — The_Acquisitions_Incorporated_Miniature_
-          Collection_2653936/Jim_Darkmagic.stl, …/The_REAL_Jim_Darkmagic.stl,
-          Zombie_Collection_2847691/Zombie_NEW.stl, Player_Character_Pack_02_
-          3101042/MadMageFigure.stl, Player_Character_Pack_03_3750572/
-          ElfArmoredMage.stl. The corpus's one vampire kit,
+          "a vampire" (60 entries, `matched: 405`) — The_Acquisitions_
+          Incorporated_Miniature_Collection_2653936/Jim_Darkmagic.stl,
+          …/The_REAL_Jim_Darkmagic.stl, Zombie_Collection_2847691/Zombie_NEW.stl,
+          Player_Character_Pack_02_3101042/MadMageFigure.stl,
+          Player_Character_Pack_03_3750572/ElfArmoredMage.stl. Drow from 11th;
+          the corpus's one vampire kit,
           Vampire_Lord_Monstrous_Strahd_Von_Zarovich_3854115/Strahd_smaller_2.stl,
-          came eighteenth.
+          came eighteenth; the first ghoul 23rd.
 
           "an elf carrying an orb" (60 entries) — Elven_Mage_Miniature_3507584/
           Elven_mage.stl, Wizard_Warlock_Sorcerer_and_Druid_Collection_2435009/
@@ -323,28 +332,42 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
           Female_Ogre_BODY_AND_STAND.stl, …/Human_Male_Warlock_with_Orb.stl,
           …/Mage.stl.
 
+          README.md's "wizard with a staff → orc shaman" and "witch on a
+          broomstick → mounted rider" are mini-classify's own measurements on
+          its collection and do NOT reproduce here (this index answers
+          Gnome_Mage.stl and Bard_on_a__Broom.stl first), so they are not used.
+
           Re-run them before trusting this section again; an example that stops
           reproducing is dropped, not reworded. */}
       <Section id="limitations" title="What the search does badly">
         <p className="mb-2">
           Meaning search returns the nearest things to what you described, and nearest is not the
-          same as right. Three ways that shows, each one run against this deployment&rsquo;s own
-          index:
+          same as right. It ranks; it does not judge. Four ways that shows, each one run against
+          this deployment&rsquo;s own index:
         </p>
         <ul className="list-disc space-y-2 pl-5">
+          <li>
+            <span className="font-semibold text-zinc-100">Nothing clears the floor.</span> A
+            meaning search keeps only hits above a score floor, so a query this corpus has nothing
+            for can come back empty: ask for <em>a bicycle</em> and the page says nothing matched.
+            That is the search declining to guess, not an empty folder.
+          </li>
           <li>
             <span className="font-semibold text-zinc-100">A concept the corpus barely holds.</span>{' '}
             Ask for <em>a submarine</em> and the first screen is a treasure mimic, a quiver, a
             keyring sewing machine and a longboat — hull-shaped and box-shaped things, because
             there is no submarine here to find. What comes back is whatever was least far away,
-            not a statement that nothing matched.
+            and it arrives without the &ldquo;Nothing stood out — these are the closest&rdquo;
+            notice: that notice measures how far the best hit stands above the collection&rsquo;s
+            own spread and fires only for unambiguous noise. A confident wrong answer like this
+            one clears it unmarked.
           </li>
           <li>
             <span className="font-semibold text-zinc-100">Neighbouring concepts blur.</span> Ask
-            for <em>a vampire</em> and the list opens with zombies, ghouls, dark elves and robed
+            for <em>a vampire</em> and the list opens with zombies, dark elves and robed
             spellcasters; the one kit in this corpus that actually names a vampire sits well down
-            it. The undead and the sinister sit close together, and the query cannot pull them
-            apart.
+            it, and the ghouls further still. Each of those is a fair reading of part of what a vampire
+            is — undead, sinister, caped — and the search cannot pull them apart.
           </li>
           <li>
             <span className="font-semibold text-zinc-100">Part of a query counts as a match.</span>{' '}
