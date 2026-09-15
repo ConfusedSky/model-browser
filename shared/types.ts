@@ -212,6 +212,25 @@ export interface ResolvedOverrides {
 }
 
 /**
+ * One kit as `GET /api/credits` lists it: a store key that holds credits of its
+ * **own**, with the display name stored there when there is one
+ * (`landing-page` D8).
+ *
+ * `credits` is required here where it is optional on `OverrideEntry`, because
+ * the list is exactly the keys whose credits would be drawn — an entry with
+ * nothing to show is not a line. `path` is the store's key, which is a library
+ * path and never a location on the host.
+ *
+ * Deliberately not a resolution: a kit's own stored credits are what the
+ * generator wrote, and a key that merely *inherits* them is not a kit.
+ */
+export interface CreditedKit {
+  path: string
+  name?: string
+  credits: OverrideCredits
+}
+
+/**
  * Orbit spindle axis: the model turns around this axis, camera up locked to
  * it. Sign is part of the value (six spindles). No default here: an
  * un-framed model turns about its format's up axis, `defaultAxisFor`
@@ -784,6 +803,20 @@ export interface FeatureReport {
    * discard (public-deployment D4).
    */
   maintenance: boolean
+  /**
+   * Whether the visitor introduction is offered — the banner over the grid, its
+   * example queries and surprise action, the header's About affordance, the
+   * placeholder examples and the meaning-mode start (`visitor-intro`).
+   *
+   * Its default is **off**: the introduction speaks to a visitor who does not
+   * know what the app is, and a personal installation has none. No route serves
+   * it, so there is nothing for the server to refuse — like `chatTab` it is
+   * purely an offer the client draws or withholds. It names a *surface*, never a
+   * deployment kind: a deployment that wants the introduction declares this
+   * field, and nothing infers it from `hostDetails` or `thumbWrites`
+   * (`landing-page` D1).
+   */
+  intro: boolean
 }
 
 /**

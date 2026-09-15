@@ -559,8 +559,8 @@ describe('HttpApiClient contract', () => {
 // `HttpApiClient` over a spy `fetchFn`, so "sends nothing" is asserted at the
 // network and not merely at a mock's method.
 describe('withLocalFramings', () => {
-  const OFF: FeatureReport = { thumbWrites: false, appLaunch: true, chatTab: false, hostDetails: true, maintenance: true }
-  const ON: FeatureReport = { thumbWrites: true, appLaunch: true, chatTab: false, hostDetails: true, maintenance: true }
+  const OFF: FeatureReport = { thumbWrites: false, appLaunch: true, chatTab: false, hostDetails: true, maintenance: true, intro: false }
+  const ON: FeatureReport = { thumbWrites: true, appLaunch: true, chatTab: false, hostDetails: true, maintenance: true, intro: false }
   /**
    * The library the framings belong to, as App reads it: a getter, because it
    * is unknown when the client is built and known a round trip later. Every

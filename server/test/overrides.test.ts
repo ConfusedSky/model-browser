@@ -35,6 +35,7 @@ import { MARKER_DIR, createLibrary } from '../src/library'
 import {
   type OverrideStore,
   createOverrideHolder,
+  listCredits,
   loadOverrides,
   resolveOverrides,
   writeOverrides,
@@ -312,6 +313,69 @@ describe('field-wise longest-prefix resolution', () => {
   })
 })
 
+/**
+ * The store's own credited keys, listed (`landing-page` D8, task 1.4) — the
+ * answer `GET /api/credits` gives and the About page's list is drawn from.
+ *
+ * What these cells are about is the **difference from `resolveOverrides`**: the
+ * list is the keys that hold credits themselves, not the paths those credits
+ * reach. The filter is the lightbox's own `renderableCredits`, so a stored
+ * block this build can draw nothing from is not a line.
+ */
+describe('listing the store’s credits', () => {
+  it('lists every kit that holds its own credits, once, in key order, with its stored name', async () => {
+    const { store } = await loadWith(
+      v1({
+        '/kit': { name: 'The Kit', credits: CREDITS },
+        '/kit2': { credits: { ...CREDITS, author: 'Someone Else' } },
+      }),
+    )
+    expect(listCredits(store)).toEqual([
+      { path: '/kit', name: 'The Kit', credits: CREDITS },
+      // No `name` key at all where none is stored, rather than `name:
+      // undefined`: the wire carries what the store holds.
+      { path: '/kit2', credits: { ...CREDITS, author: 'Someone Else' } },
+    ])
+  })
+
+  it('leaves out a key that only inherits credits, name or not', async () => {
+    // The distinction the route exists on. `/kit/x.stl` resolves the kit's
+    // credits — asserted here so the cell cannot pass by the resolution being
+    // broken — and is still absent from the list, because its credits are the
+    // kit's and repeating them would list one attribution per model.
+    const { store } = await loadWith(
+      v1({ '/kit': { credits: CREDITS }, '/kit/x.stl': { name: 'The Big One' } }),
+    )
+    expect(resolveOverrides(store, '/kit/x.stl')).toEqual({ credits: CREDITS, name: 'The Big One' })
+    expect(listCredits(store)).toEqual([{ path: '/kit', credits: CREDITS }])
+  })
+
+  it('leaves out a key whose credits hold nothing this build draws', async () => {
+    // What the loader produces from a block whose every known field was
+    // wrong-typed: `{}` — present, and with nothing to show. The lightbox draws
+    // no block for it, so the list carries no line for it either, and
+    // `authorUrl` alone stays on the wrong side of that line (a link labelled
+    // with nobody credits nobody).
+    const { store, problems } = await loadWith(
+      v1({
+        '/kit': { name: 'Nothing To Show', credits: { author: 42 } },
+        '/kit2': { credits: { authorUrl: 'https://example.invalid/someone' } },
+        '/kit3': { credits: CREDITS },
+      }),
+    )
+    expect(store.get('/kit')?.credits).toEqual({})
+    expect(problems).toHaveLength(1)
+    expect(listCredits(store)).toEqual([{ path: '/kit3', credits: CREDITS }])
+  })
+
+  it('answers an empty list for a store with no credits, and for no store at all', async () => {
+    const top = realTempDir('mb-ovr-')
+    expect(listCredits(await loadOverrides(top, () => {}))).toEqual([])
+    const { store } = await loadWith(v1({ '/kit': { name: 'The Kit' } }))
+    expect(listCredits(store)).toEqual([])
+  })
+})
+
 describe('the store’s lifetime', () => {
   /** A library rooted at `dir`, whose env object the caller can repoint. */
   function libraryOn(env: NodeJS.ProcessEnv) {
@@ -491,6 +555,60 @@ describe('GET /api/overrides', () => {
       error: 'no library root is configured',
       state: 'unconfigured',
     })
+  })
+})
+
+/**
+ * The whole store's credits in one answer (`landing-page` D8, task 1.5) — a
+ * route with no path parameter, gated by the same not-ready envelope its
+ * per-entry sibling is.
+ */
+describe('GET /api/credits', () => {
+  it('answers the store’s credited kits, carrying library paths and no location on the host', async () => {
+    const libTop = fixtureLibrary()
+    storeAt(
+      libTop,
+      v1({
+        '/kit': { name: 'The Kit', credits: CREDITS },
+        // Inherits, so it is not a line — the route's rule, asserted through
+        // the wire rather than only against `listCredits`.
+        '/kit/x.stl': { name: 'The Big One' },
+        '/kit2': { credits: { modified: MODIFIED } },
+      }),
+    )
+    const res = await appOn(libTop).request('/api/credits', { headers: LOOPBACK })
+    expect(res.status).toBe(200)
+    const body = await res.text()
+    expect(JSON.parse(body)).toEqual([
+      { path: '/kit', name: 'The Kit', credits: CREDITS },
+      { path: '/kit2', credits: { modified: MODIFIED } },
+    ])
+    // The requirement's own sentence: library paths only. `libTop` is a real
+    // temp path, and it appears nowhere in the bytes — asserted over the raw
+    // text, since a location could ride any field rather than only `path`.
+    expect(body.includes(libTop)).toBe(false)
+  })
+
+  it('answers the not-ready envelope while the library is unconfigured', async () => {
+    const home = realTempDir('mb-ovr-home-')
+    const app = createApp(
+      new ThumbCache(realTempDir('mb-ovr-cache-')),
+      undefined,
+      undefined,
+      createLibrary({ HOME: home, XDG_CONFIG_HOME: join(home, 'config') }),
+    )
+    const res = await app.request('/api/credits', { headers: LOOPBACK })
+    expect(res.status).toBe(503)
+    expect(await res.json()).toEqual({
+      error: 'no library root is configured',
+      state: 'unconfigured',
+    })
+  })
+
+  it('answers an empty list for a library with no store', async () => {
+    const res = await appOn(fixtureLibrary()).request('/api/credits', { headers: LOOPBACK })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual([])
   })
 })
 

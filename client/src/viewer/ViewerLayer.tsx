@@ -9,8 +9,10 @@ import type {
   OrbitAxis,
   OverrideCredits,
 } from '../../../shared/types'
+import { renderableCredits } from '../../../shared/credits'
 import type { ApiClient } from '../api/client'
 import { MENU_ITEM_CLASS } from '../components/EntryMenu'
+import { CREDIT_LINK_CLASS, hostLabel } from '../lib/credits'
 import {
   AXIS_CAPTION_CLASS,
   AXIS_DIVIDER_CLASS,
@@ -181,55 +183,6 @@ interface Props {
 
 /** Longest the orbit overlay holds its dismissal waiting for the refreshed thumbnail. */
 export const PERSIST_HOLD_MS = 1500
-
-/**
- * How a stored URL is drawn: its host, with `www.` dropped.
- *
- * The panel is `--lb-panel` (18rem) wide and a corpus source URL runs ~45
- * characters (`https://www.thingiverse.com/thing:3750572`), which spelled out
- * wraps to three lines and becomes the loudest thing in a column of one-line
- * rows. The whole URL rides the link's `title`, and the `href` is of course the
- * stored string itself — this is what the reader sees, not where they go.
- *
- * A stored URL is corpus data and need not parse. Anything `new URL` refuses is
- * drawn verbatim rather than dropped: a string the reader can still read beats a
- * row that silently is not there, and attribution is the one thing here that
- * must not go quiet on a malformed field.
- */
-export function hostLabel(url: string): string {
-  try {
-    return new URL(url).host.replace(/^www\./, '')
-  } catch {
-    return url
-  }
-}
-
-/**
- * The panel's only links, and the app's first: `_blank` because the lightbox is
- * a live session over a loaded mesh, and following a credit in place would tear
- * the whole app down to visit a model page. `rel="noreferrer"` implies
- * `noopener`, so one word covers both.
- */
-const CREDIT_LINK_CLASS = 'break-all text-sky-400 hover:underline'
-
-/**
- * The credits worth drawing, or `null` — so the state's non-null case means
- * "there is a row here", and the panel needs no second opinion at render time.
- *
- * `authorUrl` alone is deliberately not enough: it is where a name points, not
- * a name, and a link labelled with nobody credits nobody. `licenseUrl` is the
- * same: a link with no label to hang on. `modified` does count — the notice
- * that a copy is not the author's file stands on its own.
- */
-function renderableCredits(credits: OverrideCredits | undefined): OverrideCredits | null {
-  if (credits === undefined) return null
-  const some =
-    credits.author !== undefined ||
-    credits.license !== undefined ||
-    credits.sourceUrl !== undefined ||
-    credits.modified !== undefined
-  return some ? credits : null
-}
 
 /**
  * The single live-canvas layer: in 'orbit' mode it overlays the pressed tile;

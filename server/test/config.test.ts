@@ -134,6 +134,34 @@ describe('loadConfig', () => {
     ).resolves.toEqual({ origins: ['https://models.example', 'http://box:8080'] })
   })
 
+  it('accepts every field of the default report, `intro` among them, and still refuses a misspelling', async () => {
+    // `FEATURE_KEYS` is `Object.keys(DEFAULT_FEATURES)`, so a field is
+    // declarable the moment it has a default — asserted over the whole set
+    // rather than over one name, which is what makes this cell fail when a
+    // field reaches `FeatureReport` without reaching `DEFAULT_FEATURES`
+    // (`landing-page` 1.1). The values alternate so no field is read as the
+    // parser's own idea of a default.
+    const tmp = realTempDir('mb-config-featurekeys-')
+    const keys = Object.keys(DEFAULT_FEATURES)
+    expect(keys).toContain('intro')
+    const declared = Object.fromEntries(keys.map((k, i) => [k, i % 2 === 0]))
+    await expect(loadConfig(at(tmp, JSON.stringify({ features: declared })))).resolves.toEqual({
+      features: declared,
+    })
+    // The demo's own shape, on its own, as the file writes it.
+    await expect(loadConfig(at(tmp, JSON.stringify({ features: { intro: true } })))).resolves.toEqual({
+      features: { intro: true },
+    })
+    // And a misspelling is still refused by name — the reason the parse is
+    // strict is a capability silently left at its default.
+    await expect(
+      loadConfig(at(tmp, JSON.stringify({ features: { intor: true } }))),
+    ).rejects.toThrow(/unknown key "intor"/)
+    await expect(
+      loadConfig(at(tmp, JSON.stringify({ features: { intro: 'yes' } }))),
+    ).rejects.toThrow(/features.intro must be a boolean/)
+  })
+
   it('refuses a public listen.host with no origins, which would answer nobody', async () => {
     // 9.11a. The guard admits loopback and the configured origins, so a box
     // bound past loopback with no origin starts clean and 403s every visitor
@@ -234,6 +262,10 @@ describe('the committed demo configuration', () => {
       chatTab: false,
       hostDetails: false,
       maintenance: false,
+      // The one field the demo turns **on**: the deployment a stranger opens is
+      // exactly the one that owes them a sentence saying what this is
+      // (`landing-page` D1). Every other field is as it was.
+      intro: true,
     })
     // And nothing else: the file carries no free-text key, and the
     // bake-pins-the-recipe note lives on `demo-infrastructure`'s bake step.
@@ -264,6 +296,7 @@ describe('the committed demo configuration', () => {
       chatTab: false,
       hostDetails: false,
       maintenance: false,
+      intro: true,
     })
 
     // `/api/library` rather than a listing: the guard runs before every

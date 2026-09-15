@@ -1,6 +1,7 @@
 import type {
   AppsReport,
   CameraState,
+  CreditedKit,
   DirEntry,
   DirListing,
   FeatureReport,
@@ -291,6 +292,9 @@ class LocalFramingClient implements ApiClient {
   }
   overrides(...args: Parameters<ApiClient['overrides']>): Promise<ResolvedOverrides> {
     return this.inner.overrides(...args)
+  }
+  credits(...args: Parameters<ApiClient['credits']>): Promise<CreditedKit[]> {
+    return this.inner.credits(...args)
   }
   indexAvailability(...args: Parameters<ApiClient['indexAvailability']>): Promise<IndexAvailability> {
     return this.inner.indexAvailability(...args)

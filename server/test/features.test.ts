@@ -38,6 +38,9 @@ describe('GET /api/features', () => {
       chatTab: false,
       hostDetails: true,
       maintenance: true,
+      // Off: the introduction addresses a visitor, and a server with no
+      // configuration is somebody's own installation (`landing-page` D1).
+      intro: false,
     })
   })
 

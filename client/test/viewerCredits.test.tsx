@@ -12,7 +12,7 @@
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DirListing, OverrideCredits } from '../../shared/types'
-import { hostLabel } from '../src/viewer/ViewerLayer'
+import { hostLabel } from '../src/lib/credits'
 import {
   container,
   dir,

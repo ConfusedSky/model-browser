@@ -34,6 +34,9 @@ const DEFAULTS: FeatureReport = {
   chatTab: false,
   hostDetails: true,
   maintenance: true,
+  // The visitor introduction, off as the server defaults it (`landing-page`
+  // D1) — spelt out with the five above and for their reason.
+  intro: false,
 }
 /** A deployment that offers the chat tab — the report this panel behaved as if
  *  it always had, before the tab became withholdable. */

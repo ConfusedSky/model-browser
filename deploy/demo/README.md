@@ -238,7 +238,7 @@ carries the ACME error — `docker compose logs caddy`.
 **The app.**
 
 ```sh
-curl -s https://models.masamaeda.com/api/features        # the demo posture: every field false
+curl -s https://models.masamaeda.com/api/features        # the demo posture: every field false but `intro`
 curl -s https://models.masamaeda.com/ | head -5          # the client's index.html, not JSON
 curl -s https://models.masamaeda.com/api/library         # ready, and **no `top`** — hostDetails is off
 ```
@@ -264,6 +264,21 @@ a different id is the proof that the marker was written on the box, as D4
 intends, rather than copied in with the models. Nor is it
 `54c0a4e9-d05b-4a53-8aad-e37a8b384422` any more — that was the `clustered-hq`
 era's box id, and its directory under `/srv/cache` is left behind.
+
+**Every example query still answers**, from the **developer machine** rather than
+the box — the box has no Bun outside the container, and the guard admits a POST
+with no `Origin` and the right `Host`:
+
+```sh
+bun run scripts/check-example-queries.ts https://models.masamaeda.com
+# 6 example queries answer on https://models.masamaeda.com
+```
+
+It asks each chip's phrase under the options a visitor's click runs with, so a
+`dead:` line means the banner would show that visitor an empty grid: replace
+that phrase in `shared/exampleQueries.ts` with one the corpus answers. A
+`failed:` line is not about the phrases at all — the origin or its index is not
+answering.
 
 **The guard is alive.** A foreign `Origin` is the check, not a foreign `Host` —
 Caddy's site block never forwards a `Host` it does not serve:

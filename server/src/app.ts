@@ -38,6 +38,7 @@ import {
   type OverrideHolder,
   applyDisplayNames,
   createOverrideHolder,
+  listCredits,
   resolveOverrides,
 } from './overrides'
 import {
@@ -540,6 +541,12 @@ export const DEFAULT_FEATURES: FeatureReport = {
   chatTab: false,
   hostDetails: true,
   maintenance: true,
+  // Off, like `chatTab` and for a kindred reason: the introduction addresses a
+  // visitor who arrived without knowing what this is, which a personal
+  // installation has none of. A deployment that wants it says so
+  // (`landing-page` D1). `FEATURE_KEYS` is this object's own keys, so the field
+  // became declarable in `config.json` the moment this line landed.
+  intro: false,
 }
 
 export function createApp(
@@ -1325,6 +1332,29 @@ export function createApp(
     const libPath = canonicalLibPath(path)
     await library.resolve(libPath)
     return c.json(resolveOverrides(await overrides.store(), libPath))
+  })
+
+  /**
+   * Every credited kit in the library's store, in one answer (`landing-page`
+   * D8) — the whole corpus's attribution, which is what the About page's
+   * credits list shows. The per-entry route above stays the lightbox's source:
+   * this one exists for a reader who wants the list rather than one model's row.
+   *
+   * No path parameter, because the answer is the store's own keys rather than
+   * anything resolved for a path. `library.resolve('/')` all the same, so this
+   * route asks the library exactly what its sibling asks — though what actually
+   * answers a not-ready library is the `/api/*` gate above, which 503s every
+   * path route outside `UNGATED` before a handler runs; the resolve is reached
+   * only once the library is ready.
+   *
+   * **No capability gate.** The store is library data, like `/api/overrides` —
+   * and displayed attribution is a licence term rather than an offer. The
+   * `intro` field gates no route at all (D1): it is what the *client* reads to
+   * decide whether to draw the page that asks this.
+   */
+  app.get('/api/credits', async (c) => {
+    await library.resolve('/')
+    return c.json(listCredits(await overrides.store()))
   })
 
   /**

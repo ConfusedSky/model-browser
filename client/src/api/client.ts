@@ -2,6 +2,7 @@ import { THUMB_MIME } from '../../../shared/types'
 import type {
   AppsReport,
   CameraState,
+  CreditedKit,
   DirEntry,
   DirListing,
   FeatureReport,
@@ -176,6 +177,17 @@ export interface ApiClient {
    * answer is a memory lookup server-side — there is nothing running to stop.
    */
   overrides(path: string): Promise<ResolvedOverrides>
+  /**
+   * Every credited kit in the library's store, in one answer (`landing-page`
+   * D8) — the whole corpus's attribution, which is what the About page's
+   * credits list shows.
+   *
+   * Takes no path, unlike `overrides` above: this is the store's own keys, not
+   * a resolution for an entry. Read once by a page a reader opened on purpose,
+   * so it carries **no `AbortSignal`** for `overrides`' reason — there is
+   * nothing running server-side to stop.
+   */
+  credits(): Promise<CreditedKit[]>
   /** Availability of the semantic index — cheap, cached server-side (D4). */
   indexAvailability(opts?: { fresh?: boolean }): Promise<IndexAvailability>
   /**
@@ -589,6 +601,11 @@ export class HttpApiClient implements ApiClient {
   async overrides(path: string): Promise<ResolvedOverrides> {
     const res = await this.fetchFn(`/api/overrides?path=${encodeURIComponent(path)}`)
     return jsonOrThrow<ResolvedOverrides>(res)
+  }
+
+  async credits(): Promise<CreditedKit[]> {
+    const res = await this.fetchFn('/api/credits')
+    return jsonOrThrow<CreditedKit[]>(res)
   }
 
   async fetchModel(path: string): Promise<ArrayBuffer> {

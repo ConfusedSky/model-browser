@@ -35,6 +35,11 @@ export const peek = vi.fn().mockResolvedValue([])
 // with no store — nothing resolves — so every test written before overrides
 // existed renders the panel it was written against, with no credits block.
 export const overrides = vi.fn().mockResolvedValue({})
+// Every credited kit in the store (`landing-page` D8), for the About page's
+// list. Default `[]` for `overrides`' reason — the answer a library with no
+// store gives — so a test that has not opted in renders the page's "no credits"
+// sentence rather than a list it did not choose.
+export const credits = vi.fn().mockResolvedValue([])
 // Shared for the same reason getThumb is: a test needs to choose what the LRU
 // loader is handed — an embedded-3MF preview arrives from these bytes, on the
 // way past, before anything is parsed. The default is the one-facet STL below,
@@ -84,6 +89,12 @@ export const DEFAULT_REPORT: FeatureReport = {
   chatTab: false,
   hostDetails: true,
   maintenance: true,
+  // Off, the server's own default: the visitor introduction is an offer a
+  // deployment makes, and the app a person running this project meets has none
+  // (`landing-page` D1). A cell that wants the banner opts into a report saying
+  // so. Spelt out beside the five above and for their reason — never imported
+  // from the server.
+  intro: false,
 }
 export const features = vi.fn().mockResolvedValue(DEFAULT_REPORT)
 // Named `openApp` rather than `open`: `open` is a global in a DOM environment,
@@ -152,6 +163,7 @@ export function apiClientModule(): Record<string, unknown> {
       fetchModel = fetchModel
       peek = peek
       overrides = overrides
+      credits = credits
       getThumb = getThumb
       // The real builder, not a copy: an image URL a cell asserts must be the
       // one the app would fetch.
@@ -326,6 +338,7 @@ async function mount(initial: DirListing): Promise<void> {
   // Cleared beside `peek` and for the same reason: "one lightbox open, one
   // overrides read" counts what this mount provoked and nothing left over.
   overrides.mockClear()
+  credits.mockClear()
   fetchModel.mockClear()
   // Cleared before the render, so the count a test reads afterwards is the
   // session's own one reading of the registry and nothing left over — which is
@@ -416,6 +429,10 @@ export async function unmountApp(): Promise<void> {
   // hands the next file back a library with no store.
   overrides.mockReset()
   overrides.mockResolvedValue({})
+  // Same rule as `overrides`': a test that listed a corpus's credits, or made
+  // the read fail, hands the next file back a library with no store.
+  credits.mockReset()
+  credits.mockResolvedValue([])
   fetchModel.mockImplementation(() => Promise.resolve(tinyStl()))
   renderThumbnail.mockClear()
   renderThumbnail.mockImplementation(() => Promise.resolve(new Blob()))

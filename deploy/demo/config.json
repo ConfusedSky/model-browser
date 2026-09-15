@@ -7,6 +7,7 @@
     "appLaunch": false,
     "chatTab": false,
     "hostDetails": false,
-    "maintenance": false
+    "maintenance": false,
+    "intro": true
   }
 }

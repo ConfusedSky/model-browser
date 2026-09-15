@@ -14,7 +14,8 @@
 
 import { mkdir, open, readFile, rename, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { DirEntry, OverrideEntry, ResolvedOverrides } from '../../shared/types'
+import { renderableCredits } from '../../shared/credits'
+import type { CreditedKit, DirEntry, OverrideEntry, ResolvedOverrides } from '../../shared/types'
 import { MARKER_DIR, type Library, canonicalLibPath } from './library'
 import { joinVPath, parseVPath } from './vpath'
 
@@ -267,6 +268,37 @@ export function resolveOverrides(store: OverrideStore, libPath: string): Resolve
   const exact = store.get(keys[keys.length - 1]!)
   if (exact?.name !== undefined) resolved.name = exact.name
   return resolved
+}
+
+/**
+ * Every key of the store that holds credits of its **own**, in the store's key
+ * order — what `GET /api/credits` answers, and what the About page's credits
+ * list is drawn from (`landing-page` D8).
+ *
+ * No resolution and no inheritance, unlike `resolveOverrides` above: a kit's own
+ * stored credits are what the generator wrote, and a key that merely inherits
+ * them is a model inside a kit rather than a kit. Listing the inheritors would
+ * repeat one attribution once per model in the corpus.
+ *
+ * The filter is `renderableCredits` — the lightbox's own "would this draw"
+ * rule, imported from `shared/` rather than restated — so the list and the
+ * panel agree on what counts as credited, and a `{}` the loader produced when
+ * every field was wrong-typed is skipped by both.
+ *
+ * Insertion order is the file's order, which the loader preserves: the answer
+ * is stable across requests without sorting, and the order is the corpus's own.
+ */
+export function listCredits(store: OverrideStore): CreditedKit[] {
+  const listed: CreditedKit[] = []
+  for (const [path, entry] of store) {
+    const credits = renderableCredits(entry.credits)
+    if (credits === null) continue
+    // `name` only when the key stores one: an `undefined` written into the
+    // object would ride the wire as a key `JSON.stringify` drops anyway, and
+    // the type says the field is absent rather than empty.
+    listed.push(entry.name === undefined ? { path, credits } : { path, name: entry.name, credits })
+  }
+  return listed
 }
 
 /**

@@ -50,6 +50,9 @@ const OFFERED: FeatureReport = {
   chatTab: false,
   hostDetails: true,
   maintenance: true,
+  // The visitor introduction, off as the server defaults it (`landing-page`
+  // D1) — spelt out with the five above and for their reason.
+  intro: false,
 }
 // The default is `null` — the report not known — for `apps: null`'s reason:
 // every case written before the bulk rows existed is about the rest of the
