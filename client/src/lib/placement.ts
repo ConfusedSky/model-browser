@@ -109,7 +109,7 @@ function tilesIn(scroller: HTMLElement): HTMLElement[] {
   return Array.from(scroller.querySelectorAll<HTMLElement>(`[${TILE_ATTR}]`))
 }
 
-function findTile(scroller: HTMLElement, path: string): HTMLElement | null {
+export function findTile(scroller: HTMLElement, path: string): HTMLElement | null {
   return tilesIn(scroller).find((el) => el.getAttribute(TILE_ATTR) === path) ?? null
 }
 

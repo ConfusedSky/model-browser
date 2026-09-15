@@ -64,6 +64,12 @@ function makeProps(mode: 'orbit' | 'lightbox') {
     // Widened so a case can override it with `null` — the not-ready library.
     libraryTop: '/lib' as string | null,
     onCommand: vi.fn(),
+    // The lightbox-sibling-stepping props: required, so the fixture supplies
+    // them. No neighbours in these cases — they are about a model that never
+    // loaded — so both ends are null and the arrows disable.
+    onNavigate: vi.fn(),
+    prevEntry: null,
+    nextEntry: null,
   }
 }
 

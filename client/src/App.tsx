@@ -52,7 +52,7 @@ import {
 import { GestureTracker } from './lib/gesture'
 import { createHoverWarmer } from './lib/hover'
 import { fitSquareBox, type Box } from './lib/layout'
-import { applyIn, measureIn, resolvePlacement, type PlacementRequest } from './lib/placement'
+import { applyIn, findTile, measureIn, resolvePlacement, type PlacementRequest } from './lib/placement'
 import { pushRecent } from './lib/recents'
 import { scaleOf } from './lib/scoreScale'
 import {
@@ -2435,6 +2435,24 @@ export default function App() {
     [anchor, filteredListing],
   )
   /**
+   * The models the lightbox steps among (lightbox-sibling-stepping D1): the
+   * shown listing narrowed to `kind === 'model'`, in the grid's order. Derived
+   * from `shownEntries` — not the raw listing — so a find filter or a similarity
+   * anchor is honoured, and interleaved dirs/zips are skipped rather than opened.
+   */
+  const modelSiblings = useMemo(
+    () => shownEntries.filter((e) => e.kind === 'model'),
+    [shownEntries],
+  )
+  // The neighbours the lightbox can step to (D1/D2). At `sibIdx === -1` — the
+  // open model is no longer in the shown list (a background revalidation can do
+  // this) — BOTH are null: stepping goes inert rather than teleporting to the
+  // list's first entry. `null` at each end, so the affordance there disables.
+  const sibIdx = viewer !== null ? modelSiblings.findIndex((e) => e.path === viewer.entry.path) : -1
+  const prevEntry = sibIdx > 0 ? modelSiblings[sibIdx - 1] ?? null : null
+  const nextEntry =
+    sibIdx >= 0 && sibIdx < modelSiblings.length - 1 ? modelSiblings[sibIdx + 1] ?? null : null
+  /**
    * `Grid`'s band report with App's own knowledge merged in (sweep-priority
    * D3/2.5): a model the kind option or the find filter hid has a slot but no
    * tile, so no observer can report it — unmerged it stays unreported, ranked
@@ -3028,6 +3046,32 @@ export default function App() {
   }
 
   /**
+   * Step the open lightbox to a sibling model (lightbox-sibling-stepping D3/D4).
+   * Refuses unless a lightbox is still up — a step whose persist lost its race to
+   * a close (D3) must write no `modelOpen`, or the re-open effect would resurrect
+   * the lightbox over the listing the user backed onto.
+   *
+   * `setViewer` runs BEFORE `commit`, deliberately: the close-watcher fires when
+   * `state.view.model !== viewer.entry.path`, and its `namedModelRef` guard stays
+   * true across the swap only if the entry moves first — so even a split render
+   * cannot read the step as the model leaving the view. `commit` replaces the
+   * current history entry (no new entry; back still closes the lightbox) and
+   * carries `history.state` forward to preserve the LIGHTBOX_ENTRY marker.
+   * `originEl` follows to the shown model's own tile so a later close returns
+   * focus there, not to the tile the lightbox first opened from.
+   */
+  const navigateSibling = useCallback(
+    (entry: DirEntry): void => {
+      if (viewerRef.current?.mode !== 'lightbox') return
+      const main = mainRef.current
+      const tile = main !== null ? findTile(main, entry.path) : null
+      setViewer((v) => (v !== null ? { ...v, entry, originEl: tile ?? v.originEl } : v))
+      commit({ type: 'modelOpen', path: entry.path }, { replace: true, state: window.history.state })
+    },
+    [commit],
+  )
+
+  /**
    * One line, always present, so the grid starts at the same height in every
    * state — including the skeleton, whose tiles used to sit 56px above where
    * the real ones would land. What the view *is* reads on the left, what was
@@ -3531,6 +3575,9 @@ export default function App() {
             setThumb(viewer.entry.path, { status: 'error', url: thumbs.get(viewer.entry.path)?.url })
           }
           onEntryMenu={onViewerEntryMenu}
+          onNavigate={navigateSibling}
+          prevEntry={prevEntry}
+          nextEntry={nextEntry}
           menuOpen={menuOpenRef}
           panelCommands={panelCommands}
           libraryTop={libraryTop}

@@ -166,6 +166,17 @@ interface Props {
    * on this surface could not previously show at all.
    */
   actionNote?: { text: string; tone: 'ok' | 'error' } | null
+  /**
+   * Step the lightbox to a sibling model (lightbox-sibling-stepping). App swaps
+   * `viewer.entry` and the URL together; `goTo` here reproduces the persisting
+   * close's branch first (D3). Reached through a ref from the key handler so it
+   * never closes over a leaving render's `onPersist` (the `endGestureRef` bug).
+   */
+  onNavigate: (entry: DirEntry) => void
+  /** The previous / next model in shown order, or `null` at the ends (D1/D2) —
+   *  the arrow controls disable and the arrow keys no-op where `null`. */
+  prevEntry: DirEntry | null
+  nextEntry: DirEntry | null
 }
 
 /** Longest the orbit overlay holds its dismissal waiting for the refreshed thumbnail. */
@@ -248,6 +259,9 @@ export default function ViewerLayer({
   openIn = null,
   onCommand,
   actionNote = null,
+  onNavigate,
+  prevEntry,
+  nextEntry,
 }: Props) {
   const [session, setSession] = useState<ViewerSession | null>(null)
   /**
@@ -347,6 +361,16 @@ export default function ViewerLayer({
   // same cache entry, so a present camera means the axis prop is settled too.
   useEffect(() => {
     let alive = true
+    // A step swaps `viewer.entry` under a live lightbox (lightbox-sibling-stepping
+    // D5): clear this component's own session and error state up front so the
+    // neighbour draws the spinner (and no stale ⚠) rather than the leaving
+    // model's frozen last frame while its mesh loads. The cleanup nulls
+    // `sessionRef` but leaves the `session` *state* — which the spinner, the axis
+    // group and the error block all gate on — so without this reset a cold step
+    // shows the previous frame beside the new name. A no-op on the first open,
+    // where both are already null/absent.
+    setSession(null)
+    setLoadError(null)
     // An index orientation is the *default* only: a stored axis or camera is
     // the user's own and wins, and applying a pose persists nothing — the
     // sidecar is written by orbiting, not by opening (semantic-search D5).
@@ -575,10 +599,55 @@ export default function ViewerLayer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewer.mode])
 
+  /**
+   * Step to a sibling model (lightbox-sibling-stepping D3). Persist the leaving
+   * model exactly as `closeLightbox` does — its camera, axis and pixels, under
+   * its own path, and only if it was manipulated — *before* asking App to swap
+   * the entry, because App's `persist` captures `viewer.entry` before its awaits
+   * and that is still the leaving model until the swap lands.
+   *
+   * The snapshot-and-bail is `dismissAfterPersist`'s idiom: `onPersist`'s
+   * `putThumb` is a tens-to-hundreds-of-ms window in which a close (Escape / ✕ /
+   * backdrop) can run the full teardown, so after the awaits we bail if the
+   * viewer we started on is gone or the mode is no longer `lightbox`. App's
+   * `navigateSibling` owns the matching guard, so a step that lost the race
+   * writes no `modelOpen` and cannot re-open the lightbox over the listing the
+   * user backed onto. An untouched view has no await to race.
+   */
+  // `goTo` and the step props reach the key handler through refs, not the effect
+  // deps (D6): the key effect re-runs on every step (its `session` dep changes),
+  // and closing `onKey` over a leaving render's `onPersist` is the `endGestureRef`
+  // bug — the new tile's pixels under the old tile's path. Updated on render so
+  // both the key handler and the on-screen buttons see the current values.
+  const onNavigateRef = useRef(onNavigate)
+  onNavigateRef.current = onNavigate
+  const prevEntryRef = useRef(prevEntry)
+  prevEntryRef.current = prevEntry
+  const nextEntryRef = useRef(nextEntry)
+  nextEntryRef.current = nextEntry
+  async function goTo(entry: DirEntry): Promise<void> {
+    const started = viewerRef.current
+    const s = sessionRef.current
+    if (s !== null && s.everManipulated) {
+      await s.settle(renderNow)
+      await onPersist(s)
+    }
+    if (viewerRef.current !== started || modeRef.current !== 'lightbox') return
+    onNavigateRef.current(entry)
+  }
+  const goToRef = useRef(goTo)
+  goToRef.current = goTo
+
   // Lightbox: focus trap + Esc close; re-render on window resize.
   useEffect(() => {
     if (viewer.mode !== 'lightbox') return
-    containerRef.current?.focus()
+    // Conditional, not unconditional (D6): grab focus when the lightbox opens
+    // (focus is outside the dialog then), but do NOT yank it back on every step
+    // (the effect re-runs as `session` changes), or a keyboard user could
+    // activate the on-screen Next control only once before focus jumped away.
+    if (containerRef.current !== null && !containerRef.current.contains(document.activeElement)) {
+      containerRef.current.focus()
+    }
     function onKey(e: KeyboardEvent): void {
       // The entry menu can now be raised over this view, and while it is up it
       // is the thing on top: its own window listener closes it and this one
@@ -600,6 +669,17 @@ export default function ViewerLayer({
           ? (idx - 1 + focusables.length) % focusables.length
           : (idx + 1) % focusables.length
         focusables[next]?.focus()
+      }
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        // Leave Alt+Arrow to the browser (it is Back/Forward — Alt+Left is the
+        // very gesture that closes the lightbox), and Ctrl/Meta+Arrow to the OS
+        // (D6). Stand down for the entry menu as Escape does.
+        if (e.altKey || e.ctrlKey || e.metaKey) return
+        if (menuOpen.current) return
+        const target = e.key === 'ArrowLeft' ? prevEntryRef.current : nextEntryRef.current
+        if (target === null) return // no wrap; the end control is disabled (D2)
+        e.preventDefault()
+        void goToRef.current(target)
       }
     }
     function onResize(): void {
@@ -868,6 +948,56 @@ export default function ViewerLayer({
               renderNow()
             }}
           />
+          {/* Prev/next affordances (lightbox-sibling-stepping D2). Siblings of
+              the canvas host, not children — the host owns the orbit/zoom
+              handlers and this container owns none, so a press or wheel on a
+              button never orbits or zooms. Present but `disabled` at the end
+              each cannot serve (no wrap), so focus stays put and the ends are
+              visible. `z-10` keeps them above the canvas. */}
+          <button
+            type="button"
+            aria-label="Previous model"
+            disabled={prevEntry === null}
+            onClick={() => {
+              if (prevEntry !== null) void goTo(prevEntry)
+            }}
+            className="absolute left-2 top-1/2 z-10 -translate-y-1/2 rounded-full bg-zinc-800/80 p-2 text-zinc-200 hover:bg-zinc-700 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-zinc-800/80"
+          >
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 24 24"
+              className="size-5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M15 6l-6 6 6 6" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            aria-label="Next model"
+            disabled={nextEntry === null}
+            onClick={() => {
+              if (nextEntry !== null) void goTo(nextEntry)
+            }}
+            className="absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-full bg-zinc-800/80 p-2 text-zinc-200 hover:bg-zinc-700 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-zinc-800/80"
+          >
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 24 24"
+              className="size-5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M9 6l6 6-6 6" />
+            </svg>
+          </button>
           {session === null &&
             (loadError !== null ? (
               <div

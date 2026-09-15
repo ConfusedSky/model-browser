@@ -84,6 +84,13 @@ function makeProps() {
       panelCommands: [],
       libraryTop: '/lib',
       onCommand: vi.fn(),
+      // The lightbox-sibling-stepping props: required, so the fixture supplies
+      // them. These cases are the gesture and the persist, not stepping, so both
+      // neighbours are null; the `posed` objects below spread `...props` and
+      // inherit them.
+      onNavigate: vi.fn(),
+      prevEntry: null,
+      nextEntry: null,
     },
   }
 }
