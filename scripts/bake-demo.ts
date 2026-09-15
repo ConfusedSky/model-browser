@@ -27,11 +27,26 @@
  * so the server suite, which cannot resolve `three`, can exercise it.
  */
 
+import { type ChildProcess, spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { mkdir, mkdtemp, readFile, realpath, stat, writeFile } from 'node:fs/promises'
+import { createServer } from 'node:net'
+import { tmpdir } from 'node:os'
+import { basename, isAbsolute, join, normalize } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { SNAPSHOT_DIR } from '../server/src/snapshot'
-import type { IndexPose, LightingMode } from '../shared/types'
+import {
+  type DirEntry,
+  type IndexAvailability,
+  type IndexPose,
+  type LibraryState,
+  type LightingMode,
+  type ModelsListing,
+  POSES_MAX,
+  type PosesResponse,
+  THUMB_MIME,
+  type ThumbGetResponse,
+} from '../shared/types'
 
 /** One enumerated model — `/api/models`' library path and file mtime. */
 export interface BakeModel {
@@ -371,4 +386,737 @@ function contentsOf(dir: string): string {
  */
 export function rsyncCommand(localCache: string, localId: string, host: string, boxDir: string): string {
   return `rsync -az --info=progress2 --exclude '${SNAPSHOT_DIR}/' ${contentsOf(join(localCache, localId))} ${host}:${contentsOf(boxDir)}`
+}
+
+// ─── The driver ──────────────────────────────────────────────────────────────
+//
+// D1 steps 1–6 and 8–11, around the core above. Node APIs only here too, though
+// the design allows Bun: the server suite's `tsc` reaches this file through
+// `bakeDemo.test.ts`, and there are no Bun types in this repo to check a
+// `Bun.spawn` against — `node:child_process` runs under `bun run` unchanged.
+// Two things are loaded by a non-literal dynamic `import()` so that program
+// never follows them: the client's recipe constants (`renderer.ts` imports
+// `three`, which the server workspace cannot resolve — design Context) and
+// Playwright (found, never installed — `playwright-found.mjs`).
+
+export interface BakeArgs {
+  root: string
+  cache: string
+  indexCache: string
+  port: number
+  /** The scratch client build; a fresh temp directory when absent. Never `client/dist` (CLAUDE.md). */
+  client?: string
+  ship?: string
+  shipDir?: string
+}
+
+export const USAGE = `usage: bun run scripts/bake-demo.ts --root <corpus top> --cache <scratch cache dir> --index-cache <the index's cache dir>
+         [--port 3199] [--client <scratch build dir>] [--ship <user@host> --ship-dir </srv/cache/<box id>>]`
+
+const FLAGS = ['root', 'cache', 'index-cache', 'port', 'client', 'ship', 'ship-dir'] as const
+type Flag = (typeof FLAGS)[number]
+
+/**
+ * `gen-overrides.ts`'s shape: every flag takes a value, an unknown flag is
+ * rejected by name rather than collected — a misspelled `--index-cache` that
+ * silently defaulted is how a wrong run would look clean — and the three
+ * required flags are required. `--ship` needs `--ship-dir` (the rsync has no
+ * target without it); `--ship-dir` alone only fills in the printed command.
+ */
+export function parseArgs(argv: string[]): BakeArgs {
+  const values: Partial<Record<Flag, string>> = {}
+  for (let i = 0; i < argv.length; i += 2) {
+    const flag = argv[i]
+    const value = argv[i + 1]
+    if (flag === undefined || !flag.startsWith('--') || value === undefined) throw new Error(USAGE)
+    const name = flag.slice(2)
+    if (!(FLAGS as readonly string[]).includes(name)) throw new Error(`unknown flag ${flag}\n${USAGE}`)
+    values[name as Flag] = value
+  }
+  const root = values.root
+  const cache = values.cache
+  const indexCache = values['index-cache']
+  if (root === undefined || cache === undefined || indexCache === undefined) throw new Error(USAGE)
+  const port = values.port === undefined ? 3199 : Number(values.port)
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`--port must be a port number, got ${values.port}`)
+  if (values.ship !== undefined && values['ship-dir'] === undefined) throw new Error(`--ship needs --ship-dir\n${USAGE}`)
+  return { root, cache, indexCache, port, client: values.client, ship: values.ship, shipDir: values['ship-dir'] }
+}
+
+/** The bake instance's `/api/semantic/status` is re-read until it stops saying `warming` (~16 s of SigLIP; the app itself calls it wedged at 180 s). */
+const WARMING_DEADLINE_MS = 180_000
+/** How long `/api/library` may refuse connections while the child starts. */
+const START_DEADLINE_MS = 60_000
+/** Between chip reads while a pass runs. */
+const POLL_MS = 2_000
+/** A chip whose sentence has not changed for this long is a stuck pass (D1 step 6's "bounded time"). */
+const STALL_MS = 5 * 60_000
+/** Launches per pass before the count that stuck is refused: the first, and one relaunch. */
+const MAX_LAUNCHES = 2
+/** The default index base — `semantic.ts`'s `DEFAULT_BASE`, read from the same variable. */
+const DEFAULT_INDEX = 'http://127.0.0.1:8077'
+/** Where the shipped store is verified (task 4.2). */
+export const DEMO_ORIGIN = 'https://models.masamaeda.com'
+/** The restart after a ship (D3: for the startup sweep's memo, not for correctness). */
+export const RESTART_COMMAND = 'cd /opt/model-browser && docker compose -f deploy/demo/compose.yaml restart app'
+
+export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
+
+const T0 = Date.now()
+function log(...parts: unknown[]): void {
+  console.log(`[bake ${((Date.now() - T0) / 1000).toFixed(0)}s]`, ...parts)
+}
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+async function getJson<T>(url: string, fetchFn: FetchLike = fetch): Promise<T> {
+  const res = await fetchFn(url)
+  if (!res.ok) throw new Error(`GET ${url} answered ${res.status}`)
+  return (await res.json()) as T
+}
+
+async function postPoses(base: string, batch: string[], fetchFn: FetchLike): Promise<Record<string, IndexPose | null>> {
+  const res = await fetchFn(`${base}/api/semantic/poses`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ paths: batch }),
+  })
+  if (!res.ok) throw new Error(`POST /api/semantic/poses answered ${res.status} for a batch of ${batch.length}`)
+  const body: unknown = await res.json()
+  if (!isRecord(body) || !isRecord(body.poses)) throw new Error('POST /api/semantic/poses answered no poses map')
+  return body.poses as PosesResponse['poses']
+}
+
+/**
+ * D1 step 8's fetch: `paths` to the bake instance's `POST /api/semantic/poses`
+ * in batches of at most `POSES_MAX` — the wire bound the route refuses past,
+ * imported and never restated — and the answers merged into one map. A batch
+ * that fails is retried once, then the failure names it. Judged afterwards by
+ * `auditUnposed`; also the wave `confirmNothingLeft` primes the pose layer
+ * with. Separate from the browser and the server so a cell can drive it with
+ * a fake `fetch`.
+ */
+export async function fetchPoses(base: string, paths: string[], fetchFn: FetchLike = fetch): Promise<Record<string, IndexPose | null>> {
+  const merged: Record<string, IndexPose | null> = {}
+  for (let i = 0; i < paths.length; i += POSES_MAX) {
+    const batch = paths.slice(i, i + POSES_MAX)
+    const answer = await postPoses(base, batch, fetchFn).catch(() => postPoses(base, batch, fetchFn))
+    Object.assign(merged, answer)
+  }
+  return merged
+}
+
+/**
+ * D1 step 4's compare between what the index's `/status` reports as
+ * `cache_dir` — the string it was started with, `str(args.cache_dir)` — and
+ * the realpath of `--index-cache`: an absolute report must equal the realpath,
+ * a relative one (`embed-cache-test`, relative to the checkout's cwd) must
+ * equal its basename. `normalize` so `./embed-cache-test/` reads as
+ * `embed-cache-test`; nothing looser, since the fingerprint is taken from
+ * `--index-cache` and this is what ties it to the index that framed the renders.
+ */
+export function indexCacheDirMatches(reported: string, indexCacheReal: string): boolean {
+  const norm = normalize(reported).replace(/(?<=.)\/+$/, '')
+  return isAbsolute(norm) ? norm === indexCacheReal : norm === basename(indexCacheReal)
+}
+
+/** What the index's own `/status` says (mini-classify `src/api.py` `status`), the fields the manifest keeps. */
+interface IndexStatusWire {
+  ready?: unknown
+  cache_dir?: unknown
+  views?: unknown
+  elevations?: unknown
+  up_axis?: unknown
+  n_models?: unknown
+  failure?: unknown
+}
+
+/** The client's recipe constants, imported (never restated) from the modules that own them. */
+async function loadRecipe(repo: string): Promise<ManifestRecipe> {
+  // Non-literal specifiers, so the server suite's `tsc` does not follow them
+  // into `three`; the values are checked here instead of typed there.
+  const renderer = (await import(pathToFileURL(join(repo, 'client/src/three/renderer.ts')).href)) as Record<string, unknown>
+  const pose = (await import(pathToFileURL(join(repo, 'client/src/three/pose.ts')).href)) as Record<string, unknown>
+  const { RIG_VERSION, THUMB_LIGHTING, THUMB_SIZE } = renderer
+  const { POSE_VERSION } = pose
+  if (typeof RIG_VERSION !== 'number' || typeof THUMB_SIZE !== 'number' || typeof POSE_VERSION !== 'number') {
+    throw new Error('renderer.ts/pose.ts no longer export numeric RIG_VERSION, THUMB_SIZE and POSE_VERSION')
+  }
+  if (THUMB_LIGHTING !== 'camera' && THUMB_LIGHTING !== 'axis') throw new Error('renderer.ts THUMB_LIGHTING is not a LightingMode')
+  return { rig: RIG_VERSION, poseVersion: POSE_VERSION, lighting: THUMB_LIGHTING, size: THUMB_SIZE }
+}
+
+function run(cmd: string, args: string[], cwd: string): void {
+  log('$', cmd, ...args)
+  const r = spawnSync(cmd, args, { cwd, stdio: 'inherit' })
+  if (r.error) throw r.error
+  if (r.status !== 0) throw new Error(`${cmd} ${args.join(' ')} exited ${r.status}`)
+}
+
+/** `git rev-parse HEAD` and whether `git status --porcelain` says anything — recorded, never refused (D1 step 1). */
+function gitFacts(repo: string): { commit?: string; dirty: boolean } {
+  const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' })
+  const status = spawnSync('git', ['status', '--porcelain'], { cwd: repo, encoding: 'utf8' })
+  const commit = head.status === 0 ? head.stdout.trim() : undefined
+  return { commit, dirty: status.status === 0 ? status.stdout.trim() !== '' : false }
+}
+
+/** Refuses a port something already listens on — before the child is started, so the refusal names the port rather than a confusing startup failure. */
+async function refuseBusyPort(port: number): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const probe = createServer()
+    probe.once('error', (err: NodeJS.ErrnoException) => {
+      reject(err.code === 'EADDRINUSE' ? new Error(`port ${port} is already in use — another instance on the scratch port?`) : err)
+    })
+    probe.listen(port, '127.0.0.1', () => probe.close(() => resolve()))
+  })
+}
+
+interface ChildServer {
+  exited: number | null
+  stop(): Promise<void>
+}
+
+/**
+ * The bake's own server (D1 step 3): `bun run server/src/index.ts` with the
+ * scratch config, cache and client build, `MODEL_BROWSER_ROOT` unset so the
+ * file's `root` is the root. Its output is relayed line by line under a
+ * prefix — the `library <id> at <top>` startup line is the one to read.
+ */
+function startServer(repo: string, env: { configFile: string; cache: string; client: string }): ChildServer {
+  const childEnv: NodeJS.ProcessEnv = { ...process.env }
+  delete childEnv.MODEL_BROWSER_ROOT
+  childEnv.MODEL_BROWSER_CONFIG = env.configFile
+  childEnv.MODEL_BROWSER_CACHE = env.cache
+  childEnv.MODEL_BROWSER_CLIENT = env.client
+  const child: ChildProcess = spawn('bun', ['run', 'server/src/index.ts'], { cwd: repo, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] })
+  const relay = (stream: NodeJS.ReadableStream | null, tag: string) => {
+    let rest = ''
+    stream?.setEncoding('utf8')
+    stream?.on('data', (chunk: string) => {
+      const lines = (rest + chunk).split('\n')
+      rest = lines.pop() ?? ''
+      for (const line of lines) console.log(`${tag} ${line}`)
+    })
+  }
+  relay(child.stdout, 'server │')
+  relay(child.stderr, 'server ‼')
+  const gone = new Promise<void>((r) => child.once('exit', () => r()))
+  const server: ChildServer = {
+    exited: null,
+    stop: async () => {
+      if (child.exitCode !== null || child.signalCode !== null) return
+      child.kill('SIGTERM')
+      await Promise.race([gone, sleep(3000)])
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+      await gone
+    },
+  }
+  child.on('exit', (code, signal) => {
+    server.exited = code ?? (signal !== null ? 128 : 1)
+  })
+  // Belt and braces for a way out no handler saw (an uncaught throw in a
+  // callback): `kill` is synchronous, so it works from the exit event.
+  process.on('exit', () => {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+  })
+  return server
+}
+
+type ReadyLibrary = Extract<LibraryState, { state: 'ready' }>
+
+/** Waits for `/api/library` to answer `ready`; refuses `nested`, `missing`, `unconfigured` by name, and a child that died first. */
+async function waitForLibrary(base: string, server: ChildServer): Promise<ReadyLibrary> {
+  const deadline = Date.now() + START_DEADLINE_MS
+  while (Date.now() < deadline) {
+    if (server.exited !== null) throw new Error(`the server exited (${server.exited}) before answering /api/library`)
+    const s = await getJson<LibraryState>(`${base}/api/library`).catch(() => null)
+    if (s !== null) {
+      if (s.state === 'ready') return s
+      const where =
+        s.state === 'nested'
+          ? ` (root ${s.root ?? '?'} encloses a library at ${s.library ?? '?'})`
+          : s.state === 'missing'
+            ? ` (root ${s.root ?? '?'})`
+            : ''
+      throw new Error(`the library is ${s.state}${where}; the bake needs ready`)
+    }
+    await sleep(250)
+  }
+  throw new Error(`/api/library did not answer within ${START_DEADLINE_MS / 1000}s`)
+}
+
+/** `/api/semantic/status?fresh=true` must read `ready`; waits through `warming`. */
+async function indexThroughApp(base: string): Promise<IndexAvailability> {
+  const deadline = Date.now() + WARMING_DEADLINE_MS
+  for (;;) {
+    const s = await getJson<IndexAvailability>(`${base}/api/semantic/status?fresh=true`)
+    if (s.state === 'ready') return s
+    if (s.state !== 'warming' || Date.now() >= deadline) {
+      throw new Error(`the index is ${s.state}${s.detail !== undefined ? ` — ${s.detail}` : ''}; the bake needs ready`)
+    }
+    log(`index warming (${s.elapsed ?? '?'}s), waiting`)
+    await sleep(POLL_MS)
+  }
+}
+
+/** D1 step 4, the app's half: ready and covering the bake library's top. Refuses naming the root reported and the root wanted. */
+async function requireIndexAtRoot(base: string): Promise<void> {
+  const s = await indexThroughApp(base)
+  if (s.collectionRoot !== '/') {
+    const reported = s.collectionRoot ?? `no library root${s.detail !== undefined ? ` (${s.detail})` : ''}`
+    throw new Error(`the index covers ${reported}; the bake wants a collection root of / (the library's top)`)
+  }
+}
+
+type DirectIndexFacts = Omit<IndexFacts, 'collectionRoot' | 'poseCacheSha256' | 'runParamsSha256'>
+
+/** D1 step 4, the index's half: its own `/status`, `ready` and `cache_dir` naming `--index-cache`; the four fields the manifest keeps. */
+async function indexDirect(indexCache: string): Promise<DirectIndexFacts> {
+  const indexBase = (process.env.MODEL_BROWSER_INDEX ?? DEFAULT_INDEX).replace(/\/+$/, '')
+  const s = await getJson<IndexStatusWire>(`${indexBase}/status`).catch((err: unknown) => {
+    throw new Error(`the index's own /status at ${indexBase} did not answer: ${err instanceof Error ? err.message : String(err)}`)
+  })
+  if (s.ready !== true) {
+    const failure = s.failure !== null && s.failure !== undefined ? ` (failure: ${String(s.failure)})` : ''
+    throw new Error(`the index's /status reads ready: ${String(s.ready)}${failure}`)
+  }
+  const real = await realpath(indexCache)
+  if (typeof s.cache_dir !== 'string' || !indexCacheDirMatches(s.cache_dir, real)) {
+    throw new Error(`the index reports cache_dir ${String(s.cache_dir)}, but --index-cache is ${real} — the fingerprint would pin poses nobody rendered under`)
+  }
+  if (typeof s.views !== 'number' || !Array.isArray(s.elevations) || typeof s.n_models !== 'number') {
+    throw new Error(`the index's /status lacks views/elevations/n_models: ${JSON.stringify({ views: s.views, elevations: s.elevations, n_models: s.n_models })}`)
+  }
+  return {
+    cacheDir: s.cache_dir,
+    models: s.n_models,
+    views: s.views,
+    elevations: s.elevations.map(Number),
+    upAxis: String(s.up_axis ?? ''),
+  }
+}
+
+/** D1 step 5: `/api/models?path=/`, whole; an incomplete enumeration is refused. */
+async function enumerateModels(base: string): Promise<{ models: BakeModel[]; entries: DirEntry[] }> {
+  const listing = await getJson<ModelsListing>(`${base}/api/models?path=${encodeURIComponent('/')}`)
+  if (!listing.complete) {
+    throw new Error('the enumeration is incomplete (the tree cache ran out of budget) — models would go unbaked and the count would never say so')
+  }
+  const entries = listing.entries.filter((e) => e.kind === 'model')
+  if (entries.length === 0) throw new Error('the enumeration holds no models')
+  return { models: entries.map((e) => ({ path: e.path, mtime: e.mtime })), entries }
+}
+
+// ── Playwright, as much of it as the passes touch ──
+interface PwLocator {
+  first(): PwLocator
+  count(): Promise<number>
+  click(): Promise<void>
+  textContent(): Promise<string | null>
+  getAttribute(name: string): Promise<string | null>
+  locator(selector: string, options?: { hasText?: RegExp | string }): PwLocator
+}
+interface PwResponse {
+  status(): number
+  request(): { method(): string; url(): string }
+}
+interface PwPage {
+  goto(url: string, options?: { waitUntil?: 'domcontentloaded' }): Promise<unknown>
+  locator(selector: string, options?: { hasText?: RegExp | string }): PwLocator
+  waitForSelector(selector: string, options?: { timeout?: number }): Promise<unknown>
+  waitForTimeout(ms: number): Promise<void>
+  on(event: 'response', handler: (response: PwResponse) => void): void
+}
+interface PwBrowser {
+  newPage(options?: { viewport?: { width: number; height: number } }): Promise<PwPage>
+  close(): Promise<void>
+}
+interface PwChromium {
+  launch(options: { headless: boolean; executablePath: string; args: string[] }): Promise<PwBrowser>
+}
+
+async function launchChromium(): Promise<PwBrowser> {
+  const found = (await import(new URL('./playwright-found.mjs', import.meta.url).href)) as {
+    findModule(): string | null
+    findChrome(): string | null
+  }
+  const modulePath = found.findModule()
+  const chrome = found.findChrome()
+  if (modulePath === null || chrome === null) {
+    throw new Error('needs a Playwright install this repo does not carry:\n  npx playwright install chromium   (downloads both the library and the browser)')
+  }
+  const { chromium } = (await import(modulePath)) as { chromium: PwChromium }
+  // The 2026-09-14 driver's flags: SwiftShader through ANGLE, and the third
+  // because that launch needed it to admit an unaccelerated WebGL context.
+  return chromium.launch({
+    headless: true,
+    executablePath: chrome,
+    args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
+  })
+}
+
+/** The corner pill (`App.tsx`, the button with `aria-pressed` reading `ssao`). */
+function pill(page: PwPage): PwLocator {
+  return page.locator('button[aria-pressed]', { hasText: /^\s*ssao\s*$/ }).first()
+}
+
+async function aoOn(page: PwPage): Promise<boolean> {
+  return (await pill(page).getAttribute('aria-pressed')) === 'true'
+}
+
+const GENERATE = /^Generate (\d+) missing thumbnails$/
+
+/**
+ * Opens the `library` tab — via another tab first when it is already open,
+ * since the count re-derives on open — and reads the button's count once it
+ * has stopped `Counting…`. `Count failed` refuses: a scope that cannot be
+ * enumerated cannot be baked.
+ */
+async function openLibraryTabAndCount(page: PwPage): Promise<number> {
+  const tabs = page.locator('[role="tab"]')
+  if ((await tabs.count()) === 0) {
+    const expand = page.locator('button[aria-label="Expand side panel"]')
+    if ((await expand.count()) > 0) await expand.first().click()
+    await page.waitForSelector('[role="tab"]', { timeout: 30_000 })
+  }
+  const library = page.locator('[role="tab"]', { hasText: /library/i }).first()
+  if ((await library.getAttribute('aria-selected')) === 'true') {
+    await page.locator('[role="tab"]', { hasText: /search/i }).first().click()
+    await page.waitForTimeout(300)
+  }
+  await library.click()
+  const button = page.locator('button', { hasText: /Generate .* missing thumbnails|Counting…|Count failed/ }).first()
+  const deadline = Date.now() + 120_000
+  for (;;) {
+    const text = ((await button.textContent().catch(() => null)) ?? '').trim()
+    const m = GENERATE.exec(text)
+    if (m !== null) return Number(m[1])
+    if (text === 'Count failed') throw new Error('the library tab could not count the scope (Count failed)')
+    if (Date.now() >= deadline) throw new Error(`the library tab never finished counting (button reads "${text}")`)
+    await page.waitForTimeout(500)
+  }
+}
+
+/**
+ * The chip (`JobChip`, `role="status"`) with no Cancel button — `BulkJobs.run`'s
+ * last patch sets `phase: 'done'` and `settled: true` together, and Cancel is
+ * offered exactly in the three live phases. No chip at all is not settled: it
+ * is a job that has not been launched.
+ */
+async function chipSettled(page: PwPage): Promise<boolean> {
+  const chip = page.locator('[role="status"]').first()
+  if ((await chip.count()) === 0) return false
+  return (await chip.locator('button', { hasText: /^\s*Cancel\s*$/ }).count()) === 0
+}
+
+async function chipText(page: PwPage): Promise<string> {
+  const chip = page.locator('[role="status"]').first()
+  return (await chip.count()) === 0 ? '' : ((await chip.textContent()) ?? '').trim()
+}
+
+/** Polls the chip until it settles, or until its sentence has not moved for `STALL_MS`. */
+async function waitSettled(page: PwPage, label: string): Promise<'settled' | 'stalled'> {
+  let last = ''
+  let changed = Date.now()
+  let reported = 0
+  for (;;) {
+    await page.waitForTimeout(POLL_MS)
+    const text = await chipText(page)
+    if (text !== last) {
+      last = text
+      changed = Date.now()
+    }
+    if (await chipSettled(page)) {
+      log(label, 'settled:', text)
+      return 'settled'
+    }
+    if (Date.now() - changed > STALL_MS) {
+      log(label, 'stalled:', text)
+      return 'stalled'
+    }
+    if (Date.now() - reported > 20_000) {
+      reported = Date.now()
+      log(label, text)
+    }
+  }
+}
+
+/**
+ * The stopping rule's last clause. D1 step 6 asks for a *relaunch* settling
+ * at `Generated 0 of 0 in the library`, because a launch runs the pose wave a
+ * count does not (`BulkJobs.enumerate`'s `needsPose`). The button is
+ * `disabled` at a count of zero (SidePanel's `libraryOps.map`), so that press
+ * cannot be made in the DOM; this is its equivalent, and the difference between
+ * a launch's derivation and a count's is exactly the wave: both judge with
+ * `entry.pose` where the enumeration carries one (`annotate` in app.ts fills
+ * it from the pose layer), and `POST /api/semantic/poses` records what it
+ * answers into that layer (`layers.recordPoses`). So: enumerate, ask the route
+ * for every model still `pose === undefined` — the wave, made by hand — and
+ * count again. A zero then is what a relaunch's `Generated 0 of 0` would be.
+ */
+async function confirmNothingLeft(page: PwPage, base: string): Promise<number> {
+  const { entries } = await enumerateModels(base)
+  const unknown = entries.filter((e) => e.pose === undefined).map((e) => e.path)
+  if (unknown.length > 0) {
+    const answered = await fetchPoses(base, unknown)
+    log(`pose wave by hand: ${unknown.length} models asked, ${Object.keys(answered).length} answered`)
+  }
+  return openLibraryTabAndCount(page)
+}
+
+/**
+ * One *Generate* pass under the pill's current state (D1 step 6). A pass ends
+ * only when the chip has settled, the button reads `Generate 0 missing
+ * thumbnails`, and `confirmNothingLeft` still reads zero — never on the count
+ * alone, which reads zero while the last entries are in flight. A stalled
+ * launch is cancelled and relaunched once, then refused with the count that
+ * stuck.
+ */
+async function runPass(page: PwPage, base: string, label: string, puts: { ok: number }): Promise<PassFigures> {
+  const t0 = Date.now()
+  const before = puts.ok
+  let launches = 0
+  for (;;) {
+    let n = await openLibraryTabAndCount(page)
+    if (n === 0 && (await chipText(page)) !== '' && !(await chipSettled(page))) {
+      // Zero with a job still live: the in-flight tail. Let it land.
+      if ((await waitSettled(page, label)) === 'stalled') throw new Error(`${label}: a live job stalled at "${await chipText(page)}"`)
+      continue
+    }
+    if (n === 0) {
+      n = await confirmNothingLeft(page, base)
+      if (n === 0) break
+      log(label, `the pose wave found ${n} more`)
+    }
+    if (launches >= MAX_LAUNCHES) throw new Error(`${label}: the count stuck at ${n} after ${launches} launches`)
+    launches++
+    log(label, `launch ${launches}: Generate ${n} missing thumbnails`)
+    await page.locator('button', { hasText: GENERATE }).first().click()
+    const outcome = await waitSettled(page, label)
+    if (outcome === 'stalled') {
+      await page
+        .locator('[role="status"] button', { hasText: /^\s*Cancel\s*$/ })
+        .first()
+        .click()
+        .catch(() => undefined)
+      await waitSettled(page, label)
+    }
+  }
+  return { rendered: puts.ok - before, elapsed: Math.round((Date.now() - t0) / 1000) }
+}
+
+type Variant = 'ao' | 'noao'
+
+/** D1 step 6 whole: both variants, the pill toggled only between fully ended passes. */
+async function generateBoth(base: string): Promise<{ first: Variant; ao: PassFigures; noao: PassFigures }> {
+  const browser = await launchChromium()
+  try {
+    const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
+    const puts = { ok: 0, failed: 0 }
+    page.on('response', (r) => {
+      const q = r.request()
+      if (q.method() === 'PUT' && q.url().includes('/api/thumb')) {
+        if (r.status() === 200) puts.ok++
+        else puts.failed++
+      }
+    })
+    await page.goto(`${base}/`, { waitUntil: 'domcontentloaded' })
+    await page.waitForSelector('[role="tab"]', { timeout: 60_000 })
+    const first: Variant = (await aoOn(page)) ? 'ao' : 'noao'
+    log(`pill reads ssao ${first === 'ao' ? 'on' : 'off'}: the first pass is ${first}`)
+    const one = await runPass(page, base, `pass 1 (${first})`, puts)
+    // Only now: `renderEntryThumbnail` reads `aoEnabled()` live, and a pill
+    // toggled with an entry in flight files it under the other variant.
+    await pill(page).click()
+    await page.waitForTimeout(500)
+    const second: Variant = (await aoOn(page)) ? 'ao' : 'noao'
+    if (second === first) throw new Error('the ssao pill did not toggle')
+    const two = await runPass(page, base, `pass 2 (${second})`, puts)
+    if (puts.failed > 0) log(`warning: ${puts.failed} PUTs answered non-200 (verifyBake decides what that cost)`)
+    return first === 'ao' ? { first, ao: one, noao: two } : { first, ao: two, noao: one }
+  } finally {
+    await browser.close()
+  }
+}
+
+/** Task 4.2's two hit checks for one model and one variant, against the live host. */
+async function hitCheck(model: BakeModel, ao: boolean, recipe: ManifestRecipe): Promise<string> {
+  const q = `path=${encodeURIComponent(model.path)}&mtime=${model.mtime}${ao ? '' : '&ao=off'}`
+  const info = await getJson<ThumbGetResponse & { gen?: number }>(`${DEMO_ORIGIN}/api/thumb?${q}`)
+  const problems: string[] = []
+  if (info.status !== 'hit') problems.push(`status ${info.status}`)
+  if (info.rig !== recipe.rig) problems.push(`rig ${String(info.rig)}`)
+  if (info.posed !== undefined && (info.posed !== recipe.poseVersion || typeof info.poseKey !== 'string')) {
+    problems.push(`posed ${String(info.posed)} poseKey ${String(info.poseKey)}`)
+  }
+  const image = await fetch(`${DEMO_ORIGIN}/api/thumb/image?${q}${info.gen !== undefined ? `&gen=${info.gen}` : ''}`)
+  const type = image.headers.get('content-type') ?? ''
+  const cacheControl = image.headers.get('cache-control') ?? ''
+  if (!image.ok || !type.startsWith(THUMB_MIME)) problems.push(`image ${image.status} ${type}`)
+  if (!cacheControl.includes('immutable')) problems.push(`image cache-control "${cacheControl}"`)
+  const label = `${model.path} ${ao ? 'ao' : 'noao'}`
+  if (problems.length > 0) throw new Error(`hit check failed for ${label}: ${problems.join(', ')}`)
+  return `${label}: hit, rig ${info.rig}, ${info.posed !== undefined ? `posed ${info.posed} (${info.poseKey})` : 'unposed'}, ${type}, ${cacheControl}`
+}
+
+function hitCheckCommands(models: BakeModel[]): string[] {
+  return models.flatMap((m) => {
+    const q = `path=${encodeURIComponent(m.path)}&mtime=${m.mtime}`
+    return [
+      `curl -s '${DEMO_ORIGIN}/api/thumb?${q}'`,
+      `curl -s '${DEMO_ORIGIN}/api/thumb?${q}&ao=off'`,
+      `curl -sI '${DEMO_ORIGIN}/api/thumb/image?${q}&gen=<gen from the lookup>'`,
+    ]
+  })
+}
+
+/** D1 step 11 / D5: the rsync, the restart and task 4.2's hit checks — run behind `--ship`, printed without it. */
+async function ship(args: BakeArgs, libraryId: string, models: BakeModel[], recipe: ManifestRecipe): Promise<void> {
+  const host = args.ship ?? '<user@host>'
+  const boxDir = args.shipDir ?? '/srv/cache/<box id>'
+  const rsync = rsyncCommand(args.cache, libraryId, host, boxDir)
+  const restart = `ssh ${host} '${RESTART_COMMAND}'`
+  const three = models.slice(0, 3)
+  if (args.ship === undefined) {
+    console.log('\nTo ship (D4/D5) — the box id is read from its startup line `library <id> at …`, never assumed:')
+    console.log(`  ${rsync}`)
+    console.log(`  ${restart}`)
+    for (const c of hitCheckCommands(three)) console.log(`  ${c}`)
+    return
+  }
+  run('sh', ['-c', rsync], process.cwd())
+  run('sh', ['-c', restart], process.cwd())
+  for (const m of three) for (const ao of [true, false]) log('hit check:', await hitCheck(m, ao, recipe))
+}
+
+/** The whole run, D1's eleven steps in order; the child server is stopped on every path out. */
+export async function bake(args: BakeArgs): Promise<void> {
+  const repo = fileURLToPath(new URL('..', import.meta.url))
+  const base = `http://127.0.0.1:${args.port}`
+  const scratch = await mkdtemp(join(tmpdir(), 'mb-bake-'))
+  const clientDir = args.client ?? join(scratch, 'client')
+  log(`scratch ${scratch} (the config and, unless --client says otherwise, the client build; kept for inspection)`)
+
+  // 1. The client build — to the scratch directory, never `client/dist`.
+  run('bunx', ['vite', 'build', '--outDir', clientDir, '--emptyOutDir'], join(repo, 'client'))
+  const client = gitFacts(repo)
+  const recipe = await loadRecipe(repo)
+  log(`client ${client.commit ?? '(no git)'}${client.dirty ? ' (dirty tree, recorded)' : ''}; recipe rig ${recipe.rig}, pose ${recipe.poseVersion}, ${recipe.lighting}, ${recipe.size}²`)
+
+  // 2. The scratch configuration. `hostDetails: true` because `/api/library`'s
+  // `top`/`id` and `/api/semantic/status`'s `detail` are withheld otherwise.
+  const configFile = join(scratch, 'config.json')
+  const config = {
+    root: args.root,
+    listen: { host: '127.0.0.1', port: args.port },
+    features: { thumbWrites: true, maintenance: true, appLaunch: false, chatTab: false, hostDetails: true },
+  }
+  await writeFile(configFile, JSON.stringify(config, null, 2))
+
+  // 3. The child server, killed on every way out of the block below — and by
+  // the signal handlers, so a Ctrl-C mid-pass leaves the scratch port free.
+  await refuseBusyPort(args.port)
+  await mkdir(args.cache, { recursive: true })
+  const server = startServer(repo, { configFile, cache: args.cache, client: clientDir })
+  const onSignal = (signal: NodeJS.Signals) => {
+    console.error(`\n${signal}: stopping the server`)
+    void server.stop().finally(() => process.exit(130))
+  }
+  process.on('SIGINT', onSignal)
+  process.on('SIGTERM', onSignal)
+
+  let libraryId: string
+  let libraryTop: string
+  let models: BakeModel[]
+  let index: IndexFacts
+  let passes: Awaited<ReturnType<typeof generateBoth>>
+  let verify: VerifyResult
+  try {
+    const lib = await waitForLibrary(base, server)
+    if (lib.top === undefined) throw new Error('/api/library withholds top — hostDetails is off?')
+    libraryId = lib.id
+    libraryTop = lib.top
+    log(`library ${lib.id} at ${lib.top}`)
+
+    // 4. The index, twice over.
+    await requireIndexAtRoot(base)
+    const direct = await indexDirect(args.indexCache)
+    log(`index ready: cache_dir ${direct.cacheDir}, ${direct.models} models, ${direct.views} views, elevations ${JSON.stringify(direct.elevations)}, up_axis ${direct.upAxis}`)
+
+    // 5. The enumeration.
+    models = (await enumerateModels(base)).models
+    log(`${models.length} models enumerated`)
+
+    // 6. Both passes.
+    passes = await generateBoth(base)
+    log(`passes: first ${passes.first}; ao ${passes.ao.rendered} renders in ${passes.ao.elapsed}s, noao ${passes.noao.rendered} in ${passes.noao.elapsed}s`)
+
+    // 7. The store on disk.
+    verify = await verifyBake(args.cache, libraryId, models, recipe)
+    for (const miss of verify.misses) console.error(`miss ${miss.path}: ${miss.reasons.join('; ')}`)
+    if (verify.refusal !== null) throw new Error(`verifyBake: ${verify.refusal}`)
+    log(`verified: ${verify.renders.ao} ao + ${verify.renders.noao} noao renders, ${verify.posed} posed, ${verify.unposed} unposed`)
+
+    // 8. The unposed against the index — ready before and after, so a `null`
+    // filed under an absent/wedged/volume-gone memo cannot pass as settled.
+    await requireIndexAtRoot(base)
+    const answer = await fetchPoses(base, verify.unlabelled)
+    await requireIndexAtRoot(base)
+    const audit = auditUnposed(verify.unlabelled, answer)
+    for (const p of audit.unsettled) console.error(`unsettled (absent from the index's answer): ${p}`)
+    for (const p of audit.shouldHavePosed) console.error(`should have been posed (the index answers a pose): ${p}`)
+    if (audit.unsettled.length > 0 || audit.shouldHavePosed.length > 0) {
+      throw new Error(`pose audit: ${audit.unsettled.length} unsettled, ${audit.shouldHavePosed.length} should have been posed — no manifest written`)
+    }
+    log(`pose audit: ${verify.unlabelled.length} unlabelled, all settled null`)
+
+    index = { collectionRoot: '/', ...direct, ...(await indexFingerprint(args.indexCache)) }
+  } finally {
+    process.off('SIGINT', onSignal)
+    process.off('SIGTERM', onSignal)
+    await server.stop()
+    log('server stopped')
+  }
+
+  // 9. The manifest, after the server is stopped (no sweep of the bake instance running while it lands).
+  const manifest = manifestFor({
+    date: new Date().toISOString(),
+    client,
+    recipe,
+    library: { id: libraryId, root: libraryTop },
+    models: models.length,
+    verify,
+    passes: { ao: passes.ao, noao: passes.noao },
+    index,
+  })
+  const file = await writeManifest(args.cache, libraryId, manifest)
+  log(`manifest ${file}`)
+
+  // 10. The pin check — the same script the box runs.
+  run('sh', ['deploy/demo/check-bake.sh', file, args.indexCache], repo)
+  log('check-bake.sh passed')
+
+  // 11. The ship, or its commands.
+  await ship(args, libraryId, models, recipe)
+}
+
+// Run only when invoked directly, so the core above can be imported by the
+// suite (`gen-overrides.ts`'s guard).
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  let args: BakeArgs | null = null
+  try {
+    args = parseArgs(process.argv.slice(2))
+  } catch (err: unknown) {
+    console.error(err instanceof Error ? err.message : String(err))
+    process.exit(2)
+  }
+  bake(args).catch((err: unknown) => {
+    console.error(err instanceof Error ? err.message : String(err))
+    process.exitCode = 1
+  })
 }

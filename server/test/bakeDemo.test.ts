@@ -1,21 +1,26 @@
 import { createHash } from 'node:crypto'
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   type BakeModel,
+  type FetchLike,
   type ManifestInput,
   type ManifestRecipe,
   auditUnposed,
+  fetchPoses,
+  indexCacheDirMatches,
   indexFingerprint,
   manifestFor,
   manifestPath,
+  parseArgs,
   rsyncCommand,
   sidecarKey,
   verifyBake,
   writeManifest,
 } from '../../scripts/bake-demo'
+import { type IndexPose, POSES_MAX } from '../../shared/types'
 import { ThumbCache } from '../src/cache'
 import { libraryFor, realTempDir } from './helpers'
 
@@ -40,6 +45,8 @@ const MODELS: BakeModel[] = [
 ]
 
 interface Store {
+  /** The library's top — what a second `ThumbCache` over the same store is built from. */
+  top: string
   cacheDir: string
   id: string
   cache: ThumbCache
@@ -61,7 +68,7 @@ async function store(): Promise<Store> {
   const id = library.id()
   const cacheDir = realTempDir('mb-bake-cache-')
   const cache = new ThumbCache(cacheDir, CAP, 1_000_000, library)
-  return { cacheDir, id, cache, dir: join(cacheDir, id) }
+  return { top, cacheDir, id, cache, dir: join(cacheDir, id) }
 }
 
 type Labels = { mtime?: number; rig?: number; posed?: number; poseKey?: string }
@@ -315,5 +322,125 @@ describe('indexFingerprint', () => {
     const dir = realTempDir('mb-bake-index-')
     writeFileSync(join(dir, 'pose-cache.json'), '{"poses":1}')
     await expect(indexFingerprint(dir)).rejects.toThrow(/run-params\.json/)
+  })
+})
+
+const A_POSE: IndexPose = {
+  up: [0, 0, 1],
+  azimuth_zero: [1, 0, 0],
+  source: 'index',
+  confidence: 0.9,
+  front: { view: 3, azimuth_deg: 40, elevation_deg: 20 },
+}
+
+/**
+ * The driver's pose fetch (task 1.6), against a fake `POST /api/semantic/poses`
+ * that records each request's paths and answers `null` for every one — the
+ * settled absence the audit wants — except `poseFor`. `failFirst` batches
+ * answer 500 before the fake starts answering.
+ */
+function fakePosesRoute(opts: { failFirst?: number; poseFor?: string } = {}) {
+  const batches: string[][] = []
+  let failures = 0
+  const fetchFn: FetchLike = async (input, init) => {
+    expect(input).toBe('http://bake/api/semantic/poses')
+    expect(init?.method).toBe('POST')
+    const { paths } = JSON.parse(String(init?.body)) as { paths: string[] }
+    batches.push(paths)
+    if (failures < (opts.failFirst ?? 0)) {
+      failures++
+      return new Response('index hiccup', { status: 500 })
+    }
+    const poses = Object.fromEntries(paths.map((p) => [p, p === opts.poseFor ? A_POSE : null]))
+    return new Response(JSON.stringify({ poses }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+  return { batches, fetchFn }
+}
+
+const pathsOf = (n: number) => Array.from({ length: n }, (_, i) => `/kit/m${i}.stl`)
+
+describe('fetchPoses', () => {
+  it('sends 1,500 paths as two POSTs — POSES_MAX, then the 476 left — and merges both answers', async () => {
+    const paths = pathsOf(1500)
+    const last = paths[1499]!
+    const { batches, fetchFn } = fakePosesRoute({ poseFor: last })
+    const answer = await fetchPoses('http://bake', paths, fetchFn)
+    // 1,500 is under two batches of the wire bound, so the split is the bound
+    // and the remainder — the bound imported, never restated (task 1.6).
+    expect(batches.map((b) => b.length)).toEqual([POSES_MAX, 1500 - POSES_MAX])
+    expect(batches[0]).toEqual(paths.slice(0, POSES_MAX))
+    expect(batches[1]).toEqual(paths.slice(POSES_MAX))
+    expect(Object.keys(answer)).toHaveLength(1500)
+    expect(answer[paths[0]!]).toBeNull()
+    expect(answer[paths[POSES_MAX]!]).toBeNull()
+    expect(answer[last]).toEqual(A_POSE)
+    // Judged as the driver judges it: the one posed path, from the second batch, is named.
+    expect(auditUnposed(paths, answer)).toEqual({ unsettled: [], shouldHavePosed: [last] })
+  })
+
+  it('retries a failed batch once, then refuses naming the batch', async () => {
+    const paths = pathsOf(10)
+    const once = fakePosesRoute({ failFirst: 1 })
+    await expect(fetchPoses('http://bake', paths, once.fetchFn)).resolves.toEqual(Object.fromEntries(paths.map((p) => [p, null])))
+    expect(once.batches).toHaveLength(2)
+    const twice = fakePosesRoute({ failFirst: 2 })
+    await expect(fetchPoses('http://bake', paths, twice.fetchFn)).rejects.toThrow(/500 for a batch of 10/)
+    expect(twice.batches).toHaveLength(2)
+  })
+})
+
+describe('indexCacheDirMatches', () => {
+  const real = '/home/me/mini-classify/embed-cache-test'
+  it('an absolute cache_dir must equal the realpath; a relative one its basename (D1 step 4)', () => {
+    expect(indexCacheDirMatches(real, real)).toBe(true)
+    expect(indexCacheDirMatches(`${real}/`, real)).toBe(true)
+    expect(indexCacheDirMatches('embed-cache-test', real)).toBe(true)
+    expect(indexCacheDirMatches('./embed-cache-test/', real)).toBe(true)
+    expect(indexCacheDirMatches('embed-cache512', real)).toBe(false)
+    expect(indexCacheDirMatches('/home/me/other/embed-cache-test', real)).toBe(false)
+    expect(indexCacheDirMatches('caches/embed-cache-test', real)).toBe(false)
+  })
+})
+
+describe('parseArgs', () => {
+  const required = ['--root', '/corpus', '--cache', '/scratch', '--index-cache', '/index']
+  it('rejects an unknown flag by name rather than swallowing it', () => {
+    expect(() => parseArgs([...required, '--prot', '3199'])).toThrow(/unknown flag --prot/)
+  })
+  it('defaults the port to 3199, needs the three flags, and --ship-dir beside --ship', () => {
+    expect(parseArgs(required)).toEqual({
+      root: '/corpus', cache: '/scratch', indexCache: '/index', port: 3199,
+      client: undefined, ship: undefined, shipDir: undefined,
+    })
+    expect(parseArgs([...required, '--port', '4000', '--ship', 'root@box', '--ship-dir', '/srv/cache/box-id']).port).toBe(4000)
+    expect(() => parseArgs([])).toThrow(/^usage:/)
+    expect(() => parseArgs([...required, '--ship', 'root@box'])).toThrow(/--ship needs --ship-dir/)
+  })
+})
+
+describe('the manifest under bake/ and the startup sweep (task 1.4)', () => {
+  it('survives maintain(), every sidecar is annotated afterwards, and no stranger is warned about', async () => {
+    const s = await completeStore()
+    const file = await writeManifest(s.cacheDir, s.id, manifestFor(manifestInput()))
+    // A fresh cache over the same store, so `annotate` reflects what this
+    // `maintain()` itself learned rather than what `put` already remembered.
+    const resumed = new ThumbCache(s.cacheDir, CAP, 1, libraryFor(s.top))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      await resumed.maintain()
+      expect(existsSync(file)).toBe(true)
+      for (const m of MODELS) expect(resumed.annotate(m.path, m.mtime), m.path).toBeDefined()
+      // The subdirectory is what keeps the sweep from ever reading the manifest
+      // as a sidecar: no stranger seen, no warning. The **control** — what a
+      // `bake.json` copied up to the id level does — is cache.test.ts's cell
+      // "skips a stranger *.json with no `path` (a manifest copied up from
+      // bake/) rather than aborting the sweep" (task 1.7): the file survives,
+      // `maintain()` resolves, one warning names it, every sidecar is
+      // annotated. Never assert that a flat manifest is removed at the id
+      // level; it is not (design Context, second bullet).
+      expect(warn).not.toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+    }
   })
 })
