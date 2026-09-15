@@ -28,7 +28,9 @@ deploy
 # Prose, specifications and tooling: none of it is imported by the source.
 openspec
 docs
-scripts
+# `scripts/` is copied into the build stage (app.Dockerfile): the client's
+# typecheck covers `client/test`, and checkBake.test.ts imports the bake
+# script's core from there (`corpus-bake`, 2026-09-15).
 README.md
 CLAUDE.md
 .node-version
