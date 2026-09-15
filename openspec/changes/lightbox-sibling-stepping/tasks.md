@@ -65,9 +65,19 @@
       - `history.length` unchanged across a step (replace, D4); a `popstate` afterward still
         closes the lightbox (reuse `urlLightbox.test.tsx`'s `pop()`/`dialog()` helpers)
       - a close after stepping returns focus to the shown model's tile (D4)
-      - Falsify: drop the `everManipulated` guard → the no-orbit step wrongly persists; change
-        `replace` to a push → the history-length cell fails; drop the `goTo` snapshot bail →
-        the close-during-persist cell re-opens
+      - Tab on the FIRST model (Previous disabled, first in the ring) advances focus off the
+        dialog to the first ENABLED control, not dead-stopped (review FND-1)
+      - a second arrow during a step's persist is ignored — one persist of the leaving model,
+        one step advanced (review FND-4, `steppingRef`)
+      - Falsify (verified 2026-09-15): drop the `everManipulated` guard → the no-orbit step
+        wrongly persists; change `replace` to a push → the history-length cell fails; remove
+        `steppingRef` from `goTo`'s guard → the double-arrow cell double-persists; revert the
+        Tab trap to `querySelectorAll('button')` → the Tab-on-first-model cell fails. NOTE:
+        removing `goTo`'s snapshot bail ALONE does NOT re-open (App's `navigateSibling` mode
+        guard is the load-bearing half for the close case; ViewerLayer's `viewerRef`/`modeRef`
+        freeze on unmount) — the close-during-persist cell asserts the D3 OUTCOME and is
+        covered by `closingRef` + the App mode guard, not the bail; the bail is falsifiable
+        only for the second-step-lands-first case
 
 ## 4. Land it
 

@@ -289,4 +289,38 @@ describe('lightbox sibling stepping', () => {
     expect(document.activeElement).toBe(modelTile(M1)) // focus returned to the shown model
     back.mockRestore()
   })
+
+  it('Tab is not dead-stopped by a disabled end control (first model)', async () => {
+    // On the first model the Previous control is disabled and first in the dialog's
+    // button ring. `focus()` on a disabled button is a no-op, so a trap that kept it
+    // in the ring would loop back to the dialog forever. The trap must skip it.
+    await openModel(M0)
+    expect(prevButton().disabled).toBe(true)
+    expect(document.activeElement).toBe(dialog()) // focus grabbed on open
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab' }))
+    })
+    // Focus advanced off the dialog to the first *enabled* control (Next), not stuck.
+    expect(document.activeElement).not.toBe(dialog())
+    expect(document.activeElement).toBe(nextButton())
+  })
+
+  it('a second arrow during a step persist is ignored — no double persist', async () => {
+    await openModel(M0)
+    await orbit() // manipulated, so the step will persist; clears the release's write
+    const held = deferred<Record<string, unknown>>()
+    putThumb.mockReturnValueOnce(held.promise)
+
+    await pressArrow('ArrowRight') // goTo#1 parks at onPersist(held); a step is in flight
+    await pressArrow('ArrowRight') // goTo#2 sees the in-flight guard and returns at once
+
+    await act(async () => {
+      held.resolve({})
+    })
+    await wait(200)
+    await settle()
+
+    expect(cameraWrites(M0)).toHaveLength(1) // one persist of the leaving model, not two
+    expect(shownName()).toBe('m1.stl') // advanced exactly one step
+  })
 })

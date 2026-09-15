@@ -79,8 +79,13 @@ declined (issue #9, settled with Masa): a lightbox that silently loops gives no 
 reached the end, and folders here can be large. The end control is rendered **disabled**, not
 removed (settled with Masa 2026-09-14): a control that vanishes under the user's focus drops
 focus to `<body>` and empties the modal's focus trap, whereas a disabled control holds its
-place, shows the end plainly, and keeps the trap populated. The key for a `null` neighbour is
-a no-op — the lightbox stays open and unchanged.
+place and shows the end plainly. The key for a `null` neighbour is a no-op — the lightbox
+stays open and unchanged. A disabled button, though, cannot take focus, so the existing Tab
+trap — which cycled every `button` in the dialog — would `focus()` it to no effect and
+dead-stop there; on the first model the disabled Previous control is the ring's first button,
+which froze Tab entirely. The trap therefore skips disabled controls
+(`querySelectorAll('button:not([disabled])')`), which is what lets the disabled ends coexist
+with a working trap rather than break it.
 
 ### D3: A step persists like a close, before the swap, and survives a close landing mid-persist
 
@@ -92,15 +97,29 @@ App's `persist` captures `viewer.entry` before its awaits, which is still the le
 until the swap lands, so the leaving model's pixels file under the leaving model's path.
 
 The other half is the async window. During `onPersist`'s `putThumb`, a close affordance
-(Escape / ✕ / backdrop) can run the full teardown and `setViewer(null)`. `goTo` therefore
-snapshots the viewer it started on and, after its awaits, bails if the lightbox is gone or
-changed (`if (viewerRef.current !== started || modeRef.current !== 'lightbox') return`),
-following the file's own `dismissAfterPersist` idiom. And because the re-open effect is
-App's, App owns the matching half: `navigateSibling` refuses to commit unless a lightbox is
-still up (`viewerRef.current?.mode === 'lightbox'`), so a step that lost its race writes no
-`modelOpen` and cannot re-open the lightbox over the listing the user backed onto. An
-untouched view (`everManipulated` false) writes nothing, so arrowing through a folder without
-touching anything is free — and its `goTo` has no await to race.
+(Escape / ✕ / backdrop) can run the full teardown and `setViewer(null)`. Three guards cover
+it, in order of what actually catches each case:
+
+- **`closingRef`** (set at the top of `closeLightbox`) is the load-bearing one for a close
+  racing a step: `goTo` reads it before navigating and aborts, so a step in flight when the
+  close begins does not flash the neighbour on its way out. It is needed because ViewerLayer's
+  own `viewerRef`/`modeRef` are assigned during render and *freeze* once `setViewer(null)`
+  unmounts the component — so the "viewer gone/changed" check below cannot observe an unmount.
+- **App's `navigateSibling` mode guard** (`viewerRef.current?.mode === 'lightbox'`, on App's
+  ref, which App's render *does* keep updating) is the backstop: even if a step reaches the
+  commit after a close, App writes no `modelOpen`, so the re-open effect cannot resurrect the
+  lightbox over the backed-to listing. This — not ViewerLayer's own bail — is what a
+  falsification of the close-during-persist case actually exercises (removing it fails the
+  cell; removing the ViewerLayer bail alone does not, because of the ref freeze above).
+- **`goTo`'s snapshot-and-bail** (`viewerRef.current !== started || modeRef.current !==
+  'lightbox'`, the `dismissAfterPersist` idiom) earns its place for the *second step* landing
+  first: a viewer replaced while still mounted, which the frozen-ref problem does not touch.
+  A **`steppingRef`** in-flight guard makes that case deterministic too — a rapid double-press
+  during the persist window is ignored rather than starting a duplicate persist or ending on
+  the wrong model.
+
+An untouched view (`everManipulated` false) writes nothing, so arrowing through a folder
+without touching anything is free — and its `goTo` has no await to race.
 
 ### D4: The entry and the URL parameter move together
 

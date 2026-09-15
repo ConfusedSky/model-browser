@@ -326,7 +326,6 @@ function Grid({
     const tiles = gridRef.current ? tilesIn(gridRef.current) : []
     const idx = tiles.indexOf(document.activeElement as HTMLElement)
     if (idx === -1) return
-    e.preventDefault()
     const last = tiles.length - 1
     const cols = columnCount(tiles)
     let target = idx
@@ -345,6 +344,10 @@ function Grid({
       const up = idx - cols
       if (up >= 0) target = up
     }
+    // Only when focus actually moves (D3): an inert edge arrow (top-row Up,
+    // bottom-row Down, or an end) is left to the browser, so the page may scroll.
+    if (target === idx) return
+    e.preventDefault()
     tiles[target]?.focus()
   }
 

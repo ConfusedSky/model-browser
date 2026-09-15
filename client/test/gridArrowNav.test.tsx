@@ -98,6 +98,13 @@ describe('grid arrow-key focus movement', () => {
     const modified = await fireArrow('ArrowRight', { alt: true })
     expect(document.activeElement).toBe(tiles()[0])
     expect(modified.defaultPrevented).toBe(false)
+
+    // An inert edge arrow (ArrowLeft at the first tile) moves nothing, so it is
+    // left to the browser — not prevented, the page may scroll (D3).
+    tiles()[0]!.focus()
+    const edge = await fireArrow('ArrowLeft')
+    expect(document.activeElement).toBe(tiles()[0])
+    expect(edge.defaultPrevented).toBe(false)
   })
 
   it('steps by the live column count for Down and Up', async () => {

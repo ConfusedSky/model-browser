@@ -328,6 +328,14 @@ export default function ViewerLayer({
   modeRef.current = viewer.mode
   const viewerRef = useRef(viewer)
   viewerRef.current = viewer
+  // A close in progress (lightbox-sibling-stepping D3) and a step in progress.
+  // `goTo` awaits a persist before it navigates; a close landing in that window
+  // must abort the pending step (`closingRef`, set at the top of `closeLightbox`)
+  // so it does not flash the neighbour on its way out, and a second step in the
+  // window is ignored (`steppingRef`) so a rapid double-press neither double-
+  // persists nor lands on the wrong model. Never reset: a close unmounts.
+  const closingRef = useRef(false)
+  const steppingRef = useRef(false)
   /** In-flight settle→persist chain from the last drag release (D1). */
   const pendingPersistRef = useRef<Promise<void> | null>(null)
 
@@ -626,13 +634,27 @@ export default function ViewerLayer({
   const nextEntryRef = useRef(nextEntry)
   nextEntryRef.current = nextEntry
   async function goTo(entry: DirEntry): Promise<void> {
+    // Already closing, or a step's persist is still in flight — do nothing (D3):
+    // the first covers a close that raced the press, the second a rapid double
+    // press while the leaving model is being written.
+    if (closingRef.current || steppingRef.current) return
     const started = viewerRef.current
     const s = sessionRef.current
     if (s !== null && s.everManipulated) {
-      await s.settle(renderNow)
-      await onPersist(s)
+      steppingRef.current = true
+      try {
+        await s.settle(renderNow)
+        await onPersist(s)
+      } finally {
+        steppingRef.current = false
+      }
     }
-    if (viewerRef.current !== started || modeRef.current !== 'lightbox') return
+    // Bail if a close landed in the persist window, or the viewer was replaced or
+    // left the lightbox: App's `navigateSibling` also mode-guards the commit, so
+    // a lost race writes no `modelOpen` and cannot re-open over the backed-to list.
+    if (closingRef.current || viewerRef.current !== started || modeRef.current !== 'lightbox') {
+      return
+    }
     onNavigateRef.current(entry)
   }
   const goToRef = useRef(goTo)
@@ -663,7 +685,11 @@ export default function ViewerLayer({
         e.preventDefault()
         const dialog = containerRef.current
         if (dialog === null) return
-        const focusables = [dialog, ...dialog.querySelectorAll<HTMLElement>('button')]
+        // `:not([disabled])` — a disabled button (a prev/next control at an end,
+        // D2) cannot take focus, so `focus()` on it is a no-op and the trap would
+        // dead-stop there. On the first model the disabled Previous control is the
+        // first button in the ring, so without this Tab is inert in the lightbox.
+        const focusables = [dialog, ...dialog.querySelectorAll<HTMLElement>('button:not([disabled])')]
         const idx = focusables.indexOf(document.activeElement as HTMLElement)
         const next = e.shiftKey
           ? (idx - 1 + focusables.length) % focusables.length
@@ -695,6 +721,9 @@ export default function ViewerLayer({
   }, [viewer.mode, session])
 
   async function closeLightbox(): Promise<void> {
+    // Mark the close first (lightbox-sibling-stepping D3): a step whose persist is
+    // still awaiting must see this and abort rather than navigate on its way out.
+    closingRef.current = true
     const s = sessionRef.current
     // A close persists — camera, axis and pixels, like an orbit release — only
     // after the user manipulated the view (`pose-rerender` D4): an orbit, a

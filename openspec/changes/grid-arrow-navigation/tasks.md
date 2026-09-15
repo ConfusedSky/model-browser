@@ -21,8 +21,10 @@
       - `tiles()[0].focus()`; ArrowRight → `document.activeElement === tiles()[1]`; ArrowLeft
         → back to `tiles()[0]`
       - ArrowLeft at `tiles()[0]` stays; ArrowRight at the last tile stays (horizontal clamp)
-      - an arrow handled on a focused tile has `defaultPrevented` true; `Alt+ArrowRight` does
-        NOT move focus and is NOT prevented (D3)
+      - an arrow that MOVES focus has `defaultPrevented` true; `Alt+ArrowRight` does NOT move
+        focus and is NOT prevented; an inert edge arrow (ArrowLeft at the first tile) moves
+        nothing and is NOT prevented either — left to the browser so the page may scroll (D3,
+        review FND-5: `preventDefault` runs only when `target !== idx`)
       - stub `getBoundingClientRect` per tile to fake a 3-column layout, then: ArrowDown from
         `tiles()[1]` → `tiles()[4]`; ArrowUp from a top-row tile (not [0]) stays put; ArrowUp
         from `tiles()[4]` → `tiles()[1]`; ArrowDown from the last full row into a short final
@@ -32,7 +34,9 @@
         keydown never reaches the handler (container scoping, D3); the `idx === -1` check is a
         second, independent defense for non-tile focus that does reach the handler
       - Falsify (verified 2026-09-15): drop `preventDefault` → the defaultPrevented cell
-        fails; clamp Up-from-top to 0 instead of no-op → the top-row "no sideways" cell fails.
+        fails; clamp Up-from-top to 0 instead of no-op → the top-row "no sideways" cell fails;
+        remove the `if (target === idx) return` guard so `preventDefault` runs on an inert
+        edge arrow → the edge-not-prevented cell fails (FND-5).
         NOTE: moving the listener to `window` does NOT fail the find-input cell — with the
         `idx === -1` guard present, non-tile focus is rejected regardless of scoping, so the
         find input is protected by defense-in-depth (scoping + guard) and only the compound
