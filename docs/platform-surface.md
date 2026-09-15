@@ -81,6 +81,17 @@ contracts and placeholder rules: `openspec/changes/open-in-slicer/design.md` (L2
   Chrome dispatches it with `shiftKey` set and the app declines it. Keyboard raising
   is unaffected either way: a keyboard-dispatched `contextmenu` carries `button: -1`
   (Chrome 150) or `0`, never `2`.
+- **The demo bake and its pin check** (`corpus-bake`, `scripts/bake-demo.ts` and
+  `deploy/demo/check-bake.sh`): developer-machine and box assumptions, Linux only like
+  everything else here. The bake runs on the developer machine under Bun and drives a
+  Playwright Chromium it *finds*, never installs — `~/.cache/ms-playwright` (newest
+  first) for the browser and `~/.npm/_npx` for the library (`scripts/playwright-found.mjs`)
+  — and ships with `rsync` over `ssh` (`--exclude 'snapshots/'`, no `--delete`). The check
+  runs on the box, which carries nothing but the container engine, so it is POSIX `sh`
+  with `grep`, `sed` and `sha256sum` (no Bun, no `jq`); the same script is run by the
+  bake locally as its last step. `~/.cache` and `~/.npm` are the XDG-shaped user dirs of
+  the bullet above; `sha256sum` is coreutils (`shasum -a 256` on macOS) — none of it is
+  exercised anywhere but Linux.
 - **Content types**: the fixed extension→mime table (app-launch L6) is
   platform-neutral, but anything that would *consume* those mimes is registry-specific
   per the table above.

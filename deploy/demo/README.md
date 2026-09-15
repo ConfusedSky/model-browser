@@ -184,8 +184,9 @@ app restarted (the `up --build` below does that).
 
 `library.json` beside it must **not** travel. It is the library marker, and D4
 has the box write its own on first start: that id names the cache directory the
-bake fills, so a copied one would tie the box's cache to this machine's library
-identity.
+bake fills (§7 — which is why the bake comes after the first deploy, and why its
+rsync targets the box's id rather than this machine's), so a copied one would tie
+the box's cache to this machine's library identity.
 
 **3.3 The index** (~275 MB), from this machine:
 
@@ -214,6 +215,12 @@ docker compose -f deploy/demo/compose.yaml up -d --build
 The client build and the torch install happen here, on the box (D2): minutes on
 two vCPUs the first time, cached after. Compose builds before it swaps
 containers, so an existing stack serves through a rebuild.
+
+This is the one deploy line without §6's pin check in front of it, by
+construction rather than by exception: the check reads
+`/srv/cache/<id>/bake/bake.json`, and that id directory does not exist until the
+app has written its marker on this very start (D4) — the bake (§7) comes after,
+and every later `up` (§6) runs behind the check.
 
 ## 5. What to check
 
@@ -248,10 +255,15 @@ docker compose -f deploy/demo/compose.yaml logs app | grep -E 'client at|library
 Two things to look at in that second line. The path must be
 `/library/miniatures/decimated` — the index reports the same absolute path as
 its collection root, and if the two disagree the index silently covers nothing.
-And the `<id>` must **not** be the id in this machine's corpus marker
-(`.model-browser/library.json`, `5358d071-…` as of 2026-09-08): a different id is
-the proof that the marker was written on the box, as D4 intends, rather than
-copied in with the models.
+And the `<id>` is the box's own, minted under the decimated root on its first
+start there, and this line is where it is read — never assumed: §7's rsync
+targets `/srv/cache/<id>/` and §6's check reads the manifest under it. It must
+**not** be an id from this machine (`5358d071-…` is this machine's `clustered-hq`
+marker; the bake's own local id under `decimated` is read from `/api/library`):
+a different id is the proof that the marker was written on the box, as D4
+intends, rather than copied in with the models. Nor is it
+`54c0a4e9-d05b-4a53-8aad-e37a8b384422` any more — that was the `clustered-hq`
+era's box id, and its directory under `/srv/cache` is left behind.
 
 **The guard is alive.** A foreign `Origin` is the check, not a foreign `Host` —
 Caddy's site block never forwards a `Host` it does not serve:
@@ -297,45 +309,190 @@ unit to check.
 ## 6. Redeploy, and rollback
 
 ```sh
-cd /opt/model-browser && git pull && docker compose -f deploy/demo/compose.yaml up -d --build
+cd /opt/model-browser && git pull && \
+  sh deploy/demo/check-bake.sh /srv/cache/<id>/bake/bake.json /srv/index && \
+  docker compose -f deploy/demo/compose.yaml up -d --build
 ```
+
+The `<id>` is the one §5's startup line reports. The middle command is the bake's
+recipe pin (§7): it compares the checkout's `RIG_VERSION` and `POSE_VERSION` with
+the ones the shipped store was rendered under, and the SHA-256 of
+`/srv/index/pose-cache.json` and `run-params.json` with the ones the bake hashed,
+and exits non-zero on any disagreement. The `&&` is the refusal: the build does
+not start and the running stack keeps serving — nothing is half-deployed. What to
+do about it is a re-bake (§7) from the checkout you meant to deploy, shipped
+before the `up` is retried. There is no override flag; leaving the check off the
+line is the shell history's record that a build whose every tile re-renders on
+every visit, for every visitor, was chosen. A `commit: checkout <a>, bake <b>`
+line is information, not a refusal: at equal versions the recipe says the pixels
+are the same, and a copy change does not cost an eleven-minute bake.
+
+A redeploy that moves `root` in `config.json` is the first deploy again for the
+check's purposes: the box mints a new id on that start and no manifest can exist
+under it yet, so that one deploy runs without the check, like §4, and the bake
+(§7) follows it.
 
 A configuration change is the same command: `config.json` is committed and
 mounted from the checkout (D6), so it arrives with the code and is reviewed like
 it.
 
-Rollback is a checkout and the same command:
+Rollback is a checkout and the same command, check included:
 
 ```sh
-cd /opt/model-browser && git checkout <rev> && docker compose -f deploy/demo/compose.yaml up -d --build
+cd /opt/model-browser && git checkout <rev> && \
+  sh deploy/demo/check-bake.sh /srv/cache/<id>/bake/bake.json /srv/index && \
+  docker compose -f deploy/demo/compose.yaml up -d --build
 ```
+
+A rollback across a `RIG_VERSION` or `POSE_VERSION` bump is refused the same way,
+for the same reason: the store on the box was baked under the newer recipe, and
+the older client would re-render every tile on every visit. It needs that
+revision's bake — run from the checkout at `<rev>` and shipped (§7) — before the
+`up`. A `<rev>` older than the check itself has no script to run and the line
+refuses on that too; such a revision predates the bake, and a rollback to it is
+§4's case.
 
 Either way the corpus, the caches, the embeddings, the checkpoint and the
 certificate are untouched — none of them is in an image. `docker compose down`
 stops the stack and keeps every volume; `down -v` would destroy the checkpoint
 and the certificate, so it is never the command you want here.
 
+What no redeploy touches because it is not on the box at all: a visitor's
+framings live in their browser's `localStorage` (`thumbWrites` is off). Since
+`file-frame-spindle` the stored axis is the model file's own, and a framing held
+from before that change reads a quarter turn off — expendable, per-browser
+conveniences the demo never promised to keep.
+
 ## 7. The bake, and its recipe pin
 
-The corpus is baked (`web-demo-backlog` 1.7) **after** the app's first start on
-the box: the bake writes into `$CACHE_DIR/<library id>/`, and that id does not
-exist until the app has written the marker (D4).
+The corpus is baked **after** the app's first start on the box (§4): the store
+ships into `$CACHE_DIR/<box id>/`, and that id does not exist until the app has
+written the marker (D4, §3.2). It is run from this machine — the box carries
+nothing but the container engine — by `scripts/bake-demo.ts`
+(`openspec/changes/corpus-bake/design.md`, D1–D6; cited as such below):
 
-The pin that matters, from `public-deployment`'s Risks (2026-09-07): with
-`thumbWrites` off, a visitor's client cannot heal a stale cache. If the client
-that ships has a `RIG_VERSION` newer than the bake's, every tile re-renders on
-every visit, for every visitor, forever. So:
+```sh
+bun run scripts/bake-demo.ts --root <corpus top> --cache <scratch cache dir> \
+  --index-cache <the index's cache dir> [--port 3199] [--client <scratch build dir>] \
+  [--ship <user@host> --ship-dir /srv/cache/<box id>]
+```
 
-A visitor's framings live in their browser's `localStorage` (`thumbWrites` is off). Since
-`file-frame-spindle` the stored axis is the model file's own, and a framing held from
-before that change reads a quarter turn off — expendable, per-browser conveniences the
-demo never promised to keep.
+For the demo `--root` is `~/Documents/tests/test-models/miniatures/decimated` (the
+tree the box serves, §3.2), `--cache` a scratch directory that is not
+`~/.cache/model-browser` (the bake's own instance mints a library id under
+`decimated` and fills `<cache>/<local id>/`; the script reads that id from
+`/api/library`, never assumes it), and `--index-cache` the cache directory the
+index was started on. The script builds the client to a scratch directory (never
+`client/dist`, which the dev instance on 3177 serves), starts its own server on
+`--port` with writes and maintenance on, drives *Generate* in a headless Chromium
+twice — once per occlusion pill state, each pass settled at `Generated 0 of 0`
+before the pill is toggled — verifies every sidecar and both renders on disk
+against the enumeration, audits every unposed render against the index, writes
+the manifest, runs the check below on it, and prints the ship commands (or runs
+them under `--ship`). Its server is killed on every exit path, so a `Ctrl-C`
+leaves the scratch port free; the dev instance on 3177 is untouched throughout.
 
-* bake with the **client build that ships**, and
-* **re-bake before deploying a build whose `RIG_VERSION` has moved.**
+**The index precondition.** The index must be running with its collection root at
+`decimated` — the tree the demo ships, not the `deduplicated` tree its
+`run-params.json` records — and it is the user's to start, not the script's:
 
-`config.json` is JSON and can carry no comment saying so, which is why it is said
-here.
+```sh
+cd ~/Documents/tests/mini-classify && .venv/bin/python serve_api.py \
+  ~/Documents/tests/test-models/miniatures/decimated \
+  --cache-dir embed-cache-test --no-volume --port 8077
+```
+
+`MODEL_BROWSER_INDEX` overrides the index's base URL (default
+`http://127.0.0.1:8077`). The script draws no render until two checks pass.
+Through its own instance, `/api/semantic/status?fresh=true` must be `ready` with
+`collectionRoot: '/'` — an index rooted at any other tree asks for no poses and
+bakes every render unposed, corpus-wide, and a stray marker *above* `decimated`
+(a `.model-browser/library.json` left in `test-models`) reads `/miniatures/decimated`
+here instead of `/`, with every sidecar keyed wrong for the box; one check, both
+mistakes. And directly, the index's own `/status` must be `ready` with a
+`cache_dir` naming `--index-cache` (an absolute one equal to its realpath, a
+relative one equal to its basename) — which is what ties the manifest's
+fingerprint to the index that actually framed the renders. That answer's
+`n_models`, `views`, `elevations` and `up_axis` go into the manifest.
+
+**What ships, and what does not** (D4). The local id directory, whole, minus
+`snapshots/` — the sidecars, both renders per model and `bake/` — into the
+**box's** id directory, whose name differs and is read from §5's startup line:
+
+```sh
+rsync -az --info=progress2 --exclude 'snapshots/' \
+  <scratch cache>/<local id>/ root@<ip>:/srv/cache/<box id>/
+ssh root@<ip> 'cd /opt/model-browser && docker compose -f deploy/demo/compose.yaml restart app'
+```
+
+Both trailing slashes, no `--delete`: nothing on the box is removed by a ship, and
+a stale sidecar is overwritten by key. The script prints this pair with both ids
+filled in, since the id mapping is the part a hand gets wrong. `snapshots/` stays
+behind because the tree snapshot is the box's own, with its own root and stats.
+Nothing else needs shipping: contact sheets are derived in memory per listing, and
+poses are the index's, already under `/srv/index`. Before the rsync, `stat` a
+shipped model inside the app container and confirm its mtime equals this
+machine's copy to the nanosecond — a sidecar is a hit only where path and `mtime`
+agree, and a box still serving other bytes reads every shipped tile `stale`,
+which no visitor can heal.
+
+**The restart** is for the first listing, not for correctness (D3).
+`ThumbCache.read` goes to disk on every call, so the files are served the moment
+they land. What a restart buys is the startup sweep (`maintain`), which
+re-remembers every sidecar: without it, every path the box's process has ever
+looked up and found absent stays memoised as absent, the first listing of it
+annotates `miss`, and each such tile pays one JSON lookup before it reaches the
+image route. The sweep runs in the background after start; give it a minute
+before measuring a first visit.
+
+**The manifest** is `/srv/cache/<box id>/bake/bake.json` (D2): the recipe (`rig`,
+`poseVersion`, `lighting`, `size`), the client commit and whether the tree was
+dirty, the counts (models, renders per variant, posed and unposed), the rates, and
+what the index's `/status` said beside the SHA-256 of its `pose-cache.json` and
+`run-params.json`. It lives in `bake/`, not beside the sidecars, because both
+store sweeps parse every `*.json` at their level as a sidecar: at the cache top a
+stranger is removed by the legacy sweep; at the id level one with no `path` is
+skipped with a `console.warn` naming it and left on disk (`maintain`'s guard,
+`corpus-bake` 1.7). Before that guard the startup sweep threw on such a file
+silently and left every sidecar after it unremembered — so a `maintain` warning in
+`docker compose logs app` after a restart means a `bake.json` was copied up a
+level; move it back. It is never deleted at the id level.
+
+**What triggers a re-bake** (D6) — three things, all unhealable on the box because
+`thumbWrites` is off:
+
+* `RIG_VERSION` or `POSE_VERSION` moves — every stored render fails on every visit
+  for every visitor; the check refuses the redeploy until the store is re-baked.
+* The corpus changes — a new kit (no sidecar; a miss the client renders per visit)
+  or a re-exported file (its mtime moves and the sidecar reads `stale`). *Generate*
+  is incremental, so the re-bake renders only what changed — but it must be run.
+* The index's poses change, **by re-embedding or by view configuration** — a pose
+  is a function of both `pose-cache.json` and `run-params.json` (whose `views` and
+  `elevations` key the `front` each entry resolves to, from which the render's
+  `poseKey` derives), which is why the fingerprint hashes both files and a §3.3
+  rsync that changes either is refused at the next redeploy.
+
+**The pin** is `sh deploy/demo/check-bake.sh <manifest> [<index dir>]`, POSIX `sh`
+over `grep`, `sed` and `sha256sum` because the box has no Bun. It compares four
+values — the checkout's `RIG_VERSION` and `POSE_VERSION` against the manifest's
+`rig` and `poseVersion`, and the SHA-256 of `<index dir>/pose-cache.json` and
+`run-params.json` against the manifest's — exits 0 silently when all agree, else
+names each disagreement (`rig: checkout 8, bake 7`) and exits 1; a missing
+manifest is exit 1 too. It also prints `commit: checkout <a>, bake <b>` when the
+commits differ, which never moves the exit code: equal versions are the recipe's
+own statement that the pixels are the same. The bake runs it locally as its last
+step against the manifest it just wrote, and §6 runs it on the box in front of
+both its lines, redeploy and rollback — which is how "bake with the client build
+that ships, and re-bake before a build whose `RIG_VERSION` has moved" stopped
+being a sentence in this file and became a command that refuses. `config.json` is
+JSON and can carry no comment saying any of this, which is why it is said here.
+
+**The figures** — models, renders, rates, bytes shipped and the first-visit counts
+— are the live run's and are recorded where they can be re-read, not here:
+`openspec/changes/corpus-bake/tasks.md` 3.2, 4.1 and 4.3, and
+`docs/web-demo-notes.md` item 8 once it ships. The 2026-09-14 run on
+`clustered-hq` (design D-cost) is the cost scale only: its store reads `stale`
+against the decimated corpus and cannot ship.
 
 ## 8. Rehearsing locally (D8)
 

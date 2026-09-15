@@ -45,8 +45,10 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   `cd <mini-classify checkout> && .venv/bin/python serve_api.py [<collection root>] --cache-dir <cache> [--no-volume] --port 8077`
   — the positional root overrides the one recorded in the cache's `run-params.json`
   (the demo corpus was embedded from `miniatures/deduplicated`; serving it for
-  `clustered-hq`, as the box does, needs the positional root, and `--no-volume` serves
-  poses from the records without reading files). The checkout location and which
+  `decimated`, as the box does since 2026-09-15, needs the positional root, and `--no-volume`
+  serves poses from the records without reading files — the root is a string prefix
+  over the cache's records, so no model file is read and the answers do not depend on
+  the bytes under it). The checkout location and which
   embedding cache holds which collection are machine-specific, so they live outside the
   repo; ask the running server's `/status` which cache and root it loaded rather than
   assuming. It answers `/status` at once with
@@ -226,7 +228,15 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
     Alongside it: `{mtime, lighting, rig, posed, poseKey}` — grep those to verify a RIG_VERSION
     sweep; `poseKey` is the orientation a posed render was drawn under (`pose-rerender`).
     `rm -rf` the id directory (or the whole cache dir) to force re-renders during visual
-    tuning
+    tuning. `bake/` under the id directory is the demo bake's manifest's home
+    (`corpus-bake`: `<id>/bake/bake.json`, the only subdirectory there besides
+    `snapshots/`), because both store sweeps parse every `*.json` at their level as a
+    sidecar: a `*.json` at the cache **top** is removed by the legacy sweep
+    (`sweepLegacy`, the flat directory's rule); one at the **id level** with no `path` is
+    skipped with one `console.warn` naming it and left on disk (`maintain`'s guard, since
+    `corpus-bake` 1.7 — before it, the startup sweep threw on that file silently and left
+    every sidecar listed after it unremembered, so a `cp bake/bake.json .` while
+    inspecting cost the first listing its `hit` annotations with nothing saying so)
   - Orbit E2E persists path-keyed cameras — tile thumbnails later re-render from the new
     angles; that is not a pixel regression. The orbit's pointerup also queues a full
     thumbnail re-render (persist), so wait ~5s before frame-time measurements. A lightbox
