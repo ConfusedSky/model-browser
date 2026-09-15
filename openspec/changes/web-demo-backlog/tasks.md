@@ -57,9 +57,9 @@
       volumes, the config file bind-mounted from the checkout, a `local` profile to
       rehearse here first. **Applied 2026-09-08 and deployed 2026-09-09 — archived**:
       https://models.masamaeda.com is up on the CX23 behind Caddy with a Let's Encrypt
-      certificate, every runbook check passing from outside; the thumbnails are **not yet
-      baked** (1.7), so until then every visitor renders every tile in their own browser
-      and nothing persists. `deploy/demo/config.json` was written in full by
+      certificate, every runbook check passing from outside; the thumbnails were **not
+      baked** until 2026-09-15 (1.7), so until then every visitor rendered every tile in
+      their own browser and nothing persisted. `deploy/demo/config.json` was written in full by
       `public-deployment`
 - [ ] 1.5 *(drafted 2026-09-15 as `landing-page` — proposal, design, `visitor-intro` plus
       `feature-report` and `library-overrides` deltas, tasks; folds in issues #12 and #15
@@ -86,8 +86,16 @@
       against the applied spec rather than against what that requirement said before.
       Carries the print warning: downloads are decimated display copies, print from the
       source — at the Download action itself, not only on the About page (notes item 4)
-- [ ] 1.7 the corpus bake — preview paths attached to dir entries (the decided shape);
-      rides `listing-tree-cache` and `bulk-thumbnail-jobs`
+- [x] 1.7 the corpus bake — preview paths attached to dir entries (the decided shape);
+      rides `listing-tree-cache` and `bulk-thumbnail-jobs`. **Done 2026-09-15 as
+      `corpus-bake`**: `scripts/bake-demo.ts` builds the shipping client, owns its own
+      server, drives both occlusion passes headless, verifies every sidecar on disk,
+      audits every unposed render against the index and writes `bake/bake.json`;
+      `deploy/demo/check-bake.sh` pins the redeploy and the rollback to that manifest's
+      recipe and the index's two pose files. The run: 3,122 models, 6,244 WebP renders in
+      796 s (8.8 and 7.1 renders/s), 2,976 posed with a `poseKey`, 146 settled-null,
+      33.3 MB shipped in 9,367 files. Measured on the live host, cold, both `ssao`
+      states: **0 thumbnail lookups, 0 mesh fetches, 0 client renders**.
 - [ ] 1.8 the credits page — **downgraded to a courtesy that rides the landing page
       (1.5), 2026-09-14** (`credits-completion`): the licences ask for attribution "in any
       reasonable manner", and the lightbox is where each work is shown, so attribution is

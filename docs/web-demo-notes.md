@@ -31,9 +31,14 @@ impression and the link never being dead outrank everything else.
 
 **Live since 2026-09-09: https://models.masamaeda.com** — the CX23 in Falkenstein, three
 containers behind Caddy (`demo-infrastructure`, archived; the operator's steps are
-`deploy/demo/README.md`). Not yet baked (backlog 1.7), so every tile still renders in
-the visitor's browser; the landing page, the context-menu actions and the credits page
-(1.5, 1.6, 1.8) are still to come.
+`deploy/demo/README.md`). **Baked and shipped 2026-09-15** (`corpus-bake`, backlog 1.7):
+3,122 models, both occlusion variants, 6,244 WebP renders and the manifest under the box's
+id directory, so a first visit draws every tile from the immutable image route instead of
+rendering it in the visitor's browser. Measured cold from this machine on the day, on the
+root screen and on one kit, under both `ssao` states: **0 `/api/thumb` lookups, 0
+`/api/file` mesh fetches, 0 client renders** — against 2026-09-05's 114 tiles and 9.62 MB
+of PNG. The landing page, the context-menu actions and the credits page (1.5, 1.6, 1.8)
+are still to come.
 
 ## Drafted (2026-08-28) — these supersede the items they cover
 
@@ -401,7 +406,9 @@ own origin"; only its body hardcodes loopback.
    (two-render sibling cache, no migration; being implemented 2026-08-31) —
    locally, switching keeps the
    other variant (instant switch-back, LRU-bounded); on the demo, bake both
-   AO variants (the deployment change's sweep runs once per preference) at one lighting mode (~270 MB each at the observed ~120 KB/PNG;
+   AO variants (the deployment change's sweep runs once per preference) — **done
+   2026-09-15, `corpus-bake`: 6,244 renders, 34.0 MB apparent on disk, a good deal under
+   the projection below because the store is WebP, not PNG** — at one lighting mode (~270 MB each at the observed ~120 KB/PNG;
    1,705 cached here = 205 MB). Keyed-by-recipe would also allow the lighting
    menu to stay visible on the demo if all four variants were baked (~1.1 GB)
    — moot if item 9 removes the lighting pill. Hard ordering: after

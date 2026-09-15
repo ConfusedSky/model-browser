@@ -601,6 +601,27 @@ the larger of the two on this corpus (`CatfolkRogue.stl` 2.5 MB against 1.46 MB)
 load shares the render queue, so task 3.2 records its own figures rather than reproducing
 these.
 
+**Measured on `decimated` — the script's own run, 2026-09-15.** The shipping bake.
+796 s wall on this machine, headless SwiftShader Chromium, a scratch instance on 3199
+rooted at `decimated` with writes on, the index at 8077 on `embed-cache-test` rooted at
+`decimated` with `--no-volume` (`n_models: 2976`). **3,122 models** enumerated — the
+corpus holds 3,122 `*.stl`, and the 3,121 above is the 2026-09-14 run's own count, one
+short of its own tree. Pass 1 (noao) 3,122 renders in 355 s = 8.8/s; pass 2 (ao) 3,120 in
+437 s = 7.1/s; zero non-200 PUTs. On disk: 3,122 sidecars, 6,244 WebP, 34.0 MB apparent,
+57 MB by `du`; `rig` ∈ {7}, `lighting` ∈ {camera}, **2,976 posed with a `poseKey` on both
+renders, 146 unposed and every one present-and-`null` from the index** — step 8's audit
+passed by the script rather than by hand. `check-bake.sh` passed; the ship moved 9,367
+files and 33,300,403 bytes in 8 s. The rate is below the clustered-hq run's because
+decimated's meshes are the larger ones (2.5 MB against 1.46 MB on `CatfolkRogue.stl`) and
+mesh load shares the render queue, as predicted.
+
+**What this run proved about step 6, live.** After the `ssao` pill toggled, the button's
+own count read zero while the entire ao variant was still unrendered, and the by-hand
+pose wave found the work — `pass 2 (ao) the pose wave found 3109 more`. A stopping rule
+that trusted the bare count would have ended pass 2 there and shipped an empty ao
+variant. The correction recorded in D1 step 6 is not a paper equivalence; it is what made
+the second half of this bake happen.
+
 ## Risks / Trade-offs
 
 - **The check reads source by pattern.** A refactor that spells `RIG_VERSION` any other
