@@ -62,7 +62,11 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
     if (id !== '') document.getElementById(id)?.scrollIntoView()
   }, [creditsSettled])
   return (
-    <main className="mx-auto max-w-3xl p-6 text-zinc-200">
+    // The app's root sets the dark ground on its own top-level element rather
+    // than on `body`, and this document has no such element — without a ground
+    // of its own the page rendered light text on white (seen on 5174).
+    <main className="min-h-screen bg-zinc-950 text-zinc-200">
+      <div className="mx-auto max-w-3xl p-6">
       {/* The way back, first and unmissable: a plain anchor to the library's
           top, because the app has one route and `/` is it. */}
       <a href="/" className="text-sm text-sky-400 hover:underline">
@@ -362,6 +366,7 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
         </p>
         <CreditsList api={api} onSettled={() => setCreditsSettled(true)} />
       </Section>
+      </div>
     </main>
   )
 }
