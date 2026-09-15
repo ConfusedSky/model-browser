@@ -1,10 +1,10 @@
 ## 1. The sibling list and the step handler (App)
 
-- [ ] 1.1 `App.tsx`: `modelSiblings = useMemo(() => shownEntries.filter((e) => e.kind ===
+- [x] 1.1 `App.tsx`: `modelSiblings = useMemo(() => shownEntries.filter((e) => e.kind ===
       'model'), [shownEntries])`. Where `<ViewerLayer>` renders, resolve the current index by
       `viewer.entry.path`; derive `prevEntry` / `nextEntry` as the neighbour or `null`, and
       when the index is `-1` BOTH are `null` (D1 — no teleport to `siblings[0]`)
-- [ ] 1.2 `App.tsx`: `navigateSibling = useCallback((entry: DirEntry) => { if
+- [x] 1.2 `App.tsx`: `navigateSibling = useCallback((entry: DirEntry) => { if
       (viewerRef.current?.mode !== 'lightbox') return; setViewer((v) => v ? { ...v, entry,
       originEl: tileFor(entry.path) ?? v.originEl } : v); commit({ type: 'modelOpen', path:
       entry.path }, { replace: true, state: window.history.state }) }, [commit])` (D3/D4).
@@ -15,24 +15,24 @@
 
 ## 2. Keys, affordances, persist-on-step, state reset (ViewerLayer)
 
-- [ ] 2.1 `ViewerLayer.tsx`: add `onNavigate`, `prevEntry`, `nextEntry` to `Props`; read all
+- [x] 2.1 `ViewerLayer.tsx`: add `onNavigate`, `prevEntry`, `nextEntry` to `Props`; read all
       three, and `goTo`, through refs updated on render (NOT in the key effect's deps — D6)
-- [ ] 2.2 `ViewerLayer.tsx`: `async function goTo(entry)` — snapshot the current viewer
+- [x] 2.2 `ViewerLayer.tsx`: `async function goTo(entry)` — snapshot the current viewer
       (`const started = viewerRef.current`), run `closeLightbox`'s branch (`if
       (s?.everManipulated) { await s.settle(renderNow); await onPersist(s) }`), then bail if a
       close raced in (`if (viewerRef.current !== started || modeRef.current !== 'lightbox')
       return`) before `onNavigateRef.current(entry)` (D3). One handler; a key and a button
       both call it
-- [ ] 2.3 `ViewerLayer.tsx`: the session effect clears `setSession(null)` and
+- [x] 2.3 `ViewerLayer.tsx`: the session effect clears `setSession(null)` and
       `setLoadError(null)` at its top on an entry change, so a step draws a spinner and not
       the leaving model's frame or a stale error (D5)
-- [ ] 2.4 `ViewerLayer.tsx`: in the lightbox `onKey`, beside Escape/Tab, handle `ArrowLeft`
+- [x] 2.4 `ViewerLayer.tsx`: in the lightbox `onKey`, beside Escape/Tab, handle `ArrowLeft`
       → `goTo(prevEntryRef.current)` and `ArrowRight` → `goTo(nextEntryRef.current)` — return
       early on `altKey || ctrlKey || metaKey` (leave Alt+Arrow to the browser), guard on
       `menuOpen.current` as Escape does, `preventDefault`, and no-op when the target is
       `null`. Make the effect's `containerRef.current?.focus()` conditional on the dialog not
       already containing `document.activeElement` (D6). Deps stay `[viewer.mode, session]`
-- [ ] 2.5 `ViewerLayer.tsx`: render two arrow buttons as siblings of the canvas host inside
+- [x] 2.5 `ViewerLayer.tsx`: render two arrow buttons as siblings of the canvas host inside
       the square viewer container — previous left, next right, absolutely positioned and
       centred, above the canvas, `type="button"`, `aria-label` "Previous model" / "Next
       model", `disabled` when the neighbour is `null` (D2); both call `goTo`. Confirm a click
@@ -41,7 +41,7 @@
 
 ## 3. Tests
 
-- [ ] 3.1 `client/test/lightboxPrevNext.test.tsx` (new), harness `mountApp`, listing with
+- [x] 3.1 `client/test/lightboxPrevNext.test.tsx` (new), harness `mountApp`, listing with
       several models plus an interleaved dir and zip:
       - open a middle model (`pressEnter` on its tile); `[role="dialog"]` present
       - `dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }))` in `act` → dialog
@@ -71,7 +71,7 @@
 
 ## 4. Land it
 
-- [ ] 4.1 `cd client && bunx vitest run` and `bun run typecheck` green
+- [x] 4.1 `cd client && bunx vitest run` and `bun run typecheck` green
 - [ ] 4.2 Manual on 5173 (not 3177 — it may serve a stale `dist/`): open a folder with
       several models, open one, ArrowLeft/ArrowRight and click both arrows — the lightbox
       steps without closing, interleaved non-models are skipped, the end controls are

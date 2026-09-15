@@ -117,12 +117,15 @@ rather than "undo one arrow press", and carrying `window.history.state` forward 
 `LIGHTBOX_ENTRY` marker the close path reads. The history-push effect does not double-fire: it
 early-returns while the mode stays `'lightbox'`.
 
-`originEl` is updated to the shown model's own tile (found by `data-entry-tile` for the path,
-all tiles being mounted), so a close after stepping returns focus to the model on screen
-rather than to the tile the lightbox first opened from (settled with Masa 2026-09-14); with
-grid arrow navigation landing beside this, leaving focus twenty tiles away from the last model
-viewed would be the wrong place to resume. When the tile is not found (a filtered or
-off-screen sibling), `originEl` is left as it was.
+`originEl` is updated to the shown model's own tile, so a close after stepping returns focus
+to the model on screen rather than to the tile the lightbox first opened from (settled with
+Masa 2026-09-14); with grid arrow navigation landing beside this, leaving focus twenty tiles
+away from the last model viewed would be the wrong place to resume. The tile is found by
+reusing `findTile(scroller, path)` from `lib/placement.ts` — exported for this (it already did
+the exact match-by-`data-entry-tile`-attribute-value the reveal placement needs, avoiding a
+CSS attribute selector because paths carry `!/`, spaces and quotes) rather than hand-writing a
+second copy. It is called with `mainRef.current` as the scroller; when that is null or the
+tile is not found (a filtered or off-screen sibling), `originEl` is left as it was.
 
 ### D5: A step resets the viewer's own state so the neighbour draws a spinner
 
