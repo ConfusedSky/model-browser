@@ -309,6 +309,29 @@ own origin"; only its body hardcodes loopback.
    measurements: like the chips, each example is verified against the live index
    before it becomes copy, and a limitation that stops reproducing is dropped rather
    than kept as lore. The section is backlog 1.5's to draft with the rest of About.
+   **Checked against mini-classify 2026-09-15** (`docs/learnings/queries-and-filters.md`,
+   `src/query.py`), which changes (i) and grounds a piece of (ii)/(iii). **(i) is wrong as
+   written: search does not always answer.** `min_score` defaults to 0.10 in this app, and a
+   query where nothing clears the floor returns an empty grid — model-browser draws its own
+   "Nothing matched" for it (`App.tsx`, the three-outcome empty state). The true shape is two
+   outcomes chosen by the floor: nothing clears it, or something scrapes over and is returned
+   as the least-far thing. Nor is `weak` the marker for the second: it is the index's,
+   `z[best] < WEAK_Z` with `WEAK_Z = 2.0` over a robust median/MAD z of the collection's own
+   spread, and upstream sets it deliberately low to catch **only unambiguous noise** —
+   measured there, correct "skeleton" hits ran z 2.4–2.7 while a wrong-but-nearest "witch on
+   a broomstick" hit a mounted rider at 3.7, so **no cutoff separates a modest correct match
+   from a near-miss** and a confident wrong answer arrives unflagged by design. That
+   measurement is the upstream half of (ii)/(iii): its own reading is that near-misses are
+   **often semantically legitimate** ("wizard with a staff" → an orc shaman, who carries a
+   staff), i.e. treat a threshold as UX, not truth — the Limitations section's own argument
+   arrived at from the other side. The averaging and part-by-part examples themselves are
+   still unmeasured upstream; nothing there records them, so the observations-not-measurements
+   caveat stands for those two. Two asides worth keeping: `raw` (the "phrase as written"
+   switch) matters because **cosines are comparable only within one query** — some phrasings
+   run hot, some cold — which is why a raw-score floor is a blunter instrument than it looks;
+   and upstream's tag filter once matched `"supported"` inside `"unsupported"`, which in
+   miniature packs means the opposite — the reason a README example must not ask about
+   supports at all.
    **Relayed from another session 2026-09-03 and verified against the code before being
    kept** (the one claim that did not hold is noted last): (i) **Ctrl+F is the one
    keybinding the copy must mention** — the app binds Ctrl/Cmd+F on window keydown to the
