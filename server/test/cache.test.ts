@@ -828,6 +828,41 @@ describe('ThumbCache under a library', () => {
     expect(res.axis).toBeUndefined()
     expect(readdirSync(join(base, 'lib-gone'))).toHaveLength(0)
   })
+
+  it('skips a stranger *.json with no `path` (a manifest copied up from bake/) rather than aborting the sweep', async () => {
+    const base = tempDir('mb-cache-')
+    const lib = makeLibraryTree('lib-stranger')
+    // Two more real models beside `makeLibraryTree`'s own, at paths whose
+    // sha256 keys sort either side of "bake.json" under Node's sorted
+    // `readdir` — so the stranger lists between the two sidecars below.
+    // Nothing here asserts an order beyond that; it only puts the stranger
+    // where an unguarded loop would reach it before the second sidecar.
+    const beforePath = '/kits/a/aaa.stl'
+    const afterPath = '/kits/a/m1.stl'
+    writeFileSync(join(lib.top, 'kits', 'a', 'aaa.stl'), 'aaa bytes')
+    writeFileSync(join(lib.top, 'kits', 'a', 'm1.stl'), 'm1 bytes')
+
+    const cache = new ThumbCache(base, CAP, 32, libraryFor(lib.top))
+    await cache.put(beforePath, { mtime: 1, png: PNG_A })
+    await cache.put(afterPath, { mtime: 1, png: PNG_B })
+    const idDir = join(base, 'lib-stranger')
+    // A manifest, not a sidecar: parses fine, carries no `path`.
+    writeFileSync(join(idDir, 'bake.json'), JSON.stringify({ rig: 3 }))
+
+    // A fresh cache, so `annotate` below reflects what this `maintain()`
+    // itself learned rather than what `put` already remembered.
+    const resumed = new ThumbCache(base, CAP, 32, libraryFor(lib.top))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      await resumed.maintain()
+      expect(resumed.annotate(beforePath, 1)).toBeDefined()
+      expect(resumed.annotate(afterPath, 1)).toBeDefined()
+      expect(existsSync(join(idDir, 'bake.json'))).toBe(true)
+      expect(warn).toHaveBeenCalledTimes(1)
+    } finally {
+      warn.mockRestore()
+    }
+  })
 })
 
 /**

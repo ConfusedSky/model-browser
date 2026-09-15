@@ -816,6 +816,19 @@ export class ThumbCache {
       const key = f.slice(0, -'.json'.length)
       const meta = await this.readMeta(dir, key)
       if (meta === null) continue
+      // A `*.json` here need not be a sidecar `put` wrote — this change puts
+      // `bake/bake.json` beside them, and a hand inspecting the id directory
+      // can copy it up a level (`cp bake/bake.json .`). That parses fine and
+      // carries no `path`, so `sourceExists` below would throw out of
+      // `library.resolve(undefined)` and abort the sweep for every sidecar
+      // listed after it. Skip it here, before it can join `metas` for the
+      // cap pass either. `sweepLegacy`/`migrate` need no equivalent: their
+      // `parseVPathSafe(undefined)` already answers null, so the file is
+      // just removed — the flat pre-library directory's rule, not this one's.
+      if (typeof meta.path !== 'string') {
+        console.warn(`maintain: ${this.metaFile(dir, key)} has no path, skipping`)
+        continue
+      }
       if (!(await this.sourceExists(meta.path))) {
         await rm(this.metaFile(dir, key), { force: true })
         await rm(this.renderFile(dir, key, true), { force: true })
