@@ -48,6 +48,19 @@ function Out({ href, children }: { href: string; children: ReactNode }): ReactNo
 }
 
 export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
+  // The document's sections exist only once React has rendered them, which is
+  // after the browser has already looked for the URL's fragment and found
+  // nothing — so a link to `#credits` opened cold landed at the top (found on
+  // 5173, 2026-09-15). The page scrolls itself, twice: once after mount, and
+  // again when the credits list settles — the section is the last on the page,
+  // and while its list still says "Loading…" there is not enough document below
+  // it for the browser to bring it to the top (measured: 2190 px scrolled, the
+  // section still 758 px down). The second scroll, over the filled list, lands it.
+  const [creditsSettled, setCreditsSettled] = useState(false)
+  useEffect(() => {
+    const id = window.location.hash.slice(1)
+    if (id !== '') document.getElementById(id)?.scrollIntoView()
+  }, [creditsSettled])
   return (
     <main className="mx-auto max-w-3xl p-6 text-zinc-200">
       {/* The way back, first and unmissable: a plain anchor to the library's
@@ -347,7 +360,7 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
           Every model is credited in the panel beside it when you open it in the browser. This
           list is the same credits for the whole corpus in one place.
         </p>
-        <CreditsList api={api} />
+        <CreditsList api={api} onSettled={() => setCreditsSettled(true)} />
       </Section>
     </main>
   )
@@ -368,21 +381,37 @@ type CreditsState =
  * there is nothing running server-side to stop, and the only thing that can
  * supersede this read is the page going away.
  */
-export function CreditsList({ api }: { api: ApiClient }): ReactNode {
+export function CreditsList({
+  api,
+  onSettled,
+}: {
+  api: ApiClient
+  /** Called once the read has answered either way — the page re-does its
+   *  fragment scroll then, because the list is what gives the section height. */
+  onSettled?: () => void
+}): ReactNode {
   const [state, setState] = useState<CreditsState>({ kind: 'loading' })
   useEffect(() => {
     let ignore = false
     api.credits().then(
       (kits) => {
-        if (!ignore) setState({ kind: 'ready', kits })
+        if (ignore) return
+        setState({ kind: 'ready', kits })
+        onSettled?.()
       },
       () => {
-        if (!ignore) setState({ kind: 'failed' })
+        if (ignore) return
+        setState({ kind: 'failed' })
+        onSettled?.()
       },
     )
     return () => {
       ignore = true
     }
+    // `onSettled` is a fresh arrow each render of the page; re-reading on it
+    // would re-issue the request every render, which is the ignore-on-stale
+    // idiom's one hazard.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api])
 
   if (state.kind === 'loading') return <p>Loading…</p>

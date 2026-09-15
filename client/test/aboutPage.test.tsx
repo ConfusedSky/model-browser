@@ -146,6 +146,44 @@ describe('the page as a document', () => {
   })
 })
 
+describe('a fragment in the URL', () => {
+  it('scrolls to the named section once the sections exist', async () => {
+    // The browser looks for the fragment before React has rendered a single
+    // section, so the page has to do the scroll itself after mount (found on
+    // 5173: `/about.html#credits` opened at the top). happy-dom lays nothing
+    // out, so the assertion is that the credits section was asked to scroll.
+    const calls: Element[] = []
+    const original = Element.prototype.scrollIntoView
+    Element.prototype.scrollIntoView = function (this: Element) {
+      calls.push(this)
+    }
+    window.history.replaceState(null, '', '/about.html#credits')
+    try {
+      await mount(fakeApi(() => Promise.resolve([])))
+      // Once after mount and once when the list settles — the section is the
+      // last on the page, and only the filled list gives it room to reach the top.
+      expect(calls.map((el) => el.id)).toEqual(['credits', 'credits'])
+    } finally {
+      Element.prototype.scrollIntoView = original
+      window.history.replaceState(null, '', '/about.html')
+    }
+  })
+
+  it('scrolls nowhere without one', async () => {
+    const calls: Element[] = []
+    const original = Element.prototype.scrollIntoView
+    Element.prototype.scrollIntoView = function (this: Element) {
+      calls.push(this)
+    }
+    try {
+      await mount(fakeApi(() => Promise.resolve([])))
+      expect(calls).toEqual([])
+    } finally {
+      Element.prototype.scrollIntoView = original
+    }
+  })
+})
+
 describe('the credits list', () => {
   it('draws one line per kit, with the lightbox’s links', async () => {
     await mount(fakeApi(() => Promise.resolve(KITS)))
