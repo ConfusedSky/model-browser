@@ -1,4 +1,4 @@
-import type { ModelFormat, OrbitAxis } from './types'
+import type { ModelFormat, OrbitAxis } from "./types";
 
 /**
  * Spindle frames as plain arithmetic, shared by the client (`three/camera.ts`
@@ -6,7 +6,7 @@ import type { ModelFormat, OrbitAxis } from './types'
  * server project compiles `shared/` and has no `three`.
  */
 
-export type Triple = readonly [number, number, number]
+export type Triple = readonly [number, number, number];
 
 /**
  * A turntable frame: `s` is the spindle (yaw axis, also camera up); (a, b)
@@ -15,9 +15,9 @@ export type Triple = readonly [number, number, number]
  * `a` (`captureState`'s `atan2(dir·a, dir·b)`).
  */
 export interface FrameTriples {
-  s: Triple
-  a: Triple
-  b: Triple
+  s: Triple;
+  a: Triple;
+  b: Triple;
 }
 
 /**
@@ -28,12 +28,12 @@ export interface FrameTriples {
  */
 export const SCENE_FRAMES: Record<OrbitAxis, FrameTriples> = {
   y: { s: [0, 1, 0], a: [1, 0, 0], b: [0, 0, 1] },
-  '-y': { s: [0, -1, 0], a: [0, 0, 1], b: [1, 0, 0] },
+  "-y": { s: [0, -1, 0], a: [0, 0, 1], b: [1, 0, 0] },
   x: { s: [1, 0, 0], a: [0, 0, 1], b: [0, 1, 0] },
-  '-x': { s: [-1, 0, 0], a: [0, 1, 0], b: [0, 0, 1] },
+  "-x": { s: [-1, 0, 0], a: [0, 1, 0], b: [0, 0, 1] },
   z: { s: [0, 0, 1], a: [0, 1, 0], b: [1, 0, 0] },
-  '-z': { s: [0, 0, -1], a: [1, 0, 0], b: [0, 1, 0] },
-}
+  "-z": { s: [0, 0, -1], a: [1, 0, 0], b: [0, 1, 0] },
+};
 
 /**
  * R⁻¹, the inverse of the bake `rotateX(-π/2)`: a scene direction back to the
@@ -43,23 +43,26 @@ export const SCENE_FRAMES: Record<OrbitAxis, FrameTriples> = {
 export function unbake(v: Triple): Triple {
   // `0 - x` rather than `-x`: a unary minus turns a 0 component into −0, and
   // the derived table would then not compare equal to hand-typed triples.
-  return [v[0], 0 - v[2], v[1]]
+  return [v[0], 0 - v[2], v[1]];
 }
 
 const AXIS_VECTORS: readonly { axis: OrbitAxis; v: Triple }[] = [
-  { axis: 'x', v: [1, 0, 0] },
-  { axis: '-x', v: [-1, 0, 0] },
-  { axis: 'y', v: [0, 1, 0] },
-  { axis: '-y', v: [0, -1, 0] },
-  { axis: 'z', v: [0, 0, 1] },
-  { axis: '-z', v: [0, 0, -1] },
-]
+  { axis: "x", v: [1, 0, 0] },
+  { axis: "-x", v: [-1, 0, 0] },
+  { axis: "y", v: [0, 1, 0] },
+  { axis: "-y", v: [0, -1, 0] },
+  { axis: "z", v: [0, 0, 1] },
+  { axis: "-z", v: [0, 0, -1] },
+];
 
 /** The axis a unit axis vector names — by exact lookup; anything else throws. */
 export function axisOfTriple(v: Triple): OrbitAxis {
-  const match = AXIS_VECTORS.find(({ v: u }) => u[0] === v[0] && u[1] === v[1] && u[2] === v[2])
-  if (match === undefined) throw new Error(`not a unit axis vector: [${v.join(', ')}]`)
-  return match.axis
+  const match = AXIS_VECTORS.find(
+    ({ v: u }) => u[0] === v[0] && u[1] === v[1] && u[2] === v[2],
+  );
+  if (match === undefined)
+    throw new Error(`not a unit axis vector: [${v.join(", ")}]`);
+  return match.axis;
 }
 
 /**
@@ -75,7 +78,7 @@ export const FILE_FRAMES: Record<OrbitAxis, FrameTriples> = Object.fromEntries(
     axisOfTriple(unbake(s)),
     { s: unbake(s), a: unbake(a), b: unbake(b) },
   ]),
-) as Record<OrbitAxis, FrameTriples>
+) as Record<OrbitAxis, FrameTriples>;
 
 /**
  * A scene-convention axis converted to the file convention, for the one format
@@ -86,11 +89,11 @@ export const FILE_FRAMES: Record<OrbitAxis, FrameTriples> = Object.fromEntries(
  * scene-convention framings under the file convention.
  */
 export function migrateAxis(sceneAxis: OrbitAxis): OrbitAxis {
-  return axisOfTriple(unbake(SCENE_FRAMES[sceneAxis].s))
+  return axisOfTriple(unbake(SCENE_FRAMES[sceneAxis].s));
 }
 
 function dot(u: Triple, v: Triple): number {
-  return u[0] * v[0] + u[1] * v[1] + u[2] * v[2]
+  return u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
 }
 
 /**
@@ -104,9 +107,9 @@ function dot(u: Triple, v: Triple): number {
  * and `-y` 0 (the fixed points).
  */
 export function swapOffset(axis: OrbitAxis): number {
-  const old = SCENE_FRAMES[axis]
-  const next = FILE_FRAMES[axis]
-  return Math.atan2(dot(old.b, next.a), dot(old.b, next.b))
+  const old = SCENE_FRAMES[axis];
+  const next = FILE_FRAMES[axis];
+  return Math.atan2(dot(old.b, next.a), dot(old.b, next.b));
 }
 
 /**
@@ -116,5 +119,5 @@ export function swapOffset(axis: OrbitAxis): number {
  * reads; `null` or `undefined` here is a type error, never a default.
  */
 export function defaultAxisFor(format: ModelFormat): OrbitAxis {
-  return format === 'obj' ? 'y' : 'z'
+  return format === "obj" ? "y" : "z";
 }

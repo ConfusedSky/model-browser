@@ -7,10 +7,10 @@
 // report declaring it off must all leave no trace (`feature-report`). The chips
 // are withheld on a second axis — the index's own state — because a query the
 // index cannot answer is worse than no query offered.
-import { act } from 'react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DirListing, SemanticListing } from '../../shared/types'
-import { EXAMPLE_QUERIES } from '../../shared/exampleQueries'
+import { act } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { DirListing, SemanticListing } from "../../shared/types";
+import { EXAMPLE_QUERIES } from "../../shared/exampleQueries";
 import {
   click,
   container,
@@ -27,330 +27,359 @@ import {
   settle,
   unmountApp,
   wait,
-} from './appHarness'
-import { introDismissedStore } from '../src/lib/intro'
-import { applySessionSearchMode } from '../src/lib/searchOptions'
+} from "./appHarness";
+import { introDismissedStore } from "../src/lib/intro";
+import { applySessionSearchMode } from "../src/lib/searchOptions";
 
-vi.mock('../src/api/client', async () => (await import('./appHarness')).apiClientModule())
-vi.mock('../src/three/renderer', async (importOriginal) =>
-  (await import('./appHarness')).rendererModule(importOriginal),
-)
+vi.mock("../src/api/client", async () =>
+  (await import("./appHarness")).apiClientModule(),
+);
+vi.mock("../src/three/renderer", async (importOriginal) =>
+  (await import("./appHarness")).rendererModule(importOriginal),
+);
 
 /** The library's top — where the banner belongs, and the only view it is drawn
  *  on. The harness's `library` answers `root: '/'`, so this is the boot view. */
-const TOP: DirListing = { path: '/', entries: [dirEntry('/Kit')] }
-const FOLDER: DirListing = { path: '/Kit', entries: [modelEntry('/Kit/a.stl')] }
+const TOP: DirListing = { path: "/", entries: [dirEntry("/Kit")] };
+const FOLDER: DirListing = {
+  path: "/Kit",
+  entries: [modelEntry("/Kit/a.stl")],
+};
 const MEANING: SemanticListing = {
-  path: '/',
-  entries: [modelEntry('/Kit/a.stl')],
+  path: "/",
+  entries: [modelEntry("/Kit/a.stl")],
   poses: {},
   scores: {},
-  scope: { path: null, status: 'indexed', indexed: 1, scanned: 1, covers: ['stl'] },
+  scope: {
+    path: null,
+    status: "indexed",
+    indexed: 1,
+    scanned: 1,
+    covers: ["stl"],
+  },
   weak: false,
   capped: false,
-}
+};
 
-const INTRO = { ...DEFAULT_REPORT, intro: true }
-const READY = { state: 'ready' as const, collectionRoot: '/', covers: ['stl'] }
+const INTRO = { ...DEFAULT_REPORT, intro: true };
+const READY = { state: "ready" as const, collectionRoot: "/", covers: ["stl"] };
 
 const banner = (): HTMLElement | null =>
-  container.querySelector<HTMLElement>('[role="region"][aria-label="Introduction"]')
+  container.querySelector<HTMLElement>(
+    '[role="region"][aria-label="Introduction"]',
+  );
 const chips = (): HTMLButtonElement[] =>
-  Array.from(container.querySelectorAll<HTMLButtonElement>('button[data-example-query]'))
+  Array.from(
+    container.querySelectorAll<HTMLButtonElement>("button[data-example-query]"),
+  );
 const buttonNamed = (text: string): HTMLButtonElement | undefined =>
-  Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find(
+  Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find(
     (b) => b.textContent === text,
-  )
+  );
 const linkTo = (href: string): HTMLAnchorElement | null =>
-  container.querySelector<HTMLAnchorElement>(`a[href="${href}"]`)
+  container.querySelector<HTMLAnchorElement>(`a[href="${href}"]`);
 const dismissButton = (): HTMLButtonElement | null =>
-  container.querySelector<HTMLButtonElement>('button[aria-label="Dismiss introduction"]')
+  container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Dismiss introduction"]',
+  );
 /** The header's own About, told apart from the banner's by its ancestor. */
 const headerAbout = (): HTMLAnchorElement | null =>
-  container.querySelector<HTMLAnchorElement>('header a[href="/about.html"]')
+  container.querySelector<HTMLAnchorElement>('header a[href="/about.html"]');
 const headerSurprise = (): HTMLButtonElement | undefined =>
-  Array.from(container.querySelectorAll<HTMLButtonElement>('header button')).find(
-    (b) => b.textContent === 'Surprise me',
-  )
+  Array.from(
+    container.querySelectorAll<HTMLButtonElement>("header button"),
+  ).find((b) => b.textContent === "Surprise me");
 
 beforeEach(() => {
-  localStorage.clear()
+  localStorage.clear();
   // The mode lives in a module closure `localStorage.clear()` does not reach
   // (client/test/CLAUDE.md). Reset through the *session* setter, never
   // `setSearchMode` — that writes the key other cells assert the absence of.
-  applySessionSearchMode('name')
-})
-afterEach(() => unmountApp())
+  applySessionSearchMode("name");
+});
+afterEach(() => unmountApp());
 
-describe('the banner at the library top', () => {
-  it('is drawn with its sentence, its chips, the surprise action and three links', async () => {
-    features.mockResolvedValue(INTRO)
-    indexAvailability.mockResolvedValue(READY)
-    await mountAppAtCurrentUrl('/', TOP)
-    await settle()
+describe("the banner at the library top", () => {
+  it("is drawn with its sentence, its chips, the surprise action and three links", async () => {
+    features.mockResolvedValue(INTRO);
+    indexAvailability.mockResolvedValue(READY);
+    await mountAppAtCurrentUrl("/", TOP);
+    await settle();
 
-    const b = banner()
-    expect(b).not.toBeNull()
-    expect(b!.textContent).toContain('Browse a library of 3D-printable miniatures')
-    expect(chips().map((c) => c.dataset.exampleQuery)).toEqual([...EXAMPLE_QUERIES])
-    expect(buttonNamed('Surprise me')).toBeDefined()
-    expect(linkTo('/about.html')).not.toBeNull()
-    expect(linkTo('/about.html#credits')).not.toBeNull()
-    expect(linkTo('https://github.com/ConfusedSky/model-browser')).not.toBeNull()
-    expect(dismissButton()).not.toBeNull()
-  })
+    const b = banner();
+    expect(b).not.toBeNull();
+    expect(b!.textContent).toContain(
+      "Browse a library of 3D-printable miniatures",
+    );
+    expect(chips().map((c) => c.dataset.exampleQuery)).toEqual([
+      ...EXAMPLE_QUERIES,
+    ]);
+    expect(buttonNamed("Surprise me")).toBeDefined();
+    expect(linkTo("/about.html")).not.toBeNull();
+    expect(linkTo("/about.html#credits")).not.toBeNull();
+    expect(
+      linkTo("https://github.com/ConfusedSky/model-browser"),
+    ).not.toBeNull();
+    expect(dismissButton()).not.toBeNull();
+  });
 
-  it('is absent on the report a server with no configuration answers', async () => {
-    indexAvailability.mockResolvedValue(READY)
-    await mountAppAtCurrentUrl('/', TOP)
-    await settle()
-    expect(banner()).toBeNull()
-    expect(headerAbout()).toBeNull()
-  })
+  it("is absent on the report a server with no configuration answers", async () => {
+    indexAvailability.mockResolvedValue(READY);
+    await mountAppAtCurrentUrl("/", TOP);
+    await settle();
+    expect(banner()).toBeNull();
+    expect(headerAbout()).toBeNull();
+  });
 
-  it('is absent while the report has not resolved — withheld, never withdrawn', async () => {
-    features.mockReturnValue(new Promise(() => {}))
-    indexAvailability.mockResolvedValue(READY)
-    await mountAppAtCurrentUrl('/', TOP)
-    await settle()
-    expect(banner()).toBeNull()
-    expect(headerAbout()).toBeNull()
-  })
+  it("is absent while the report has not resolved — withheld, never withdrawn", async () => {
+    features.mockReturnValue(new Promise(() => {}));
+    indexAvailability.mockResolvedValue(READY);
+    await mountAppAtCurrentUrl("/", TOP);
+    await settle();
+    expect(banner()).toBeNull();
+    expect(headerAbout()).toBeNull();
+  });
 
-  it('is absent on a folder URL — a deep link lands on what it names', async () => {
-    features.mockResolvedValue(INTRO)
-    indexAvailability.mockResolvedValue(READY)
-    await mountAppAtCurrentUrl('/?path=%2FKit', FOLDER)
-    await settle()
-    expect(banner()).toBeNull()
+  it("is absent on a folder URL — a deep link lands on what it names", async () => {
+    features.mockResolvedValue(INTRO);
+    indexAvailability.mockResolvedValue(READY);
+    await mountAppAtCurrentUrl("/?path=%2FKit", FOLDER);
+    await settle();
+    expect(banner()).toBeNull();
     // The introduction is still *offered* there — only the banner is not the
     // view. The header keeps what it promised.
-    expect(headerAbout()).not.toBeNull()
-  })
+    expect(headerAbout()).not.toBeNull();
+  });
 
-  it('is absent on a query URL', async () => {
-    features.mockResolvedValue(INTRO)
-    indexAvailability.mockResolvedValue(READY)
-    semanticSearch.mockResolvedValue(MEANING)
-    await mountAppAtCurrentUrl('/?q=a+dragon&mode=meaning', TOP)
-    await settle()
-    expect(banner()).toBeNull()
-  })
-})
+  it("is absent on a query URL", async () => {
+    features.mockResolvedValue(INTRO);
+    indexAvailability.mockResolvedValue(READY);
+    semanticSearch.mockResolvedValue(MEANING);
+    await mountAppAtCurrentUrl("/?q=a+dragon&mode=meaning", TOP);
+    await settle();
+    expect(banner()).toBeNull();
+  });
+});
 
-describe('the chips follow the index, not the report', () => {
-  it('withholds them while the index is absent, keeping the sentence and the links', async () => {
-    features.mockResolvedValue(INTRO)
-    await mountAppAtCurrentUrl('/', TOP)
-    await settle()
+describe("the chips follow the index, not the report", () => {
+  it("withholds them while the index is absent, keeping the sentence and the links", async () => {
+    features.mockResolvedValue(INTRO);
+    await mountAppAtCurrentUrl("/", TOP);
+    await settle();
 
-    expect(banner()).not.toBeNull()
-    expect(chips()).toHaveLength(0)
-    expect(buttonNamed('Surprise me')).toBeUndefined()
+    expect(banner()).not.toBeNull();
+    expect(chips()).toHaveLength(0);
+    expect(buttonNamed("Surprise me")).toBeUndefined();
     // The sentence must not promise a search nothing on screen can run.
-    expect(banner()!.textContent).toContain('Browse a library of 3D-printable miniatures.')
-    expect(banner()!.textContent).not.toContain('describe what you are looking for')
-    expect(linkTo('/about.html')).not.toBeNull()
-  })
+    expect(banner()!.textContent).toContain(
+      "Browse a library of 3D-printable miniatures.",
+    );
+    expect(banner()!.textContent).not.toContain(
+      "describe what you are looking for",
+    );
+    expect(linkTo("/about.html")).not.toBeNull();
+  });
 
-  it('withholds them while the index covers somewhere else', async () => {
+  it("withholds them while the index covers somewhere else", async () => {
     // `indexCovers` is false without a `collectionRoot`, and false for a root
     // the top is not inside — ready is necessary and not sufficient.
-    features.mockResolvedValue(INTRO)
-    indexAvailability.mockResolvedValue({ state: 'ready', covers: ['stl'] })
-    await mountAppAtCurrentUrl('/', TOP)
-    await settle()
-    expect(banner()).not.toBeNull()
-    expect(chips()).toHaveLength(0)
-  })
+    features.mockResolvedValue(INTRO);
+    indexAvailability.mockResolvedValue({ state: "ready", covers: ["stl"] });
+    await mountAppAtCurrentUrl("/", TOP);
+    await settle();
+    expect(banner()).not.toBeNull();
+    expect(chips()).toHaveLength(0);
+  });
 
-  it('offers them once the index answers ready and covering the top', async () => {
-    features.mockResolvedValue(INTRO)
-    indexAvailability.mockResolvedValue(READY)
-    await mountAppAtCurrentUrl('/', TOP)
-    await settle()
-    expect(chips().length).toBeGreaterThan(0)
-  })
-})
+  it("offers them once the index answers ready and covering the top", async () => {
+    features.mockResolvedValue(INTRO);
+    indexAvailability.mockResolvedValue(READY);
+    await mountAppAtCurrentUrl("/", TOP);
+    await settle();
+    expect(chips().length).toBeGreaterThan(0);
+  });
+});
 
-describe('a chip is a submitted meaning search', () => {
-  it('runs the text, names it in the URL under meaning mode, and Back returns to the top', async () => {
-    features.mockResolvedValue(INTRO)
-    indexAvailability.mockResolvedValue(READY)
-    semanticSearch.mockResolvedValue(MEANING)
-    await mountAppAtCurrentUrl('/', TOP)
-    await settle()
-    const top = window.location.search
+describe("a chip is a submitted meaning search", () => {
+  it("runs the text, names it in the URL under meaning mode, and Back returns to the top", async () => {
+    features.mockResolvedValue(INTRO);
+    indexAvailability.mockResolvedValue(READY);
+    semanticSearch.mockResolvedValue(MEANING);
+    await mountAppAtCurrentUrl("/", TOP);
+    await settle();
+    const top = window.location.search;
 
-    await click(chips()[0]!)
-    await settle()
+    await click(chips()[0]!);
+    await settle();
 
     // `semanticSearch(text, path, tuning, signal)` — the chip sends the phrase
     // at the top under the visitor's own tuning, which is the body the
     // deploy-time check proves the queries against.
     expect(semanticSearch).toHaveBeenCalledWith(
       EXAMPLE_QUERIES[0],
-      '/',
+      "/",
       expect.objectContaining({ minScore: 0.1, top: 60 }),
       expect.any(AbortSignal),
-    )
-    expect(window.location.search).toContain('q=')
-    expect(window.location.search).toContain('mode=meaning')
+    );
+    expect(window.location.search).toContain("q=");
+    expect(window.location.search).toContain("mode=meaning");
     // The input holds the phrase, exactly as it would after typing it.
-    expect(searchInput().value).toBe(EXAMPLE_QUERIES[0])
-    expect(banner()).toBeNull()
+    expect(searchInput().value).toBe(EXAMPLE_QUERIES[0]);
+    expect(banner()).toBeNull();
 
     // Play the browser's Back (the harness's rule: happy-dom's own history is
     // not driven through `history.back` in this suite).
-    listDir.mockResolvedValue(TOP)
+    listDir.mockResolvedValue(TOP);
     await act(async () => {
-      window.history.replaceState(null, '', `/${top}`)
-      window.dispatchEvent(new PopStateEvent('popstate'))
-    })
-    await settle()
-    expect(banner()).not.toBeNull()
-  })
+      window.history.replaceState(null, "", `/${top}`);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await settle();
+    expect(banner()).not.toBeNull();
+  });
 
-  it('the surprise action runs the query the pick chose', async () => {
-    features.mockResolvedValue(INTRO)
-    indexAvailability.mockResolvedValue(READY)
-    semanticSearch.mockResolvedValue(MEANING)
-    await mountAppAtCurrentUrl('/', TOP)
-    await settle()
+  it("the surprise action runs the query the pick chose", async () => {
+    features.mockResolvedValue(INTRO);
+    indexAvailability.mockResolvedValue(READY);
+    semanticSearch.mockResolvedValue(MEANING);
+    await mountAppAtCurrentUrl("/", TOP);
+    await settle();
 
     // The seam is `pickExample`'s `random` parameter; App passes `Math.random`,
     // so pinning that pins the choice to one named query.
-    vi.spyOn(Math, 'random').mockReturnValue(0)
-    await click(buttonNamed('Surprise me')!)
-    await settle()
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    await click(buttonNamed("Surprise me")!);
+    await settle();
 
     expect(semanticSearch).toHaveBeenCalledWith(
       EXAMPLE_QUERIES[0],
-      '/',
+      "/",
       expect.anything(),
       expect.any(AbortSignal),
-    )
-  })
-})
+    );
+  });
+});
 
-describe('dismissal', () => {
-  it('hides the banner and records the choice for the next visit', async () => {
-    features.mockResolvedValue(INTRO)
-    indexAvailability.mockResolvedValue(READY)
-    await mountAppAtCurrentUrl('/', TOP)
-    await settle()
+describe("dismissal", () => {
+  it("hides the banner and records the choice for the next visit", async () => {
+    features.mockResolvedValue(INTRO);
+    indexAvailability.mockResolvedValue(READY);
+    await mountAppAtCurrentUrl("/", TOP);
+    await settle();
 
-    await click(dismissButton()!)
-    expect(banner()).toBeNull()
-    expect(introDismissedStore.read()).toBe(true)
+    await click(dismissButton()!);
+    expect(banner()).toBeNull();
+    expect(introDismissedStore.read()).toBe(true);
 
     // A later visit in the same browser: the flag is what a remount reads.
-    await unmountAndRemount()
-    expect(banner()).toBeNull()
-  })
+    await unmountAndRemount();
+    expect(banner()).toBeNull();
+  });
 
-  it('leaves the banner dismissed for the page even when the write fails', async () => {
-    features.mockResolvedValue(INTRO)
-    indexAvailability.mockResolvedValue(READY)
-    await mountAppAtCurrentUrl('/', TOP)
-    await settle()
+  it("leaves the banner dismissed for the page even when the write fails", async () => {
+    features.mockResolvedValue(INTRO);
+    indexAvailability.mockResolvedValue(READY);
+    await mountAppAtCurrentUrl("/", TOP);
+    await settle();
 
-    const setItem = vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
-      throw new Error('quota')
-    })
-    await click(dismissButton()!)
-    expect(banner()).toBeNull()
-    setItem.mockRestore()
+    const setItem = vi.spyOn(localStorage, "setItem").mockImplementation(() => {
+      throw new Error("quota");
+    });
+    await click(dismissButton()!);
+    expect(banner()).toBeNull();
+    setItem.mockRestore();
     // Nothing was recorded, so the next load draws it again — which is the
     // spec's answer, not an error.
-    expect(introDismissedStore.read()).toBe(false)
-  })
+    expect(introDismissedStore.read()).toBe(false);
+  });
 
-  it('a chip and a Back are not a dismissal', async () => {
-    features.mockResolvedValue(INTRO)
-    indexAvailability.mockResolvedValue(READY)
-    semanticSearch.mockResolvedValue(MEANING)
-    await mountAppAtCurrentUrl('/', TOP)
-    await settle()
-    const top = window.location.search
+  it("a chip and a Back are not a dismissal", async () => {
+    features.mockResolvedValue(INTRO);
+    indexAvailability.mockResolvedValue(READY);
+    semanticSearch.mockResolvedValue(MEANING);
+    await mountAppAtCurrentUrl("/", TOP);
+    await settle();
+    const top = window.location.search;
 
-    await click(chips()[0]!)
-    await settle()
-    listDir.mockResolvedValue(TOP)
+    await click(chips()[0]!);
+    await settle();
+    listDir.mockResolvedValue(TOP);
     await act(async () => {
-      window.history.replaceState(null, '', `/${top}`)
-      window.dispatchEvent(new PopStateEvent('popstate'))
-    })
-    await settle()
+      window.history.replaceState(null, "", `/${top}`);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await settle();
 
-    expect(banner()).not.toBeNull()
-    expect(introDismissedStore.read()).toBe(false)
-  })
-})
+    expect(banner()).not.toBeNull();
+    expect(introDismissedStore.read()).toBe(false);
+  });
+});
 
-describe('the header keeps what the banner offered', () => {
-  it('carries About and the surprise action after the banner is dismissed', async () => {
-    features.mockResolvedValue(INTRO)
-    indexAvailability.mockResolvedValue(READY)
-    await mountAppAtCurrentUrl('/', TOP)
-    await settle()
-    await click(dismissButton()!)
+describe("the header keeps what the banner offered", () => {
+  it("carries About and the surprise action after the banner is dismissed", async () => {
+    features.mockResolvedValue(INTRO);
+    indexAvailability.mockResolvedValue(READY);
+    await mountAppAtCurrentUrl("/", TOP);
+    await settle();
+    await click(dismissButton()!);
 
-    expect(banner()).toBeNull()
-    expect(headerAbout()).not.toBeNull()
-    expect(headerSurprise()).toBeDefined()
-  })
+    expect(banner()).toBeNull();
+    expect(headerAbout()).not.toBeNull();
+    expect(headerSurprise()).toBeDefined();
+  });
 
-  it('withholds the surprise action where a meaning search cannot run', async () => {
-    features.mockResolvedValue(INTRO)
-    await mountAppAtCurrentUrl('/', TOP)
-    await settle()
-    expect(headerAbout()).not.toBeNull()
-    expect(headerSurprise()).toBeUndefined()
-  })
+  it("withholds the surprise action where a meaning search cannot run", async () => {
+    features.mockResolvedValue(INTRO);
+    await mountAppAtCurrentUrl("/", TOP);
+    await settle();
+    expect(headerAbout()).not.toBeNull();
+    expect(headerSurprise()).toBeUndefined();
+  });
 
-  it('carries neither on a server with no configuration', async () => {
-    indexAvailability.mockResolvedValue(READY)
-    await mountAppAtCurrentUrl('/', TOP)
-    await settle()
-    expect(headerAbout()).toBeNull()
-    expect(headerSurprise()).toBeUndefined()
-  })
-})
+  it("carries neither on a server with no configuration", async () => {
+    indexAvailability.mockResolvedValue(READY);
+    await mountAppAtCurrentUrl("/", TOP);
+    await settle();
+    expect(headerAbout()).toBeNull();
+    expect(headerSurprise()).toBeUndefined();
+  });
+});
 
-describe('the banner does not move the grid', () => {
-  it('is outside <main> while the listing is in flight and after it renders', async () => {
+describe("the banner does not move the grid", () => {
+  it("is outside <main> while the listing is in flight and after it renders", async () => {
     // happy-dom lays nothing out, so no rectangle here means anything: what is
     // assertable is the structural fact the layout claim rests on (D3). The
     // pixel check is on 5173, measuring the first tile's `top` across the
     // landing.
-    features.mockResolvedValue(INTRO)
-    indexAvailability.mockResolvedValue(READY)
-    const held = deferred<DirListing>()
-    listDir.mockReturnValue(held.promise)
-    await mountAppAtCurrentUrl('/', TOP)
-    await settle()
+    features.mockResolvedValue(INTRO);
+    indexAvailability.mockResolvedValue(READY);
+    const held = deferred<DirListing>();
+    listDir.mockReturnValue(held.promise);
+    await mountAppAtCurrentUrl("/", TOP);
+    await settle();
 
-    const main = container.querySelector('main')!
-    expect(banner()).not.toBeNull()
-    expect(main.contains(banner())).toBe(false)
+    const main = container.querySelector("main")!;
+    expect(banner()).not.toBeNull();
+    expect(main.contains(banner())).toBe(false);
 
-    await act(async () => held.resolve(TOP))
-    await settle()
-    expect(container.querySelectorAll('main .grid button').length).toBeGreaterThan(0)
-    expect(banner()).not.toBeNull()
-    expect(container.querySelector('main')!.contains(banner())).toBe(false)
-  })
-})
+    await act(async () => held.resolve(TOP));
+    await settle();
+    expect(
+      container.querySelectorAll("main .grid button").length,
+    ).toBeGreaterThan(0);
+    expect(banner()).not.toBeNull();
+    expect(container.querySelector("main")!.contains(banner())).toBe(false);
+  });
+});
 
 /** Re-mount at the top with the same storage — a later visit in this browser.
  *  `unmountApp` clears `localStorage`, so the flag is re-written first. */
 async function unmountAndRemount(): Promise<void> {
-  const dismissed = introDismissedStore.read()
-  await unmountApp()
-  if (dismissed) introDismissedStore.write(true)
-  features.mockResolvedValue(INTRO)
-  indexAvailability.mockResolvedValue(READY)
-  await mountAppAtCurrentUrl('/', TOP)
-  await wait(20)
+  const dismissed = introDismissedStore.read();
+  await unmountApp();
+  if (dismissed) introDismissedStore.write(true);
+  features.mockResolvedValue(INTRO);
+  indexAvailability.mockResolvedValue(READY);
+  await mountAppAtCurrentUrl("/", TOP);
+  await wait(20);
 }

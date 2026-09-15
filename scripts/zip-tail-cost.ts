@@ -35,31 +35,31 @@
  * concluding anything about hardware this was not measured on.
  */
 
-import { readdir } from 'node:fs/promises'
-import { join } from 'node:path'
-import { type ZipDirCache, listZipEntries } from '../server/src/zip'
+import { readdir } from "node:fs/promises";
+import { join } from "node:path";
+import { type ZipDirCache, listZipEntries } from "../server/src/zip";
 
-const root = process.argv[2]
+const root = process.argv[2];
 if (root === undefined) {
-  console.error('usage: bun scripts/zip-tail-cost.ts <library root>')
-  process.exit(2)
+  console.error("usage: bun scripts/zip-tail-cost.ts <library root>");
+  process.exit(2);
 }
 
 /** Every `*.zip` under `dir`, depth-first, skipping what cannot be read. */
 async function archives(dir: string): Promise<string[]> {
-  const out: string[] = []
-  let entries
+  const out: string[] = [];
+  let entries;
   try {
-    entries = await readdir(dir, { withFileTypes: true })
+    entries = await readdir(dir, { withFileTypes: true });
   } catch {
-    return out
+    return out;
   }
   for (const e of entries) {
-    const path = join(dir, e.name)
-    if (e.isDirectory()) out.push(...(await archives(path)))
-    else if (e.isFile() && /\.zip$/i.test(e.name)) out.push(path)
+    const path = join(dir, e.name);
+    if (e.isDirectory()) out.push(...(await archives(path)));
+    else if (e.isFile() && /\.zip$/i.test(e.name)) out.push(path);
   }
-  return out
+  return out;
 }
 
 /**
@@ -76,80 +76,90 @@ async function dropCache(paths: readonly string[]): Promise<void> {
   // "cold" row is whatever the page cache happened to be holding, and the pass
   // says so rather than quietly reporting a warm number as cold.
   const script = [
-    'import os,sys',
+    "import os,sys",
     'for p in sys.stdin.read().split("\\n"):',
-    '    if not p: continue',
-    '    try:',
-    '        fd=os.open(p, os.O_RDONLY)',
-    '        os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)',
-    '        os.close(fd)',
-    '    except OSError: pass',
-  ].join('\n')
+    "    if not p: continue",
+    "    try:",
+    "        fd=os.open(p, os.O_RDONLY)",
+    "        os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)",
+    "        os.close(fd)",
+    "    except OSError: pass",
+  ].join("\n");
   try {
-    const proc = Bun.spawn(['python3', '-c', script], { stdin: 'pipe', stderr: 'ignore' })
-    proc.stdin.write(paths.join('\n'))
-    await proc.stdin.end()
-    if ((await proc.exited) !== 0) throw new Error('fadvise helper failed')
+    const proc = Bun.spawn(["python3", "-c", script], {
+      stdin: "pipe",
+      stderr: "ignore",
+    });
+    proc.stdin.write(paths.join("\n"));
+    await proc.stdin.end();
+    if ((await proc.exited) !== 0) throw new Error("fadvise helper failed");
   } catch {
-    console.warn('note: could not drop the page cache — the "cold" row is not cold')
+    console.warn(
+      'note: could not drop the page cache — the "cold" row is not cold',
+    );
   }
 }
 
 const inMemoryLayer = (): ZipDirCache => {
-  const held = new Map<string, { mtime: number; size: number; entries: unknown }>()
+  const held = new Map<
+    string,
+    { mtime: number; size: number; entries: unknown }
+  >();
   return {
     get: async (p, id) => {
-      const rec = held.get(p)
-      if (rec === undefined || rec.mtime !== id.mtime || rec.size !== id.size) return undefined
-      return rec.entries as never
+      const rec = held.get(p);
+      if (rec === undefined || rec.mtime !== id.mtime || rec.size !== id.size)
+        return undefined;
+      return rec.entries as never;
     },
     set: async (p, id, entries) => {
-      held.set(p, { mtime: id.mtime, size: id.size, entries })
+      held.set(p, { mtime: id.mtime, size: id.size, entries });
     },
-  }
-}
+  };
+};
 
 async function pass(
   label: string,
   paths: readonly string[],
   cache?: ZipDirCache,
 ): Promise<{ ms: number; each: number[] }> {
-  let ok = 0
-  let refused = 0
-  let entries = 0
-  const each: number[] = []
-  const t0 = performance.now()
+  let ok = 0;
+  let refused = 0;
+  let entries = 0;
+  const each: number[] = [];
+  const t0 = performance.now();
   for (const p of paths) {
-    const s = performance.now()
+    const s = performance.now();
     try {
-      const e = await listZipEntries(p, cache)
-      each.push(performance.now() - s)
-      ok++
-      entries += e.length
+      const e = await listZipEntries(p, cache);
+      each.push(performance.now() - s);
+      ok++;
+      entries += e.length;
     } catch {
-      refused++
+      refused++;
     }
   }
-  const ms = performance.now() - t0
+  const ms = performance.now() - t0;
   console.log(
     `${label.padEnd(20)} ${ms.toFixed(0).padStart(5)} ms   ok=${ok} refused=${refused} entries=${entries}`,
-  )
-  return { ms, each }
+  );
+  return { ms, each };
 }
 
-const paths = await archives(root)
-console.log(`${paths.length} archives under ${root}\n`)
+const paths = await archives(root);
+console.log(`${paths.length} archives under ${root}\n`);
 
-await dropCache(paths)
-const cold = await pass('cold, no layer', paths)
+await dropCache(paths);
+const cold = await pass("cold, no layer", paths);
 
-const layer = inMemoryLayer()
-await pass('warming the layer', paths, layer)
-await pass('with the layer', paths, layer)
-await pass('no layer, warm', paths)
+const layer = inMemoryLayer();
+await pass("warming the layer", paths, layer);
+await pass("with the layer", paths, layer);
+await pass("no layer, warm", paths);
 
-const sorted = [...cold.each].sort((a, b) => a - b)
-const q = (f: number): string => (sorted[Math.floor(sorted.length * f)] ?? 0).toFixed(2)
+const sorted = [...cold.each].sort((a, b) => a - b);
+const q = (f: number): string =>
+  (sorted[Math.floor(sorted.length * f)] ?? 0).toFixed(2);
 console.log(
   `\ncold per archive: median ${q(0.5)} ms  p90 ${q(0.9)} ms  p99 ${q(0.99)} ms  max ${(sorted.at(-1) ?? 0).toFixed(1)} ms`,
-)
+);

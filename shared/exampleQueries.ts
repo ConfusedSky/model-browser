@@ -28,10 +28,10 @@
  * dead, and the remedy is to replace that phrase here.
  */
 export const EXAMPLE_QUERIES: readonly string[] = [
-  'a dragon',
-  'an elf archer',
-  'a skeleton warrior',
-  'a wizard casting a spell',
-  'a treasure chest',
-  'a stone golem',
-]
+  "a dragon",
+  "an elf archer",
+  "a skeleton warrior",
+  "a wizard casting a spell",
+  "a treasure chest",
+  "a stone golem",
+];

@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
-import { beforeEach, describe, expect, it } from 'vitest'
-import { resolveTuning, TUNING_DEFAULTS } from '../src/lib/searchOptions'
-import { MAX_RESULT_COUNT } from '../../shared/types'
-import { requestOf, type View } from '../src/state/view'
+import { beforeEach, describe, expect, it } from "vitest";
+import { resolveTuning, TUNING_DEFAULTS } from "../src/lib/searchOptions";
+import { MAX_RESULT_COUNT } from "../../shared/types";
+import { requestOf, type View } from "../src/state/view";
 import {
   commitUrl,
   historyIndex,
@@ -14,265 +14,322 @@ import {
   SIMILAR_ENTRY,
   similarDepth,
   type UrlView,
-} from '../src/lib/urlState'
+} from "../src/lib/urlState";
 
 beforeEach(() => {
-  window.history.replaceState(null, '', '/')
-})
+  window.history.replaceState(null, "", "/");
+});
 
-const roundTrip = (view: UrlView): UrlView => parseUrl(serializeView(view))
+const roundTrip = (view: UrlView): UrlView => parseUrl(serializeView(view));
 
-describe('url state', () => {
-  it('round-trips paths with spaces, unicode, zip separators, and percent signs', () => {
+describe("url state", () => {
+  it("round-trips paths with spaces, unicode, zip separators, and percent signs", () => {
     // URLSearchParams is the single encoder (D1): a path containing `%` is the
     // case a stray encodeURIComponent pass on top would double-encode.
     for (const path of [
-      '/run/media/masa/STL Library/Loot Studios/Sandy Dunes',
-      '/models/Boîte à outils/pièce.stl',
-      '/lib/kit.zip!/inner dir/part v2.stl',
-      '/odd/50% infill/½-scale.stl',
+      "/run/media/masa/STL Library/Loot Studios/Sandy Dunes",
+      "/models/Boîte à outils/pièce.stl",
+      "/lib/kit.zip!/inner dir/part v2.stl",
+      "/odd/50% infill/½-scale.stl",
     ]) {
       expect(roundTrip({ path, flat: false })).toEqual({
         path,
         flat: false,
         q: undefined,
         model: undefined,
-      })
+      });
     }
-  })
+  });
 
-  it('round-trips the full view and omits empty parameters', () => {
-    const view: UrlView = { path: '/a', flat: true, q: 'mech gun', model: '/a/kit.zip!/m.stl' }
+  it("round-trips the full view and omits empty parameters", () => {
+    const view: UrlView = {
+      path: "/a",
+      flat: true,
+      q: "mech gun",
+      model: "/a/kit.zip!/m.stl",
+    };
     // A committed query always names its corpus, so it comes back explicit.
-    expect(roundTrip(view)).toEqual({ ...view, mode: 'name' })
+    expect(roundTrip(view)).toEqual({ ...view, mode: "name" });
     // Omit-empty: flat only when on, blank strings absent rather than empty.
-    expect(serializeView({ path: '/a', flat: false })).not.toContain('flat')
-    expect(serializeView({ path: '/a', flat: false, q: '', model: '' })).toBe(
-      `?${new URLSearchParams({ path: '/a' }).toString()}`,
-    )
+    expect(serializeView({ path: "/a", flat: false })).not.toContain("flat");
+    expect(serializeView({ path: "/a", flat: false, q: "", model: "" })).toBe(
+      `?${new URLSearchParams({ path: "/a" }).toString()}`,
+    );
     // The root is written by omission, which is the same claim this line always
     // made — "a view with no path serializes to nothing" — in the vocabulary
     // library-root gives it: `/` is what "no path" now spells (design D2).
-    expect(serializeView({ path: '/', flat: false })).toBe('')
-  })
+    expect(serializeView({ path: "/", flat: false })).toBe("");
+  });
 
-  it('round-trips library paths and names the root by omitting it', () => {
+  it("round-trips library paths and names the root by omitting it", () => {
     // Every path on the wire, in the URL and in the bar is library-relative
     // with a leading slash (library R2): `/` is the library's top, `/Kit` a
     // folder in it, `/Kit/a.zip!/x.stl` an entry inside an archive in it.
-    for (const path of ['/', '/Kit', '/Kit/a.zip!/x.stl']) {
-      expect(roundTrip({ path, flat: false }).path).toBe(path)
+    for (const path of ["/", "/Kit", "/Kit/a.zip!/x.stl"]) {
+      expect(roundTrip({ path, flat: false }).path).toBe(path);
     }
     // The top is the default view, so it needs no parameter — and a URL that
     // carries none names it. That equivalence is what makes the shortest deep
     // link the shortest.
-    expect(serializeView({ path: '/', flat: false })).toBe('')
-    expect(serializeView({ path: '/', flat: true, q: 'gear' })).not.toContain('path=')
-    expect(parseUrl('').path).toBe('/')
-    expect(parseUrl('?flat=1').path).toBe('/')
+    expect(serializeView({ path: "/", flat: false })).toBe("");
+    expect(serializeView({ path: "/", flat: true, q: "gear" })).not.toContain(
+      "path=",
+    );
+    expect(parseUrl("").path).toBe("/");
+    expect(parseUrl("?flat=1").path).toBe("/");
     // A folder is still named, so omission cannot be mistaken for a general
     // rule about paths.
-    expect(serializeView({ path: '/Kit', flat: false })).toContain('path=%2FKit')
-  })
+    expect(serializeView({ path: "/Kit", flat: false })).toContain(
+      "path=%2FKit",
+    );
+  });
 
-  it('reads a blank `path` as the root', () => {
+  it("reads a blank `path` as the root", () => {
     // `URLSearchParams.get` answers `''`, not `null`, for `?path=` and for a
     // bare `?path` — so a `??` default would have let `''` through as a value
     // the view holds. It is not one: `/` is what "no path" spells (design D2),
     // and the landing that once rendered for `''` is gone with the last-path
     // boot. Blank reads as absence here, the same as a blank `q` or `similar`.
-    expect(parseUrl('?path=').path).toBe('/')
-    expect(parseUrl('?path').path).toBe('/')
-    expect(parseUrl('?path=&flat=1').path).toBe('/')
+    expect(parseUrl("?path=").path).toBe("/");
+    expect(parseUrl("?path").path).toBe("/");
+    expect(parseUrl("?path=&flat=1").path).toBe("/");
     // And what a blank one resolves to serializes back to nothing, so a URL
     // that arrived with `?path=` stops carrying it the moment the view advances.
-    expect(serializeView({ path: parseUrl('?path=').path, flat: false })).toBe('')
-    expect(roundTrip(parseUrl('?path=')).path).toBe('/')
-  })
+    expect(serializeView({ path: parseUrl("?path=").path, flat: false })).toBe(
+      "",
+    );
+    expect(roundTrip(parseUrl("?path=")).path).toBe("/");
+  });
 
-  it('parses a bare `flat` key the same as a valued one', () => {
-    expect(parseUrl('?path=%2Fa&flat').flat).toBe(true)
-    expect(parseUrl('?path=%2Fa&flat=1').flat).toBe(true)
-    expect(parseUrl('?path=%2Fa').flat).toBe(false)
-  })
+  it("parses a bare `flat` key the same as a valued one", () => {
+    expect(parseUrl("?path=%2Fa&flat").flat).toBe(true);
+    expect(parseUrl("?path=%2Fa&flat=1").flat).toBe(true);
+    expect(parseUrl("?path=%2Fa").flat).toBe(false);
+  });
 
-  it('the flat param records the toggle; the request shape is derived from the query', () => {
+  it("the flat param records the toggle; the request shape is derived from the query", () => {
     // The API rejects `q` without `flat=true`, and deep results are flat-shaped
     // regardless of the toggle — but that is the *request's* shape, derived
     // where the request is built. Reading it back into the toggle gave one slot
     // two meanings: a deep-linked search whose query was then cleared listed the
     // whole volume, while a typed one listed nested (design R4).
-    expect(parseUrl('?path=%2Fa&q=gear').flat).toBe(false)
-    expect(parseUrl('?path=%2Fa&flat=1&q=gear').flat).toBe(true) // old links still parse
+    expect(parseUrl("?path=%2Fa&q=gear").flat).toBe(false);
+    expect(parseUrl("?path=%2Fa&flat=1&q=gear").flat).toBe(true); // old links still parse
     const searched: View = {
-      path: '/a',
+      path: "/a",
       flat: false,
-      subject: { kind: 'query', text: 'gear' },
-      mode: 'name',
-      kinds: 'both',
+      subject: { kind: "query", text: "gear" },
+      mode: "name",
+      kinds: "both",
       folderMatching: true,
       tuning: { ...TUNING_DEFAULTS },
       model: null,
-    }
+    };
     // A flat-less search view still issues `flat: true` to the API…
-    expect(requestOf(searched)).toMatchObject({ kind: 'listing', q: 'gear', flat: true })
+    expect(requestOf(searched)).toMatchObject({
+      kind: "listing",
+      q: "gear",
+      flat: true,
+    });
     // …and the toggle it never asserted survives to the listing left behind.
-    expect(requestOf({ ...searched, subject: { kind: 'none' } })).toMatchObject({
-      q: null,
-      flat: false,
-    })
+    expect(requestOf({ ...searched, subject: { kind: "none" } })).toMatchObject(
+      {
+        q: null,
+        flat: false,
+      },
+    );
     // A blank query is no query, and cannot switch flat on by itself.
-    expect(parseUrl('?path=%2Fa&q=')).toEqual({
-      path: '/a',
+    expect(parseUrl("?path=%2Fa&q=")).toEqual({
+      path: "/a",
       flat: false,
       q: undefined,
       model: undefined,
-    })
-  })
+    });
+  });
 
-  it('marks the entries a lightbox push mints, and only those', () => {
-    commitUrl({ path: '/a', flat: false })
-    expect(isLightboxEntry()).toBe(false)
-    commitUrl({ path: '/a', flat: false, model: '/a/m.stl' }, { state: LIGHTBOX_ENTRY })
-    expect(isLightboxEntry()).toBe(true)
+  it("marks the entries a lightbox push mints, and only those", () => {
+    commitUrl({ path: "/a", flat: false });
+    expect(isLightboxEntry()).toBe(false);
+    commitUrl(
+      { path: "/a", flat: false, model: "/a/m.stl" },
+      { state: LIGHTBOX_ENTRY },
+    );
+    expect(isLightboxEntry()).toBe(true);
     // The marker rides the entry, so it outlives any in-memory flag. The entry
     // index rides beside it (retrace-placement D2) — merged, not overwritten.
-    expect(window.history.state).toEqual({ lightbox: true, idx: 2 })
-  })
+    expect(window.history.state).toEqual({ lightbox: true, idx: 2 });
+  });
 
-  it('marks the entries an in-app find-similar mints, and the two markers do not read each other', () => {
+  it("marks the entries an in-app find-similar mints, and the two markers do not read each other", () => {
     // 6.3. Same channel as the lightbox's, same reason: the browser keeps state
     // per entry, so a forward-restored similarity view is still known to have
     // its origin behind it, which an in-memory flag could not say.
-    commitUrl({ path: '/a', flat: false, similar: '/a/m.stl' }, { state: SIMILAR_ENTRY(1) })
-    expect(isSimilarEntry()).toBe(true)
-    expect(similarDepth()).toBe(1)
-    expect(isLightboxEntry()).toBe(false)
+    commitUrl(
+      { path: "/a", flat: false, similar: "/a/m.stl" },
+      { state: SIMILAR_ENTRY(1) },
+    );
+    expect(isSimilarEntry()).toBe(true);
+    expect(similarDepth()).toBe(1);
+    expect(isLightboxEntry()).toBe(false);
 
     // A link's entry is the browser's, not one we minted — nothing behind it,
     // so nothing to go back to.
-    commitUrl({ path: '/a', flat: false, similar: '/a/other.stl' })
-    expect(isSimilarEntry()).toBe(false)
-    expect(similarDepth()).toBe(0)
+    commitUrl({ path: "/a", flat: false, similar: "/a/other.stl" });
+    expect(isSimilarEntry()).toBe(false);
+    expect(similarDepth()).toBe(0);
 
-    commitUrl({ path: '/a', flat: false, model: '/a/m.stl' }, { state: LIGHTBOX_ENTRY })
-    expect(isSimilarEntry()).toBe(false)
-    expect(similarDepth()).toBe(0)
-  })
+    commitUrl(
+      { path: "/a", flat: false, model: "/a/m.stl" },
+      { state: LIGHTBOX_ENTRY },
+    );
+    expect(isSimilarEntry()).toBe(false);
+    expect(similarDepth()).toBe(0);
+  });
 
-  it('a redundant write leaves the entry’s marker alone — it is not a write at all', () => {
+  it("a redundant write leaves the entry’s marker alone — it is not a write at all", () => {
     // What the restore path rests on (6.3): a Back onto a marked similarity
     // entry re-asks and lands, and that landing's replace must not scrub the
     // marker. It cannot, because the browser has already rewound the URL, so
     // the serialization matches and `commitUrl` declines — the dedupe is the
     // preservation.
-    commitUrl({ path: '/a', flat: false, similar: '/a/m.stl' }, { state: SIMILAR_ENTRY(2) })
-    commitUrl({ path: '/a', flat: false, similar: '/a/m.stl' }, { replace: true })
-    expect(isSimilarEntry()).toBe(true)
+    commitUrl(
+      { path: "/a", flat: false, similar: "/a/m.stl" },
+      { state: SIMILAR_ENTRY(2) },
+    );
+    commitUrl(
+      { path: "/a", flat: false, similar: "/a/m.stl" },
+      { replace: true },
+    );
+    expect(isSimilarEntry()).toBe(true);
     // The depth is preserved by the same non-write, and it has to be: it is
     // what the dismissal after a Back goes back by.
-    expect(similarDepth()).toBe(2)
-  })
+    expect(similarDepth()).toBe(2);
+  });
 
-  it('pushes only on difference: a re-commit of the same view stacks nothing', () => {
-    const before = window.history.length
-    commitUrl({ path: '/a', flat: false })
-    expect(window.history.length).toBe(before + 1)
-    expect(parseUrl()).toEqual({ path: '/a', flat: false, q: undefined, model: undefined })
+  it("pushes only on difference: a re-commit of the same view stacks nothing", () => {
+    const before = window.history.length;
+    commitUrl({ path: "/a", flat: false });
+    expect(window.history.length).toBe(before + 1);
+    expect(parseUrl()).toEqual({
+      path: "/a",
+      flat: false,
+      q: undefined,
+      model: undefined,
+    });
 
-    commitUrl({ path: '/a', flat: false }) // same view — must not stack
-    expect(window.history.length).toBe(before + 1)
+    commitUrl({ path: "/a", flat: false }); // same view — must not stack
+    expect(window.history.length).toBe(before + 1);
 
-    commitUrl({ path: '/a', flat: true }) // different — pushes
-    expect(window.history.length).toBe(before + 2)
-  })
+    commitUrl({ path: "/a", flat: true }); // different — pushes
+    expect(window.history.length).toBe(before + 2);
+  });
 
-  it('replace rewrites the current entry without growing history', () => {
-    commitUrl({ path: '/a', flat: false })
-    const len = window.history.length
-    commitUrl({ path: '/a', flat: false, q: 'gear' }, { replace: true })
-    expect(window.history.length).toBe(len)
-    expect(parseUrl().q).toBe('gear')
-  })
-})
+  it("replace rewrites the current entry without growing history", () => {
+    commitUrl({ path: "/a", flat: false });
+    const len = window.history.length;
+    commitUrl({ path: "/a", flat: false, q: "gear" }, { replace: true });
+    expect(window.history.length).toBe(len);
+    expect(parseUrl().q).toBe("gear");
+  });
+});
 
-describe('the entry index', () => {
+describe("the entry index", () => {
   // retrace-placement D2: the browser exposes only the current entry's state,
   // so every entry `commitUrl` writes carries its position in the stack, and
   // that position is what a session mirror of the stack is keyed by.
-  it('a state without an index answers 0', () => {
-    expect(historyIndex()).toBe(0)
-    window.history.replaceState({ lightbox: true }, '', '/')
-    expect(historyIndex()).toBe(0)
-    window.history.replaceState({ idx: 'three' }, '', '/')
-    expect(historyIndex()).toBe(0)
-  })
+  it("a state without an index answers 0", () => {
+    expect(historyIndex()).toBe(0);
+    window.history.replaceState({ lightbox: true }, "", "/");
+    expect(historyIndex()).toBe(0);
+    window.history.replaceState({ idx: "three" }, "", "/");
+    expect(historyIndex()).toBe(0);
+  });
 
-  it('a boot replace over an entry with no state writes index 0', () => {
-    expect(commitUrl({ path: '/a', flat: false }, { replace: true })).toEqual({
+  it("a boot replace over an entry with no state writes index 0", () => {
+    expect(commitUrl({ path: "/a", flat: false }, { replace: true })).toEqual({
       idx: 0,
-      wrote: 'replace',
-    })
-    expect(window.history.state).toEqual({ idx: 0 })
-    expect(historyIndex()).toBe(0)
-  })
+      wrote: "replace",
+    });
+    expect(window.history.state).toEqual({ idx: 0 });
+    expect(historyIndex()).toBe(0);
+  });
 
-  it('a push writes the previous index plus one and returns it', () => {
-    expect(commitUrl({ path: '/a', flat: false })).toEqual({ idx: 1, wrote: 'push' })
-    expect(historyIndex()).toBe(1)
-    expect(commitUrl({ path: '/b', flat: false })).toEqual({ idx: 2, wrote: 'push' })
-    expect(historyIndex()).toBe(2)
-    expect(window.history.state).toEqual({ idx: 2 })
-  })
-
-  it('a replace keeps the index', () => {
-    commitUrl({ path: '/a', flat: false })
-    commitUrl({ path: '/b', flat: false })
-    expect(commitUrl({ path: '/b', flat: false, q: 'gear' }, { replace: true })).toEqual({
+  it("a push writes the previous index plus one and returns it", () => {
+    expect(commitUrl({ path: "/a", flat: false })).toEqual({
+      idx: 1,
+      wrote: "push",
+    });
+    expect(historyIndex()).toBe(1);
+    expect(commitUrl({ path: "/b", flat: false })).toEqual({
       idx: 2,
-      wrote: 'replace',
-    })
-    expect(historyIndex()).toBe(2)
-  })
+      wrote: "push",
+    });
+    expect(historyIndex()).toBe(2);
+    expect(window.history.state).toEqual({ idx: 2 });
+  });
 
-  it('the markers keep reading true beside the index', () => {
-    commitUrl({ path: '/a', flat: false })
-    commitUrl({ path: '/a', flat: false, model: '/a/m.stl' }, { state: LIGHTBOX_ENTRY })
-    expect(isLightboxEntry()).toBe(true)
-    expect(historyIndex()).toBe(2)
-    expect(window.history.state).toEqual({ lightbox: true, idx: 2 })
+  it("a replace keeps the index", () => {
+    commitUrl({ path: "/a", flat: false });
+    commitUrl({ path: "/b", flat: false });
+    expect(
+      commitUrl({ path: "/b", flat: false, q: "gear" }, { replace: true }),
+    ).toEqual({
+      idx: 2,
+      wrote: "replace",
+    });
+    expect(historyIndex()).toBe(2);
+  });
 
-    commitUrl({ path: '/a', flat: false, similar: '/a/m.stl' }, { state: SIMILAR_ENTRY(2) })
-    expect(isSimilarEntry()).toBe(true)
-    expect(similarDepth()).toBe(2)
-    expect(isLightboxEntry()).toBe(false)
-    expect(historyIndex()).toBe(3)
-  })
+  it("the markers keep reading true beside the index", () => {
+    commitUrl({ path: "/a", flat: false });
+    commitUrl(
+      { path: "/a", flat: false, model: "/a/m.stl" },
+      { state: LIGHTBOX_ENTRY },
+    );
+    expect(isLightboxEntry()).toBe(true);
+    expect(historyIndex()).toBe(2);
+    expect(window.history.state).toEqual({ lightbox: true, idx: 2 });
 
-  it('the same-view short-circuit writes nothing and says so', () => {
-    commitUrl({ path: '/a', flat: false })
-    const len = window.history.length
-    const url = window.location.search
-    expect(commitUrl({ path: '/a', flat: false })).toEqual({ idx: 1, wrote: 'none' })
-    expect(commitUrl({ path: '/a', flat: false }, { replace: true, state: LIGHTBOX_ENTRY })).toEqual(
-      { idx: 1, wrote: 'none' },
-    )
-    expect(window.history.length).toBe(len)
-    expect(window.location.search).toBe(url)
-    expect(window.history.state).toEqual({ idx: 1 })
-  })
-})
+    commitUrl(
+      { path: "/a", flat: false, similar: "/a/m.stl" },
+      { state: SIMILAR_ENTRY(2) },
+    );
+    expect(isSimilarEntry()).toBe(true);
+    expect(similarDepth()).toBe(2);
+    expect(isLightboxEntry()).toBe(false);
+    expect(historyIndex()).toBe(3);
+  });
 
-describe('search options in the URL', () => {
-  it('omits both at their defaults — an ordinary search URL is unchanged', () => {
+  it("the same-view short-circuit writes nothing and says so", () => {
+    commitUrl({ path: "/a", flat: false });
+    const len = window.history.length;
+    const url = window.location.search;
+    expect(commitUrl({ path: "/a", flat: false })).toEqual({
+      idx: 1,
+      wrote: "none",
+    });
+    expect(
+      commitUrl(
+        { path: "/a", flat: false },
+        { replace: true, state: LIGHTBOX_ENTRY },
+      ),
+    ).toEqual({ idx: 1, wrote: "none" });
+    expect(window.history.length).toBe(len);
+    expect(window.location.search).toBe(url);
+    expect(window.history.state).toEqual({ idx: 1 });
+  });
+});
+
+describe("search options in the URL", () => {
+  it("omits both at their defaults — an ordinary search URL is unchanged", () => {
     // The corpus is always named — see 'every search names its corpus'. The
     // other options still omit at their defaults, which is what this pins.
-    expect(serializeView({ path: '/m', flat: true, q: 'dragon' })).toBe(
-      '?path=%2Fm&flat=1&q=dragon&mode=name',
-    )
-  })
+    expect(serializeView({ path: "/m", flat: true, q: "dragon" })).toBe(
+      "?path=%2Fm&flat=1&q=dragon&mode=name",
+    );
+  });
 
-  it('a meaning link naming only an unrelated option does not acquire a bound', () => {
+  it("a meaning link naming only an unrelated option does not acquire a bound", () => {
     // The regression: the count branch tested that a tuning object EXISTS, not
     // that it names a bound. `parseUrl` returns `{pool:'mean'}` for this link —
     // no bound at all — and the writer stamped `top=60` onto it, which reads
@@ -281,192 +338,255 @@ describe('search options in the URL', () => {
     // lightbox, dropping the model) re-serialize a parsed URL, so closing a
     // lightbox rewrote a floor-bounded search into a count-bounded one in the
     // address bar, and nothing afterwards corrected it.
-    const parsed = parseUrl('?path=%2Fm&q=dragon&mode=meaning&pool=mean')
-    expect(parsed.tuning).toEqual({ pool: 'mean' })
-    expect(serializeView(parsed)).not.toContain('top=')
-    expect(parseUrl(serializeView(parsed)).tuning).toEqual({ pool: 'mean' })
+    const parsed = parseUrl("?path=%2Fm&q=dragon&mode=meaning&pool=mean");
+    expect(parsed.tuning).toEqual({ pool: "mean" });
+    expect(serializeView(parsed)).not.toContain("top=");
+    expect(parseUrl(serializeView(parsed)).tuning).toEqual({ pool: "mean" });
     // `score-raw` is the same shape: tuning asserted, bound unmentioned.
-    expect(serializeView(parseUrl('?q=dragon&mode=meaning&score-raw=1'))).not.toContain('top=')
+    expect(
+      serializeView(parseUrl("?q=dragon&mode=meaning&score-raw=1")),
+    ).not.toContain("top=");
     // And the round trip is stable, which is what the replace sites depend on.
-    const once = serializeView(parseUrl('?path=%2Fm&q=dragon&mode=meaning&pool=mean'))
-    expect(serializeView(parseUrl(once))).toBe(once)
-  })
+    const once = serializeView(
+      parseUrl("?path=%2Fm&q=dragon&mode=meaning&pool=mean"),
+    );
+    expect(serializeView(parseUrl(once))).toBe(once);
+  });
 
-  it('names each bound in force, at its default value or not', () => {
+  it("names each bound in force, at its default value or not", () => {
     // The presence rule, on the substrate where it is easiest to get wrong: a
     // bound's absence says it is not in force, so a bound that *is* in force is
     // named even when its value happens to equal the default. A floor-only view
     // at 0.1 that wrote nothing would read back as both bounds — the failure
     // this replaces, and the reason "at its own default" appears in the title.
-    const base = { path: '/m', flat: false, q: 'dragon', mode: 'meaning' as const }
+    const base = {
+      path: "/m",
+      flat: false,
+      q: "dragon",
+      mode: "meaning" as const,
+    };
 
     const countOnly = serializeView({
       ...base,
       tuning: { ...TUNING_DEFAULTS, minScore: undefined },
-    })
-    expect(countOnly).toContain('top=60')
-    expect(countOnly).not.toContain('min=')
-    expect(parseUrl(countOnly).tuning).toEqual({ top: 60 })
+    });
+    expect(countOnly).toContain("top=60");
+    expect(countOnly).not.toContain("min=");
+    expect(parseUrl(countOnly).tuning).toEqual({ top: 60 });
 
-    const floorOnly = serializeView({ ...base, tuning: { ...TUNING_DEFAULTS, top: undefined } })
-    expect(floorOnly).toContain('min=0.1')
-    expect(floorOnly).not.toContain('top=')
-    expect(parseUrl(floorOnly).tuning).toEqual({ minScore: 0.1 })
+    const floorOnly = serializeView({
+      ...base,
+      tuning: { ...TUNING_DEFAULTS, top: undefined },
+    });
+    expect(floorOnly).toContain("min=0.1");
+    expect(floorOnly).not.toContain("top=");
+    expect(parseUrl(floorOnly).tuning).toEqual({ minScore: 0.1 });
 
-    const both = serializeView({ ...base, tuning: { ...TUNING_DEFAULTS, top: 12 } })
-    expect(both).toContain('min=0.1')
-    expect(both).toContain('top=12')
-    expect(parseUrl(both).tuning).toEqual({ top: 12, minScore: 0.1 })
-  })
+    const both = serializeView({
+      ...base,
+      tuning: { ...TUNING_DEFAULTS, top: 12 },
+    });
+    expect(both).toContain("min=0.1");
+    expect(both).toContain("top=12");
+    expect(parseUrl(both).tuning).toEqual({ top: 12, minScore: 0.1 });
+  });
 
-  it('the resting state is written as absence, and reads back as itself', () => {
+  it("the resting state is written as absence, and reads back as itself", () => {
     // D4's one stated overload: both bounds in force at both their defaults are
     // written by naming neither, because a record naming no bound is read as
     // exactly that state. The rule holds only if the two spellings are the same
     // view, so that equivalence is asserted rather than assumed.
-    const base = { path: '/m', flat: false, q: 'dragon', mode: 'meaning' as const }
-    const resting = serializeView({ ...base, tuning: { ...TUNING_DEFAULTS } })
-    expect(resting).not.toContain('min=')
-    expect(resting).not.toContain('top=')
+    const base = {
+      path: "/m",
+      flat: false,
+      q: "dragon",
+      mode: "meaning" as const,
+    };
+    const resting = serializeView({ ...base, tuning: { ...TUNING_DEFAULTS } });
+    expect(resting).not.toContain("min=");
+    expect(resting).not.toContain("top=");
 
-    const spelledOut = `${resting}&min=${TUNING_DEFAULTS.minScore}&top=${TUNING_DEFAULTS.top}`
+    const spelledOut = `${resting}&min=${TUNING_DEFAULTS.minScore}&top=${TUNING_DEFAULTS.top}`;
     expect(resolveTuning(parseUrl(spelledOut).tuning)).toEqual(
       resolveTuning(parseUrl(resting).tuning),
-    )
+    );
     expect(resolveTuning(parseUrl(resting).tuning)).toMatchObject({
       top: TUNING_DEFAULTS.top,
       minScore: TUNING_DEFAULTS.minScore,
-    })
-  })
+    });
+  });
 
-  it('reads an unparseable floor as a floor not named', () => {
+  it("reads an unparseable floor as a floor not named", () => {
     // `?min=` alone would otherwise be `Number('') === 0`, a floor of zero —
     // the whole collection, under a bound the link appears to set. The panel's
     // score field already refuses that reading from an empty box.
-    expect(parseUrl('?q=dragon&mode=meaning&min=').tuning).toBeUndefined()
-    expect(parseUrl('?q=dragon&mode=meaning&min=%20').tuning).toBeUndefined()
-    expect(parseUrl('?q=dragon&mode=meaning&min=abc').tuning).toBeUndefined()
+    expect(parseUrl("?q=dragon&mode=meaning&min=").tuning).toBeUndefined();
+    expect(parseUrl("?q=dragon&mode=meaning&min=%20").tuning).toBeUndefined();
+    expect(parseUrl("?q=dragon&mode=meaning&min=abc").tuning).toBeUndefined();
     // A real zero, spelled out, is still a choice someone can make.
-    expect(parseUrl('?q=dragon&mode=meaning&min=0').tuning).toEqual({ minScore: 0 })
-  })
+    expect(parseUrl("?q=dragon&mode=meaning&min=0").tuning).toEqual({
+      minScore: 0,
+    });
+  });
 
-  it('clamps a hand-edited count to what the index will return', () => {
+  it("clamps a hand-edited count to what the index will return", () => {
     // A link is hand-editable, and 5000 would spend the index's headroom on
     // rows its cap deletes (design D5).
-    expect(parseUrl('?q=dragon&mode=meaning&top=5000').tuning).toEqual({ top: MAX_RESULT_COUNT })
-  })
+    expect(parseUrl("?q=dragon&mode=meaning&top=5000").tuning).toEqual({
+      top: MAX_RESULT_COUNT,
+    });
+  });
 
-  it('carries them when they are not the default', () => {
+  it("carries them when they are not the default", () => {
     expect(
-      serializeView({ path: '/m', flat: true, q: 'dragon', folderMatching: false, kinds: 'models' }),
-    ).toBe('?path=%2Fm&flat=1&q=dragon&nofolders=1&kinds=models&mode=name')
-  })
+      serializeView({
+        path: "/m",
+        flat: true,
+        q: "dragon",
+        folderMatching: false,
+        kinds: "models",
+      }),
+    ).toBe("?path=%2Fm&flat=1&q=dragon&nofolders=1&kinds=models&mode=name");
+  });
 
-  it('round-trips without a second encoding pass', () => {
-    const view = { path: '/a b/c.zip!/d', flat: true, q: 'x y', folderMatching: false, kinds: 'folders' as const }
-    expect(parseUrl(serializeView(view))).toEqual({ ...view, mode: 'name', model: undefined })
-  })
+  it("round-trips without a second encoding pass", () => {
+    const view = {
+      path: "/a b/c.zip!/d",
+      flat: true,
+      q: "x y",
+      folderMatching: false,
+      kinds: "folders" as const,
+    };
+    expect(parseUrl(serializeView(view))).toEqual({
+      ...view,
+      mode: "name",
+      model: undefined,
+    });
+  });
 
-  it('a similarity view names its model and none of the options it cannot read', () => {
+  it("a similarity view names its model and none of the options it cannot read", () => {
     // The gate is one sentence now: an option is written only when the view's
     // subject reads it. A similarity subject reads none of them — the index
     // answers with models, and there is no phrase to tune or restrict — so the
     // source model really is the whole of what the view contains.
     const similar: UrlView = {
-      path: '/a',
+      path: "/a",
       flat: true,
-      similar: '/a/m.stl',
-      q: 'gear',
-      mode: 'meaning',
-      kinds: 'models',
+      similar: "/a/m.stl",
+      q: "gear",
+      mode: "meaning",
+      kinds: "models",
       folderMatching: false,
       tuning: { ...TUNING_DEFAULTS, top: 12 },
-    }
-    expect(serializeView(similar)).toBe('?path=%2Fa&flat=1&similar=%2Fa%2Fm.stl')
-  })
+    };
+    expect(serializeView(similar)).toBe(
+      "?path=%2Fa&flat=1&similar=%2Fa%2Fm.stl",
+    );
+  });
 
-  it('a similarity view round-trips the two parameters it does read, and omits them at their defaults', () => {
+  it("a similarity view round-trips the two parameters it does read, and omits them at their defaults", () => {
     // 6.2. The gate did not loosen — it grew two options this subject genuinely
     // reads, on the same rule as the rest: they select which entries the view
     // contains, and something on screen sets them.
-    const tuned: UrlView = { path: '/a', flat: false, similar: '/a/m.stl', k: 40, pool: 'max' }
-    expect(serializeView(tuned)).toBe('?path=%2Fa&similar=%2Fa%2Fm.stl&k=40&pool=max')
-    expect(roundTrip(tuned)).toMatchObject({ similar: '/a/m.stl', k: 40, pool: 'max' })
+    const tuned: UrlView = {
+      path: "/a",
+      flat: false,
+      similar: "/a/m.stl",
+      k: 40,
+      pool: "max",
+    };
+    expect(serializeView(tuned)).toBe(
+      "?path=%2Fa&similar=%2Fa%2Fm.stl&k=40&pool=max",
+    );
+    expect(roundTrip(tuned)).toMatchObject({
+      similar: "/a/m.stl",
+      k: 40,
+      pool: "max",
+    });
 
     // Absent is the default at both ends: `toUrlView` elides `SIMILAR_K` (it
     // owns the constant; this module cannot import it back), and an absent pool
     // is the index's own rather than any of the three values.
-    const plain: UrlView = { path: '/a', flat: false, similar: '/a/m.stl' }
-    expect(serializeView(plain)).toBe('?path=%2Fa&similar=%2Fa%2Fm.stl')
-    expect(roundTrip(plain).k).toBeUndefined()
-    expect(roundTrip(plain).pool).toBeUndefined()
+    const plain: UrlView = { path: "/a", flat: false, similar: "/a/m.stl" };
+    expect(serializeView(plain)).toBe("?path=%2Fa&similar=%2Fa%2Fm.stl");
+    expect(roundTrip(plain).k).toBeUndefined();
+    expect(roundTrip(plain).pool).toBeUndefined();
 
     // A `k` the index would refuse reads as absence, not as an error over a
     // link that names a perfectly good view.
-    for (const bad of ['k=0', 'k=1001', 'k=4.5', 'k=lots', 'k=']) {
-      expect(parseUrl(`?path=%2Fa&similar=%2Fa%2Fm.stl&${bad}`).k).toBeUndefined()
+    for (const bad of ["k=0", "k=1001", "k=4.5", "k=lots", "k="]) {
+      expect(
+        parseUrl(`?path=%2Fa&similar=%2Fa%2Fm.stl&${bad}`).k,
+      ).toBeUndefined();
     }
 
     // One `pool` param, two readers, and never both: the subject decides. A
     // similarity view writes its own; a meaning view writes its tuning's.
     const meaningPool: UrlView = {
-      path: '/a',
+      path: "/a",
       flat: false,
-      q: 'gear',
-      mode: 'meaning',
-      tuning: { ...TUNING_DEFAULTS, pool: 'mean' },
-    }
+      q: "gear",
+      mode: "meaning",
+      tuning: { ...TUNING_DEFAULTS, pool: "mean" },
+    };
     expect(serializeView({ ...tuned, ...meaningPool })).toBe(
-      '?path=%2Fa&similar=%2Fa%2Fm.stl&k=40&pool=max',
-    )
-    expect(serializeView(meaningPool)).toContain('pool=mean')
+      "?path=%2Fa&similar=%2Fa%2Fm.stl&k=40&pool=max",
+    );
+    expect(serializeView(meaningPool)).toContain("pool=mean");
     // …and a `k` beside a phrase is written by neither, because no phrase reads
     // one.
-    expect(serializeView({ ...meaningPool, k: 40 })).not.toContain('k=')
-  })
+    expect(serializeView({ ...meaningPool, k: 40 })).not.toContain("k=");
+  });
 
-  it('a hand-edited link carrying both q and similar parses as both; similar is what wins', () => {
+  it("a hand-edited link carrying both q and similar parses as both; similar is what wins", () => {
     // The parser is the permissive half by design: it reports every param it
     // knows and lets `resolveView` decide, where the parameter naming a subject
     // is the more specific one. The serializer is the strict half, so the stray
     // rides in the address bar unread rather than being read as a search.
-    const both = parseUrl('?path=%2Fa&q=gear&similar=%2Fa%2Fm.stl')
-    expect(both.similar).toBe('/a/m.stl')
-    expect(both.q).toBe('gear')
-    expect(serializeView(both)).toBe('?path=%2Fa&similar=%2Fa%2Fm.stl')
-  })
+    const both = parseUrl("?path=%2Fa&q=gear&similar=%2Fa%2Fm.stl");
+    expect(both.similar).toBe("/a/m.stl");
+    expect(both.q).toBe("gear");
+    expect(serializeView(both)).toBe("?path=%2Fa&similar=%2Fa%2Fm.stl");
+  });
 
-  it('an unrecognised kinds reads as the default rather than an error', () => {
-    expect(parseUrl('?path=/m&flat=1&q=a&kinds=sideways').kinds).toBeUndefined()
-  })
+  it("an unrecognised kinds reads as the default rather than an error", () => {
+    expect(
+      parseUrl("?path=/m&flat=1&q=a&kinds=sideways").kinds,
+    ).toBeUndefined();
+  });
 
-  it('a re-submitted meaning view stacks nothing, though its tuning is spelled out', () => {
+  it("a re-submitted meaning view stacks nothing, though its tuning is spelled out", () => {
     // The regression: `parseUrl` leaves tuning left at its defaults undefined,
     // while a committer passes the full defaults object. Compared field by
     // field those never matched, so every re-submit of an unchanged meaning
     // search pushed a duplicate entry and Back landed on the same view.
     const view: UrlView = {
-      path: '/m',
+      path: "/m",
       flat: true,
-      q: 'dragon',
-      mode: 'meaning',
+      q: "dragon",
+      mode: "meaning",
       tuning: { ...TUNING_DEFAULTS },
-    }
-    commitUrl(view)
-    const len = window.history.length
+    };
+    commitUrl(view);
+    const len = window.history.length;
     // The URL says nothing about tuning, because none of it is off default.
-    expect(window.location.search).toBe('?path=%2Fm&flat=1&q=dragon&mode=meaning')
-    commitUrl(view)
-    commitUrl({ ...view, tuning: { ...TUNING_DEFAULTS } })
-    expect(window.history.length).toBe(len)
+    expect(window.location.search).toBe(
+      "?path=%2Fm&flat=1&q=dragon&mode=meaning",
+    );
+    commitUrl(view);
+    commitUrl({ ...view, tuning: { ...TUNING_DEFAULTS } });
+    expect(window.history.length).toBe(len);
     // A tuning change is still a different view, and still pushes. Sending the
     // floor away is such a change on its own now, since both bounds are the
     // resting state and dropping one is a bound going out of force.
-    commitUrl({ ...view, tuning: { ...TUNING_DEFAULTS, top: 12, minScore: undefined } })
-    expect(window.history.length).toBe(len + 1)
-  })
+    commitUrl({
+      ...view,
+      tuning: { ...TUNING_DEFAULTS, top: 12, minScore: undefined },
+    });
+    expect(window.history.length).toBe(len + 1);
+  });
 
-  it('an option the mode cannot use stays out of the URL', () => {
+  it("an option the mode cannot use stays out of the URL", () => {
     // The report: sticky options leaked into URLs of modes that cannot read
     // them — `?q=almenhier&mode=name&pool=max&top=120` (a name search naming a
     // meaning question) and `?q=almenhier&kinds=models&mode=meaning` (a meaning
@@ -474,51 +594,77 @@ describe('search options in the URL', () => {
     // with models and nothing else). The panel hides each control outside its
     // mode; the URL now agrees.
     const nameWithTuning: UrlView = {
-      path: '/m',
+      path: "/m",
       flat: true,
-      q: 'almenhier',
-      mode: 'name',
-      kinds: 'models',
-      tuning: { ...TUNING_DEFAULTS, pool: 'max', top: 120, raw: true, minScore: 0.4 },
-    }
-    const nameUrl = serializeView(nameWithTuning)
-    expect(nameUrl).toBe('?path=%2Fm&flat=1&q=almenhier&kinds=models&mode=name')
-    for (const leak of ['pool', 'top=', 'score-raw', 'min=']) expect(nameUrl).not.toContain(leak)
+      q: "almenhier",
+      mode: "name",
+      kinds: "models",
+      tuning: {
+        ...TUNING_DEFAULTS,
+        pool: "max",
+        top: 120,
+        raw: true,
+        minScore: 0.4,
+      },
+    };
+    const nameUrl = serializeView(nameWithTuning);
+    expect(nameUrl).toBe(
+      "?path=%2Fm&flat=1&q=almenhier&kinds=models&mode=name",
+    );
+    for (const leak of ["pool", "top=", "score-raw", "min="])
+      expect(nameUrl).not.toContain(leak);
 
     const meaningWithKinds: UrlView = {
-      path: '/m',
+      path: "/m",
       flat: true,
-      q: 'almenhier',
-      mode: 'meaning',
-      kinds: 'models',
+      q: "almenhier",
+      mode: "meaning",
+      kinds: "models",
       folderMatching: false,
-      tuning: { ...TUNING_DEFAULTS, pool: 'max' },
-    }
-    const meaningUrl = serializeView(meaningWithKinds)
-    expect(meaningUrl).toBe('?path=%2Fm&flat=1&q=almenhier&mode=meaning&pool=max')
-    for (const leak of ['kinds', 'nofolders']) expect(meaningUrl).not.toContain(leak)
-  })
+      tuning: { ...TUNING_DEFAULTS, pool: "max" },
+    };
+    const meaningUrl = serializeView(meaningWithKinds);
+    expect(meaningUrl).toBe(
+      "?path=%2Fm&flat=1&q=almenhier&mode=meaning&pool=max",
+    );
+    for (const leak of ["kinds", "nofolders"])
+      expect(meaningUrl).not.toContain(leak);
+  });
 
-  it('a view is the same view as its clean counterpart when only the unread options differ', () => {
+  it("a view is the same view as its clean counterpart when only the unread options differ", () => {
     // The knock-on: identical views serialized differently, so `commitUrl`'s
     // dedupe saw a difference where there is none and Back walked entries that
     // change nothing on screen.
-    const clean: UrlView = { path: '/m', flat: true, q: 'almenhier', mode: 'name', kinds: 'models' }
-    commitUrl(clean)
-    const len = window.history.length
-    commitUrl({ ...clean, tuning: { ...TUNING_DEFAULTS, pool: 'max', top: 120 } })
-    expect(window.history.length).toBe(len)
+    const clean: UrlView = {
+      path: "/m",
+      flat: true,
+      q: "almenhier",
+      mode: "name",
+      kinds: "models",
+    };
+    commitUrl(clean);
+    const len = window.history.length;
+    commitUrl({
+      ...clean,
+      tuning: { ...TUNING_DEFAULTS, pool: "max", top: 120 },
+    });
+    expect(window.history.length).toBe(len);
 
-    const meaning: UrlView = { path: '/m', flat: true, q: 'almenhier', mode: 'meaning' }
-    commitUrl(meaning)
-    const after = window.history.length
-    commitUrl({ ...meaning, kinds: 'models', folderMatching: false })
-    expect(window.history.length).toBe(after)
-  })
+    const meaning: UrlView = {
+      path: "/m",
+      flat: true,
+      q: "almenhier",
+      mode: "meaning",
+    };
+    commitUrl(meaning);
+    const after = window.history.length;
+    commitUrl({ ...meaning, kinds: "models", folderMatching: false });
+    expect(window.history.length).toBe(after);
+  });
 
-  it('absent options are absent, not false', () => {
-    const v = parseUrl('?path=/m&flat=1&q=a')
-    expect(v.folderMatching).toBeUndefined()
-    expect(v.kinds).toBeUndefined()
-  })
-})
+  it("absent options are absent, not false", () => {
+    const v = parseUrl("?path=/m&flat=1&q=a");
+    expect(v.folderMatching).toBeUndefined();
+    expect(v.kinds).toBeUndefined();
+  });
+});

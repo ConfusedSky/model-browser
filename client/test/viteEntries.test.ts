@@ -11,27 +11,29 @@
 // thing a future edit can quietly change. `?raw` comes through Vite for the
 // reason chromeLayers.test.tsx reads index.css that way — this workspace has no
 // @types/node and happy-dom replaces the global `URL`.
-import { describe, expect, it } from 'vitest'
-import CONFIG from '../vite.config.ts?raw'
+import { describe, expect, it } from "vitest";
+import CONFIG from "../vite.config.ts?raw";
 
 /** The body of `rollupOptions.input`, or null if the config has no such key. */
 function inputBlock(): string | null {
-  const found = /rollupOptions:\s*\{[\s\S]*?input:\s*\{([\s\S]*?)\}/.exec(CONFIG)
-  return found?.[1] ?? null
+  const found = /rollupOptions:\s*\{[\s\S]*?input:\s*\{([\s\S]*?)\}/.exec(
+    CONFIG,
+  );
+  return found?.[1] ?? null;
 }
 
-describe('the client build has two entries', () => {
-  it('reads the config as text at all', () => {
+describe("the client build has two entries", () => {
+  it("reads the config as text at all", () => {
     // Guards the mechanism before the assertions that rest on it: were `?raw`
     // stubbed to an empty string, every `toContain` below would fail for a
     // reason that has nothing to do with the entries.
-    expect(CONFIG).toContain('defineConfig')
-  })
+    expect(CONFIG).toContain("defineConfig");
+  });
 
-  it('names both index.html and about.html under rollupOptions.input', () => {
-    const block = inputBlock()
-    expect(block).not.toBeNull()
-    expect(block).toContain('index.html')
-    expect(block).toContain('about.html')
-  })
-})
+  it("names both index.html and about.html under rollupOptions.input", () => {
+    const block = inputBlock();
+    expect(block).not.toBeNull();
+    expect(block).toContain("index.html");
+    expect(block).toContain("about.html");
+  });
+});

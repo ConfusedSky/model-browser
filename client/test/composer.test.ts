@@ -1,32 +1,32 @@
 // @vitest-environment happy-dom
-import * as THREE from 'three'
-import type { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js'
-import type { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Bounds } from '../src/three/camera'
-import type { CameraState, OrbitAxis } from '../../shared/types'
+import * as THREE from "three";
+import type { GTAOPass } from "three/examples/jsm/postprocessing/GTAOPass.js";
+import type { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Bounds } from "../src/three/camera";
+import type { CameraState, OrbitAxis } from "../../shared/types";
 
 // The chains are internal to the renderer module, so the seam is three itself
 // — a fake WebGLRenderer lets the real composers be built (and the real
 // staging run) without a GL context, exactly as in thumbnailTeardown.test.ts.
-vi.mock('three', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('three')>()
+vi.mock("three", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("three")>();
   class FakeWebGLRenderer {
-    shadowMap = { enabled: false, type: 0 }
+    shadowMap = { enabled: false, type: 0 };
     setClearColor(): void {}
     setSize(): void {}
     getPixelRatio(): number {
-      return 1
+      return 1;
     }
     getRenderTarget(): null {
-      return null
+      return null;
     }
     setRenderTarget(): void {}
     render(): void {}
     readRenderTargetPixels(): void {}
   }
-  return { ...actual, WebGLRenderer: FakeWebGLRenderer }
-})
+  return { ...actual, WebGLRenderer: FakeWebGLRenderer };
+});
 
 const {
   getLiveChain,
@@ -37,132 +37,153 @@ const {
   renderThumbnail,
   stageModel,
   THUMB_SIZE,
-} = await import('../src/three/renderer')
-const { ViewerSession } = await import('../src/viewer/session')
-const { setAoEnabled } = await import('../src/viewer/aoToggle')
+} = await import("../src/three/renderer");
+const { ViewerSession } = await import("../src/viewer/session");
+const { setAoEnabled } = await import("../src/viewer/aoToggle");
 
 afterEach(() => {
-  vi.restoreAllMocks()
+  vi.restoreAllMocks();
   // aoToggle keeps its value in a module closure, so it outlives a test
   // (client/test/CLAUDE.md). Back to *this file's* assumption, which is on —
   // NOT the shipped default, which `ao-default-off` made off. Written when the
   // two were the same; kept because these cases are about the occluded chain.
-  setAoEnabled(true)
-})
+  setAoEnabled(true);
+});
 
 /** A cube whose bounding-sphere radius is exactly `radius`. */
 function makeMesh(radius = 1): THREE.Mesh {
-  const side = (2 * radius) / Math.sqrt(3)
-  return new THREE.Mesh(new THREE.BoxGeometry(side, side, side), new THREE.MeshBasicMaterial())
+  const side = (2 * radius) / Math.sqrt(3);
+  return new THREE.Mesh(
+    new THREE.BoxGeometry(side, side, side),
+    new THREE.MeshBasicMaterial(),
+  );
 }
 
 /** Stage a cube the way every view does, and hand back what a chain render needs. */
-function staged(radius: number): { scene: THREE.Scene; camera: THREE.PerspectiveCamera; bounds: Bounds } {
-  const lit = makeScene()
-  const { bounds } = stageModel(lit, makeMesh(radius), 'y')
-  return { scene: lit.scene, camera: new THREE.PerspectiveCamera(40, 1), bounds }
+function staged(radius: number): {
+  scene: THREE.Scene;
+  camera: THREE.PerspectiveCamera;
+  bounds: Bounds;
+} {
+  const lit = makeScene();
+  const { bounds } = stageModel(lit, makeMesh(radius), "y");
+  return {
+    scene: lit.scene,
+    camera: new THREE.PerspectiveCamera(40, 1),
+    bounds,
+  };
 }
 
-describe('post-process chains', () => {
-  it('builds one chain per path and reuses it across sessions and thumbnails', () => {
-    const first = getLiveChain(200, 100)
+describe("post-process chains", () => {
+  it("builds one chain per path and reuses it across sessions and thumbnails", () => {
+    const first = getLiveChain(200, 100);
     // A different host size resizes the chain; it never builds a second one.
-    expect(getLiveChain(300, 150)).toBe(first)
-    expect(getThumbChain()).toBe(getThumbChain())
-    expect(getThumbChain()).not.toBe(first)
-  })
+    expect(getLiveChain(300, 150)).toBe(first);
+    expect(getThumbChain()).toBe(getThumbChain());
+    expect(getThumbChain()).not.toBe(first);
+  });
 
-  it('runs RenderPass → GTAOPass → OutputPass in both paths', () => {
+  it("runs RenderPass → GTAOPass → OutputPass in both paths", () => {
     for (const chain of [getLiveChain(64, 64), getThumbChain()]) {
       expect(chain.composer.passes.map((p) => p.constructor.name)).toEqual([
-        'RenderPass',
-        'GTAOPass',
-        'OutputPass',
-      ])
+        "RenderPass",
+        "GTAOPass",
+        "OutputPass",
+      ]);
     }
-  })
+  });
 
-  it('never takes the composer default target: 4× MSAA on both, bytes for readback', () => {
+  it("never takes the composer default target: 4× MSAA on both, bytes for readback", () => {
     // EffectComposer's own default is single-sample half-float, which would
     // drop today's antialiasing and break the thumbnail readback (D1).
-    const live = getLiveChain(320, 240)
-    expect(live.composer.renderTarget1.samples).toBe(4)
-    expect(live.composer.renderTarget2.samples).toBe(4)
+    const live = getLiveChain(320, 240);
+    expect(live.composer.renderTarget1.samples).toBe(4);
+    expect(live.composer.renderTarget2.samples).toBe(4);
 
-    const thumb = getThumbChain()
-    expect(thumb.composer.renderTarget1.samples).toBe(4)
-    expect(thumb.composer.renderTarget2.samples).toBe(4)
-    expect(thumb.composer.renderTarget1.texture.type).toBe(THREE.UnsignedByteType)
-    expect(thumb.composer.renderTarget2.texture.type).toBe(THREE.UnsignedByteType)
+    const thumb = getThumbChain();
+    expect(thumb.composer.renderTarget1.samples).toBe(4);
+    expect(thumb.composer.renderTarget2.samples).toBe(4);
+    expect(thumb.composer.renderTarget1.texture.type).toBe(
+      THREE.UnsignedByteType,
+    );
+    expect(thumb.composer.renderTarget2.texture.type).toBe(
+      THREE.UnsignedByteType,
+    );
     // Fixed 512², never resized, and never pointed at the visible canvas.
-    expect(thumb.composer.renderTarget1.width).toBe(THUMB_SIZE)
-    expect(thumb.composer.renderTarget1.height).toBe(THUMB_SIZE)
-    expect(thumb.composer.renderToScreen).toBe(false)
-  })
+    expect(thumb.composer.renderTarget1.width).toBe(THUMB_SIZE);
+    expect(thumb.composer.renderTarget1.height).toBe(THUMB_SIZE);
+    expect(thumb.composer.renderToScreen).toBe(false);
+  });
 
-  it('resizes the live chain only when the host dimensions actually change', () => {
-    const live = getLiveChain(400, 300)
-    const setSize = vi.spyOn(live.composer, 'setSize')
-    getLiveChain(400, 300)
-    expect(setSize).not.toHaveBeenCalled()
-    getLiveChain(401, 300)
-    expect(setSize).toHaveBeenCalledExactlyOnceWith(401, 300)
-  })
+  it("resizes the live chain only when the host dimensions actually change", () => {
+    const live = getLiveChain(400, 300);
+    const setSize = vi.spyOn(live.composer, "setSize");
+    getLiveChain(400, 300);
+    expect(setSize).not.toHaveBeenCalled();
+    getLiveChain(401, 300);
+    expect(setSize).toHaveBeenCalledExactlyOnceWith(401, 300);
+  });
 
-  it('re-points both passes at the caller on every render', () => {
-    const chain = getThumbChain()
-    vi.spyOn(chain.composer, 'render').mockImplementation(() => {})
+  it("re-points both passes at the caller on every render", () => {
+    const chain = getThumbChain();
+    vi.spyOn(chain.composer, "render").mockImplementation(() => {});
     for (const radius of [1, 100]) {
-      const { scene, camera, bounds } = staged(radius)
-      chain.render(scene, camera, bounds)
-      const scenePass = chain.composer.passes[0] as RenderPass
-      const aoPass = chain.composer.passes[1] as GTAOPass
+      const { scene, camera, bounds } = staged(radius);
+      chain.render(scene, camera, bounds);
+      const scenePass = chain.composer.passes[0] as RenderPass;
+      const aoPass = chain.composer.passes[1] as GTAOPass;
       for (const pass of [scenePass, aoPass]) {
-        expect(pass.scene).toBe(scene)
-        expect(pass.camera).toBe(camera)
+        expect(pass.scene).toBe(scene);
+        expect(pass.camera).toBe(camera);
       }
     }
-  })
-})
+  });
+});
 
-describe('render paths go through the chains, never renderer.render', () => {
-  it('drives the live view through the live chain', () => {
-    const live = getLiveChain(200, 200)
-    const composed = vi.spyOn(live.composer, 'render').mockImplementation(() => {})
-    const direct = vi.spyOn(getRenderer(), 'render')
+describe("render paths go through the chains, never renderer.render", () => {
+  it("drives the live view through the live chain", () => {
+    const live = getLiveChain(200, 200);
+    const composed = vi
+      .spyOn(live.composer, "render")
+      .mockImplementation(() => {});
+    const direct = vi.spyOn(getRenderer(), "render");
 
-    const session = new ViewerSession(makeMesh(), 'y')
-    session.render(200, 200)
+    const session = new ViewerSession(makeMesh(), "y");
+    session.render(200, 200);
 
-    expect(composed).toHaveBeenCalledOnce()
+    expect(composed).toHaveBeenCalledOnce();
     // The chain's own render is stubbed, so any renderer.render left here
     // would be a direct call from session.render().
-    expect(direct).not.toHaveBeenCalled()
-    session.close()
-  })
+    expect(direct).not.toHaveBeenCalled();
+    session.close();
+  });
 
-  it('reads the thumbnail back from the chain readBuffer as 512² RGBA', () => {
-    const chain = getThumbChain()
-    const composed = vi.spyOn(chain.composer, 'render').mockImplementation(() => {})
-    const r = getRenderer()
-    const direct = vi.spyOn(r, 'render')
-    const read = vi.spyOn(r, 'readRenderTargetPixels')
+  it("reads the thumbnail back from the chain readBuffer as 512² RGBA", () => {
+    const chain = getThumbChain();
+    const composed = vi
+      .spyOn(chain.composer, "render")
+      .mockImplementation(() => {});
+    const r = getRenderer();
+    const direct = vi.spyOn(r, "render");
+    const read = vi.spyOn(r, "readRenderTargetPixels");
 
     // happy-dom has no 2d canvas context, so the PNG encode at the very end
     // throws — well after the readback this test is about.
-    expect(() => renderThumbnail(makeMesh(), undefined, 'y')).toThrow('2d context unavailable')
+    expect(() => renderThumbnail(makeMesh(), undefined, "y")).toThrow(
+      "2d context unavailable",
+    );
 
-    expect(composed).toHaveBeenCalledOnce()
-    expect(direct).not.toHaveBeenCalled()
-    const [target, x, y, width, height, buffer] = read.mock.calls[0]!
+    expect(composed).toHaveBeenCalledOnce();
+    expect(direct).not.toHaveBeenCalled();
+    const [target, x, y, width, height, buffer] = read.mock.calls[0]!;
     // OutputPass leaves needsSwap at the Pass default, so the composer swaps
     // after it and the finished frame is the readBuffer (D1).
-    expect(target).toBe(chain.composer.readBuffer)
-    expect([x, y, width, height]).toEqual([0, 0, THUMB_SIZE, THUMB_SIZE])
-    expect(buffer).toBeInstanceOf(Uint8Array)
-    expect(buffer!.length).toBe(THUMB_SIZE * THUMB_SIZE * 4)
-  })
-})
+    expect(target).toBe(chain.composer.readBuffer);
+    expect([x, y, width, height]).toEqual([0, 0, THUMB_SIZE, THUMB_SIZE]);
+    expect(buffer).toBeInstanceOf(Uint8Array);
+    expect(buffer!.length).toBe(THUMB_SIZE * THUMB_SIZE * 4);
+  });
+});
 
 // Frozen AO fit (D3), in radius units and pure exponents — tuned visually
 // 2026-08-14 on the six e2e fixtures (task 2.1): reach/thickness/falloff kept
@@ -170,126 +191,133 @@ describe('render paths go through the chains, never renderer.render', () => {
 // 1 → 1.5 so crevices read at thumbnail size (the cube's embossed text
 // resolves through AO alone) without surfaces muddying. Changing any value
 // changes every model's pixels and needs a RIG_VERSION bump.
-const AO_RADIUS_R = 0.15
-const AO_THICKNESS_R = 0.3
-const AO_SCALE = 1.5
-const AO_DISTANCE_EXPONENT = 1
-const AO_SAMPLES = 16
+const AO_RADIUS_R = 0.15;
+const AO_THICKNESS_R = 0.3;
+const AO_SCALE = 1.5;
+const AO_DISTANCE_EXPONENT = 1;
+const AO_SAMPLES = 16;
 
 /** The chain's GTAO pass, fitted to a freshly staged cube of this radius. */
 function fitFor(radius: number): { ao: GTAOPass; bounds: Bounds } {
-  const chain = getThumbChain()
-  vi.spyOn(chain.composer, 'render').mockImplementation(() => {})
-  const { scene, camera, bounds } = staged(radius)
-  chain.render(scene, camera, bounds)
-  return { ao: chain.composer.passes[1] as GTAOPass, bounds }
+  const chain = getThumbChain();
+  vi.spyOn(chain.composer, "render").mockImplementation(() => {});
+  const { scene, camera, bounds } = staged(radius);
+  chain.render(scene, camera, bounds);
+  return { ao: chain.composer.passes[1] as GTAOPass, bounds };
 }
 
 /** The fitted scalars, copied out — the shared chain overwrites its uniforms. */
 function uniformFit(ao: GTAOPass): {
-  radius: number
-  thickness: number
-  scale: number
-  distanceExponent: number
+  radius: number;
+  thickness: number;
+  scale: number;
+  distanceExponent: number;
 } {
-  const u = ao.gtaoMaterial.uniforms
+  const u = ao.gtaoMaterial.uniforms;
   return {
     radius: u.radius!.value,
     thickness: u.thickness!.value,
     scale: u.scale!.value,
     distanceExponent: u.distanceExponent!.value,
-  }
+  };
 }
 
-describe('GTAO fit', () => {
-  it('scales reach and thickness with the staged radius, freezing the multiples', () => {
-    const small = fitFor(1)
+describe("GTAO fit", () => {
+  it("scales reach and thickness with the staged radius, freezing the multiples", () => {
+    const small = fitFor(1);
     // float32 vertices: 1 to within ~1e-8
-    expect(small.bounds.radius).toBeCloseTo(1, 6)
+    expect(small.bounds.radius).toBeCloseTo(1, 6);
     // Snapshots, not the live uniforms: one shared chain means the next fit
     // overwrites them in place.
-    const smallFit = uniformFit(small.ao)
-    expect(smallFit.radius).toBeCloseTo(AO_RADIUS_R * small.bounds.radius, 9)
-    expect(smallFit.thickness).toBeCloseTo(AO_THICKNESS_R * small.bounds.radius, 9)
-    expect(smallFit.scale).toBe(AO_SCALE)
-    expect(smallFit.distanceExponent).toBe(AO_DISTANCE_EXPONENT)
-    expect(small.ao.gtaoMaterial.defines!.SAMPLES).toBe(AO_SAMPLES)
+    const smallFit = uniformFit(small.ao);
+    expect(smallFit.radius).toBeCloseTo(AO_RADIUS_R * small.bounds.radius, 9);
+    expect(smallFit.thickness).toBeCloseTo(
+      AO_THICKNESS_R * small.bounds.radius,
+      9,
+    );
+    expect(smallFit.scale).toBe(AO_SCALE);
+    expect(smallFit.distanceExponent).toBe(AO_DISTANCE_EXPONENT);
+    expect(small.ao.gtaoMaterial.defines!.SAMPLES).toBe(AO_SAMPLES);
 
     // A model 100× bigger gets the same occlusion 100× out: equal depth-cueing
     // for a miniature and a bust is the whole point of scaling by the radius.
-    const big = fitFor(100)
-    expect(big.bounds.radius / small.bounds.radius).toBeCloseTo(100, 4)
-    const bigFit = uniformFit(big.ao)
-    expect(bigFit.radius / smallFit.radius).toBeCloseTo(100, 4)
-    expect(bigFit.thickness / smallFit.thickness).toBeCloseTo(100, 4)
-  })
+    const big = fitFor(100);
+    expect(big.bounds.radius / small.bounds.radius).toBeCloseTo(100, 4);
+    const bigFit = uniformFit(big.ao);
+    expect(bigFit.radius / smallFit.radius).toBeCloseTo(100, 4);
+    expect(bigFit.thickness / smallFit.thickness).toBeCloseTo(100, 4);
+  });
 
-  it('clips occlusion to the staged bounds box, so the floor and background stay clean', () => {
-    const { ao, bounds } = fitFor(3)
-    expect(ao.gtaoMaterial.defines!.SCENE_CLIP_BOX).toBe(1)
-    const min: THREE.Vector3 = ao.gtaoMaterial.uniforms.sceneBoxMin!.value
-    const max: THREE.Vector3 = ao.gtaoMaterial.uniforms.sceneBoxMax!.value
-    expect(min.distanceTo(bounds.box.min)).toBeLessThan(1e-9)
-    expect(max.distanceTo(bounds.box.max)).toBeLessThan(1e-9)
-  })
+  it("clips occlusion to the staged bounds box, so the floor and background stay clean", () => {
+    const { ao, bounds } = fitFor(3);
+    expect(ao.gtaoMaterial.defines!.SCENE_CLIP_BOX).toBe(1);
+    const min: THREE.Vector3 = ao.gtaoMaterial.uniforms.sceneBoxMin!.value;
+    const max: THREE.Vector3 = ao.gtaoMaterial.uniforms.sceneBoxMax!.value;
+    expect(min.distanceTo(bounds.box.min)).toBeLessThan(1e-9);
+    expect(max.distanceTo(bounds.box.max)).toBeLessThan(1e-9);
+  });
 
-  it('re-fits per render, because the chain is shared between models', () => {
-    const first = fitFor(1).ao.gtaoMaterial.uniforms.radius!.value
-    const second = fitFor(50).ao.gtaoMaterial.uniforms.radius!.value
-    expect(second).not.toBeCloseTo(first, 6)
-  })
-})
+  it("re-fits per render, because the chain is shared between models", () => {
+    const first = fitFor(1).ao.gtaoMaterial.uniforms.radius!.value;
+    const second = fitFor(50).ao.gtaoMaterial.uniforms.radius!.value;
+    expect(second).not.toBeCloseTo(first, 6);
+  });
+});
 
 // Handoff parity, asserted where it is actually decided: the `ao` flag the two
 // chains receive. Every other test in this change works against a mocked
 // `renderThumbnail` and can only say what the *callers* passed; here the
 // chains are real (over the fake WebGLRenderer above), so the GTAO pass's own
 // `enabled` is the answer to "was this render occluded".
-describe('both paths render under the same occlusion preference', () => {
+describe("both paths render under the same occlusion preference", () => {
   /** The GTAO pass of a chain — the only thing `ao` actually moves. */
   function aoPassOf(chain: { composer: { passes: unknown[] } }): GTAOPass {
-    return chain.composer.passes[1] as GTAOPass
+    return chain.composer.passes[1] as GTAOPass;
   }
 
   /** Drive the live view once and report whether its chain occluded it. */
   function liveOccluded(session: InstanceType<typeof ViewerSession>): boolean {
-    const live = getLiveChain(200, 200)
-    vi.spyOn(live.composer, 'render').mockImplementation(() => {})
-    session.render(200, 200)
-    return aoPassOf(live).enabled
+    const live = getLiveChain(200, 200);
+    vi.spyOn(live.composer, "render").mockImplementation(() => {});
+    session.render(200, 200);
+    return aoPassOf(live).enabled;
   }
 
   /** Draw a thumbnail once and report whether its chain occluded it. The PNG
    *  encode throws in happy-dom, well after the chain render this reads. */
   function thumbOccluded(draw: () => unknown): boolean {
-    const chain = getThumbChain()
-    vi.spyOn(chain.composer, 'render').mockImplementation(() => {})
-    expect(draw).toThrow('2d context unavailable')
-    return aoPassOf(chain).enabled
+    const chain = getThumbChain();
+    vi.spyOn(chain.composer, "render").mockImplementation(() => {});
+    expect(draw).toThrow("2d context unavailable");
+    return aoPassOf(chain).enabled;
   }
 
-  it('with the preference off, the tile and the overlay over it are both unoccluded', () => {
-    setAoEnabled(false)
-    const session = new ViewerSession(makeMesh(), 'y')
+  it("with the preference off, the tile and the overlay over it are both unoccluded", () => {
+    setAoEnabled(false);
+    const session = new ViewerSession(makeMesh(), "y");
     try {
       // The thumbnail the tile shows: rendered under the caller's reading.
-      expect(thumbOccluded(() => renderThumbnail(makeMesh(), undefined, 'y', false))).toBe(false)
+      expect(
+        thumbOccluded(() => renderThumbnail(makeMesh(), undefined, "y", false)),
+      ).toBe(false);
       // The overlay that opens over it: the live chain reads the same store.
-      expect(liveOccluded(session)).toBe(false)
+      expect(liveOccluded(session)).toBe(false);
     } finally {
-      session.close()
+      session.close();
     }
-  })
+  });
 
-  it('with the preference on, both are occluded — the shipped recipe, unchanged', () => {
-    const session = new ViewerSession(makeMesh(), 'y')
+  it("with the preference on, both are occluded — the shipped recipe, unchanged", () => {
+    const session = new ViewerSession(makeMesh(), "y");
     try {
-      expect(thumbOccluded(() => renderThumbnail(makeMesh(), undefined, 'y'))).toBe(true)
-      expect(liveOccluded(session)).toBe(true)
+      expect(
+        thumbOccluded(() => renderThumbnail(makeMesh(), undefined, "y")),
+      ).toBe(true);
+      expect(liveOccluded(session)).toBe(true);
     } finally {
-      session.close()
+      session.close();
     }
-  })
+  });
 
   it("a session's snapshot draws under the value handed to it, never a read of its own", () => {
     // The site a grep for `aoEnabled` misses: `snapshot` goes through
@@ -298,15 +326,15 @@ describe('both paths render under the same occlusion preference', () => {
     // pixels and the slot they are filed under (D4a). Asserted against the
     // store set the *other* way, which is the only way to tell a passed value
     // from a fresh read.
-    setAoEnabled(true)
-    const session = new ViewerSession(makeMesh(), 'y')
+    setAoEnabled(true);
+    const session = new ViewerSession(makeMesh(), "y");
     try {
-      expect(thumbOccluded(() => session.snapshot(false))).toBe(false)
+      expect(thumbOccluded(() => session.snapshot(false))).toBe(false);
     } finally {
-      session.close()
+      session.close();
     }
-  })
-})
+  });
+});
 
 /**
  * The thumbnail rig's orientation — the one input to every tile's pixels that
@@ -319,8 +347,8 @@ describe('both paths render under the same occlusion preference', () => {
  * re-lights — silently, since the cache keys on a rig number nobody would think
  * to bump for a line that still compiles, and the tile still shows *a* render.
  */
-describe('the thumbnail rig is fixed in the rest camera’s frame', () => {
-  const IDENTITY = new THREE.Quaternion()
+describe("the thumbnail rig is fixed in the rest camera’s frame", () => {
+  const IDENTITY = new THREE.Quaternion();
 
   /** Draw once and report the rig and camera the chain was handed. The PNG
    *  encode throws in happy-dom, well after the render this reads. */
@@ -328,45 +356,59 @@ describe('the thumbnail rig is fixed in the rest camera’s frame', () => {
     state: CameraState | undefined,
     axis: OrbitAxis,
   ): { rig: THREE.Object3D; camera: THREE.PerspectiveCamera } {
-    const chain = getThumbChain()
-    const seen = vi.spyOn(chain, 'render').mockImplementation(() => {})
-    expect(() => renderThumbnail(makeMesh(), state, axis, true)).toThrow('2d context unavailable')
-    const [scene, camera] = seen.mock.calls[0] as unknown as [THREE.Scene, THREE.PerspectiveCamera]
+    const chain = getThumbChain();
+    const seen = vi.spyOn(chain, "render").mockImplementation(() => {});
+    expect(() => renderThumbnail(makeMesh(), state, axis, true)).toThrow(
+      "2d context unavailable",
+    );
+    const [scene, camera] = seen.mock.calls[0] as unknown as [
+      THREE.Scene,
+      THREE.PerspectiveCamera,
+    ];
     // The rig is the scene child that owns the key light — found by name, so
     // this does not depend on the order `makeScene` and `stageModel` add
     // children.
-    const rig = scene.children.find((c) => c.getObjectByName(KEY_LIGHT) !== undefined)
-    expect(rig).toBeDefined()
-    return { rig: rig!, camera }
+    const rig = scene.children.find(
+      (c) => c.getObjectByName(KEY_LIGHT) !== undefined,
+    );
+    expect(rig).toBeDefined();
+    return { rig: rig!, camera };
   }
 
   /** A camera state that is nothing like the default, so "copied" and "left at
    *  whatever staging set" cannot both pass. */
-  const TURNED: CameraState = { az: 2.1, el: -0.55, distR: 3, target: [0, 0, 0] }
+  const TURNED: CameraState = {
+    az: 2.1,
+    el: -0.55,
+    distR: 3,
+    target: [0, 0, 0],
+  };
 
-  it('copies the rest camera’s quaternion onto the rig, whatever the framing', () => {
+  it("copies the rest camera’s quaternion onto the rig, whatever the framing", () => {
     const cases: [CameraState | undefined, OrbitAxis][] = [
-      [undefined, 'y'], // the default framing every un-orbited tile gets
-      [TURNED, 'y'],
-      [TURNED, 'z'],
-      [TURNED, '-x'], // a negated spindle: the rig follows the camera, not the axis
-    ]
+      [undefined, "y"], // the default framing every un-orbited tile gets
+      [TURNED, "y"],
+      [TURNED, "z"],
+      [TURNED, "-x"], // a negated spindle: the rig follows the camera, not the axis
+    ];
     for (const [state, axis] of cases) {
-      const { rig, camera } = drawn(state, axis)
-      expect(rig.quaternion.angleTo(camera.quaternion)).toBeLessThan(1e-6)
+      const { rig, camera } = drawn(state, axis);
+      expect(rig.quaternion.angleTo(camera.quaternion)).toBeLessThan(1e-6);
       // The control, and it is load-bearing: a rig left at identity would pass
       // the line above for any camera that happened to be at identity too.
       // None of these framings is — they are all well off it.
-      expect(camera.quaternion.angleTo(IDENTITY)).toBeGreaterThan(0.1)
+      expect(camera.quaternion.angleTo(IDENTITY)).toBeGreaterThan(0.1);
     }
-  })
+  });
 
-  it('turns the rig when the framing turns, rather than fixing it to the world', () => {
+  it("turns the rig when the framing turns, rather than fixing it to the world", () => {
     // Two framings, two rig orientations. Without this a rig copied *once* into
     // a module-level constant would satisfy the equality above forever.
-    const a = drawn(undefined, 'y')
-    const b = drawn(TURNED, 'y')
-    expect(a.rig.quaternion.angleTo(b.rig.quaternion)).toBeGreaterThan(0.1)
-    expect(a.camera.quaternion.angleTo(b.camera.quaternion)).toBeGreaterThan(0.1)
-  })
-})
+    const a = drawn(undefined, "y");
+    const b = drawn(TURNED, "y");
+    expect(a.rig.quaternion.angleTo(b.rig.quaternion)).toBeGreaterThan(0.1);
+    expect(a.camera.quaternion.angleTo(b.camera.quaternion)).toBeGreaterThan(
+      0.1,
+    );
+  });
+});

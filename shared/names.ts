@@ -8,5 +8,5 @@
  * together in the grid.
  */
 export function baseName(name: string): string {
-  return name.slice(name.lastIndexOf('/') + 1)
+  return name.slice(name.lastIndexOf("/") + 1);
 }

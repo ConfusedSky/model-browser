@@ -1,11 +1,11 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
-import { generateOverrides, underTop } from '../../scripts/gen-overrides'
-import { MARKER_DIR } from '../src/library'
-import { loadOverrides, resolveOverrides } from '../src/overrides'
-import { realTempDir } from './helpers'
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { generateOverrides, underTop } from "../../scripts/gen-overrides";
+import { MARKER_DIR } from "../src/library";
+import { loadOverrides, resolveOverrides } from "../src/overrides";
+import { realTempDir } from "./helpers";
 
 /**
  * The generator's core, exercised as a function rather than through a
@@ -21,375 +21,508 @@ import { realTempDir } from './helpers'
  * fields: the second is the kit served unchanged, whose absence of `modified`
  * is the point (D2).
  */
-const LICENSE_URL = 'https://creativecommons.org/licenses/by/4.0/'
-const MODIFIED = 're-exported as STL and decimated for display'
+const LICENSE_URL = "https://creativecommons.org/licenses/by/4.0/";
+const MODIFIED = "re-exported as STL and decimated for display";
 const KITS = [
   {
     thing_id: 3750572,
-    stem: 'Player_Character_Pack_03_3750572',
-    name: 'Player Character Pack 03',
-    author: 'Valandar',
-    author_url: 'https://www.thingiverse.com/Valandar',
-    license: 'Creative Commons - Attribution',
+    stem: "Player_Character_Pack_03_3750572",
+    name: "Player Character Pack 03",
+    author: "Valandar",
+    author_url: "https://www.thingiverse.com/Valandar",
+    license: "Creative Commons - Attribution",
     license_url: LICENSE_URL,
     modified: MODIFIED,
-    source_url: 'https://www.thingiverse.com/thing:3750572',
-    files: [{ name: 'KindleCleric_000.stl', stem: 'KindleCleric_000' }],
+    source_url: "https://www.thingiverse.com/thing:3750572",
+    files: [{ name: "KindleCleric_000.stl", stem: "KindleCleric_000" }],
   },
   {
     thing_id: 3040102,
-    stem: 'Locked_Chest_3040102',
-    name: 'Locked Chest',
-    author: 'Someone',
-    author_url: 'https://www.thingiverse.com/Someone',
-    license: 'Creative Commons - Attribution',
-    source_url: 'https://www.thingiverse.com/thing:3040102',
-    files: [{ name: 'case_meshmixed.stl', stem: 'case_meshmixed' }],
+    stem: "Locked_Chest_3040102",
+    name: "Locked Chest",
+    author: "Someone",
+    author_url: "https://www.thingiverse.com/Someone",
+    license: "Creative Commons - Attribution",
+    source_url: "https://www.thingiverse.com/thing:3040102",
+    files: [{ name: "case_meshmixed.stl", stem: "case_meshmixed" }],
   },
   {
     thing_id: 999,
-    stem: 'Drifted_Away_999',
-    name: 'Drifted Away',
-    author: 'Nobody',
-    license: 'Creative Commons - Attribution',
-    source_url: 'https://www.thingiverse.com/thing:999',
+    stem: "Drifted_Away_999",
+    name: "Drifted Away",
+    author: "Nobody",
+    license: "Creative Commons - Attribution",
+    source_url: "https://www.thingiverse.com/thing:999",
     files: [],
   },
-]
+];
 
-const PACK = KITS[0]!.stem
-const CHEST = KITS[1]!.stem
+const PACK = KITS[0]!.stem;
+const CHEST = KITS[1]!.stem;
 
 /**
  * A library top with the kits laid out under `<top>/<kitsRel>` — the corpus's
  * own `miniatures/<variant>/<stem>/` shape when `kitsRel` is given, and the
  * demo's "root at the variant directory" shape when it is not.
  */
-function fixture(kitsRel = ''): { top: string; kitsDir: string; metadata: string } {
-  const top = realTempDir('mb-gen-')
-  const kitsDir = kitsRel === '' ? top : join(top, kitsRel)
+function fixture(kitsRel = ""): {
+  top: string;
+  kitsDir: string;
+  metadata: string;
+} {
+  const top = realTempDir("mb-gen-");
+  const kitsDir = kitsRel === "" ? top : join(top, kitsRel);
   // Only the first two stems get a folder; the third is the drift case.
-  for (const stem of [PACK, CHEST]) mkdirSync(join(kitsDir, stem), { recursive: true })
-  const metadata = join(top, 'miniatures.json')
-  writeFileSync(metadata, JSON.stringify(KITS))
-  return { top, kitsDir, metadata }
+  for (const stem of [PACK, CHEST])
+    mkdirSync(join(kitsDir, stem), { recursive: true });
+  const metadata = join(top, "miniatures.json");
+  writeFileSync(metadata, JSON.stringify(KITS));
+  return { top, kitsDir, metadata };
 }
 
 function storePath(top: string): string {
-  return join(top, MARKER_DIR, 'overrides.json')
+  return join(top, MARKER_DIR, "overrides.json");
 }
 
-async function readStore(top: string): Promise<{ version: number; entries: Record<string, unknown> }> {
-  return JSON.parse(await readFile(storePath(top), 'utf8'))
+async function readStore(
+  top: string,
+): Promise<{ version: number; entries: Record<string, unknown> }> {
+  return JSON.parse(await readFile(storePath(top), "utf8"));
 }
 
-describe('gen-overrides', () => {
-  it('writes a name and credits per existing kit, and reports the counts', async () => {
-    const { top, metadata } = fixture()
-    const lines: string[] = []
-    const result = await generateOverrides({ top, metadata, report: (m) => lines.push(m) })
+describe("gen-overrides", () => {
+  it("writes a name and credits per existing kit, and reports the counts", async () => {
+    const { top, metadata } = fixture();
+    const lines: string[] = [];
+    const result = await generateOverrides({
+      top,
+      metadata,
+      report: (m) => lines.push(m),
+    });
 
-    expect(result.read).toBe(3)
-    expect(result.written).toBe(2)
-    expect(lines[0]).toContain('wrote 2 keys from 3 kits read')
+    expect(result.read).toBe(3);
+    expect(result.written).toBe(2);
+    expect(lines[0]).toContain("wrote 2 keys from 3 kits read");
 
-    const store = await loadOverrides(top, () => undefined)
+    const store = await loadOverrides(top, () => undefined);
     expect(resolveOverrides(store, `/${PACK}`)).toEqual({
-      name: 'Player Character Pack 03',
+      name: "Player Character Pack 03",
       credits: {
-        author: 'Valandar',
-        authorUrl: 'https://www.thingiverse.com/Valandar',
-        license: 'Creative Commons - Attribution',
+        author: "Valandar",
+        authorUrl: "https://www.thingiverse.com/Valandar",
+        license: "Creative Commons - Attribution",
         licenseUrl: LICENSE_URL,
         modified: MODIFIED,
-        sourceUrl: 'https://www.thingiverse.com/thing:3750572',
+        sourceUrl: "https://www.thingiverse.com/thing:3750572",
       },
-    })
+    });
     // The kit's credits reach a model inside it, which is the whole point.
-    expect(resolveOverrides(store, `/${PACK}/KindleCleric_000.stl`).credits).toBeDefined()
+    expect(
+      resolveOverrides(store, `/${PACK}/KindleCleric_000.stl`).credits,
+    ).toBeDefined();
     // A partial credit is still a credit: this kit carries no author_url.
-    expect(resolveOverrides(store, `/${CHEST}`).credits).toBeDefined()
-  })
+    expect(resolveOverrides(store, `/${CHEST}`).credits).toBeDefined();
+  });
 
-  it('maps license_url and modified on the kit that carries them, and none on the one that does not', async () => {
+  it("maps license_url and modified on the kit that carries them, and none on the one that does not", async () => {
     // The corpus and the app agree on the two field names by convention, not
     // by a shared type (D5): the mapping is asserted field by field, and the
     // run's two counts are what a misspelling on either side would zero.
-    const { top, metadata } = fixture()
-    const lines: string[] = []
-    const result = await generateOverrides({ top, metadata, report: (m) => lines.push(m) })
+    const { top, metadata } = fixture();
+    const lines: string[] = [];
+    const result = await generateOverrides({
+      top,
+      metadata,
+      report: (m) => lines.push(m),
+    });
 
-    const store = await loadOverrides(top, () => undefined)
-    const pack = resolveOverrides(store, `/${PACK}`).credits!
-    expect(pack.licenseUrl).toBe(LICENSE_URL)
-    expect(pack.modified).toBe(MODIFIED)
+    const store = await loadOverrides(top, () => undefined);
+    const pack = resolveOverrides(store, `/${PACK}`).credits!;
+    expect(pack.licenseUrl).toBe(LICENSE_URL);
+    expect(pack.modified).toBe(MODIFIED);
     // Absent means served unchanged — no field, not an empty one, and nothing
     // inferred from anything else the kit carries (D2).
-    const chest = resolveOverrides(store, `/${CHEST}`).credits!
-    expect(chest.author).toBe('Someone')
-    expect('licenseUrl' in chest).toBe(false)
-    expect('modified' in chest).toBe(false)
+    const chest = resolveOverrides(store, `/${CHEST}`).credits!;
+    expect(chest.author).toBe("Someone");
+    expect("licenseUrl" in chest).toBe(false);
+    expect("modified" in chest).toBe(false);
 
-    expect(result.withLicenseUrl).toBe(1)
-    expect(result.withModified).toBe(1)
-    expect(lines).toContain('with license URL: 1, modified: 1')
+    expect(result.withLicenseUrl).toBe(1);
+    expect(result.withModified).toBe(1);
+    expect(lines).toContain("with license URL: 1, modified: 1");
     // The per-value tallies: one line per licence URL and per phrase, count first.
-    expect(lines.filter((l) => /^  1 × https:\/\//.test(l))).toHaveLength(1)
-    expect(lines.filter((l) => /^  1 × "/.test(l))).toHaveLength(1)
-  })
+    expect(lines.filter((l) => /^  1 × https:\/\//.test(l))).toHaveLength(1);
+    expect(lines.filter((l) => /^  1 × "/.test(l))).toHaveLength(1);
+  });
 
-  it('maps strings only: a non-string license_url or modified yields no field and no count', async () => {
-    const { top, metadata } = fixture()
-    const typed = structuredClone(KITS) as Record<string, unknown>[]
-    typed[0]!.license_url = 4
-    typed[0]!.modified = true
-    writeFileSync(metadata, JSON.stringify(typed))
-    const lines: string[] = []
-    const result = await generateOverrides({ top, metadata, report: (m) => lines.push(m) })
+  it("maps strings only: a non-string license_url or modified yields no field and no count", async () => {
+    const { top, metadata } = fixture();
+    const typed = structuredClone(KITS) as Record<string, unknown>[];
+    typed[0]!.license_url = 4;
+    typed[0]!.modified = true;
+    writeFileSync(metadata, JSON.stringify(typed));
+    const lines: string[] = [];
+    const result = await generateOverrides({
+      top,
+      metadata,
+      report: (m) => lines.push(m),
+    });
 
-    const pack = resolveOverrides(await loadOverrides(top, () => undefined), `/${PACK}`).credits!
-    expect(pack.author).toBe('Valandar')
-    expect('licenseUrl' in pack).toBe(false)
-    expect('modified' in pack).toBe(false)
-    expect(result.withLicenseUrl).toBe(0)
-    expect(result.withModified).toBe(0)
-    expect(lines).toContain('with license URL: 0, modified: 0')
-  })
+    const pack = resolveOverrides(
+      await loadOverrides(top, () => undefined),
+      `/${PACK}`,
+    ).credits!;
+    expect(pack.author).toBe("Valandar");
+    expect("licenseUrl" in pack).toBe(false);
+    expect("modified" in pack).toBe(false);
+    expect(result.withLicenseUrl).toBe(0);
+    expect(result.withModified).toBe(0);
+    expect(lines).toContain("with license URL: 0, modified: 0");
+  });
 
-  it('regenerates a four-field store into six fields on a rerun, pose untouched', async () => {
+  it("regenerates a four-field store into six fields on a rerun, pose untouched", async () => {
     // The live deploy's shape: a store written before the corpus carried the
     // two fields, regenerated from metadata that now does. The keys the
     // generator owns gain the fields; what it does not own survives.
-    const { top, metadata } = fixture()
-    const fourField = structuredClone(KITS) as Record<string, unknown>[]
-    delete fourField[0]!.license_url
-    delete fourField[0]!.modified
-    writeFileSync(metadata, JSON.stringify(fourField))
-    await generateOverrides({ top, metadata, report: () => undefined })
+    const { top, metadata } = fixture();
+    const fourField = structuredClone(KITS) as Record<string, unknown>[];
+    delete fourField[0]!.license_url;
+    delete fourField[0]!.modified;
+    writeFileSync(metadata, JSON.stringify(fourField));
+    await generateOverrides({ top, metadata, report: () => undefined });
 
-    const before = await readStore(top)
+    const before = await readStore(top);
     expect(before.entries[`/${PACK}`]).toEqual({
-      name: 'Player Character Pack 03',
+      name: "Player Character Pack 03",
       credits: {
-        author: 'Valandar',
-        authorUrl: 'https://www.thingiverse.com/Valandar',
-        license: 'Creative Commons - Attribution',
-        sourceUrl: 'https://www.thingiverse.com/thing:3750572',
+        author: "Valandar",
+        authorUrl: "https://www.thingiverse.com/Valandar",
+        license: "Creative Commons - Attribution",
+        sourceUrl: "https://www.thingiverse.com/thing:3750572",
       },
-    })
-    ;(before.entries[`/${PACK}`] as Record<string, unknown>).pose = { az: 1.5, el: 0.25 }
-    ;(before.entries as Record<string, unknown>)[`/${PACK}/hero.stl`] = { pose: { az: 3 } }
-    writeFileSync(storePath(top), JSON.stringify(before))
+    });
+    (before.entries[`/${PACK}`] as Record<string, unknown>).pose = {
+      az: 1.5,
+      el: 0.25,
+    };
+    (before.entries as Record<string, unknown>)[`/${PACK}/hero.stl`] = {
+      pose: { az: 3 },
+    };
+    writeFileSync(storePath(top), JSON.stringify(before));
 
-    writeFileSync(metadata, JSON.stringify(KITS))
-    const result = await generateOverrides({ top, metadata, report: () => undefined })
-    expect(result.withLicenseUrl).toBe(1)
-    expect(result.withModified).toBe(1)
+    writeFileSync(metadata, JSON.stringify(KITS));
+    const result = await generateOverrides({
+      top,
+      metadata,
+      report: () => undefined,
+    });
+    expect(result.withLicenseUrl).toBe(1);
+    expect(result.withModified).toBe(1);
 
-    const after = await readStore(top)
+    const after = await readStore(top);
     expect(after.entries[`/${PACK}`]).toEqual({
-      name: 'Player Character Pack 03',
+      name: "Player Character Pack 03",
       credits: {
-        author: 'Valandar',
-        authorUrl: 'https://www.thingiverse.com/Valandar',
-        license: 'Creative Commons - Attribution',
+        author: "Valandar",
+        authorUrl: "https://www.thingiverse.com/Valandar",
+        license: "Creative Commons - Attribution",
         licenseUrl: LICENSE_URL,
         modified: MODIFIED,
-        sourceUrl: 'https://www.thingiverse.com/thing:3750572',
+        sourceUrl: "https://www.thingiverse.com/thing:3750572",
       },
       pose: { az: 1.5, el: 0.25 },
-    })
-    expect(after.entries[`/${PACK}/hero.stl`]).toEqual({ pose: { az: 3 } })
-  })
+    });
+    expect(after.entries[`/${PACK}/hero.stl`]).toEqual({ pose: { az: 3 } });
+  });
 
-  it('reports a stem naming no directory and writes no dead key for it', async () => {
-    const { top, metadata } = fixture()
-    const lines: string[] = []
-    const result = await generateOverrides({ top, metadata, report: (m) => lines.push(m) })
+  it("reports a stem naming no directory and writes no dead key for it", async () => {
+    const { top, metadata } = fixture();
+    const lines: string[] = [];
+    const result = await generateOverrides({
+      top,
+      metadata,
+      report: (m) => lines.push(m),
+    });
 
-    expect(result.missing).toEqual(['Drifted_Away_999'])
-    expect(lines.some((l) => l.includes('no directory for stem: Drifted_Away_999'))).toBe(true)
-    expect(Object.keys((await readStore(top)).entries)).toEqual([`/${PACK}`, `/${CHEST}`])
-  })
+    expect(result.missing).toEqual(["Drifted_Away_999"]);
+    expect(
+      lines.some((l) => l.includes("no directory for stem: Drifted_Away_999")),
+    ).toBe(true);
+    expect(Object.keys((await readStore(top)).entries)).toEqual([
+      `/${PACK}`,
+      `/${CHEST}`,
+    ]);
+  });
 
-  it('never turns a nested files[].stem into a key', async () => {
-    const { top, metadata } = fixture()
-    await generateOverrides({ top, metadata, report: () => undefined })
-    const keys = Object.keys((await readStore(top)).entries)
+  it("never turns a nested files[].stem into a key", async () => {
+    const { top, metadata } = fixture();
+    await generateOverrides({ top, metadata, report: () => undefined });
+    const keys = Object.keys((await readStore(top)).entries);
     // 2,801 of these exist in the real corpus, and they are file stems.
-    expect(keys.some((k) => k.includes('KindleCleric_000'))).toBe(false)
-    expect(keys.some((k) => k.includes('case_meshmixed'))).toBe(false)
-  })
+    expect(keys.some((k) => k.includes("KindleCleric_000"))).toBe(false);
+    expect(keys.some((k) => k.includes("case_meshmixed"))).toBe(false);
+  });
 
-  it('makes keys top-relative when the kit directory is below the top', async () => {
-    const { top, kitsDir, metadata } = fixture(join('miniatures', 'clustered-hq'))
-    await generateOverrides({ top, kitsDir, metadata, report: () => undefined })
+  it("makes keys top-relative when the kit directory is below the top", async () => {
+    const { top, kitsDir, metadata } = fixture(
+      join("miniatures", "clustered-hq"),
+    );
+    await generateOverrides({
+      top,
+      kitsDir,
+      metadata,
+      report: () => undefined,
+    });
     expect(Object.keys((await readStore(top)).entries)).toEqual([
       `/miniatures/clustered-hq/${PACK}`,
       `/miniatures/clustered-hq/${CHEST}`,
-    ])
+    ]);
 
     // Rooting the library at the kit directory itself yields keys `/<stem>`.
-    const flat = fixture()
-    await generateOverrides({ top: flat.top, metadata: flat.metadata, report: () => undefined })
-    expect(Object.keys((await readStore(flat.top)).entries)).toEqual([`/${PACK}`, `/${CHEST}`])
-  })
+    const flat = fixture();
+    await generateOverrides({
+      top: flat.top,
+      metadata: flat.metadata,
+      report: () => undefined,
+    });
+    expect(Object.keys((await readStore(flat.top)).entries)).toEqual([
+      `/${PACK}`,
+      `/${CHEST}`,
+    ]);
+  });
 
-  it('refuses a kit directory outside the top before writing anything', async () => {
-    const { top, metadata } = fixture()
-    const outside = realTempDir('mb-gen-outside-')
+  it("refuses a kit directory outside the top before writing anything", async () => {
+    const { top, metadata } = fixture();
+    const outside = realTempDir("mb-gen-outside-");
     await expect(
-      generateOverrides({ top, kitsDir: outside, metadata, report: () => undefined }),
-    ).rejects.toThrow('must be the library top or beneath it')
-    expect(existsSync(storePath(top))).toBe(false)
+      generateOverrides({
+        top,
+        kitsDir: outside,
+        metadata,
+        report: () => undefined,
+      }),
+    ).rejects.toThrow("must be the library top or beneath it");
+    expect(existsSync(storePath(top))).toBe(false);
 
     // A `..` spelling is the same refusal: outside the top, `relative()` yields
     // `..`-keys that normalise into plausible wrong spellings rather than errors.
     await expect(
-      generateOverrides({ top, kitsDir: join(top, '..'), metadata, report: () => undefined }),
-    ).rejects.toThrow('must be the library top or beneath it')
-    expect(existsSync(storePath(top))).toBe(false)
-  })
+      generateOverrides({
+        top,
+        kitsDir: join(top, ".."),
+        metadata,
+        report: () => undefined,
+      }),
+    ).rejects.toThrow("must be the library top or beneath it");
+    expect(existsSync(storePath(top))).toBe(false);
+  });
 
-  it('preserves a pose on a generated key, and keys it does not own, across a rerun', async () => {
-    const { top, metadata } = fixture()
-    await generateOverrides({ top, metadata, report: () => undefined })
+  it("preserves a pose on a generated key, and keys it does not own, across a rerun", async () => {
+    const { top, metadata } = fixture();
+    await generateOverrides({ top, metadata, report: () => undefined });
 
     // Later tooling writes a pose onto a generated key, and a key of its own.
-    const planted = await readStore(top)
-    ;(planted.entries[`/${PACK}`] as Record<string, unknown>).pose = { az: 1.5, el: 0.25 }
-    ;(planted.entries as Record<string, unknown>)[`/${PACK}/hero.stl`] = { pose: { az: 3 } }
-    writeFileSync(storePath(top), JSON.stringify(planted))
+    const planted = await readStore(top);
+    (planted.entries[`/${PACK}`] as Record<string, unknown>).pose = {
+      az: 1.5,
+      el: 0.25,
+    };
+    (planted.entries as Record<string, unknown>)[`/${PACK}/hero.stl`] = {
+      pose: { az: 3 },
+    };
+    writeFileSync(storePath(top), JSON.stringify(planted));
 
     // The metadata changes underneath; the rerun regenerates what it owns.
-    const renamed = structuredClone(KITS)
-    renamed[0]!.name = 'Player Character Pack 03 (v2)'
-    writeFileSync(metadata, JSON.stringify(renamed))
-    await generateOverrides({ top, metadata, report: () => undefined })
+    const renamed = structuredClone(KITS);
+    renamed[0]!.name = "Player Character Pack 03 (v2)";
+    writeFileSync(metadata, JSON.stringify(renamed));
+    await generateOverrides({ top, metadata, report: () => undefined });
 
-    const after = await readStore(top)
+    const after = await readStore(top);
     expect(after.entries[`/${PACK}`]).toMatchObject({
-      name: 'Player Character Pack 03 (v2)',
+      name: "Player Character Pack 03 (v2)",
       pose: { az: 1.5, el: 0.25 },
-    })
-    expect(after.entries[`/${PACK}/hero.stl`]).toEqual({ pose: { az: 3 } })
-  })
+    });
+    expect(after.entries[`/${PACK}/hero.stl`]).toEqual({ pose: { az: 3 } });
+  });
 
-  it('refuses to merge into a store it cannot read rather than overwriting it', async () => {
-    const { top, metadata } = fixture()
-    mkdirSync(join(top, MARKER_DIR), { recursive: true })
-    writeFileSync(storePath(top), '{ half a store')
-    await expect(generateOverrides({ top, metadata, report: () => undefined })).rejects.toThrow(
-      'not valid JSON',
-    )
+  it("refuses to merge into a store it cannot read rather than overwriting it", async () => {
+    const { top, metadata } = fixture();
+    mkdirSync(join(top, MARKER_DIR), { recursive: true });
+    writeFileSync(storePath(top), "{ half a store");
+    await expect(
+      generateOverrides({ top, metadata, report: () => undefined }),
+    ).rejects.toThrow("not valid JSON");
     // Untouched: rewriting a store this build cannot merge into would destroy it.
-    expect(await readFile(storePath(top), 'utf8')).toBe('{ half a store')
-  })
+    expect(await readFile(storePath(top), "utf8")).toBe("{ half a store");
+  });
 
-  it('prints the restart-after-editing reminder', async () => {
-    const { top, metadata } = fixture()
-    const lines: string[] = []
-    await generateOverrides({ top, metadata, report: (m) => lines.push(m) })
-    expect(lines.some((l) => l.includes('restart it to pick this up'))).toBe(true)
-  })
+  it("prints the restart-after-editing reminder", async () => {
+    const { top, metadata } = fixture();
+    const lines: string[] = [];
+    await generateOverrides({ top, metadata, report: (m) => lines.push(m) });
+    expect(lines.some((l) => l.includes("restart it to pick this up"))).toBe(
+      true,
+    );
+  });
 
-  it('refuses a stem that escapes the top, and writes no key for it', async () => {
+  it("refuses a stem that escapes the top, and writes no key for it", async () => {
     // The containment check guards the kit *directory*; a `..` stem escapes
     // through `join` per key and would write a key the loader normalises into
     // a plausible wrong path (found by the post-merge review). The escaping
     // directory genuinely exists here, so only the key guard stands between
     // the stem and the store.
-    const { top, metadata } = fixture()
-    mkdirSync(join(top, '..', 'outside-gen'), { recursive: true })
+    const { top, metadata } = fixture();
+    mkdirSync(join(top, "..", "outside-gen"), { recursive: true });
     writeFileSync(
       metadata,
-      JSON.stringify([{ thing_id: 1, stem: '../outside-gen', name: 'Escaped', files: [] }]),
-    )
-    const lines: string[] = []
-    const result = await generateOverrides({ top, metadata, report: (m) => lines.push(m) })
-    expect(result.written).toBe(0)
-    expect(Object.keys((await readStore(top)).entries)).toEqual([])
-    expect(lines.some((l) => l.includes('escapes the kit directory'))).toBe(true)
-  })
+      JSON.stringify([
+        { thing_id: 1, stem: "../outside-gen", name: "Escaped", files: [] },
+      ]),
+    );
+    const lines: string[] = [];
+    const result = await generateOverrides({
+      top,
+      metadata,
+      report: (m) => lines.push(m),
+    });
+    expect(result.written).toBe(0);
+    expect(Object.keys((await readStore(top)).entries)).toEqual([]);
+    expect(lines.some((l) => l.includes("escapes the kit directory"))).toBe(
+      true,
+    );
+  });
 
-  it('refuses a stem that names the top itself, and mints no root key', async () => {
+  it("refuses a stem that names the top itself, and mints no root key", async () => {
     // `..` from a kits dir one level down lands ON the top — rel is '' — and a
     // root key's credits would inherit to every model in the library with no
     // nearer key: false attribution at maximum blast radius (found by review;
     // the first escape guard let it through and the root-key ternary minted
     // `/` for it).
-    const { top, kitsDir, metadata } = fixture('miniatures/clustered-hq')
+    const { top, kitsDir, metadata } = fixture("miniatures/clustered-hq");
     writeFileSync(
       metadata,
       JSON.stringify([
         // Two levels up lands ON the top; one level up lands on an
         // intermediate directory whose key would inherit credits to the whole
         // variant tree. Both are outside the kit directory, both refused.
-        { thing_id: 1, stem: '../..', name: 'Attacker', author: 'Attacker', files: [] },
-        { thing_id: 2, stem: '..', name: 'Attacker', author: 'Attacker', files: [] },
+        {
+          thing_id: 1,
+          stem: "../..",
+          name: "Attacker",
+          author: "Attacker",
+          files: [],
+        },
+        {
+          thing_id: 2,
+          stem: "..",
+          name: "Attacker",
+          author: "Attacker",
+          files: [],
+        },
       ]),
-    )
-    const lines: string[] = []
-    const result = await generateOverrides({ top, kitsDir, metadata, report: (m) => lines.push(m) })
-    expect(result.written).toBe(0)
-    expect(result.escaped).toEqual(['../..', '..'])
-    expect(result.missing).toEqual([])
-    const keys = Object.keys((await readStore(top)).entries)
-    expect(keys).not.toContain('/')
-    expect(keys).not.toContain('/miniatures')
-    expect(lines.some((l) => l.includes('escapes the kit directory'))).toBe(true)
-    expect(lines.some((l) => l.includes('no directory for stem'))).toBe(false)
-  })
+    );
+    const lines: string[] = [];
+    const result = await generateOverrides({
+      top,
+      kitsDir,
+      metadata,
+      report: (m) => lines.push(m),
+    });
+    expect(result.written).toBe(0);
+    expect(result.escaped).toEqual(["../..", ".."]);
+    expect(result.missing).toEqual([]);
+    const keys = Object.keys((await readStore(top)).entries);
+    expect(keys).not.toContain("/");
+    expect(keys).not.toContain("/miniatures");
+    expect(lines.some((l) => l.includes("escapes the kit directory"))).toBe(
+      true,
+    );
+    expect(lines.some((l) => l.includes("no directory for stem"))).toBe(false);
+  });
 
-  it('refuses the trailing-slash spellings join preserves', async () => {
+  it("refuses the trailing-slash spellings join preserves", async () => {
     // `join('/lib', './')` is `'/lib/'` — neither `=== kitsDir` nor outside
     // the `startsWith(kitsDir + sep)` prefix, so without normalisation every
     // dot-onto-the-top spelling written with a trailing slash minted the root
     // key again (review round four; the third life of this bug).
-    const { top, kitsDir, metadata } = fixture('miniatures/clustered-hq')
+    const { top, kitsDir, metadata } = fixture("miniatures/clustered-hq");
     writeFileSync(
       metadata,
       JSON.stringify([
-        { thing_id: 1, stem: './', name: 'Attacker', author: 'Attacker', files: [] },
-        { thing_id: 2, stem: 'a/../', name: 'Attacker', author: 'Attacker', files: [] },
-        { thing_id: 3, stem: '../clustered-hq/', name: 'Attacker', author: 'Attacker', files: [] },
+        {
+          thing_id: 1,
+          stem: "./",
+          name: "Attacker",
+          author: "Attacker",
+          files: [],
+        },
+        {
+          thing_id: 2,
+          stem: "a/../",
+          name: "Attacker",
+          author: "Attacker",
+          files: [],
+        },
+        {
+          thing_id: 3,
+          stem: "../clustered-hq/",
+          name: "Attacker",
+          author: "Attacker",
+          files: [],
+        },
       ]),
-    )
-    const result = await generateOverrides({ top, kitsDir, metadata, report: () => undefined })
-    expect(result.written).toBe(0)
-    expect(result.escaped).toEqual(['./', 'a/../', '../clustered-hq/'])
-    const keys = Object.keys((await readStore(top)).entries)
-    expect(keys).toEqual([])
-  })
+    );
+    const result = await generateOverrides({
+      top,
+      kitsDir,
+      metadata,
+      report: () => undefined,
+    });
+    expect(result.written).toBe(0);
+    expect(result.escaped).toEqual(["./", "a/../", "../clustered-hq/"]);
+    const keys = Object.keys((await readStore(top)).entries);
+    expect(keys).toEqual([]);
+  });
 
-  it('does not over-trim: a real stem written with a trailing slash still keys', async () => {
-    const { top, metadata } = fixture()
+  it("does not over-trim: a real stem written with a trailing slash still keys", async () => {
+    const { top, metadata } = fixture();
     writeFileSync(
       metadata,
-      JSON.stringify([{ thing_id: 1, stem: `${PACK}/`, name: 'Slashed', files: [] }]),
-    )
-    const result = await generateOverrides({ top, metadata, report: () => undefined })
-    expect(result.written).toBe(1)
-    expect(result.escaped).toEqual([])
-    expect(Object.keys((await readStore(top)).entries)).toEqual([`/${PACK}`])
-  })
+      JSON.stringify([
+        { thing_id: 1, stem: `${PACK}/`, name: "Slashed", files: [] },
+      ]),
+    );
+    const result = await generateOverrides({
+      top,
+      metadata,
+      report: () => undefined,
+    });
+    expect(result.written).toBe(1);
+    expect(result.escaped).toEqual([]);
+    expect(Object.keys((await readStore(top)).entries)).toEqual([`/${PACK}`]);
+  });
 
-  it('contains a kit directory under a root top — the predicate, since root cannot be fixtured', () => {
+  it("contains a kit directory under a root top — the predicate, since root cannot be fixtured", () => {
     // `top + sep` alone doubles the separator at '/', refusing everything.
-    expect(underTop('/', '/kits')).toBe(true)
-    expect(underTop('/', '/')).toBe(true)
-    expect(underTop('/a/b', '/a/bc')).toBe(false)
-    expect(underTop('/a/b', '/a/b/c')).toBe(true)
-  })
+    expect(underTop("/", "/kits")).toBe(true);
+    expect(underTop("/", "/")).toBe(true);
+    expect(underTop("/a/b", "/a/bc")).toBe(false);
+    expect(underTop("/a/b", "/a/b/c")).toBe(true);
+  });
 
-  it('counts a duplicated stem once — the count means keys', async () => {
-    const { top, metadata } = fixture()
-    writeFileSync(metadata, JSON.stringify([KITS[0], KITS[0]]))
-    const lines: string[] = []
-    const result = await generateOverrides({ top, metadata, report: (m) => lines.push(m) })
-    expect(result.written).toBe(1)
-    expect(result.read).toBe(2)
-    expect(result.duplicated).toEqual(['Player_Character_Pack_03_3750572'])
-    expect(lines.some((l) => l.includes('1 stems duplicated keys'))).toBe(true)
-  })
-})
+  it("counts a duplicated stem once — the count means keys", async () => {
+    const { top, metadata } = fixture();
+    writeFileSync(metadata, JSON.stringify([KITS[0], KITS[0]]));
+    const lines: string[] = [];
+    const result = await generateOverrides({
+      top,
+      metadata,
+      report: (m) => lines.push(m),
+    });
+    expect(result.written).toBe(1);
+    expect(result.read).toBe(2);
+    expect(result.duplicated).toEqual(["Player_Character_Pack_03_3750572"]);
+    expect(lines.some((l) => l.includes("1 stems duplicated keys"))).toBe(true);
+  });
+});

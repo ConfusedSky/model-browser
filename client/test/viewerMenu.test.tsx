@@ -12,9 +12,9 @@
 // from a screenshot of the three-item menu on a tile just orbited), that Escape
 // dismisses one thing at a time, and that a command which changes the view
 // takes the open lightbox with it through the persisting close.
-import { act } from 'react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DirListing, IndexPose } from '../../shared/types'
+import { act } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { DirListing, IndexPose } from "../../shared/types";
 import {
   click,
   container,
@@ -31,77 +31,94 @@ import {
   tiles,
   unmountApp,
   wait,
-} from './appHarness'
-import { RIG_VERSION, THUMB_LIGHTING } from '../src/three/renderer'
+} from "./appHarness";
+import { RIG_VERSION, THUMB_LIGHTING } from "../src/three/renderer";
 
-import { ViewerSession } from '../src/viewer/session'
+import { ViewerSession } from "../src/viewer/session";
 
-vi.mock('../src/api/client', async () => (await import('./appHarness')).apiClientModule())
-vi.mock('../src/three/renderer', async (importOriginal) =>
-  (await import('./appHarness')).rendererModule(importOriginal),
-)
+vi.mock("../src/api/client", async () =>
+  (await import("./appHarness")).apiClientModule(),
+);
+vi.mock("../src/three/renderer", async (importOriginal) =>
+  (await import("./appHarness")).rendererModule(importOriginal),
+);
 
-const NESTED: DirListing = { path: '/models', entries: [dir('Alpha'), model('widget.stl')] }
+const NESTED: DirListing = {
+  path: "/models",
+  entries: [dir("Alpha"), model("widget.stl")],
+};
 /** A `-y` pose for the widget: its spindle is not the STL default, so a live
  *  re-frame to it is visible on the lightbox's axis control. */
 const POSE: IndexPose = {
   up: [0, -1, 0],
   azimuth_zero: [1, 0, 0],
-  source: 'test',
+  source: "test",
   confidence: 1,
   front: { view: 0, azimuth_deg: 40, elevation_deg: 20 },
-}
+};
 /** The lightbox axis control's marked letters — `['Y', 'flip']` for `-y`. */
 const markedAxes = (): string[] =>
   Array.from(
-    dialog()?.querySelectorAll<HTMLButtonElement>('[aria-label="Orbit axis"] button') ?? [],
+    dialog()?.querySelectorAll<HTMLButtonElement>(
+      '[aria-label="Orbit axis"] button',
+    ) ?? [],
   )
-    .filter((b) => b.getAttribute('aria-pressed') === 'true')
-    .map((b) => b.textContent ?? '')
+    .filter((b) => b.getAttribute("aria-pressed") === "true")
+    .map((b) => b.textContent ?? "");
 const NEIGHBOURS = {
-  path: '/models',
-  entries: [model('Alpha/near.stl')],
+  path: "/models",
+  entries: [model("Alpha/near.stl")],
   poses: {},
-}
+};
 
-const menu = (): HTMLElement | null => document.querySelector<HTMLElement>('[role="menu"]')
+const menu = (): HTMLElement | null =>
+  document.querySelector<HTMLElement>('[role="menu"]');
 const items = (): string[] =>
-  Array.from(menu()?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []).map(
-    (b) => b.dataset.command ?? '',
-  )
+  Array.from(
+    menu()?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [],
+  ).map((b) => b.dataset.command ?? "");
 const item = (id: string): HTMLButtonElement =>
-  menu()!.querySelector<HTMLButtonElement>(`[data-command="${id}"]`)!
+  menu()!.querySelector<HTMLButtonElement>(`[data-command="${id}"]`)!;
 const axes = (): string[] =>
-  Array.from(menu()?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') ?? []).map(
-    (b) => b.dataset.axis ?? '',
-  )
+  Array.from(
+    menu()?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') ?? [],
+  ).map((b) => b.dataset.axis ?? "");
 /** The group's fourth button — present exactly when the letters are. */
 const flip = (): HTMLElement | null =>
-  menu()?.querySelector<HTMLElement>('[role="menuitemcheckbox"][data-axis="flip"]') ?? null
-const dialog = (): HTMLElement | null => document.querySelector<HTMLElement>('[role="dialog"]')
+  menu()?.querySelector<HTMLElement>(
+    '[role="menuitemcheckbox"][data-axis="flip"]',
+  ) ?? null;
+const dialog = (): HTMLElement | null =>
+  document.querySelector<HTMLElement>('[role="dialog"]');
 /** The panel's transient line, in whichever tone it is wearing. */
 const panelNote = (): string | null =>
-  dialog()?.querySelector('p[role="status"]')?.textContent ?? null
+  dialog()?.querySelector('p[role="status"]')?.textContent ?? null;
 /** The path bar's transient line — the surface the lightbox covers. */
 const headerNote = (): string | null =>
-  container.querySelector('header p.text-zinc-400')?.textContent ?? null
+  container.querySelector("header p.text-zinc-400")?.textContent ?? null;
 /** Every item a model tile offers when the index is answering — the whole of
  *  D6's table, which is also what the orbit overlay offers since 6.8. */
 const WHOLE_TABLE = [
-  'open',
-  'reveal',
-  'copyPath',
-  'findSimilar',
-  'reRenderThumbnail',
-  'resetFraming',
-]
+  "open",
+  "reveal",
+  "copyPath",
+  "findSimilar",
+  "reRenderThumbnail",
+  "resetFraming",
+];
 /** The axis group as the lightbox picker states it: three letters and a flip. */
-const AXIS_LETTERS = ['x', 'y', 'z']
-const GROUP_ROLES = ['menuitemradio', 'menuitemradio', 'menuitemradio', 'menuitemcheckbox']
+const AXIS_LETTERS = ["x", "y", "z"];
+const GROUP_ROLES = [
+  "menuitemradio",
+  "menuitemradio",
+  "menuitemradio",
+  "menuitemcheckbox",
+];
 /** The orbit overlay: the fixed layer over the pressed tile. */
-const overlay = (): HTMLElement | null => container.querySelector<HTMLElement>('.z-orbit-overlay.cursor-grab')
+const overlay = (): HTMLElement | null =>
+  container.querySelector<HTMLElement>(".z-orbit-overlay.cursor-grab");
 const modelTile = (): HTMLElement =>
-  tiles().find((t) => (t.getAttribute('title') ?? '') === 'widget.stl')!
+  tiles().find((t) => (t.getAttribute("title") ?? "") === "widget.stl")!;
 
 /**
  * The secondary press as a browser delivers it — press, `contextmenu`, release,
@@ -118,11 +135,11 @@ async function secondaryPress(
   y = 140,
   opts: { shift?: boolean } = {},
 ): Promise<boolean> {
-  const shiftKey = opts.shift === true
-  let taken = false
+  const shiftKey = opts.shift === true;
+  let taken = false;
   await act(async () => {
     el.dispatchEvent(
-      new PointerEvent('pointerdown', {
+      new PointerEvent("pointerdown", {
         bubbles: true,
         button: 2,
         buttons: 2,
@@ -130,9 +147,9 @@ async function secondaryPress(
         clientY: y,
         shiftKey,
       }),
-    )
+    );
     taken = !el.dispatchEvent(
-      new MouseEvent('contextmenu', {
+      new MouseEvent("contextmenu", {
         bubbles: true,
         cancelable: true,
         button: 2,
@@ -140,129 +157,185 @@ async function secondaryPress(
         clientY: y,
         shiftKey,
       }),
-    )
+    );
     window.dispatchEvent(
-      new PointerEvent('pointerup', { bubbles: true, button: 2, clientX: x, clientY: y, shiftKey }),
-    )
-  })
-  return taken
+      new PointerEvent("pointerup", {
+        bubbles: true,
+        button: 2,
+        clientX: x,
+        clientY: y,
+        shiftKey,
+      }),
+    );
+  });
+  return taken;
 }
 
 const escape = (): Promise<void> =>
   act(async () => {
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-  })
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+  });
 
 /** Press and hold the model tile: the orbit overlay, mid-gesture. */
 async function startOrbit(): Promise<void> {
   await act(async () => {
     modelTile().dispatchEvent(
-      new PointerEvent('pointerdown', { bubbles: true, clientX: 50, clientY: 50, button: 0 }),
-    )
-  })
-  await settle()
+      new PointerEvent("pointerdown", {
+        bubbles: true,
+        clientX: 50,
+        clientY: 50,
+        button: 0,
+      }),
+    );
+  });
+  await settle();
 }
 
 /** Press and release without dragging: the overlay promotes to the lightbox. */
 async function openLightbox(): Promise<void> {
-  await startOrbit()
+  await startOrbit();
   await act(async () => {
-    window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: 50, clientY: 50 }))
-  })
-  await wait(150)
+    window.dispatchEvent(
+      new PointerEvent("pointerup", {
+        bubbles: true,
+        clientX: 50,
+        clientY: 50,
+      }),
+    );
+  });
+  await wait(150);
 }
 
 beforeEach(async () => {
   // The index answers for this collection, so *find similar* is on the table —
   // otherwise the viewer set would be two items for a reason that is not the
   // surface filter.
-  indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models' })
-  await mountApp('/models', NESTED)
-  listDir.mockResolvedValue(NESTED)
-})
+  indexAvailability.mockResolvedValue({
+    state: "ready",
+    collectionRoot: "/models",
+  });
+  await mountApp("/models", NESTED);
+  listDir.mockResolvedValue(NESTED);
+});
 afterEach(async () => {
-  getThumb.mockResolvedValue({ status: 'miss' })
-  semanticPosesFor.mockResolvedValue({ poses: {} })
-  await unmountApp()
-})
+  getThumb.mockResolvedValue({ status: "miss" });
+  semanticPosesFor.mockResolvedValue({ poses: {} });
+  await unmountApp();
+});
 
 /** Drag on the open lightbox's canvas — the manipulation an untouched close
  *  lacks, since `pose-rerender` D4 made such a close write nothing. */
 async function orbitInLightbox(): Promise<void> {
-  const canvas = dialog()!.querySelector<HTMLElement>('.cursor-grab')!
+  const canvas = dialog()!.querySelector<HTMLElement>(".cursor-grab")!;
   await act(async () => {
     canvas.dispatchEvent(
-      new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 100, clientY: 100 }),
-    )
-  })
+      new PointerEvent("pointerdown", {
+        bubbles: true,
+        button: 0,
+        clientX: 100,
+        clientY: 100,
+      }),
+    );
+  });
   await act(async () => {
     const move = (x: number, y: number): void => {
-      window.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: x, clientY: y }))
-    }
-    move(160, 100) // beyond the drag threshold
-    move(200, 120)
-    window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: 200, clientY: 120 }))
-  })
-  await settle()
+      window.dispatchEvent(
+        new PointerEvent("pointermove", {
+          bubbles: true,
+          clientX: x,
+          clientY: y,
+        }),
+      );
+    };
+    move(160, 100); // beyond the drag threshold
+    move(200, 120);
+    window.dispatchEvent(
+      new PointerEvent("pointerup", {
+        bubbles: true,
+        clientX: 200,
+        clientY: 120,
+      }),
+    );
+  });
+  await settle();
 }
 
-describe('the menu on a viewer surface', () => {
-  it('a secondary press on the orbiting model raises the tile’s whole menu', async () => {
-    await startOrbit()
-    expect(overlay()).not.toBeNull()
+describe("the menu on a viewer surface", () => {
+  it("a secondary press on the orbiting model raises the tile’s whole menu", async () => {
+    await startOrbit();
+    expect(overlay()).not.toBeNull();
 
-    const taken = await secondaryPress(overlay()!)
-    expect(menu()).not.toBeNull()
+    const taken = await secondaryPress(overlay()!);
+    expect(menu()).not.toBeNull();
     // Six, not three — **changed 2026-08-22 (6.8)**, from a user's screenshot.
     // Every reason the filter gives is about a view the user *opened*: it holds
     // the renderer for as long as they leave it open, it carries the live axis
     // picker, and it ends in a close that persists what is on screen. A
     // transient overlay over a tile is none of those, so as far as the menu is
     // concerned it *is* that tile. The lightbox is the surface that filters.
-    expect(items()).toEqual(WHOLE_TABLE)
-    expect(taken).toBe(true) // the platform's own menu is suppressed
+    expect(items()).toEqual(WHOLE_TABLE);
+    expect(taken).toBe(true); // the platform's own menu is suppressed
     // The press did not disturb what it was raised over.
-    expect(overlay()).not.toBeNull()
-    expect(dialog()).toBeNull()
-  })
+    expect(overlay()).not.toBeNull();
+    expect(dialog()).toBeNull();
+  });
 
-  it('offers that whole menu through the persist hold after an orbit — the reported case', async () => {
+  it("offers that whole menu through the persist hold after an orbit — the reported case", async () => {
     // The screenshot itself: drag, release, right-click the tile you are still
     // looking at. The overlay lingers there invisibly for up to
     // PERSIST_HOLD_MS, catches the press, and used to answer it with the
     // three-item viewer menu — for a model that is, to the user, sitting on
     // the grid.
-    await startOrbit()
+    await startOrbit();
     await act(async () => {
       const move = (x: number, y: number): void => {
-        window.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: x, clientY: y }))
-      }
-      move(120, 50) // beyond the drag threshold
-      move(160, 60)
-      window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: 160, clientY: 60 }))
-    })
+        window.dispatchEvent(
+          new PointerEvent("pointermove", {
+            bubbles: true,
+            clientX: x,
+            clientY: y,
+          }),
+        );
+      };
+      move(120, 50); // beyond the drag threshold
+      move(160, 60);
+      window.dispatchEvent(
+        new PointerEvent("pointerup", {
+          bubbles: true,
+          clientX: 160,
+          clientY: 60,
+        }),
+      );
+    });
     // Still mounted: the dismissal is waiting on the persist it just started.
-    expect(overlay()).not.toBeNull()
-    expect(dialog()).toBeNull() // a drag does not promote
+    expect(overlay()).not.toBeNull();
+    expect(dialog()).toBeNull(); // a drag does not promote
 
-    await secondaryPress(overlay()!)
-    expect(items()).toEqual(WHOLE_TABLE)
-    expect(axes()).toEqual(AXIS_LETTERS)
-    expect(flip()).not.toBeNull()
-  })
+    await secondaryPress(overlay()!);
+    expect(items()).toEqual(WHOLE_TABLE);
+    expect(axes()).toEqual(AXIS_LETTERS);
+    expect(flip()).not.toBeNull();
+  });
 
-  it('a secondary press on the lightbox raises the menu an open view can honestly run', async () => {
-    await openLightbox()
-    expect(dialog()).not.toBeNull()
+  it("a secondary press on the lightbox raises the menu an open view can honestly run", async () => {
+    await openLightbox();
+    expect(dialog()).not.toBeNull();
 
-    const taken = await secondaryPress(dialog()!)
+    const taken = await secondaryPress(dialog()!);
     // Reset framing joined 2026-09-01 (a user-reported screenshot: the panel
     // offered it, the menu did not) — offered because its press is live-routed
     // through resetFramingLive, not because the queued body became honest here.
-    expect(items()).toEqual(['reveal', 'copyPath', 'findSimilar', 'resetFraming'])
-    expect(taken).toBe(true)
-    expect(dialog()).not.toBeNull() // still open behind its own menu
-  })
+    expect(items()).toEqual([
+      "reveal",
+      "copyPath",
+      "findSimilar",
+      "resetFraming",
+    ]);
+    expect(taken).toBe(true);
+    expect(dialog()).not.toBeNull(); // still open behind its own menu
+  });
 
   it("the lightbox menu's Reset framing runs the live body, not the queued one", async () => {
     // The live body re-frames the open view *now*; the queued body (the tile
@@ -273,250 +346,289 @@ describe('the menu on a viewer surface', () => {
     // png-less discard, sent now; the pixels follow after the close
     // (`resetFramingLive`, since `pose-rerender` D4), so no render lands while
     // the dialog is up.
-    await unmountApp()
+    await unmountApp();
     getThumb.mockResolvedValue({
-      status: 'hit',
+      status: "hit",
       camera: { az: 1.25, el: -0.4, distR: 4.5, target: [0, 0, 0] },
-      axis: 'z',
-      pngUrl: 'blob:stored',
+      axis: "z",
+      pngUrl: "blob:stored",
       lighting: THUMB_LIGHTING,
       rig: RIG_VERSION,
-    })
-    semanticPosesFor.mockResolvedValue({ poses: { '/models/widget.stl': POSE } })
-    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models' })
-    await mountApp('/models', NESTED)
-    listDir.mockResolvedValue(NESTED)
-    await settle()
-    await openLightbox()
-    expect(markedAxes()).toEqual(['Z'])
-    await secondaryPress(dialog()!)
-    putThumb.mockClear()
-    const reset = Array.from(menu()!.querySelectorAll('button')).find(
-      (b) => b.textContent === 'Reset framing',
-    )!
-    await click(reset as HTMLElement)
-    await settle()
+    });
+    semanticPosesFor.mockResolvedValue({
+      poses: { "/models/widget.stl": POSE },
+    });
+    indexAvailability.mockResolvedValue({
+      state: "ready",
+      collectionRoot: "/models",
+    });
+    await mountApp("/models", NESTED);
+    listDir.mockResolvedValue(NESTED);
+    await settle();
+    await openLightbox();
+    expect(markedAxes()).toEqual(["Z"]);
+    await secondaryPress(dialog()!);
+    putThumb.mockClear();
+    const reset = Array.from(menu()!.querySelectorAll("button")).find(
+      (b) => b.textContent === "Reset framing",
+    )!;
+    await click(reset as HTMLElement);
+    await settle();
 
-    expect(dialog()).not.toBeNull()
-    expect(markedAxes()).toEqual(['Y', 'flip'])
-    const discard = putThumb.mock.calls.find((c) => c[0].camera === null)
-    expect(discard).toBeDefined()
-    expect(discard![0].png).toBeUndefined()
-    expect(putThumb.mock.calls.filter((c) => c[0].png !== undefined)).toEqual([])
-  })
+    expect(dialog()).not.toBeNull();
+    expect(markedAxes()).toEqual(["Y", "flip"]);
+    const discard = putThumb.mock.calls.find((c) => c[0].camera === null);
+    expect(discard).toBeDefined();
+    expect(discard![0].png).toBeUndefined();
+    expect(putThumb.mock.calls.filter((c) => c[0].png !== undefined)).toEqual(
+      [],
+    );
+  });
 
-  it('confirms a copy in the panel, not on the bar it is covering', async () => {
+  it("confirms a copy in the panel, not on the bar it is covering", async () => {
     // *Copy path* is the one command on this surface that owes the user a word
     // — entry-actions requires a brief confirmation — and it was the one that
     // could not give one: the host's routing sat on `report` alone, so the
     // "copied" line went to the path bar under a 70% scrim, in the far corner,
     // behind the dialog being looked at. Success is not silent here, so the
     // absence read as a copy that did not happen.
-    const writeText = vi.fn().mockResolvedValue(undefined)
-    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
     try {
-      await openLightbox()
-      await secondaryPress(dialog()!)
-      await click(item('copyPath'))
-      await settle()
+      await openLightbox();
+      await secondaryPress(dialog()!);
+      await click(item("copyPath"));
+      await settle();
 
       // The same body as everywhere else: the filesystem path, expanded from
       // the harness library's `/lib` top (library R2).
-      expect(writeText).toHaveBeenCalledWith('/lib/models/widget.stl')
-      expect(panelNote()).toBe('Path copied.')
+      expect(writeText).toHaveBeenCalledWith("/lib/models/widget.stl");
+      expect(panelNote()).toBe("Path copied.");
       // In the confirming tone, not the failure one — a success painted red
       // would be the other half of this bug.
-      expect(dialog()!.querySelector('p[role="status"].text-zinc-400')).not.toBeNull()
-      expect(dialog()!.querySelector('p.text-red-400')).toBeNull()
+      expect(
+        dialog()!.querySelector('p[role="status"].text-zinc-400'),
+      ).not.toBeNull();
+      expect(dialog()!.querySelector("p.text-red-400")).toBeNull();
       // And it did not also go to the covered bar: one sentence, one surface.
-      expect(headerNote()).toBeNull()
+      expect(headerNote()).toBeNull();
     } finally {
-      Reflect.deleteProperty(navigator, 'clipboard')
+      Reflect.deleteProperty(navigator, "clipboard");
     }
-  })
+  });
 
-  it('still offers the whole table on a tile — the filter is the surface, not the app', async () => {
-    await secondaryPress(modelTile())
-    expect(items()).toEqual(WHOLE_TABLE)
-  })
+  it("still offers the whole table on a tile — the filter is the surface, not the app", async () => {
+    await secondaryPress(modelTile());
+    expect(items()).toEqual(WHOLE_TABLE);
+  });
 
   // 6.7's half of the same filter, **narrowed to the lightbox by 6.8**: the
   // group is withheld on the one surface that already carries the live picker.
-  it('withholds the orbit-axis group on the lightbox, and offers it on the tile and the overlay', async () => {
+  it("withholds the orbit-axis group on the lightbox, and offers it on the tile and the overlay", async () => {
     const roles = (): (string | null)[] =>
-      Array.from(menu()?.querySelectorAll<HTMLElement>('button') ?? []).map((b) =>
-        b.getAttribute('role'),
-      )
+      Array.from(menu()?.querySelectorAll<HTMLElement>("button") ?? []).map(
+        (b) => b.getAttribute("role"),
+      );
 
     // The tile first, while nothing is open: this is not a rule about the
     // entry, so the same model has to offer the group here — as the picker's
     // own `axis X Y Z | flip` row at the top of the menu (6.8, second look).
-    await secondaryPress(modelTile())
-    expect(axes()).toEqual(AXIS_LETTERS)
-    expect(roles().slice(0, 4)).toEqual(GROUP_ROLES)
-    await escape()
+    await secondaryPress(modelTile());
+    expect(axes()).toEqual(AXIS_LETTERS);
+    expect(roles().slice(0, 4)).toEqual(GROUP_ROLES);
+    await escape();
 
     // The overlay carries no picker of its own — the live one belongs to the
     // lightbox — so withholding the group here left a model's spindle
     // unreachable for as long as the overlay lingered over its tile.
-    await startOrbit()
-    await secondaryPress(overlay()!)
-    expect(axes()).toEqual(AXIS_LETTERS)
-    expect(roles().slice(0, 4)).toEqual(GROUP_ROLES)
-    await escape()
+    await startOrbit();
+    await secondaryPress(overlay()!);
+    expect(axes()).toEqual(AXIS_LETTERS);
+    expect(roles().slice(0, 4)).toEqual(GROUP_ROLES);
+    await escape();
 
     // The same gesture's release promotes the overlay to the lightbox — a
     // pointer-opened one, which is why this test never closes it (that path
     // goes through `history.back`, which the harness's stubbed URL cannot
     // survive).
     await act(async () => {
-      window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: 50, clientY: 50 }))
-    })
-    await wait(150)
-    expect(dialog()).not.toBeNull()
-    await secondaryPress(dialog()!)
+      window.dispatchEvent(
+        new PointerEvent("pointerup", {
+          bubbles: true,
+          clientX: 50,
+          clientY: 50,
+        }),
+      );
+    });
+    await wait(150);
+    expect(dialog()).not.toBeNull();
+    await secondaryPress(dialog()!);
     // Here, and only here, the picker is a few pixels away — the row this
     // menu's group is a copy of.
-    expect(axes()).toHaveLength(0)
-    expect(flip()).toBeNull()
-  })
+    expect(axes()).toHaveLength(0);
+    expect(flip()).toBeNull();
+  });
 
-  it('gives Escape to the menu first and to the lightbox second', async () => {
+  it("gives Escape to the menu first and to the lightbox second", async () => {
     // Deep-linked rather than pointer-opened: this one closes without
     // history.back, which the suite plays by hand rather than through the
     // browser (client/test/CLAUDE.md).
-    await unmountApp()
-    indexAvailability.mockResolvedValue({ state: 'ready', collectionRoot: '/models' })
-    const { mountAppAtCurrentUrl } = await import('./appHarness')
-    await mountAppAtCurrentUrl('/?path=%2Fmodels&model=%2Fmodels%2Fwidget.stl', NESTED)
-    listDir.mockResolvedValue(NESTED)
-    await wait(200)
-    expect(dialog()).not.toBeNull()
+    await unmountApp();
+    indexAvailability.mockResolvedValue({
+      state: "ready",
+      collectionRoot: "/models",
+    });
+    const { mountAppAtCurrentUrl } = await import("./appHarness");
+    await mountAppAtCurrentUrl(
+      "/?path=%2Fmodels&model=%2Fmodels%2Fwidget.stl",
+      NESTED,
+    );
+    listDir.mockResolvedValue(NESTED);
+    await wait(200);
+    expect(dialog()).not.toBeNull();
 
-    await secondaryPress(dialog()!)
-    expect(menu()).not.toBeNull()
+    await secondaryPress(dialog()!);
+    expect(menu()).not.toBeNull();
 
-    await escape()
-    expect(menu()).toBeNull()
-    expect(dialog()).not.toBeNull() // one press dismissed one thing
+    await escape();
+    expect(menu()).toBeNull();
+    expect(dialog()).not.toBeNull(); // one press dismissed one thing
 
-    await escape()
-    await wait(200)
-    expect(dialog()).toBeNull()
-  })
+    await escape();
+    await wait(200);
+    expect(dialog()).toBeNull();
+  });
 
-  it('takes the lightbox with it when a command changes the view', async () => {
-    similar.mockResolvedValue(NEIGHBOURS)
-    await openLightbox()
-    expect(dialog()).not.toBeNull()
-    putThumb.mockClear()
+  it("takes the lightbox with it when a command changes the view", async () => {
+    similar.mockResolvedValue(NEIGHBOURS);
+    await openLightbox();
+    expect(dialog()).not.toBeNull();
+    putThumb.mockClear();
 
     // Orbited first, and the release's own write cleared: an untouched close
     // writes nothing (`pose-rerender` D4), so it is the close after a
     // manipulation whose camera write says the close ran.
-    await orbitInLightbox()
-    putThumb.mockClear()
-    await secondaryPress(dialog()!)
-    await click(item('findSimilar'))
-    await wait(250)
+    await orbitInLightbox();
+    putThumb.mockClear();
+    await secondaryPress(dialog()!);
+    await click(item("findSimilar"));
+    await wait(250);
 
     // The model left the view, so App signalled the persisting close and the
     // session wrote its camera on the way out — not a bare unmount. The camera
     // is what says which write this was: the background sweep PUTs pixels and
     // labels and never a viewpoint (useThumbnails' sweep PUT), so `putThumb`
     // having been called at all proves nothing here.
-    expect(dialog()).toBeNull()
+    expect(dialog()).toBeNull();
     const closeWrites = putThumb.mock.calls
       .map(([body]) => body as { path: string; camera?: unknown })
-      .filter((b) => b.path === '/models/widget.stl' && b.camera !== undefined)
-    expect(closeWrites.length).toBeGreaterThan(0)
+      .filter((b) => b.path === "/models/widget.stl" && b.camera !== undefined);
+    expect(closeWrites.length).toBeGreaterThan(0);
     // And the similarity view actually landed.
-    expect(similar).toHaveBeenCalled()
-    expect(window.location.search).toContain('similar=%2Fmodels%2Fwidget.stl')
-    expect(tiles().map((t) => t.getAttribute('title'))).toContain('Alpha/near.stl')
-  })
-})
+    expect(similar).toHaveBeenCalled();
+    expect(window.location.search).toContain("similar=%2Fmodels%2Fwidget.stl");
+    expect(tiles().map((t) => t.getAttribute("title"))).toContain(
+      "Alpha/near.stl",
+    );
+  });
+});
 
 // entry-actions, the requirement's one exception (native-context-menu-bypass):
 // a shifted secondary press is the browser's. On these surfaces that means the
 // page menu — Inspect, extension items — over a canvas that offers no image
 // items of its own.
-describe('the shifted secondary press on a viewer surface', () => {
+describe("the shifted secondary press on a viewer surface", () => {
   const move = (x: number, y: number): void => {
-    window.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: x, clientY: y }))
-  }
+    window.dispatchEvent(
+      new PointerEvent("pointermove", {
+        bubbles: true,
+        clientX: x,
+        clientY: y,
+      }),
+    );
+  };
   const primaryRelease = (): Promise<void> =>
     act(async () => {
-      window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, clientX: 50, clientY: 50 }))
-    })
+      window.dispatchEvent(
+        new PointerEvent("pointerup", {
+          bubbles: true,
+          button: 0,
+          clientX: 50,
+          clientY: 50,
+        }),
+      );
+    });
 
-  it('is left to the browser on the lightbox, which stays open', async () => {
-    await openLightbox()
-    const taken = await secondaryPress(dialog()!, 120, 140, { shift: true })
-    expect(taken).toBe(false) // not prevented: the platform's menu appears
-    expect(menu()).toBeNull()
-    expect(dialog()).not.toBeNull()
-  })
+  it("is left to the browser on the lightbox, which stays open", async () => {
+    await openLightbox();
+    const taken = await secondaryPress(dialog()!, 120, 140, { shift: true });
+    expect(taken).toBe(false); // not prevented: the platform's menu appears
+    expect(menu()).toBeNull();
+    expect(dialog()).not.toBeNull();
+  });
 
-  it('mid-hold, ends the gesture without promoting — the primary’s lost release opens nothing', async () => {
+  it("mid-hold, ends the gesture without promoting — the primary’s lost release opens nothing", async () => {
     // The browser's menu takes the pointer, so the primary's release never
     // reaches the page. The press must end the gesture itself, or a release
     // that *does* arrive later would promote a press nobody is still making.
-    await startOrbit()
-    const taken = await secondaryPress(overlay()!, 60, 60, { shift: true })
-    expect(taken).toBe(false)
-    expect(menu()).toBeNull()
-    expect(dialog()).toBeNull() // ended, not promoted (D6)
+    await startOrbit();
+    const taken = await secondaryPress(overlay()!, 60, 60, { shift: true });
+    expect(taken).toBe(false);
+    expect(menu()).toBeNull();
+    expect(dialog()).toBeNull(); // ended, not promoted (D6)
 
-    await primaryRelease()
-    await wait(150)
-    expect(dialog()).toBeNull() // the gesture was already over
-  })
+    await primaryRelease();
+    await wait(150);
+    expect(dialog()).toBeNull(); // the gesture was already over
+  });
 
-  it('mid-drag, ends the orbit — the mouse no longer steers a model nobody is holding', async () => {
-    const orbit = vi.spyOn(ViewerSession.prototype, 'orbit')
+  it("mid-drag, ends the orbit — the mouse no longer steers a model nobody is holding", async () => {
+    const orbit = vi.spyOn(ViewerSession.prototype, "orbit");
     try {
-      await startOrbit()
+      await startOrbit();
       await act(async () => {
-        move(120, 50) // beyond the drag threshold
-        move(160, 60)
-      })
+        move(120, 50); // beyond the drag threshold
+        move(160, 60);
+      });
       // The control: a session exists and is steering, or the assertion
       // below would pass for the wrong reason.
-      expect(orbit).toHaveBeenCalled()
-      const steered = orbit.mock.calls.length
+      expect(orbit).toHaveBeenCalled();
+      const steered = orbit.mock.calls.length;
 
-      const taken = await secondaryPress(overlay()!, 160, 60, { shift: true })
-      expect(taken).toBe(false)
-      expect(menu()).toBeNull()
+      const taken = await secondaryPress(overlay()!, 160, 60, { shift: true });
+      expect(taken).toBe(false);
+      expect(menu()).toBeNull();
 
       await act(async () => {
-        move(200, 80)
-        move(240, 90)
-      })
-      expect(orbit.mock.calls.length).toBe(steered) // nothing follows the mouse
-      expect(dialog()).toBeNull()
+        move(200, 80);
+        move(240, 90);
+      });
+      expect(orbit.mock.calls.length).toBe(steered); // nothing follows the mouse
+      expect(dialog()).toBeNull();
     } finally {
-      orbit.mockRestore()
+      orbit.mockRestore();
     }
-  })
+  });
 
-  it('an unshifted secondary press mid-hold raises the menu, and its release ends nothing', async () => {
+  it("an unshifted secondary press mid-hold raises the menu, and its release ends nothing", async () => {
     // The release side of "raising the menu disturbs nothing": the secondary
     // button's release is not the primary's. Before the guard, `onUp` took any
     // release as the end of the gesture, and a right-click without a drag
     // opened the lightbox under the menu it had just raised.
-    await startOrbit()
-    const taken = await secondaryPress(overlay()!, 60, 60)
-    expect(taken).toBe(true)
-    expect(menu()).not.toBeNull()
-    expect(dialog()).toBeNull() // the secondary release promoted nothing
-    expect(overlay()).not.toBeNull()
+    await startOrbit();
+    const taken = await secondaryPress(overlay()!, 60, 60);
+    expect(taken).toBe(true);
+    expect(menu()).not.toBeNull();
+    expect(dialog()).toBeNull(); // the secondary release promoted nothing
+    expect(overlay()).not.toBeNull();
 
-    await escape()
+    await escape();
     // The primary's own release still ends the gesture as it always did.
-    await primaryRelease()
-    await wait(150)
-    expect(dialog()).not.toBeNull()
-  })
-})
+    await primaryRelease();
+    await wait(150);
+    expect(dialog()).not.toBeNull();
+  });
+});

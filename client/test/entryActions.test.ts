@@ -2,9 +2,13 @@
 // The shared action module, asked directly: the vpath arithmetic reveal runs
 // on, D6's per-kind table, and the menu's viewport clamp. Everything here is a
 // pure function — the wiring is entryMenu.test.tsx's job.
-import { describe, expect, it, vi } from 'vitest'
-import type { DirEntry, FeatureReport, IndexAvailability } from '../../shared/types'
-import { clampToViewport } from '../src/components/EntryMenu'
+import { describe, expect, it, vi } from "vitest";
+import type {
+  DirEntry,
+  FeatureReport,
+  IndexAvailability,
+} from "../../shared/types";
+import { clampToViewport } from "../src/components/EntryMenu";
 import {
   commandsFor,
   containingFolder,
@@ -13,29 +17,29 @@ import {
   ENTRY_COMMANDS,
   runCommand,
   type ActionHost,
-} from '../src/lib/entryActions'
+} from "../src/lib/entryActions";
 
 const model = (path: string): DirEntry => ({
-  name: path.slice(path.lastIndexOf('/') + 1),
+  name: path.slice(path.lastIndexOf("/") + 1),
   path,
-  kind: 'model',
-  format: 'stl',
+  kind: "model",
+  format: "stl",
   size: 1,
   mtime: 1,
-})
+});
 const dir = (path: string): DirEntry => ({
-  name: path.slice(path.lastIndexOf('/') + 1),
+  name: path.slice(path.lastIndexOf("/") + 1),
   path,
-  kind: 'dir',
+  kind: "dir",
   size: 0,
   mtime: 1,
-})
-const zip = (path: string): DirEntry => ({ ...dir(path), kind: 'zip' })
+});
+const zip = (path: string): DirEntry => ({ ...dir(path), kind: "zip" });
 
 // Answering, and saying which collection it covers — the second half matters:
 // find similar is offered inside that collection, by the same `indexCovers` the
 // side panel reads.
-const READY: IndexAvailability = { state: 'ready', collectionRoot: '/m' }
+const READY: IndexAvailability = { state: "ready", collectionRoot: "/m" };
 // `apps: null` is a machine whose registry has not answered — no chooser, so no
 // *Open with…*, which is what every case in this file is about. The launch
 // actions' own cases are in openInApps.test.tsx, where a report exists.
@@ -53,7 +57,7 @@ const OFFERED: FeatureReport = {
   // The visitor introduction, off as the server defaults it (`landing-page`
   // D1) — spelt out with the five above and for their reason.
   intro: false,
-}
+};
 // The default is `null` — the report not known — for `apps: null`'s reason:
 // every case written before the bulk rows existed is about the rest of the
 // table, and an unknown report withholds exactly those two.
@@ -61,108 +65,123 @@ const ids = (
   entry: DirEntry,
   index: IndexAvailability | null,
   features: FeatureReport | null = null,
-): string[] => commandsFor(entry, { index, apps: null, features }).map((c) => c.id)
+): string[] =>
+  commandsFor(entry, { index, apps: null, features }).map((c) => c.id);
 
-describe('containingFolder', () => {
-  it('is the parent directory of an ordinary path', () => {
-    expect(containingFolder('/models/Kits/hero.stl')).toBe('/models/Kits')
-    expect(containingFolder('/models/hero.stl')).toBe('/models')
-  })
+describe("containingFolder", () => {
+  it("is the parent directory of an ordinary path", () => {
+    expect(containingFolder("/models/Kits/hero.stl")).toBe("/models/Kits");
+    expect(containingFolder("/models/hero.stl")).toBe("/models");
+  });
 
-  it('is the directory INSIDE the archive for a zip entry', () => {
-    expect(containingFolder('/models/kit.zip!/parts/lid.stl')).toBe('/models/kit.zip!/parts')
-  })
+  it("is the directory INSIDE the archive for a zip entry", () => {
+    expect(containingFolder("/models/kit.zip!/parts/lid.stl")).toBe(
+      "/models/kit.zip!/parts",
+    );
+  });
 
-  it('is the archive itself for an entry at the archive root', () => {
-    expect(containingFolder('/models/kit.zip!/lid.stl')).toBe('/models/kit.zip')
-  })
+  it("is the archive itself for an entry at the archive root", () => {
+    expect(containingFolder("/models/kit.zip!/lid.stl")).toBe(
+      "/models/kit.zip",
+    );
+  });
 
-  it('bottoms out at the root rather than the empty path', () => {
+  it("bottoms out at the root rather than the empty path", () => {
     // '' is "no directory chosen yet" in this app — the state the header
     // disables ↑ for — so ascending from a top-level entry must not produce it.
-    expect(containingFolder('/hero.stl')).toBe('/')
-    expect(containingFolder('/')).toBe('/')
-  })
-})
+    expect(containingFolder("/hero.stl")).toBe("/");
+    expect(containingFolder("/")).toBe("/");
+  });
+});
 
 describe("D6's per-kind table", () => {
-  it('offers open, reveal and copy path on every kind', () => {
-    for (const entry of [model('/m/a.stl'), dir('/m/d'), zip('/m/z.zip')]) {
-      expect(ids(entry, READY)).toEqual(expect.arrayContaining(['open', 'reveal', 'copyPath']))
+  it("offers open, reveal and copy path on every kind", () => {
+    for (const entry of [model("/m/a.stl"), dir("/m/d"), zip("/m/z.zip")]) {
+      expect(ids(entry, READY)).toEqual(
+        expect.arrayContaining(["open", "reveal", "copyPath"]),
+      );
     }
-  })
+  });
 
-  it('offers find similar on a model and on nothing else', () => {
-    expect(ids(model('/m/a.stl'), READY)).toContain('findSimilar')
-    expect(ids(dir('/m/d'), READY)).not.toContain('findSimilar')
-    expect(ids(zip('/m/z.zip'), READY)).not.toContain('findSimilar')
-  })
+  it("offers find similar on a model and on nothing else", () => {
+    expect(ids(model("/m/a.stl"), READY)).toContain("findSimilar");
+    expect(ids(dir("/m/d"), READY)).not.toContain("findSimilar");
+    expect(ids(zip("/m/z.zip"), READY)).not.toContain("findSimilar");
+  });
 
-  it('withholds find similar when the index is not answering', () => {
+  it("withholds find similar when the index is not answering", () => {
     // The degradation semantic-search designs for, arriving here: a model tile
     // without find similar is not a bug. Absent, never present and inert.
-    expect(ids(model('/m/a.stl'), null)).not.toContain('findSimilar')
-    expect(ids(model('/m/a.stl'), { state: 'absent' })).not.toContain('findSimilar')
-    expect(ids(model('/m/a.stl'), { state: 'warming' })).not.toContain('findSimilar')
-  })
+    expect(ids(model("/m/a.stl"), null)).not.toContain("findSimilar");
+    expect(ids(model("/m/a.stl"), { state: "absent" })).not.toContain(
+      "findSimilar",
+    );
+    expect(ids(model("/m/a.stl"), { state: "warming" })).not.toContain(
+      "findSimilar",
+    );
+  });
 
-  it('withholds find similar from a model inside an archive', () => {
+  it("withholds find similar from a model inside an archive", () => {
     // Outside the corpus by construction, and knowable client-side from the
     // path — no round trip to learn it. `indexCovers` answers this half too,
     // which is why the rule is not spelled out a second time here.
-    expect(ids(model('/m/kit.zip!/lid.stl'), READY)).not.toContain('findSimilar')
-  })
+    expect(ids(model("/m/kit.zip!/lid.stl"), READY)).not.toContain(
+      "findSimilar",
+    );
+  });
 
-  it('withholds find similar from a model outside the collection the index covers', () => {
+  it("withholds find similar from a model outside the collection the index covers", () => {
     // "Inside the indexed collection" is one rule, and the side panel already
     // owns it: a second copy here is how the menu and the panel would come to
     // disagree about the same model.
-    expect(ids(model('/elsewhere/a.stl'), READY)).not.toContain('findSimilar')
-    expect(ids(model('/m/a.stl'), { state: 'ready' })).not.toContain('findSimilar') // no root, no claim
-  })
+    expect(ids(model("/elsewhere/a.stl"), READY)).not.toContain("findSimilar");
+    expect(ids(model("/m/a.stl"), { state: "ready" })).not.toContain(
+      "findSimilar",
+    ); // no root, no claim
+  });
 
-  it('offers both thumbnail commands on a model and on nothing else', () => {
+  it("offers both thumbnail commands on a model and on nothing else", () => {
     // Model-only for a structural reason: container tiles are drawn as glyphs,
     // not renders, so there is no thumbnail to act on. Every command in the
     // table has a body now, so none is hidden for want of one.
-    expect(ENTRY_COMMANDS.filter((c) => c.run === null)).toEqual([])
-    for (const id of ['reRenderThumbnail', 'resetFraming']) {
-      expect(ids(model('/m/a.stl'), READY)).toContain(id)
-      expect(ids(dir('/m/d'), READY)).not.toContain(id)
-      expect(ids(zip('/m/z.zip'), READY)).not.toContain(id)
+    expect(ENTRY_COMMANDS.filter((c) => c.run === null)).toEqual([]);
+    for (const id of ["reRenderThumbnail", "resetFraming"]) {
+      expect(ids(model("/m/a.stl"), READY)).toContain(id);
+      expect(ids(dir("/m/d"), READY)).not.toContain(id);
+      expect(ids(zip("/m/z.zip"), READY)).not.toContain(id);
     }
     // Offered on a model the index cannot serve, too — they are not the
     // index's actions, and a failed image is a case re-render exists for.
-    expect(ids(model('/m/a.stl'), null)).toEqual([
-      'open',
-      'reveal',
-      'copyPath',
-      'reRenderThumbnail',
-      'resetFraming',
-    ])
-  })
+    expect(ids(model("/m/a.stl"), null)).toEqual([
+      "open",
+      "reveal",
+      "copyPath",
+      "reRenderThumbnail",
+      "resetFraming",
+    ]);
+  });
 
-  it('offers both bulk commands on a container and on nothing else', () => {
+  it("offers both bulk commands on a container and on nothing else", () => {
     // The container analogues of the two thumbnail commands, under the mirror
     // of their rule: a subtree is what a container has instead of a thumbnail,
     // and a model's own per-model actions already cover it.
-    for (const id of ['generateBeneath', 'resetBeneath']) {
-      expect(ids(dir('/m/d'), READY, OFFERED)).toContain(id)
-      expect(ids(zip('/m/z.zip'), READY, OFFERED)).toContain(id)
-      expect(ids(model('/m/a.stl'), READY, OFFERED)).not.toContain(id)
+    for (const id of ["generateBeneath", "resetBeneath"]) {
+      expect(ids(dir("/m/d"), READY, OFFERED)).toContain(id);
+      expect(ids(zip("/m/z.zip"), READY, OFFERED)).toContain(id);
+      expect(ids(model("/m/a.stl"), READY, OFFERED)).not.toContain(id);
     }
     // Not the index's actions either: a container's bulk work has nothing to do
     // with whether meaning search is answering.
-    expect(ids(dir('/m/d'), null, OFFERED)).toEqual([
-      'open',
-      'reveal',
-      'copyPath',
-      'generateBeneath',
-      'resetBeneath',
-    ])
-  })
+    expect(ids(dir("/m/d"), null, OFFERED)).toEqual([
+      "open",
+      "reveal",
+      "copyPath",
+      "generateBeneath",
+      "resetBeneath",
+    ]);
+  });
 
-  it('withholds both unless a KNOWN report offers maintenance', () => {
+  it("withholds both unless a KNOWN report offers maintenance", () => {
     // The offer half of feature-report D3. `null` is *not known* — in flight,
     // or the read failed — and both read the same here, so nothing renders and
     // then vanishes a round trip later, and nothing opens on error.
@@ -170,15 +189,18 @@ describe("D6's per-kind table", () => {
     // `maintenance` is the field, not `thumbWrites`: both rows act on the
     // server's own derived state for every viewer at once (`public-deployment`
     // 3.8a, closing the interim `bulk-thumbnail-jobs` 5.1 declared).
-    for (const entry of [dir('/m/d'), zip('/m/z.zip')]) {
-      for (const report of [null, { ...OFFERED, maintenance: false }] as (FeatureReport | null)[]) {
-        expect(ids(entry, READY, report)).not.toContain('generateBeneath')
-        expect(ids(entry, READY, report)).not.toContain('resetBeneath')
+    for (const entry of [dir("/m/d"), zip("/m/z.zip")]) {
+      for (const report of [
+        null,
+        { ...OFFERED, maintenance: false },
+      ] as (FeatureReport | null)[]) {
+        expect(ids(entry, READY, report)).not.toContain("generateBeneath");
+        expect(ids(entry, READY, report)).not.toContain("resetBeneath");
       }
     }
-  })
+  });
 
-  it('splits the two when maintenance and thumbnail writes disagree', () => {
+  it("splits the two when maintenance and thumbnail writes disagree", () => {
     // The spec's *Bulk work is gated by what it does*, and the one
     // configuration a single field gets wrong.
     //
@@ -188,171 +210,219 @@ describe("D6's per-kind table", () => {
     // a loop over the same `PUT /api/thumb` a single model's reset makes, so
     // refusing it as maintenance would refuse that single reset too, and what
     // it writes stays governed by `thumbWrites` at the route (D4).
-    const noWrites = { ...OFFERED, thumbWrites: false }
-    for (const entry of [dir('/m/d'), zip('/m/z.zip')]) {
-      expect(ids(entry, READY, noWrites)).not.toContain('generateBeneath')
-      expect(ids(entry, READY, noWrites)).toContain('resetBeneath')
+    const noWrites = { ...OFFERED, thumbWrites: false };
+    for (const entry of [dir("/m/d"), zip("/m/z.zip")]) {
+      expect(ids(entry, READY, noWrites)).not.toContain("generateBeneath");
+      expect(ids(entry, READY, noWrites)).toContain("resetBeneath");
     }
 
     // And the reverse configuration reverses them: writes accepted but no
     // maintenance withholds both, because neither is a question about the
     // library — generate's second condition never comes up.
-    const noMaintenance = { ...OFFERED, maintenance: false }
-    for (const entry of [dir('/m/d'), zip('/m/z.zip')]) {
-      expect(ids(entry, READY, noMaintenance)).not.toContain('generateBeneath')
-      expect(ids(entry, READY, noMaintenance)).not.toContain('resetBeneath')
+    const noMaintenance = { ...OFFERED, maintenance: false };
+    for (const entry of [dir("/m/d"), zip("/m/z.zip")]) {
+      expect(ids(entry, READY, noMaintenance)).not.toContain("generateBeneath");
+      expect(ids(entry, READY, noMaintenance)).not.toContain("resetBeneath");
     }
-  })
+  });
 
-  it('labels both without a count, and without any digit at all', () => {
+  it("labels both without a count, and without any digit at all", () => {
     // D5/M6: `EntryMenu` measures, clamps and focus-seeds from its command list
     // at mount, so a count arriving a round trip later would move the menu out
     // from under the pointer. The cost is stated at the next step — the chip's
     // confirmation for reset, the chip itself for generate.
     const label = (id: string): string =>
-      commandsFor(dir('/m/d'), { index: READY, apps: null, features: OFFERED }).find(
-        (c) => c.id === id,
-      )!.label
-    expect(label('generateBeneath')).toBe('Generate thumbnails beneath')
-    expect(label('resetBeneath')).toBe('Reset framings beneath')
-    for (const id of ['generateBeneath', 'resetBeneath']) expect(label(id)).not.toMatch(/[0-9]/)
+      commandsFor(dir("/m/d"), {
+        index: READY,
+        apps: null,
+        features: OFFERED,
+      }).find((c) => c.id === id)!.label;
+    expect(label("generateBeneath")).toBe("Generate thumbnails beneath");
+    expect(label("resetBeneath")).toBe("Reset framings beneath");
+    for (const id of ["generateBeneath", "resetBeneath"])
+      expect(label(id)).not.toMatch(/[0-9]/);
     // And no `labelFor`: a per-entry label is resolved at `commandsFor` time,
     // which is the one hook a count could have arrived through.
-    for (const id of ['generateBeneath', 'resetBeneath']) {
-      expect(ENTRY_COMMANDS.find((c) => c.id === id)!.labelFor).toBeUndefined()
+    for (const id of ["generateBeneath", "resetBeneath"]) {
+      expect(ENTRY_COMMANDS.find((c) => c.id === id)!.labelFor).toBeUndefined();
     }
-  })
+  });
 
-  it('launches the scope the tile names, preferring the displayed name', () => {
+  it("launches the scope the tile names, preferring the displayed name", () => {
     // The command asks and nothing else: no confirmation here (the chip's, once
     // it has a count) and no report of a refusal (App's — see `JOB_BUSY`).
-    const launchJob = vi.fn()
-    const host = { launchJob } as unknown as ActionHost
-    const folder: DirEntry = { ...dir('/m/Kits/Baal'), displayName: 'Baal — primed' }
-    runCommand('resetBeneath', folder, host)
-    expect(launchJob).toHaveBeenCalledWith('reset', {
-      path: '/m/Kits/Baal',
-      label: 'Baal — primed',
-    })
-    runCommand('generateBeneath', dir('/m/Kits/Plain'), host)
+    const launchJob = vi.fn();
+    const host = { launchJob } as unknown as ActionHost;
+    const folder: DirEntry = {
+      ...dir("/m/Kits/Baal"),
+      displayName: "Baal — primed",
+    };
+    runCommand("resetBeneath", folder, host);
+    expect(launchJob).toHaveBeenCalledWith("reset", {
+      path: "/m/Kits/Baal",
+      label: "Baal — primed",
+    });
+    runCommand("generateBeneath", dir("/m/Kits/Plain"), host);
     // No override, so the entry's own name — the label is display only, and the
     // chip names the scope the way the tile the user pressed named it.
-    expect(launchJob).toHaveBeenLastCalledWith('generate', {
-      path: '/m/Kits/Plain',
-      label: 'Plain',
-    })
-  })
+    expect(launchJob).toHaveBeenLastCalledWith("generate", {
+      path: "/m/Kits/Plain",
+      label: "Plain",
+    });
+  });
 
-  it('labels open for what it does to this entry, resolved by commandsFor', () => {
+  it("labels open for what it does to this entry, resolved by commandsFor", () => {
     // The 4.3 naming decision (2026-08-25): "Open" was only ever accurate on a
     // model — a directory or archive is browsed into, no lightbox involved.
     // One command, three labels, and the resolution happens where the
     // per-entry list is built: consumers keep rendering a plain `label`
     // string and never learn about entry kinds.
     const label = (entry: DirEntry): string =>
-      commandsFor(entry, { index: READY, apps: null, features: null }).find((c) => c.id === 'open')!.label
-    expect(label(model('/m/a.stl'))).toBe('Open lightbox')
-    expect(label(dir('/m/d'))).toBe('Open folder')
-    expect(label(zip('/m/z.zip'))).toBe('Open archive')
+      commandsFor(entry, { index: READY, apps: null, features: null }).find(
+        (c) => c.id === "open",
+      )!.label;
+    expect(label(model("/m/a.stl"))).toBe("Open lightbox");
+    expect(label(dir("/m/d"))).toBe("Open folder");
+    expect(label(zip("/m/z.zip"))).toBe("Open archive");
     // Every other command's label is one string for every entry.
-    for (const entry of [model('/m/a.stl'), dir('/m/d'), zip('/m/z.zip')]) {
-      for (const c of commandsFor(entry, { index: READY, apps: null, features: null })) {
-        if (c.id === 'open') continue
-        expect(c.label).toBe(ENTRY_COMMANDS.find((t) => t.id === c.id)!.label)
+    for (const entry of [model("/m/a.stl"), dir("/m/d"), zip("/m/z.zip")]) {
+      for (const c of commandsFor(entry, {
+        index: READY,
+        apps: null,
+        features: null,
+      })) {
+        if (c.id === "open") continue;
+        expect(c.label).toBe(ENTRY_COMMANDS.find((t) => t.id === c.id)!.label);
       }
     }
-  })
-})
+  });
+});
 
-describe('copyEntryPath', () => {
-  it('copies the filesystem path, expanded from the library top, zip notation included', async () => {
+describe("copyEntryPath", () => {
+  it("copies the filesystem path, expanded from the library top, zip notation included", async () => {
     // What lands on the clipboard is going somewhere else, so it is the
     // filesystem path (library R2) — the library top joined to the entry's
     // library path, with `!/` intact. The entry's own `path` stays the library
     // path everywhere inside the app.
-    const writeText = vi.fn().mockResolvedValue(undefined)
-    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
-    const confirm = vi.fn()
-    const report = vi.fn()
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    const confirm = vi.fn();
+    const report = vi.fn();
     try {
-      copyEntryPath(model('/m/kit.zip!/parts/lid.stl'), {
-        libraryTop: '/lib',
+      copyEntryPath(model("/m/kit.zip!/parts/lid.stl"), {
+        libraryTop: "/lib",
         confirm,
         report,
-      })
-      await Promise.resolve()
-      expect(writeText).toHaveBeenCalledWith('/lib/m/kit.zip!/parts/lid.stl')
-      expect(confirm).toHaveBeenCalled()
-      expect(report).not.toHaveBeenCalled()
+      });
+      await Promise.resolve();
+      expect(writeText).toHaveBeenCalledWith("/lib/m/kit.zip!/parts/lid.stl");
+      expect(confirm).toHaveBeenCalled();
+      expect(report).not.toHaveBeenCalled();
     } finally {
-      Reflect.deleteProperty(navigator, 'clipboard')
+      Reflect.deleteProperty(navigator, "clipboard");
     }
-  })
+  });
 
-  it('copies the library path bare when the library is not ready', async () => {
+  it("copies the library path bare when the library is not ready", async () => {
     // No top to join onto, so no guess is made: the honest answer is the path
     // as the app holds it, not a prefix invented for a volume that is not
     // mounted, which would name a real file somewhere else.
-    const writeText = vi.fn().mockResolvedValue(undefined)
-    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
     try {
-      copyEntryPath(model('/m/a.stl'), {
+      copyEntryPath(model("/m/a.stl"), {
         libraryTop: null,
         confirm: vi.fn(),
         report: vi.fn(),
-      })
-      await Promise.resolve()
-      expect(writeText).toHaveBeenCalledWith('/m/a.stl')
+      });
+      await Promise.resolve();
+      expect(writeText).toHaveBeenCalledWith("/m/a.stl");
     } finally {
-      Reflect.deleteProperty(navigator, 'clipboard')
+      Reflect.deleteProperty(navigator, "clipboard");
     }
-  })
+  });
 
-  it('reports rather than throwing when the clipboard fails synchronously', () => {
+  it("reports rather than throwing when the clipboard fails synchronously", () => {
     // The case a bare `.catch()` misses. Outside a secure context
     // `navigator.clipboard` is undefined and the call throws where nothing is
     // awaiting it — the reason the try survived the move out of the panel.
     // (happy-dom supplies a clipboard of its own, so this defines the absence
     // rather than deleting the property: a delete only uncovers the prototype's.)
-    const report = vi.fn()
-    for (const clipboard of [undefined, { writeText: () => { throw new Error('blocked') } }]) {
-      Object.defineProperty(navigator, 'clipboard', { value: clipboard, configurable: true })
-      report.mockClear()
+    const report = vi.fn();
+    for (const clipboard of [
+      undefined,
+      {
+        writeText: () => {
+          throw new Error("blocked");
+        },
+      },
+    ]) {
+      Object.defineProperty(navigator, "clipboard", {
+        value: clipboard,
+        configurable: true,
+      });
+      report.mockClear();
       expect(() =>
-        copyEntryPath(model('/m/a.stl'), { libraryTop: '/lib', confirm: vi.fn(), report }),
-      ).not.toThrow()
-      expect(report).toHaveBeenCalledWith(COPY_FAILED)
+        copyEntryPath(model("/m/a.stl"), {
+          libraryTop: "/lib",
+          confirm: vi.fn(),
+          report,
+        }),
+      ).not.toThrow();
+      expect(report).toHaveBeenCalledWith(COPY_FAILED);
     }
-    Reflect.deleteProperty(navigator, 'clipboard')
-  })
+    Reflect.deleteProperty(navigator, "clipboard");
+  });
 
-  it('reports a rejected write with the one shared sentence', async () => {
-    const writeText = vi.fn().mockRejectedValue(new Error('denied'))
-    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
-    const report = vi.fn()
+  it("reports a rejected write with the one shared sentence", async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error("denied"));
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    const report = vi.fn();
     try {
-      copyEntryPath(model('/m/a.stl'), { libraryTop: '/lib', confirm: vi.fn(), report })
-      await Promise.resolve()
-      await Promise.resolve()
-      expect(report).toHaveBeenCalledWith(COPY_FAILED)
+      copyEntryPath(model("/m/a.stl"), {
+        libraryTop: "/lib",
+        confirm: vi.fn(),
+        report,
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(report).toHaveBeenCalledWith(COPY_FAILED);
     } finally {
-      Reflect.deleteProperty(navigator, 'clipboard')
+      Reflect.deleteProperty(navigator, "clipboard");
     }
-  })
-})
+  });
+});
 
-describe('clampToViewport', () => {
-  it('leaves a menu that fits where the pointer was', () => {
-    expect(clampToViewport(100, 100, 180, 120, 1000, 800)).toEqual({ left: 100, top: 100 })
-  })
+describe("clampToViewport", () => {
+  it("leaves a menu that fits where the pointer was", () => {
+    expect(clampToViewport(100, 100, 180, 120, 1000, 800)).toEqual({
+      left: 100,
+      top: 100,
+    });
+  });
 
-  it('slides a menu raised at the edge back inside, on both axes', () => {
-    expect(clampToViewport(960, 780, 180, 120, 1000, 800)).toEqual({ left: 814, top: 674 })
-  })
+  it("slides a menu raised at the edge back inside, on both axes", () => {
+    expect(clampToViewport(960, 780, 180, 120, 1000, 800)).toEqual({
+      left: 814,
+      top: 674,
+    });
+  });
 
-  it('never pushes it off the near edge to satisfy the far one', () => {
+  it("never pushes it off the near edge to satisfy the far one", () => {
     // A menu taller than the window clamps to the top margin rather than to a
     // negative offset that would hide its first item.
-    expect(clampToViewport(10, 10, 2000, 2000, 1000, 800)).toEqual({ left: 6, top: 6 })
-  })
-})
+    expect(clampToViewport(10, 10, 2000, 2000, 1000, 800)).toEqual({
+      left: 6,
+      top: 6,
+    });
+  });
+});

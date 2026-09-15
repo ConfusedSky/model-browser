@@ -22,20 +22,23 @@
  * container, and the guard admits an `Origin`-less POST with the right `Host`.
  */
 
-import { pathToFileURL } from 'node:url'
-import { EXAMPLE_QUERIES } from '../shared/exampleQueries'
-import { TUNING_DEFAULTS } from '../client/src/lib/searchOptions'
+import { pathToFileURL } from "node:url";
+import { EXAMPLE_QUERIES } from "../shared/exampleQueries";
+import { TUNING_DEFAULTS } from "../client/src/lib/searchOptions";
 
-export const USAGE = 'usage: bun run scripts/check-example-queries.ts <origin>'
+export const USAGE = "usage: bun run scripts/check-example-queries.ts <origin>";
 
-export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
+export type FetchLike = (
+  input: string,
+  init?: RequestInit,
+) => Promise<Response>;
 
 /** What a run found: the queries that answered nothing, and the ones that could not be asked. */
 export interface CheckResult {
   /** Asked successfully, and the grid would be empty — `entries` came back with nothing in it. */
-  dead: string[]
+  dead: string[];
   /** Never answered: a non-2xx status, or a request that threw. */
-  failed: string[]
+  failed: string[];
 }
 
 /**
@@ -56,67 +59,73 @@ export async function checkExampleQueries(
   queries: readonly string[],
   fetchFn: FetchLike = fetch,
 ): Promise<CheckResult> {
-  const dead: string[] = []
-  const failed: string[] = []
+  const dead: string[] = [];
+  const failed: string[] = [];
   for (const text of queries) {
-    let entries: unknown
+    let entries: unknown;
     try {
       const res = await fetchFn(`${origin}/api/semantic`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        method: "POST",
+        headers: { "content-type": "application/json" },
         body: JSON.stringify({ text, ...TUNING_DEFAULTS }),
-      })
+      });
       if (!res.ok) {
-        failed.push(text)
-        continue
+        failed.push(text);
+        continue;
       }
-      const body: unknown = await res.json()
-      entries = (body as { entries?: unknown } | null)?.entries
+      const body: unknown = await res.json();
+      entries = (body as { entries?: unknown } | null)?.entries;
     } catch {
-      failed.push(text)
-      continue
+      failed.push(text);
+      continue;
     }
     // A 200 that carries no `entries` array is not a listing this client could
     // draw either, so it counts as dead rather than passing for lack of a
     // length to read.
-    if (!Array.isArray(entries) || entries.length === 0) dead.push(text)
+    if (!Array.isArray(entries) || entries.length === 0) dead.push(text);
   }
-  return { dead, failed }
+  return { dead, failed };
 }
 
 /** One positional origin, required — no flags, so a second argument is a mistake rather than an origin. */
 export function parseArgs(argv: string[]): { origin: string } {
-  if (argv.length !== 1) throw new Error(USAGE)
-  const origin = argv[0]
-  if (origin === undefined || origin === '' || origin.startsWith('-')) throw new Error(USAGE)
-  return { origin }
+  if (argv.length !== 1) throw new Error(USAGE);
+  const origin = argv[0];
+  if (origin === undefined || origin === "" || origin.startsWith("-"))
+    throw new Error(USAGE);
+  return { origin };
 }
 
 // Run only when invoked directly, so the core above can be imported by the
 // suite (`bake-demo.ts`'s guard, `gen-overrides.ts`'s before it).
-if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  let origin: string | null = null
+if (
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
+  let origin: string | null = null;
   try {
-    origin = parseArgs(process.argv.slice(2)).origin
+    origin = parseArgs(process.argv.slice(2)).origin;
   } catch (err: unknown) {
-    console.error(err instanceof Error ? err.message : String(err))
-    process.exit(2)
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(2);
   }
-  const named = origin
+  const named = origin;
   checkExampleQueries(named, EXAMPLE_QUERIES)
     .then(({ dead, failed }) => {
       if (dead.length === 0 && failed.length === 0) {
-        console.log(`${EXAMPLE_QUERIES.length} example queries answer on ${named}`)
-        return
+        console.log(
+          `${EXAMPLE_QUERIES.length} example queries answer on ${named}`,
+        );
+        return;
       }
       // One query per line, prefixed by which kind of trouble it is: the output
       // is read by whoever just deployed, and each line is a thing to do.
-      for (const q of dead) console.error(`dead: ${q}`)
-      for (const q of failed) console.error(`failed: ${q}`)
-      process.exitCode = 1
+      for (const q of dead) console.error(`dead: ${q}`);
+      for (const q of failed) console.error(`failed: ${q}`);
+      process.exitCode = 1;
     })
     .catch((err: unknown) => {
-      console.error(err instanceof Error ? err.message : String(err))
-      process.exitCode = 1
-    })
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exitCode = 1;
+    });
 }

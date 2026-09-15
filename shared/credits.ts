@@ -1,4 +1,4 @@
-import type { OverrideCredits } from './types'
+import type { OverrideCredits } from "./types";
 
 /**
  * The credits worth drawing, or `null` — so the state's non-null case means
@@ -14,12 +14,14 @@ import type { OverrideCredits } from './types'
  * the lightbox cannot disagree about which kits are credited — a loader-produced
  * `{}` is skipped by both.
  */
-export function renderableCredits(credits: OverrideCredits | undefined): OverrideCredits | null {
-  if (credits === undefined) return null
+export function renderableCredits(
+  credits: OverrideCredits | undefined,
+): OverrideCredits | null {
+  if (credits === undefined) return null;
   const some =
     credits.author !== undefined ||
     credits.license !== undefined ||
     credits.sourceUrl !== undefined ||
-    credits.modified !== undefined
-  return some ? credits : null
+    credits.modified !== undefined;
+  return some ? credits : null;
 }

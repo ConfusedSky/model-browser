@@ -1,7 +1,7 @@
-import { fileURLToPath } from 'node:url'
-import { defineConfig } from 'vitest/config'
-import react from '@vitejs/plugin-react'
-import tailwindcss from '@tailwindcss/vite'
+import { fileURLToPath } from "node:url";
+import { defineConfig } from "vitest/config";
+import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 // The entries below are resolved against this file's own URL: it is ESM
 // (`"type": "module"` in package.json), so there is no `__dirname` to join
@@ -23,8 +23,8 @@ export default defineConfig({
       // box, where the only symptom is a 404 that the SPA fallback dresses up
       // as the app.
       input: {
-        main: fileURLToPath(new URL('index.html', import.meta.url)),
-        about: fileURLToPath(new URL('about.html', import.meta.url)),
+        main: fileURLToPath(new URL("index.html", import.meta.url)),
+        about: fileURLToPath(new URL("about.html", import.meta.url)),
       },
     },
   },
@@ -34,7 +34,7 @@ export default defineConfig({
   test: { css: true },
   server: {
     proxy: {
-      '/api': 'http://127.0.0.1:3177',
+      "/api": "http://127.0.0.1:3177",
     },
   },
-})
+});

@@ -1,7 +1,11 @@
-import * as THREE from 'three'
-import { describe, expect, it } from 'vitest'
-import { SCENE_FRAMES } from '../../shared/frames'
-import { CAMERA_EPSILON, type CameraState, type OrbitAxis } from '../../shared/types'
+import * as THREE from "three";
+import { describe, expect, it } from "vitest";
+import { SCENE_FRAMES } from "../../shared/frames";
+import {
+  CAMERA_EPSILON,
+  type CameraState,
+  type OrbitAxis,
+} from "../../shared/types";
 import {
   applyState,
   boundsOf,
@@ -11,129 +15,145 @@ import {
   statePosition,
   stateTarget,
   type Bounds,
-} from '../src/three/camera'
+} from "../src/three/camera";
 
-const STATE: CameraState = { az: 0.8, el: 0.4, distR: 3, target: [0.1, -0.2, 0.05] }
-const AXES: OrbitAxis[] = ['x', '-x', 'y', '-y', 'z', '-z']
+const STATE: CameraState = {
+  az: 0.8,
+  el: 0.4,
+  distR: 3,
+  target: [0.1, -0.2, 0.05],
+};
+const AXES: OrbitAxis[] = ["x", "-x", "y", "-y", "z", "-z"];
 
 /** Camera math reads only center/radius; the box is along for the ride. */
 function boundsAt(center: THREE.Vector3, radius: number): Bounds {
-  const box = new THREE.Box3().setFromCenterAndSize(center, new THREE.Vector3(radius, radius, radius))
-  return { center, radius, box }
+  const box = new THREE.Box3().setFromCenterAndSize(
+    center,
+    new THREE.Vector3(radius, radius, radius),
+  );
+  return { center, radius, box };
 }
 
-function roundTrip(state: CameraState, bounds: Bounds, axis: OrbitAxis): CameraState {
-  const pos = statePosition(state, bounds, axis)
-  const target = stateTarget(state, bounds)
-  return captureState(pos, target, bounds, axis)
+function roundTrip(
+  state: CameraState,
+  bounds: Bounds,
+  axis: OrbitAxis,
+): CameraState {
+  const pos = statePosition(state, bounds, axis);
+  const target = stateTarget(state, bounds);
+  return captureState(pos, target, bounds, axis);
 }
 
 function expectClose(a: CameraState, b: CameraState): void {
-  expect(a.az).toBeCloseTo(b.az, 6)
-  expect(a.el).toBeCloseTo(b.el, 6)
-  expect(a.distR).toBeCloseTo(b.distR, 6)
-  for (let i = 0; i < 3; i++) expect(a.target[i]).toBeCloseTo(b.target[i]!, 6)
+  expect(a.az).toBeCloseTo(b.az, 6);
+  expect(a.el).toBeCloseTo(b.el, 6);
+  expect(a.distR).toBeCloseTo(b.distR, 6);
+  for (let i = 0; i < 3; i++) expect(a.target[i]).toBeCloseTo(b.target[i]!, 6);
 }
 
-describe('bounds-relative camera state', () => {
-  it('capture(apply(state)) round-trips', () => {
-    const bounds = boundsAt(new THREE.Vector3(5, 2, -3), 7)
-    expectClose(roundTrip(STATE, bounds, 'z'), STATE)
-  })
+describe("bounds-relative camera state", () => {
+  it("capture(apply(state)) round-trips", () => {
+    const bounds = boundsAt(new THREE.Vector3(5, 2, -3), 7);
+    expectClose(roundTrip(STATE, bounds, "z"), STATE);
+  });
 
-  it('survives a re-scaled re-export: same state, different bounds → same view', () => {
-    const mm = boundsAt(new THREE.Vector3(10, 0, 0), 25.4)
-    const inches = boundsAt(new THREE.Vector3(0.39, 0, 0), 1)
+  it("survives a re-scaled re-export: same state, different bounds → same view", () => {
+    const mm = boundsAt(new THREE.Vector3(10, 0, 0), 25.4);
+    const inches = boundsAt(new THREE.Vector3(0.39, 0, 0), 1);
 
     // The state is unit-free: capturing from either sized world recovers it.
-    expectClose(roundTrip(STATE, mm, 'z'), STATE)
-    expectClose(roundTrip(STATE, inches, 'z'), STATE)
+    expectClose(roundTrip(STATE, mm, "z"), STATE);
+    expectClose(roundTrip(STATE, inches, "z"), STATE);
 
     // And the framing is identical: distance-to-target scales with the radius.
-    const posMm = statePosition(STATE, mm, 'z')
-    const posIn = statePosition(STATE, inches, 'z')
+    const posMm = statePosition(STATE, mm, "z");
+    const posIn = statePosition(STATE, inches, "z");
     expect(posMm.distanceTo(stateTarget(STATE, mm)) / mm.radius).toBeCloseTo(
       posIn.distanceTo(stateTarget(STATE, inches)) / inches.radius,
       6,
-    )
-  })
+    );
+  });
 
-  it('applyState aims the camera at the state target', () => {
-    const bounds = boundsAt(new THREE.Vector3(0, 0, 0), 2)
-    const camera = new THREE.PerspectiveCamera(40, 1)
-    applyState(camera, STATE, bounds, 'z')
-    const forward = new THREE.Vector3()
-    camera.getWorldDirection(forward)
-    const toTarget = stateTarget(STATE, bounds).sub(camera.position).normalize()
-    expect(forward.dot(toTarget)).toBeCloseTo(1, 5)
-  })
+  it("applyState aims the camera at the state target", () => {
+    const bounds = boundsAt(new THREE.Vector3(0, 0, 0), 2);
+    const camera = new THREE.PerspectiveCamera(40, 1);
+    applyState(camera, STATE, bounds, "z");
+    const forward = new THREE.Vector3();
+    camera.getWorldDirection(forward);
+    const toTarget = stateTarget(STATE, bounds)
+      .sub(camera.position)
+      .normalize();
+    expect(forward.dot(toTarget)).toBeCloseTo(1, 5);
+  });
 
-  it('capture(apply(state)) round-trips under every spindle axis', () => {
-    const bounds = boundsAt(new THREE.Vector3(5, 2, -3), 7)
-    for (const axis of AXES) expectClose(roundTrip(STATE, bounds, axis), STATE)
-  })
+  it("capture(apply(state)) round-trips under every spindle axis", () => {
+    const bounds = boundsAt(new THREE.Vector3(5, 2, -3), 7);
+    for (const axis of AXES) expectClose(roundTrip(STATE, bounds, axis), STATE);
+  });
 
-  it('spindle round-trip survives a re-scaled re-export', () => {
-    const mm = boundsAt(new THREE.Vector3(10, 0, 0), 25.4)
-    const inches = boundsAt(new THREE.Vector3(0.39, 0, 0), 1)
+  it("spindle round-trip survives a re-scaled re-export", () => {
+    const mm = boundsAt(new THREE.Vector3(10, 0, 0), 25.4);
+    const inches = boundsAt(new THREE.Vector3(0.39, 0, 0), 1);
     for (const axis of AXES) {
-      expectClose(roundTrip(STATE, mm, axis), STATE)
-      expectClose(roundTrip(STATE, inches, axis), STATE)
+      expectClose(roundTrip(STATE, mm, axis), STATE);
+      expectClose(roundTrip(STATE, inches, axis), STATE);
     }
-  })
+  });
 
-  it('the y frame is unchanged from the scene table: the historical world-Y representation', () => {
+  it("the y frame is unchanged from the scene table: the historical world-Y representation", () => {
     // There is no default axis any more (file-frame-spindle D2) — but the `y`
     // frame, which every un-framed model used to be drawn about, is a fixed
     // point of the re-derivation, so an OBJ at its default reads as it always
     // did. Assert it against the pre-bake table the derivation starts from.
-    const { s, a, b } = frameFor('y')
+    const { s, a, b } = frameFor("y");
     expect([s.toArray(), a.toArray(), b.toArray()]).toEqual([
       SCENE_FRAMES.y.s,
       SCENE_FRAMES.y.a,
       SCENE_FRAMES.y.b,
-    ])
-    const bounds = boundsAt(new THREE.Vector3(1, 2, 3), 4)
-    const explicit = statePosition(STATE, bounds, 'y')
+    ]);
+    const bounds = boundsAt(new THREE.Vector3(1, 2, 3), 4);
+    const explicit = statePosition(STATE, bounds, "y");
     // The world-Y formula the client used before spindle frames existed:
-    const dist = STATE.distR * bounds.radius
+    const dist = STATE.distR * bounds.radius;
     const manual = stateTarget(STATE, bounds).add(
       new THREE.Vector3(
         Math.sin(STATE.az) * Math.cos(STATE.el),
         Math.sin(STATE.el),
         Math.cos(STATE.az) * Math.cos(STATE.el),
       ).multiplyScalar(dist),
-    )
-    expect(explicit.distanceTo(manual)).toBeLessThan(1e-9)
-  })
+    );
+    expect(explicit.distanceTo(manual)).toBeLessThan(1e-9);
+  });
 
-  it('every frame satisfies a×b = −s with unit vectors (consistent drag feel)', () => {
+  it("every frame satisfies a×b = −s with unit vectors (consistent drag feel)", () => {
     for (const axis of AXES) {
-      const { s, a, b } = frameFor(axis)
-      expect(new THREE.Vector3().crossVectors(a, b).distanceTo(s.clone().negate())).toBeLessThan(1e-12)
-      for (const v of [s, a, b]) expect(v.length()).toBeCloseTo(1, 12)
+      const { s, a, b } = frameFor(axis);
+      expect(
+        new THREE.Vector3().crossVectors(a, b).distanceTo(s.clone().negate()),
+      ).toBeLessThan(1e-12);
+      for (const v of [s, a, b]) expect(v.length()).toBeCloseTo(1, 12);
     }
-  })
+  });
 
-  it('applyState locks camera up to the spindle', () => {
-    const bounds = boundsAt(new THREE.Vector3(0, 0, 0), 2)
+  it("applyState locks camera up to the spindle", () => {
+    const bounds = boundsAt(new THREE.Vector3(0, 0, 0), 2);
     for (const axis of AXES) {
-      const camera = new THREE.PerspectiveCamera(40, 1)
-      applyState(camera, STATE, bounds, axis)
-      expect(camera.up.distanceTo(frameFor(axis).s)).toBeLessThan(1e-12)
+      const camera = new THREE.PerspectiveCamera(40, 1);
+      applyState(camera, STATE, bounds, axis);
+      expect(camera.up.distanceTo(frameFor(axis).s)).toBeLessThan(1e-12);
     }
-  })
+  });
 
-  it('boundsOf centers a mesh and finds a positive radius', () => {
-    const geom = new THREE.BoxGeometry(2, 2, 2)
-    const mesh = new THREE.Mesh(geom, new THREE.MeshBasicMaterial())
-    mesh.position.set(10, 10, 10)
-    mesh.updateMatrixWorld()
-    const bounds = boundsOf(mesh)
-    expect(bounds.center.x).toBeCloseTo(10, 5)
-    expect(bounds.radius).toBeGreaterThan(0)
-  })
-})
+  it("boundsOf centers a mesh and finds a positive radius", () => {
+    const geom = new THREE.BoxGeometry(2, 2, 2);
+    const mesh = new THREE.Mesh(geom, new THREE.MeshBasicMaterial());
+    mesh.position.set(10, 10, 10);
+    mesh.updateMatrixWorld();
+    const bounds = boundsOf(mesh);
+    expect(bounds.center.x).toBeCloseTo(10, 5);
+    expect(bounds.radius).toBeGreaterThan(0);
+  });
+});
 
 /*
  * ── The round-trip drift probe behind CAMERA_EPSILON ─────────────────────────
@@ -155,56 +175,61 @@ describe('bounds-relative camera state', () => {
  * tolerance is — only that what it absorbs is nowhere near it.
  */
 
-const EL_LIMIT = Math.PI / 2 - 0.01
+const EL_LIMIT = Math.PI / 2 - 0.01;
 /** `ViewerSession`'s own dolly clamp, in bounding-sphere radii. */
-const DIST_MIN = 1.1
-const DIST_MAX = 20
+const DIST_MIN = 1.1;
+const DIST_MAX = 20;
 
 /** A seeded LCG (Numerical Recipes), so this sweep is the same sweep every run. */
 function lcg(seed: number): () => number {
-  let s = seed >>> 0
+  let s = seed >>> 0;
   return () => {
-    s = (Math.imul(s, 1664525) + 1013904223) >>> 0
-    return s / 4294967296
-  }
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
 }
 
 /** Signed angular difference wrapped into (−π, π]: `az` comes back from
  *  `atan2`, so a state drawn near ±π returns on the other side of the branch
  *  cut and a raw subtraction would report 2π of "drift" that is not there. */
 function angleDelta(a: number, b: number): number {
-  return ((a - b + Math.PI) % (2 * Math.PI)) - Math.PI
+  return ((a - b + Math.PI) % (2 * Math.PI)) - Math.PI;
 }
 
-describe('camera round-trip drift (the measurement behind CAMERA_EPSILON)', () => {
-  it('survives 200k round trips at each of three scales, orders below the tolerance', () => {
-    const rand = lcg(0x5eed)
-    const camera = new THREE.PerspectiveCamera(40, 1)
-    let worst = 0
-    let worstRadius = 0
+describe("camera round-trip drift (the measurement behind CAMERA_EPSILON)", () => {
+  it("survives 200k round trips at each of three scales, orders below the tolerance", () => {
+    const rand = lcg(0x5eed);
+    const camera = new THREE.PerspectiveCamera(40, 1);
+    let worst = 0;
+    let worstRadius = 0;
 
     for (const radius of [0.01, 1, 137]) {
       // Pivoted to the origin, the way `stageModel` leaves every model.
-      const bounds = boundsAt(new THREE.Vector3(0, 0, 0), radius)
+      const bounds = boundsAt(new THREE.Vector3(0, 0, 0), radius);
       for (let i = 0; i < 200_000; i++) {
         // `target` drawn inside the bounding sphere (radius units): a uniform
         // direction and a radius scaled by the cube root of a uniform, which
         // fills the ball instead of crowding its center.
-        const u = 2 * rand() - 1
-        const phi = 2 * Math.PI * rand()
-        const r = Math.cbrt(rand())
-        const rho = Math.sqrt(1 - u * u) * r
+        const u = 2 * rand() - 1;
+        const phi = 2 * Math.PI * rand();
+        const r = Math.cbrt(rand());
+        const rho = Math.sqrt(1 - u * u) * r;
         const state: CameraState = {
           az: 2 * Math.PI * rand() - Math.PI,
           el: (2 * rand() - 1) * EL_LIMIT,
           distR: DIST_MIN + rand() * (DIST_MAX - DIST_MIN),
           target: [rho * Math.cos(phi), rho * Math.sin(phi), u * r],
-        }
+        };
 
         // The trip a lightbox close makes: place the camera in the world, then
         // recover the state from where it landed.
-        applyState(camera, state, bounds, 'y')
-        const back = captureState(camera.position, stateTarget(state, bounds), bounds, 'y')
+        applyState(camera, state, bounds, "y");
+        const back = captureState(
+          camera.position,
+          stateTarget(state, bounds),
+          bounds,
+          "y",
+        );
 
         const drift = Math.max(
           Math.abs(angleDelta(back.az, state.az)),
@@ -213,10 +238,10 @@ describe('camera round-trip drift (the measurement behind CAMERA_EPSILON)', () =
           Math.abs(back.target[0] - state.target[0]),
           Math.abs(back.target[1] - state.target[1]),
           Math.abs(back.target[2] - state.target[2]),
-        )
+        );
         if (drift > worst) {
-          worst = drift
-          worstRadius = radius
+          worst = drift;
+          worstRadius = radius;
         }
       }
     }
@@ -234,29 +259,34 @@ describe('camera round-trip drift (the measurement behind CAMERA_EPSILON)', () =
     // clamp, and fills the target ball by cube-root radius. Same order, same
     // conclusion — five orders of headroom either way. Re-run this, do not
     // re-type it.
-    expect(worst).toBeLessThan(CAMERA_EPSILON / 1e4)
+    expect(worst).toBeLessThan(CAMERA_EPSILON / 1e4);
     // Non-trivial: a probe that stopped exercising the round trip — a state
     // generator collapsed onto one value, a `captureState` handing back its
     // input — would read exactly zero and sail through the bound above.
-    expect(worst).toBeGreaterThan(0)
-    expect([0.01, 1, 137]).toContain(worstRadius)
-  }, 120_000)
+    expect(worst).toBeGreaterThan(0);
+    expect([0.01, 1, 137]).toContain(worstRadius);
+  }, 120_000);
 
-  it('DEFAULT_CAMERA itself survives the trip, which is the common case', () => {
+  it("DEFAULT_CAMERA itself survives the trip, which is the common case", () => {
     // Every unmoved close of an un-oriented model re-sends this state. If it
     // drifted past the tolerance, a close that changed nothing would invalidate
     // the sibling render on every model nobody had ever orbited.
-    const bounds = boundsAt(new THREE.Vector3(0, 0, 0), 1)
-    const camera = new THREE.PerspectiveCamera(40, 1)
-    applyState(camera, DEFAULT_CAMERA, bounds, 'y')
-    const back = captureState(camera.position, stateTarget(DEFAULT_CAMERA, bounds), bounds, 'y')
+    const bounds = boundsAt(new THREE.Vector3(0, 0, 0), 1);
+    const camera = new THREE.PerspectiveCamera(40, 1);
+    applyState(camera, DEFAULT_CAMERA, bounds, "y");
+    const back = captureState(
+      camera.position,
+      stateTarget(DEFAULT_CAMERA, bounds),
+      bounds,
+      "y",
+    );
     for (const d of [
       angleDelta(back.az, DEFAULT_CAMERA.az),
       back.el - DEFAULT_CAMERA.el,
       back.distR - DEFAULT_CAMERA.distR,
       ...back.target.map((t, i) => t - DEFAULT_CAMERA.target[i]!),
     ]) {
-      expect(Math.abs(d)).toBeLessThan(CAMERA_EPSILON / 1e4)
+      expect(Math.abs(d)).toBeLessThan(CAMERA_EPSILON / 1e4);
     }
-  })
-})
+  });
+});

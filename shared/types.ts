@@ -1,4 +1,4 @@
-export type EntryKind = 'dir' | 'zip' | 'model'
+export type EntryKind = "dir" | "zip" | "model";
 
 /**
  * The three model formats the app reads. One definition for the wire
@@ -7,18 +7,18 @@ export type EntryKind = 'dir' | 'zip' | 'model'
  * `kind: 'model'` only through these same three extensions (`MODEL_EXT`,
  * server/src/listing.ts).
  */
-export type ModelFormat = 'stl' | '3mf' | 'obj'
+export type ModelFormat = "stl" | "3mf" | "obj";
 
 export interface DirEntry {
-  name: string
+  name: string;
   /** Virtual path: plain fs path, or `zip.zip!/inner/entry` for zip contents. */
-  path: string
-  kind: EntryKind
+  path: string;
+  kind: EntryKind;
   /** Model format, present when kind === 'model'. */
-  format?: ModelFormat
-  size: number
+  format?: ModelFormat;
+  size: number;
   /** mtime (ms). For zip entries this is the containing zip's mtime. */
-  mtime: number
+  mtime: number;
   /**
    * The name the library's override store holds for this exact path, when it
    * holds one. Display only: tiles label themselves with it while `name` stays
@@ -26,7 +26,7 @@ export interface DirEntry {
    * filter match (library-overrides D7). Absent for every entry the store does
    * not name, and for every library that has no store.
    */
-  displayName?: string
+  displayName?: string;
   /**
    * What the server's caches already knew about this entry when the listing was
    * emitted (`listing-tree-cache` §6.3). All three are **additive and absent by
@@ -39,7 +39,7 @@ export interface DirEntry {
    * the client asks for it exactly as it did before — the pose wave for `pose`,
    * `/api/thumb` for `thumb`, `/api/peek` for `preview`.
    */
-  thumb?: ThumbInfo
+  thumb?: ThumbInfo;
   /**
    * The index's orientation for this model, when the pose layer holds an answer.
    *
@@ -58,9 +58,9 @@ export interface DirEntry {
    * "still unknown" is `pose === undefined`. A filter written as
    * `pose === undefined` already reads a null as known, since `null !== undefined`.
    */
-  pose?: IndexPose | null
+  pose?: IndexPose | null;
   /** Directories only: the contact sheet a peek already derived for this folder. */
-  preview?: DirEntry[]
+  preview?: DirEntry[];
 }
 
 /**
@@ -76,14 +76,14 @@ export interface DirEntry {
  * interprets.
  */
 export interface ThumbRenderInfo {
-  state: ThumbStatus
-  lighting?: LightingMode
-  rig?: number
-  posed?: number
+  state: ThumbStatus;
+  lighting?: LightingMode;
+  rig?: number;
+  posed?: number;
   /** The orientation the render was drawn under, where a source framed it —
    *  see `ThumbSave.poseKey`. A posed render without it, or with a different
    *  one, is stale — the lighting and rig labels' rule. */
-  poseKey?: string
+  poseKey?: string;
 }
 
 /**
@@ -97,13 +97,13 @@ export interface ThumbRenderInfo {
  */
 export interface ThumbInfo {
   /** The entry's write generation — the cache validator every read echoes. */
-  gen: number
+  gen: number;
   /** A stored orientation exists: a camera **or** an axis (`bulk-thumbnail-jobs` M4). */
-  framed: boolean
-  camera?: CameraState
-  axis?: OrbitAxis
-  ao?: ThumbRenderInfo
-  noao?: ThumbRenderInfo
+  framed: boolean;
+  camera?: CameraState;
+  axis?: OrbitAxis;
+  ao?: ThumbRenderInfo;
+  noao?: ThumbRenderInfo;
 }
 
 /**
@@ -115,9 +115,9 @@ export interface ThumbInfo {
  * and a caller that knows its scope was cut can say so.
  */
 export interface ModelsListing {
-  path: string
-  entries: DirEntry[]
-  complete: boolean
+  path: string;
+  entries: DirEntry[];
+  complete: boolean;
 }
 
 /**
@@ -125,16 +125,16 @@ export interface ModelsListing {
  * roots it re-checked, and whether any of them had moved on disk.
  */
 export interface ReloadResult {
-  ok: true
-  roots: number
-  changed: boolean
+  ok: true;
+  roots: number;
+  changed: boolean;
 }
 
 export interface DirListing {
-  path: string
-  entries: DirEntry[]
+  path: string;
+  entries: DirEntry[];
   /** Flat listings only: models were dropped by the return cap or walk budget. */
-  truncated?: boolean
+  truncated?: boolean;
   /**
    * This answer came from a cached tree that this server process has not yet
    * checked against the filesystem (`listing-tree-cache` §5.1). The entries are
@@ -146,7 +146,7 @@ export interface DirListing {
    * has since revalidated. Never `false`: the field is additive, so an older
    * client and a hand-written request see exactly what they saw before.
    */
-  stale?: true
+  stale?: true;
 }
 
 /**
@@ -155,25 +155,25 @@ export interface DirListing {
  * carry all six, and a partial credit is still a true one.
  */
 export interface OverrideCredits {
-  author?: string
-  authorUrl?: string
+  author?: string;
+  authorUrl?: string;
   /** The license's label as the source page gives it — never normalised here. */
-  license?: string
+  license?: string;
   /**
    * The license deed's URI, version included
    * (`https://creativecommons.org/licenses/by-nd/4.0/`). The URL is what
    * carries the version; the app infers nothing from the label
    * (`credits-completion` D3).
    */
-  licenseUrl?: string
+  licenseUrl?: string;
   /**
    * What was done to the served copy, in the corpus's own words ("re-exported
    * as STL and decimated for display"), drawn verbatim as the modification
    * notice. **Absent means served unchanged**, and draws nothing
    * (`credits-completion` D2).
    */
-  modified?: string
-  sourceUrl?: string
+  modified?: string;
+  sourceUrl?: string;
 }
 
 /**
@@ -183,8 +183,8 @@ export interface OverrideCredits {
  */
 export interface OverrideEntry {
   /** A display name for the thing at this exact key. Never inherited (D2/D7). */
-  name?: string
-  credits?: OverrideCredits
+  name?: string;
+  credits?: OverrideCredits;
   /**
    * Stored orientation, **reserved by name only**. Deliberately `unknown` and
    * not `IndexPose`: the stored pose's concrete shape belongs to
@@ -192,7 +192,7 @@ export interface OverrideEntry {
    * it. Reserving the name now is documentation of the file format's contract
    * — nothing this change writes or reads depends on it (D6).
    */
-  pose?: unknown
+  pose?: unknown;
 }
 
 /**
@@ -206,9 +206,9 @@ export interface OverrideEntry {
  * resolved-only one, changes exactly one of them.
  */
 export interface ResolvedOverrides {
-  name?: string
-  credits?: OverrideCredits
-  pose?: unknown
+  name?: string;
+  credits?: OverrideCredits;
+  pose?: unknown;
 }
 
 /**
@@ -225,9 +225,9 @@ export interface ResolvedOverrides {
  * generator wrote, and a key that merely *inherits* them is not a kit.
  */
 export interface CreditedKit {
-  path: string
-  name?: string
-  credits: OverrideCredits
+  path: string;
+  name?: string;
+  credits: OverrideCredits;
 }
 
 /**
@@ -236,7 +236,7 @@ export interface CreditedKit {
  * un-framed model turns about its format's up axis, `defaultAxisFor`
  * (shared/frames.ts).
  */
-export type OrbitAxis = 'x' | '-x' | 'y' | '-y' | 'z' | '-z'
+export type OrbitAxis = "x" | "-x" | "y" | "-y" | "z" | "-z";
 
 /**
  * Bounds- and spindle-relative camera state: azimuth/elevation (radians)
@@ -248,10 +248,10 @@ export type OrbitAxis = 'x' | '-x' | 'y' | '-y' | 'z' | '-z'
  * (file-frame-spindle D3).
  */
 export interface CameraState {
-  az: number
-  el: number
-  distR: number
-  target: [number, number, number]
+  az: number;
+  el: number;
+  distR: number;
+  target: [number, number, number];
 }
 
 /**
@@ -261,7 +261,7 @@ export interface CameraState {
  * refuses to upload a render that came back as anything else, and the image
  * route types the bytes with it.
  */
-export const THUMB_MIME = 'image/webp'
+export const THUMB_MIME = "image/webp";
 
 /**
  * How far two `CameraState`s may differ per component and still be the same
@@ -288,9 +288,9 @@ export const THUMB_MIME = 'image/webp'
  * with a narrower target distribution — same order, same conclusion). The
  * constant keeps ~4.6e4× headroom over the measured maximum.
  */
-export const CAMERA_EPSILON = 1e-9
+export const CAMERA_EPSILON = 1e-9;
 
-export type ThumbStatus = 'hit' | 'stale' | 'miss'
+export type ThumbStatus = "hit" | "stale" | "miss";
 
 /**
  * The lighting label a thumbnail carries — a legacy label type with one
@@ -303,7 +303,7 @@ export type ThumbStatus = 'hit' | 'stale' | 'miss'
  * interpreting it, and a stored `'axis'` is how a client knows those pixels
  * are stale. It is never written anew.
  */
-export type LightingMode = 'axis' | 'camera'
+export type LightingMode = "axis" | "camera";
 
 /**
  * The answer for **one** render of an entry — the occluded one, or the
@@ -313,18 +313,18 @@ export type LightingMode = 'axis' | 'camera'
  * was asked for and whatever its status is.
  */
 export interface ThumbGetResponse {
-  status: ThumbStatus
-  camera?: CameraState
+  status: ThumbStatus;
+  camera?: CameraState;
   /**
    * Stored spindle axis, absent when none is stored — which is not the same as
    * 'y'. A caller defaults it; a caller that needs to know whether the user has
    * chosen an orientation reads the absence.
    */
-  axis?: OrbitAxis
+  axis?: OrbitAxis;
   /** Lighting mode the PNG was rendered with; absent on pre-lighting entries. */
-  lighting?: LightingMode
+  lighting?: LightingMode;
   /** Pixel-recipe (rig) version the PNG was rendered with; absent on pre-rim entries. */
-  rig?: number
+  rig?: number;
   /**
    * Which pose recipe the PNG was rendered under, absent when it was rendered
    * without one. A version rather than a flag for the same reason `rig` is:
@@ -333,16 +333,16 @@ export interface ThumbGetResponse {
    * did once already, and every posed thumbnail rendered under the old one was
    * wrong while looking perfectly fresh.
    */
-  posed?: number
+  posed?: number;
   /**
    * The orientation the PNG was drawn under, where a pose framed it — the
    * pose's *value* beside `posed`'s version (`pose-rerender` D2). Absent on
    * renders labelled before the key existed, which the client re-renders once
    * — a posed render with no key is stale like one with no rig label.
    */
-  poseKey?: string
+  poseKey?: string;
   /** base64 PNG, present when status === 'hit'. */
-  png?: string
+  png?: string;
   /**
    * The entry's write generation — a counter the server moves on **every**
    * write to the entry, whichever render or field carried it, and never
@@ -358,7 +358,7 @@ export interface ThumbGetResponse {
    * does not exist). Optional only so that entries and clients from before
    * this change stay readable — absence reads as 0.
    */
-  gen?: number
+  gen?: number;
 }
 
 /**
@@ -367,8 +367,8 @@ export interface ThumbGetResponse {
  * round trip to find out what it just caused.
  */
 export interface ThumbPutResponse {
-  ok: true
-  gen: number
+  ok: true;
+  gen: number;
 }
 
 /**
@@ -383,13 +383,13 @@ export interface ThumbPutResponse {
  * reading the entry back.
  */
 export interface ThumbPutRefused {
-  error: string
-  gen: number
+  error: string;
+  gen: number;
 }
 
 export interface ThumbPutRequest {
-  path: string
-  mtime: number
+  path: string;
+  mtime: number;
   /**
    * Three states, exactly as `camera` below has three: base64 pixels
    * **replace** this render's bytes, absence **keeps** whatever is stored, and
@@ -402,7 +402,7 @@ export interface ThumbPutRequest {
    * entry's stored orientation is this write's own `camera`/`axis` fields, on
    * their own three-state rule, never the deletion's business.
    */
-  png?: string | null
+  png?: string | null;
   /**
    * Three states, not two: a value **sets** the camera, absence **keeps**
    * whatever was stored, and `null` **discards** it. Silence has to go on
@@ -411,15 +411,15 @@ export interface ThumbPutRequest {
    * orientation of the user's and suppresses any index that would supply one
    * (entry-context-menu D7).
    */
-  camera?: CameraState | null
+  camera?: CameraState | null;
   /** Set / keep / discard, exactly as `camera` — the axis is discarded with it
    *  when a source can supply both, since angles measured about one axis do not
    *  describe a view about another. */
-  axis?: OrbitAxis | null
-  lighting?: LightingMode
-  rig?: number
+  axis?: OrbitAxis | null;
+  lighting?: LightingMode;
+  rig?: number;
   /** Pose recipe version the PNG was rendered under; absent when unposed. */
-  posed?: number
+  posed?: number;
   /**
    * What the pixels depended on when a pose framed them, and nothing else
    * (`pose-rerender` D2): `poseKeyOf` over the camera and axis the pose
@@ -431,7 +431,7 @@ export interface ThumbPutRequest {
    * label — so every render labelled before the key existed is re-rendered
    * once and gains one. Absent when unposed.
    */
-  poseKey?: string
+  poseKey?: string;
   /**
    * Which render these pixels and labels are: `true` — or absent — the
    * occluded one, `false` the unoccluded sibling. Absent means occluded
@@ -439,7 +439,7 @@ export interface ThumbPutRequest {
    * occlusion: an old client never rendered an unoccluded thumbnail, so it
    * can only ever have meant this one.
    */
-  ao?: boolean
+  ao?: boolean;
   /**
    * The generation the writer last saw, which makes this write **conditional**:
    * when it is given and is no longer the entry's current generation, the
@@ -456,7 +456,7 @@ export interface ThumbPutRequest {
    * A missing entry's current generation is 0, so `ifGen: 0` reads as "only if
    * nothing has ever been written here".
    */
-  ifGen?: number
+  ifGen?: number;
 }
 
 /**
@@ -479,12 +479,12 @@ export interface SemanticScope {
    * library top. A scope the viewer cannot browse to is reported as absent
    * rather than named.
    */
-  path: string | null
-  status: 'indexed' | 'partial' | 'unindexed'
-  indexed: number
-  scanned: number
+  path: string | null;
+  status: "indexed" | "partial" | "unindexed";
+  indexed: number;
+  scanned: number;
   /** Extensions the index can hold at all — published by it, not assumed here. */
-  covers: string[]
+  covers: string[];
 }
 
 /**
@@ -492,12 +492,12 @@ export interface SemanticScope {
  * the angles its front view was rendered from.
  */
 export interface IndexPose {
-  up: [number, number, number]
+  up: [number, number, number];
   /** The model-space direction the index's azimuth 0 is measured from. */
-  azimuth_zero: [number, number, number]
-  source: string
-  confidence: number
-  front: { view: number; azimuth_deg: number; elevation_deg: number } | null
+  azimuth_zero: [number, number, number];
+  source: string;
+  confidence: number;
+  front: { view: number; azimuth_deg: number; elevation_deg: number } | null;
 }
 
 /**
@@ -518,26 +518,26 @@ export interface IndexPose {
  */
 export interface IndexScore {
   /** Pooled cosine similarity, under whichever pooling the request asked for. */
-  score: number
+  score: number;
   /** Robust z (median/MAD) over the scored set — comparable across queries. */
-  z: number
+  z: number;
 }
 
 /** How a meaning query is shaped, beyond the phrase and the scope. */
 export interface SemanticTuning {
   /** Read the phrase as written rather than through the index's templates. */
-  raw?: boolean
+  raw?: boolean;
   /** How a model's per-view scores reduce to one. */
-  pool?: 'mean' | 'max' | 'softmax'
+  pool?: "mean" | "max" | "softmax";
   /**
    * How many results. Composes with `minScore` rather than competing with it:
    * the floor filters and this caps what survived, so both may be present and
    * absent means *this bound is not in force* — never "unset". Clamped to
    * `MAX_RESULT_COUNT` by every reader that accepts one from a user.
    */
-  top?: number
+  top?: number;
   /** Everything at or above this score, capped by `top` where one is set. */
-  minScore?: number
+  minScore?: number;
 }
 
 /**
@@ -549,7 +549,7 @@ export interface SemanticTuning {
  * Pinned to a default we rely on rather than to a fixed ceiling, which is worth
  * saying so it does not rot silently if this app ever starts sending `cap`.
  */
-export const MAX_RESULT_COUNT = 500
+export const MAX_RESULT_COUNT = 500;
 
 /**
  * The longest phrase a meaning query may carry, refused at the route before any
@@ -572,13 +572,13 @@ export const MAX_RESULT_COUNT = 500
  * kept as what it is — well under any plausible token budget for ordinary
  * prose, and enough to stop a paragraph from becoming an index round trip.
  */
-export const SEARCH_TEXT_MAX = 500
+export const SEARCH_TEXT_MAX = 500;
 
 export interface SemanticListing {
-  path: string
-  entries: DirEntry[]
+  path: string;
+  entries: DirEntry[];
   /** Orientation per tile path, where the index has one. Advisory (D5). */
-  poses: Record<string, IndexPose>
+  poses: Record<string, IndexPose>;
   /**
    * What the index scored each tile at, keyed as `poses` is — by the **library
    * path** the entry carries, so "no entry" and "no score" are one fact and a
@@ -590,12 +590,12 @@ export interface SemanticListing {
    * does not send it leaves a newer client rendering no badges rather than
    * failing, which is what makes this field additive.
    */
-  scores?: Record<string, IndexScore>
-  scope: SemanticScope
+  scores?: Record<string, IndexScore>;
+  scope: SemanticScope;
   /** The index found nothing standing out — the set is weak, not the results. */
-  weak: boolean
+  weak: boolean;
   /** The index's own ceiling stopped it returning what was asked for. */
-  capped: boolean
+  capped: boolean;
   /**
    * How many models cleared the floor *before* a count cut them — the size of
    * the set the count sampled from, so a view showing 60 can say "of 875"
@@ -608,7 +608,7 @@ export interface SemanticListing {
    * failing. Never derived client-side — what arrives has already been cut, so
    * counting the tiles would just restate the count.
    */
-  matched?: number
+  matched?: number;
 }
 
 /**
@@ -629,15 +629,15 @@ export interface SemanticListing {
  */
 export interface SimilarListing {
   /** The collection the neighbours were drawn from — the whole of it (D4). */
-  path: string
-  entries: DirEntry[]
+  path: string;
+  entries: DirEntry[];
   /** Orientation per tile path, where the index has one. Advisory (D5). */
-  poses: Record<string, IndexPose>
+  poses: Record<string, IndexPose>;
   /** What the index scored each neighbour at, keyed as `poses` is (D1). The
    *  anchor below is absent from it: the index excludes the query model from its
    *  own ranking rather than scoring it. Optional for the same reason it is on a
    *  meaning answer — an older server simply sends no badges. */
-  scores?: Record<string, IndexScore>
+  scores?: Record<string, IndexScore>;
   /**
    * The model the neighbours were computed from, so the question can be shown
    * beside its answer. A field of its own rather than the head of `entries`,
@@ -648,7 +648,7 @@ export interface SimilarListing {
    * Absent when the model no longer stats: it can be deleted after it was
    * embedded, and its neighbours are still an answer without it.
    */
-  anchor?: DirEntry
+  anchor?: DirEntry;
 }
 
 /**
@@ -675,7 +675,7 @@ export interface SimilarListing {
  * thumbnail sweep's reconciler is built for (D3).
  */
 export interface PosesResponse {
-  poses: Record<string, IndexPose | null>
+  poses: Record<string, IndexPose | null>;
 }
 
 /**
@@ -685,7 +685,7 @@ export interface PosesResponse {
  * chunked at its own copy of this number until a review flagged the drift
  * hazard (`pose-for-every-model` §4 F4).
  */
-export const POSES_MAX = 1024
+export const POSES_MAX = 1024;
 
 /**
  * What a client asks for poses about when naming the directory will not do:
@@ -707,14 +707,19 @@ export const POSES_MAX = 1024
  * index's own bound on the call); a longer listing asks more than once.
  */
 export interface PosesRequest {
-  paths: string[]
+  paths: string[];
 }
 
 /** Availability of the semantic index, read from the wire (semantic-search D4). */
-export type IndexState = 'ready' | 'warming' | 'wedged' | 'volume-gone' | 'absent'
+export type IndexState =
+  | "ready"
+  | "warming"
+  | "wedged"
+  | "volume-gone"
+  | "absent";
 
 export interface IndexAvailability {
-  state: IndexState
+  state: IndexState;
   /**
    * The collection the index covers, as a **library path** (library-root D6);
    * absent when the index answered but covers a location outside the library,
@@ -722,40 +727,40 @@ export interface IndexAvailability {
    * another process with its own view of the volume — and only the server sees
    * it.
    */
-  collectionRoot?: string
+  collectionRoot?: string;
   /** Extensions the index can hold — read, never assumed (semantic-search D3). */
-  covers?: string[]
-  elapsed?: number
+  covers?: string[];
+  elapsed?: number;
   /** The index's own words when it has them; preferred to ours (D4). */
-  detail?: string
+  detail?: string;
 }
 
 export interface ApiError {
-  error: string
+  error: string;
 }
 
 /** One launchable application, as the platform registry names it. */
 export interface AppRef {
   /** Desktop-file id (with its `.desktop` suffix), e.g. `lycheeslicer.desktop`. */
-  id: string
+  id: string;
   /** Human-readable name from the entry itself — ids never render (app-launch L2). */
-  name: string
+  name: string;
 }
 
 /** A model type's registry entry: the default is its own source and need not
  *  appear among the associations (app-launch spec). */
 export interface TypeApps {
-  default: AppRef | null
-  associated: AppRef[]
+  default: AppRef | null;
+  associated: AppRef[];
 }
 
 /** `GET /api/apps` — fetched once per session, refetched after an open-with
  *  completes; never probed when a menu opens (open-in-slicer L5). */
 export interface AppsReport {
   /** Whether a chooser command is configured server-side — gates "Open with…". */
-  chooser: boolean
+  chooser: boolean;
   /** Keyed by mime, only the model types the app handles (open-in-slicer L6). */
-  types: Record<string, TypeApps>
+  types: Record<string, TypeApps>;
 }
 
 /**
@@ -771,20 +776,20 @@ export interface AppsReport {
  */
 export interface FeatureReport {
   /** Whether `PUT /api/thumb` is accepted. */
-  thumbWrites: boolean
+  thumbWrites: boolean;
   /**
    * Whether the platform launcher is offered — all three launcher routes
    * (`/api/open`, `/api/open-with`, `/api/apps`), each of which runs a command
    * on the machine the server sits on.
    */
-  appLaunch: boolean
+  appLaunch: boolean;
   /**
    * Whether the chat side-panel tab is offered. Its default is **off**: the tab
    * is a placeholder with no backend, and an unfinished surface belongs neither
    * in a shipped desktop build nor on a public link. It stays declarable, so
    * the day chat gains a backend the default flips (public-deployment D4).
    */
-  chatTab: boolean
+  chatTab: boolean;
   /**
    * Whether the machine the server runs on is the viewer's concern — governing
    * whether any route or surface may name a location on that machine (the
@@ -793,7 +798,7 @@ export interface FeatureReport {
    * perform (start a service, mount a volume, re-run a tool). Library paths are
    * not such locations and are unaffected (public-deployment D11).
    */
-  hostDetails: boolean
+  hostDetails: boolean;
   /**
    * Whether maintenance operations against the library are offered — the ones
    * that act on the server's own derived state rather than answering a question
@@ -802,7 +807,7 @@ export interface FeatureReport {
    * `thumbWrites` instead, since with those writes refused it would render and
    * discard (public-deployment D4).
    */
-  maintenance: boolean
+  maintenance: boolean;
   /**
    * Whether the visitor introduction is offered — the banner over the grid, its
    * example queries and surprise action, the header's About affordance, the
@@ -816,7 +821,7 @@ export interface FeatureReport {
    * field, and nothing infers it from `hostDetails` or `thumbWrites`
    * (`landing-page` D1).
    */
-  intro: boolean
+  intro: boolean;
 }
 
 /**
@@ -831,8 +836,8 @@ export interface FeatureReport {
  * nothing about the library it declined to act on.
  */
 export interface Refused {
-  error: string
-  refused: keyof FeatureReport
+  error: string;
+  refused: keyof FeatureReport;
 }
 
 /**
@@ -858,7 +863,7 @@ export interface DeploymentConfig {
    * by a non-empty `MODEL_BROWSER_ROOT`, which overrides *this key alone* and
    * no longer suppresses the rest of the file (D2).
    */
-  root?: string
+  root?: string;
   /**
    * The origins this deployment answers, e.g. `https://models.masamaeda.com`.
    * A **list**, since one deployment may answer more than one name; each entry
@@ -866,15 +871,15 @@ export interface DeploymentConfig {
    * whatever is configured, so a health check from the machine itself is never
    * refused by the deployment it is checking (D3/D8).
    */
-  origins?: string[]
+  origins?: string[];
   /** Where the server listens. Defaults to `127.0.0.1:3177`, as today. */
-  listen?: { host?: string; port?: number }
+  listen?: { host?: string; port?: number };
   /**
    * Capability overrides, merged over the built-in defaults. An unknown field
    * here is a parse failure: a misspelled capability that read as "unset" would
    * silently offer the surface it was written to withhold.
    */
-  features?: Partial<FeatureReport>
+  features?: Partial<FeatureReport>;
 }
 
 /**
@@ -886,9 +891,9 @@ export interface DeploymentConfig {
  */
 export type LibraryState =
   | {
-      state: 'ready'
+      state: "ready";
       /** The library's identity: its marker's id, or a hash when `unmarked`. */
-      id: string
+      id: string;
       /**
        * The **filesystem** path of the library's top — the marker's own
        * directory, resolved. The client joins a library path onto it to expand
@@ -899,35 +904,35 @@ export type LibraryState =
        * viewer cannot reach, so nothing is sent for a surface to compose a
        * filesystem path from, and a copied path is the library path itself.
        */
-      top?: string
+      top?: string;
       /**
        * The configured root as a **library path**: `/` when the root is the
        * top, `/sub/dir` when it is a folder inside the library. Where the app
        * opens is a viewpoint inside the library, not a namespace (D1).
        */
-      root: string
+      root: string;
       /**
        * Present only when no marker could be written (a read-only volume) and
        * the id fell back to a hash of the top: the library's location is its
        * identity again, so a remount is a different library.
        */
-      unmarked?: true
+      unmarked?: true;
     }
-  | { state: 'unconfigured' }
+  | { state: "unconfigured" }
   | {
-      state: 'missing'
+      state: "missing";
       /**
        * The configured root's filesystem path, verbatim, so the UI can name it —
        * absent under `hostDetails`, since mounting a volume is an operator's
        * remedy and the state alone is what a viewer can be told (D11).
        */
-      root?: string
+      root?: string;
     }
   | {
-      state: 'nested'
+      state: "nested";
       /** The configured root's filesystem path, verbatim; absent under
        *  `hostDetails`, like `missing.root`. */
-      root?: string
+      root?: string;
       /**
        * The **filesystem** path of a library top found *beneath* the root.
        * Claiming the root would have written a marker enclosing this one and
@@ -935,5 +940,5 @@ export type LibraryState =
        * root serves nothing until it is repointed at this path or inside it
        * (D1/R1). Absent under `hostDetails`, like the two roots above.
        */
-      library?: string
-    }
+      library?: string;
+    };

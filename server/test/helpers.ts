@@ -1,8 +1,14 @@
-import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { zipSync } from 'fflate'
-import { type Library, createLibrary } from '../src/library'
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { zipSync } from "fflate";
+import { type Library, createLibrary } from "../src/library";
 
 /**
  * A library rooted at `dir`, with the machine's own configuration steered well
@@ -13,12 +19,12 @@ import { type Library, createLibrary } from '../src/library'
  * every listing skips it.
  */
 export function libraryFor(dir: string): Library {
-  const home = mkdtempSync(join(tmpdir(), 'mb-home-'))
+  const home = mkdtempSync(join(tmpdir(), "mb-home-"));
   return createLibrary({
     MODEL_BROWSER_ROOT: dir,
     HOME: home,
-    XDG_CONFIG_HOME: join(home, 'config'),
-  })
+    XDG_CONFIG_HOME: join(home, "config"),
+  });
 }
 
 /**
@@ -28,45 +34,48 @@ export function libraryFor(dir: string): Library {
  * server hands back.
  */
 export function realTempDir(prefix: string): string {
-  return realpathSync(mkdtempSync(join(tmpdir(), prefix)))
+  return realpathSync(mkdtempSync(join(tmpdir(), prefix)));
 }
 
 /** Minimal binary STL: 80-byte header, triangle count, one triangle. */
 export function stlBytes(seed = 1): Buffer {
-  const buf = Buffer.alloc(84 + 50)
-  buf.writeUInt32LE(1, 80)
-  for (let i = 0; i < 12; i++) buf.writeFloatLE(seed + i, 84 + i * 4)
-  return buf
+  const buf = Buffer.alloc(84 + 50);
+  buf.writeUInt32LE(1, 80);
+  for (let i = 0; i < 12; i++) buf.writeFloatLE(seed + i, 84 + i * 4);
+  return buf;
 }
 
 export function makeFixtures(): {
-  dir: string
-  zipPath: string
-  lidStl: Buffer
-  boxStl: Buffer
+  dir: string;
+  zipPath: string;
+  lidStl: Buffer;
+  boxStl: Buffer;
 } {
-  const dir = realTempDir('mb-test-')
-  const lidStl = stlBytes(1)
-  const boxStl = stlBytes(2)
+  const dir = realTempDir("mb-test-");
+  const lidStl = stlBytes(1);
+  const boxStl = stlBytes(2);
 
-  writeFileSync(join(dir, 'loose.stl'), stlBytes(3))
-  writeFileSync(join(dir, 'notes.txt'), 'not a model')
-  writeFileSync(join(dir, '.hidden.stl'), stlBytes(4))
-  mkdirSync(join(dir, 'sub'), { recursive: true })
-  symlinkSync(join(dir, 'sub'), join(dir, 'linked'))
+  writeFileSync(join(dir, "loose.stl"), stlBytes(3));
+  writeFileSync(join(dir, "notes.txt"), "not a model");
+  writeFileSync(join(dir, ".hidden.stl"), stlBytes(4));
+  mkdirSync(join(dir, "sub"), { recursive: true });
+  symlinkSync(join(dir, "sub"), join(dir, "linked"));
 
   const zip = zipSync({
-    'box.stl': new Uint8Array(boxStl),
-    'parts/lid.stl': new Uint8Array(lidStl),
-    'parts/readme.txt': new TextEncoder().encode('skip me'),
+    "box.stl": new Uint8Array(boxStl),
+    "parts/lid.stl": new Uint8Array(lidStl),
+    "parts/readme.txt": new TextEncoder().encode("skip me"),
     // A real directory whose name ends in .zip — must stay navigable.
-    'v2.zip/deep2.stl': new Uint8Array(stlBytes(6)),
-    'inner.zip': [new Uint8Array(zipSync({ 'deep.stl': new Uint8Array(stlBytes(5)) })), { level: 0 }],
-  })
-  const zipPath = join(dir, 'models.zip')
-  writeFileSync(zipPath, zip)
+    "v2.zip/deep2.stl": new Uint8Array(stlBytes(6)),
+    "inner.zip": [
+      new Uint8Array(zipSync({ "deep.stl": new Uint8Array(stlBytes(5)) })),
+      { level: 0 },
+    ],
+  });
+  const zipPath = join(dir, "models.zip");
+  writeFileSync(zipPath, zip);
 
-  return { dir, zipPath, lidStl, boxStl }
+  return { dir, zipPath, lidStl, boxStl };
 }
 
-export const LOOPBACK = { host: '127.0.0.1:3177' }
+export const LOOPBACK = { host: "127.0.0.1:3177" };

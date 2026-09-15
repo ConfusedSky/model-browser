@@ -5,19 +5,20 @@
 // and a chip that says "0 of 96" for twelve seconds with no reason reads as
 // hung. The word appears only after a wait outlasts `WAITING_AFTER_MS` and
 // goes the moment the entry starts.
-import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import JobChip, { WAITING_AFTER_MS } from '../src/components/JobChip'
-import type { JobState } from '../src/jobs/bulkJobs'
-
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import JobChip, { WAITING_AFTER_MS } from "../src/components/JobChip";
+import type { JobState } from "../src/jobs/bulkJobs";
+(
+  globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
 
 const running = (waiting: boolean): JobState => ({
   runId: 1,
-  operation: 'generate',
-  scope: { path: '/kit', label: 'kit' },
-  phase: 'running',
+  operation: "generate",
+  scope: { path: "/kit", label: "kit" },
+  phase: "running",
   total: 96,
   done: 0,
   failed: 0,
@@ -27,67 +28,77 @@ const running = (waiting: boolean): JobState => ({
   waiting,
   incomplete: false,
   dismissed: false,
-})
+});
 
-let container: HTMLDivElement
-let root: Root
-const text = (): string => container.querySelector('p')?.textContent ?? ''
+let container: HTMLDivElement;
+let root: Root;
+const text = (): string => container.querySelector("p")?.textContent ?? "";
 function show(state: JobState, viewOpen = false): void {
   act(() => {
     root.render(
-      <JobChip state={state} viewOpen={viewOpen} onConfirm={() => {}} onCancel={() => {}} onDismiss={() => {}} />,
-    )
-  })
+      <JobChip
+        state={state}
+        viewOpen={viewOpen}
+        onConfirm={() => {}}
+        onCancel={() => {}}
+        onDismiss={() => {}}
+      />,
+    );
+  });
 }
 
 beforeEach(() => {
-  vi.useFakeTimers()
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
-})
+  vi.useFakeTimers();
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  root = createRoot(container);
+});
 afterEach(() => {
-  act(() => root.unmount())
-  container.remove()
-  vi.useRealTimers()
-})
+  act(() => root.unmount());
+  container.remove();
+  vi.useRealTimers();
+});
 
-describe('the chip under a held entry', () => {
-  it('says it is waiting only after the wait has lasted, and stops saying so when the entry starts', () => {
-    show(running(true))
-    expect(text()).toBe('Generating thumbnails beneath kit: 0 of 96')
+describe("the chip under a held entry", () => {
+  it("says it is waiting only after the wait has lasted, and stops saying so when the entry starts", () => {
+    show(running(true));
+    expect(text()).toBe("Generating thumbnails beneath kit: 0 of 96");
     act(() => {
-      vi.advanceTimersByTime(WAITING_AFTER_MS - 1)
-    })
-    expect(text()).toBe('Generating thumbnails beneath kit: 0 of 96')
+      vi.advanceTimersByTime(WAITING_AFTER_MS - 1);
+    });
+    expect(text()).toBe("Generating thumbnails beneath kit: 0 of 96");
     act(() => {
-      vi.advanceTimersByTime(1)
-    })
-    expect(text()).toBe('Generating thumbnails beneath kit: 0 of 96 · waiting behind what you’re looking at')
-    show(running(false))
-    expect(text()).toBe('Generating thumbnails beneath kit: 0 of 96')
-  })
+      vi.advanceTimersByTime(1);
+    });
+    expect(text()).toBe(
+      "Generating thumbnails beneath kit: 0 of 96 · waiting behind what you’re looking at",
+    );
+    show(running(false));
+    expect(text()).toBe("Generating thumbnails beneath kit: 0 of 96");
+  });
 
-  it('reads an open view as a wait too — the entry that started is held inside the core', () => {
-    show(running(false), true)
+  it("reads an open view as a wait too — the entry that started is held inside the core", () => {
+    show(running(false), true);
     act(() => {
-      vi.advanceTimersByTime(WAITING_AFTER_MS)
-    })
-    expect(text()).toBe('Generating thumbnails beneath kit: 0 of 96 · waiting behind what you’re looking at')
-    show(running(false), false)
-    expect(text()).toBe('Generating thumbnails beneath kit: 0 of 96')
-  })
+      vi.advanceTimersByTime(WAITING_AFTER_MS);
+    });
+    expect(text()).toBe(
+      "Generating thumbnails beneath kit: 0 of 96 · waiting behind what you’re looking at",
+    );
+    show(running(false), false);
+    expect(text()).toBe("Generating thumbnails beneath kit: 0 of 96");
+  });
 
-  it('does not accumulate short waits into a long one', () => {
-    show(running(true))
+  it("does not accumulate short waits into a long one", () => {
+    show(running(true));
     act(() => {
-      vi.advanceTimersByTime(WAITING_AFTER_MS - 100)
-    })
-    show(running(false))
-    show(running(true))
+      vi.advanceTimersByTime(WAITING_AFTER_MS - 100);
+    });
+    show(running(false));
+    show(running(true));
     act(() => {
-      vi.advanceTimersByTime(WAITING_AFTER_MS - 100)
-    })
-    expect(text()).toBe('Generating thumbnails beneath kit: 0 of 96')
-  })
-})
+      vi.advanceTimersByTime(WAITING_AFTER_MS - 100);
+    });
+    expect(text()).toBe("Generating thumbnails beneath kit: 0 of 96");
+  });
+});

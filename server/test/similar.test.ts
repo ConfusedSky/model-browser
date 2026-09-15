@@ -3,52 +3,60 @@
 // through. Its own file rather than a branch inside semantic.test.ts, because
 // the fetch stub there answers every POST with one fixture and this route needs
 // `/query` and `/similar` to be told apart.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createApp } from '../src/app'
-import { ThumbCache } from '../src/cache'
-import { resetIndexStatus } from '../src/semantic'
-import { LOOPBACK, libraryFor, realTempDir, stlBytes } from './helpers'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+import { createApp } from "../src/app";
+import { ThumbCache } from "../src/cache";
+import { resetIndexStatus } from "../src/semantic";
+import { LOOPBACK, libraryFor, realTempDir, stlBytes } from "./helpers";
 
 // The collection root is the library's top here, so a hit's library path is its
 // `rel_path` with a leading slash. What the *index* is told stays absolute — it
 // is another process with its own view of the volume (D6) — and the two
 // spellings appearing side by side below is the translation being asserted.
-const root = realTempDir('mb-sim-')
-writeFileSync(join(root, 'hero.stl'), stlBytes(1))
-writeFileSync(join(root, 'base.stl'), stlBytes(2))
+const root = realTempDir("mb-sim-");
+writeFileSync(join(root, "hero.stl"), stlBytes(1));
+writeFileSync(join(root, "base.stl"), stlBytes(2));
 // A file that is not a model, for the anchor the route must not call one.
-writeFileSync(join(root, 'notes.txt'), 'not a model')
+writeFileSync(join(root, "notes.txt"), "not a model");
 // A kit, for the collection that covers only part of the library further down.
-mkdirSync(join(root, 'Kits'), { recursive: true })
-writeFileSync(join(root, 'Kits', 'anchor.stl'), stlBytes(3))
-writeFileSync(join(root, 'Kits', 'near.stl'), stlBytes(4))
-const cacheDir = mkdtempSync(join(tmpdir(), 'mb-sim-cache-'))
-const cache = new ThumbCache(cacheDir)
-const app = createApp(cache, undefined, undefined, libraryFor(root))
+mkdirSync(join(root, "Kits"), { recursive: true });
+writeFileSync(join(root, "Kits", "anchor.stl"), stlBytes(3));
+writeFileSync(join(root, "Kits", "near.stl"), stlBytes(4));
+const cacheDir = mkdtempSync(join(tmpdir(), "mb-sim-cache-"));
+const cache = new ThumbCache(cacheDir);
+const app = createApp(cache, undefined, undefined, libraryFor(root));
 
 afterAll(() => {
-  rmSync(root, { recursive: true, force: true })
-  rmSync(cacheDir, { recursive: true, force: true })
-})
+  rmSync(root, { recursive: true, force: true });
+  rmSync(cacheDir, { recursive: true, force: true });
+});
 
 const READY = {
   ready: true,
   elapsed: 18.8,
   collection_root: root,
-  covers: ['stl'],
+  covers: ["stl"],
   volume: { present: true, root, missing: null },
-}
+};
 
 const POSE = {
   up: [0, 1, 0],
   azimuth_zero: [1, 0, 0],
-  source: 'siglip',
+  source: "siglip",
   confidence: 0.9,
   front: { view: 5, azimuth_deg: 225, elevation_deg: 20 },
-}
+};
 
 function hit(rel: string, pose: unknown = POSE) {
   return {
@@ -59,7 +67,7 @@ function hit(rel: string, pose: unknown = POSE) {
     score: 0.93,
     z: 3.3,
     pose,
-  }
+  };
 }
 
 /**
@@ -73,263 +81,302 @@ function stubIndex(
   opts: { similarStatus?: number } = {},
 ): void {
   vi.stubGlobal(
-    'fetch',
+    "fetch",
     vi.fn(async (url: string) => {
-      if (String(url).endsWith('/status')) {
-        if (status === 'refused') throw new TypeError('fetch failed')
+      if (String(url).endsWith("/status")) {
+        if (status === "refused") throw new TypeError("fetch failed");
         return new Response(JSON.stringify(status), {
-          headers: { 'content-type': 'application/json' },
-        })
+          headers: { "content-type": "application/json" },
+        });
       }
-      if (String(url).endsWith('/similar')) {
-        if (similar === 'refused') throw new TypeError('fetch failed')
-        return new Response(JSON.stringify(similar ?? {}), { status: opts.similarStatus ?? 200 })
+      if (String(url).endsWith("/similar")) {
+        if (similar === "refused") throw new TypeError("fetch failed");
+        return new Response(JSON.stringify(similar ?? {}), {
+          status: opts.similarStatus ?? 200,
+        });
       }
-      throw new Error(`unexpected fetch: ${String(url)}`)
+      throw new Error(`unexpected fetch: ${String(url)}`);
     }),
-  )
+  );
 }
 
 /** The body of the last non-status POST — what the index was actually told. */
 function sentBody(): Record<string, unknown> {
-  const calls = (globalThis.fetch as unknown as { mock: { calls: [string, { body: string }][] } })
-    .mock.calls
-  return JSON.parse(calls.filter((c) => !String(c[0]).endsWith('/status')).at(-1)![1].body) as Record<
-    string,
-    unknown
-  >
+  const calls = (
+    globalThis.fetch as unknown as {
+      mock: { calls: [string, { body: string }][] };
+    }
+  ).mock.calls;
+  return JSON.parse(
+    calls.filter((c) => !String(c[0]).endsWith("/status")).at(-1)![1].body,
+  ) as Record<string, unknown>;
 }
 
 const post = (body: unknown) =>
-  app.request('/api/semantic/similar', {
-    method: 'POST',
-    headers: { ...LOOPBACK, 'content-type': 'application/json' },
+  app.request("/api/semantic/similar", {
+    method: "POST",
+    headers: { ...LOOPBACK, "content-type": "application/json" },
     body: JSON.stringify(body),
-  })
+  });
 
-const RESULT = { scope: { path: null }, results: [hit('base.stl')] }
+const RESULT = { scope: { path: null }, results: [hit("base.stl")] };
 
-beforeEach(() => resetIndexStatus())
-afterEach(() => vi.unstubAllGlobals())
+beforeEach(() => resetIndexStatus());
+afterEach(() => vi.unstubAllGlobals());
 
-describe('a model’s neighbours', () => {
-  it('joins hits to tiles through the same path a meaning answer takes', async () => {
-    stubIndex(READY, RESULT)
-    const body = (await (await post({ path: '/hero.stl', k: 16 })).json()) as {
-      path: string
-      entries: { name: string; path: string; kind: string; size: number; mtime: number }[]
-      poses: Record<string, unknown>
-      scores: Record<string, unknown>
-    }
-    expect(body.entries).toHaveLength(1)
+describe("a model’s neighbours", () => {
+  it("joins hits to tiles through the same path a meaning answer takes", async () => {
+    stubIndex(READY, RESULT);
+    const body = (await (await post({ path: "/hero.stl", k: 16 })).json()) as {
+      path: string;
+      entries: {
+        name: string;
+        path: string;
+        kind: string;
+        size: number;
+        mtime: number;
+      }[];
+      poses: Record<string, unknown>;
+      scores: Record<string, unknown>;
+    };
+    expect(body.entries).toHaveLength(1);
     // mtime and size come from this server's stat, not from the index, which
     // reports neither — the same join, and the same reason for it.
-    expect(body.entries[0]!.path).toBe('/base.stl')
-    expect(body.entries[0]!.kind).toBe('model')
-    expect(body.entries[0]!.mtime).toBeGreaterThan(0)
-    expect(body.entries[0]!.size).toBeGreaterThan(0)
+    expect(body.entries[0]!.path).toBe("/base.stl");
+    expect(body.entries[0]!.kind).toBe("model");
+    expect(body.entries[0]!.mtime).toBeGreaterThan(0);
+    expect(body.entries[0]!.size).toBeGreaterThan(0);
     // Poses ride along, so a neighbour grid renders at the index's orientation
     // exactly as a meaning grid does.
-    expect(body.poses['/base.stl']).toEqual(POSE)
+    expect(body.poses["/base.stl"]).toEqual(POSE);
     // So do the scores, keyed by the same resolved path — which is what makes
     // "no entry" and "no score" one fact rather than two that can disagree.
     // Verbatim from the index: nothing is rescaled on the way through.
-    expect(body.scores['/base.stl']).toEqual({ score: 0.93, z: 3.3 })
+    expect(body.scores["/base.stl"]).toEqual({ score: 0.93, z: 3.3 });
     // The whole collection is what the view is about, and the answer says so —
     // as a library path, like every other path on the wire (D2).
-    expect(body.path).toBe('/')
-  })
+    expect(body.path).toBe("/");
+  });
 
-  it('the neighbours and the anchor carry what the thumbnail cache knows, as a listing’s tiles do', async () => {
+  it("the neighbours and the anchor carry what the thumbnail cache knows, as a listing’s tiles do", async () => {
     // `thumbnail-image-serving` D2, second review R4: the meaning route's
     // annotation was pinned and this route's was not. Both the joined hits
     // and the anchor are tiles, and get the listing annotation.
-    stubIndex(READY, RESULT)
-    const first = (await (await post({ path: '/hero.stl', k: 16 })).json()) as {
-      entries: { path: string; mtime: number }[]
-      anchor: { path: string; mtime: number }
-    }
-    const neighbourGen = await cache.put('/base.stl', { mtime: first.entries[0]!.mtime, png: Buffer.from('n'), lighting: 'camera', rig: 1 })
-    const anchorGen = await cache.put('/hero.stl', { mtime: first.anchor.mtime, png: Buffer.from('a'), lighting: 'camera', rig: 1 })
-    stubIndex(READY, RESULT)
-    const body = (await (await post({ path: '/hero.stl', k: 16 })).json()) as {
-      entries: { path: string; thumb?: { gen: number; ao?: { state: string } } }[]
-      anchor: { path: string; thumb?: { gen: number; ao?: { state: string } } }
-    }
-    expect(body.entries[0]!.thumb?.gen).toBe(neighbourGen)
-    expect(body.entries[0]!.thumb?.ao?.state).toBe('hit')
-    expect(body.anchor.thumb?.gen).toBe(anchorGen)
-    expect(body.anchor.thumb?.ao?.state).toBe('hit')
-  })
+    stubIndex(READY, RESULT);
+    const first = (await (await post({ path: "/hero.stl", k: 16 })).json()) as {
+      entries: { path: string; mtime: number }[];
+      anchor: { path: string; mtime: number };
+    };
+    const neighbourGen = await cache.put("/base.stl", {
+      mtime: first.entries[0]!.mtime,
+      png: Buffer.from("n"),
+      lighting: "camera",
+      rig: 1,
+    });
+    const anchorGen = await cache.put("/hero.stl", {
+      mtime: first.anchor.mtime,
+      png: Buffer.from("a"),
+      lighting: "camera",
+      rig: 1,
+    });
+    stubIndex(READY, RESULT);
+    const body = (await (await post({ path: "/hero.stl", k: 16 })).json()) as {
+      entries: {
+        path: string;
+        thumb?: { gen: number; ao?: { state: string } };
+      }[];
+      anchor: { path: string; thumb?: { gen: number; ao?: { state: string } } };
+    };
+    expect(body.entries[0]!.thumb?.gen).toBe(neighbourGen);
+    expect(body.entries[0]!.thumb?.ao?.state).toBe("hit");
+    expect(body.anchor.thumb?.gen).toBe(anchorGen);
+    expect(body.anchor.thumb?.ao?.state).toBe("hit");
+  });
 
-  it('drops a hit that no longer resolves, without failing the request', async () => {
-    stubIndex(READY, { ...RESULT, results: [hit('base.stl'), hit('moved-away.stl')] })
-    const body = (await (await post({ path: '/hero.stl' })).json()) as {
-      entries: unknown[]
-      scores: Record<string, unknown>
-    }
-    expect(body.entries).toHaveLength(1)
+  it("drops a hit that no longer resolves, without failing the request", async () => {
+    stubIndex(READY, {
+      ...RESULT,
+      results: [hit("base.stl"), hit("moved-away.stl")],
+    });
+    const body = (await (await post({ path: "/hero.stl" })).json()) as {
+      entries: unknown[];
+      scores: Record<string, unknown>;
+    };
+    expect(body.entries).toHaveLength(1);
     // The stale hit takes its score with it. Keyed alike, dropped alike — a
     // number left behind for a tile that is not there is exactly what sharing
     // the key prevents.
-    expect(Object.keys(body.scores)).toEqual(['/base.stl'])
-  })
+    expect(Object.keys(body.scores)).toEqual(["/base.stl"]);
+  });
 
-  it('a hit cannot name a file outside the collection', async () => {
+  it("a hit cannot name a file outside the collection", async () => {
     // `rel_path` is data from another process, and it is the only field trusted
     // for the join — the same rule the meaning route follows.
     stubIndex(READY, {
       ...RESULT,
       results: [
-        { ...hit('base.stl'), rel_path: '../escape.stl', path: '/etc/passwd' },
-        { ...hit('base.stl'), rel_path: 'base.stl', path: '/etc/passwd' },
+        { ...hit("base.stl"), rel_path: "../escape.stl", path: "/etc/passwd" },
+        { ...hit("base.stl"), rel_path: "base.stl", path: "/etc/passwd" },
       ],
-    })
-    const body = (await (await post({ path: '/hero.stl' })).json()) as {
-      entries: { path: string }[]
-    }
-    expect(body.entries.map((e) => e.path)).toEqual(['/base.stl'])
-  })
+    });
+    const body = (await (await post({ path: "/hero.stl" })).json()) as {
+      entries: { path: string }[];
+    };
+    expect(body.entries.map((e) => e.path)).toEqual(["/base.stl"]);
+  });
 
-  it('sends no scope: neighbours are collection-wide', async () => {
+  it("sends no scope: neighbours are collection-wide", async () => {
     // 4.1a. The index's `scope` defaults to the whole collection, so stating
     // that default means sending nothing — and this is where it differs from
     // meaning search, which IS rooted at the browsed directory. A reviewer
     // finding the two scoped differently should find this test.
-    stubIndex(READY, RESULT)
-    await post({ path: '/hero.stl', k: 16 })
-    const body = sentBody()
-    expect(body).not.toHaveProperty('scope')
+    stubIndex(READY, RESULT);
+    await post({ path: "/hero.stl", k: 16 });
+    const body = sentBody();
+    expect(body).not.toHaveProperty("scope");
     // Absolute, and this is the one place it must be: the index resolves its
     // own paths, and a library path would name nothing to it.
-    expect(body.path).toBe(join(root, 'hero.stl'))
-    expect(body.k).toBe(16)
+    expect(body.path).toBe(join(root, "hero.stl"));
+    expect(body.k).toBe(16);
     // No pool named, no pool sent: 4.2's rule survives the parameter becoming
     // settable (6.2) — a view that made no choice leaves the index's own in
     // force, and absence is what says so at every layer.
-    expect(body).not.toHaveProperty('pool')
-  })
+    expect(body).not.toHaveProperty("pool");
+  });
 
-  it('forwards the pooling only when the caller names one, and only the three the index knows', async () => {
+  it("forwards the pooling only when the caller names one, and only the three the index knows", async () => {
     // 6.2. The same shape as `k`: validated, never defaulted. Substituting one
     // here would mint a second default for a choice this server has no opinion
     // about, and forwarding an unknown value would make the index guess.
-    stubIndex(READY, RESULT)
-    await post({ path: '/hero.stl', k: 16, pool: 'max' })
-    expect(sentBody().pool).toBe('max')
+    stubIndex(READY, RESULT);
+    await post({ path: "/hero.stl", k: 16, pool: "max" });
+    expect(sentBody().pool).toBe("max");
 
-    for (const pool of ['softmax', 'mean']) {
-      stubIndex(READY, RESULT)
-      await post({ path: '/hero.stl', pool })
-      expect(sentBody().pool).toBe(pool)
+    for (const pool of ["softmax", "mean"]) {
+      stubIndex(READY, RESULT);
+      await post({ path: "/hero.stl", pool });
+      expect(sentBody().pool).toBe(pool);
     }
 
-    stubIndex(READY, RESULT)
-    expect((await post({ path: '/hero.stl', pool: 'sideways' })).status).toBe(400)
-    expect((await post({ path: '/hero.stl', pool: 3 })).status).toBe(400)
-  })
+    stubIndex(READY, RESULT);
+    expect((await post({ path: "/hero.stl", pool: "sideways" })).status).toBe(
+      400,
+    );
+    expect((await post({ path: "/hero.stl", pool: 3 })).status).toBe(400);
+  });
 
-  it('leaves k to the index when the caller names none, rather than minting a second default', async () => {
-    stubIndex(READY, RESULT)
-    await post({ path: '/hero.stl' })
-    expect(sentBody()).not.toHaveProperty('k')
-  })
+  it("leaves k to the index when the caller names none, rather than minting a second default", async () => {
+    stubIndex(READY, RESULT);
+    await post({ path: "/hero.stl" });
+    expect(sentBody()).not.toHaveProperty("k");
+  });
 
-  it('refuses a k the index would refuse', async () => {
-    stubIndex(READY, RESULT)
-    expect((await post({ path: '/hero.stl', k: 0 })).status).toBe(400)
-    expect((await post({ path: '/hero.stl', k: 4.5 })).status).toBe(400)
-  })
+  it("refuses a k the index would refuse", async () => {
+    stubIndex(READY, RESULT);
+    expect((await post({ path: "/hero.stl", k: 0 })).status).toBe(400);
+    expect((await post({ path: "/hero.stl", k: 4.5 })).status).toBe(400);
+  });
 
-  it('a model the index has never embedded comes back as a 404, in its own words', async () => {
+  it("a model the index has never embedded comes back as a 404, in its own words", async () => {
     // The lane the UI owns a distinct sentence for: "not indexed yet — run the
     // classifier". It travels as the status rather than as text to sniff, and it
     // is unambiguous because the other unembeddable case (an archive interior)
     // never reaches this server.
-    stubIndex(READY, { detail: `${join(root, 'hero.stl')} is not in the cache` }, { similarStatus: 404 })
-    const res = await post({ path: '/hero.stl' })
-    expect(res.status).toBe(404)
-    const body = (await res.json()) as { error: string; state?: string }
-    expect(body.error).toContain('not in the cache')
+    stubIndex(
+      READY,
+      { detail: `${join(root, "hero.stl")} is not in the cache` },
+      { similarStatus: 404 },
+    );
+    const res = await post({ path: "/hero.stl" });
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: string; state?: string };
+    expect(body.error).toContain("not in the cache");
     // Availability is not what went wrong, so no state is claimed.
-    expect(body.state).toBeUndefined()
-  })
+    expect(body.state).toBeUndefined();
+  });
 
-  it('any other refusal is still a 400, not a 404', async () => {
+  it("any other refusal is still a 400, not a 404", async () => {
     // The index 422s a virtual path and a name matching more than one model.
     // Those are refusals to fix, not "this model is not embedded", and reading
     // them as the latter would tell the user to run the classifier over a path
     // that can never be in it.
-    stubIndex(READY, { detail: 'names 2 models; /similar takes one' }, { similarStatus: 422 })
-    const res = await post({ path: '/hero.stl' })
-    expect(res.status).toBe(400)
-    expect((await res.json()).error).toContain('takes one')
-  })
+    stubIndex(
+      READY,
+      { detail: "names 2 models; /similar takes one" },
+      { similarStatus: 422 },
+    );
+    const res = await post({ path: "/hero.stl" });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain("takes one");
+  });
 
-  it('an index that fails on its own side is a bad gateway', async () => {
-    stubIndex(READY, { detail: 'CUDA out of memory' }, { similarStatus: 500 })
-    const res = await post({ path: '/hero.stl' })
-    expect(res.status).toBe(502)
-    expect((await res.json()).error).toBe('CUDA out of memory')
-  })
+  it("an index that fails on its own side is a bad gateway", async () => {
+    stubIndex(READY, { detail: "CUDA out of memory" }, { similarStatus: 500 });
+    const res = await post({ path: "/hero.stl" });
+    expect(res.status).toBe(502);
+    expect((await res.json()).error).toBe("CUDA out of memory");
+  });
 
-  it('an unavailable index keeps the 503 envelope, state and all', async () => {
-    stubIndex('refused')
-    const res = await post({ path: '/hero.stl' })
-    expect(res.status).toBe(503)
-    expect((await res.json()).state).toBe('absent')
-  })
+  it("an unavailable index keeps the 503 envelope, state and all", async () => {
+    stubIndex("refused");
+    const res = await post({ path: "/hero.stl" });
+    expect(res.status).toBe(503);
+    expect((await res.json()).state).toBe("absent");
+  });
 
-  it('a 503 racing the warmup folds back into warming', async () => {
-    stubIndex(READY, {}, { similarStatus: 503 })
-    const res = await post({ path: '/hero.stl' })
-    expect(res.status).toBe(503)
-    expect((await res.json()).state).toBe('warming')
-  })
+  it("a 503 racing the warmup folds back into warming", async () => {
+    stubIndex(READY, {}, { similarStatus: 503 });
+    const res = await post({ path: "/hero.stl" });
+    expect(res.status).toBe(503);
+    expect((await res.json()).state).toBe("warming");
+  });
 
-  it('a 200 with no results array is an index that is not answering', async () => {
+  it("a 200 with no results array is an index that is not answering", async () => {
     // `results` is the field this route exists to carry; trusted, its absence
     // (or a number in its place) threw in `hitsToEntries`' map — a 500 for the
     // index talking nonsense. Gated where the cast happens instead.
     for (const body of [{}, { results: 5 }]) {
-      resetIndexStatus()
-      stubIndex(READY, body)
-      const res = await post({ path: '/hero.stl' })
-      expect(res.status).toBe(503)
-      expect(((await res.json()) as { state: string }).state).toBe('absent')
+      resetIndexStatus();
+      stubIndex(READY, body);
+      const res = await post({ path: "/hero.stl" });
+      expect(res.status).toBe(503);
+      expect(((await res.json()) as { state: string }).state).toBe("absent");
     }
-  })
+  });
 
-  it('refuses a virtual path and a path outside the collection without asking the index', async () => {
+  it("refuses a virtual path and a path outside the collection without asking the index", async () => {
     // Defense at the boundary: the honest client sends neither (the command is
     // absent on archive entries and outside the collection), so reaching here
     // means a hand-made request — and it must not become a 404, which would say
     // "index it again" about a path the index can never hold.
-    stubIndex(READY, RESULT)
-    expect((await post({ path: '/kit.zip!/inner.stl' })).status).toBe(400)
-    expect((await post({ path: '/elsewhere.stl' })).status).toBe(400)
-    const posts = (globalThis.fetch as unknown as { mock: { calls: [string][] } }).mock.calls.filter(
-      (c) => String(c[0]).endsWith('/similar'),
-    )
-    expect(posts).toHaveLength(0)
-  })
+    stubIndex(READY, RESULT);
+    expect((await post({ path: "/kit.zip!/inner.stl" })).status).toBe(400);
+    expect((await post({ path: "/elsewhere.stl" })).status).toBe(400);
+    const posts = (
+      globalThis.fetch as unknown as { mock: { calls: [string][] } }
+    ).mock.calls.filter((c) => String(c[0]).endsWith("/similar"));
+    expect(posts).toHaveLength(0);
+  });
 
-  it('a missing path is not a request', async () => {
-    stubIndex(READY, RESULT)
-    expect((await post({})).status).toBe(400)
-    expect((await post({ path: '   ' })).status).toBe(400)
-  })
+  it("a missing path is not a request", async () => {
+    stubIndex(READY, RESULT);
+    expect((await post({})).status).toBe(400);
+    expect((await post({ path: "   " })).status).toBe(400);
+  });
 
-  it('carries none of the meaning residue a similarity view does not read', async () => {
+  it("carries none of the meaning residue a similarity view does not read", async () => {
     // 4.7: the index publishes no `weak` for neighbours (measured — model-to-
     // model cosines run 0.85–0.99 where text cosines run ~0.1), and forwarding
     // its `scope` dict would make the client's label read the view as a meaning
     // search.
-    stubIndex(READY, { scope: { path: null, status: 'indexed' }, results: [hit('base.stl')] })
-    const body = (await (await post({ path: '/hero.stl' })).json()) as Record<
+    stubIndex(READY, {
+      scope: { path: null, status: "indexed" },
+      results: [hit("base.stl")],
+    });
+    const body = (await (await post({ path: "/hero.stl" })).json()) as Record<
       string,
       unknown
-    >
+    >;
     // Two fields have been added since, and neither is residue. `anchor` is this
     // server's own answer to "what was this compared against", which the index
     // never says because it excludes the query model from its own ranking.
@@ -337,108 +384,125 @@ describe('a model’s neighbours', () => {
     // because it publishes no `weak`: withholding the numbers left the ranking
     // as everything a reader had here (confidence-scores-on-tiles). What stays
     // out is what describes a *phrase's* result — `scope`, `weak`, `capped`.
-    expect(Object.keys(body).sort()).toEqual(['anchor', 'entries', 'path', 'poses', 'scores'])
-  })
+    expect(Object.keys(body).sort()).toEqual([
+      "anchor",
+      "entries",
+      "path",
+      "poses",
+      "scores",
+    ]);
+  });
 
-  it('carries the model the neighbours were computed from, stat’d here like any tile', async () => {
+  it("carries the model the neighbours were computed from, stat’d here like any tile", async () => {
     // The index excludes the query model from its own ranking by design (it
     // scores 1.0 against itself), so the only place the question can be made
     // visible beside its answer is here.
-    stubIndex(READY, RESULT)
-    const body = (await (await post({ path: '/Kits/anchor.stl', k: 16 })).json()) as {
-      entries: { path: string }[]
-      anchor?: { name: string; path: string; kind: string; size: number; mtime: number }
-    }
+    stubIndex(READY, RESULT);
+    const body = (await (
+      await post({ path: "/Kits/anchor.stl", k: 16 })
+    ).json()) as {
+      entries: { path: string }[];
+      anchor?: {
+        name: string;
+        path: string;
+        kind: string;
+        size: number;
+        mtime: number;
+      };
+    };
     // Addressed by its library path, like the neighbours beside it — the tile
     // is navigable, and a listing would give it the same string.
-    expect(body.anchor?.path).toBe('/Kits/anchor.stl')
+    expect(body.anchor?.path).toBe("/Kits/anchor.stl");
     // Named relative to the collection, exactly as a hit is, so the anchor tile
     // reads like the neighbours beside it rather than as an absolute path.
-    expect(body.anchor?.name).toBe(join('Kits', 'anchor.stl'))
-    expect(body.anchor?.kind).toBe('model')
+    expect(body.anchor?.name).toBe(join("Kits", "anchor.stl"));
+    expect(body.anchor?.kind).toBe("model");
     // Its own stat, not the index's word for it — a tile needs mtime and size,
     // and the index reports neither.
-    expect(body.anchor?.mtime).toBeGreaterThan(0)
-    expect(body.anchor?.size).toBeGreaterThan(0)
+    expect(body.anchor?.mtime).toBeGreaterThan(0);
+    expect(body.anchor?.size).toBeGreaterThan(0);
     // Beside the answer, never inside it: an anchor counted among the entries
     // would say a model with no neighbours had one.
-    expect(body.entries.map((e) => e.path)).toEqual(['/base.stl'])
-  })
+    expect(body.entries.map((e) => e.path)).toEqual(["/base.stl"]);
+  });
 
-  it('omits the anchor when it no longer resolves, and still answers with the neighbours', async () => {
+  it("omits the anchor when it no longer resolves, and still answers with the neighbours", async () => {
     // A model can be deleted after it was embedded. Deleted here between the
     // path check and the stat — which is the real race, not a contrived one —
     // by removing it while the index is answering.
-    const ghost = join(root, 'ghost.stl')
-    writeFileSync(ghost, stlBytes(4))
+    const ghost = join(root, "ghost.stl");
+    writeFileSync(ghost, stlBytes(4));
     vi.stubGlobal(
-      'fetch',
+      "fetch",
       vi.fn(async (url: string) => {
-        if (String(url).endsWith('/status')) {
+        if (String(url).endsWith("/status")) {
           return new Response(JSON.stringify(READY), {
-            headers: { 'content-type': 'application/json' },
-          })
+            headers: { "content-type": "application/json" },
+          });
         }
-        rmSync(ghost, { force: true })
-        return new Response(JSON.stringify(RESULT))
+        rmSync(ghost, { force: true });
+        return new Response(JSON.stringify(RESULT));
       }),
-    )
-    const res = await post({ path: '/ghost.stl' })
-    expect(res.status).toBe(200)
-    const body = (await res.json()) as { entries: unknown[]; anchor?: unknown }
+    );
+    const res = await post({ path: "/ghost.stl" });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { entries: unknown[]; anchor?: unknown };
     // Silently: the neighbours are a true answer without it, and a 404 here
     // would say "not indexed" about a model that was.
-    expect(body).not.toHaveProperty('anchor')
-    expect(body.entries).toHaveLength(1)
-  })
+    expect(body).not.toHaveProperty("anchor");
+    expect(body.entries).toHaveLength(1);
+  });
 
-  it('omits the anchor when the path is not a model, rather than answering a model entry without a format', async () => {
+  it("omits the anchor when the path is not a model, rather than answering a model entry without a format", async () => {
     // The route checks containment, not extension, so a hand-made request can
     // name any file in the collection. It stats fine, but `kind: 'model'` is
     // assigned only through the three extensions (`ModelFormat`, file-frame-
     // spindle D2) — the client's `formatOfEntry` throws on a model entry it
     // cannot classify — so the anchor is omitted the way a deleted one is.
-    stubIndex(READY, RESULT)
-    const res = await post({ path: '/notes.txt' })
-    expect(res.status).toBe(200)
-    const body = (await res.json()) as { entries: { path: string }[]; anchor?: unknown }
-    expect(body).not.toHaveProperty('anchor')
-    expect(body.entries.map((e) => e.path)).toEqual(['/base.stl'])
-  })
-})
+    stubIndex(READY, RESULT);
+    const res = await post({ path: "/notes.txt" });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      entries: { path: string }[];
+      anchor?: unknown;
+    };
+    expect(body).not.toHaveProperty("anchor");
+    expect(body.entries.map((e) => e.path)).toEqual(["/base.stl"]);
+  });
+});
 
-describe('a collection beneath the library top', () => {
+describe("a collection beneath the library top", () => {
   // The index covers one kit rather than the whole library. Its own root stays
   // absolute; every path this route answers with is a library path (D6).
-  const KITS = { ...READY, collection_root: join(root, 'Kits') }
+  const KITS = { ...READY, collection_root: join(root, "Kits") };
 
-  it('addresses the anchor and its neighbours by library path', async () => {
-    stubIndex(KITS, { scope: { path: null }, results: [hit('near.stl')] })
-    const body = (await (await post({ path: '/Kits/anchor.stl' })).json()) as {
-      path: string
-      entries: { path: string }[]
-      poses: Record<string, unknown>
-      anchor?: { name: string; path: string }
-    }
-    expect(body.anchor?.path).toBe('/Kits/anchor.stl')
+  it("addresses the anchor and its neighbours by library path", async () => {
+    stubIndex(KITS, { scope: { path: null }, results: [hit("near.stl")] });
+    const body = (await (await post({ path: "/Kits/anchor.stl" })).json()) as {
+      path: string;
+      entries: { path: string }[];
+      poses: Record<string, unknown>;
+      anchor?: { name: string; path: string };
+    };
+    expect(body.anchor?.path).toBe("/Kits/anchor.stl");
     // Still named relative to the collection, which is how a hit reads — only
     // the address changed.
-    expect(body.anchor?.name).toBe('anchor.stl')
-    expect(body.entries.map((e) => e.path)).toEqual(['/Kits/near.stl'])
-    expect(body.poses['/Kits/near.stl']).toEqual(POSE)
-    expect(body.path).toBe('/Kits')
-  })
+    expect(body.anchor?.name).toBe("anchor.stl");
+    expect(body.entries.map((e) => e.path)).toEqual(["/Kits/near.stl"]);
+    expect(body.poses["/Kits/near.stl"]).toEqual(POSE);
+    expect(body.path).toBe("/Kits");
+  });
 
-  it('refuses a model inside the library but outside the collection', async () => {
+  it("refuses a model inside the library but outside the collection", async () => {
     // The case the migrated fixtures above cannot show while the collection is
     // the whole library: a real file, addressable by this server, that the
     // index has no business being asked about.
-    stubIndex(KITS, { scope: { path: null }, results: [hit('near.stl')] })
-    const res = await post({ path: '/hero.stl' })
-    expect(res.status).toBe(400)
-    const posts = (globalThis.fetch as unknown as { mock: { calls: [string][] } }).mock.calls.filter(
-      (c) => String(c[0]).endsWith('/similar'),
-    )
-    expect(posts).toHaveLength(0)
-  })
-})
+    stubIndex(KITS, { scope: { path: null }, results: [hit("near.stl")] });
+    const res = await post({ path: "/hero.stl" });
+    expect(res.status).toBe(400);
+    const posts = (
+      globalThis.fetch as unknown as { mock: { calls: [string][] } }
+    ).mock.calls.filter((c) => String(c[0]).endsWith("/similar"));
+    expect(posts).toHaveLength(0);
+  });
+});
