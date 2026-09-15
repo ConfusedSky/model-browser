@@ -89,9 +89,10 @@
       beside the library id the bake instance logs
 - [ ] 3.2 The run: both passes to `Generate 0 missing thumbnails`, `verifyBake` clean,
       manifest written, `check-bake.sh` passing. **Record here, and in design D-cost**:
-      `[SLOT — coordinator's figures: renders per variant, elapsed per variant, renders/s
-      per variant, wall time, `du -sh` of the id directory, failures relaunched if any,
-      the machine and the Chromium flags, the manifest's commit]`. The dry run of the same
+      *(pre-script run recorded in design D-cost, 2026-09-14: 3,106 + 3,106 PUTs, 361 s +
+      442 s, 8.6 and 7.0 renders/s, zero failures, 3,121 sidecars / 6,242 WebP / 56 MB,
+      2,976 posed and keyed per variant, 145 settled-null unlabelled; the baked directory
+      is kept at the scratch path until the script's own run reproduces it and ships.)* The dry run of the same
       day for scale: 15 renders at 9.6/s off and 9.2/s on, every sidecar `rig: 7`,
       `posed: 2`, `poseKey` present
 

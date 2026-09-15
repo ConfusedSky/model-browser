@@ -331,10 +331,7 @@ Projected from the dry run: 6,242 renders at ~10/s ≈ 11 min plus mesh loads on
 larger models. The full run started 2026-09-14 at ~10 PUTs/s (`Generate 3102 missing
 thumbnails` at its start — 3,121 less the dry run's 19).
 
-**Measured — the coordinator's full run, to be filled in when it ends:**
-`[SLOT: renders per variant, elapsed per variant, renders/s per variant, wall time,
-store size on disk, failures if any — from the manifest of the run, with the machine
-and the Chromium flags]`.
+**Measured — the coordinator's full run:** 2026-09-14, this machine (local GPU; headless Chromium via playwright-core with `--use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader`), a scratch instance on 3199 rooted at `clustered-hq` with writes on and its own cache directory, the index at 8077 on `embed-cache-test` rooted at `clustered-hq` with `--no-volume`, driven by an ad-hoc driver before the script existed (the script's first run is task 3.2 proper; these are the figures it must reproduce): variant A (occlusion off) `Generate 3102 missing thumbnails` → 3,106 PUTs in 361 s = 8.6 renders/s; variant B (on) `Generate 3088` → 3,106 PUTs in 442 s = 7.0/s; wall 815 s for 6,212 PUTs, zero non-200; the id directory holds 3,121 sidecars and 6,242 WebP renders, 30 MB of images, 56 MB with sidecars. Labels: every sidecar `rig: 7`, `lighting: camera` on both variants; 2,976 per variant `posed: 2` with a `poseKey`; 145 per variant unlabelled — the index answers `null` for those paths (bases, terrain: `/Werewolf_Miniatures_3712197/werewolfmalebase.stl` and the like, verified by asking `/poses` directly), which under `pose-rerender`'s rule is a settled absence over an unlabelled render, a hit. No sidecar holds a camera or an axis. The dry run's 9.6/s over one small kit was the ceiling; the corpus mean is lower because mesh load and decode share the queue with the render.
 
 ## Risks / Trade-offs
 
