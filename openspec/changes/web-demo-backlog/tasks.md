@@ -61,7 +61,7 @@
       baked** until 2026-09-15 (1.7), so until then every visitor rendered every tile in
       their own browser and nothing persisted. `deploy/demo/config.json` was written in full by
       `public-deployment`
-- [ ] 1.5 *(drafted 2026-09-15 as `landing-page` — proposal, design, `visitor-intro` plus
+- [x] 1.5 *(drafted and **applied 2026-09-15** as `landing-page` — live on models.masamaeda.com at cbad523: the `intro` field, the banner, six proven example queries, the About page at /about.html with the credits list; drafted the same day — proposal, design, `visitor-intro` plus
       `feature-report` and `library-overrides` deltas, tasks; folds in issues #12 and #15
       and gives 1.8's credits list a home at `/about.html#credits`; cold-reviewed, the
       review's findings applied; validates and archive-dry-runs clean; the line below is
@@ -96,7 +96,7 @@
       796 s (8.8 and 7.1 renders/s), 2,976 posed with a `poseKey`, 146 settled-null,
       33.3 MB shipped in 9,367 files. Measured on the live host, cold, both `ssao`
       states: **0 thumbnail lookups, 0 mesh fetches, 0 client renders**.
-- [ ] 1.8 the credits page — **downgraded to a courtesy that rides the landing page
+- [x] 1.8 *(done 2026-09-15 as `landing-page`'s `/about.html#credits` — 444 kits from `GET /api/credits`, the same store the lightbox reads)* the credits page — **downgraded to a courtesy that rides the landing page
       (1.5), 2026-09-14** (`credits-completion`): the licences ask for attribution "in any
       reasonable manner", and the lightbox is where each work is shown, so attribution is
       complete there — author linked, licence label linked to its deed URL with version,

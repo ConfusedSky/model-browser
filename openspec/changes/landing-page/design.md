@@ -266,6 +266,24 @@ each example query against the live index on the day. The page carries no number
 would have to be re-run to be true (no accuracy figure, no corpus count — the credits
 list's length is the one count, and it is computed).
 
+**Decided at apply (2026-09-15), on the About-page worker's check-in:** the pinned
+differences list named "Download in place of opening in an application" and "Copy link
+in place of Copy path", but neither exists — both are backlog 1.6's, unbuilt
+(`grep -rnai download client/src server/src shared` matches nothing; the only label is
+`entryActions.ts`'s `Copy path`). A visitor opening a tile menu would falsify both
+lines at once. The page therefore describes what ships: opening in an application is
+not offered; a copied path is a library path. The `visitor-intro` requirement was
+reworded to say the list describes the deployment as it behaves, never as a promise,
+and 1.6 owns updating this copy when its actions land (a follow-up line in tasks.md).
+Two more findings from the same pass: the corpus repository
+(`ConfusedSky/model-browser-corpus`) is private, so the page names it and does not
+link it; and "a bicycle" returned **zero** results under the visitor's `minScore: 0.1`,
+so the notes' claim that meaning search "always answers" holds only at the index's own
+floor — the Limitations copy says what comes back is whatever was least far, and does
+not claim there is never an empty answer. The fragment link `#credits` needed one
+mount effect: the browser resolves the fragment before React has rendered a section,
+so `AboutPage` scrolls to the named section itself after mount (found on 5173).
+
 ## Risks / Trade-offs
 
 - [The report arrives after first paint, so the banner appears a frame or two late]

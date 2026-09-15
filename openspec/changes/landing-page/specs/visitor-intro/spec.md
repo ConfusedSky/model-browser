@@ -152,9 +152,12 @@ It SHALL carry, as sections: what this is; licence and provenance — that the m
 not the operator's, that every model is credited where it is shown, under which
 licences; how the corpus was altered — deduplication, non-model files dropped,
 decimation, display names from the store — and that downloads are display copies to be
-printed from the source; what differs from the desktop app — Download in place of
-opening in an application, Copy link in place of Copy path, the chat tab withheld,
-thumbnails baked and read-only, orbits saved per browser, host details hidden; a how-to
+printed from the source; what differs from the desktop app, described as the deployment
+behaves on the day the copy is written and never as a promise — opening in an
+application not offered, a copied path being a library path, the chat tab withheld,
+thumbnails baked and read-only, orbits saved per browser, host details hidden — so that
+a change to those actions (a Download action, a Copy link label) is a change to this
+copy; a how-to
 of at most five lines that names Ctrl+F as the one binding that replaces the browser's
 own and notes that Shift+right-click reaches the browser's menu; links — source, corpus
 repository, contact, credits, where to report a problem; a privacy line — no accounts,

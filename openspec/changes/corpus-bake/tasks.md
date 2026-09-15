@@ -395,3 +395,12 @@
       corpus-bake --yes)`) applied 4 added requirements across the two capabilities with no
       collision. The applied `deployment-infrastructure` and `model-thumbnails` text was
       read for change-scoped prose: no "this delta"/"this change" survived into either.
+
+- [ ] 9.x *(added by `landing-page`, 2026-09-15 — not that change's session)* when 1.5's
+      `--ship` lands, call `bun run scripts/check-example-queries.ts <origin>` after the
+      restart (`landing-page` D9): every example query the banner offers must answer on
+      the box, and the ship step is the one place that fires HTTP at the origin after a
+      restart. Also: the demo image now copies `scripts/` (c53f64a, cbad523) because
+      `client/test/checkBake.test.ts` imports the bake script and the client build
+      typechecks its tests — the box could not build from the day that test landed
+

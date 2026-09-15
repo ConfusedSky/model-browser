@@ -357,7 +357,11 @@ own origin"; only its body hardcodes loopback.
    credits list at `#credits`, example queries in `shared/exampleQueries.ts` proven by
    `scripts/check-example-queries.ts` under the visitor's search options, and a
    meaning-mode start for a browser that never chose. The decisions stay here for
-   history; the change's design.md is now the reference.
+   history; the change's design.md is now the reference. **Applied and live 2026-09-15.**
+   One correction from the apply: (i) above says search "always answers" — at the
+   visitor's floor (`minScore: 0.1`) it does not: "a bicycle" returned zero results on
+   the live index, so the About copy says what comes back is whatever was least far and
+   does not claim there is never an empty answer.
 5. **Names.** Rename folders at corpus build (re-embed — needed anyway) or
    display-name from the store (near-free if #1 is sidecars; ids stay in paths).
    **Resolved 2026-08-31 (Masa): display names from the store.** Near-free now
