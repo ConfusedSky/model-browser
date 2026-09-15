@@ -13,8 +13,8 @@
  * setting.
  */
 export interface Stored<T> {
-  read(): T
-  write(value: T): void
+  read(): T;
+  write(value: T): void;
 }
 
 export function stored<T>(
@@ -25,17 +25,17 @@ export function stored<T>(
   return {
     read() {
       try {
-        return parse(localStorage.getItem(key))
+        return parse(localStorage.getItem(key));
       } catch {
-        return parse(null)
+        return parse(null);
       }
     },
     write(value) {
       try {
-        localStorage.setItem(key, serialize(value))
+        localStorage.setItem(key, serialize(value));
       } catch {
         // no localStorage (tests) — in-memory only
       }
     },
-  }
+  };
 }

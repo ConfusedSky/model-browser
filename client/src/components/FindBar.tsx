@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef } from "react";
 
 /**
  * The find control: summoned over a listing to narrow it by name, dismissed
@@ -18,30 +18,33 @@ export default function FindBar({
   onChange,
   onClose,
 }: {
-  value: string
+  value: string;
   /**
    * Entries currently visible, so the user can see the filter working — null
    * while a listing is in flight, when the count would describe the listing
    * being replaced rather than the one arriving.
    */
-  count: number | null
+  count: number | null;
   /** Bumped when the user asks for the control again; refocuses it. */
-  focusSignal: number
-  onChange: (value: string) => void
-  onClose: () => void
+  focusSignal: number;
+  onChange: (value: string) => void;
+  onClose: () => void;
 }) {
-  const ref = useRef<HTMLInputElement>(null)
+  const ref = useRef<HTMLInputElement>(null);
 
   // Focused on open, and again whenever the user asks for it while it is
   // already open — a control you summon and then have to click into has not
   // finished appearing.
   useEffect(() => {
-    ref.current?.focus()
-    ref.current?.select()
-  }, [focusSignal])
+    ref.current?.focus();
+    ref.current?.select();
+  }, [focusSignal]);
 
   return (
-    <div data-find-bar className="flex items-center gap-2 border-b border-zinc-800 bg-zinc-900 px-4 py-2">
+    <div
+      data-find-bar
+      className="flex items-center gap-2 border-b border-zinc-800 bg-zinc-900 px-4 py-2"
+    >
       <span aria-hidden="true" className="text-xs text-zinc-500">
         ⌕
       </span>
@@ -50,9 +53,9 @@ export default function FindBar({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === 'Escape') {
-            e.stopPropagation()
-            onClose()
+          if (e.key === "Escape") {
+            e.stopPropagation();
+            onClose();
           }
         }}
         placeholder="Narrow these by name…"
@@ -60,7 +63,9 @@ export default function FindBar({
         spellCheck={false}
         className="min-w-0 flex-1 bg-transparent text-sm text-zinc-100 outline-none"
       />
-      {count !== null && <span className="shrink-0 text-xs text-zinc-500">{count} shown</span>}
+      {count !== null && (
+        <span className="shrink-0 text-xs text-zinc-500">{count} shown</span>
+      )}
       <button
         type="button"
         onClick={onClose}
@@ -70,5 +75,5 @@ export default function FindBar({
         ✕
       </button>
     </div>
-  )
+  );
 }

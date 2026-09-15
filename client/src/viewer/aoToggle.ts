@@ -11,9 +11,9 @@
  * key, not a label on it — the two renders are cached side by side, so
  * following the preference still costs no `RIG_VERSION` bump and no sweep.
  */
-import { stored } from '../lib/stored'
+import { stored } from "../lib/stored";
 
-const KEY = 'model-browser:ao-enabled'
+const KEY = "model-browser:ao-enabled";
 
 const store = stored(
   KEY,
@@ -22,16 +22,16 @@ const store = stored(
   // 'off' keeps meaning what the user chose. Cheap only since
   // `ao-as-recipe-dimension`: thumbnails follow the preference, so the old
   // handoff-jump objection to a static off default no longer applies.
-  (raw) => raw === 'on',
-  (on) => (on ? 'on' : 'off'),
-)
-let enabled: boolean = store.read()
+  (raw) => raw === "on",
+  (on) => (on ? "on" : "off"),
+);
+let enabled: boolean = store.read();
 
 export function aoEnabled(): boolean {
-  return enabled
+  return enabled;
 }
 
 export function setAoEnabled(on: boolean): void {
-  enabled = on
-  store.write(on)
+  enabled = on;
+  store.write(on);
 }

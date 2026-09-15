@@ -1,4 +1,4 @@
-import { THUMB_MIME } from '../../../shared/types'
+import { THUMB_MIME } from "../../../shared/types";
 import type {
   AppsReport,
   CameraState,
@@ -19,8 +19,8 @@ import type {
   ThumbGetResponse,
   ThumbStatus,
   PosesRequest,
-} from '../../../shared/types'
-import { thumbImageUrl } from './thumbUrl'
+} from "../../../shared/types";
+import { thumbImageUrl } from "./thumbUrl";
 
 /**
  * One render's answer. There is no `ao` field, deliberately: the request names
@@ -29,31 +29,31 @@ import { thumbImageUrl } from './thumbUrl'
  * shared by both renders; everything else below is the requested render's.
  */
 export interface ThumbResult {
-  status: ThumbStatus
-  camera?: CameraState
+  status: ThumbStatus;
+  camera?: CameraState;
   /** Stored spindle axis; absent when the path is unknown (the caller falls
    *  back to the format's default, `defaultAxisFor`). */
-  axis?: OrbitAxis
+  axis?: OrbitAxis;
   /** Lighting mode the PNG was rendered with; absent on pre-lighting entries. */
-  lighting?: LightingMode
+  lighting?: LightingMode;
   /** Pixel-recipe (rig) version the PNG was rendered with; absent on pre-rim entries. */
-  rig?: number
+  rig?: number;
   /** Pose recipe version the PNG was rendered under; absent when unposed. */
-  posed?: number
+  posed?: number;
   /** The orientation the PNG was drawn under, where a pose framed it
    *  (`ThumbPutRequest.poseKey`); absent when unposed or labelled before the
    *  key existed — and a posed render without it is stale to `useThumbnails`,
    *  as one without its lighting or rig label is. */
-  poseKey?: string
+  poseKey?: string;
   /** Object URL for the cached PNG, present on 'hit'. */
-  pngUrl?: string
+  pngUrl?: string;
   /**
    * The entry's write generation, as the server last reported it
    * (`immutable-thumbnail-serving` D4). Passing it back on the next read for
    * this entry is what earns an `immutable` answer; not knowing it costs a
    * revalidation, never a wrong picture.
    */
-  gen?: number
+  gen?: number;
 }
 
 /**
@@ -62,7 +62,7 @@ export interface ThumbResult {
  */
 export interface ThumbPutResult {
   /** The entry's generation *after* this write. */
-  gen?: number
+  gen?: number;
   /**
    * The render did not land: the browser encoded it in a format this app does
    * not store, so its pixels were dropped and only what the write carried
@@ -70,12 +70,12 @@ export interface ThumbPutResult {
    * write. A caller that counts renders made must not count this as one — the
    * entry still has no pixels of its own.
    */
-  dropped?: true
+  dropped?: true;
 }
 
 export interface ThumbSave {
-  path: string
-  mtime: number
+  path: string;
+  mtime: number;
   /**
    * Three states, like `camera` below: a Blob **replaces** this render's
    * pixels, absence **keeps** what is stored, and `null` **deletes** the
@@ -83,36 +83,35 @@ export interface ThumbSave {
    * D3). The deletion is what a bulk reset writes; the orientation it leaves is
    * governed by this same save's `camera`/`axis`, never by the deletion.
    */
-  png?: Blob | null
+  png?: Blob | null;
   /** Set / keep / discard: a value stores it, absence leaves what is stored,
    *  `null` gives it up (entry-context-menu D7). */
-  camera?: CameraState | null
+  camera?: CameraState | null;
   /** Set / keep / discard, exactly as `camera`. */
-  axis?: OrbitAxis | null
-  lighting?: LightingMode
-  rig?: number
-  posed?: number
+  axis?: OrbitAxis | null;
+  lighting?: LightingMode;
+  rig?: number;
+  posed?: number;
   /** `poseKeyOf` over what the pose resolved to, beside `posed`'s version
    *  (`pose-rerender` D2); absent when unposed. */
-  poseKey?: string
+  poseKey?: string;
   /**
    * Which render these pixels and labels are: `true` the occluded one, `false`
    * the unoccluded sibling. Absent means occluded — what every PUT meant
    * before occlusion became a key dimension. Callers that render pass the same
    * value they rendered under, never a second reading of the preference (D4a).
    */
-  ao?: boolean
+  ao?: boolean;
   /**
    * The generation the writer last saw, making the write conditional: the
    * server refuses it, changing nothing, when the entry has moved past that
    * number (`bulk-thumbnail-jobs` D4). Absent is an unconditional write.
    */
-  ifGen?: number
+  ifGen?: number;
 }
 
-import { POSES_MAX } from '../../../shared/types'
-export { POSES_MAX }
-
+import { POSES_MAX } from "../../../shared/types";
+export { POSES_MAX };
 
 /**
  * All frontend I/O goes through this interface — never raw fetch in
@@ -130,7 +129,7 @@ export interface ApiClient {
     path: string,
     opts?: { flat?: boolean; q?: string; folderMatching?: boolean },
     signal?: AbortSignal,
-  ): Promise<DirListing>
+  ): Promise<DirListing>;
   /**
    * Every model beneath `path`, each carrying the caches' thumbnail facts —
    * the enumeration `listing-tree-cache` 6.7 answers, drawn from the tree
@@ -146,8 +145,8 @@ export interface ApiClient {
    * explicit action, not a scroll position, so nothing supersedes it in flight
    * — a caller that has moved on drops the answer on arrival.
    */
-  models(path: string): Promise<ModelsListing>
-  complete(prefix: string): Promise<string[]>
+  models(path: string): Promise<ModelsListing>;
+  complete(prefix: string): Promise<string[]>;
   /**
    * The first few models found inside `path`, for the folder tile's contact
    * sheet (folder-contact-sheets D1). Ordinary listing entries, so their
@@ -163,8 +162,8 @@ export interface ApiClient {
    * run to completion rather than stopped when its tile has scrolled away"), so
    * `search-cancellation`'s rule about abandoned traversals does not reach it.
    */
-  peek(path: string, n?: number): Promise<DirEntry[]>
-  fetchModel(path: string): Promise<ArrayBuffer>
+  peek(path: string, n?: number): Promise<DirEntry[]>;
+  fetchModel(path: string): Promise<ArrayBuffer>;
   /**
    * One entry's effective overrides — the field-wise merge over its ancestor
    * keys, `{}` where nothing resolves (`library-overrides` D3). Asked per viewed
@@ -176,7 +175,7 @@ export interface ApiClient {
    * rule for a superseded read is ignore-on-stale, not abort (D4), and the
    * answer is a memory lookup server-side — there is nothing running to stop.
    */
-  overrides(path: string): Promise<ResolvedOverrides>
+  overrides(path: string): Promise<ResolvedOverrides>;
   /**
    * Every credited kit in the library's store, in one answer (`landing-page`
    * D8) — the whole corpus's attribution, which is what the About page's
@@ -187,9 +186,9 @@ export interface ApiClient {
    * so it carries **no `AbortSignal`** for `overrides`' reason — there is
    * nothing running server-side to stop.
    */
-  credits(): Promise<CreditedKit[]>
+  credits(): Promise<CreditedKit[]>;
   /** Availability of the semantic index — cheap, cached server-side (D4). */
-  indexAvailability(opts?: { fresh?: boolean }): Promise<IndexAvailability>
+  indexAvailability(opts?: { fresh?: boolean }): Promise<IndexAvailability>;
   /**
    * The index's orientation for each model directly inside `dirPath`, keyed by
    * library path — the listing's second wave (pose-for-every-model D2/D3). A
@@ -214,7 +213,7 @@ export interface ApiClient {
    * bounded by one directory's model count, and a superseded one is dropped on
    * arrival by whatever asked rather than stopped in flight.
    */
-  semanticPoses(dirPath: string): Promise<PosesResponse>
+  semanticPoses(dirPath: string): Promise<PosesResponse>;
   /**
    * The index's orientation for each of the named models, keyed by library path
    * — what a listing's wave actually asks (pose-for-every-model D3). The
@@ -239,7 +238,7 @@ export interface ApiClient {
    * dropped on arrival by the landing it names (the reducer's `listingPoses`)
    * rather than stopped in flight.
    */
-  semanticPosesFor(paths: string[]): Promise<PosesResponse>
+  semanticPosesFor(paths: string[]): Promise<PosesResponse>;
   /**
    * What state the library is in (library R4). Always answers — this is the one
    * route that has something to say while the library is `unconfigured` or
@@ -250,7 +249,7 @@ export interface ApiClient {
    * than by a reload. Its `top` is the only filesystem path the client holds,
    * and only `expandLibraryPath` reads it.
    */
-  library(): Promise<LibraryState>
+  library(): Promise<LibraryState>;
   /**
    * A meaning query. Throws HttpError(503) carrying the index's state.
    *
@@ -263,7 +262,7 @@ export interface ApiClient {
     path?: string,
     tuning?: SemanticTuning,
     signal?: AbortSignal,
-  ): Promise<SemanticListing>
+  ): Promise<SemanticListing>;
   /**
    * A model's nearest neighbours, drawn from the whole indexed collection — no
    * scope is sent, which is the index's own default stated rather than passed
@@ -287,9 +286,9 @@ export interface ApiClient {
   similar(
     model: string,
     k: number,
-    pool?: SemanticTuning['pool'],
+    pool?: SemanticTuning["pool"],
     signal?: AbortSignal,
-  ): Promise<SimilarListing>
+  ): Promise<SimilarListing>;
   /**
    * The cached thumbnail for one render of `path`. `ao` names which — occluded
    * by default, which is what a request with no `ao` has always meant and what
@@ -301,15 +300,20 @@ export interface ApiClient {
    * and one that is no longer current comes back uncacheable with the current
    * number so the caller re-keys (D2).
    */
-  getThumb(path: string, mtime: number, ao?: boolean, gen?: number): Promise<ThumbResult>
+  getThumb(
+    path: string,
+    mtime: number,
+    ao?: boolean,
+    gen?: number,
+  ): Promise<ThumbResult>;
   /**
    * The URL at which the server answers the same render as `image/webp` bytes
    * (`thumbnail-image-serving` D1) — for a tile whose listing entry vouches
    * for the render to reference by `<img src>`, with no lookup. Same key as
    * `getThumb`; a pure builder, no request.
    */
-  thumbImageUrl(path: string, mtime: number, ao: boolean, gen?: number): string
-  putThumb(save: ThumbSave): Promise<ThumbPutResult>
+  thumbImageUrl(path: string, mtime: number, ao: boolean, gen?: number): string;
+  putThumb(save: ThumbSave): Promise<ThumbPutResult>;
   /**
    * What the platform registry reports for the model types this app handles,
    * plus whether a chooser is configured — the whole report in one answer,
@@ -319,7 +323,7 @@ export interface ApiClient {
    * refetched when an open-with completes, since the chooser may have rewritten
    * the registry. Never called from a menu-open path (D6/2.5).
    */
-  apps(): Promise<AppsReport>
+  apps(): Promise<AppsReport>;
   /**
    * What this server accepts and offers (feature-report D2) — capability
    * fields, never a mode name, so one client build serves every deployment.
@@ -328,10 +332,10 @@ export interface ApiClient {
    * else (D1): a surface that gates on the report must not be able to reach the
    * network around the client the tests inject.
    */
-  features(): Promise<FeatureReport>
+  features(): Promise<FeatureReport>;
   /** Open `path` in the application `appId` names — a one-shot launch, resolving
    *  when the platform's launch command succeeded (L8). */
-  open(path: string, appId: string): Promise<void>
+  open(path: string, appId: string): Promise<void>;
   /**
    * Hand `path` to the platform's configured chooser (L4).
    *
@@ -341,7 +345,7 @@ export interface ApiClient {
    * is what the refetch keys on, and an abort would also have to mean "kill the
    * chooser", which a dismissal and a kill must not both read as.
    */
-  openWith(path: string): Promise<void>
+  openWith(path: string): Promise<void>;
 }
 
 export class HttpError extends Error {
@@ -378,7 +382,7 @@ export class HttpError extends Error {
      */
     readonly refused?: keyof FeatureReport,
   ) {
-    super(message)
+    super(message);
   }
 }
 
@@ -388,29 +392,39 @@ export class HttpError extends Error {
  * is what keeps them from disagreeing.
  */
 async function errorOf(res: Response): Promise<HttpError> {
-  const body = (await res.json().catch(() => null)) as
-    | { error?: string; state?: string; refused?: string }
-    | null
+  const body = (await res.json().catch(() => null)) as {
+    error?: string;
+    state?: string;
+    refused?: string;
+  } | null;
   // A `Refused` body's field, read here so every route's refusal arrives at
   // every caller already distinguishable — the same reason `state` is read
   // here rather than at four call sites. Narrowed by shape only (a string is a
   // field name), never validated against `FeatureReport`'s keys: a server that
   // names a field this build has not heard of has still refused, and a caller
   // matching on the fields it knows simply does not match.
-  const refused = typeof body?.refused === 'string' ? (body.refused as keyof FeatureReport) : undefined
-  return new HttpError(res.status, body?.error ?? res.statusText, body?.state, refused)
+  const refused =
+    typeof body?.refused === "string"
+      ? (body.refused as keyof FeatureReport)
+      : undefined;
+  return new HttpError(
+    res.status,
+    body?.error ?? res.statusText,
+    body?.state,
+    refused,
+  );
 }
 
 async function jsonOrThrow<T>(res: Response): Promise<T> {
-  if (!res.ok) throw await errorOf(res)
-  return res.json() as Promise<T>
+  if (!res.ok) throw await errorOf(res);
+  return res.json() as Promise<T>;
 }
 
 /** `jsonOrThrow`'s half for a call whose success carries nothing the caller
  *  reads: the same `HttpError`, no body parsed on the way past. */
 async function okOrThrow(res: Response): Promise<void> {
-  if (res.ok) return
-  throw await errorOf(res)
+  if (res.ok) return;
+  throw await errorOf(res);
 }
 
 /**
@@ -439,24 +453,31 @@ async function okOrThrow(res: Response): Promise<void> {
  * send, and an empty write would bump the entry's generation for no reason.
  */
 function withoutUnusableRender(save: ThumbSave): ThumbSave | null {
-  if (!(save.png instanceof Blob) || save.png.type === THUMB_MIME) return save
-  const { png: _pixels, lighting: _lighting, rig: _rig, posed: _posed, poseKey: _poseKey, ...rest } = save
-  return rest.camera === undefined && rest.axis === undefined ? null : rest
+  if (!(save.png instanceof Blob) || save.png.type === THUMB_MIME) return save;
+  const {
+    png: _pixels,
+    lighting: _lighting,
+    rig: _rig,
+    posed: _posed,
+    poseKey: _poseKey,
+    ...rest
+  } = save;
+  return rest.camera === undefined && rest.axis === undefined ? null : rest;
 }
 
 function base64ToBlobUrl(b64: string): string {
-  const bytes = Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0))
-  return URL.createObjectURL(new Blob([bytes], { type: 'image/webp' }))
+  const bytes = Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0));
+  return URL.createObjectURL(new Blob([bytes], { type: "image/webp" }));
 }
 
 async function blobToBase64(blob: Blob): Promise<string> {
-  const bytes = new Uint8Array(await blob.arrayBuffer())
-  let bin = ''
-  const CHUNK = 0x8000
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let bin = "";
+  const CHUNK = 0x8000;
   for (let i = 0; i < bytes.length; i += CHUNK) {
-    bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+    bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
   }
-  return btoa(bin)
+  return btoa(bin);
 }
 
 export class HttpApiClient implements ApiClient {
@@ -467,34 +488,43 @@ export class HttpApiClient implements ApiClient {
     opts?: { flat?: boolean; q?: string; folderMatching?: boolean },
     signal?: AbortSignal,
   ): Promise<DirListing> {
-    const flat = opts?.flat === true ? '&flat=true' : ''
+    const flat = opts?.flat === true ? "&flat=true" : "";
     // Free-form user text, unlike the boolean `flat` — the URL is built by
     // concatenation, so an unescaped `&` or `#` would silently truncate it.
-    const q = opts?.q !== undefined && opts.q.trim() !== '' ? `&q=${encodeURIComponent(opts.q)}` : ''
+    const q =
+      opts?.q !== undefined && opts.q.trim() !== ""
+        ? `&q=${encodeURIComponent(opts.q)}`
+        : "";
     // Sent only when off: the server's default is the shipped predicate, so an
     // ordinary request is byte-identical to what it was before the option.
-    const folders = opts?.folderMatching === false ? '&folders=false' : ''
+    const folders = opts?.folderMatching === false ? "&folders=false" : "";
     const res = await this.fetchFn(
       `/api/dir?path=${encodeURIComponent(path)}${flat}${q}${folders}`,
       { signal },
-    )
-    return jsonOrThrow<DirListing>(res)
+    );
+    return jsonOrThrow<DirListing>(res);
   }
 
   async models(path: string): Promise<ModelsListing> {
-    const res = await this.fetchFn(`/api/models?path=${encodeURIComponent(path)}`)
-    return jsonOrThrow<ModelsListing>(res)
+    const res = await this.fetchFn(
+      `/api/models?path=${encodeURIComponent(path)}`,
+    );
+    return jsonOrThrow<ModelsListing>(res);
   }
 
-  async indexAvailability(opts?: { fresh?: boolean }): Promise<IndexAvailability> {
-    const q = opts?.fresh === true ? '?fresh=true' : ''
-    const res = await this.fetchFn(`/api/semantic/status${q}`)
-    return jsonOrThrow<IndexAvailability>(res)
+  async indexAvailability(opts?: {
+    fresh?: boolean;
+  }): Promise<IndexAvailability> {
+    const q = opts?.fresh === true ? "?fresh=true" : "";
+    const res = await this.fetchFn(`/api/semantic/status${q}`);
+    return jsonOrThrow<IndexAvailability>(res);
   }
 
   async semanticPoses(dirPath: string): Promise<PosesResponse> {
-    const res = await this.fetchFn(`/api/semantic/poses?path=${encodeURIComponent(dirPath)}`)
-    return jsonOrThrow<PosesResponse>(res)
+    const res = await this.fetchFn(
+      `/api/semantic/poses?path=${encodeURIComponent(dirPath)}`,
+    );
+    return jsonOrThrow<PosesResponse>(res);
   }
 
   async semanticPosesFor(paths: string[]): Promise<PosesResponse> {
@@ -520,35 +550,35 @@ export class HttpApiClient implements ApiClient {
     // silent-failure path (`App`'s wave, whose rejection handler is empty)
     // meaning exactly that. An empty `paths` is not a failure — it makes no
     // requests and answers `{}`.
-    const poses: PosesResponse['poses'] = {}
+    const poses: PosesResponse["poses"] = {};
     // Both outcomes counted rather than inferred from `firstFailure`: a
     // rejection value is whatever was thrown, `null` and `undefined` included,
     // so "was there a failure" cannot be read off the value one carried.
-    let landed = 0
-    let failed = 0
-    let firstFailure: unknown = null
+    let landed = 0;
+    let failed = 0;
+    let firstFailure: unknown = null;
     for (let i = 0; i < paths.length; i += POSES_MAX) {
-      const body: PosesRequest = { paths: paths.slice(i, i + POSES_MAX) }
+      const body: PosesRequest = { paths: paths.slice(i, i + POSES_MAX) };
       try {
-        const res = await this.fetchFn('/api/semantic/poses', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
+        const res = await this.fetchFn("/api/semantic/poses", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
           body: JSON.stringify(body),
-        })
-        Object.assign(poses, (await jsonOrThrow<PosesResponse>(res)).poses)
-        landed += 1
+        });
+        Object.assign(poses, (await jsonOrThrow<PosesResponse>(res)).poses);
+        landed += 1;
       } catch (err) {
-        if (failed === 0) firstFailure = err
-        failed += 1
+        if (failed === 0) firstFailure = err;
+        failed += 1;
       }
     }
-    if (landed === 0 && failed > 0) throw firstFailure
-    return { poses }
+    if (landed === 0 && failed > 0) throw firstFailure;
+    return { poses };
   }
 
   async library(): Promise<LibraryState> {
-    const res = await this.fetchFn('/api/library')
-    return jsonOrThrow<LibraryState>(res)
+    const res = await this.fetchFn("/api/library");
+    return jsonOrThrow<LibraryState>(res);
   }
 
   async semanticSearch(
@@ -557,64 +587,77 @@ export class HttpApiClient implements ApiClient {
     tuning: SemanticTuning = {},
     signal?: AbortSignal,
   ): Promise<SemanticListing> {
-    const res = await this.fetchFn('/api/semantic', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
+    const res = await this.fetchFn("/api/semantic", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({ text, path, ...tuning }),
       signal,
-    })
-    return jsonOrThrow<SemanticListing>(res)
+    });
+    return jsonOrThrow<SemanticListing>(res);
   }
 
   async similar(
     model: string,
     k: number,
-    pool?: SemanticTuning['pool'],
+    pool?: SemanticTuning["pool"],
     signal?: AbortSignal,
   ): Promise<SimilarListing> {
-    const res = await this.fetchFn('/api/semantic/similar', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
+    const res = await this.fetchFn("/api/semantic/similar", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
       // `JSON.stringify` drops an `undefined` field, so an unset pool sends no
       // `pool` at all and the index's own applies — absence meaning the default
       // at every layer, the way `folderMatching` and the tuning already do.
       body: JSON.stringify({ path: model, k, pool }),
       signal,
-    })
-    return jsonOrThrow<SimilarListing>(res)
+    });
+    return jsonOrThrow<SimilarListing>(res);
   }
 
   async complete(prefix: string): Promise<string[]> {
-    const res = await this.fetchFn(`/api/complete?prefix=${encodeURIComponent(prefix)}`)
-    return jsonOrThrow<string[]>(res)
+    const res = await this.fetchFn(
+      `/api/complete?prefix=${encodeURIComponent(prefix)}`,
+    );
+    return jsonOrThrow<string[]>(res);
   }
 
   async peek(path: string, n?: number): Promise<DirEntry[]> {
     // Sent only when the caller names one: absence already means the server's
     // own default (4), so an ordinary sheet's request carries no `n` at all —
     // the same rule `folders` and the tuning fields follow.
-    const count = n !== undefined ? `&n=${n}` : ''
-    const res = await this.fetchFn(`/api/peek?path=${encodeURIComponent(path)}${count}`)
-    return jsonOrThrow<DirEntry[]>(res)
+    const count = n !== undefined ? `&n=${n}` : "";
+    const res = await this.fetchFn(
+      `/api/peek?path=${encodeURIComponent(path)}${count}`,
+    );
+    return jsonOrThrow<DirEntry[]>(res);
   }
 
   async overrides(path: string): Promise<ResolvedOverrides> {
-    const res = await this.fetchFn(`/api/overrides?path=${encodeURIComponent(path)}`)
-    return jsonOrThrow<ResolvedOverrides>(res)
+    const res = await this.fetchFn(
+      `/api/overrides?path=${encodeURIComponent(path)}`,
+    );
+    return jsonOrThrow<ResolvedOverrides>(res);
   }
 
   async credits(): Promise<CreditedKit[]> {
-    const res = await this.fetchFn('/api/credits')
-    return jsonOrThrow<CreditedKit[]>(res)
+    const res = await this.fetchFn("/api/credits");
+    return jsonOrThrow<CreditedKit[]>(res);
   }
 
   async fetchModel(path: string): Promise<ArrayBuffer> {
-    const res = await this.fetchFn(`/api/file?path=${encodeURIComponent(path)}`)
-    if (!res.ok) throw await errorOf(res)
-    return res.arrayBuffer()
+    const res = await this.fetchFn(
+      `/api/file?path=${encodeURIComponent(path)}`,
+    );
+    if (!res.ok) throw await errorOf(res);
+    return res.arrayBuffer();
   }
 
-  async getThumb(path: string, mtime: number, ao = true, gen?: number): Promise<ThumbResult> {
+  async getThumb(
+    path: string,
+    mtime: number,
+    ao = true,
+    gen?: number,
+  ): Promise<ThumbResult> {
     // Appended only when off: absent already means the occluded render, so an
     // occlusion-on request is byte-identical to every request this client sent
     // before renders were keyed by occlusion (D2).
@@ -623,9 +666,9 @@ export class HttpApiClient implements ApiClient {
     // caller has one, so a client that has learned nothing yet sends exactly
     // the bytes it sent before this change and rides the validator tier.
     const res = await this.fetchFn(
-      `/api/thumb?path=${encodeURIComponent(path)}&mtime=${mtime}${ao ? '' : '&ao=off'}${gen !== undefined ? `&gen=${gen}` : ''}`,
-    )
-    const body = await jsonOrThrow<ThumbGetResponse>(res)
+      `/api/thumb?path=${encodeURIComponent(path)}&mtime=${mtime}${ao ? "" : "&ao=off"}${gen !== undefined ? `&gen=${gen}` : ""}`,
+    );
+    const body = await jsonOrThrow<ThumbGetResponse>(res);
     return {
       status: body.status,
       camera: body.camera,
@@ -636,50 +679,55 @@ export class HttpApiClient implements ApiClient {
       poseKey: body.poseKey,
       gen: body.gen,
       pngUrl: body.png !== undefined ? base64ToBlobUrl(body.png) : undefined,
-    }
+    };
   }
 
-  thumbImageUrl(path: string, mtime: number, ao: boolean, gen?: number): string {
-    return thumbImageUrl(path, mtime, ao, gen)
+  thumbImageUrl(
+    path: string,
+    mtime: number,
+    ao: boolean,
+    gen?: number,
+  ): string {
+    return thumbImageUrl(path, mtime, ao, gen);
   }
 
   async apps(): Promise<AppsReport> {
-    const res = await this.fetchFn('/api/apps')
-    return jsonOrThrow<AppsReport>(res)
+    const res = await this.fetchFn("/api/apps");
+    return jsonOrThrow<AppsReport>(res);
   }
 
   async features(): Promise<FeatureReport> {
-    const res = await this.fetchFn('/api/features')
-    return jsonOrThrow<FeatureReport>(res)
+    const res = await this.fetchFn("/api/features");
+    return jsonOrThrow<FeatureReport>(res);
   }
 
   async open(path: string, appId: string): Promise<void> {
-    const res = await this.fetchFn('/api/open', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
+    const res = await this.fetchFn("/api/open", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({ path, appId }),
-    })
-    await okOrThrow(res)
+    });
+    await okOrThrow(res);
   }
 
   async openWith(path: string): Promise<void> {
     // No `signal`, deliberately, and no timeout wrapped around it: the chooser
     // blocks in its own UI until the user picks or dismisses (L9). The reply is
     // the completion this client waits for.
-    const res = await this.fetchFn('/api/open-with', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
+    const res = await this.fetchFn("/api/open-with", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({ path }),
-    })
-    await okOrThrow(res)
+    });
+    await okOrThrow(res);
   }
 
   async putThumb(save: ThumbSave): Promise<ThumbPutResult> {
-    const write = withoutUnusableRender(save)
-    if (write === null) return { dropped: true }
-    const res = await this.fetchFn('/api/thumb', {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
+    const write = withoutUnusableRender(save);
+    if (write === null) return { dropped: true };
+    const res = await this.fetchFn("/api/thumb", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({
         path: write.path,
         mtime: write.mtime,
@@ -690,7 +738,12 @@ export class HttpApiClient implements ApiClient {
         // undefined ? … : undefined` this replaced collapsed both into absence,
         // so a reset's deletion never left the client (`bulk-thumbnail-jobs`
         // D3).
-        png: write.png === null ? null : write.png === undefined ? undefined : await blobToBase64(write.png),
+        png:
+          write.png === null
+            ? null
+            : write.png === undefined
+              ? undefined
+              : await blobToBase64(write.png),
         camera: write.camera,
         axis: write.axis,
         lighting: write.lighting,
@@ -700,20 +753,22 @@ export class HttpApiClient implements ApiClient {
         ao: write.ao,
         ifGen: write.ifGen,
       }),
-    })
+    });
     // A refused conditional write arrives here as any other failure does: an
     // `HttpError` carrying 412, which is what a bulk job branches on to count
     // the entry as skipped rather than failed (D4).
-    if (!res.ok) throw await errorOf(res)
+    if (!res.ok) throw await errorOf(res);
     // Parsed rather than discarded since this change: the answer carries the
     // generation this write landed under, which is what lets the writer key its
     // own next read. A body that is missing or unparseable is not a failed
     // write — an older server answers `{ok:true}` and nothing else — so it
     // degrades to "generation unknown", which is the validator tier.
-    const body = (await res.json().catch(() => ({}))) as { gen?: number }
+    const body = (await res.json().catch(() => ({}))) as { gen?: number };
     // `write !== save` is the identity check the helper's contract allows: it
     // returns the caller's own object untouched when the render is storable,
     // and a stripped copy when it is not.
-    return write === save ? { gen: body.gen } : { gen: body.gen, dropped: true }
+    return write === save
+      ? { gen: body.gen }
+      : { gen: body.gen, dropped: true };
   }
 }

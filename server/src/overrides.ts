@@ -12,15 +12,20 @@
  * from here so there is exactly one atomic-write implementation (D5).
  */
 
-import { mkdir, open, readFile, rename, unlink } from 'node:fs/promises'
-import { join } from 'node:path'
-import { renderableCredits } from '../../shared/credits'
-import type { CreditedKit, DirEntry, OverrideEntry, ResolvedOverrides } from '../../shared/types'
-import { MARKER_DIR, type Library, canonicalLibPath } from './library'
-import { joinVPath, parseVPath } from './vpath'
+import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
+import { join } from "node:path";
+import { renderableCredits } from "../../shared/credits";
+import type {
+  CreditedKit,
+  DirEntry,
+  OverrideEntry,
+  ResolvedOverrides,
+} from "../../shared/types";
+import { MARKER_DIR, type Library, canonicalLibPath } from "./library";
+import { joinVPath, parseVPath } from "./vpath";
 
 /** The store's file name, inside `MARKER_DIR` beside `library.json`. */
-export const STORE_FILE = 'overrides.json'
+export const STORE_FILE = "overrides.json";
 
 /**
  * The one format version this build reads. A file carrying anything else is
@@ -30,19 +35,19 @@ export const STORE_FILE = 'overrides.json'
  * silently dropping a corpus's credits is exactly the CC-BY compliance hole the
  * report exists to close (D1).
  */
-const VERSION = 1
+const VERSION = 1;
 
 /** The loaded store: canonical library path → the fields stored at that key. */
-export type OverrideStore = ReadonlyMap<string, OverrideEntry>
+export type OverrideStore = ReadonlyMap<string, OverrideEntry>;
 
 /** An absent, unreadable or unusable store — the answer is "no overrides". */
-const EMPTY: OverrideStore = new Map()
+const EMPTY: OverrideStore = new Map();
 
 /** The store file as it sits on disk, unknown fields and all. */
 export interface OverridesFile {
-  version: number
-  entries: Record<string, OverrideEntry>
-  [field: string]: unknown
+  version: number;
+  entries: Record<string, OverrideEntry>;
+  [field: string]: unknown;
 }
 
 /**
@@ -50,11 +55,11 @@ export interface OverridesFile {
  * default prints, which is what puts a malformed-store report beside the
  * `library <id> at <top>` startup line when `index.ts` loads eagerly (D1).
  */
-export type Report = (message: string) => void
+export type Report = (message: string) => void;
 
 const defaultReport: Report = (message) => {
-  console.warn(message)
-}
+  console.warn(message);
+};
 
 /**
  * The store spelling of a key read from the file, or why it has none.
@@ -72,19 +77,22 @@ const defaultReport: Report = (message) => {
  *   zip-root spelling could only ever disagree with it.
  */
 function storeKey(raw: string): { key: string } | { error: string } {
-  let canonical: string
+  let canonical: string;
   try {
-    canonical = canonicalLibPath(raw)
+    canonical = canonicalLibPath(raw);
   } catch (err) {
-    return { error: err instanceof Error ? err.message : 'not a library path' }
+    return { error: err instanceof Error ? err.message : "not a library path" };
   }
-  const { fsPath, entry } = parseVPath(canonical)
-  if (entry === undefined) return { key: canonical }
-  const trimmed = entry.endsWith('/') ? entry.slice(0, -1) : entry
-  if (trimmed === '') {
-    return { error: "an empty archive-entry half (`…!/`) is not a key; use the archive's own path" }
+  const { fsPath, entry } = parseVPath(canonical);
+  if (entry === undefined) return { key: canonical };
+  const trimmed = entry.endsWith("/") ? entry.slice(0, -1) : entry;
+  if (trimmed === "") {
+    return {
+      error:
+        "an empty archive-entry half (`…!/`) is not a key; use the archive's own path",
+    };
   }
-  return { key: joinVPath(fsPath, trimmed) }
+  return { key: joinVPath(fsPath, trimmed) };
 }
 
 /**
@@ -100,43 +108,55 @@ export async function loadOverrides(
   top: string,
   report: Report = defaultReport,
 ): Promise<OverrideStore> {
-  const file = join(top, MARKER_DIR, STORE_FILE)
-  let text: string
+  const file = join(top, MARKER_DIR, STORE_FILE);
+  let text: string;
   try {
-    text = await readFile(file, 'utf8')
+    text = await readFile(file, "utf8");
   } catch {
-    return EMPTY
+    return EMPTY;
   }
-  let parsed: unknown
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(text)
+    parsed = JSON.parse(text);
   } catch {
-    report(`overrides: ${file} is not valid JSON — ignored`)
-    return EMPTY
+    report(`overrides: ${file} is not valid JSON — ignored`);
+    return EMPTY;
   }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    report(`overrides: ${file} is not an object — ignored`)
-    return EMPTY
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    report(`overrides: ${file} is not an object — ignored`);
+    return EMPTY;
   }
-  const { version, entries } = parsed as Record<string, unknown>
+  const { version, entries } = parsed as Record<string, unknown>;
   if (version !== VERSION) {
-    report(`overrides: ${file} has unknown version ${JSON.stringify(version)} — ignored`)
-    return EMPTY
+    report(
+      `overrides: ${file} has unknown version ${JSON.stringify(version)} — ignored`,
+    );
+    return EMPTY;
   }
-  if (typeof entries !== 'object' || entries === null || Array.isArray(entries)) {
-    report(`overrides: ${file} has no entries object — ignored`)
-    return EMPTY
+  if (
+    typeof entries !== "object" ||
+    entries === null ||
+    Array.isArray(entries)
+  ) {
+    report(`overrides: ${file} has no entries object — ignored`);
+    return EMPTY;
   }
-  const store = new Map<string, OverrideEntry>()
-  for (const [raw, value] of Object.entries(entries as Record<string, unknown>)) {
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-      report(`overrides: ${file}: ignoring key ${JSON.stringify(raw)} — its value is not an object`)
-      continue
+  const store = new Map<string, OverrideEntry>();
+  for (const [raw, value] of Object.entries(
+    entries as Record<string, unknown>,
+  )) {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      report(
+        `overrides: ${file}: ignoring key ${JSON.stringify(raw)} — its value is not an object`,
+      );
+      continue;
     }
-    const spelled = storeKey(raw)
-    if ('error' in spelled) {
-      report(`overrides: ${file}: ignoring key ${JSON.stringify(raw)} — ${spelled.error}`)
-      continue
+    const spelled = storeKey(raw);
+    if ("error" in spelled) {
+      report(
+        `overrides: ${file}: ignoring key ${JSON.stringify(raw)} — ${spelled.error}`,
+      );
+      continue;
     }
     // Fields the app will render are validated to be strings, and a bad one is
     // dropped and reported while the rest of the entry is kept — the format
@@ -145,15 +165,23 @@ export async function loadOverrides(
     // handed to React as a child, unmounting the grid. Dropping the field, not
     // the entry, is the loader's usual posture: a broken piece must not take
     // the rest of a kit's metadata with it, and must not be silent either (D1).
-    const entry = { ...(value as OverrideEntry) }
-    if (entry.name !== undefined && typeof entry.name !== 'string') {
-      report(`overrides: ${file}: key ${JSON.stringify(raw)} — dropping non-string name`)
-      delete entry.name
+    const entry = { ...(value as OverrideEntry) };
+    if (entry.name !== undefined && typeof entry.name !== "string") {
+      report(
+        `overrides: ${file}: key ${JSON.stringify(raw)} — dropping non-string name`,
+      );
+      delete entry.name;
     }
     if (entry.credits !== undefined) {
-      if (typeof entry.credits !== 'object' || entry.credits === null || Array.isArray(entry.credits)) {
-        report(`overrides: ${file}: key ${JSON.stringify(raw)} — dropping non-object credits`)
-        delete entry.credits
+      if (
+        typeof entry.credits !== "object" ||
+        entry.credits === null ||
+        Array.isArray(entry.credits)
+      ) {
+        report(
+          `overrides: ${file}: key ${JSON.stringify(raw)} — dropping non-object credits`,
+        );
+        delete entry.credits;
       } else {
         // An allow-list, not a deny-list: what the app resolves and serves is
         // exactly the six string fields, built fresh — so an unknown or
@@ -163,31 +191,33 @@ export async function loadOverrides(
         // reads raw JSON); they just do not resolve — which is what lets a
         // store written for a newer build ship under an older one
         // (`credits-completion` D1/D6).
-        const held = entry.credits as Record<string, unknown>
-        const clean: Record<string, string> = {}
+        const held = entry.credits as Record<string, unknown>;
+        const clean: Record<string, string> = {};
         for (const field of [
-          'author',
-          'authorUrl',
-          'license',
-          'licenseUrl',
-          'modified',
-          'sourceUrl',
+          "author",
+          "authorUrl",
+          "license",
+          "licenseUrl",
+          "modified",
+          "sourceUrl",
         ] as const) {
-          const value = held[field]
-          if (typeof value === 'string') clean[field] = value
+          const value = held[field];
+          if (typeof value === "string") clean[field] = value;
           else if (value !== undefined) {
-            report(`overrides: ${file}: key ${JSON.stringify(raw)} — dropping non-string credits.${field}`)
+            report(
+              `overrides: ${file}: key ${JSON.stringify(raw)} — dropping non-string credits.${field}`,
+            );
           }
         }
-        entry.credits = clean
+        entry.credits = clean;
       }
     }
     // Two spellings that canonicalise to one key are one key, and the last one
     // read wins. Deliberately unreported: nothing is lost that the file did not
     // already say twice, and a line about it would be noise on every load.
-    store.set(spelled.key, entry)
+    store.set(spelled.key, entry);
   }
-  return store
+  return store;
 }
 
 /**
@@ -210,22 +240,22 @@ export async function loadOverrides(
  * archive file's path, which is what makes it resolve exactly as that path does.
  */
 function ancestorKeys(libPath: string): string[] {
-  const { fsPath, entry } = parseVPath(libPath)
-  const keys: string[] = ['/']
-  let acc = ''
-  for (const segment of fsPath.split('/')) {
-    if (segment === '') continue
-    acc = `${acc}/${segment}`
-    keys.push(acc)
+  const { fsPath, entry } = parseVPath(libPath);
+  const keys: string[] = ["/"];
+  let acc = "";
+  for (const segment of fsPath.split("/")) {
+    if (segment === "") continue;
+    acc = `${acc}/${segment}`;
+    keys.push(acc);
   }
-  if (entry === undefined || entry === '') return keys
-  let inner = ''
-  for (const segment of entry.split('/')) {
-    if (segment === '') continue
-    inner = inner === '' ? segment : `${inner}/${segment}`
-    keys.push(joinVPath(fsPath, inner))
+  if (entry === undefined || entry === "") return keys;
+  let inner = "";
+  for (const segment of entry.split("/")) {
+    if (segment === "") continue;
+    inner = inner === "" ? segment : `${inner}/${segment}`;
+    keys.push(joinVPath(fsPath, inner));
   }
-  return keys
+  return keys;
 }
 
 /**
@@ -247,9 +277,12 @@ function ancestorKeys(libPath: string): string[] {
  * path API here; unreachable through the routes, which run `canonicalLibPath`
  * first and 400 on the same error.
  */
-export function resolveOverrides(store: OverrideStore, libPath: string): ResolvedOverrides {
-  const keys = ancestorKeys(libPath)
-  const resolved: ResolvedOverrides = {}
+export function resolveOverrides(
+  store: OverrideStore,
+  libPath: string,
+): ResolvedOverrides {
+  const keys = ancestorKeys(libPath);
+  const resolved: ResolvedOverrides = {};
   // The inheriting fields, assigned one by one rather than through a loop over
   // a field list: `credits` inherits because attribution genuinely covers
   // everything under the key it was written on, and `pose` so that a
@@ -260,14 +293,14 @@ export function resolveOverrides(store: OverrideStore, libPath: string): Resolve
   // that is not named here is preserved on disk by writers and ignored here;
   // that is what makes additive evolution need no version bump.
   for (const key of keys) {
-    const entry = store.get(key)
-    if (entry === undefined) continue
-    if (entry.credits !== undefined) resolved.credits = entry.credits
-    if (entry.pose !== undefined) resolved.pose = entry.pose
+    const entry = store.get(key);
+    if (entry === undefined) continue;
+    if (entry.credits !== undefined) resolved.credits = entry.credits;
+    if (entry.pose !== undefined) resolved.pose = entry.pose;
   }
-  const exact = store.get(keys[keys.length - 1]!)
-  if (exact?.name !== undefined) resolved.name = exact.name
-  return resolved
+  const exact = store.get(keys[keys.length - 1]!);
+  if (exact?.name !== undefined) resolved.name = exact.name;
+  return resolved;
 }
 
 /**
@@ -289,24 +322,31 @@ export function resolveOverrides(store: OverrideStore, libPath: string): Resolve
  * is stable across requests without sorting, and the order is the corpus's own.
  */
 export function listCredits(store: OverrideStore): CreditedKit[] {
-  const listed: CreditedKit[] = []
+  const listed: CreditedKit[] = [];
   for (const [path, entry] of store) {
-    const credits = renderableCredits(entry.credits)
-    if (credits === null) continue
+    const credits = renderableCredits(entry.credits);
+    if (credits === null) continue;
     // `name` only when the key stores one: an `undefined` written into the
     // object would ride the wire as a key `JSON.stringify` drops anyway, and
     // the type says the field is absent rather than empty.
-    listed.push(entry.name === undefined ? { path, credits } : { path, name: entry.name, credits })
+    listed.push(
+      entry.name === undefined
+        ? { path, credits }
+        : { path, name: entry.name, credits },
+    );
   }
-  return listed
+  return listed;
 }
 
 /**
  * The stored display name for an exact library path — a Map get, no I/O and no
  * prefix walk, which is what makes it affordable per listing entry (D7).
  */
-export function displayNameOf(store: OverrideStore, libPath: string): string | undefined {
-  return store.get(libPath)?.name
+export function displayNameOf(
+  store: OverrideStore,
+  libPath: string,
+): string | undefined {
+  return store.get(libPath)?.name;
 }
 
 /**
@@ -324,11 +364,14 @@ export function displayNameOf(store: OverrideStore, libPath: string): string | u
  * tile and nothing beneath it. An empty store touches nothing, so a library
  * without one emits byte-identical listings.
  */
-export function applyDisplayNames(entries: DirEntry[], store: OverrideStore): void {
-  if (store.size === 0) return
+export function applyDisplayNames(
+  entries: DirEntry[],
+  store: OverrideStore,
+): void {
+  if (store.size === 0) return;
   for (const entry of entries) {
-    const name = displayNameOf(store, entry.path)
-    if (name !== undefined) entry.displayName = name
+    const name = displayNameOf(store, entry.path);
+    if (name !== undefined) entry.displayName = name;
     // A dir entry may carry its contact sheet inline (`listing-tree-cache`
     // 6.3's preview annotation), and those cells are model tiles the client
     // labels exactly like the models beside their folder — `displayName ??
@@ -336,7 +379,7 @@ export function applyDisplayNames(entries: DirEntry[], store: OverrideStore): vo
     // purpose ("never how they were labelled on one request"), so the naming
     // pass is this one, here, or a carried sheet shows the raw filename where
     // a fresh `/api/peek` answer shows the stored name (288f55a's review).
-    if (entry.preview !== undefined) applyDisplayNames(entry.preview, store)
+    if (entry.preview !== undefined) applyDisplayNames(entry.preview, store);
   }
 }
 
@@ -354,30 +397,36 @@ export function applyDisplayNames(entries: DirEntry[], store: OverrideStore): vo
  * can live on (exFAT, notably) supports it, and a store that survives to the
  * page cache is the same store either way.
  */
-export async function writeOverrides(top: string, file: OverridesFile): Promise<void> {
-  const dir = join(top, MARKER_DIR)
-  await mkdir(dir, { recursive: true })
-  const target = join(dir, STORE_FILE)
+export async function writeOverrides(
+  top: string,
+  file: OverridesFile,
+): Promise<void> {
+  const dir = join(top, MARKER_DIR);
+  await mkdir(dir, { recursive: true });
+  const target = join(dir, STORE_FILE);
   // pid + ms alone can collide (two writes in one tick of one process); the
   // random suffix cannot, and a stray loser is dot-prefixed and cleaned below.
-  const temp = join(dir, `.${STORE_FILE}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`)
+  const temp = join(
+    dir,
+    `.${STORE_FILE}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`,
+  );
   try {
-    const handle = await open(temp, 'w')
+    const handle = await open(temp, "w");
     try {
-      await handle.writeFile(`${JSON.stringify(file, null, 2)}\n`, 'utf8')
-      await handle.sync()
+      await handle.writeFile(`${JSON.stringify(file, null, 2)}\n`, "utf8");
+      await handle.sync();
     } finally {
-      await handle.close()
+      await handle.close();
     }
-    await rename(temp, target)
+    await rename(temp, target);
   } catch (err) {
-    await unlink(temp).catch(() => undefined)
-    throw err
+    await unlink(temp).catch(() => undefined);
+    throw err;
   }
-  const dirHandle = await open(dir, 'r').catch(() => null)
+  const dirHandle = await open(dir, "r").catch(() => null);
   if (dirHandle !== null) {
-    await dirHandle.sync().catch(() => undefined)
-    await dirHandle.close().catch(() => undefined)
+    await dirHandle.sync().catch(() => undefined);
+    await dirHandle.close().catch(() => undefined);
   }
 }
 
@@ -387,7 +436,7 @@ export interface OverrideHolder {
    * The store for the library as it stands right now — empty while the library
    * is not ready, loaded once per resolved library otherwise.
    */
-  store(): Promise<OverrideStore>
+  store(): Promise<OverrideStore>;
 }
 
 /**
@@ -419,28 +468,29 @@ export function createOverrideHolder(
   library: Library,
   report: Report = defaultReport,
 ): OverrideHolder {
-  let held: { id: string; top: string; store: OverrideStore } | undefined
-  let pending: Promise<OverrideStore> | undefined
+  let held: { id: string; top: string; store: OverrideStore } | undefined;
+  let pending: Promise<OverrideStore> | undefined;
 
   async function current(): Promise<OverrideStore> {
-    const state = await library.state()
-    if (state.state !== 'ready') return EMPTY
+    const state = await library.state();
+    if (state.state !== "ready") return EMPTY;
     // The top off `realTop()` rather than off the state: the state's own `top`
     // is optional on the wire, since a deployment may withhold it (D11), while
     // the library this holder is built over always knows it — and `realTop()`
     // is that same value, already narrowed to a ready library.
-    const top = library.realTop()
-    if (held !== undefined && held.id === state.id && held.top === top) return held.store
-    const store = await loadOverrides(top, report)
-    held = { id: state.id, top, store }
-    return store
+    const top = library.realTop();
+    if (held !== undefined && held.id === state.id && held.top === top)
+      return held.store;
+    const store = await loadOverrides(top, report);
+    held = { id: state.id, top, store };
+    return store;
   }
 
   return {
     store() {
       return (pending ??= current().finally(() => {
-        pending = undefined
-      }))
+        pending = undefined;
+      }));
     },
-  }
+  };
 }

@@ -9,16 +9,16 @@
  * abandons them where they stand — a `localStorage` entry costs nothing and
  * being unable to read it is the point.
  */
-const KEY = 'model-browser:recents:v2'
-const LAST_KEY = 'model-browser:last-path:v2'
-const MAX = 10
+const KEY = "model-browser:recents:v2";
+const LAST_KEY = "model-browser:last-path:v2";
+const MAX = 10;
 
 export function getRecents(): string[] {
   try {
-    const raw = localStorage.getItem(KEY)
-    return raw !== null ? (JSON.parse(raw) as string[]) : []
+    const raw = localStorage.getItem(KEY);
+    return raw !== null ? (JSON.parse(raw) as string[]) : [];
   } catch {
-    return []
+    return [];
   }
 }
 
@@ -31,7 +31,7 @@ export function getRecents(): string[] {
  * afterwards.
  */
 export function pushRecent(path: string): void {
-  const list = [path, ...getRecents().filter((p) => p !== path)].slice(0, MAX)
-  localStorage.setItem(KEY, JSON.stringify(list))
-  localStorage.setItem(LAST_KEY, path)
+  const list = [path, ...getRecents().filter((p) => p !== path)].slice(0, MAX);
+  localStorage.setItem(KEY, JSON.stringify(list));
+  localStorage.setItem(LAST_KEY, path);
 }

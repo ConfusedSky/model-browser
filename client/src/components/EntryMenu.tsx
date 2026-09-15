@@ -1,5 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { AppRef, OrbitAxis } from '../../../shared/types'
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { AppRef, OrbitAxis } from "../../../shared/types";
 import {
   AXIS_CAPTION_CLASS,
   AXIS_DIVIDER_CLASS,
@@ -17,7 +17,7 @@ import {
   isAxisNegated,
   negatedAxis,
   type EntryCommand,
-} from '../lib/entryActions'
+} from "../lib/entryActions";
 
 /**
  * A context menu raised on a grid tile.
@@ -31,9 +31,9 @@ import {
  * never sets.
  */
 interface Props {
-  x: number
-  y: number
-  commands: EntryCommand[]
+  x: number;
+  y: number;
+  commands: EntryCommand[];
   /**
    * The orbit-axis group (6.7), or `null` where it is not offered — a container
    * tile, or the **lightbox**, which shows the live picker instead. App decides
@@ -56,7 +56,7 @@ interface Props {
    * (`−Z` then `X` is `−X`), `flip` negates. `entryActions` holds both the rules
    * and the class strings so the two surfaces cannot drift apart.
    */
-  axis?: { current: OrbitAxis; onChoose: (axis: OrbitAxis) => void } | null
+  axis?: { current: OrbitAxis; onChoose: (axis: OrbitAxis) => void } | null;
   /**
    * The applications this model's type is associated with (open-in-slicer L3),
    * default first, or `null` where the row is not offered — a container tile, a
@@ -73,13 +73,13 @@ interface Props {
    * and one more crossing rule, which is the whole argument for pills over a
    * submenu holding for a group whose length the registry decides.
    */
-  openIn?: { apps: AppRef[]; onChoose: (appId: string) => void } | null
-  onChoose: (command: EntryCommand) => void
-  onClose: () => void
+  openIn?: { apps: AppRef[]; onChoose: (appId: string) => void } | null;
+  onChoose: (command: EntryCommand) => void;
+  onClose: () => void;
 }
 
 /** Margin between the menu and the window edge. */
-const EDGE = 6
+const EDGE = 6;
 
 /**
  * One menu item's look: a full-width, square-cornered row that fills on hover
@@ -94,14 +94,14 @@ const EDGE = 6
  * an indirection and nothing else.
  */
 export const MENU_ITEM_CLASS =
-  'block w-full px-3 py-1.5 text-left hover:bg-zinc-800 focus:bg-zinc-800 focus:outline-none'
+  "block w-full px-3 py-1.5 text-left hover:bg-zinc-800 focus:bg-zinc-800 focus:outline-none";
 
 /**
  * The axis pills carry their own focus mark, which the picker in the lightbox
  * has no need of: there, focus is wherever the pointer left it, while here the
  * arrow keys move it and it has to be visible doing so.
  */
-const FOCUS_RING = 'focus:outline-none focus:ring-1 focus:ring-sky-500'
+const FOCUS_RING = "focus:outline-none focus:ring-1 focus:ring-sky-500";
 
 /**
  * Keep the whole menu on screen (R2's "all of its items are visible"). Pure and
@@ -123,7 +123,7 @@ export function clampToViewport(
   return {
     left: Math.max(EDGE, Math.min(x, vw - w - EDGE)),
     top: Math.max(EDGE, Math.min(y, vh - h - EDGE)),
-  }
+  };
 }
 
 export default function EntryMenu({
@@ -135,8 +135,8 @@ export default function EntryMenu({
   onChoose,
   onClose,
 }: Props) {
-  const ref = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState({ left: x, top: y })
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ left: x, top: y });
 
   // Every focusable button, **pill rows first**, in DOM order — which is what
   // `focused` indexes and what the focus effect below reads back out of the DOM.
@@ -144,22 +144,24 @@ export default function EntryMenu({
   // is as long as the registry says, which is the generalization this arithmetic
   // grew for (open-in-slicer L10): one group was a constant, two — the second of
   // no fixed length — is a boundary between them.
-  const axisCount = axis === null ? 0 : AXIS_LETTERS.length + 1
-  const openInCount = openIn === null ? 0 : openIn.apps.length
+  const axisCount = axis === null ? 0 : AXIS_LETTERS.length + 1;
+  const openInCount = openIn === null ? 0 : openIn.apps.length;
   /** Where the pills end and the commands begin — the menu's one index seam. */
-  const pillCount = axisCount + openInCount
-  const count = pillCount + commands.length
+  const pillCount = axisCount + openInCount;
+  const count = pillCount + commands.length;
   // Entering the axis group lands on the **letter** in force — the analogue of
   // the old land-on-the-marked-spindle rule now that the sign is a fourth
   // button.
   const currentAxisRow =
-    axis === null ? 0 : Math.max(0, AXIS_LETTERS.indexOf(axisLetter(axis.current)))
+    axis === null
+      ? 0
+      : Math.max(0, AXIS_LETTERS.indexOf(axisLetter(axis.current)));
 
   // The menu opens on its first *command*, not on the pill rows above it: the
   // commands are what the menu is for, and the groups are properties of the
   // model shown alongside them. `pillCount` is that index, and 0 when neither
   // group is offered.
-  const [focused, setFocused] = useState(pillCount)
+  const [focused, setFocused] = useState(pillCount);
 
   /**
    * One step of arrow navigation, with a landing rule per group. Both say the
@@ -180,12 +182,16 @@ export default function EntryMenu({
    * off the last.
    */
   function step(from: number, delta: number): number {
-    const next = (from + delta + count) % count
-    if (from >= axisCount && next < axisCount) return currentAxisRow
-    if ((from < axisCount || from >= pillCount) && next >= axisCount && next < pillCount) {
-      return axisCount
+    const next = (from + delta + count) % count;
+    if (from >= axisCount && next < axisCount) return currentAxisRow;
+    if (
+      (from < axisCount || from >= pillCount) &&
+      next >= axisCount &&
+      next < pillCount
+    ) {
+      return axisCount;
     }
-    return next
+    return next;
   }
 
   // Measure once mounted, then clamp: the height depends on how many commands
@@ -196,19 +202,29 @@ export default function EntryMenu({
   // buttons than the last one did — leaving the index past the end, pointing at
   // no button at all.
   useLayoutEffect(() => {
-    const el = ref.current
-    if (el === null) return
-    setFocused(pillCount)
-    const r = el.getBoundingClientRect()
-    setPos(clampToViewport(x, y, r.width, r.height, window.innerWidth, window.innerHeight))
-  }, [x, y, commands.length, axisCount, openInCount, pillCount])
+    const el = ref.current;
+    if (el === null) return;
+    setFocused(pillCount);
+    const r = el.getBoundingClientRect();
+    setPos(
+      clampToViewport(
+        x,
+        y,
+        r.width,
+        r.height,
+        window.innerWidth,
+        window.innerHeight,
+      ),
+    );
+  }, [x, y, commands.length, axisCount, openInCount, pillCount]);
 
   // Focus follows the arrow keys, so the menu owns the keyboard the moment it
   // is raised — which is also what makes its Escape the one that fires.
   useEffect(() => {
-    const el = ref.current?.querySelectorAll<HTMLButtonElement>('button')[focused]
-    el?.focus()
-  }, [focused])
+    const el =
+      ref.current?.querySelectorAll<HTMLButtonElement>("button")[focused];
+    el?.focus();
+  }, [focused]);
 
   // Escape and outside interaction, at the window, so they work wherever focus
   // happens to be. App's find control also closes on Escape; it stands down
@@ -216,27 +232,28 @@ export default function EntryMenu({
   // already stands down for a mounted viewer).
   useEffect(() => {
     function onKey(e: KeyboardEvent): void {
-      if (e.key !== 'Escape') return
-      e.preventDefault()
-      onClose()
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      onClose();
     }
     function onDown(e: Event): void {
-      if (e.target instanceof Node && ref.current?.contains(e.target) === true) return
-      onClose()
+      if (e.target instanceof Node && ref.current?.contains(e.target) === true)
+        return;
+      onClose();
     }
-    window.addEventListener('keydown', onKey)
-    window.addEventListener('pointerdown', onDown, true)
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("pointerdown", onDown, true);
     // A secondary press elsewhere raises the next menu; this one must not
     // survive it.
-    window.addEventListener('contextmenu', onDown, true)
-    window.addEventListener('wheel', onDown, true)
+    window.addEventListener("contextmenu", onDown, true);
+    window.addEventListener("wheel", onDown, true);
     return () => {
-      window.removeEventListener('keydown', onKey)
-      window.removeEventListener('pointerdown', onDown, true)
-      window.removeEventListener('contextmenu', onDown, true)
-      window.removeEventListener('wheel', onDown, true)
-    }
-  }, [onClose])
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("contextmenu", onDown, true);
+      window.removeEventListener("wheel", onDown, true);
+    };
+  }, [onClose]);
 
   return (
     <div
@@ -250,18 +267,18 @@ export default function EntryMenu({
       // agrees with where `clampToViewport` will put it.
       className="fixed z-menu min-w-44 max-w-[calc(100vw-12px)] rounded-lg border border-zinc-700 bg-zinc-900 py-1 text-sm text-zinc-200 shadow-xl"
       onKeyDown={(e) => {
-        if (e.key === 'ArrowDown') {
-          e.preventDefault()
-          setFocused((i) => step(i, 1))
-        } else if (e.key === 'ArrowUp') {
-          e.preventDefault()
-          setFocused((i) => step(i, -1))
-        } else if (e.key === 'Home') {
-          e.preventDefault()
-          setFocused(0)
-        } else if (e.key === 'End') {
-          e.preventDefault()
-          setFocused(count - 1)
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setFocused((i) => step(i, 1));
+        } else if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setFocused((i) => step(i, -1));
+        } else if (e.key === "Home") {
+          e.preventDefault();
+          setFocused(0);
+        } else if (e.key === "End") {
+          e.preventDefault();
+          setFocused(count - 1);
         }
       }}
     >
@@ -277,10 +294,14 @@ export default function EntryMenu({
         // on or off (`menuitemcheckbox`). The split costs the keyboard model
         // nothing — `step` counts buttons and never reads a role — so there was
         // no reason to flatten a real distinction to save it.
-        <div role="group" aria-label="Orbit axis" className={`mx-2 mb-1 ${AXIS_GROUP_CLASS}`}>
+        <div
+          role="group"
+          aria-label="Orbit axis"
+          className={`mx-2 mb-1 ${AXIS_GROUP_CLASS}`}
+        >
           <span className={AXIS_CAPTION_CLASS}>axis</span>
           {AXIS_LETTERS.map((letter) => {
-            const active = axisLetter(axis.current) === letter
+            const active = axisLetter(axis.current) === letter;
             return (
               <button
                 key={letter}
@@ -291,12 +312,14 @@ export default function EntryMenu({
                 // The sign in force rides along: picking `X` under `−Z` means
                 // `−X`. Re-picking the active letter therefore reproduces the
                 // spindle in force, which `setOrbitAxis` already declines.
-                onClick={() => axis.onChoose(axisWithLetter(axis.current, letter))}
+                onClick={() =>
+                  axis.onChoose(axisWithLetter(axis.current, letter))
+                }
                 className={`${axisPillClass(active)} ${FOCUS_RING}`}
               >
                 {letter.toUpperCase()}
               </button>
-            )
+            );
           })}
           <span className={AXIS_DIVIDER_CLASS} />
           <button
@@ -321,7 +344,11 @@ export default function EntryMenu({
         // `data-command` for the same honesty — they are not commands from the
         // table, and a surface reading the menu's command rows must not find
         // them there.
-        <div role="group" aria-label="Open in" className={`mx-2 mb-1 ${OPEN_IN_GROUP_CLASS}`}>
+        <div
+          role="group"
+          aria-label="Open in"
+          className={`mx-2 mb-1 ${OPEN_IN_GROUP_CLASS}`}
+        >
           <span className={OPEN_IN_CAPTION_CLASS}>{OPEN_IN_CAPTION}</span>
           {openIn.apps.map((app) => (
             <button
@@ -354,5 +381,5 @@ export default function EntryMenu({
         </button>
       ))}
     </div>
-  )
+  );
 }

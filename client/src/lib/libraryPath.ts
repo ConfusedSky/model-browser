@@ -25,14 +25,14 @@
  * path opens with a slash, so a `top` that closes with one would double it.
  */
 export function expandLibraryPath(top: string | null, path: string): string {
-  if (top === null) return path
-  const base = top.endsWith('/') ? top.slice(0, -1) : top
-  const sep = path.indexOf('!/')
-  const fs = sep === -1 ? path : path.slice(0, sep)
-  const entry = sep === -1 ? '' : path.slice(sep)
+  if (top === null) return path;
+  const base = top.endsWith("/") ? top.slice(0, -1) : top;
+  const sep = path.indexOf("!/");
+  const fs = sep === -1 ? path : path.slice(0, sep);
+  const entry = sep === -1 ? "" : path.slice(sep);
   // The library's top is `/`, so it names the top itself rather than a child —
   // and a library mounted *at* the filesystem root leaves `base` empty, where
   // the answer is the root's own spelling and not the empty string.
-  const joined = fs === '/' ? base : base + fs
-  return (joined === '' ? '/' : joined) + entry
+  const joined = fs === "/" ? base : base + fs;
+  return (joined === "" ? "/" : joined) + entry;
 }

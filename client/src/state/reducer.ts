@@ -33,8 +33,8 @@ import type {
   IndexPose,
   IndexScore,
   SemanticScope,
-} from '../../../shared/types'
-import type { SearchKinds, SearchMode, Tuning } from '../lib/searchOptions'
+} from "../../../shared/types";
+import type { SearchKinds, SearchMode, Tuning } from "../lib/searchOptions";
 import {
   corpusOf,
   sameQuestion,
@@ -43,12 +43,12 @@ import {
   standInOf,
   type Prefs,
   type View,
-} from './view'
+} from "./view";
 
 /** Where a transition came from. It rides the action, lands on the result, and
  *  is what push-vs-replace, the lightbox history marker and localStorage writes
  *  derive from — never a shared "restoring" flag (R2). */
-export type Source = 'user' | 'restore'
+export type Source = "user" | "restore";
 
 export interface Inflight {
   /**
@@ -56,19 +56,19 @@ export interface Inflight {
    * `forView` against this, so a fetchless change mid-flight cannot make the
    * answer to this very question look like an answer to a different one.
    */
-  asked: View
+  asked: View;
   /**
    * The question this request will ASSERT when it lands. A fetchless view
    * change patches its field here as well as in `view`, so a concurrent
    * landing cannot revert it.
    */
-  view: View
+  view: View;
   /** The asking event. `requestRef` moved into state (R2). */
-  id: number
-  source: Source
+  id: number;
+  source: Source;
   /** A listing standing in for a deferred meaning query: it renders, but it
    *  does not rename the view. */
-  standIn?: true
+  standIn?: true;
   /**
    * The one follow-up a stale-marked listing asks for (`listing-tree-cache`
    * §5.2). An ordinary request in every other respect — no new transport (the
@@ -81,33 +81,33 @@ export interface Inflight {
    * (~5.6s cold). "Present cached results immediately" is the requirement; a
    * skeleton over them is the opposite of it.
    */
-  followUp?: true
+  followUp?: true;
 }
 
 /** What landed. The semantic residue is optional because only a meaning answer has it. */
 export interface Landed {
-  entries: DirEntry[]
-  truncated?: boolean
+  entries: DirEntry[];
+  truncated?: boolean;
   /**
    * The server answered from a cached tree it has not yet checked against the
    * filesystem (`DirListing.stale`, `listing-tree-cache` §5.1). Absent means
    * fresh-or-validated; it is never `false` on the wire.
    */
-  stale?: boolean
-  scope?: SemanticScope
-  weak?: boolean
-  capped?: boolean
+  stale?: boolean;
+  scope?: SemanticScope;
+  weak?: boolean;
+  capped?: boolean;
   /** How many cleared the floor before the count cut them, where the index
    *  reports it (D9). Absent from a plain listing and from an older index. */
-  matched?: number
-  poses?: Record<string, IndexPose | null>
+  matched?: number;
+  poses?: Record<string, IndexPose | null>;
   /**
    * What the index scored each tile at, keyed by path as `poses` is. Optional
    * for the same reason the rest of this residue is: only a scored answer has
    * it, and a landing replaces the whole result (R5), so a plain listing simply
    * arrives without one rather than having to clear the last one.
    */
-  scores?: Record<string, IndexScore>
+  scores?: Record<string, IndexScore>;
   /**
    * A similarity answer's subject: the model its neighbours were computed from,
    * which the index excludes from them by design. Beside `entries` rather than
@@ -118,16 +118,16 @@ export interface Landed {
    * No reducer logic of its own: a `landing` replaces the whole result (R5), so
    * an answer that carries no anchor simply has none.
    */
-  anchor?: DirEntry
+  anchor?: DirEntry;
 }
 
 export interface Result extends Landed {
   /** The question this answers — what the grid, the filters and the notices read. */
-  forView: View
-  source: Source
-  truncated: boolean
+  forView: View;
+  source: Source;
+  truncated: boolean;
   /** Normalised from the wire's `stale?: true` — the affordance reads it. */
-  stale: boolean
+  stale: boolean;
   /**
    * This answer IS the follow-up §5.2 asked for, which is the whole once-guard:
    * a follow-up that comes back stale again — the pass failed, or the root is
@@ -140,7 +140,7 @@ export interface Result extends Landed {
    * away and back gets its own single follow-up, where a boolean held beside
    * the state would have survived the navigation and suppressed it.
    */
-  followUp?: true
+  followUp?: true;
   /**
    * The asking event this answers — `Inflight.id`, kept past the landing that
    * cleared the request. `accepts` can compare a *response* against the
@@ -149,12 +149,12 @@ export interface Result extends Landed {
    * instead (pose-for-every-model D3). Monotonic per ask, so two landings never
    * share one and a wave cannot be taken for the wrong listing's.
    */
-  id: number
+  id: number;
 }
 
 export interface Failure {
-  forView: View
-  message: string
+  forView: View;
+  message: string;
 }
 
 /**
@@ -165,16 +165,16 @@ export interface Failure {
  * fire is that original asking resumed: a restored one must replace the entry
  * the link already sits on, not push a second one over it (R2).
  */
-export type Phase = 'idle' | { deferred: Source }
+export type Phase = "idle" | { deferred: Source };
 
 export interface SearchState {
-  view: View
-  inflight: Inflight | null
-  phase: Phase
-  result: Result | null
-  failure: Failure | null
-  index: IndexAvailability | null
-  drafts: { queryText: string }
+  view: View;
+  inflight: Inflight | null;
+  phase: Phase;
+  result: Result | null;
+  failure: Failure | null;
+  index: IndexAvailability | null;
+  drafts: { queryText: string };
   /**
    * The poses a *plain* listing's second wave supplied (pose-for-every-model
    * D3), or null where none has landed for the answer on screen.
@@ -191,17 +191,17 @@ export interface SearchState {
    * is still on screen until its successor lands, and dropping its poses there
    * would un-pose every tile of a grid that is about to be replaced anyway.
    */
-  listingPoses: Record<string, IndexPose | null> | null
+  listingPoses: Record<string, IndexPose | null> | null;
   /** Monotonic asking-event counter. */
-  lastId: number
+  lastId: number;
 }
 
 export type Action =
   /** Enter a directory: the request that clears the search, the filter and the
    *  link's options in one — all four re-seeded from this profile's own. */
-  | { type: 'navigate'; path: string; prefs: Prefs }
+  | { type: "navigate"; path: string; prefs: Prefs }
   /** Commit `drafts.queryText`. The corpus decides what that means. */
-  | { type: 'submit' }
+  | { type: "submit" }
   /**
    * Run a phrase the app supplied rather than one the user typed — the
    * introduction's example queries and its surprise action (`landing-page` D4).
@@ -210,20 +210,20 @@ export type Action =
    * The mode travels with it for the same reason: a chip is a meaning search,
    * and a `setMode` dispatched beside a `submit` would be a second transition.
    */
-  | { type: 'runQuery'; text: string; mode: SearchMode }
-  | { type: 'toggleFlat' }
-  | { type: 'setMode'; mode: SearchMode }
+  | { type: "runQuery"; text: string; mode: SearchMode }
+  | { type: "toggleFlat" }
+  | { type: "setMode"; mode: SearchMode }
   /** `run: false` records a value the debounce is still holding; `run: true`
    *  is the fire (or a click, which is the finished value already). */
-  | { type: 'setTuning'; tuning: Tuning; run: boolean }
-  | { type: 'setKinds'; kinds: SearchKinds }
-  | { type: 'setFolderMatching'; on: boolean }
+  | { type: "setTuning"; tuning: Tuning; run: boolean }
+  | { type: "setKinds"; kinds: SearchKinds }
+  | { type: "setFolderMatching"; on: boolean }
   /** Typing in the search input. Emptying it is how a committed subject is left. */
-  | { type: 'queryText'; text: string }
+  | { type: "queryText"; text: string }
   /** Show the neighbours of a model: a similarity subject over the location the
    *  user is standing in. The corpus decides what that means, exactly as it does
    *  for a phrase — including deferring it while the index warms (D4). */
-  | { type: 'similar'; model: string }
+  | { type: "similar"; model: string }
   /**
    * Re-shape the similarity view on screen: how many neighbours, and how the
    * index pools a model's per-view scores. The whole parameter set, never a
@@ -235,52 +235,61 @@ export type Action =
    * becoming four questions lives in the control that types it. So this
    * transition always asks — there is nothing to record.
    */
-  | { type: 'similarTuning'; k: number; pool?: Tuning['pool'] }
+  | { type: "similarTuning"; k: number; pool?: Tuning["pool"] }
   /** Leave whatever subject is committed — a phrase or a model — and re-ask the
    *  location's ordinary listing (D9). One transition for both kinds, which is
    *  what makes "the same dismissal" one implementation rather than two that
    *  resemble each other. */
-  | { type: 'clearSubject' }
+  | { type: "clearSubject" }
   /** The deferred banner's offer: run the held phrase against the name corpus. */
-  | { type: 'deferredToName' }
+  | { type: "deferredToName" }
   /** A history entry or a link. The caller resolves the URL into a whole View. */
-  | { type: 'restore'; view: View }
-  | { type: 'landing'; id: number; forView: View; landed: Landed }
-  | { type: 'failure'; id: number; forView: View; message: string }
-  | { type: 'index'; availability: IndexAvailability }
+  | { type: "restore"; view: View }
+  | { type: "landing"; id: number; forView: View; landed: Landed }
+  | { type: "failure"; id: number; forView: View; message: string }
+  | { type: "index"; availability: IndexAvailability }
   /** A user opened a lightbox. A *restored* one needs no action: its view came
    *  with the model already named, which is what tells the projection the
    *  entry is the browser's rather than one to mint (R3/R7). */
-  | { type: 'modelOpen'; path: string }
-  | { type: 'modelClose' }
+  | { type: "modelOpen"; path: string }
+  | { type: "modelClose" }
   /** A landed listing does not contain the model the URL named (R7's bridge 4). */
-  | { type: 'modelDrop' }
+  | { type: "modelDrop" }
   /**
    * The poses a plain listing's second wave answered with (pose-for-every-model
    * D3). `id` is the landing this wave was fired for — `Result.id` — and is
    * what drops one that answers about a view the user has left.
    */
-  | { type: 'listingPoses'; id: number; poses: Record<string, IndexPose | null> }
+  | {
+      type: "listingPoses";
+      id: number;
+      poses: Record<string, IndexPose | null>;
+    }
   /**
    * Ask the answer on screen again, because it said it was stale
    * (`listing-tree-cache` §5.2). `id` is the answer it is for — `Result.id`,
    * the `listingPoses` rule — so a dispatch about a listing the user has left
    * does nothing.
    */
-  | { type: 'revalidate'; id: number }
+  | { type: "revalidate"; id: number };
 
-export function initialState(view: View, index: IndexAvailability | null = null): SearchState {
+export function initialState(
+  view: View,
+  index: IndexAvailability | null = null,
+): SearchState {
   return {
     view,
     inflight: null,
-    phase: 'idle',
+    phase: "idle",
     result: null,
     failure: null,
     index,
-    drafts: { queryText: view.subject.kind === 'query' ? view.subject.text : '' },
+    drafts: {
+      queryText: view.subject.kind === "query" ? view.subject.text : "",
+    },
     listingPoses: null,
     lastId: 0,
-  }
+  };
 }
 
 /**
@@ -296,7 +305,7 @@ export function initialState(view: View, index: IndexAvailability | null = null)
 export function liveView(state: SearchState): View {
   return state.inflight !== null && state.inflight.standIn !== true
     ? state.inflight.view
-    : state.view
+    : state.view;
 }
 
 /** Ask `view`, from `source`. The asked view and the assert view start equal;
@@ -309,8 +318,12 @@ function ask(
   source: Source,
   kind?: { standIn?: true; followUp?: true },
 ): SearchState {
-  const id = state.lastId + 1
-  return { ...state, lastId: id, inflight: { asked: view, view, id, source, ...kind } }
+  const id = state.lastId + 1;
+  return {
+    ...state,
+    lastId: id,
+    inflight: { asked: view, view, id, source, ...kind },
+  };
 }
 
 /**
@@ -339,7 +352,7 @@ function patch(state: SearchState, fields: Partial<View>): SearchState {
       state.result === null
         ? null
         : { ...state.result, forView: { ...state.result.forView, ...fields } },
-  }
+  };
 }
 
 /**
@@ -351,14 +364,23 @@ function patch(state: SearchState, fields: Partial<View>): SearchState {
  * leaves a dead deferral behind to fire later.
  */
 function endDeferral(state: SearchState): SearchState {
-  if (state.phase === 'idle') return state
-  return { ...state, phase: 'idle', view: { ...state.view, subject: { kind: 'none' } } }
+  if (state.phase === "idle") return state;
+  return {
+    ...state,
+    phase: "idle",
+    view: { ...state.view, subject: { kind: "none" } },
+  };
 }
 
 /** Enter the deferred phase for `view`: asserted at dispatch (holding a
  *  question cannot fail), with the placeholder listing asked for at once —
  *  unless the probe has not answered at all, when nothing is asked. */
-function defer(state: SearchState, view: View, source: Source, probed: boolean): SearchState {
+function defer(
+  state: SearchState,
+  view: View,
+  source: Source,
+  probed: boolean,
+): SearchState {
   // The failure goes with the question that earned it: a deferral is a fresh
   // question, and leaving the old message standing would make `busy` read a
   // stale error as this deferral's own answer.
@@ -368,25 +390,29 @@ function defer(state: SearchState, view: View, source: Source, probed: boolean):
     view,
     inflight: null,
     failure: null,
-  }
-  return probed ? ask(held, standInOf(view), source, { standIn: true }) : held
+  };
+  return probed ? ask(held, standInOf(view), source, { standIn: true }) : held;
 }
 
 /** Whether the placeholder is already on screen — derived, not remembered
  *  (R6): the result answers a different question than the view asserts. */
 export function stoodIn(state: SearchState): boolean {
-  return state.result !== null && !sameView(state.result.forView, state.view)
+  return state.result !== null && !sameView(state.result.forView, state.view);
 }
 
 /** Whether a response belongs to the question in flight: the asking event and
  *  the question as asked must BOTH match (R2). Value equality alone would
  *  invert latest-wins for an identical re-submission — the stale answer would
  *  be taken, clearing `inflight`, and the fresh one rejected. */
-function accepts(state: SearchState, id: number, forView: View): state is SearchState & {
-  inflight: Inflight
+function accepts(
+  state: SearchState,
+  id: number,
+  forView: View,
+): state is SearchState & {
+  inflight: Inflight;
 } {
-  const f = state.inflight
-  return f !== null && f.id === id && sameView(forView, f.asked)
+  const f = state.inflight;
+  return f !== null && f.id === id && sameView(forView, f.asked);
 }
 
 /**
@@ -395,7 +421,10 @@ function accepts(state: SearchState, id: number, forView: View): state is Search
  * answer is a fresh object; without this the state changes identity on a probe
  * that changed nothing, and the whole app re-renders for it.
  */
-export function sameAvailability(a: IndexAvailability | null, b: IndexAvailability): boolean {
+export function sameAvailability(
+  a: IndexAvailability | null,
+  b: IndexAvailability,
+): boolean {
   return (
     a !== null &&
     a.state === b.state &&
@@ -404,19 +433,23 @@ export function sameAvailability(a: IndexAvailability | null, b: IndexAvailabili
     a.detail === b.detail &&
     (a.covers ?? []).length === (b.covers ?? []).length &&
     (a.covers ?? []).every((c, i) => c === (b.covers ?? [])[i])
-  )
+  );
 }
 
 /** Ask the committed query of whichever corpus owns it now — the one decision,
  *  shared by submit, the mode flip, the tuning re-run and restore (R6). */
-function askCommitted(state: SearchState, view: View, source: Source): SearchState {
+function askCommitted(
+  state: SearchState,
+  view: View,
+  source: Source,
+): SearchState {
   switch (corpusOf(view, state.index)) {
-    case 'defer':
-      return defer(endDeferral(state), view, source, true)
-    case 'wait':
-      return defer(endDeferral(state), view, source, false)
+    case "defer":
+      return defer(endDeferral(state), view, source, true);
+    case "wait":
+      return defer(endDeferral(state), view, source, false);
     default:
-      return ask(endDeferral(state), view, source)
+      return ask(endDeferral(state), view, source);
   }
 }
 
@@ -428,11 +461,15 @@ function askCommitted(state: SearchState, view: View, source: Source): SearchSta
  * the path a typed submit does or the two would drift.
  */
 function commitDraft(state: SearchState): SearchState {
-  const q = state.drafts.queryText.trim()
+  const q = state.drafts.queryText.trim();
   // A blank or whitespace-only submit is not a search — nothing to commit.
-  if (q === '') return state
-  const view: View = { ...liveView(state), subject: { kind: 'query', text: q }, model: null }
-  return askCommitted(state, view, 'user')
+  if (q === "") return state;
+  const view: View = {
+    ...liveView(state),
+    subject: { kind: "query", text: q },
+    model: null,
+  };
+  return askCommitted(state, view, "user");
 }
 
 /**
@@ -447,14 +484,18 @@ function commitDraft(state: SearchState): SearchState {
  * exit was emptying an input a similarity view has nothing in.
  */
 function leaveSubject(state: SearchState): SearchState {
-  const base = liveView(state)
-  if (base.subject.kind === 'none') return state
-  return ask(endDeferral(state), { ...base, subject: { kind: 'none' }, model: null }, 'user')
+  const base = liveView(state);
+  if (base.subject.kind === "none") return state;
+  return ask(
+    endDeferral(state),
+    { ...base, subject: { kind: "none" }, model: null },
+    "user",
+  );
 }
 
 export function reducer(state: SearchState, action: Action): SearchState {
   switch (action.type) {
-    case 'navigate': {
+    case "navigate": {
       // Navigation is itself the request that clears the search state — and
       // the options with it: a link's options governed the view it named, so
       // once the user leaves it their own preferences are in force again. All
@@ -464,20 +505,20 @@ export function reducer(state: SearchState, action: Action): SearchState {
         ...action.prefs,
         path: action.path,
         flat: liveView(state).flat,
-        subject: { kind: 'none' },
+        subject: { kind: "none" },
         model: null,
-      }
+      };
       return ask(
-        { ...endDeferral(state), drafts: { ...state.drafts, queryText: '' } },
+        { ...endDeferral(state), drafts: { ...state.drafts, queryText: "" } },
         view,
-        'user',
-      )
+        "user",
+      );
     }
 
-    case 'submit':
-      return commitDraft(state)
+    case "submit":
+      return commitDraft(state);
 
-    case 'runQuery':
+    case "runQuery":
       // The draft first — the input holds the phrase after the click, exactly
       // as it holds a typed one after Enter — then the mode as `'setMode'`
       // asserts it (a fetchless patch: nothing is committed yet for it to
@@ -489,9 +530,9 @@ export function reducer(state: SearchState, action: Action): SearchState {
           { ...state, drafts: { ...state.drafts, queryText: action.text } },
           { mode: action.mode },
         ),
-      )
+      );
 
-    case 'similar': {
+    case "similar": {
       // A model's neighbours, anchored at the location the user is standing in
       // — the anchor is what the dismissal returns to, and what tells two
       // similarity views of one model apart (`requestOf`). Routed through the
@@ -502,9 +543,9 @@ export function reducer(state: SearchState, action: Action): SearchState {
       // untouched view asks for.
       const view: View = {
         ...liveView(state),
-        subject: { kind: 'similar', model: action.model, k: SIMILAR_K },
+        subject: { kind: "similar", model: action.model, k: SIMILAR_K },
         model: null,
-      }
+      };
       // The draft goes with it, as it does on a `navigate`. Text left in the
       // input under a similarity view is a trap: it relates to nothing on
       // screen, and erasing it — the natural gesture for a stale box — runs the
@@ -513,19 +554,19 @@ export function reducer(state: SearchState, action: Action): SearchState {
       // erasing still dismisses by that one rule, so the delegation keeps a
       // user-visible instance rather than becoming unreachable.
       return askCommitted(
-        { ...state, drafts: { ...state.drafts, queryText: '' } },
+        { ...state, drafts: { ...state.drafts, queryText: "" } },
         view,
-        'user',
-      )
+        "user",
+      );
     }
 
-    case 'similarTuning': {
-      const base = liveView(state)
+    case "similarTuning": {
+      const base = liveView(state);
       // Only a similarity view has these to change. Under any other subject
       // the control is not on screen, and asserting a parameter set onto a
       // subject that reads none would put a `k` in the URL of a view that
       // cannot use it — the mode's own mistake, in a different slot.
-      if (base.subject.kind !== 'similar') return state
+      if (base.subject.kind !== "similar") return state;
       // A different parameter is a different question, so this re-asks by the
       // one corpus decision — deferring while the index warms exactly as a
       // fresh find-similar would, rather than firing at an index that cannot
@@ -534,80 +575,105 @@ export function reducer(state: SearchState, action: Action): SearchState {
         ...base,
         subject: { ...base.subject, k: action.k, pool: action.pool },
         model: null,
-      }
-      return askCommitted(state, view, 'user')
+      };
+      return askCommitted(state, view, "user");
     }
 
-    case 'clearSubject':
-      return leaveSubject(state)
+    case "clearSubject":
+      return leaveSubject(state);
 
-    case 'toggleFlat': {
+    case "toggleFlat": {
       // Deep results are flat-shaped regardless of the toggle, so pressing it
       // is an ordinary listing request and the subject stops being committed.
-      const base = liveView(state)
-      const view: View = { ...base, flat: !base.flat, subject: { kind: 'none' }, model: null }
-      return ask(endDeferral(state), view, 'user')
+      const base = liveView(state);
+      const view: View = {
+        ...base,
+        flat: !base.flat,
+        subject: { kind: "none" },
+        model: null,
+      };
+      return ask(endDeferral(state), view, "user");
     }
 
-    case 'setMode': {
-      const base = liveView(state)
+    case "setMode": {
+      const base = liveView(state);
       // The mode is the corpus a typed *phrase* goes to, so it re-asks only
       // when a phrase is what the view is about. With nothing committed it is
       // the next search's; under a similarity subject it is the next search's
       // too — that view neither reads the mode nor names it in its URL, so
       // re-asking would spend a request on a question that did not change.
-      if (base.subject.kind !== 'query') return patch(state, { mode: action.mode })
-      return askCommitted(state, { ...base, mode: action.mode, model: null }, 'user')
+      if (base.subject.kind !== "query")
+        return patch(state, { mode: action.mode });
+      return askCommitted(
+        state,
+        { ...base, mode: action.mode, model: null },
+        "user",
+      );
     }
 
-    case 'setTuning': {
-      const recorded = patch(state, { tuning: action.tuning })
-      if (!action.run) return recorded
-      const base = liveView(recorded)
+    case "setTuning": {
+      const recorded = patch(state, { tuning: action.tuning });
+      if (!action.run) return recorded;
+      const base = liveView(recorded);
       // Only a runnable meaning query re-runs. A tuning change never defers:
       // it shapes a query the index is already answering, and holding it would
       // turn a slider into a search nobody asked for.
-      if (base.subject.kind !== 'query' || corpusOf(base, recorded.index) !== 'meaning') {
-        return recorded
+      if (
+        base.subject.kind !== "query" ||
+        corpusOf(base, recorded.index) !== "meaning"
+      ) {
+        return recorded;
       }
-      return ask(recorded, { ...base, model: null }, 'user')
+      return ask(recorded, { ...base, model: null }, "user");
     }
 
     /** The kind option selects among entries already returned — no request. */
-    case 'setKinds':
-      return patch(state, { kinds: action.kinds })
+    case "setKinds":
+      return patch(state, { kinds: action.kinds });
 
-    case 'setFolderMatching': {
-      const base = liveView(state)
+    case "setFolderMatching": {
+      const base = liveView(state);
       // It decides which entries the *name corpus* returns, so a committed
       // query re-runs. A similarity view neither sends it nor names it, so it
       // records like a plain listing's does — the next search's setting.
-      if (base.subject.kind !== 'query') return patch(state, { folderMatching: action.on })
-      return askCommitted(state, { ...base, folderMatching: action.on, model: null }, 'user')
+      if (base.subject.kind !== "query")
+        return patch(state, { folderMatching: action.on });
+      return askCommitted(
+        state,
+        { ...base, folderMatching: action.on, model: null },
+        "user",
+      );
     }
 
-    case 'queryText': {
-      const typed: SearchState = { ...state, drafts: { ...state.drafts, queryText: action.text } }
-      if (action.text.trim() !== '') return typed
+    case "queryText": {
+      const typed: SearchState = {
+        ...state,
+        drafts: { ...state.drafts, queryText: action.text },
+      };
+      if (action.text.trim() !== "") return typed;
       // Emptying the input is how a committed subject is left — delegated to
       // the one rule (D9) rather than kept as a second copy of it, so the
       // dismiss control and this path cannot drift apart.
-      return leaveSubject(typed)
+      return leaveSubject(typed);
     }
 
-    case 'deferredToName': {
+    case "deferredToName": {
       // Offered rather than done for the user: substituting the corpus is only
       // honest when it was asked for, and the banner's button is the asking.
       // Only a phrase can be offered — a deferred similarity view has no text
       // to run against the name corpus, so its banner's only offer is the
       // dismiss.
-      const subject = state.view.subject
-      if (state.phase === 'idle' || subject.kind !== 'query') return state
-      return ask(endDeferral(state), { ...state.view, subject, mode: 'name', model: null }, 'user')
+      const subject = state.view.subject;
+      if (state.phase === "idle" || subject.kind !== "query") return state;
+      return ask(
+        endDeferral(state),
+        { ...state.view, subject, mode: "name", model: null },
+        "user",
+      );
     }
 
-    case 'restore': {
-      const v = action.view
+    case "restore": {
+      const v = action.view;
       // A history entry that asks the same question is not a different
       // listing: patch its request-irrelevant fields and keep the answer we
       // already have, or the one already on its way. Every field below is one
@@ -619,7 +685,10 @@ export function reducer(state: SearchState, action: Action): SearchState {
       // own rule; under `sameQuestion` they cannot differ in a way the request
       // sees — which for a similarity view is why its anchor is in the request
       // at all, since patching `path` is exactly what this branch cannot do.)
-      if ((state.result !== null || state.inflight !== null) && sameQuestion(v, liveView(state))) {
+      if (
+        (state.result !== null || state.inflight !== null) &&
+        sameQuestion(v, liveView(state))
+      ) {
         return {
           ...patch(state, {
             model: v.model,
@@ -637,7 +706,7 @@ export function reducer(state: SearchState, action: Action): SearchState {
           // this branch clears it; `patch` must not, or a lightbox open would
           // wipe the report of the failure it was opened in spite of.
           failure: null,
-        }
+        };
       }
       // The input shows the restored query — and nothing, for a subject that is
       // not one. The filter is not part of the view a URL names, so it is the
@@ -646,15 +715,15 @@ export function reducer(state: SearchState, action: Action): SearchState {
         ...state,
         drafts: {
           ...state.drafts,
-          queryText: v.subject.kind === 'query' ? v.subject.text : '',
+          queryText: v.subject.kind === "query" ? v.subject.text : "",
         },
-      }
-      return askCommitted(seeded, v, 'restore')
+      };
+      return askCommitted(seeded, v, "restore");
     }
 
-    case 'landing': {
-      if (!accepts(state, action.id, action.forView)) return state
-      const f = state.inflight
+    case "landing": {
+      if (!accepts(state, action.id, action.forView)) return state;
+      const f = state.inflight;
       const result: Result = {
         // The patched assert-view, never the action's `forView`: a fetchless
         // change made while this request was in flight belongs to the answer
@@ -678,21 +747,34 @@ export function reducer(state: SearchState, action: Action): SearchState {
         poses: action.landed.poses,
         scores: action.landed.scores,
         anchor: action.landed.anchor,
-      }
+      };
       // A stand-in renders without renaming the view: the URL still names the
       // meaning search, the deferral still waits, and the grid shows the
       // location's own contents meanwhile.
       if (f.standIn === true) {
-        return { ...state, inflight: null, failure: null, result, listingPoses: null }
+        return {
+          ...state,
+          inflight: null,
+          failure: null,
+          result,
+          listingPoses: null,
+        };
       }
       // `phase` is deliberately untouched: leaving a deferral is the job of the
       // transition that asked something else, and a landing that quietly tidied
       // the phase would hide a cancel path that forgot to.
-      return { ...state, view: f.view, inflight: null, failure: null, result, listingPoses: null }
+      return {
+        ...state,
+        view: f.view,
+        inflight: null,
+        failure: null,
+        result,
+        listingPoses: null,
+      };
     }
 
-    case 'failure': {
-      if (!accepts(state, action.id, action.forView)) return state
+    case "failure": {
+      if (!accepts(state, action.id, action.forView)) return state;
       // **A follow-up that fails says nothing** (`listing-tree-cache` §5.2,
       // round-2 finding 2). The request that failed asked for nothing the user
       // asked for: the listing it was going to correct is on screen, complete
@@ -710,45 +792,46 @@ export function reducer(state: SearchState, action: Action): SearchState {
       // said this was the outcome ("a failed follow-up is not retried either …
       // silence is the right outcome"); it was true of the retry and false of
       // the banner.
-      if (state.inflight.followUp === true) return { ...state, inflight: null }
+      if (state.inflight.followUp === true) return { ...state, inflight: null };
       // Keep the view, clear the optimism, say what went wrong. There is no
       // revert to get wrong: nothing advanced.
       return {
         ...state,
         inflight: null,
         failure: { forView: state.inflight.view, message: action.message },
-      }
+      };
     }
 
-    case 'index': {
+    case "index": {
       const known = sameAvailability(state.index, action.availability)
         ? state
-        : { ...state, index: action.availability }
-      if (known.phase === 'idle' || known.view.subject.kind === 'none') return known
-      const source = known.phase.deferred
-      if (action.availability.state === 'ready') {
+        : { ...state, index: action.availability };
+      if (known.phase === "idle" || known.view.subject.kind === "none")
+        return known;
+      const source = known.phase.deferred;
+      if (action.availability.state === "ready") {
         // The link finally doing what it named. It runs for the view that
         // deferred it and only that one — every other path out of the phase
         // cancels it, so there is no stale deferral left to fire. Under the
         // deferral's own provenance: this is the asking event resumed, so a
         // restored one still replaces rather than pushing.
-        return ask({ ...known, phase: 'idle' }, known.view, source)
+        return ask({ ...known, phase: "idle" }, known.view, source);
       }
       // Cannot answer yet: stand in with the location's own contents, once.
-      if (known.inflight !== null || stoodIn(known)) return known
-      return ask(known, standInOf(known.view), source, { standIn: true })
+      if (known.inflight !== null || stoodIn(known)) return known;
+      return ask(known, standInOf(known.view), source, { standIn: true });
     }
 
-    case 'modelOpen':
-      return patch(state, { model: action.path })
+    case "modelOpen":
+      return patch(state, { model: action.path });
 
-    case 'modelClose':
-      return patch(state, { model: null })
+    case "modelClose":
+      return patch(state, { model: null });
 
-    case 'modelDrop':
-      return patch(state, { model: null })
+    case "modelDrop":
+      return patch(state, { model: null });
 
-    case 'listingPoses': {
+    case "listingPoses": {
       // The wave belongs to the answer that fired it, and to no other: `id` is
       // the asking event the landing recorded, so a wave that comes back about
       // a view the user has left finds a different one and says nothing. The
@@ -758,23 +841,29 @@ export function reducer(state: SearchState, action: Action): SearchState {
       // The map is stored by reference and never rebuilt here: the sweep that
       // reads it re-runs on its identity, and a copy per action would walk the
       // whole grid for a value that did not change.
-      if (state.result === null || state.result.id !== action.id) return state
-      return { ...state, listingPoses: action.poses }
+      if (state.result === null || state.result.id !== action.id) return state;
+      return { ...state, listingPoses: action.poses };
     }
 
-    case 'revalidate': {
-      const r = state.result
+    case "revalidate": {
+      const r = state.result;
       // The answer this is about must still be the one on screen, it must have
       // said it was stale, and it must not itself be the follow-up — that last
       // clause is the whole of "one follow-up per landed stale answer". Without
       // it a server that keeps answering marked (a failed pass, a root still
       // unvalidated past the TTL) would be asked forever.
-      if (r === null || r.id !== action.id || r.stale !== true || r.followUp === true) return state
+      if (
+        r === null ||
+        r.id !== action.id ||
+        r.stale !== true ||
+        r.followUp === true
+      )
+        return state;
       // Never over a request the user is already waiting on. The effect that
       // dispatches this runs after the landing commits, which is exactly when a
       // click may have already asked for somewhere else — and re-asking the old
       // view here would throw that navigation away.
-      if (state.inflight !== null) return state
+      if (state.inflight !== null) return state;
       // Asked as the answer on screen was asked, including its stand-in-ness:
       // a placeholder listing under a deferred search is marked stale like any
       // other, and re-asking it without the flag would let the follow-up's
@@ -782,7 +871,7 @@ export function reducer(state: SearchState, action: Action): SearchState {
       return ask(state, r.forView, r.source, {
         followUp: true,
         ...(stoodIn(state) ? { standIn: true as const } : {}),
-      })
+      });
     }
   }
 }

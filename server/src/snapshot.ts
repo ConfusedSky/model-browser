@@ -34,14 +34,24 @@
  * the cost D3 exists to delete.
  */
 
-import { createHash } from 'node:crypto'
-import { mkdir, open, readFile, readdir, rename, rm, stat, unlink, utimes } from 'node:fs/promises'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
-import { envPositiveInt } from './env'
-import { type Library, LibraryError } from './library'
-import { VPathError } from './vpath'
-import type { ArchiveId, ZipDirCache, ZipEntry } from './zip'
+import { createHash } from "node:crypto";
+import {
+  mkdir,
+  open,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  stat,
+  unlink,
+  utimes,
+} from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { envPositiveInt } from "./env";
+import { type Library, LibraryError } from "./library";
+import { VPathError } from "./vpath";
+import type { ArchiveId, ZipDirCache, ZipEntry } from "./zip";
 
 /**
  * The on-disk format version. Bump on any change to what a stored file means;
@@ -53,16 +63,16 @@ import type { ArchiveId, ZipDirCache, ZipEntry } from './zip'
  * covers the case atomicity cannot — a file written whole by an older or newer
  * build, whose fields parse but no longer mean what this build thinks.
  */
-export const SNAPSHOT_VERSION = 1
+export const SNAPSHOT_VERSION = 1;
 
 /** The subdirectory, inside the per-library cache directory, that holds it all. */
-export const SNAPSHOT_DIR = 'snapshots'
+export const SNAPSHOT_DIR = "snapshots";
 
 /** The archive-directory layer's file name, one per library. */
-export const ARCHIVES_FILE = 'archives.json'
+export const ARCHIVES_FILE = "archives.json";
 
 /** Default bound for the whole store: 64 MB of metadata, per design D2. */
-const DEFAULT_CAP = 64 * 1024 ** 2
+const DEFAULT_CAP = 64 * 1024 ** 2;
 
 /**
  * How old a `.tmp` must be before the sweep reaps it. Sized against the race it
@@ -70,7 +80,7 @@ const DEFAULT_CAP = 64 * 1024 ** 2
  * milliseconds — and the startup sweep runs concurrently with the revalidation
  * pass's first saves, so anything younger than this is presumed live.
  */
-const TMP_REAP_MS = 60_000
+const TMP_REAP_MS = 60_000;
 
 /**
  * One entry as the walk saw it.
@@ -85,15 +95,15 @@ const TMP_REAP_MS = 60_000
  * rather than merely discouraged; stage 2 maps these to fresh `DirEntry`s.
  */
 export interface SnapshotEntry {
-  name: string
+  name: string;
   /** Library path — never a filesystem path, so a remount changes nothing. */
-  path: string
-  kind: 'dir' | 'zip' | 'model'
+  path: string;
+  kind: "dir" | "zip" | "model";
   /** Model format, present when kind === 'model'. */
-  format?: 'stl' | '3mf' | 'obj'
-  size: number
+  format?: "stl" | "3mf" | "obj";
+  size: number;
   /** mtime (ms). For zip entries this is the containing archive's mtime. */
-  mtime: number
+  mtime: number;
 }
 
 /**
@@ -105,44 +115,44 @@ export interface SnapshotEntry {
  */
 export interface SnapshotDir {
   /** Library path of the directory. */
-  path: string
+  path: string;
   /** Its `mtimeMs` when the walk read it. */
-  mtime: number
+  mtime: number;
 }
 
 /** A complete walk of one root, as stage 2 will serve and revalidate it. */
 export interface TreeSnapshot {
   /** The walked root's library path — the second half of the key. */
-  root: string
+  root: string;
   /** When the walk that produced this completed (ms since epoch). */
-  walkedAt: number
-  entries: SnapshotEntry[]
-  dirs: SnapshotDir[]
+  walkedAt: number;
+  entries: SnapshotEntry[];
+  dirs: SnapshotDir[];
 }
 
 /** A tree snapshot as it sits on disk. */
 interface TreeFile extends TreeSnapshot {
-  version: number
+  version: number;
   /**
    * The library this belongs to. Redundant with the directory it is filed in,
    * and kept anyway: it is what makes a snapshot self-describing, so a file
    * copied or restored into the wrong library's directory is rejected on its
    * own contents rather than served as that library's tree.
    */
-  library: string
+  library: string;
 }
 
 /** One archive's cached central directory, against the identity it was read at. */
 interface ArchiveRecord extends ArchiveId {
-  entries: ZipEntry[]
+  entries: ZipEntry[];
 }
 
 /** The archive layer as it sits on disk. */
 interface ArchivesFile {
-  version: number
-  library: string
+  version: number;
+  library: string;
   /** Keyed by the archive's library path (never its filesystem path). */
-  archives: Record<string, ArchiveRecord>
+  archives: Record<string, ArchiveRecord>;
 }
 
 /**
@@ -154,7 +164,7 @@ interface ArchivesFile {
  * shape exists to refuse.
  */
 function envCap(): number {
-  return envPositiveInt('MODEL_BROWSER_SNAPSHOT_CAP', DEFAULT_CAP)
+  return envPositiveInt("MODEL_BROWSER_SNAPSHOT_CAP", DEFAULT_CAP);
 }
 
 /**
@@ -170,29 +180,36 @@ function envCap(): number {
  * best-effort, because not every filesystem this library can live on (exFAT,
  * notably) supports it.
  */
-async function writeAtomic(dir: string, name: string, text: string): Promise<void> {
-  await mkdir(dir, { recursive: true })
-  const target = join(dir, name)
+async function writeAtomic(
+  dir: string,
+  name: string,
+  text: string,
+): Promise<void> {
+  await mkdir(dir, { recursive: true });
+  const target = join(dir, name);
   // pid + ms alone can collide (two writes in one tick of one process); the
   // random suffix cannot, and a stray loser is dot-prefixed and swept below.
-  const temp = join(dir, `.${name}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`)
+  const temp = join(
+    dir,
+    `.${name}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`,
+  );
   try {
-    const handle = await open(temp, 'w')
+    const handle = await open(temp, "w");
     try {
-      await handle.writeFile(text, 'utf8')
-      await handle.sync()
+      await handle.writeFile(text, "utf8");
+      await handle.sync();
     } finally {
-      await handle.close()
+      await handle.close();
     }
-    await rename(temp, target)
+    await rename(temp, target);
   } catch (err) {
-    await unlink(temp).catch(() => undefined)
-    throw err
+    await unlink(temp).catch(() => undefined);
+    throw err;
   }
-  const dirHandle = await open(dir, 'r').catch(() => null)
+  const dirHandle = await open(dir, "r").catch(() => null);
   if (dirHandle !== null) {
-    await dirHandle.sync().catch(() => undefined)
-    await dirHandle.close().catch(() => undefined)
+    await dirHandle.sync().catch(() => undefined);
+    await dirHandle.close().catch(() => undefined);
   }
 }
 
@@ -206,14 +223,15 @@ async function writeAtomic(dir: string, name: string, text: string): Promise<voi
  */
 export class SnapshotStore {
   /** The archive layer, loaded once per process and flushed on demand. */
-  private archives: Map<string, ArchiveRecord> | undefined
-  private archivesDirty = false
-  private loadingArchives: Promise<Map<string, ArchiveRecord>> | undefined
+  private archives: Map<string, ArchiveRecord> | undefined;
+  private archivesDirty = false;
+  private loadingArchives: Promise<Map<string, ArchiveRecord>> | undefined;
   /** The tail of the flush chain — see `flush`. Never rejects. */
-  private flushing: Promise<void> = Promise.resolve()
+  private flushing: Promise<void> = Promise.resolve();
 
   constructor(
-    readonly dir: string = process.env.MODEL_BROWSER_CACHE ?? join(homedir(), '.cache', 'model-browser'),
+    readonly dir: string = process.env.MODEL_BROWSER_CACHE ??
+      join(homedir(), ".cache", "model-browser"),
     readonly sizeCap: number = envCap(),
     private readonly library?: Library,
   ) {}
@@ -225,16 +243,16 @@ export class SnapshotStore {
    * has been looked at at all. `ThumbCache.entryDir` is the same shape.
    */
   private async storeDir(): Promise<string> {
-    if (this.library === undefined) return join(this.dir, SNAPSHOT_DIR)
-    await this.library.state()
-    return join(this.dir, this.library.id(), SNAPSHOT_DIR)
+    if (this.library === undefined) return join(this.dir, SNAPSHOT_DIR);
+    await this.library.state();
+    return join(this.dir, this.library.id(), SNAPSHOT_DIR);
   }
 
   /** The library's identity, or `''` for a library-less (test) store. */
   private async libraryId(): Promise<string> {
-    if (this.library === undefined) return ''
-    await this.library.state()
-    return this.library.id()
+    if (this.library === undefined) return "";
+    await this.library.state();
+    return this.library.id();
   }
 
   /**
@@ -242,7 +260,7 @@ export class SnapshotStore {
    * paths contain `/`, `!` and spaces, none of which survive being a file name.
    */
   private treeFile(root: string): string {
-    return `tree-${createHash('sha256').update(root).digest('hex')}.json`
+    return `tree-${createHash("sha256").update(root).digest("hex")}.json`;
   }
 
   /**
@@ -254,23 +272,29 @@ export class SnapshotStore {
    * use. `maintain` is what reaps them.
    */
   async load(root: string): Promise<TreeSnapshot | null> {
-    const dir = await this.storeDir()
-    const file = join(dir, this.treeFile(root))
-    const parsed = await readJson<TreeFile>(file)
-    if (parsed === null) return null
-    if (parsed.version !== SNAPSHOT_VERSION) return null
-    if (parsed.library !== (await this.libraryId())) return null
+    const dir = await this.storeDir();
+    const file = join(dir, this.treeFile(root));
+    const parsed = await readJson<TreeFile>(file);
+    if (parsed === null) return null;
+    if (parsed.version !== SNAPSHOT_VERSION) return null;
+    if (parsed.library !== (await this.libraryId())) return null;
     // The hash makes a collision vanishingly unlikely, not impossible, and a
     // stored root that is not the one asked for would serve another directory's
     // tree. Cheap to check, catastrophic to skip.
-    if (parsed.root !== root) return null
-    if (!Array.isArray(parsed.entries) || !Array.isArray(parsed.dirs)) return null
+    if (parsed.root !== root) return null;
+    if (!Array.isArray(parsed.entries) || !Array.isArray(parsed.dirs))
+      return null;
     // The LRU clock for the size cap is the file's own mtime, bumped on read
     // via `utimes` — `ThumbCache`'s trick, and for its reason: it cannot be
     // caught mid-write by the sweep the way rewriting the file could.
-    const now = new Date()
-    await utimes(file, now, now).catch(() => undefined)
-    return { root: parsed.root, walkedAt: parsed.walkedAt, entries: parsed.entries, dirs: parsed.dirs }
+    const now = new Date();
+    await utimes(file, now, now).catch(() => undefined);
+    return {
+      root: parsed.root,
+      walkedAt: parsed.walkedAt,
+      entries: parsed.entries,
+      dirs: parsed.dirs,
+    };
   }
 
   /**
@@ -290,22 +314,27 @@ export class SnapshotStore {
    * library nothing has walked.
    */
   async roots(): Promise<string[]> {
-    const dir = await this.storeDir()
-    let names: string[]
+    const dir = await this.storeDir();
+    let names: string[];
     try {
-      names = await readdir(dir)
+      names = await readdir(dir);
     } catch {
-      return []
+      return [];
     }
-    const id = await this.libraryId()
-    const out: string[] = []
+    const id = await this.libraryId();
+    const out: string[] = [];
     for (const name of names) {
-      if (!name.startsWith('tree-') || !name.endsWith('.json')) continue
-      const parsed = await readJson<TreeFile>(join(dir, name))
-      if (parsed === null || parsed.version !== SNAPSHOT_VERSION || parsed.library !== id) continue
-      if (typeof parsed.root === 'string') out.push(parsed.root)
+      if (!name.startsWith("tree-") || !name.endsWith(".json")) continue;
+      const parsed = await readJson<TreeFile>(join(dir, name));
+      if (
+        parsed === null ||
+        parsed.version !== SNAPSHOT_VERSION ||
+        parsed.library !== id
+      )
+        continue;
+      if (typeof parsed.root === "string") out.push(parsed.root);
     }
-    return out
+    return out;
   }
 
   /**
@@ -321,7 +350,7 @@ export class SnapshotStore {
    * halves of what it learned should become durable together.
    */
   async save(snapshot: TreeSnapshot): Promise<void> {
-    const dir = await this.storeDir()
+    const dir = await this.storeDir();
     const file: TreeFile = {
       version: SNAPSHOT_VERSION,
       library: await this.libraryId(),
@@ -329,9 +358,9 @@ export class SnapshotStore {
       walkedAt: snapshot.walkedAt,
       entries: snapshot.entries,
       dirs: snapshot.dirs,
-    }
-    await writeAtomic(dir, this.treeFile(snapshot.root), JSON.stringify(file))
-    await this.flush()
+    };
+    await writeAtomic(dir, this.treeFile(snapshot.root), JSON.stringify(file));
+    await this.flush();
   }
 
   /**
@@ -339,8 +368,8 @@ export class SnapshotStore {
    * filesystem has contradicted it (D6). Absent is success.
    */
   async invalidate(root: string): Promise<void> {
-    const dir = await this.storeDir()
-    await rm(join(dir, this.treeFile(root)), { force: true })
+    const dir = await this.storeDir();
+    await rm(join(dir, this.treeFile(root)), { force: true });
   }
 
   /**
@@ -349,10 +378,10 @@ export class SnapshotStore {
    * changed under us".
    */
   async invalidateAll(): Promise<void> {
-    const dir = await this.storeDir()
-    this.archives = new Map()
-    this.archivesDirty = false
-    await rm(dir, { recursive: true, force: true })
+    const dir = await this.storeDir();
+    this.archives = new Map();
+    this.archivesDirty = false;
+    await rm(dir, { recursive: true, force: true });
   }
 
   // ---- archive directories (D3) ----
@@ -368,21 +397,25 @@ export class SnapshotStore {
   archiveCache(): ZipDirCache {
     return {
       get: async (zipPath, id) => {
-        const key = await this.archiveKey(zipPath)
-        const held = (await this.loadArchives()).get(key)
-        if (held === undefined) return undefined
+        const key = await this.archiveKey(zipPath);
+        const held = (await this.loadArchives()).get(key);
+        if (held === undefined) return undefined;
         // The whole of D3's soundness: a rewritten archive necessarily rewrites
         // its tail, so a moved mtime or size means the cached directory
         // describes bytes that are gone.
-        if (held.mtime !== id.mtime || held.size !== id.size) return undefined
-        return held.entries
+        if (held.mtime !== id.mtime || held.size !== id.size) return undefined;
+        return held.entries;
       },
       set: async (zipPath, id, entries) => {
-        const key = await this.archiveKey(zipPath)
-        ;(await this.loadArchives()).set(key, { mtime: id.mtime, size: id.size, entries })
-        this.archivesDirty = true
+        const key = await this.archiveKey(zipPath);
+        (await this.loadArchives()).set(key, {
+          mtime: id.mtime,
+          size: id.size,
+          entries,
+        });
+        this.archivesDirty = true;
       },
-    }
+    };
   }
 
   /**
@@ -396,13 +429,14 @@ export class SnapshotStore {
    * mount-point-specific key rather than a wrong one.
    */
   private async archiveKey(zipPath: string): Promise<string> {
-    if (this.library === undefined) return zipPath
+    if (this.library === undefined) return zipPath;
     try {
-      await this.library.state()
-      return this.library.libPathOf(zipPath)
+      await this.library.state();
+      return this.library.libPathOf(zipPath);
     } catch (err) {
-      if (err instanceof LibraryError || err instanceof VPathError) return zipPath
-      throw err
+      if (err instanceof LibraryError || err instanceof VPathError)
+        return zipPath;
+      throw err;
     }
   }
 
@@ -412,31 +446,35 @@ export class SnapshotStore {
    * the file.
    */
   private async loadArchives(): Promise<Map<string, ArchiveRecord>> {
-    if (this.archives !== undefined) return this.archives
+    if (this.archives !== undefined) return this.archives;
     return (this.loadingArchives ??= this.readArchives().finally(() => {
-      this.loadingArchives = undefined
-    }))
+      this.loadingArchives = undefined;
+    }));
   }
 
   private async readArchives(): Promise<Map<string, ArchiveRecord>> {
-    const dir = await this.storeDir()
-    const parsed = await readJson<ArchivesFile>(join(dir, ARCHIVES_FILE))
-    const map = new Map<string, ArchiveRecord>()
+    const dir = await this.storeDir();
+    const parsed = await readJson<ArchivesFile>(join(dir, ARCHIVES_FILE));
+    const map = new Map<string, ArchiveRecord>();
     if (
       parsed !== null &&
       parsed.version === SNAPSHOT_VERSION &&
       parsed.library === (await this.libraryId()) &&
-      typeof parsed.archives === 'object' &&
+      typeof parsed.archives === "object" &&
       parsed.archives !== null
     ) {
       for (const [key, record] of Object.entries(parsed.archives)) {
-        if (record !== null && typeof record === 'object' && Array.isArray(record.entries)) {
-          map.set(key, record)
+        if (
+          record !== null &&
+          typeof record === "object" &&
+          Array.isArray(record.entries)
+        ) {
+          map.set(key, record);
         }
       }
     }
-    this.archives = map
-    return map
+    this.archives = map;
+    return map;
   }
 
   /**
@@ -458,21 +496,21 @@ export class SnapshotStore {
     // through writes the newest state by construction. A failed flush must not
     // wedge the chain, hence the `catch` on what the next one waits for — the
     // error still reaches *this* caller through `run`.
-    const run = this.flushing.then(() => this.flushLocked())
-    this.flushing = run.catch(() => undefined)
-    return await run
+    const run = this.flushing.then(() => this.flushLocked());
+    this.flushing = run.catch(() => undefined);
+    return await run;
   }
 
   /** One flush's own work, with the chain above guaranteeing it runs alone. */
   private async flushLocked(): Promise<void> {
-    if (!this.archivesDirty || this.archives === undefined) return
-    const dir = await this.storeDir()
+    if (!this.archivesDirty || this.archives === undefined) return;
+    const dir = await this.storeDir();
     const file: ArchivesFile = {
       version: SNAPSHOT_VERSION,
       library: await this.libraryId(),
       archives: Object.fromEntries(this.archives),
-    }
-    const text = JSON.stringify(file)
+    };
+    const text = JSON.stringify(file);
     // **Clean before the await, against the serialised copy above** (review
     // finding 9). `writeAtomic` is several awaits long and a walk's `set`s land
     // between them: clearing the flag *after* the write would clear a flag that
@@ -480,14 +518,14 @@ export class SnapshotStore {
     // already paid for — would never be persisted, so the next process opens
     // the archive again. Marking clean first means such a `set` re-dirties and
     // the following flush carries it, at the cost of one redundant write.
-    this.archivesDirty = false
+    this.archivesDirty = false;
     try {
-      await writeAtomic(dir, ARCHIVES_FILE, text)
+      await writeAtomic(dir, ARCHIVES_FILE, text);
     } catch (err) {
       // A write that did not happen leaves the layer unpersisted, which is
       // exactly what dirty means.
-      this.archivesDirty = true
-      throw err
+      this.archivesDirty = true;
+      throw err;
     }
   }
 
@@ -506,18 +544,23 @@ export class SnapshotStore {
    * library nothing has walked yet.
    */
   async maintain(): Promise<void> {
-    const dir = await this.storeDir()
-    let names: string[]
+    const dir = await this.storeDir();
+    let names: string[];
     try {
-      names = await readdir(dir)
+      names = await readdir(dir);
     } catch {
-      return
+      return;
     }
-    const files: { path: string; size: number; lastRead: number; evictable: boolean }[] = []
+    const files: {
+      path: string;
+      size: number;
+      lastRead: number;
+      evictable: boolean;
+    }[] = [];
     for (const name of names) {
-      const path = join(dir, name)
-      const info = await stat(path).catch(() => null)
-      if (info === null || !info.isFile()) continue
+      const path = join(dir, name);
+      const info = await stat(path).catch(() => null);
+      if (info === null || !info.isFile()) continue;
       // A stray temp file from an interrupted write is nobody's snapshot and
       // will never be read — but **only once it is stale** (review finding 8).
       // The startup sweep (`index.ts`) runs beside the revalidation pass's own
@@ -525,24 +568,25 @@ export class SnapshotStore {
       // reaping on sight unlinks a live one out from under the `rename` that
       // was about to commit it. A minute is orders of magnitude longer than any
       // write here and orders shorter than the interval between sweeps.
-      if (name.endsWith('.tmp')) {
-        if (Date.now() - info.mtimeMs > TMP_REAP_MS) await rm(path, { force: true })
-        continue
+      if (name.endsWith(".tmp")) {
+        if (Date.now() - info.mtimeMs > TMP_REAP_MS)
+          await rm(path, { force: true });
+        continue;
       }
       // Reaped here rather than on read, so a read stays pure: a file this
       // build cannot parse or whose version it does not know is dead weight
       // against the cap and will never be served.
       if (!(await this.usable(name, path))) {
-        await rm(path, { force: true })
+        await rm(path, { force: true });
         // The reaped archive layer must be dropped from memory too, or the next
         // flush writes the file this sweep just deleted straight back — the
         // write-back loop the eviction branch below used to guard against, met
         // here instead, since eviction no longer reaches this file at all.
         if (name === ARCHIVES_FILE) {
-          this.archives = new Map()
-          this.archivesDirty = false
+          this.archives = new Map();
+          this.archivesDirty = false;
         }
-        continue
+        continue;
       }
       // `archives.json` counts against the cap but is never *evicted* (review
       // finding 9). It is one small file per library, self-bounding in the only
@@ -552,42 +596,53 @@ export class SnapshotStore {
       // reclaim its ~1.5 MB was the pathological case: the sweep would throw
       // away every archive directory in the library to free a fraction of a
       // percent of a 64 MB cap, and the next walk would re-read all 409 tails.
-      files.push({ path, size: info.size, lastRead: info.mtimeMs, evictable: name !== ARCHIVES_FILE })
+      files.push({
+        path,
+        size: info.size,
+        lastRead: info.mtimeMs,
+        evictable: name !== ARCHIVES_FILE,
+      });
     }
-    let total = files.reduce((sum, f) => sum + f.size, 0)
-    if (total <= this.sizeCap) return
-    files.sort((a, b) => a.lastRead - b.lastRead)
+    let total = files.reduce((sum, f) => sum + f.size, 0);
+    if (total <= this.sizeCap) return;
+    files.sort((a, b) => a.lastRead - b.lastRead);
     for (const f of files) {
-      if (total <= this.sizeCap) break
-      if (!f.evictable) continue
-      await rm(f.path, { force: true })
-      total -= f.size
+      if (total <= this.sizeCap) break;
+      if (!f.evictable) continue;
+      await rm(f.path, { force: true });
+      total -= f.size;
     }
   }
 
   /** Can this build read this file at all? Version and owner, not contents. */
   private async usable(name: string, path: string): Promise<boolean> {
-    if (name !== ARCHIVES_FILE && !name.startsWith('tree-')) return false
-    const parsed = await readJson<{ version?: unknown; library?: unknown }>(path)
-    if (parsed === null) return false
-    return parsed.version === SNAPSHOT_VERSION && parsed.library === (await this.libraryId())
+    if (name !== ARCHIVES_FILE && !name.startsWith("tree-")) return false;
+    const parsed = await readJson<{ version?: unknown; library?: unknown }>(
+      path,
+    );
+    if (parsed === null) return false;
+    return (
+      parsed.version === SNAPSHOT_VERSION &&
+      parsed.library === (await this.libraryId())
+    );
   }
 }
 
 /** Parse a JSON file, or null for absent, unreadable, torn or not-an-object. */
 async function readJson<T>(file: string): Promise<T | null> {
-  let text: string
+  let text: string;
   try {
-    text = await readFile(file, 'utf8')
+    text = await readFile(file, "utf8");
   } catch {
-    return null
+    return null;
   }
-  let parsed: unknown
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(text)
+    parsed = JSON.parse(text);
   } catch {
-    return null
+    return null;
   }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null
-  return parsed as T
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
+    return null;
+  return parsed as T;
 }

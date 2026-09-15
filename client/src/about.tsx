@@ -12,14 +12,14 @@
  * Nothing here touches `App`, the viewer or the renderer: the whole point of
  * the second entry is that a page listing names does not ship a WebGL bundle.
  */
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import { HttpApiClient } from './api/client'
-import AboutPage from './components/AboutPage'
-import './index.css'
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import { HttpApiClient } from "./api/client";
+import AboutPage from "./components/AboutPage";
+import "./index.css";
 
-createRoot(document.getElementById('root')!).render(
+createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <AboutPage api={new HttpApiClient()} />
   </StrictMode>,
-)
+);

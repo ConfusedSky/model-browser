@@ -1,5 +1,5 @@
-import { realpath, stat } from 'node:fs/promises'
-import { basename, posix, resolve, sep } from 'node:path'
+import { realpath, stat } from "node:fs/promises";
+import { basename, posix, resolve, sep } from "node:path";
 import type {
   DirEntry,
   IndexAvailability,
@@ -7,11 +7,11 @@ import type {
   IndexScore,
   IndexState,
   SemanticTuning,
-} from '../../shared/types'
-import { POSES_MAX } from '../../shared/types'
-export { POSES_MAX }
-import { type Library, LibraryError } from './library'
-import { listDir, modelFormat } from './listing'
+} from "../../shared/types";
+import { POSES_MAX } from "../../shared/types";
+export { POSES_MAX };
+import { type Library, LibraryError } from "./library";
+import { listDir, modelFormat } from "./listing";
 
 /**
  * Client for the semantic index — a separate service (`mini-classify`), started
@@ -23,9 +23,9 @@ import { listDir, modelFormat } from './listing'
  * `fetch` and `AbortSignal.timeout` only — the Hono app must still run on Node
  * unchanged.
  */
-const DEFAULT_BASE = 'http://127.0.0.1:8077'
-const PROBE_TIMEOUT_MS = 2000
-const QUERY_TIMEOUT_MS = 30_000
+const DEFAULT_BASE = "http://127.0.0.1:8077";
+const PROBE_TIMEOUT_MS = 2000;
+const QUERY_TIMEOUT_MS = 30_000;
 
 /**
  * What a `/poses` call may cost, and deliberately not `QUERY_TIMEOUT_MS`. A
@@ -43,15 +43,15 @@ const QUERY_TIMEOUT_MS = 30_000
  * network catch, which is exactly the right classification — empty poses and a
  * forgotten status, so the next probe looks again.
  */
-const POSES_TIMEOUT_MS = 2000
+const POSES_TIMEOUT_MS = 2000;
 
 /** Past this, a load has plainly gone wrong: warming becomes wedged (D4). */
-const WEDGED_AFTER_S = 180
+const WEDGED_AFTER_S = 180;
 
 function baseUrl(): string | null {
-  const raw = process.env.MODEL_BROWSER_INDEX
-  if (raw === undefined) return DEFAULT_BASE
-  return raw.trim() === '' ? null : raw.trim() // cleared = feature off
+  const raw = process.env.MODEL_BROWSER_INDEX;
+  if (raw === undefined) return DEFAULT_BASE;
+  return raw.trim() === "" ? null : raw.trim(); // cleared = feature off
 }
 
 /**
@@ -65,7 +65,7 @@ function baseUrl(): string | null {
  * `wedged` is `warming` that has gone on too long; it is reported separately so
  * the UI can stop implying that waiting will help.
  */
-export type { IndexState }
+export type { IndexState };
 
 /**
  * The one thing every body this module reads has to be before it is read: a
@@ -86,13 +86,15 @@ export type { IndexState }
  * `warming`, a state that says waiting will help.
  */
 function isObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
+  return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
 /** A pose's two direction fields: three numbers, no fewer and no more. Arity is
  *  half the check, because the client indexes them (`up[0]`, `up[1]`, `up[2]`). */
 function isVec3(v: unknown): v is [number, number, number] {
-  return Array.isArray(v) && v.length === 3 && v.every((n) => typeof n === 'number')
+  return (
+    Array.isArray(v) && v.length === 3 && v.every((n) => typeof n === "number")
+  );
 }
 
 /**
@@ -113,17 +115,18 @@ function isVec3(v: unknown): v is [number, number, number] {
  * claims, since that is the one the angles are read out of positionally too.
  */
 export function isIndexPose(v: unknown): v is IndexPose {
-  if (!isObject(v)) return false
-  if (!isVec3(v.up) || !isVec3(v.azimuth_zero)) return false
-  if (typeof v.source !== 'string' || typeof v.confidence !== 'number') return false
-  const front = v.front
-  if (front === null || front === undefined) return true
-  if (!isObject(front)) return false
+  if (!isObject(v)) return false;
+  if (!isVec3(v.up) || !isVec3(v.azimuth_zero)) return false;
+  if (typeof v.source !== "string" || typeof v.confidence !== "number")
+    return false;
+  const front = v.front;
+  if (front === null || front === undefined) return true;
+  if (!isObject(front)) return false;
   return (
-    typeof front.view === 'number' &&
-    typeof front.azimuth_deg === 'number' &&
-    typeof front.elevation_deg === 'number'
-  )
+    typeof front.view === "number" &&
+    typeof front.azimuth_deg === "number" &&
+    typeof front.elevation_deg === "number"
+  );
 }
 
 interface RawStatus {
@@ -132,16 +135,20 @@ interface RawStatus {
   // it — which is what forces the `??` normalisation below and lets the
   // compiler catch the next field someone forwards raw. `?` alone hid two
   // crashes (collection_root reached libPathOf(null); elapsed rendered "(0s)").
-  ready?: boolean | null
-  elapsed?: number | null
-  collection_root?: string | null
-  covers?: string[] | null
+  ready?: boolean | null;
+  elapsed?: number | null;
+  collection_root?: string | null;
+  covers?: string[] | null;
   /** One shape for every reason a load did not complete — a dict, not a string. */
-  failure?: { reason?: string; hint?: string | null; kind?: string } | null
-  volume?: { present?: boolean | null; root?: string | null; missing?: string | null } | null
+  failure?: { reason?: string; hint?: string | null; kind?: string } | null;
+  volume?: {
+    present?: boolean | null;
+    root?: string | null;
+    missing?: string | null;
+  } | null;
 }
 
-let cached: { status: IndexAvailability; at: number } | null = null
+let cached: { status: IndexAvailability; at: number } | null = null;
 
 /** How long a state is trusted before re-probing. Warming re-checks often
  *  enough to become usable without a reload; ready is checked rarely because
@@ -150,19 +157,21 @@ const TTL_MS: Record<IndexState, number> = {
   ready: 30_000,
   warming: 2000,
   wedged: 30_000,
-  'volume-gone': 10_000,
+  "volume-gone": 10_000,
   absent: 10_000,
-}
+};
 
 async function probe(base: string): Promise<IndexAvailability> {
-  let parsed: unknown
+  let parsed: unknown;
   try {
-    const res = await fetch(`${base}/status`, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) })
-    if (!res.ok) return { state: 'absent' }
-    parsed = await res.json()
+    const res = await fetch(`${base}/status`, {
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    });
+    if (!res.ok) return { state: "absent" };
+    parsed = await res.json();
   } catch {
     // Refused, unreachable, or too slow to be useful: nobody started it.
-    return { state: 'absent' }
+    return { state: "absent" };
   }
   // A 200 carrying literal `null` parses without complaint and is *not* a
   // status: every read below (`raw.collection_root` first) throws a TypeError
@@ -171,8 +180,8 @@ async function probe(base: string): Promise<IndexAvailability> {
   // the pose wave included. An index that answered something other than an
   // object has not told us what state it is in, which is the same as not
   // answering.
-  if (!isObject(parsed)) return { state: 'absent' }
-  const raw = parsed as RawStatus
+  if (!isObject(parsed)) return { state: "absent" };
+  const raw = parsed as RawStatus;
   const common = {
     // Absence normalised at the boundary: the index reports a root it does not
     // have as JSON `null` (a failed load answers every volume field null), and
@@ -186,21 +195,23 @@ async function probe(base: string): Promise<IndexAvailability> {
     // The index's own words, preferred to any composed here (D4). Reason and
     // hint are separate fields upstream; joined so a caller renders one string.
     detail:
-      [raw.failure?.reason, raw.failure?.hint].filter((t) => typeof t === 'string').join(' — ') ||
-      undefined,
-  }
+      [raw.failure?.reason, raw.failure?.hint]
+        .filter((t) => typeof t === "string")
+        .join(" — ") || undefined,
+  };
   // Volume before ready, and the order is the point. A library whose drive is
   // unplugged reports `ready: false` *and* `volume.present: false` — the load
   // could not finish *because* the storage is gone. Checking `ready` first
   // classified the one failure a user fixes in seconds as "starting up", and
   // as "wedged" three minutes later, so the message never mentioned the drive.
-  if (raw.volume?.present === false) return { state: 'volume-gone', ...common }
+  if (raw.volume?.present === false) return { state: "volume-gone", ...common };
   if (raw.ready !== true) {
     // Any load error means it is not going to finish on its own.
-    const wedged = (raw.elapsed ?? 0) > WEDGED_AFTER_S || (raw.failure ?? null) !== null
-    return { state: wedged ? 'wedged' : 'warming', ...common }
+    const wedged =
+      (raw.elapsed ?? 0) > WEDGED_AFTER_S || (raw.failure ?? null) !== null;
+    return { state: wedged ? "wedged" : "warming", ...common };
   }
-  return { state: 'ready', ...common }
+  return { state: "ready", ...common };
 }
 
 /**
@@ -217,7 +228,7 @@ async function probe(base: string): Promise<IndexAvailability> {
  * Cleared as soon as the probe settles, so the memo never outlives the request
  * it belongs to and the TTL alone decides when the next one is taken.
  */
-let inFlight: Promise<IndexAvailability> | null = null
+let inFlight: Promise<IndexAvailability> | null = null;
 
 /**
  * Which "era" of knowledge about the index the cache belongs to, bumped by
@@ -237,7 +248,7 @@ let inFlight: Promise<IndexAvailability> | null = null
  * is an event, not an interval — `at` already carries the interval, and a
  * `fresh` look and the memoised one it raced share a millisecond routinely.
  */
-let generation = 0
+let generation = 0;
 
 /** One probe, its answer written to the cache the TTL protects. `at` is the
  *  moment the look was *decided on*, not the moment it came back — the TTL has
@@ -247,11 +258,11 @@ let generation = 0
  *  still being current: an answer whose question has since been superseded is
  *  still returned to whoever awaited it, and simply is not remembered. */
 function look(base: string, at: number): Promise<IndexAvailability> {
-  const born = generation
+  const born = generation;
   return probe(base).then((status) => {
-    if (born === generation) cached = { status, at }
-    return status
-  })
+    if (born === generation) cached = { status, at };
+    return status;
+  });
 }
 
 /**
@@ -264,34 +275,36 @@ function look(base: string, at: number): Promise<IndexAvailability> {
  * point is a look taken *after* the user asked for one, and a probe already on
  * the wire was started before. It still writes the cache everyone else reads.
  */
-async function rawStatus(opts: { fresh?: boolean }): Promise<IndexAvailability> {
-  const base = baseUrl()
-  if (base === null) return { state: 'absent' }
-  const now = Date.now()
+async function rawStatus(opts: {
+  fresh?: boolean;
+}): Promise<IndexAvailability> {
+  const base = baseUrl();
+  if (base === null) return { state: "absent" };
+  const now = Date.now();
   if (opts.fresh === true) {
     // The retry is a new era, not a second reader of the old one: every look
     // already on the wire was started before the user asked, so none of them
     // may write the cache this one is about to.
-    generation++
-    return look(base, now)
+    generation++;
+    return look(base, now);
   }
   if (cached !== null && now - cached.at < TTL_MS[cached.status.state]) {
-    return cached.status
+    return cached.status;
   }
-  if (inFlight !== null) return inFlight
-  const started = look(base, now)
-  inFlight = started
+  if (inFlight !== null) return inFlight;
+  const started = look(base, now);
+  inFlight = started;
   // Identity-guarded: `resetIndexStatus` can drop the memo mid-probe, and this
   // settle must not then clear whatever look replaced it.
   const clear = (): void => {
-    if (inFlight === started) inFlight = null
-  }
-  started.then(clear, clear)
-  return started
+    if (inFlight === started) inFlight = null;
+  };
+  started.then(clear, clear);
+  return started;
 }
 
 /** What the UI says when the index covers a tree this library does not hold. */
-const OUTSIDE_LIBRARY = 'the index covers a location outside the library'
+const OUTSIDE_LIBRARY = "the index covers a location outside the library";
 
 /**
  * Availability as the client reads it: the collection root mapped through the
@@ -312,18 +325,18 @@ async function mapCollectionRoot(
   library: Library,
   raw: IndexAvailability,
 ): Promise<IndexAvailability> {
-  const abs = raw.collectionRoot
-  if (abs === undefined) return raw
-  const { collectionRoot: _abs, ...rest } = raw
+  const abs = raw.collectionRoot;
+  if (abs === undefined) return raw;
+  const { collectionRoot: _abs, ...rest } = raw;
   // Nothing to map *through* yet. The library's own state is what the client is
   // being told about in that case, so no reason is invented here.
-  if ((await library.state()).state !== 'ready') return rest
-  const real = await realpath(abs).catch(() => abs)
+  if ((await library.state()).state !== "ready") return rest;
+  const real = await realpath(abs).catch(() => abs);
   try {
-    return { ...rest, collectionRoot: library.libPathOf(real) }
+    return { ...rest, collectionRoot: library.libPathOf(real) };
   } catch (err) {
-    if (!(err instanceof LibraryError)) throw err
-    return { ...rest, detail: OUTSIDE_LIBRARY }
+    if (!(err instanceof LibraryError)) throw err;
+    return { ...rest, detail: OUTSIDE_LIBRARY };
   }
 }
 
@@ -338,9 +351,15 @@ async function mapCollectionRoot(
 export async function probeStatus(
   library: Library,
   opts: { fresh?: boolean } = {},
-): Promise<{ status: IndexAvailability; collectionRootFs: string | undefined }> {
-  const raw = await rawStatus(opts)
-  return { status: await mapCollectionRoot(library, raw), collectionRootFs: raw.collectionRoot }
+): Promise<{
+  status: IndexAvailability;
+  collectionRootFs: string | undefined;
+}> {
+  const raw = await rawStatus(opts);
+  return {
+    status: await mapCollectionRoot(library, raw),
+    collectionRootFs: raw.collectionRoot,
+  };
 }
 
 /**
@@ -390,8 +409,11 @@ export async function probeStatus(
 export function memoisedStatus():
   | { status: IndexAvailability; collectionRootFs: string | undefined }
   | undefined {
-  if (cached === null) return undefined
-  return { status: cached.status, collectionRootFs: cached.status.collectionRoot }
+  if (cached === null) return undefined;
+  return {
+    status: cached.status,
+    collectionRootFs: cached.status.collectionRoot,
+  };
 }
 
 /** Availability for the status route: the wire half of `probeStatus`. */
@@ -399,7 +421,7 @@ export async function indexStatus(
   library: Library,
   opts: { fresh?: boolean } = {},
 ): Promise<IndexAvailability> {
-  return (await probeStatus(library, opts)).status
+  return (await probeStatus(library, opts)).status;
 }
 
 /**
@@ -424,9 +446,9 @@ export async function indexStatus(
  * without moving the limit somewhere else first.
  */
 export function resetIndexStatus(): void {
-  generation++
-  cached = null
-  inFlight = null
+  generation++;
+  cached = null;
+  inFlight = null;
 }
 
 export class IndexError extends Error {
@@ -441,7 +463,7 @@ export class IndexError extends Error {
      */
     readonly upstreamStatus?: number,
   ) {
-    super(message)
+    super(message);
   }
 }
 
@@ -465,7 +487,7 @@ export async function scopeWithin(
   libPath: string,
   collectionRoot: string,
 ): Promise<string | null> {
-  return (await scopeDetail(library, libPath, collectionRoot)).real
+  return (await scopeDetail(library, libPath, collectionRoot)).real;
 }
 
 /**
@@ -493,14 +515,17 @@ export async function scopeWithin(
  * over (already real) and it is what makes the *unscoped* case work, where the
  * string is the index's own spelling of its collection root.
  */
-export async function scopeLibPath(library: Library, path: unknown): Promise<string | null> {
-  if (typeof path !== 'string') return null
-  const real = await realpath(path).catch(() => path)
+export async function scopeLibPath(
+  library: Library,
+  path: unknown,
+): Promise<string | null> {
+  if (typeof path !== "string") return null;
+  const real = await realpath(path).catch(() => path);
   try {
-    return library.libPathOf(real)
+    return library.libPathOf(real);
   } catch (err) {
-    if (!(err instanceof LibraryError)) throw err
-    return null
+    if (!(err instanceof LibraryError)) throw err;
+    return null;
   }
 }
 
@@ -524,66 +549,67 @@ export async function scopeLibPath(library: Library, path: unknown): Promise<str
  * keeps its `string | null` shape: to a peek or a search hit, out of scope is out
  * of scope.
  */
-type ScopeMiss = 'structural' | 'transient'
+type ScopeMiss = "structural" | "transient";
 
 async function scopeDetail(
   library: Library,
   libPath: string,
   collectionRoot: string,
 ): Promise<{ real: string | null; miss?: ScopeMiss }> {
-  if (libPath.includes('!/')) return { real: null, miss: 'structural' }
-  let fsPath: string
+  if (libPath.includes("!/")) return { real: null, miss: "structural" };
+  let fsPath: string;
   try {
-    fsPath = (await library.resolve(libPath)).fsPath
+    fsPath = (await library.resolve(libPath)).fsPath;
   } catch (err) {
-    if (err instanceof LibraryError) return { real: null, miss: 'transient' }
-    throw err
+    if (err instanceof LibraryError) return { real: null, miss: "transient" };
+    throw err;
   }
   const [real, root] = await Promise.all([
     realpath(fsPath).catch(() => null),
     realpath(collectionRoot).catch(() => collectionRoot),
-  ])
-  if (real === null) return { real: null, miss: 'transient' }
-  if (real !== root && !real.startsWith(`${root}/`)) return { real: null, miss: 'structural' }
-  return { real }
+  ]);
+  if (real === null) return { real: null, miss: "transient" };
+  if (real !== root && !real.startsWith(`${root}/`))
+    return { real: null, miss: "structural" };
+  return { real };
 }
 
 export interface Hit {
-  id: string
-  path: string
-  rel_path: string
-  name: string
-  score: number
-  z: number
+  id: string;
+  path: string;
+  rel_path: string;
+  name: string;
+  score: number;
+  z: number;
   /**
    * `unknown`, and not `IndexPose | null`, for `RawStatus`' reason: this is
    * another process's JSON and the declared shape was never checked. Typed as
    * the contract read, a malformed pose type-checked its way to the client,
    * which reads `up` positionally. `isIndexPose` is what turns it into one.
    */
-  pose: unknown
+  pose: unknown;
 }
 
 export interface Scope {
-  path: string | null
-  status: 'indexed' | 'partial' | 'unindexed'
-  n_indexed: number
-  n_scanned: number
-  covers: string[]
+  path: string | null;
+  status: "indexed" | "partial" | "unindexed";
+  n_indexed: number;
+  n_scanned: number;
+  covers: string[];
 }
 
 export interface QueryResult {
-  scope: Scope
-  weak: boolean
+  scope: Scope;
+  weak: boolean;
   /** The index's own cap bit — it returned fewer than was asked for (D2). */
-  truncated?: boolean
+  truncated?: boolean;
   /**
    * How many models cleared the floor before `top` cut them. Optional: an
    * older index does not send it, and the client renders nothing rather than
    * failing (floor-and-count-compose D9).
    */
-  matched?: number
-  results: Hit[]
+  matched?: number;
+  results: Hit[];
 }
 
 /**
@@ -594,10 +620,10 @@ export interface QueryResult {
  * (`mini-classify` add7fd4), so a request omitting every bound would otherwise
  * be bounded only by the index's cap.
  */
-export const TOP = 60
+export const TOP = 60;
 
 /** What shapes a query beyond the phrase and the scope — the wire shape. */
-export type Tuning = SemanticTuning
+export type Tuning = SemanticTuning;
 
 /**
  * The classification for every way the index can fail to *say* something —
@@ -612,8 +638,8 @@ export type Tuning = SemanticTuning
  * not answered that route.
  */
 function notAnswering(): IndexError {
-  resetIndexStatus()
-  return new IndexError('absent', 'the semantic index is not answering')
+  resetIndexStatus();
+  return new IndexError("absent", "the semantic index is not answering");
 }
 
 /**
@@ -633,39 +659,44 @@ async function askIndex(
   body: unknown,
   timeoutMs: number = QUERY_TIMEOUT_MS,
 ): Promise<unknown> {
-  const base = baseUrl()
-  if (base === null) throw new IndexError('absent', 'semantic index is not configured')
-  let res: Response
+  const base = baseUrl();
+  if (base === null)
+    throw new IndexError("absent", "semantic index is not configured");
+  let res: Response;
   try {
     res = await fetch(`${base}${route}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      method: "POST",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
       // A timeout aborts the fetch, so it lands in the catch below with every
       // other way the index can fail to answer: empty poses, and a forgotten
       // status so the next probe looks rather than trusting a stale `ready`.
       signal: AbortSignal.timeout(timeoutMs),
-    })
+    });
   } catch {
-    throw notAnswering()
+    throw notAnswering();
   }
   if (res.status === 503) {
     // Raced the probe while SigLIP loads — the warming state, not a failure.
-    resetIndexStatus()
-    throw new IndexError('warming', 'the semantic index is still loading')
+    resetIndexStatus();
+    throw new IndexError("warming", "the semantic index is still loading");
   }
   if (!res.ok) {
-    const detail = (await res.json().catch(() => null)) as { detail?: unknown } | null
+    const detail = (await res.json().catch(() => null)) as {
+      detail?: unknown;
+    } | null;
     const message =
-      typeof detail?.detail === 'string' ? detail.detail : `index error ${res.status}`
+      typeof detail?.detail === "string"
+        ? detail.detail
+        : `index error ${res.status}`;
     // The index answered, so it is up: this is a refused request, not an
     // unavailable service. Its status travels with the error so the caller can
     // report it as what it is rather than as availability.
-    throw new IndexError('ready', message, res.status)
+    throw new IndexError("ready", message, res.status);
   }
-  let parsed: unknown
+  let parsed: unknown;
   try {
-    parsed = await res.json()
+    parsed = await res.json();
   } catch {
     // The body is read inside a `try` for the same reason the request is, and
     // it is a *second* one because the headers arriving is not the answer: a
@@ -677,7 +708,7 @@ async function askIndex(
     // listing, against "silence → walk". An index that cannot finish saying
     // what it means is an index that is not answering, and is treated as one,
     // forgotten status and all.
-    throw notAnswering()
+    throw notAnswering();
   }
   // Parsing is not answering, and the gap between them is a `TypeError` waiting
   // in every caller. A 200 whose body is literal `null` parses perfectly and
@@ -687,8 +718,8 @@ async function askIndex(
   // emptied pose wave. Caught here rather than at each caller so the three
   // routes cannot come to disagree about what a body-shaped-like-nothing means,
   // which is `askIndex`' whole reason for being one function.
-  if (!isObject(parsed)) throw notAnswering()
-  return parsed
+  if (!isObject(parsed)) throw notAnswering();
+  return parsed;
 }
 
 export async function query(
@@ -696,7 +727,7 @@ export async function query(
   scope: string | null,
   tuning: Tuning = {},
 ): Promise<QueryResult> {
-  const raw = (await askIndex('/query', {
+  const raw = (await askIndex("/query", {
     text,
     path: scope ?? undefined,
     // Each bound forwarded on its own presence, because the two compose in the
@@ -711,22 +742,22 @@ export async function query(
       : {}),
     ...(tuning.raw === true ? { raw: true } : {}),
     ...(tuning.pool !== undefined ? { pool: tuning.pool } : {}),
-  })) as Partial<QueryResult>
+  })) as Partial<QueryResult>;
   // An object body is not yet this route's answer: `results` feeds
   // `hitsToEntries`' map and `scope` is read field by field on the way to the
   // wire, so a body missing either would throw in the route handler, outside
   // every `IndexError` catch — a 500 for what is really an index talking
   // nonsense. The fields *inside* a present scope stay unchecked: wrong-typed
   // ones serialize oddly but crash nothing.
-  if (!Array.isArray(raw.results) || !isObject(raw.scope)) throw notAnswering()
-  return raw as QueryResult
+  if (!Array.isArray(raw.results) || !isObject(raw.scope)) throw notAnswering();
+  return raw as QueryResult;
 }
 
 /** What `/similar` answers with. No `weak` and no `truncated`: the index
  *  publishes neither for neighbours, and inventing them here would hand the UI
  *  a flag that can only ever read `false` (D4/4.7). */
 export interface SimilarResult {
-  results: Hit[]
+  results: Hit[];
 }
 
 /**
@@ -755,17 +786,17 @@ export interface SimilarResult {
 export async function similar(
   path: string,
   k?: number,
-  pool?: Tuning['pool'],
+  pool?: Tuning["pool"],
 ): Promise<SimilarResult> {
-  const raw = (await askIndex('/similar', {
+  const raw = (await askIndex("/similar", {
     path,
     ...(k !== undefined ? { k } : {}),
     ...(pool !== undefined ? { pool } : {}),
-  })) as Partial<SimilarResult>
+  })) as Partial<SimilarResult>;
   // `query`'s reason: `results` is the field the route exists to carry, and a
   // body without an array there would throw in `hitsToEntries`, not here.
-  if (!Array.isArray(raw.results)) throw notAnswering()
-  return raw as SimilarResult
+  if (!Array.isArray(raw.results)) throw notAnswering();
+  return raw as SimilarResult;
 }
 
 /**
@@ -803,18 +834,18 @@ export async function modelEntryAt(
   // throws on a model entry it cannot classify. A hit, a peek candidate or an
   // anchor naming some other file is dropped the way a moved-away one is — it
   // could not be thumbnailed or posed anyway.
-  const format = modelFormat(full)
-  if (format === undefined) return null
-  const s = await stat(full).catch(() => null)
-  if (s === null || !s.isFile()) return null
+  const format = modelFormat(full);
+  if (format === undefined) return null;
+  const s = await stat(full).catch(() => null);
+  if (s === null || !s.isFile()) return null;
   return {
     name,
     path: libPath,
-    kind: 'model' as const,
+    kind: "model" as const,
     format,
     size: s.size,
     mtime: s.mtimeMs,
-  }
+  };
 }
 
 /**
@@ -866,21 +897,23 @@ export async function hitsToEntries(
   hits: Hit[],
   collectionRoot: string,
 ): Promise<{
-  entries: DirEntry[]
-  poses: Record<string, IndexPose>
-  scores: Record<string, IndexScore>
+  entries: DirEntry[];
+  poses: Record<string, IndexPose>;
+  scores: Record<string, IndexScore>;
 }> {
-  const poses: Record<string, IndexPose> = {}
-  const scores: Record<string, IndexScore> = {}
-  const realTop = library.realTop()
+  const poses: Record<string, IndexPose> = {};
+  const scores: Record<string, IndexScore> = {};
+  const realTop = library.realTop();
   // The one spelling of the root everything below is measured against.
-  const root = resolve(collectionRoot)
-  let collectionLibPath: string
+  const root = resolve(collectionRoot);
+  let collectionLibPath: string;
   try {
-    collectionLibPath = library.libPathOf(await realpath(root).catch(() => root))
+    collectionLibPath = library.libPathOf(
+      await realpath(root).catch(() => root),
+    );
   } catch (err) {
-    if (!(err instanceof LibraryError)) throw err
-    return { entries: [], poses, scores }
+    if (!(err instanceof LibraryError)) throw err;
+    return { entries: [], poses, scores };
   }
   const settled = await Promise.all(
     hits.map(async (h): Promise<DirEntry | null> => {
@@ -889,45 +922,44 @@ export async function hitsToEntries(
       // object naming a string `rel_path` has no join key — `resolve` throws
       // on a non-string — and is dropped the way a hit that resolves to
       // nothing is.
-      if (!isObject(h) || typeof h.rel_path !== 'string') return null
+      if (!isObject(h) || typeof h.rel_path !== "string") return null;
       // `rel_path` is the join key and the only field trusted for it: this is
       // data from another process, and `resolve` normalising `..` is what stops
       // a hit naming a file outside the collection. The index's absolute `path`
       // is ignored — preferring it would also undo D4's remount reasoning by
       // trusting a mount point this app resolved for itself.
-      const full = resolve(root, h.rel_path)
-      if (full !== root && !full.startsWith(root + sep)) return null
+      const full = resolve(root, h.rel_path);
+      if (full !== root && !full.startsWith(root + sep)) return null;
       // Inside the collection is not yet inside the library: a symlink in the
       // indexed tree resolves wherever it points, and the index followed it
       // when it embedded the file. Confined the way every other route is
       // confined (D3), so a hit cannot be named and scored on a surface where
       // `/api/file` refuses the very same path. `realpath` rather than `stat`,
       // so the single stat a tile costs stays the query's per-hit bound.
-      const real = await realpath(full).catch(() => null)
-      if (real === null) return null
-      if (real !== realTop && !real.startsWith(realTop + sep)) return null
+      const real = await realpath(full).catch(() => null);
+      if (real === null) return null;
+      if (real !== realTop && !real.startsWith(realTop + sep)) return null;
       // The same `rel_path`, joined onto the collection's library path instead
       // of onto its filesystem path — one hit, two addresses, from one string.
-      const libPath = posix.join(collectionLibPath, h.rel_path)
-      const entry = await modelEntryAt(full, libPath, h.rel_path)
-      if (entry === null) return null
+      const libPath = posix.join(collectionLibPath, h.rel_path);
+      const entry = await modelEntryAt(full, libPath, h.rel_path);
+      if (entry === null) return null;
       // Validated, not merely non-null: the pose rides a hit straight to the
       // client, which reads `up` positionally, so a malformed one is dropped
       // here and the tile renders at its default framing (`isIndexPose`).
-      if (isIndexPose(h.pose)) poses[libPath] = h.pose
-      scores[libPath] = { score: h.score, z: h.z }
-      return entry
+      if (isIndexPose(h.pose)) poses[libPath] = h.pose;
+      scores[libPath] = { score: h.score, z: h.z };
+      return entry;
     }),
-  )
-  return { entries: settled.filter((e) => e !== null), poses, scores }
+  );
+  return { entries: settled.filter((e) => e !== null), poses, scores };
 }
-
 
 /** The `/poses` answer, typed as the wire actually is: another process's JSON,
  *  so the values are `unknown` until `isIndexPose` has looked at them. `null`
  *  is the index's own spelling for "holds the model, has no orientation". */
 interface PosesAnswer {
-  poses?: Record<string, unknown> | null
+  poses?: Record<string, unknown> | null;
 }
 
 /**
@@ -955,35 +987,37 @@ interface PosesAnswer {
  * directory of more than `POSES_MAX` models, so the partial case is a large
  * folder's alone — which is exactly the folder it costs the most.
  */
-async function askPoses(paths: readonly string[]): Promise<Record<string, IndexPose | null>> {
-  const out: Record<string, IndexPose | null> = {}
-  let chunks = 0
-  let failed = 0
-  let first: IndexError | null = null
+async function askPoses(
+  paths: readonly string[],
+): Promise<Record<string, IndexPose | null>> {
+  const out: Record<string, IndexPose | null> = {};
+  let chunks = 0;
+  let failed = 0;
+  let first: IndexError | null = null;
   for (let i = 0; i < paths.length; i += POSES_MAX) {
-    chunks++
-    let answer: PosesAnswer
+    chunks++;
+    let answer: PosesAnswer;
     try {
       answer = (await askIndex(
-        '/poses',
+        "/poses",
         { paths: paths.slice(i, i + POSES_MAX) },
         POSES_TIMEOUT_MS,
-      )) as PosesAnswer
+      )) as PosesAnswer;
     } catch (err) {
-      if (!(err instanceof IndexError)) throw err
-      failed++
-      first ??= err
-      continue
+      if (!(err instanceof IndexError)) throw err;
+      failed++;
+      first ??= err;
+      continue;
     }
     // Counted rather than inferred from the output: a chunk that answered with
     // an empty map contributes nothing too, and "everything failed" must not be
     // reachable by an index that simply had nothing to say.
     for (const [path, pose] of Object.entries(answer.poses ?? {})) {
-      out[path] = isIndexPose(pose) ? pose : null
+      out[path] = isIndexPose(pose) ? pose : null;
     }
   }
-  if (chunks > 0 && failed === chunks && first !== null) throw first
-  return out
+  if (chunks > 0 && failed === chunks && first !== null) throw first;
+  return out;
 }
 
 /**
@@ -1018,7 +1052,7 @@ export async function posesForPaths(
   libPaths: readonly string[],
   collectionRoot: string,
 ): Promise<Record<string, IndexPose>> {
-  return (await posesAsked(library, libPaths, collectionRoot)).poses
+  return (await posesAsked(library, libPaths, collectionRoot)).poses;
 }
 
 /**
@@ -1066,43 +1100,45 @@ export async function posesAsked(
   libPaths: readonly string[],
   collectionRoot: string,
 ): Promise<{ poses: Record<string, IndexPose>; answered: boolean }> {
-  const poses: Record<string, IndexPose> = {}
-  if (libPaths.length === 0) return { poses, answered: true }
+  const poses: Record<string, IndexPose> = {};
+  if (libPaths.length === 0) return { poses, answered: true };
   // Resolved in parallel, joined in the caller's order: what goes on the wire
   // must not depend on which `realpath` happened to finish first.
-  const reals = await Promise.all(libPaths.map((p) => scopeDetail(library, p, collectionRoot)))
-  const byReal = new Map<string, string[]>()
-  let transient = 0
+  const reals = await Promise.all(
+    libPaths.map((p) => scopeDetail(library, p, collectionRoot)),
+  );
+  const byReal = new Map<string, string[]>();
+  let transient = 0;
   libPaths.forEach((libPath, i) => {
-    const detail = reals[i]
+    const detail = reals[i];
     if (detail === undefined || detail.real === null) {
-      if (detail?.miss === 'transient') transient++
-      return
+      if (detail?.miss === "transient") transient++;
+      return;
     }
-    const named = byReal.get(detail.real)
-    if (named === undefined) byReal.set(detail.real, [libPath])
-    else named.push(libPath)
-  })
+    const named = byReal.get(detail.real);
+    if (named === undefined) byReal.set(detail.real, [libPath]);
+    else named.push(libPath);
+  });
   // Nothing to ask about. That is an answer when every exclusion was structural
   // and a non-answer when any of them was this server failing to look.
-  if (byReal.size === 0) return { poses, answered: transient === 0 }
-  let answered: Record<string, IndexPose | null>
+  if (byReal.size === 0) return { poses, answered: transient === 0 };
+  let answered: Record<string, IndexPose | null>;
   try {
-    answered = await askPoses([...byReal.keys()])
+    answered = await askPoses([...byReal.keys()]);
   } catch (err) {
-    if (err instanceof IndexError) return { poses, answered: false }
-    throw err
+    if (err instanceof IndexError) return { poses, answered: false };
+    throw err;
   }
   for (const [real, named] of byReal) {
-    const pose = answered[real]
+    const pose = answered[real];
     // Absent and null are one fact — the index holds no orientation for this
     // model — and the key is left out rather than set to null: `poses[path]`
     // reads as "no pose" either way, and a present-but-null key would make
     // "has a pose" two tests everywhere it is asked.
-    if (pose === undefined || pose === null) continue
-    for (const libPath of named) poses[libPath] = pose
+    if (pose === undefined || pose === null) continue;
+    for (const libPath of named) poses[libPath] = pose;
   }
-  return { poses, answered: true }
+  return { poses, answered: true };
 }
 
 /**
@@ -1127,7 +1163,7 @@ export async function posesForListing(
   libPaths: readonly string[],
   opts: { fresh?: boolean } = {},
 ): Promise<Record<string, IndexPose>> {
-  return (await posesListingAsked(library, libPaths, opts)).poses
+  return (await posesListingAsked(library, libPaths, opts)).poses;
 }
 
 /**
@@ -1150,11 +1186,11 @@ export async function posesListingAsked(
   libPaths: readonly string[],
   opts: { fresh?: boolean } = {},
 ): Promise<{ poses: Record<string, IndexPose>; answered: boolean }> {
-  const { status, collectionRootFs } = await probeStatus(library, opts)
-  if (status.state !== 'ready' || collectionRootFs === undefined) {
-    return { poses: {}, answered: false }
+  const { status, collectionRootFs } = await probeStatus(library, opts);
+  if (status.state !== "ready" || collectionRootFs === undefined) {
+    return { poses: {}, answered: false };
   }
-  return posesAsked(library, libPaths, collectionRootFs)
+  return posesAsked(library, libPaths, collectionRootFs);
 }
 
 /**
@@ -1176,12 +1212,12 @@ export async function posesForDir(
   dirPath: string,
   opts: { fresh?: boolean } = {},
 ): Promise<Record<string, IndexPose>> {
-  const listing = await listDir(library, dirPath)
+  const listing = await listDir(library, dirPath);
   return posesForListing(
     library,
-    listing.entries.filter((e) => e.kind === 'model').map((e) => e.path),
+    listing.entries.filter((e) => e.kind === "model").map((e) => e.path),
     opts,
-  )
+  );
 }
 
 /**
@@ -1202,7 +1238,7 @@ export async function posesForDir(
  * either. Four cells is what is at stake, and a posed model past the cut being
  * invisible to them is recorded as accepted rather than fixed (D5).
  */
-export const UNDER_LIMIT = 256
+export const UNDER_LIMIT = 256;
 
 /**
  * `/under` rides behind a folder tile exactly as `/poses` does — advisory, one
@@ -1211,13 +1247,13 @@ export const UNDER_LIMIT = 256
  * pure store scan (§5.1): an index that has not answered in two seconds is not
  * busy, it is not answering, and the peek has a walk to fall back on.
  */
-const UNDER_TIMEOUT_MS = POSES_TIMEOUT_MS
+const UNDER_TIMEOUT_MS = POSES_TIMEOUT_MS;
 
 /** One indexed model under a prefix: the path the index walked, and whatever
  *  orientation it holds for it. */
 export interface UnderModel {
-  path: string
-  pose: IndexPose | null
+  path: string;
+  pose: IndexPose | null;
 }
 
 /**
@@ -1228,12 +1264,12 @@ export interface UnderModel {
  * frames later.
  */
 interface RawUnder {
-  status?: string | null
+  status?: string | null;
   /** `unknown` outright, not a typed array: `models: 5` is one property read
    *  from crashing `flatMap`, so even the list-ness is checked, not declared. */
-  models?: unknown
-  matched?: number | null
-  truncated?: boolean | null
+  models?: unknown;
+  matched?: number | null;
+  truncated?: boolean | null;
 }
 
 /**
@@ -1257,34 +1293,40 @@ export async function modelsUnder(
   dirRealPath: string,
   limit: number = UNDER_LIMIT,
 ): Promise<UnderModel[] | null> {
-  let raw: RawUnder
+  let raw: RawUnder;
   try {
-    raw = (await askIndex('/under', { path: dirRealPath, limit }, UNDER_TIMEOUT_MS)) as RawUnder
+    raw = (await askIndex(
+      "/under",
+      { path: dirRealPath, limit },
+      UNDER_TIMEOUT_MS,
+    )) as RawUnder;
   } catch (err) {
     // Availability states and refusals alike, for `posesForPaths`' reason: a
     // preview may never be made to fail by the index, and here there is a walk
     // that answers without it.
-    if (err instanceof IndexError) return null
-    throw err
+    if (err instanceof IndexError) return null;
+    throw err;
   }
   // Anything but the one status that means "these are the models" is the walk's
   // cue — `unindexed`, and equally a status this server has never heard of.
-  if (raw.status !== 'ok') return null
+  if (raw.status !== "ok") return null;
   // A `models` that is not a list reads as an empty one, like an absent or
   // null field: an `"ok"` answer holding nothing usable still lands as a real
   // answer the caller fills from the walk, cell by cell, the same way it
   // fills a short one.
-  const models: readonly unknown[] = Array.isArray(raw.models) ? raw.models : []
+  const models: readonly unknown[] = Array.isArray(raw.models)
+    ? raw.models
+    : [];
   // A malformed pose is "no pose" rather than a dropped model: the path is what
   // the peek is here for, and an unposed candidate still fills a cell — it
   // simply sorts into the unposed half of `entriesUnder`'s partition. A
   // malformed *model* — not an object, or no string path — is dropped: there
   // is no cell without a path.
   return models.flatMap((m) =>
-    isObject(m) && typeof m.path === 'string'
+    isObject(m) && typeof m.path === "string"
       ? [{ path: m.path, pose: isIndexPose(m.pose) ? m.pose : null }]
       : [],
-  )
+  );
 }
 
 /**
@@ -1351,51 +1393,52 @@ export async function entriesUnder(
   dirLibPath: string,
   n: number,
 ): Promise<{ entries: DirEntry[]; poses: Record<string, IndexPose | null> }> {
-  const posed = models.filter((m) => m.pose !== null)
-  const unposed = models.filter((m) => m.pose === null)
-  const out: DirEntry[] = []
-  const poses: Record<string, IndexPose | null> = {}
+  const posed = models.filter((m) => m.pose !== null);
+  const unposed = models.filter((m) => m.pose === null);
+  const out: DirEntry[] = [];
+  const poses: Record<string, IndexPose | null> = {};
   // The base every candidate is measured against, resolved once. `scopeWithin`
   // already hands a realpath, so this is normally `dirReal` itself; taking it
   // anyway is what stops the test depending on how the caller spelled it.
-  const dirTop = await realpath(dirReal).catch(() => dirReal)
+  const dirTop = await realpath(dirReal).catch(() => dirReal);
   // The premise the single per-candidate test rests on, checked rather than
   // assumed: a directory outside the library cannot lend its inside to
   // anything.
-  const realTop = library.realTop()
-  if (dirTop !== realTop && !dirTop.startsWith(realTop + sep)) return { entries: out, poses }
-  const seen = new Set<string>()
+  const realTop = library.realTop();
+  if (dirTop !== realTop && !dirTop.startsWith(realTop + sep))
+    return { entries: out, poses };
+  const seen = new Set<string>();
   for (const m of [...posed, ...unposed]) {
-    if (out.length >= n) break
+    if (out.length >= n) break;
     // `resolve` normalises `..`, for the reason `hitsToEntries` gives: this is
     // a path string from another process, and normalising is what stops a
     // `..` naming a file outside what was asked about before it is resolved.
-    const full = resolve(m.path)
+    const full = resolve(m.path);
     // The index followed symlinks when it embedded, and spelled its answer
     // however its own run reached the tree. Both facts are settled here: the
     // realpath is the one spelling this server and the index can agree on, and
     // a model whose realpath leaves the peeked directory is a wrong answer —
     // dropped rather than named on a surface `/api/file` would refuse the same
     // path on (D3).
-    const real = await realpath(full).catch(() => null)
-    if (real === null) continue
-    if (!real.startsWith(dirTop + sep)) continue
+    const real = await realpath(full).catch(() => null);
+    if (real === null) continue;
+    if (!real.startsWith(dirTop + sep)) continue;
     // One file, two addresses, from one string — the tail below the directory,
     // joined onto its library path. Taken off the *real* path, so an aliased
     // spelling lands on the cell the walk would have named for the same file.
-    const rel = real.slice(dirTop.length + 1)
-    const libPath = posix.join(dirLibPath, rel)
-    if (seen.has(libPath)) continue
+    const rel = real.slice(dirTop.length + 1);
+    const libPath = posix.join(dirLibPath, rel);
+    if (seen.has(libPath)) continue;
     // `basename`, not `rel`: a peek's entries are named the way the walk names
     // them, and a sheet must not read half in bare names and half in paths.
-    const entry = await modelEntryAt(real, libPath, basename(rel))
-    if (entry === null) continue
-    seen.add(libPath)
-    out.push(entry)
+    const entry = await modelEntryAt(real, libPath, basename(rel));
+    if (entry === null) continue;
+    seen.add(libPath);
+    out.push(entry);
     // Recorded against the cell, not against the candidate: `libPath` is the
     // spelling the walk would have produced for this file, which is the key the
     // pose layer and the client both look a tile up under.
-    poses[libPath] = m.pose
+    poses[libPath] = m.pose;
   }
-  return { entries: out, poses }
+  return { entries: out, poses };
 }

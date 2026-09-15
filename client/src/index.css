@@ -1,4 +1,4 @@
-@import 'tailwindcss';
+@import "tailwindcss";
 
 /**
  * The paint order, in one place. A bare `z-40` in a component says nothing

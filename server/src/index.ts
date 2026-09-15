@@ -1,16 +1,16 @@
 // Bun entry point — the only runtime-specific file. The app itself (Hono) runs
 // unchanged on Node for a future Electron main/sidecar.
-import { statSync } from 'node:fs'
-import type { FeatureReport } from '../../shared/types'
-import { ThumbCache } from './cache'
-import { DEFAULT_FEATURES, createApp } from './app'
-import { ConfigError, loadConfig } from './config'
-import { ZipTempStore, createLauncher } from './launch'
-import { createLibrary } from './library'
-import { ListingCache } from './listingCache'
-import { createOverrideHolder } from './overrides'
-import { SnapshotStore } from './snapshot'
-import { clientDist, createStaticHandler, route } from './static'
+import { statSync } from "node:fs";
+import type { FeatureReport } from "../../shared/types";
+import { ThumbCache } from "./cache";
+import { DEFAULT_FEATURES, createApp } from "./app";
+import { ConfigError, loadConfig } from "./config";
+import { ZipTempStore, createLauncher } from "./launch";
+import { createLibrary } from "./library";
+import { ListingCache } from "./listingCache";
+import { createOverrideHolder } from "./overrides";
+import { SnapshotStore } from "./snapshot";
+import { clientDist, createStaticHandler, route } from "./static";
 
 // The deployment's configuration, parsed **once**, here, before anything is
 // built from it (public-deployment D2). An absent file is silent and means the
@@ -22,43 +22,43 @@ import { clientDist, createStaticHandler, route } from './static'
 // `library-overrides` reports a broken store here.
 const config = await loadConfig(process.env).catch((err: unknown) => {
   if (err instanceof ConfigError) {
-    console.error(err.message)
-    process.exit(1)
+    console.error(err.message);
+    process.exit(1);
   }
-  throw err
-})
+  throw err;
+});
 
-const library = createLibrary(process.env, config)
+const library = createLibrary(process.env, config);
 // Positional to keep the three existing parameters' defaults; the library is
 // what files entries under `<cache>/<id>/` and gates the sweep (D5).
-const cache = new ThumbCache(undefined, undefined, undefined, library)
+const cache = new ThumbCache(undefined, undefined, undefined, library);
 // The walked-tree cache, filed under the same per-library directory and bounded
 // by its own knob (`listing-tree-cache` D2). Built here rather than inside
 // `createApp` for `cache`'s reason: the startup sweep below needs it.
-const snapshots = new SnapshotStore(undefined, undefined, library)
+const snapshots = new SnapshotStore(undefined, undefined, library);
 // The listing cache, built here rather than left to `createApp`'s default for
 // the same reason the two above are: the startup pass below must run on the
 // **instance the app serves from**, or the app would still believe every root
 // unchecked and re-run the pass behind the first listing (§6.5).
-const listings = new ListingCache(snapshots)
+const listings = new ListingCache(snapshots);
 // Built here rather than left to `createApp`'s default so the eager load below
 // can use it: a malformed store then reports beside the startup line rather
 // than on whichever request happened to ask first (library-overrides D1).
-const overrides = createOverrideHolder(library)
+const overrides = createOverrideHolder(library);
 // The resolved library, named once at start: the root is a viewpoint and the
 // top is found by walking up from it, so which tree is open is not something a
 // reader can infer from the configuration alone (D1, and R1's warning).
 void library.state().then((s) => {
-  if (s.state === 'ready') {
-    console.log(`library ${s.id} at ${s.top}`)
+  if (s.state === "ready") {
+    console.log(`library ${s.id} at ${s.top}`);
     // The store is read once per resolved library, so reading it here is the
     // whole of the work — and it is where a broken store gets to complain while
     // someone is still looking at the startup output. A library that resolves
     // later loads, and reports, on the first request that asks.
-    void overrides.store()
+    void overrides.store();
     // The startup sweep resolves every cached path through the library, so it
     // has nothing to say until there is one.
-    void cache.maintain()
+    void cache.maintain();
     // Startup revalidation (§6.5, design D8): every root this library has a
     // snapshot for is re-checked at once, so a change made while the app was
     // closed is usually found before anyone lists anything.
@@ -86,11 +86,12 @@ void library.state().then((s) => {
       // race the stage-1/2 review names (finding 8). The sweep now reaps only
       // temps older than a minute, which is the actual fix; the ordering here
       // is kept because it costs nothing and does not depend on that age.
-      await snapshots.maintain()
-      for (const root of await snapshots.roots()) await listings.revalidate(library, root)
-    })()
-  } else console.log(`library: ${s.state}`)
-})
+      await snapshots.maintain();
+      for (const root of await snapshots.roots())
+        await listings.revalidate(library, root);
+    })();
+  } else console.log(`library: ${s.state}`);
+});
 
 // The feature report, built here rather than left to `createApp`'s default,
 // because this is the construction site: the deployment's declarations over the
@@ -98,7 +99,7 @@ void library.state().then((s) => {
 // routes' refusals are read, so a declaration and a refusal cannot disagree
 // (public-deployment D5). Nothing re-derives a capability from the
 // configuration a second time.
-const features: FeatureReport = { ...DEFAULT_FEATURES, ...config.features }
+const features: FeatureReport = { ...DEFAULT_FEATURES, ...config.features };
 
 const app = createApp(
   cache,
@@ -111,7 +112,7 @@ const app = createApp(
   listings,
   // Loopback is allowed besides, always — the guard adds it whatever is here.
   config.origins ?? [],
-)
+);
 
 /**
  * The built client, if there is one. Serving files is adapter-specific, so it
@@ -120,10 +121,11 @@ const app = createApp(
  * development loop — where Vite serves the client — does not start depending on
  * a build.
  */
-const dist = clientDist(process.env)
-const client = statSync(dist, { throwIfNoEntry: false })?.isDirectory() === true
-  ? createStaticHandler(dist, { intro: features.intro })
-  : null
+const dist = clientDist(process.env);
+const client =
+  statSync(dist, { throwIfNoEntry: false })?.isDirectory() === true
+    ? createStaticHandler(dist, { intro: features.intro })
+    : null;
 // Said out loud, beside the `library …` line, because the absence is silent and
 // looks exactly like the app being broken: an image that builds the client
 // *after* the server starts, or one whose build failed, serves the API and
@@ -131,15 +133,17 @@ const client = statSync(dist, { throwIfNoEntry: false })?.isDirectory() === true
 // with no line anywhere saying why. Operator-facing stdout, so the directory is
 // named — it is the one thing that makes the answer actionable.
 console.log(
-  client === null ? `no built client at ${dist}: serving the API only` : `client at ${dist}`,
-)
+  client === null
+    ? `no built client at ${dist}: serving the API only`
+    : `client at ${dist}`,
+);
 
 export default {
   // Where the deployment says, defaulting to loopback (D8). The demo's own
   // configuration pins loopback on purpose: `demo-infrastructure` D1 puts the
   // proxy, the app and the index in one network namespace.
   port: config.listen?.port ?? 3177,
-  hostname: config.listen?.host ?? '127.0.0.1',
+  hostname: config.listen?.host ?? "127.0.0.1",
   // Bun closes an idle connection after 10s by default, which silently killed
   // every listing that walked a large library off a slow disk: a cold flat or
   // deep-search walk measured ~32s on a spinning USB exfat drive (2.4 ms per
@@ -177,4 +181,4 @@ export default {
   // configuration.
   maxRequestBodySize: 1_048_576,
   fetch: (req: Request) => route(req, app.fetch, client),
-}
+};

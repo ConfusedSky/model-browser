@@ -31,9 +31,9 @@
  * negative.
  */
 export function envPositiveInt(name: string, fallback: number): number {
-  const raw = process.env[name]
-  if (raw === undefined || raw.trim() === '') return fallback
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") return fallback;
   // Floored first, on purpose — see the rule above.
-  const n = Math.floor(Number(raw))
-  return Number.isFinite(n) && n > 0 ? n : fallback
+  const n = Math.floor(Number(raw));
+  return Number.isFinite(n) && n > 0 ? n : fallback;
 }

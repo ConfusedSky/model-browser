@@ -27,9 +27,9 @@
  */
 export function hostLabel(url: string): string {
   try {
-    return new URL(url).host.replace(/^www\./, '')
+    return new URL(url).host.replace(/^www\./, "");
   } catch {
-    return url
+    return url;
   }
 }
 
@@ -39,4 +39,4 @@ export function hostLabel(url: string): string {
  * the whole app down to visit a model page. `rel="noreferrer"` implies
  * `noopener`, so one word covers both.
  */
-export const CREDIT_LINK_CLASS = 'break-all text-sky-400 hover:underline'
+export const CREDIT_LINK_CLASS = "break-all text-sky-400 hover:underline";

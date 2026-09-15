@@ -1,7 +1,7 @@
-import type { MiddlewareHandler } from 'hono'
+import type { MiddlewareHandler } from "hono";
 
-const LOOPBACK_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/
-const LOOPBACK_HOST = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/
+const LOOPBACK_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+const LOOPBACK_HOST = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 
 /**
  * One configured origin, in the two shapes a request can name it: the value an
@@ -14,8 +14,8 @@ const LOOPBACK_HOST = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/
  * `http://example.com:8080` deployment names a different origin.
  */
 interface AllowedOrigin {
-  origin: string
-  hosts: ReadonlySet<string>
+  origin: string;
+  hosts: ReadonlySet<string>;
 }
 
 /**
@@ -25,15 +25,16 @@ interface AllowedOrigin {
  */
 function normalize(origins: readonly string[]): AllowedOrigin[] {
   return origins.map((raw) => {
-    const url = new URL(raw)
+    const url = new URL(raw);
     // `URL.origin` is the lowercased `scheme://host[:port]` with a default port
     // dropped, which is exactly the spelling a browser sends.
-    const origin = url.origin.toLowerCase()
-    const hostname = url.hostname.toLowerCase()
-    const hosts = new Set<string>([url.host.toLowerCase()])
-    if (url.port === '') hosts.add(`${hostname}:${url.protocol === 'https:' ? '443' : '80'}`)
-    return { origin, hosts }
-  })
+    const origin = url.origin.toLowerCase();
+    const hostname = url.hostname.toLowerCase();
+    const hosts = new Set<string>([url.host.toLowerCase()]);
+    if (url.port === "")
+      hosts.add(`${hostname}:${url.protocol === "https:" ? "443" : "80"}`);
+    return { origin, hosts };
+  });
 }
 
 /**
@@ -72,21 +73,27 @@ function normalize(origins: readonly string[]): AllowedOrigin[] {
  * tell anyone why; the rebinding defence lives on the API, where the data is.
  */
 export function guard(origins: readonly string[] = []): MiddlewareHandler {
-  const allowed = normalize(origins)
+  const allowed = normalize(origins);
   return async (c, next) => {
-    const origin = c.req.header('origin')
+    const origin = c.req.header("origin");
     if (origin !== undefined) {
-      const lower = origin.toLowerCase()
-      if (!LOOPBACK_ORIGIN.test(origin) && !allowed.some((a) => a.origin === lower)) {
-        return c.json({ error: 'forbidden origin' }, 403)
+      const lower = origin.toLowerCase();
+      if (
+        !LOOPBACK_ORIGIN.test(origin) &&
+        !allowed.some((a) => a.origin === lower)
+      ) {
+        return c.json({ error: "forbidden origin" }, 403);
       }
     }
-    const host = c.req.header('host')
-    if (host === undefined) return c.json({ error: 'forbidden host' }, 403)
-    const lowerHost = host.toLowerCase()
-    if (!LOOPBACK_HOST.test(host) && !allowed.some((a) => a.hosts.has(lowerHost))) {
-      return c.json({ error: 'forbidden host' }, 403)
+    const host = c.req.header("host");
+    if (host === undefined) return c.json({ error: "forbidden host" }, 403);
+    const lowerHost = host.toLowerCase();
+    if (
+      !LOOPBACK_HOST.test(host) &&
+      !allowed.some((a) => a.hosts.has(lowerHost))
+    ) {
+      return c.json({ error: "forbidden host" }, 403);
     }
-    await next()
-  }
+    await next();
+  };
 }

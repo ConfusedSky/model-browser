@@ -1,4 +1,4 @@
-export const HOVER_LINGER_MS = 120
+export const HOVER_LINGER_MS = 120;
 
 /**
  * Hover-warm debounce: fires only after the pointer lingers, so sweeping the
@@ -10,20 +10,20 @@ export function createHoverWarmer(
   setTimer: typeof setTimeout = setTimeout,
   clearTimer: typeof clearTimeout = clearTimeout,
 ): { enter: (path: string) => void; leave: () => void } {
-  let timer: ReturnType<typeof setTimeout> | null = null
+  let timer: ReturnType<typeof setTimeout> | null = null;
   return {
     enter(path: string): void {
-      if (timer !== null) clearTimer(timer)
+      if (timer !== null) clearTimer(timer);
       timer = setTimer(() => {
-        timer = null
-        warm(path)
-      }, lingerMs)
+        timer = null;
+        warm(path);
+      }, lingerMs);
     },
     leave(): void {
       if (timer !== null) {
-        clearTimer(timer)
-        timer = null
+        clearTimer(timer);
+        timer = null;
       }
     },
-  }
+  };
 }

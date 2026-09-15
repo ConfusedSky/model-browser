@@ -1,15 +1,15 @@
-import * as THREE from 'three'
-import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
-import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
-import { ThreeMFLoader } from 'three/examples/jsm/loaders/3MFLoader.js'
-import { unzipSync } from 'fflate'
-import type { DirEntry, ModelFormat } from '../../../shared/types'
+import * as THREE from "three";
+import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
+import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
+import { ThreeMFLoader } from "three/examples/jsm/loaders/3MFLoader.js";
+import { unzipSync } from "fflate";
+import type { DirEntry, ModelFormat } from "../../../shared/types";
 
-export type { ModelFormat } from '../../../shared/types'
+export type { ModelFormat } from "../../../shared/types";
 
 export function formatOf(path: string): ModelFormat | null {
-  const m = /\.(stl|3mf|obj)$/i.exec(path)
-  return m ? (m[1]!.toLowerCase() as ModelFormat) : null
+  const m = /\.(stl|3mf|obj)$/i.exec(path);
+  return m ? (m[1]!.toLowerCase() as ModelFormat) : null;
 }
 
 /**
@@ -22,13 +22,17 @@ export function formatOf(path: string): ModelFormat | null {
  * (D2).
  */
 export function formatOfEntry(entry: DirEntry): ModelFormat {
-  const format = entry.format ?? formatOf(entry.path)
-  if (format === null) throw new Error(`not a model: ${entry.path}`)
-  return format
+  const format = entry.format ?? formatOf(entry.path);
+  if (format === null) throw new Error(`not a model: ${entry.path}`);
+  return format;
 }
 
 function makeMaterial(): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({ color: 0x9aa4b2, metalness: 0.1, roughness: 0.75 })
+  return new THREE.MeshStandardMaterial({
+    color: 0x9aa4b2,
+    metalness: 0.1,
+    roughness: 0.75,
+  });
 }
 
 /**
@@ -38,11 +42,11 @@ function makeMaterial(): THREE.MeshStandardMaterial {
 function withShadows<T extends THREE.Object3D>(object: T): T {
   object.traverse((o) => {
     if (o instanceof THREE.Mesh) {
-      o.castShadow = true
-      o.receiveShadow = true
+      o.castShadow = true;
+      o.receiveShadow = true;
     }
-  })
-  return object
+  });
+  return object;
 }
 
 /**
@@ -55,44 +59,47 @@ function withShadows<T extends THREE.Object3D>(object: T): T {
  * `y`. The 3MF loader applies no rotation either (an earlier comment here
  * claimed it did; `3MFLoader.js` in node_modules rotates nothing).
  */
-export function parseModel(bytes: ArrayBuffer, format: ModelFormat): THREE.Object3D {
-  if (format === 'stl') {
-    const geometry = new STLLoader().parse(bytes)
+export function parseModel(
+  bytes: ArrayBuffer,
+  format: ModelFormat,
+): THREE.Object3D {
+  if (format === "stl") {
+    const geometry = new STLLoader().parse(bytes);
     // Stored STL facet normals are exporter-asserted and redundant with the
     // triangle winding, which the spec makes authoritative — and files exist
     // whose normal field is zeroed, stale, or rotated into another up-axis
     // convention than the vertices. Shade from winding, always (D1).
-    geometry.deleteAttribute('normal')
-    geometry.computeVertexNormals()
-    return withShadows(new THREE.Mesh(geometry, makeMaterial()))
+    geometry.deleteAttribute("normal");
+    geometry.computeVertexNormals();
+    return withShadows(new THREE.Mesh(geometry, makeMaterial()));
   }
-  if (format === 'obj') {
-    const group = new OBJLoader().parse(new TextDecoder().decode(bytes))
+  if (format === "obj") {
+    const group = new OBJLoader().parse(new TextDecoder().decode(bytes));
     group.traverse((o) => {
-      if (o instanceof THREE.Mesh) o.material = makeMaterial()
-    })
-    return withShadows(group)
+      if (o instanceof THREE.Mesh) o.material = makeMaterial();
+    });
+    return withShadows(group);
   }
-  const group = new ThreeMFLoader().parse(bytes)
+  const group = new ThreeMFLoader().parse(bytes);
   group.traverse((o) => {
-    if (o instanceof THREE.Mesh) o.material = makeMaterial()
-  })
-  return withShadows(group)
+    if (o instanceof THREE.Mesh) o.material = makeMaterial();
+  });
+  return withShadows(group);
 }
 
 /** Byte size of all geometry attribute arrays — the LRU accounting unit. */
 export function geometryBytes(object: THREE.Object3D): number {
-  let bytes = 0
+  let bytes = 0;
   object.traverse((o) => {
     if (o instanceof THREE.Mesh) {
-      const g = o.geometry as THREE.BufferGeometry
+      const g = o.geometry as THREE.BufferGeometry;
       for (const attr of Object.values(g.attributes)) {
-        bytes += (attr as THREE.BufferAttribute).array.byteLength
+        bytes += (attr as THREE.BufferAttribute).array.byteLength;
       }
-      if (g.index !== null) bytes += g.index.array.byteLength
+      if (g.index !== null) bytes += g.index.array.byteLength;
     }
-  })
-  return bytes
+  });
+  return bytes;
 }
 
 /**
@@ -103,11 +110,11 @@ export function geometryBytes(object: THREE.Object3D): number {
 export function disposeModel(object: THREE.Object3D): void {
   object.traverse((o) => {
     if (o instanceof THREE.Mesh) {
-      ;(o.geometry as THREE.BufferGeometry).dispose()
-      const mats = Array.isArray(o.material) ? o.material : [o.material]
-      for (const m of mats) (m as THREE.Material).dispose()
+      (o.geometry as THREE.BufferGeometry).dispose();
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of mats) (m as THREE.Material).dispose();
     }
-  })
+  });
 }
 
 /** Embedded 3MF preview (`/Metadata/thumbnail.png`) as an object URL, if present. */
@@ -115,11 +122,13 @@ export function embedded3mfThumbnail(bytes: ArrayBuffer): string | null {
   try {
     const files = unzipSync(new Uint8Array(bytes), {
       filter: (f) => /^\/?Metadata\/thumbnail\.png$/i.test(f.name),
-    })
-    const png = Object.values(files)[0]
-    if (png === undefined) return null
-    return URL.createObjectURL(new Blob([new Uint8Array(png)], { type: 'image/png' }))
+    });
+    const png = Object.values(files)[0];
+    if (png === undefined) return null;
+    return URL.createObjectURL(
+      new Blob([new Uint8Array(png)], { type: "image/png" }),
+    );
   } catch {
-    return null
+    return null;
   }
 }

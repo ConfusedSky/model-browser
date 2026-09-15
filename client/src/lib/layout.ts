@@ -1,8 +1,8 @@
 export interface Box {
-  left: number
-  top: number
-  width: number
-  height: number
+  left: number;
+  top: number;
+  width: number;
+  height: number;
 }
 
 /**
@@ -13,11 +13,11 @@ export interface Box {
  * framing matches the thumbnail camera exactly.
  */
 export function fitSquareBox(box: Box): Box {
-  const side = Math.min(box.width, box.height)
+  const side = Math.min(box.width, box.height);
   return {
     left: box.left + (box.width - side) / 2,
     top: box.top + (box.height - side) / 2,
     width: side,
     height: side,
-  }
+  };
 }

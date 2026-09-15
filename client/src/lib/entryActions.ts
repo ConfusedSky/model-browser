@@ -26,7 +26,7 @@
  * carries no picker — offers it as the tile does (6.8). Recorded in design.md
  * D7, under the heading that carried the old rule.
  */
-import type * as THREE from 'three'
+import type * as THREE from "three";
 import type {
   AppRef,
   AppsReport,
@@ -37,36 +37,40 @@ import type {
   IndexPose,
   ModelFormat,
   OrbitAxis,
-} from '../../../shared/types'
-import type { ApiClient, ThumbSave } from '../api/client'
-import { HttpError } from '../api/client'
-import { isCurrentRender, type ThumbState } from '../hooks/useThumbnails'
+} from "../../../shared/types";
+import type { ApiClient, ThumbSave } from "../api/client";
+import { HttpError } from "../api/client";
+import { isCurrentRender, type ThumbState } from "../hooks/useThumbnails";
 // Type-only, and it must stay that way: `bulkJobs` imports `ActionHost` and
 // `renderEntryThumbnail` from here, so a value import back would close the
 // cycle. Types are erased, so this edge costs nothing at runtime.
-import type { JobOperation, JobScope } from '../jobs/bulkJobs'
-import { expandLibraryPath } from './libraryPath'
-import type { Action } from '../state/reducer'
-import { indexCovers } from '../state/selectors'
-import { DEFAULT_CAMERA, defaultAxisFor } from '../three/camera'
-import type { MeshLru } from '../three/lru'
-import { formatOfEntry } from '../three/models'
-import { cameraForPose, POSE_VERSION, poseKeyOf } from '../three/pose'
-import type { RenderQueue } from '../three/queue'
-import { RIG_VERSION, renderThumbnail, THUMB_LIGHTING } from '../three/renderer'
-import { aoEnabled } from '../viewer/aoToggle'
+import type { JobOperation, JobScope } from "../jobs/bulkJobs";
+import { expandLibraryPath } from "./libraryPath";
+import type { Action } from "../state/reducer";
+import { indexCovers } from "../state/selectors";
+import { DEFAULT_CAMERA, defaultAxisFor } from "../three/camera";
+import type { MeshLru } from "../three/lru";
+import { formatOfEntry } from "../three/models";
+import { cameraForPose, POSE_VERSION, poseKeyOf } from "../three/pose";
+import type { RenderQueue } from "../three/queue";
+import {
+  RIG_VERSION,
+  renderThumbnail,
+  THUMB_LIGHTING,
+} from "../three/renderer";
+import { aoEnabled } from "../viewer/aoToggle";
 
 /** One id per command. The closed list is the menu's budget (D6). */
 export type CommandId =
-  | 'open'
-  | 'reveal'
-  | 'copyPath'
-  | 'findSimilar'
-  | 'generateBeneath'
-  | 'resetBeneath'
-  | 'reRenderThumbnail'
-  | 'resetFraming'
-  | 'openWith'
+  | "open"
+  | "reveal"
+  | "copyPath"
+  | "findSimilar"
+  | "generateBeneath"
+  | "resetBeneath"
+  | "reRenderThumbnail"
+  | "resetFraming"
+  | "openWith";
 
 /**
  * What a surface can withhold: every command, plus the menu's two inline
@@ -83,7 +87,7 @@ export type CommandId =
  * one body, one row — so it arrives through `CommandId` and needs no second
  * spelling (open-in-slicer 3.5).
  */
-export type MenuItemId = CommandId | 'orbitAxis' | 'openIn'
+export type MenuItemId = CommandId | "orbitAxis" | "openIn";
 
 /**
  * The per-surface half of a host: brief feedback, rendered however the surface
@@ -92,9 +96,9 @@ export type MenuItemId = CommandId | 'orbitAxis' | 'openIn'
  */
 export interface Feedback {
   /** Brief success feedback. */
-  confirm: () => void
+  confirm: () => void;
   /** Brief failure text. */
-  report: (message: string) => void
+  report: (message: string) => void;
 }
 
 /**
@@ -109,7 +113,7 @@ export interface Feedback {
  * place the answer lives).
  */
 export interface LibraryTop {
-  libraryTop: string | null
+  libraryTop: string | null;
 }
 
 /**
@@ -126,9 +130,9 @@ export interface LibraryTop {
 export interface ActionHost extends Feedback, LibraryTop {
   /** App's `navigate`: one `commit({ type: 'navigate', … })`, plus the ephemeral
    *  resets every navigation owes (find text, the reveal mark). */
-  navigate: (path: string) => void
+  navigate: (path: string) => void;
   /** The reducer's dispatch, for the transitions that are not a navigation. */
-  dispatch: (action: Action) => void
+  dispatch: (action: Action) => void;
   /**
    * Arm the locate-on-arrival mark for `path` — component-local state in App,
    * never a view field (D8): the reducer never reads a highlight, the same rule
@@ -138,7 +142,7 @@ export interface ActionHost extends Feedback, LibraryTop {
    * `navigate` beside the find-text reset, so arming first would clear the mark
    * this very command is setting.
    */
-  markOnArrival: (path: string) => void
+  markOnArrival: (path: string) => void;
   /**
    * Activate the entry exactly as its tile does — a container is browsed into,
    * a model is presented in the expanded viewer. `el` anchors the lightbox's
@@ -148,7 +152,7 @@ export interface ActionHost extends Feedback, LibraryTop {
    * different object: this one opens the entry *in this app*, that one opens
    * the file in another application and never touches the view.
    */
-  open: (entry: DirEntry, el: HTMLElement | null) => void
+  open: (entry: DirEntry, el: HTMLElement | null) => void;
   /**
    * The index's orientations for the **landed listing** — App's merged `poses`
    * memo (`state.result?.poses ?? state.listingPoses`, the previews' poses
@@ -165,14 +169,14 @@ export interface ActionHost extends Feedback, LibraryTop {
    * parameter instead of reading a host (D7); this field is what the
    * *command's* wrapper passes into it.
    */
-  poses: Record<string, IndexPose | null>
+  poses: Record<string, IndexPose | null>;
   /**
    * The one ApiClient (architecture D1), narrowed to what these bodies ask of
    * it. The thumbnail commands need both cache halves — the stored orientation
    * to render from, and somewhere to put the pixels; the launch actions need
    * the two handoffs, which return nothing and change nothing in this app.
    */
-  api: Pick<ApiClient, 'getThumb' | 'putThumb' | 'open' | 'openWith'>
+  api: Pick<ApiClient, "getThumb" | "putThumb" | "open" | "openWith">;
   /**
    * Read the platform registry again, into the session's held report — App's
    * own setter, handed over the way `setThumb` is.
@@ -182,20 +186,20 @@ export interface ActionHost extends Feedback, LibraryTop {
    * chooser's own set-default is the designed way to lead the pill row with a
    * slicer (L4), and the next menu raised has to show what the user just did.
    */
-  refreshApps: () => void
+  refreshApps: () => void;
   /** Meshes come from the LRU the grid already loads through, so a re-render
    *  reuses bytes a thumbnail or an orbit has already paid for. */
-  lru: Pick<MeshLru<THREE.Object3D>, 'acquire'>
+  lru: Pick<MeshLru<THREE.Object3D>, "acquire">;
   /** The single shared renderer's queue (architecture D2/D3). */
-  queue: Pick<RenderQueue, 'push' | 'whenResumed'>
+  queue: Pick<RenderQueue, "push" | "whenResumed">;
   /** `useThumbnails`' own setter. The map is not a mirror of the server, it is
    *  what the tile draws and what the lightbox opens at, so a command that
    *  wrote only to the cache would not take effect until the next load (4b.4). */
-  setThumb: (path: string, state: ThumbState) => void
+  setThumb: (path: string, state: ThumbState) => void;
   /** The same map's framing-only discard — camera and axis both — for the one
    *  command that gives an orientation up before anything redraws it
    *  (`resetFramingLive`). */
-  discardThumbFraming: (path: string) => void
+  discardThumbFraming: (path: string) => void;
   /**
    * App's one call into the job runner (`bulk-thumbnail-jobs` D2): start
    * `(operation, scope)`, or surface the job already running.
@@ -207,7 +211,7 @@ export interface ActionHost extends Feedback, LibraryTop {
    * place the busy sentence lives, on a surface that does not know where the
    * user is looking.
    */
-  launchJob: (operation: JobOperation, scope: JobScope) => void
+  launchJob: (operation: JobOperation, scope: JobScope) => void;
   /**
    * Say that a model's stored framing just changed by the user's own hand — a
    * camera or axis set or given up — spelled exactly as the write spelled it:
@@ -226,7 +230,11 @@ export interface ActionHost extends Feedback, LibraryTop {
    * every site keeps to this order; a refused or failed write changed nothing
    * and says nothing.
    */
-  framingChanged: (path: string, write: FramingWrite, before?: StoredFraming) => void
+  framingChanged: (
+    path: string,
+    write: FramingWrite,
+    before?: StoredFraming,
+  ) => void;
 }
 
 /**
@@ -245,8 +253,8 @@ export interface ActionHost extends Feedback, LibraryTop {
  * and jump focus out from under the keyboard.
  */
 export interface AvailabilityContext {
-  index: IndexAvailability | null
-  apps: AppsReport | null
+  index: IndexAvailability | null;
+  apps: AppsReport | null;
   /**
    * What this server accepts and offers, as App holds it (feature-report D3).
    *
@@ -262,12 +270,12 @@ export interface AvailabilityContext {
    * Like `index` and `apps`, this is state the app already holds and never a
    * probe issued when a menu opens.
    */
-  features: FeatureReport | null
+  features: FeatureReport | null;
 }
 
 /** The failure sentence for a clipboard write that did not land. One string, so
  *  the menu and the info panel report the same thing (R1). */
-export const COPY_FAILED = 'Could not copy the path — the clipboard refused.'
+export const COPY_FAILED = "Could not copy the path — the clipboard refused.";
 
 /**
  * The failure sentence for a launch into a **named** application — the pill the
@@ -278,7 +286,7 @@ export const COPY_FAILED = 'Could not copy the path — the clipboard refused.'
  * launcher from a nonzero exit and does not need to. What the user can act on
  * is that the application did not open.
  */
-export const LAUNCH_FAILED = 'Could not open the file in that application.'
+export const LAUNCH_FAILED = "Could not open the file in that application.";
 
 /**
  * The failure sentence for *Open with…*, which is a different failure from the
@@ -291,7 +299,8 @@ export const LAUNCH_FAILED = 'Could not open the file in that application.'
  * rule: the split is by **which action the user invoked**, which the client
  * knows for certain, not by a status code, which it still never reads.
  */
-export const CHOOSER_FAILED = 'Could not open the chooser to pick an application.'
+export const CHOOSER_FAILED =
+  "Could not open the chooser to pick an application.";
 
 /**
  * Copy an entry's virtual path. **The** copy implementation — the menu reaches
@@ -322,15 +331,21 @@ export const CHOOSER_FAILED = 'Could not open the chooser to pick an application
  * The `try` stays even so: outside a secure context `navigator.clipboard` is
  * undefined and the call throws *synchronously*, which a bare `.catch()` misses.
  */
-export function copyEntryPath(entry: DirEntry, host: Feedback & LibraryTop): void {
+export function copyEntryPath(
+  entry: DirEntry,
+  host: Feedback & LibraryTop,
+): void {
   try {
-    if (navigator.clipboard === undefined) throw new Error('clipboard unavailable')
-    void navigator.clipboard.writeText(expandLibraryPath(host.libraryTop, entry.path)).then(
-      () => host.confirm(),
-      () => host.report(COPY_FAILED),
-    )
+    if (navigator.clipboard === undefined)
+      throw new Error("clipboard unavailable");
+    void navigator.clipboard
+      .writeText(expandLibraryPath(host.libraryTop, entry.path))
+      .then(
+        () => host.confirm(),
+        () => host.report(COPY_FAILED),
+      );
   } catch {
-    host.report(COPY_FAILED)
+    host.report(COPY_FAILED);
   }
 }
 
@@ -360,15 +375,15 @@ export function copyEntryPath(entry: DirEntry, host: Feedback & LibraryTop): voi
  * caller.
  */
 export function containingFolder(path: string): string {
-  const zipSep = path.lastIndexOf('!/')
+  const zipSep = path.lastIndexOf("!/");
   if (zipSep !== -1) {
-    const entry = path.slice(zipSep + 2)
-    return entry.includes('/')
-      ? path.slice(0, zipSep + 2) + entry.slice(0, entry.lastIndexOf('/'))
-      : path.slice(0, zipSep)
+    const entry = path.slice(zipSep + 2);
+    return entry.includes("/")
+      ? path.slice(0, zipSep + 2) + entry.slice(0, entry.lastIndexOf("/"))
+      : path.slice(0, zipSep);
   }
-  const slash = path.lastIndexOf('/')
-  return slash > 0 ? path.slice(0, slash) : '/'
+  const slash = path.lastIndexOf("/");
+  return slash > 0 ? path.slice(0, slash) : "/";
 }
 
 /**
@@ -387,13 +402,17 @@ export function containingFolder(path: string): string {
  * to disagree about the same model.
  */
 function similarApplies(entry: DirEntry, ctx: AvailabilityContext): boolean {
-  return entry.kind === 'model' && ctx.index?.state === 'ready' && indexCovers(ctx.index, entry.path)
+  return (
+    entry.kind === "model" &&
+    ctx.index?.state === "ready" &&
+    indexCovers(ctx.index, entry.path)
+  );
 }
 
 /** The failure sentence for a thumbnail the app could not draw again. One
  *  string for both commands and every surface, like `COPY_FAILED`: they differ
  *  in what they give up, not in how a render that never happened is reported. */
-export const RENDER_FAILED = 'Could not re-render the thumbnail.'
+export const RENDER_FAILED = "Could not re-render the thumbnail.";
 
 /**
  * What App says when a launch found a job already running (D2).
@@ -405,11 +424,12 @@ export const RENDER_FAILED = 'Could not re-render the thumbnail.'
  * to spell it. The chip is un-dismissed by the runner on the same press, which
  * is the substantive half of D2's answer; this is the word that goes with it.
  */
-export const JOB_BUSY = 'A job is already running — cancel it to start another.'
+export const JOB_BUSY =
+  "A job is already running — cancel it to start another.";
 
 /** The orientation half of a thumbnail write, in the write's own three states:
  *  a value sets, `null` discards, absence keeps. What `framingChanged` reports. */
-export type FramingWrite = Pick<ThumbSave, 'camera' | 'axis'>
+export type FramingWrite = Pick<ThumbSave, "camera" | "axis">;
 
 /**
  * Whether a reset would change this model's stored framing — the one rule the
@@ -425,12 +445,18 @@ export type FramingWrite = Pick<ThumbSave, 'camera' | 'axis'>
  * framing again the moment a pose could replace it, and withheld that pose —
  * a reset that had to be run twice.
  */
-export function resettable(camera: CameraState | undefined, axis: OrbitAxis | undefined): boolean {
-  return camera !== undefined || axis !== undefined
+export function resettable(
+  camera: CameraState | undefined,
+  axis: OrbitAxis | undefined,
+): boolean {
+  return camera !== undefined || axis !== undefined;
 }
 
 /** A model's stored orientation as a caller knows it: both fields, or absent. */
-export type StoredFraming = { camera: CameraState | undefined; axis: OrbitAxis | undefined }
+export type StoredFraming = {
+  camera: CameraState | undefined;
+  axis: OrbitAxis | undefined;
+};
 
 /**
  * What a model resolves to once its own stored orientation is given up — the
@@ -456,12 +482,12 @@ export function framingAfterDiscard(
   pose: IndexPose | null | undefined,
   format: ModelFormat,
 ): { camera: CameraState; axis: OrbitAxis; posed: boolean } {
-  const resolved = cameraForPose(pose, DEFAULT_CAMERA)
+  const resolved = cameraForPose(pose, DEFAULT_CAMERA);
   return {
     camera: resolved?.camera ?? DEFAULT_CAMERA,
     axis: resolved?.axis ?? defaultAxisFor(format),
     posed: resolved !== null,
-  }
+  };
 }
 
 /**
@@ -475,12 +501,12 @@ export function framingAfterDiscard(
 export type RenderDeps = {
   /** Optional: the discard branch reports a framing change through it when
    *  given (the commands pass their host; the generate job never discards). */
-  framingChanged?: ActionHost['framingChanged']
-  api: Pick<ApiClient, 'getThumb' | 'putThumb'>
-  lru: Pick<MeshLru<THREE.Object3D>, 'acquire'>
-  queue: Pick<RenderQueue, 'whenResumed'>
-  setThumb: ActionHost['setThumb']
-}
+  framingChanged?: ActionHost["framingChanged"];
+  api: Pick<ApiClient, "getThumb" | "putThumb">;
+  lru: Pick<MeshLru<THREE.Object3D>, "acquire">;
+  queue: Pick<RenderQueue, "whenResumed">;
+  setThumb: ActionHost["setThumb"];
+};
 
 /**
  * Draw one model's thumbnail and file it — **one body, three callers** (D7).
@@ -520,32 +546,32 @@ export async function renderEntryThumbnail(
   entry: DirEntry,
   deps: RenderDeps,
   opts: {
-    discardFraming: boolean
+    discardFraming: boolean;
     /** The index's orientation for this model, from whatever the caller holds:
      *  the landing's map for a command, the job's own wave for a job. `null`
      *  is a settled absence (`pose-rerender` D5): rendered at the default. */
-    pose: IndexPose | null | undefined
+    pose: IndexPose | null | undefined;
     /** The generation the caller last saw, making the write conditional (D4).
      *  Absent for a user's press, which is unconditional by definition. */
-    ifGen?: number
+    ifGen?: number;
     /** Pin the write to the generation this body's *own* lookup read, so a
      *  write the user makes between that lookup and the render wins and this
      *  one is refused (412 → `'skipped'`). A queued follow-up asks for it — the
      *  panel reset's re-render, which waits behind the open view's suspension
      *  and can be overtaken by an orbit on the same tile; a user's press never
      *  does (`pose-rerender` D4). Takes precedence over `ifGen`. */
-    pinToLookup?: boolean
+    pinToLookup?: boolean;
     /** Answer `'current'` rather than re-render when the lookup says the stored
      *  render is already current. The job asks for it; a command never does. */
-    skipIfCurrent?: boolean
+    skipIfCurrent?: boolean;
   },
-): Promise<'done' | 'skipped' | 'current'> {
-  const { discardFraming } = opts
+): Promise<"done" | "skipped" | "current"> {
+  const { discardFraming } = opts;
   // Every renderer-touching stage waits out a suspension first: `push`
   // alone is not enough, because `suspend()` cannot stop a job that has
   // already started (queue.ts's waiters gate), and there is exactly one
   // WebGLRenderer app-wide (architecture D2/D3).
-  await deps.queue.whenResumed()
+  await deps.queue.whenResumed();
   // The stored orientation, read from the cache rather than from the
   // thumbs map: a tile whose lookup or render failed carries no camera at
   // all, and both commands are offered exactly there (4b.7) — resolving
@@ -560,8 +586,8 @@ export async function renderEntryThumbnail(
   // while a lightbox holds the queue suspended, so a toggle made there is
   // already in it. It also decides which render's LRU clock the lookup
   // bumps — the one about to be rewritten, not its sibling.
-  const ao = aoEnabled()
-  const cached = await deps.api.getThumb(entry.path, entry.mtime, ao)
+  const ao = aoEnabled();
+  const cached = await deps.api.getThumb(entry.path, entry.mtime, ao);
 
   // The job derived this entry from a listing annotation — a memory read on
   // the server, taken before the job's turn came round, and an entry can go
@@ -589,37 +615,42 @@ export async function renderEntryThumbnail(
       opts.pose,
     )
   ) {
-    URL.revokeObjectURL(cached.pngUrl)
-    return 'current'
+    URL.revokeObjectURL(cached.pngUrl);
+    return "current";
   }
   // A hit mints an object URL; this read wanted the orientation, not the
   // old pixels.
-  if (cached.pngUrl !== undefined) URL.revokeObjectURL(cached.pngUrl)
+  if (cached.pngUrl !== undefined) URL.revokeObjectURL(cached.pngUrl);
 
   // The index's orientation for this model, for the re-render branch — the
   // discard branch reads it through `framingAfterDiscard`, which is where
   // "usable" is decided (D7/4b.3a).
-  const pose = cameraForPose(opts.pose, DEFAULT_CAMERA)
-  let camera: CameraState
-  let axis: OrbitAxis
-  let posed: boolean
+  const pose = cameraForPose(opts.pose, DEFAULT_CAMERA);
+  let camera: CameraState;
+  let axis: OrbitAxis;
+  let posed: boolean;
   if (discardFraming) {
     // What the model resolves to once its own orientation is gone —
     // resolved by the shared rule, which the lightbox panel's live reset
     // reads too, so the two surfaces cannot disagree about the same model.
-    ;({ camera, axis, posed } = framingAfterDiscard(opts.pose, formatOfEntry(entry)))
+    ({ camera, axis, posed } = framingAfterDiscard(
+      opts.pose,
+      formatOfEntry(entry),
+    ));
   } else {
     // Exactly the sweep's resolution (useThumbnails' dropStale): the stored
     // camera/axis, else the pose when *both* are absent, else the default.
-    const fromPose = cached.camera === undefined && cached.axis === undefined ? pose : null
-    posed = fromPose !== null
-    camera = cached.camera ?? fromPose?.camera ?? DEFAULT_CAMERA
-    axis = cached.axis ?? fromPose?.axis ?? defaultAxisFor(formatOfEntry(entry))
+    const fromPose =
+      cached.camera === undefined && cached.axis === undefined ? pose : null;
+    posed = fromPose !== null;
+    camera = cached.camera ?? fromPose?.camera ?? DEFAULT_CAMERA;
+    axis =
+      cached.axis ?? fromPose?.axis ?? defaultAxisFor(formatOfEntry(entry));
   }
 
-  const object = await deps.lru.acquire(entry.path)
-  await deps.queue.whenResumed()
-  const png = await renderThumbnail(object, camera, axis, ao)
+  const object = await deps.lru.acquire(entry.path);
+  await deps.queue.whenResumed();
+  const png = await renderThumbnail(object, camera, axis, ao);
   const written = await deps.api
     .putThumb({
       path: entry.path,
@@ -654,12 +685,12 @@ export async function renderEntryThumbnail(
       // launched, or another surface wrote it. Their write stands, and these
       // pixels are for a state that no longer exists. `null` rather than a
       // throw because this is not a failure — it is the outcome D4 designed.
-      if (err instanceof HttpError && err.status === 412) return null
-      throw err
-    })
+      if (err instanceof HttpError && err.status === 412) return null;
+      throw err;
+    });
   // Nothing is handed to the session's map for a refused write either: the
   // tile's state belongs to whoever *did* write, not to this render.
-  if (written === null) return 'skipped'
+  if (written === null) return "skipped";
   // The session's own copy, not only the server's: App sources the
   // lightbox's camera and axis from this map, so a cache-only write would
   // leave the viewer opening at the orientation just given up (4b.4).
@@ -670,17 +701,17 @@ export async function renderEntryThumbnail(
       entry.path,
       { camera: null, axis: null },
       { camera: cached.camera, axis: cached.axis },
-    )
+    );
   }
   deps.setThumb(entry.path, {
-    status: 'ready',
+    status: "ready",
     url: URL.createObjectURL(png),
     camera: discardFraming ? undefined : cached.camera,
     axis: discardFraming ? undefined : cached.axis,
     // The PUT above moved the generation; the echo keeps the tile's next
     // fetch cacheable (setThumb adopts absence as "re-learn").
     gen: written.gen,
-  })
+  });
   // The outcome, and only the outcome. A render this browser's encoder could
   // not produce in the stored format never reached the store, though the
   // orientation in that write did (`webp-thumbnails` D6) — so this is work the
@@ -690,7 +721,7 @@ export async function renderEntryThumbnail(
   // the tile must show them and a discarded framing must reach the session map
   // (4b.4) exactly as on any other write. What differs is the count, nothing
   // the user can see.
-  return written.dropped === true ? 'skipped' : 'done'
+  return written.dropped === true ? "skipped" : "done";
 }
 
 /**
@@ -712,7 +743,7 @@ function refreshThumbnail(
   host: ActionHost,
   opts: { discardFraming: boolean; pinToLookup?: boolean },
 ): void {
-  const { discardFraming, pinToLookup } = opts
+  const { discardFraming, pinToLookup } = opts;
   host.queue.push(async () => {
     try {
       await renderEntryThumbnail(entry, host, {
@@ -721,14 +752,14 @@ function refreshThumbnail(
         // The landing's map, which covers this tile by construction: the
         // command is pressed on something on screen.
         pose: host.poses[entry.path],
-      })
+      });
     } catch {
       // The tile keeps whatever it was showing — a render that did not happen
       // is not a reason to degrade a picture that did. Said out loud, though:
       // this one is a user's press, not a background sweep.
-      host.report(RENDER_FAILED)
+      host.report(RENDER_FAILED);
     }
-  })
+  });
 }
 
 /**
@@ -741,11 +772,11 @@ export interface LiveFramingView {
    * on the orientation so the close that follows writes nothing
    * (`ViewerSession.reframe`).
    */
-  reframe: (camera: CameraState, axis: OrbitAxis) => void
+  reframe: (camera: CameraState, axis: OrbitAxis) => void;
 }
 
 /** The failure sentence for a discard the store did not accept. */
-export const RESET_FAILED = 'Could not reset the framing.'
+export const RESET_FAILED = "Could not reset the framing.";
 
 /**
  * *Reset framing* pressed on the surface that is **showing** the model — the
@@ -792,7 +823,10 @@ export function resetFramingLive(
 ): void {
   // Resolved from the pose and the file's format alone (`pose-rerender` D7):
   // nothing stored survives a reset, so nothing stored is read.
-  const framing = framingAfterDiscard(host.poses[entry.path], formatOfEntry(entry))
+  const framing = framingAfterDiscard(
+    host.poses[entry.path],
+    formatOfEntry(entry),
+  );
   void host.api
     .putThumb({
       path: entry.path,
@@ -816,13 +850,13 @@ export function resetFramingLive(
       // at the orientation just given up (4b.4).
       () => {
         // No lookup here to hand over a before-state; App reads the tile's.
-        host.framingChanged(entry.path, { camera: null, axis: null })
-        host.discardThumbFraming(entry.path)
+        host.framingChanged(entry.path, { camera: null, axis: null });
+        host.discardThumbFraming(entry.path);
       },
       () => host.report(RESET_FAILED),
-    )
-  view?.reframe(framing.camera, framing.axis)
-  refreshThumbnail(entry, host, { discardFraming: false, pinToLookup: true })
+    );
+  view?.reframe(framing.camera, framing.axis);
+  refreshThumbnail(entry, host, { discardFraming: false, pinToLookup: true });
 }
 
 /*
@@ -844,17 +878,17 @@ export function resetFramingLive(
  */
 
 /** The three letters the picker lists; a spindle is one of these, signed. */
-export const AXIS_LETTERS = ['x', 'y', 'z'] as const
-export type AxisLetter = (typeof AXIS_LETTERS)[number]
+export const AXIS_LETTERS = ["x", "y", "z"] as const;
+export type AxisLetter = (typeof AXIS_LETTERS)[number];
 
 /** Whether this spindle is a negated one — the state `flip` shows pressed. */
 export function isAxisNegated(axis: OrbitAxis): boolean {
-  return axis.startsWith('-')
+  return axis.startsWith("-");
 }
 
 /** The letter of this spindle, which is the pill marked for it. */
 export function axisLetter(axis: OrbitAxis): AxisLetter {
-  return (isAxisNegated(axis) ? axis.slice(1) : axis) as AxisLetter
+  return (isAxisNegated(axis) ? axis.slice(1) : axis) as AxisLetter;
 }
 
 /**
@@ -862,29 +896,35 @@ export function axisLetter(axis: OrbitAxis): AxisLetter {
  * force**. `−Z` + `X` is `−X`, not `X` — the picker's rule, because the sign is
  * the flip pill's to say and a letter press is not a press of it.
  */
-export function axisWithLetter(current: OrbitAxis, letter: AxisLetter): OrbitAxis {
-  return (isAxisNegated(current) ? `-${letter}` : letter) as OrbitAxis
+export function axisWithLetter(
+  current: OrbitAxis,
+  letter: AxisLetter,
+): OrbitAxis {
+  return (isAxisNegated(current) ? `-${letter}` : letter) as OrbitAxis;
 }
 
 /** The spindle the flip pill chooses: the current one, negated. Never a no-op. */
 export function negatedAxis(current: OrbitAxis): OrbitAxis {
-  return (isAxisNegated(current) ? current.slice(1) : `-${current}`) as OrbitAxis
+  return (
+    isAxisNegated(current) ? current.slice(1) : `-${current}`
+  ) as OrbitAxis;
 }
 
 /** The row the four pills sit in — positioning stays with the caller. */
-export const AXIS_GROUP_CLASS = 'flex items-center gap-1 rounded-full bg-zinc-800/80 p-1 text-xs'
+export const AXIS_GROUP_CLASS =
+  "flex items-center gap-1 rounded-full bg-zinc-800/80 p-1 text-xs";
 /** The `axis` caption: a `<span>`, so it stays out of any button index. */
-export const AXIS_CAPTION_CLASS = 'px-1.5 text-zinc-500'
+export const AXIS_CAPTION_CLASS = "px-1.5 text-zinc-500";
 /** The hairline between the letters and `flip`. */
-export const AXIS_DIVIDER_CLASS = 'h-4 w-px bg-zinc-700'
+export const AXIS_DIVIDER_CLASS = "h-4 w-px bg-zinc-700";
 /** A letter pill; the spindle in force is the *filled* one. */
 export const axisPillClass = (active: boolean): string =>
-  `rounded-full px-2.5 py-1 ${active ? 'bg-sky-700 text-white' : 'text-zinc-400 hover:text-zinc-200'}`
+  `rounded-full px-2.5 py-1 ${active ? "bg-sky-700 text-white" : "text-zinc-400 hover:text-zinc-200"}`;
 /** The `flip` pill — amber rather than sky, since it is a state and not a pick. */
 export const flipPillClass = (active: boolean): string =>
-  `rounded-full px-2.5 py-1 ${active ? 'bg-amber-700 text-white' : 'text-zinc-400 hover:text-zinc-200'}`
+  `rounded-full px-2.5 py-1 ${active ? "bg-amber-700 text-white" : "text-zinc-400 hover:text-zinc-200"}`;
 /** What `flip` says it does, on both surfaces. */
-export const FLIP_TITLE = 'Negate the spindle axis (+axis ↔ −axis)'
+export const FLIP_TITLE = "Negate the spindle axis (+axis ↔ −axis)";
 
 /**
  * Whether the menu raised on this entry, on this surface, offers the axis group.
@@ -895,8 +935,11 @@ export const FLIP_TITLE = 'Negate the spindle axis (+axis ↔ −axis)'
  * `LIGHTBOX_MENU_EXCLUDES`; the orbit overlay offers it, exactly as the tile
  * beneath it does (6.8).
  */
-export function orbitAxisApplies(entry: DirEntry, exclude: readonly MenuItemId[] = []): boolean {
-  return entry.kind === 'model' && !exclude.includes('orbitAxis')
+export function orbitAxisApplies(
+  entry: DirEntry,
+  exclude: readonly MenuItemId[] = [],
+): boolean {
+  return entry.kind === "model" && !exclude.includes("orbitAxis");
 }
 
 /**
@@ -941,22 +984,22 @@ export function setOrbitAxis(
   axis: OrbitAxis,
   current: OrbitAxis,
 ): void {
-  if (axis === current) return
+  if (axis === current) return;
   host.queue.push(async () => {
     try {
       // The suspension gate, twice, exactly where the other two put it: `push`
       // alone cannot stop a job that has already started (queue.ts's waiters gate), and
       // there is one WebGLRenderer app-wide (architecture D2/D3).
-      await host.queue.whenResumed()
-      const object = await host.lru.acquire(entry.path)
-      await host.queue.whenResumed()
+      await host.queue.whenResumed();
+      const object = await host.lru.acquire(entry.path);
+      await host.queue.whenResumed();
       // The default about the new spindle — which is what an ordinary visit
       // resolves to for a model that has an axis and no camera
       // (`useThumbnails`' camera/axis fallbacks), so the tile and the next sweep agree.
       // One reading, here, for the pixels and the PUT that files them
       // (D4/D4a) — after the gate, like the other re-render command's.
-      const ao = aoEnabled()
-      const png = await renderThumbnail(object, DEFAULT_CAMERA, axis, ao)
+      const ao = aoEnabled();
+      const png = await renderThumbnail(object, DEFAULT_CAMERA, axis, ao);
       const written = await host.api.putThumb({
         path: entry.path,
         mtime: entry.mtime,
@@ -966,24 +1009,24 @@ export function setOrbitAxis(
         lighting: THUMB_LIGHTING,
         rig: RIG_VERSION,
         ao,
-      })
+      });
       // The session's own copy, not only the server's: App opens the lightbox at
       // what this map holds, so a cache-only write would open the model about
       // the spindle just replaced (4b.4).
       // No lookup here to hand over a before-state; App reads the tile's.
-      host.framingChanged(entry.path, { camera: null, axis })
+      host.framingChanged(entry.path, { camera: null, axis });
       host.setThumb(entry.path, {
-        status: 'ready',
+        status: "ready",
         url: URL.createObjectURL(png),
         camera: undefined,
         axis,
         // As in the re-render command: the echo, so the next fetch stays keyed.
         gen: written.gen,
-      })
+      });
     } catch {
-      host.report(RENDER_FAILED)
+      host.report(RENDER_FAILED);
     }
-  })
+  });
 }
 
 /*
@@ -1013,14 +1056,14 @@ export function setOrbitAxis(
  * pill, hence the softer radius.
  */
 export const OPEN_IN_GROUP_CLASS =
-  'flex flex-wrap items-center gap-1 rounded-2xl bg-zinc-800/80 p-1 text-xs'
+  "flex flex-wrap items-center gap-1 rounded-2xl bg-zinc-800/80 p-1 text-xs";
 /**
  * The `open in` caption: a `<span>`, so it stays out of any button index — and
  * `whitespace-nowrap`, because two words in a squeezed flex row break as "open"
  * over "in", which reads as two captions (observed 2026-08-25; `axis` is one
  * word and never showed it).
  */
-export const OPEN_IN_CAPTION_CLASS = `${AXIS_CAPTION_CLASS} whitespace-nowrap`
+export const OPEN_IN_CAPTION_CLASS = `${AXIS_CAPTION_CLASS} whitespace-nowrap`;
 /**
  * The caption on a surface narrow enough that the row wraps in practice — the
  * lightbox's panel. `w-full` takes the whole line of a wrapping flex row, so
@@ -1029,7 +1072,7 @@ export const OPEN_IN_CAPTION_CLASS = `${AXIS_CAPTION_CLASS} whitespace-nowrap`
  * a caption over its list reads as a heading. The menu keeps the inline caption,
  * where the row has the width to stay on one line beside the axis row above it.
  */
-export const OPEN_IN_PANEL_CAPTION_CLASS = `${OPEN_IN_CAPTION_CLASS} w-full`
+export const OPEN_IN_PANEL_CAPTION_CLASS = `${OPEN_IN_CAPTION_CLASS} w-full`;
 /**
  * An application pill. One class for every pill, including the default's: which
  * application leads is said by **order**, which is what the spec pins ("the
@@ -1037,9 +1080,9 @@ export const OPEN_IN_PANEL_CAPTION_CLASS = `${OPEN_IN_CAPTION_CLASS} w-full`
  * and a filled pill in the axis row means "this is what the model is", which is
  * not what a launchable application is.
  */
-export const OPEN_IN_PILL_CLASS = `${axisPillClass(false)} max-w-full truncate`
+export const OPEN_IN_PILL_CLASS = `${axisPillClass(false)} max-w-full truncate`;
 /** What the caption says the row is for. */
-export const OPEN_IN_CAPTION = 'open in'
+export const OPEN_IN_CAPTION = "open in";
 
 /**
  * The mime for an entry's model format — the client's half of L6's rule that
@@ -1052,8 +1095,8 @@ export const OPEN_IN_CAPTION = 'open in'
  * therefore no applications — absence, not an inert row.
  */
 function entryMime(entry: DirEntry): string | null {
-  if (entry.kind !== 'model' || entry.format === undefined) return null
-  return `model/${entry.format}`
+  if (entry.kind !== "model" || entry.format === undefined) return null;
+  return `model/${entry.format}`;
 }
 
 /**
@@ -1078,13 +1121,13 @@ export function openInApps(
   ctx: AvailabilityContext,
   exclude: readonly MenuItemId[] = [],
 ): AppRef[] {
-  if (exclude.includes('openIn')) return []
-  const mime = entryMime(entry)
-  const type = mime === null ? undefined : ctx.apps?.types[mime]
-  if (type === undefined) return []
-  const lead = type.default
-  if (lead === null) return type.associated
-  return [lead, ...type.associated.filter((a) => a.id !== lead.id)]
+  if (exclude.includes("openIn")) return [];
+  const mime = entryMime(entry);
+  const type = mime === null ? undefined : ctx.apps?.types[mime];
+  if (type === undefined) return [];
+  const lead = type.default;
+  if (lead === null) return type.associated;
+  return [lead, ...type.associated.filter((a) => a.id !== lead.id)];
 }
 
 /**
@@ -1100,8 +1143,14 @@ export function openInApps(
  * clipboard refusal takes, which is what "reported the way other entry actions
  * report theirs" means structurally.
  */
-export function openEntryIn(entry: DirEntry, host: ActionHost, appId: string): void {
-  void host.api.open(entry.path, appId).then(undefined, () => host.report(LAUNCH_FAILED))
+export function openEntryIn(
+  entry: DirEntry,
+  host: ActionHost,
+  appId: string,
+): void {
+  void host.api
+    .open(entry.path, appId)
+    .then(undefined, () => host.report(LAUNCH_FAILED));
 }
 
 /**
@@ -1120,15 +1169,15 @@ export function openEntryWith(entry: DirEntry, host: ActionHost): void {
   void host.api.openWith(entry.path).then(
     () => host.refreshApps(),
     () => {
-      host.report(CHOOSER_FAILED)
-      host.refreshApps()
+      host.report(CHOOSER_FAILED);
+      host.refreshApps();
     },
-  )
+  );
 }
 
 export interface EntryCommand {
-  readonly id: CommandId
-  readonly label: string
+  readonly id: CommandId;
+  readonly label: string;
   /**
    * A label that depends on the entry, resolved by `commandsFor` — so the
    * commands a surface receives already carry the right `label` as a plain
@@ -1136,16 +1185,18 @@ export interface EntryCommand {
    * one command, labelled for what it does to *this* entry). Absent on every
    * command whose label is one string for every entry.
    */
-  readonly labelFor?: (entry: DirEntry) => string
+  readonly labelFor?: (entry: DirEntry) => string;
   /** D6's table read for one entry, plus the conditions a table cannot show. */
-  readonly applies: (entry: DirEntry, ctx: AvailabilityContext) => boolean
+  readonly applies: (entry: DirEntry, ctx: AvailabilityContext) => boolean;
   /**
    * `null` while the body is not built yet — a null-bodied command is not
    * rendered, since an inapplicable action is absent rather than present and
    * inert, and so is an unbuilt one. Every command in the table has a body
    * now; the field stays because that is the shape a seventh would arrive in.
    */
-  readonly run: ((entry: DirEntry, host: ActionHost, el: HTMLElement | null) => void) | null
+  readonly run:
+    | ((entry: DirEntry, host: ActionHost, el: HTMLElement | null) => void)
+    | null;
 }
 
 /**
@@ -1200,8 +1251,8 @@ export interface EntryCommand {
  */
 export const ENTRY_COMMANDS: readonly EntryCommand[] = [
   {
-    id: 'open',
-    label: 'Open',
+    id: "open",
+    label: "Open",
     // Labelled for what it does to *this* entry, not for what it is (the 4.3
     // naming decision, 2026-08-25): "Open" was only ever accurate on a model —
     // a directory or archive is browsed into, no lightbox involved — and beside
@@ -1209,13 +1260,17 @@ export const ENTRY_COMMANDS: readonly EntryCommand[] = [
     // many. The table's `label` is the fallback spelling; every surface renders
     // what `commandsFor` resolved.
     labelFor: (entry) =>
-      entry.kind === 'model' ? 'Open lightbox' : entry.kind === 'dir' ? 'Open folder' : 'Open archive',
+      entry.kind === "model"
+        ? "Open lightbox"
+        : entry.kind === "dir"
+          ? "Open folder"
+          : "Open archive",
     applies: () => true,
     run: (entry, host, el) => host.open(entry, el),
   },
   {
-    id: 'reveal',
-    label: 'Reveal in app',
+    id: "reveal",
+    label: "Reveal in app",
     applies: () => true,
     run: (entry, host) => {
       // One navigate and nothing else (D8/3.1): the history push comes from the
@@ -1224,21 +1279,21 @@ export const ENTRY_COMMANDS: readonly EntryCommand[] = [
       //
       // Then the mark, never before — `navigate` clears it on the way past
       // (3.5), so arming first would arm nothing.
-      host.navigate(containingFolder(entry.path))
-      host.markOnArrival(entry.path)
+      host.navigate(containingFolder(entry.path));
+      host.markOnArrival(entry.path);
     },
   },
   {
-    id: 'copyPath',
-    label: 'Copy path',
+    id: "copyPath",
+    label: "Copy path",
     applies: () => true,
     run: (entry, host) => copyEntryPath(entry, host),
   },
   {
-    id: 'findSimilar',
-    label: 'Find similar',
+    id: "findSimilar",
+    label: "Find similar",
     applies: similarApplies,
-    run: (entry, host) => host.dispatch({ type: 'similar', model: entry.path }),
+    run: (entry, host) => host.dispatch({ type: "similar", model: entry.path }),
   },
   // The two container rows, between *Find similar* and the two per-model
   // thumbnail commands they are the analogue of.
@@ -1251,62 +1306,74 @@ export const ENTRY_COMMANDS: readonly EntryCommand[] = [
   // instead: reset's on the chip's confirmation, before anything is discarded;
   // generate's on the chip as the job starts.
   {
-    id: 'generateBeneath',
-    label: 'Generate thumbnails beneath',
+    id: "generateBeneath",
+    label: "Generate thumbnails beneath",
     // **Both** fields, and that is the mixed configuration this row exists to
     // get right: under `maintenance: true, thumbWrites: false` every write this
     // job made would be refused at the route, so the job is a loop that renders
     // and discards and the launcher is absent rather than inert (D4).
     applies: (entry, ctx) =>
-      entry.kind !== 'model' && ctx.features?.maintenance === true && ctx.features.thumbWrites === true,
+      entry.kind !== "model" &&
+      ctx.features?.maintenance === true &&
+      ctx.features.thumbWrites === true,
     // `displayName` first: the chip names the scope the way the tile the user
     // pressed named it (library-overrides D7), falling back to the real name.
     run: (entry, host) =>
-      host.launchJob('generate', { path: entry.path, label: entry.displayName ?? entry.name }),
+      host.launchJob("generate", {
+        path: entry.path,
+        label: entry.displayName ?? entry.name,
+      }),
   },
   {
-    id: 'resetBeneath',
-    label: 'Reset framings beneath',
+    id: "resetBeneath",
+    label: "Reset framings beneath",
     // `maintenance` alone: the writes are `png: null, camera: null`, which a
     // write-refusing deployment refuses at the route without this launcher
     // needing to ask (D4).
-    applies: (entry, ctx) => entry.kind !== 'model' && ctx.features?.maintenance === true,
+    applies: (entry, ctx) =>
+      entry.kind !== "model" && ctx.features?.maintenance === true,
     // No confirmation here: the runner derives first and parks in `confirming`
     // with the count, which is the chip's to state (D5). A dialog raised by the
     // command would have to state a number nobody has counted yet.
     run: (entry, host) =>
-      host.launchJob('reset', { path: entry.path, label: entry.displayName ?? entry.name }),
+      host.launchJob("reset", {
+        path: entry.path,
+        label: entry.displayName ?? entry.name,
+      }),
   },
   {
-    id: 'reRenderThumbnail',
-    label: 'Re-render thumbnail',
+    id: "reRenderThumbnail",
+    label: "Re-render thumbnail",
     // Model-only for the same structural reason the framing reset is: container
     // tiles are drawn as glyphs, not renders, so there is no thumbnail to act
     // on. Offered whether or not the cached image is current — a failed image
     // is one of the things re-rendering exists to fix.
-    applies: (entry) => entry.kind === 'model',
+    applies: (entry) => entry.kind === "model",
     // Keeps the model's orientation and replaces its pixels: the manual
     // trigger for a mode or rig change the visible grid was never rebuilt for.
-    run: (entry, host) => refreshThumbnail(entry, host, { discardFraming: false }),
+    run: (entry, host) =>
+      refreshThumbnail(entry, host, { discardFraming: false }),
   },
   {
-    id: 'resetFraming',
-    label: 'Reset framing',
-    applies: (entry) => entry.kind === 'model',
+    id: "resetFraming",
+    label: "Reset framing",
+    applies: (entry) => entry.kind === "model",
     // *Framing*, not *thumbnail*: the orientation is keyed by path and shared
     // with the viewer, so giving it up also moves where the lightbox opens
     // this model (D7). Re-rendering without giving it up would reproduce the
     // same badly framed picture, which is why this is a second command.
-    run: (entry, host) => refreshThumbnail(entry, host, { discardFraming: true }),
+    run: (entry, host) =>
+      refreshThumbnail(entry, host, { discardFraming: true }),
   },
   {
-    id: 'openWith',
-    label: 'Open with…',
+    id: "openWith",
+    label: "Open with…",
     // Model-only, and offered *exactly* when the session's report says a
     // chooser is configured — read from state, never probed (L5). The report
     // being absent (not yet landed, or its read failed) reads as no chooser,
     // which is the same absence a machine without one has.
-    applies: (entry, ctx) => entry.kind === 'model' && ctx.apps?.chooser === true,
+    applies: (entry, ctx) =>
+      entry.kind === "model" && ctx.apps?.chooser === true,
     // Last in the table, which puts it under the pill row it extends. The
     // naming pass (4.3) kept it here and resolved the four-flavors-of-open
     // crowd the other way: `open` is now labelled for what it does to the
@@ -1314,7 +1381,7 @@ export const ENTRY_COMMANDS: readonly EntryCommand[] = [
     // the only application-facing opens left in the menu.
     run: (entry, host) => openEntryWith(entry, host),
   },
-]
+];
 
 /**
  * What a menu raised on the **lightbox** withholds (D6's margin).
@@ -1364,10 +1431,10 @@ export const ENTRY_COMMANDS: readonly EntryCommand[] = [
  * overlay caught the press and this filter applied to it.
  */
 export const LIGHTBOX_MENU_EXCLUDES: readonly MenuItemId[] = [
-  'open',
-  'reRenderThumbnail',
-  'orbitAxis',
-]
+  "open",
+  "reRenderThumbnail",
+  "orbitAxis",
+];
 
 // Neither list names `generateBeneath` or `resetBeneath`, and neither needs to:
 // both lists filter the *lightbox*, which only ever opens a model, and both
@@ -1420,11 +1487,11 @@ export const LIGHTBOX_MENU_EXCLUDES: readonly MenuItemId[] = [
  *   strip through this list's silence about it.
  */
 export const LIGHTBOX_PANEL_EXCLUDES: readonly MenuItemId[] = [
-  'open',
-  'copyPath',
-  'reRenderThumbnail',
-  'orbitAxis',
-]
+  "open",
+  "copyPath",
+  "reRenderThumbnail",
+  "orbitAxis",
+];
 
 /**
  * Run a command by id — the shape a surface that renders its own affordances
@@ -1437,7 +1504,7 @@ export function runCommand(
   host: ActionHost,
   el: HTMLElement | null = null,
 ): void {
-  ENTRY_COMMANDS.find((c) => c.id === id)?.run?.(entry, host, el)
+  ENTRY_COMMANDS.find((c) => c.id === id)?.run?.(entry, host, el);
 }
 
 /**
@@ -1453,5 +1520,7 @@ export function commandsFor(
 ): EntryCommand[] {
   return ENTRY_COMMANDS.filter(
     (c) => c.run !== null && !exclude.includes(c.id) && c.applies(entry, ctx),
-  ).map((c) => (c.labelFor === undefined ? c : { ...c, label: c.labelFor(entry) }))
+  ).map((c) =>
+    c.labelFor === undefined ? c : { ...c, label: c.labelFor(entry) },
+  );
 }

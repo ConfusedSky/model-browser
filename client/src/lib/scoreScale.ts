@@ -28,9 +28,9 @@
  * third scoring route must extend this to be rendered at all, which is the
  * failure mode we want: unlabelled is unrendered.
  */
-import type { Subject } from '../state/view'
+import type { Subject } from "../state/view";
 
-export type ScoreScale = 'k' | 'sim'
+export type ScoreScale = "k" | "sim";
 
 /**
  * The scale this view's results are on, or `null` where none are scored.
@@ -40,9 +40,9 @@ export type ScoreScale = 'k' | 'sim'
  * scores nothing, so it must not be labelled as though it did.
  */
 export function scaleOf(subject: Subject, meaning: boolean): ScoreScale | null {
-  if (subject.kind === 'similar') return 'sim'
-  if (subject.kind === 'query' && meaning) return 'k'
-  return null
+  if (subject.kind === "similar") return "sim";
+  if (subject.kind === "query" && meaning) return "k";
+  return null;
 }
 
 /**
@@ -50,7 +50,7 @@ export function scaleOf(subject: Subject, meaning: boolean): ScoreScale | null {
  * and legible there because sixty tiles carry the same label and the view
  * overhead says which search produced them.
  */
-export const SCALE_BADGE: Record<ScoreScale, string> = { k: 'k', sim: 'sim' }
+export const SCALE_BADGE: Record<ScoreScale, string> = { k: "k", sim: "sim" };
 
 /**
  * What the same scale is called when read aloud (D8). Spelled out because a
@@ -60,7 +60,10 @@ export const SCALE_BADGE: Record<ScoreScale, string> = { k: 'k', sim: 'sim' }
  * and the `k` in a similarity URL). The corner has a reason to be terse; the
  * spoken form has none, and should not imitate one.
  */
-export const SCALE_SPOKEN: Record<ScoreScale, string> = { k: 'cosine', sim: 'similarity' }
+export const SCALE_SPOKEN: Record<ScoreScale, string> = {
+  k: "cosine",
+  sim: "similarity",
+};
 
 /** The z's label, which is its whole name on both surfaces and in both forms. */
-export const Z_LABEL = 'z'
+export const Z_LABEL = "z";

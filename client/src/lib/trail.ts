@@ -24,98 +24,113 @@
  * malformed value reads as empty. An index the trail does not know answers
  * `null`, which the caller lands as the top — fresh, never wrong.
  */
-import { serializeView } from './urlState'
-import { toUrlView, type View } from '../state/view'
-import type { Placement } from './placement'
+import { serializeView } from "./urlState";
+import { toUrlView, type View } from "../state/view";
+import type { Placement } from "./placement";
 
 export interface TrailRow {
-  idx: number
-  listing: string
-  placement: Placement | null
+  idx: number;
+  listing: string;
+  placement: Placement | null;
 }
 
 /** Just the three calls used here, so a test can pass a plain object. */
-export type TrailStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
+export type TrailStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
-export const TRAIL_KEY = 'mb:trail'
-export const TRAIL_CAP = 300
+export const TRAIL_KEY = "mb:trail";
+export const TRAIL_CAP = 300;
 
 /** The entry's listing as `sameListing` compares it: the view minus its model. */
 export function listingKey(view: View): string {
-  return serializeView(toUrlView({ ...view, model: null }))
+  return serializeView(toUrlView({ ...view, model: null }));
 }
 
 function browserStorage(): TrailStorage | null {
   try {
-    return globalThis.sessionStorage ?? null
+    return globalThis.sessionStorage ?? null;
   } catch {
     // Accessing the property itself throws where site data is blocked.
-    return null
+    return null;
   }
 }
 
 function isPlacement(value: unknown): value is Placement {
-  if (typeof value !== 'object' || value === null) return false
-  const p = value as Record<string, unknown>
-  return typeof p.anchor === 'string' && typeof p.offset === 'number'
+  if (typeof value !== "object" || value === null) return false;
+  const p = value as Record<string, unknown>;
+  return typeof p.anchor === "string" && typeof p.offset === "number";
 }
 
 function isRow(value: unknown): value is TrailRow {
-  if (typeof value !== 'object' || value === null) return false
-  const r = value as Record<string, unknown>
+  if (typeof value !== "object" || value === null) return false;
+  const r = value as Record<string, unknown>;
   return (
-    typeof r.idx === 'number' &&
-    typeof r.listing === 'string' &&
+    typeof r.idx === "number" &&
+    typeof r.listing === "string" &&
     (r.placement === null || isPlacement(r.placement))
-  )
+  );
 }
 
 /** The rows, ascending by index; anything unreadable or malformed is empty. */
 function readRows(storage: TrailStorage | null): TrailRow[] {
-  if (storage === null) return []
+  if (storage === null) return [];
   try {
-    const parsed: unknown = JSON.parse(storage.getItem(TRAIL_KEY) ?? '[]')
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter(isRow).sort((a, b) => a.idx - b.idx)
+    const parsed: unknown = JSON.parse(storage.getItem(TRAIL_KEY) ?? "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(isRow).sort((a, b) => a.idx - b.idx);
   } catch {
-    return []
+    return [];
   }
 }
 
 function writeRows(storage: TrailStorage | null, rows: TrailRow[]): void {
-  if (storage === null) return
+  if (storage === null) return;
   try {
-    storage.setItem(TRAIL_KEY, JSON.stringify(rows.slice(-TRAIL_CAP)))
+    storage.setItem(TRAIL_KEY, JSON.stringify(rows.slice(-TRAIL_CAP)));
   } catch {
     // Storage refused the write — the trail is simply not kept.
   }
 }
 
 /** A new entry at `idx`: prune every row at or above it, append it with no placement. */
-export function trailPush(idx: number, listing: string, storage = browserStorage()): void {
-  const rows = readRows(storage).filter((r) => r.idx < idx)
-  rows.push({ idx, listing, placement: null })
-  writeRows(storage, rows)
+export function trailPush(
+  idx: number,
+  listing: string,
+  storage = browserStorage(),
+): void {
+  const rows = readRows(storage).filter((r) => r.idx < idx);
+  rows.push({ idx, listing, placement: null });
+  writeRows(storage, rows);
 }
 
 /** The entry at `idx` now names `listing` (a boot seed, a `replaceState`). Its
  *  placement survives only if the listing is unchanged. */
-export function trailReplace(idx: number, listing: string, storage = browserStorage()): void {
-  const rows = readRows(storage)
-  const row = rows.find((r) => r.idx === idx)
-  if (row === undefined) rows.push({ idx, listing, placement: null })
-  else if (row.listing === listing) return
-  else Object.assign(row, { listing, placement: null })
-  writeRows(storage, rows.sort((a, b) => a.idx - b.idx))
+export function trailReplace(
+  idx: number,
+  listing: string,
+  storage = browserStorage(),
+): void {
+  const rows = readRows(storage);
+  const row = rows.find((r) => r.idx === idx);
+  if (row === undefined) rows.push({ idx, listing, placement: null });
+  else if (row.listing === listing) return;
+  else Object.assign(row, { listing, placement: null });
+  writeRows(
+    storage,
+    rows.sort((a, b) => a.idx - b.idx),
+  );
 }
 
 /** File the entry's placement. An index the trail does not know is ignored, never invented. */
-export function trailRecord(idx: number, placement: Placement | null, storage = browserStorage()): void {
-  const rows = readRows(storage)
-  const row = rows.find((r) => r.idx === idx)
-  if (row === undefined) return
-  row.placement = placement
-  writeRows(storage, rows)
+export function trailRecord(
+  idx: number,
+  placement: Placement | null,
+  storage = browserStorage(),
+): void {
+  const rows = readRows(storage);
+  const row = rows.find((r) => r.idx === idx);
+  if (row === undefined) return;
+  row.placement = placement;
+  writeRows(storage, rows);
 }
 
 /** The entry's placement, `null` when the row is unknown or names another
@@ -125,16 +140,21 @@ export function trailPlacement(
   listing: string,
   storage = browserStorage(),
 ): Placement | null {
-  const row = readRows(storage).find((r) => r.idx === idx)
-  return row !== undefined && row.listing === listing ? row.placement : null
+  const row = readRows(storage).find((r) => r.idx === idx);
+  return row !== undefined && row.listing === listing ? row.placement : null;
 }
 
 /** The nearest row below `fromIdx` whose listing is `listing` — the visit that led here (D3). */
-export function trailWalkBack(fromIdx: number, listing: string, storage = browserStorage()): TrailRow | null {
-  const rows = readRows(storage)
+export function trailWalkBack(
+  fromIdx: number,
+  listing: string,
+  storage = browserStorage(),
+): TrailRow | null {
+  const rows = readRows(storage);
   for (let i = rows.length - 1; i >= 0; i--) {
-    const row = rows[i]
-    if (row !== undefined && row.idx < fromIdx && row.listing === listing) return row
+    const row = rows[i];
+    if (row !== undefined && row.idx < fromIdx && row.listing === listing)
+      return row;
   }
-  return null
+  return null;
 }

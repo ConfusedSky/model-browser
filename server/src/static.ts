@@ -22,9 +22,9 @@
  * on a build.
  */
 
-import { readFile, stat } from 'node:fs/promises'
-import { posix, resolve as resolvePath, sep } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { readFile, stat } from "node:fs/promises";
+import { posix, resolve as resolvePath, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 
 /**
  * The API's prefix is **reserved**: a request under it that names no route is a
@@ -41,8 +41,8 @@ export function isApiRequest(pathname: string): boolean {
   // client's entry document with a 200 is the invisible bug this rule exists to
   // prevent. A build emits no such name, so nothing is shadowed by the wider
   // rule.
-  const p = pathname.toLowerCase()
-  return p === '/api' || p.startsWith('/api/')
+  const p = pathname.toLowerCase();
+  return p === "/api" || p.startsWith("/api/");
 }
 
 /**
@@ -56,8 +56,9 @@ export async function route(
   api: (req: Request) => Response | Promise<Response>,
   client: ((req: Request) => Promise<Response | null>) | null,
 ): Promise<Response> {
-  if (client === null || isApiRequest(new URL(req.url).pathname)) return api(req)
-  return (await client(req)) ?? (await api(req))
+  if (client === null || isApiRequest(new URL(req.url).pathname))
+    return api(req);
+  return (await client(req)) ?? (await api(req));
 }
 
 /**
@@ -66,37 +67,37 @@ export async function route(
  * `process.env` so a test can point it at a temp tree, like `xdg.ts`.
  */
 export function clientDist(env: NodeJS.ProcessEnv): string {
-  const override = env.MODEL_BROWSER_CLIENT
-  if (override !== undefined && override !== '') return override
-  return fileURLToPath(new URL('../../client/dist', import.meta.url))
+  const override = env.MODEL_BROWSER_CLIENT;
+  if (override !== undefined && override !== "") return override;
+  return fileURLToPath(new URL("../../client/dist", import.meta.url));
 }
 
 /** Content types for what a Vite build actually emits. */
 const TYPES: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.map': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.webp': 'image/webp',
-  '.gif': 'image/gif',
-  '.ico': 'image/x-icon',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
-  '.ttf': 'font/ttf',
-  '.txt': 'text/plain; charset=utf-8',
-  '.wasm': 'application/wasm',
-}
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".map": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+  ".ico": "image/x-icon",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".ttf": "font/ttf",
+  ".txt": "text/plain; charset=utf-8",
+  ".wasm": "application/wasm",
+};
 
 function extensionOf(path: string): string {
-  const dot = path.lastIndexOf('.')
-  const slash = path.lastIndexOf('/')
-  return dot > slash ? path.slice(dot).toLowerCase() : ''
+  const dot = path.lastIndexOf(".");
+  const slash = path.lastIndexOf("/");
+  return dot > slash ? path.slice(dot).toLowerCase() : "";
 }
 
 /**
@@ -106,8 +107,8 @@ function extensionOf(path: string): string {
  * is the one file whose name does not change and the only thing that names the
  * new build's assets.
  */
-const IMMUTABLE = 'public, max-age=31536000, immutable'
-const REVALIDATE = 'no-cache'
+const IMMUTABLE = "public, max-age=31536000, immutable";
+const REVALIDATE = "no-cache";
 
 /**
  * Serves `distDir`, or `null` when there is nothing there to serve.
@@ -132,35 +133,42 @@ export function createStaticHandler(
   distDir: string,
   { intro }: { intro: boolean } = { intro: true },
 ): (req: Request) => Promise<Response | null> {
-  const root = resolvePath(distDir)
-  const indexPath = resolvePath(root, 'index.html')
+  const root = resolvePath(distDir);
+  const indexPath = resolvePath(root, "index.html");
 
-  async function send(file: string, cacheControl: string): Promise<Response | null> {
+  async function send(
+    file: string,
+    cacheControl: string,
+  ): Promise<Response | null> {
     try {
-      if (!(await stat(file)).isFile()) return null
+      if (!(await stat(file)).isFile()) return null;
     } catch {
-      return null
+      return null;
     }
     // A view over the buffer, never a copy of it: `new Uint8Array(buf)` copies
     // every byte of a bundle this handler has just read, per request, for
     // nothing — a `Buffer` is already a `Uint8Array`, and what `Response` needs
     // is a view of those bytes.
-    const bytes = await readFile(file)
-    return new Response(new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength), {
-      headers: {
-        'content-type': TYPES[extensionOf(file)] ?? 'application/octet-stream',
-        'cache-control': cacheControl,
+    const bytes = await readFile(file);
+    return new Response(
+      new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength),
+      {
+        headers: {
+          "content-type":
+            TYPES[extensionOf(file)] ?? "application/octet-stream",
+          "cache-control": cacheControl,
+        },
       },
-    })
+    );
   }
 
   return async function handle(req: Request): Promise<Response | null> {
-    const { pathname } = new URL(req.url)
-    let decoded: string
+    const { pathname } = new URL(req.url);
+    let decoded: string;
     try {
-      decoded = decodeURIComponent(pathname)
+      decoded = decodeURIComponent(pathname);
     } catch {
-      return new Response('bad request', { status: 400 })
+      return new Response("bad request", { status: 400 });
     }
     // A `..` reaching here survived URL normalisation, which means it arrived
     // percent-encoded — a traversal attempt rather than a filename. Refused
@@ -169,27 +177,30 @@ export function createStaticHandler(
     // `/etc/passwd` and serve whatever that names inside the build. A NUL goes
     // the same way: `node:fs` throws on one, and a thrown path is a 500 saying
     // something about this machine.
-    const parts = decoded.split('/')
-    if (parts.includes('..') || decoded.includes('\0')) {
-      return new Response('forbidden', { status: 403 })
+    const parts = decoded.split("/");
+    if (parts.includes("..") || decoded.includes("\0")) {
+      return new Response("forbidden", { status: 403 });
     }
-    const normalized = posix.normalize(decoded)
-    if (!intro && normalized === '/about.html') {
-      return new Response('not found', { status: 404 })
+    const normalized = posix.normalize(decoded);
+    if (!intro && normalized === "/about.html") {
+      return new Response("not found", { status: 404 });
     }
-    const candidate = resolvePath(root, `.${normalized}`)
+    const candidate = resolvePath(root, `.${normalized}`);
     // Belt and braces: whatever the rules above let through must still land
     // under the build, and this is the one check a later rule cannot weaken by
     // accident.
     if (candidate !== root && !candidate.startsWith(root + sep)) {
-      return new Response('forbidden', { status: 403 })
+      return new Response("forbidden", { status: 403 });
     }
     if (candidate !== root) {
-      const file = await send(candidate, normalized.startsWith('/assets/') ? IMMUTABLE : REVALIDATE)
-      if (file !== null) return file
+      const file = await send(
+        candidate,
+        normalized.startsWith("/assets/") ? IMMUTABLE : REVALIDATE,
+      );
+      if (file !== null) return file;
     }
     // No file of that name: the client's entry document, so the client resolves
     // the location itself.
-    return send(indexPath, REVALIDATE)
-  }
+    return send(indexPath, REVALIDATE);
+  };
 }

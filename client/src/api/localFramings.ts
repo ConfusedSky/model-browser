@@ -14,9 +14,14 @@ import type {
   SemanticListing,
   SemanticTuning,
   SimilarListing,
-} from '../../../shared/types'
-import { HttpError } from './client'
-import type { ApiClient, ThumbPutResult, ThumbResult, ThumbSave } from './client'
+} from "../../../shared/types";
+import { HttpError } from "./client";
+import type {
+  ApiClient,
+  ThumbPutResult,
+  ThumbResult,
+  ThumbSave,
+} from "./client";
 
 /**
  * A visitor's own framings, kept in their browser, on a deployment that refuses
@@ -35,23 +40,26 @@ import type { ApiClient, ThumbPutResult, ThumbResult, ThumbSave } from './client
  */
 
 /** Just the three calls used here, so a test can pass a plain object. */
-export type FramingStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
+export type FramingStorage = Pick<
+  Storage,
+  "getItem" | "setItem" | "removeItem"
+>;
 
 /** One model's locally-held orientation. Never both-absent — that is `undefined`. */
 export interface LocalFraming {
-  camera?: CameraState
-  axis?: OrbitAxis
+  camera?: CameraState;
+  axis?: OrbitAxis;
 }
 
 /** This store's own namespace in a shared `localStorage`. See `framingKey`. */
-const PREFIX = 'mb:framing:'
+const PREFIX = "mb:framing:";
 
 /**
  * The default library-id getter, module-level for the reason `useThumbnails`'
  * `NO_FEATURES` is: an inline `() => null` is a fresh function per call, and
  * this value lands in that hook's sweep dependency array.
  */
-export const NO_LIBRARY = (): string | null => null
+export const NO_LIBRARY = (): string | null => null;
 
 /**
  * Where one library's framing for `path` is held: `mb:framing:<id>:<path>`.
@@ -72,35 +80,35 @@ export const NO_LIBRARY = (): string | null => null
  * no tile on screen to orbit before the id is here.
  */
 function framingKey(path: string, libraryId: string | null): string | null {
-  return libraryId === null ? null : `${PREFIX}${libraryId}:${path}`
+  return libraryId === null ? null : `${PREFIX}${libraryId}:${path}`;
 }
 
-const AXES: readonly string[] = ['x', '-x', 'y', '-y', 'z', '-z']
+const AXES: readonly string[] = ["x", "-x", "y", "-y", "z", "-z"];
 
 function browserStorage(): FramingStorage | null {
   try {
-    return globalThis.localStorage ?? null
+    return globalThis.localStorage ?? null;
   } catch {
     // Accessing the property itself throws where site data is blocked.
-    return null
+    return null;
   }
 }
 
 function isCamera(value: unknown): value is CameraState {
-  if (typeof value !== 'object' || value === null) return false
-  const c = value as Record<string, unknown>
+  if (typeof value !== "object" || value === null) return false;
+  const c = value as Record<string, unknown>;
   return (
-    typeof c.az === 'number' &&
-    typeof c.el === 'number' &&
-    typeof c.distR === 'number' &&
+    typeof c.az === "number" &&
+    typeof c.el === "number" &&
+    typeof c.distR === "number" &&
     Array.isArray(c.target) &&
     c.target.length === 3 &&
-    c.target.every((n) => typeof n === 'number')
-  )
+    c.target.every((n) => typeof n === "number")
+  );
 }
 
 function isAxis(value: unknown): value is OrbitAxis {
-  return typeof value === 'string' && AXES.includes(value)
+  return typeof value === "string" && AXES.includes(value);
 }
 
 /**
@@ -112,7 +120,7 @@ function isAxis(value: unknown): value is OrbitAxis {
  * must never relocate where a user's data is stored.
  */
 export function keepsFramingsLocally(report: FeatureReport | null): boolean {
-  return report !== null && report.thumbWrites === false
+  return report !== null && report.thumbWrites === false;
 }
 
 /**
@@ -126,30 +134,30 @@ export function readLocalFraming(
   storage: FramingStorage | null = browserStorage(),
   libraryId: () => string | null = NO_LIBRARY,
 ): LocalFraming | undefined {
-  if (storage === null) return undefined
-  const key = framingKey(path, libraryId())
-  if (key === null) return undefined
-  let raw: string | null
+  if (storage === null) return undefined;
+  const key = framingKey(path, libraryId());
+  if (key === null) return undefined;
+  let raw: string | null;
   try {
-    raw = storage.getItem(key)
+    raw = storage.getItem(key);
   } catch {
-    return undefined
+    return undefined;
   }
-  if (raw === null) return undefined
-  let parsed: unknown
+  if (raw === null) return undefined;
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(raw)
+    parsed = JSON.parse(raw);
   } catch {
-    return undefined
+    return undefined;
   }
-  if (typeof parsed !== 'object' || parsed === null) return undefined
-  const { camera, axis } = parsed as { camera?: unknown; axis?: unknown }
+  if (typeof parsed !== "object" || parsed === null) return undefined;
+  const { camera, axis } = parsed as { camera?: unknown; axis?: unknown };
   const held: LocalFraming = {
     camera: isCamera(camera) ? camera : undefined,
     axis: isAxis(axis) ? axis : undefined,
-  }
-  if (held.camera === undefined && held.axis === undefined) return undefined
-  return held
+  };
+  if (held.camera === undefined && held.axis === undefined) return undefined;
+  return held;
 }
 
 /**
@@ -165,26 +173,28 @@ export function readLocalFraming(
  */
 export function writeLocalFraming(
   path: string,
-  save: Pick<ThumbSave, 'camera' | 'axis'>,
+  save: Pick<ThumbSave, "camera" | "axis">,
   storage: FramingStorage | null = browserStorage(),
   libraryId: () => string | null = NO_LIBRARY,
 ): void {
-  if (storage === null) return
-  const key = framingKey(path, libraryId())
-  if (key === null) return
+  if (storage === null) return;
+  const key = framingKey(path, libraryId());
+  if (key === null) return;
   // Neither half named is not a write at all — pixels alone reach here on a
   // refusing deployment, and there is nothing of them to keep.
-  if (save.camera === undefined && save.axis === undefined) return
-  const held = readLocalFraming(path, storage, libraryId)
+  if (save.camera === undefined && save.axis === undefined) return;
+  const held = readLocalFraming(path, storage, libraryId);
   const next: LocalFraming = {
-    camera: save.camera === undefined ? held?.camera : (save.camera ?? undefined),
+    camera:
+      save.camera === undefined ? held?.camera : (save.camera ?? undefined),
     axis: save.axis === undefined ? held?.axis : (save.axis ?? undefined),
-  }
+  };
   try {
-    if (next.camera === undefined && next.axis === undefined) storage.removeItem(key)
+    if (next.camera === undefined && next.axis === undefined)
+      storage.removeItem(key);
     // `JSON.stringify` drops an `undefined` field, which is what "this half is
     // not held" means on the way back in.
-    else storage.setItem(key, JSON.stringify(next))
+    else storage.setItem(key, JSON.stringify(next));
   } catch {
     // Storage refused the write — the framing is simply not kept.
   }
@@ -223,16 +233,18 @@ class LocalFramingClient implements ApiClient {
    * business — and this browser's orientation is laid over the answer. A `miss`
    * with a local camera is still a `miss`.
    */
-  async getThumb(...args: Parameters<ApiClient['getThumb']>): Promise<ThumbResult> {
-    const answer = await this.inner.getThumb(...args)
-    if (!keepsFramingsLocally(this.report())) return answer
-    const local = readLocalFraming(args[0], this.storage, this.libraryId)
-    if (local === undefined) return answer
+  async getThumb(
+    ...args: Parameters<ApiClient["getThumb"]>
+  ): Promise<ThumbResult> {
+    const answer = await this.inner.getThumb(...args);
+    if (!keepsFramingsLocally(this.report())) return answer;
+    const local = readLocalFraming(args[0], this.storage, this.libraryId);
+    if (local === undefined) return answer;
     return {
       ...answer,
       camera: local.camera ?? answer.camera,
       axis: local.axis ?? answer.axis,
-    }
+    };
   }
 
   /**
@@ -263,71 +275,84 @@ class LocalFramingClient implements ApiClient {
    */
   async putThumb(save: ThumbSave): Promise<ThumbPutResult> {
     if (keepsFramingsLocally(this.report())) {
-      writeLocalFraming(save.path, save, this.storage, this.libraryId)
-      return { dropped: true }
+      writeLocalFraming(save.path, save, this.storage, this.libraryId);
+      return { dropped: true };
     }
     try {
-      return await this.inner.putThumb(save)
+      return await this.inner.putThumb(save);
     } catch (err) {
-      if (!(err instanceof HttpError) || err.refused !== 'thumbWrites') throw err
-      writeLocalFraming(save.path, save, this.storage, this.libraryId)
-      return { dropped: true }
+      if (!(err instanceof HttpError) || err.refused !== "thumbWrites")
+        throw err;
+      writeLocalFraming(save.path, save, this.storage, this.libraryId);
+      return { dropped: true };
     }
   }
 
-  listDir(...args: Parameters<ApiClient['listDir']>): Promise<DirListing> {
-    return this.inner.listDir(...args)
+  listDir(...args: Parameters<ApiClient["listDir"]>): Promise<DirListing> {
+    return this.inner.listDir(...args);
   }
-  models(...args: Parameters<ApiClient['models']>): Promise<ModelsListing> {
-    return this.inner.models(...args)
+  models(...args: Parameters<ApiClient["models"]>): Promise<ModelsListing> {
+    return this.inner.models(...args);
   }
-  complete(...args: Parameters<ApiClient['complete']>): Promise<string[]> {
-    return this.inner.complete(...args)
+  complete(...args: Parameters<ApiClient["complete"]>): Promise<string[]> {
+    return this.inner.complete(...args);
   }
-  peek(...args: Parameters<ApiClient['peek']>): Promise<DirEntry[]> {
-    return this.inner.peek(...args)
+  peek(...args: Parameters<ApiClient["peek"]>): Promise<DirEntry[]> {
+    return this.inner.peek(...args);
   }
-  fetchModel(...args: Parameters<ApiClient['fetchModel']>): Promise<ArrayBuffer> {
-    return this.inner.fetchModel(...args)
+  fetchModel(
+    ...args: Parameters<ApiClient["fetchModel"]>
+  ): Promise<ArrayBuffer> {
+    return this.inner.fetchModel(...args);
   }
-  overrides(...args: Parameters<ApiClient['overrides']>): Promise<ResolvedOverrides> {
-    return this.inner.overrides(...args)
+  overrides(
+    ...args: Parameters<ApiClient["overrides"]>
+  ): Promise<ResolvedOverrides> {
+    return this.inner.overrides(...args);
   }
-  credits(...args: Parameters<ApiClient['credits']>): Promise<CreditedKit[]> {
-    return this.inner.credits(...args)
+  credits(...args: Parameters<ApiClient["credits"]>): Promise<CreditedKit[]> {
+    return this.inner.credits(...args);
   }
-  indexAvailability(...args: Parameters<ApiClient['indexAvailability']>): Promise<IndexAvailability> {
-    return this.inner.indexAvailability(...args)
+  indexAvailability(
+    ...args: Parameters<ApiClient["indexAvailability"]>
+  ): Promise<IndexAvailability> {
+    return this.inner.indexAvailability(...args);
   }
-  semanticPoses(...args: Parameters<ApiClient['semanticPoses']>): Promise<PosesResponse> {
-    return this.inner.semanticPoses(...args)
+  semanticPoses(
+    ...args: Parameters<ApiClient["semanticPoses"]>
+  ): Promise<PosesResponse> {
+    return this.inner.semanticPoses(...args);
   }
-  semanticPosesFor(...args: Parameters<ApiClient['semanticPosesFor']>): Promise<PosesResponse> {
-    return this.inner.semanticPosesFor(...args)
+  semanticPosesFor(
+    ...args: Parameters<ApiClient["semanticPosesFor"]>
+  ): Promise<PosesResponse> {
+    return this.inner.semanticPosesFor(...args);
   }
-  library(...args: Parameters<ApiClient['library']>): Promise<LibraryState> {
-    return this.inner.library(...args)
+  library(...args: Parameters<ApiClient["library"]>): Promise<LibraryState> {
+    return this.inner.library(...args);
   }
-  semanticSearch(...args: Parameters<ApiClient['semanticSearch']>): Promise<SemanticListing> {
-    return this.inner.semanticSearch(...args)
+  semanticSearch(
+    ...args: Parameters<ApiClient["semanticSearch"]>
+  ): Promise<SemanticListing> {
+    return this.inner.semanticSearch(...args);
   }
-  similar(...args: Parameters<ApiClient['similar']>): Promise<SimilarListing> {
-    return this.inner.similar(...args)
+  similar(...args: Parameters<ApiClient["similar"]>): Promise<SimilarListing> {
+    return this.inner.similar(...args);
   }
-  thumbImageUrl(...args: Parameters<ApiClient['thumbImageUrl']>): string {
-    return this.inner.thumbImageUrl(...args)
+  thumbImageUrl(...args: Parameters<ApiClient["thumbImageUrl"]>): string {
+    return this.inner.thumbImageUrl(...args);
   }
-  apps(...args: Parameters<ApiClient['apps']>): Promise<AppsReport> {
-    return this.inner.apps(...args)
+  apps(...args: Parameters<ApiClient["apps"]>): Promise<AppsReport> {
+    return this.inner.apps(...args);
   }
-  features(...args: Parameters<ApiClient['features']>): Promise<FeatureReport> {
-    return this.inner.features(...args)
+  features(...args: Parameters<ApiClient["features"]>): Promise<FeatureReport> {
+    return this.inner.features(...args);
   }
-  open(...args: Parameters<ApiClient['open']>): Promise<void> {
-    return this.inner.open(...args)
+  open(...args: Parameters<ApiClient["open"]>): Promise<void> {
+    return this.inner.open(...args);
   }
-  openWith(...args: Parameters<ApiClient['openWith']>): Promise<void> {
-    return this.inner.openWith(...args)
+  openWith(...args: Parameters<ApiClient["openWith"]>): Promise<void> {
+    return this.inner.openWith(...args);
   }
 }
 
@@ -345,5 +370,5 @@ export function withLocalFramings(
   storage?: FramingStorage,
   libraryId: () => string | null = NO_LIBRARY,
 ): ApiClient {
-  return new LocalFramingClient(inner, features, storage, libraryId)
+  return new LocalFramingClient(inner, features, storage, libraryId);
 }

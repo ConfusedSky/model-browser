@@ -22,7 +22,7 @@
  * browser downsamples it — the canvas keeps its CSS box (`style.width/height`
  * are 100%; `setSize` is called with `updateStyle: false`).
  */
-const LIVE_SUPERSAMPLE = 1.5
+const LIVE_SUPERSAMPLE = 1.5;
 
 /**
  * Ceiling on the backing store. Supersampling multiplies every per-pixel cost
@@ -31,7 +31,7 @@ const LIVE_SUPERSAMPLE = 1.5
  * quadruple that work; it is also where each displayed pixel already gets the
  * most samples, so it needs the help least.
  */
-const LIVE_MAX_PIXELS = 6_000_000
+const LIVE_MAX_PIXELS = 6_000_000;
 
 /**
  * CSS box + device pixel ratio → render size. Never below device resolution
@@ -43,13 +43,13 @@ export function liveRenderSize(
   dpr: number,
 ): { width: number; height: number } {
   // Math.max(1, NaN) is NaN, so the ratio is validated rather than clamped.
-  const ratio = Number.isFinite(dpr) && dpr > 1 ? dpr : 1
-  const deviceWidth = Math.max(1, cssWidth * ratio)
-  const deviceHeight = Math.max(1, cssHeight * ratio)
-  const room = Math.sqrt(LIVE_MAX_PIXELS / (deviceWidth * deviceHeight))
-  const scale = Math.min(LIVE_SUPERSAMPLE, Math.max(1, room))
+  const ratio = Number.isFinite(dpr) && dpr > 1 ? dpr : 1;
+  const deviceWidth = Math.max(1, cssWidth * ratio);
+  const deviceHeight = Math.max(1, cssHeight * ratio);
+  const room = Math.sqrt(LIVE_MAX_PIXELS / (deviceWidth * deviceHeight));
+  const scale = Math.min(LIVE_SUPERSAMPLE, Math.max(1, room));
   return {
     width: Math.max(1, Math.round(deviceWidth * scale)),
     height: Math.max(1, Math.round(deviceHeight * scale)),
-  }
+  };
 }

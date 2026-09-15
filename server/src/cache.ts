@@ -1,11 +1,30 @@
-import { createHash } from 'node:crypto'
-import { mkdir, readFile, readdir, realpath, rename, rm, stat, utimes, writeFile } from 'node:fs/promises'
-import { homedir } from 'node:os'
-import { dirname, join, sep } from 'node:path'
-import { CAMERA_EPSILON, type CameraState, type LightingMode, type OrbitAxis, type ThumbGetResponse, type ThumbInfo, type ThumbRenderInfo, type ThumbStatus } from '../../shared/types'
-import { envPositiveInt } from './env'
-import { type Library, LibraryError } from './library'
-import { VPathError, joinVPath, parseVPath } from './vpath'
+import { createHash } from "node:crypto";
+import {
+  mkdir,
+  readFile,
+  readdir,
+  realpath,
+  rename,
+  rm,
+  stat,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname, join, sep } from "node:path";
+import {
+  CAMERA_EPSILON,
+  type CameraState,
+  type LightingMode,
+  type OrbitAxis,
+  type ThumbGetResponse,
+  type ThumbInfo,
+  type ThumbRenderInfo,
+  type ThumbStatus,
+} from "../../shared/types";
+import { envPositiveInt } from "./env";
+import { type Library, LibraryError } from "./library";
+import { VPathError, joinVPath, parseVPath } from "./vpath";
 
 /**
  * Everything a sidecar records about *one* render's pixels. Both renders of an
@@ -13,16 +32,16 @@ import { VPathError, joinVPath, parseVPath } from './vpath'
  */
 interface RenderLabels {
   /** mtime the PNG was rendered against; undefined when only camera is stored. */
-  mtime?: number
+  mtime?: number;
   /** Lighting mode the PNG was rendered with; stored and echoed, never interpreted. */
-  lighting?: LightingMode
+  lighting?: LightingMode;
   /** Pixel-recipe (rig) version the PNG was rendered with; stored and echoed, never interpreted. */
-  rig?: number
+  rig?: number;
   /** Pose recipe version the PNG was rendered under; same contract as `rig`. */
-  posed?: number
+  posed?: number;
   /** The orientation the PNG was drawn under, where a pose framed it; same
    *  contract as `rig` — stored, echoed, never interpreted (`pose-rerender` D2). */
-  poseKey?: string
+  poseKey?: string;
 }
 
 /**
@@ -39,15 +58,15 @@ interface RenderLabels {
  * not to a recipe, and both renders are always drawn under it.
  */
 interface Meta extends RenderLabels {
-  path: string
-  camera?: CameraState
+  path: string;
+  camera?: CameraState;
   /**
    * Orbit spindle axis; undefined means no stored axis. What the entry is then
    * rendered about is the caller's — the format's default — not this store's.
    */
-  axis?: OrbitAxis
+  axis?: OrbitAxis;
   /** The unoccluded sibling's labels; absent when it is not cached. */
-  noao?: RenderLabels
+  noao?: RenderLabels;
   /**
    * Write generation (`immutable-thumbnail-serving` D1) — the cache validator
    * every read echoes and every write moves.
@@ -66,7 +85,7 @@ interface Meta extends RenderLabels {
    * Absent on every sidecar written before this change, which reads as 0.
    * `allocateGen` is the only thing that produces a value for it.
    */
-  gen?: number
+  gen?: number;
 }
 
 /**
@@ -80,8 +99,11 @@ interface Meta extends RenderLabels {
  * twice: once in its ordinary merge, once on the deletion branch, which governs
  * the orientation by the same rule (`bulk-thumbnail-jobs` D3).
  */
-function merged<T>(next: T | null | undefined, prev: T | undefined): T | undefined {
-  return next === null ? undefined : (next ?? prev)
+function merged<T>(
+  next: T | null | undefined,
+  prev: T | undefined,
+): T | undefined {
+  return next === null ? undefined : (next ?? prev);
 }
 
 /**
@@ -97,10 +119,13 @@ function merged<T>(next: T | null | undefined, prev: T | undefined): T | undefin
  * bit-exact, so equality would read every close of an oriented model as a move
  * (see `CAMERA_EPSILON` for the measurement).
  */
-function cameraMoved(next: CameraState | null | undefined, prev: CameraState | undefined): boolean {
-  if (next === undefined) return false
-  if (next === null) return prev !== undefined
-  if (prev === undefined) return true
+function cameraMoved(
+  next: CameraState | null | undefined,
+  prev: CameraState | undefined,
+): boolean {
+  if (next === undefined) return false;
+  if (next === null) return prev !== undefined;
+  if (prev === undefined) return true;
   return (
     Math.abs(next.az - prev.az) > CAMERA_EPSILON ||
     Math.abs(next.el - prev.el) > CAMERA_EPSILON ||
@@ -108,14 +133,17 @@ function cameraMoved(next: CameraState | null | undefined, prev: CameraState | u
     Math.abs(next.target[0] - prev.target[0]) > CAMERA_EPSILON ||
     Math.abs(next.target[1] - prev.target[1]) > CAMERA_EPSILON ||
     Math.abs(next.target[2] - prev.target[2]) > CAMERA_EPSILON
-  )
+  );
 }
 
 /** The same question for the axis, which is an enum and compares by equality. */
-function axisMoved(next: OrbitAxis | null | undefined, prev: OrbitAxis | undefined): boolean {
-  if (next === undefined) return false
-  if (next === null) return prev !== undefined
-  return next !== prev
+function axisMoved(
+  next: OrbitAxis | null | undefined,
+  prev: OrbitAxis | undefined,
+): boolean {
+  if (next === undefined) return false;
+  if (next === null) return prev !== undefined;
+  return next !== prev;
 }
 
 /**
@@ -126,7 +154,7 @@ function axisMoved(next: OrbitAxis | null | undefined, prev: OrbitAxis | undefin
  * old orientation for exactly as long as it takes to draw the new one.
  */
 function clearRecipe(labels: RenderLabels): RenderLabels {
-  return { mtime: labels.mtime }
+  return { mtime: labels.mtime };
 }
 
 /**
@@ -137,14 +165,14 @@ function clearRecipe(labels: RenderLabels): RenderLabels {
  * entry's path and camera inside its own sidecar.
  */
 function renderLabels(from: RenderLabels | null | undefined): RenderLabels {
-  if (from === null || from === undefined) return {}
+  if (from === null || from === undefined) return {};
   return {
     mtime: from.mtime,
     lighting: from.lighting,
     rig: from.rig,
     posed: from.posed,
     poseKey: from.poseKey,
-  }
+  };
 }
 
 function hasLabels(labels: RenderLabels): boolean {
@@ -154,7 +182,7 @@ function hasLabels(labels: RenderLabels): boolean {
     labels.rig !== undefined ||
     labels.posed !== undefined ||
     labels.poseKey !== undefined
-  )
+  );
 }
 
 /**
@@ -177,8 +205,8 @@ function statusFor(
   camera: CameraState | undefined,
   mtime: number,
 ): ThumbStatus {
-  if (labels.mtime === mtime) return 'hit'
-  return camera !== undefined || labels.mtime !== undefined ? 'stale' : 'miss'
+  if (labels.mtime === mtime) return "hit";
+  return camera !== undefined || labels.mtime !== undefined ? "stale" : "miss";
 }
 
 /**
@@ -189,7 +217,12 @@ function statusFor(
  */
 function infoFor(meta: Meta | null, mtime: number): ThumbInfo {
   if (meta === null) {
-    return { gen: 0, framed: false, ao: { state: 'miss' }, noao: { state: 'miss' } }
+    return {
+      gen: 0,
+      framed: false,
+      ao: { state: "miss" },
+      noao: { state: "miss" },
+    };
   }
   const info: ThumbInfo = {
     gen: meta.gen ?? 0,
@@ -198,13 +231,13 @@ function infoFor(meta: Meta | null, mtime: number): ThumbInfo {
     framed: meta.camera !== undefined || meta.axis !== undefined,
     ao: renderInfo(meta, meta.camera, mtime),
     noao: renderInfo(renderLabels(meta.noao), meta.camera, mtime),
-  }
-  if (meta.camera !== undefined) info.camera = meta.camera
+  };
+  if (meta.camera !== undefined) info.camera = meta.camera;
   // Undefined is information here for the same reason it is in `get`: "nothing
   // stored" and "stored as y" are different facts, and defaulting made a model
   // framed at an index-supplied pose report an axis it never had.
-  if (meta.axis !== undefined) info.axis = meta.axis
-  return info
+  if (meta.axis !== undefined) info.axis = meta.axis;
+  return info;
 }
 
 function renderInfo(
@@ -212,12 +245,12 @@ function renderInfo(
   camera: CameraState | undefined,
   mtime: number,
 ): ThumbRenderInfo {
-  const out: ThumbRenderInfo = { state: statusFor(labels, camera, mtime) }
-  if (labels.lighting !== undefined) out.lighting = labels.lighting
-  if (labels.rig !== undefined) out.rig = labels.rig
-  if (labels.posed !== undefined) out.posed = labels.posed
-  if (labels.poseKey !== undefined) out.poseKey = labels.poseKey
-  return out
+  const out: ThumbRenderInfo = { state: statusFor(labels, camera, mtime) };
+  if (labels.lighting !== undefined) out.lighting = labels.lighting;
+  if (labels.rig !== undefined) out.rig = labels.rig;
+  if (labels.posed !== undefined) out.posed = labels.posed;
+  if (labels.poseKey !== undefined) out.poseKey = labels.poseKey;
+  return out;
 }
 
 /**
@@ -226,7 +259,7 @@ function renderInfo(
  * what the test suite builds, and what any future second reader would be —
  * cannot issue the same number.
  */
-let lastGen = 0
+let lastGen = 0;
 
 /**
  * Allocate the generation a write will land under (D1) — strictly increasing,
@@ -267,8 +300,8 @@ let lastGen = 0
  * pass the same `prev`, but the second still clears the first's `lastGen`.
  */
 function allocateGen(prev: number | undefined): number {
-  lastGen = Math.max(Date.now(), lastGen + 1, (prev ?? 0) + 1)
-  return lastGen
+  lastGen = Math.max(Date.now(), lastGen + 1, (prev ?? 0) + 1);
+  return lastGen;
 }
 
 /**
@@ -281,13 +314,13 @@ function allocateGen(prev: number | undefined): number {
  */
 export class StaleWriteError extends Error {
   constructor(readonly gen: number) {
-    super(`generation moved to ${gen}`)
+    super(`generation moved to ${gen}`);
   }
 }
 
-const DEFAULT_CAP = 2 * 1024 ** 3
+const DEFAULT_CAP = 2 * 1024 ** 3;
 /** PNG writes between automatic maintenance runs (D4: "after writes crossing a threshold"). */
-const MAINTAIN_EVERY = 32
+const MAINTAIN_EVERY = 32;
 
 /**
  * The size cap from the environment — `env.ts`'s one parser, which owns the
@@ -302,7 +335,7 @@ const MAINTAIN_EVERY = 32
  * them and missed here (`listing-tree-cache` round-2 finding 9).
  */
 function envCap(): number {
-  return envPositiveInt('MODEL_BROWSER_CACHE_CAP', DEFAULT_CAP)
+  return envPositiveInt("MODEL_BROWSER_CACHE_CAP", DEFAULT_CAP);
 }
 
 /**
@@ -317,10 +350,10 @@ function envCap(): number {
  * existence but counts toward no cap.
  */
 export class ThumbCache {
-  private writesSinceMaintain = 0
-  private maintaining = false
+  private writesSinceMaintain = 0;
+  private maintaining = false;
   /** The legacy scan is a once-per-process event (D5), not once per sweep. */
-  private migrated = false
+  private migrated = false;
   /**
    * What this process has learned about each entry, by library path
    * (`listing-tree-cache` §6.2): the sidecar as it was last read or written, or
@@ -342,10 +375,11 @@ export class ThumbCache {
    * 2 GB pixel budget beside it. Entries the sweep deletes are dropped here too,
    * so it cannot outgrow the store it describes.
    */
-  private readonly facts = new Map<string, Meta | null>()
+  private readonly facts = new Map<string, Meta | null>();
 
   constructor(
-    readonly dir: string = process.env.MODEL_BROWSER_CACHE ?? join(homedir(), '.cache', 'model-browser'),
+    readonly dir: string = process.env.MODEL_BROWSER_CACHE ??
+      join(homedir(), ".cache", "model-browser"),
     readonly sizeCap: number = envCap(),
     readonly maintainEvery: number = MAINTAIN_EVERY,
     /**
@@ -357,7 +391,7 @@ export class ThumbCache {
   ) {}
 
   private key(path: string): string {
-    return createHash('sha256').update(path).digest('hex')
+    return createHash("sha256").update(path).digest("hex");
   }
 
   /**
@@ -367,18 +401,18 @@ export class ThumbCache {
    * been looked at at all.
    */
   private async entryDir(): Promise<string> {
-    if (this.library === undefined) return this.dir
-    await this.library.state()
-    return join(this.dir, this.library.id())
+    if (this.library === undefined) return this.dir;
+    await this.library.state();
+    return join(this.dir, this.library.id());
   }
 
   private metaFile(dir: string, key: string): string {
-    return join(dir, `${key}.json`)
+    return join(dir, `${key}.json`);
   }
 
   /** The occluded render's file is the historical one; the sibling is suffixed. */
   private renderFile(dir: string, key: string, ao = true): string {
-    return join(dir, ao ? `${key}.webp` : `${key}.noao.webp`)
+    return join(dir, ao ? `${key}.webp` : `${key}.noao.webp`);
   }
 
   /**
@@ -394,12 +428,17 @@ export class ThumbCache {
    * everywhere, and no site could serve them even if it kept them.
    */
   private supersededFiles(dir: string, key: string, ao?: boolean): string[] {
-    const both: readonly boolean[] = ao === undefined ? [true, false] : [ao]
-    return both.map((a) => join(dir, a ? `${key}.png` : `${key}.noao.png`))
+    const both: readonly boolean[] = ao === undefined ? [true, false] : [ao];
+    return both.map((a) => join(dir, a ? `${key}.png` : `${key}.noao.png`));
   }
 
-  private async rmSuperseded(dir: string, key: string, ao?: boolean): Promise<void> {
-    for (const f of this.supersededFiles(dir, key, ao)) await rm(f, { force: true })
+  private async rmSuperseded(
+    dir: string,
+    key: string,
+    ao?: boolean,
+  ): Promise<void> {
+    for (const f of this.supersededFiles(dir, key, ao))
+      await rm(f, { force: true });
   }
 
   /**
@@ -409,20 +448,22 @@ export class ThumbCache {
    */
   protected async readMeta(dir: string, key: string): Promise<Meta | null> {
     try {
-      return JSON.parse(await readFile(this.metaFile(dir, key), 'utf8')) as Meta
+      return JSON.parse(
+        await readFile(this.metaFile(dir, key), "utf8"),
+      ) as Meta;
     } catch {
-      return null
+      return null;
     }
   }
 
   private async writeMeta(dir: string, key: string, meta: Meta): Promise<void> {
-    await mkdir(dir, { recursive: true })
-    await writeFile(this.metaFile(dir, key), JSON.stringify(meta))
+    await mkdir(dir, { recursive: true });
+    await writeFile(this.metaFile(dir, key), JSON.stringify(meta));
     // Every write path in this class lands here — `put`, the size cap's
     // write-back, the migration — so recording at this one point is what makes
     // the index track the store by construction rather than by an enumeration
     // of call sites that a later writer could fall out of.
-    this.remember(meta.path, meta)
+    this.remember(meta.path, meta);
   }
 
   /**
@@ -431,7 +472,7 @@ export class ThumbCache {
    * later merge mutate what a listing is about to report.
    */
   private remember(path: string, meta: Meta | null): void {
-    this.facts.set(path, meta === null ? null : { ...meta })
+    this.facts.set(path, meta === null ? null : { ...meta });
   }
 
   /**
@@ -443,11 +484,10 @@ export class ThumbCache {
    * client asks `/api/thumb` for those exactly as it did before.
    */
   annotate(path: string, mtime: number): ThumbInfo | undefined {
-    const meta = this.facts.get(path)
-    if (meta === undefined) return undefined
-    return infoFor(meta, mtime)
+    const meta = this.facts.get(path);
+    if (meta === undefined) return undefined;
+    return infoFor(meta, mtime);
   }
-
 
   /**
    * Read one render of an entry. `ao` names which — the occluded render by
@@ -460,8 +500,8 @@ export class ThumbCache {
    * orientation the other one is already drawn at.
    */
   async get(path: string, mtime: number, ao = true): Promise<ThumbGetResponse> {
-    const { body, png } = await this.read(path, mtime, ao)
-    return png === undefined ? body : { ...body, png: png.toString('base64') }
+    const { body, png } = await this.read(path, mtime, ao);
+    return png === undefined ? body : { ...body, png: png.toString("base64") };
   }
 
   /**
@@ -473,9 +513,13 @@ export class ThumbCache {
    * the two cannot disagree about what a hit is, and the same LRU bump (D7):
    * a cold-browser view of the image counts as a read.
    */
-  async image(path: string, mtime: number, ao = true): Promise<{ gen: number; png?: Buffer }> {
-    const { body, png } = await this.read(path, mtime, ao)
-    return { gen: body.gen ?? 0, png }
+  async image(
+    path: string,
+    mtime: number,
+    ao = true,
+  ): Promise<{ gen: number; png?: Buffer }> {
+    const { body, png } = await this.read(path, mtime, ao);
+    return { gen: body.gen ?? 0, png };
   }
 
   /** The read both `get` and `image` are: the answer, and the raw bytes on a hit. */
@@ -483,55 +527,89 @@ export class ThumbCache {
     path: string,
     mtime: number,
     ao: boolean,
-  ): Promise<{ body: Omit<ThumbGetResponse, 'png'>; png?: Buffer }> {
-    const dir = await this.entryDir()
-    const key = this.key(path)
-    const meta = await this.readMeta(dir, key)
+  ): Promise<{ body: Omit<ThumbGetResponse, "png">; png?: Buffer }> {
+    const dir = await this.entryDir();
+    const key = this.key(path);
+    const meta = await this.readMeta(dir, key);
     // Both answers are facts worth keeping (§6.2): the sidecar, or that there
     // is none. A read is where this cache learns about an entry it has not
     // written, which is most of them after a restart.
-    this.remember(path, meta)
+    this.remember(path, meta);
     // An entry that does not exist has answered nothing, so it has issued no
     // generation: 0. The number still rides along, because the caller's cache
     // policy is decided from it uniformly and a miss is `no-store` anyway.
-    if (meta === null) return { body: { status: 'miss', gen: 0 } }
-    const gen = meta.gen ?? 0
-    const labels: RenderLabels = (ao ? meta : meta.noao) ?? {}
+    if (meta === null) return { body: { status: "miss", gen: 0 } };
+    const gen = meta.gen ?? 0;
+    const labels: RenderLabels = (ao ? meta : meta.noao) ?? {};
     // Not defaulted here: the *absence* of a stored axis is information a
     // client needs. Defaulting it to 'y' made "nothing stored" indistinguishable
     // from "stored as y", so a model whose thumbnail was rendered at an
     // index-supplied pose (which deliberately stores no axis) reported `y`, and
     // the viewer abandoned the pose the moment it opened. Every caller already
     // applies its own default.
-    const axis = meta.axis
-    const lighting = labels.lighting
-    const rig = labels.rig
-    const posed = labels.posed
-    const poseKey = labels.poseKey
+    const axis = meta.axis;
+    const lighting = labels.lighting;
+    const rig = labels.rig;
+    const posed = labels.posed;
+    const poseKey = labels.poseKey;
     // Per render, but with the entry's camera: this render was written before,
     // or the model has an orientation stored, and either way the client has
     // something to re-render from. An axis alone is not enough — an entry
     // holding only an axis is still a miss, as it was before renders split.
     // The predicate is `statusFor`, shared with the listing annotation so the
     // two can never come to disagree about what a cached render is.
-    const status = statusFor(labels, meta.camera, mtime)
-    if (status !== 'hit') {
-      return { body: { status, camera: meta.camera, axis, lighting, rig, posed, poseKey, gen } }
+    const status = statusFor(labels, meta.camera, mtime);
+    if (status !== "hit") {
+      return {
+        body: {
+          status,
+          camera: meta.camera,
+          axis,
+          lighting,
+          rig,
+          posed,
+          poseKey,
+          gen,
+        },
+      };
     }
-    let png
+    let png;
     try {
-      png = await readFile(this.renderFile(dir, key, ao))
+      png = await readFile(this.renderFile(dir, key, ao));
     } catch {
-      return { body: { status: 'stale', camera: meta.camera, axis, lighting, rig, posed, poseKey, gen } }
+      return {
+        body: {
+          status: "stale",
+          camera: meta.camera,
+          axis,
+          lighting,
+          rig,
+          posed,
+          poseKey,
+          gen,
+        },
+      };
     }
     // LRU clock for size-cap eviction is the png file's mtime. Bumping it via
     // utimes (instead of rewriting the meta json) keeps reads race-free
     // against the sweep: it cannot resurrect a removed entry and cannot be
     // caught mid-write by the sweep's meta parse. Each render carries its own
     // clock, so reading one never defends the other from the cap (D3).
-    const now = new Date()
-    await utimes(this.renderFile(dir, key, ao), now, now).catch(() => {})
-    return { body: { status: 'hit', camera: meta.camera, axis, lighting, rig, posed, poseKey, gen }, png }
+    const now = new Date();
+    await utimes(this.renderFile(dir, key, ao), now, now).catch(() => {});
+    return {
+      body: {
+        status: "hit",
+        camera: meta.camera,
+        axis,
+        lighting,
+        rig,
+        posed,
+        poseKey,
+        gen,
+      },
+      png,
+    };
   }
 
   /**
@@ -566,10 +644,24 @@ export class ThumbCache {
    * conditional — it **throws `StaleWriteError`**, having written nothing, when
    * the entry has moved past the generation the caller named (D4).
    */
-  async put(path: string, opts: { mtime: number; png?: Buffer | null; camera?: CameraState | null; axis?: OrbitAxis | null; lighting?: LightingMode; rig?: number; posed?: number; poseKey?: string; ao?: boolean; ifGen?: number }): Promise<number> {
-    const dir = await this.entryDir()
-    const key = this.key(path)
-    const ao = opts.ao ?? true
+  async put(
+    path: string,
+    opts: {
+      mtime: number;
+      png?: Buffer | null;
+      camera?: CameraState | null;
+      axis?: OrbitAxis | null;
+      lighting?: LightingMode;
+      rig?: number;
+      posed?: number;
+      poseKey?: string;
+      ao?: boolean;
+      ifGen?: number;
+    },
+  ): Promise<number> {
+    const dir = await this.entryDir();
+    const key = this.key(path);
+    const ao = opts.ao ?? true;
     // Read-modify-write with awaits between the read and the write: two
     // concurrent puts for one path (one per render, plausible around a toggle
     // plus a command) can each merge against the same `prev`, and the loser's
@@ -581,7 +673,7 @@ export class ThumbCache {
     // new-angle PNG with the old camera as a fresh-looking hit. Only a later
     // camera write heals those. The window is one request round-trip wide and
     // needs a toggle racing a close on one model; recorded, not defended.
-    const prev = await this.readMeta(dir, key)
+    const prev = await this.readMeta(dir, key);
 
     // The precondition, first and before anything is merged, allocated or
     // written (`bulk-thumbnail-jobs` D4): a writer that named a generation the
@@ -600,7 +692,7 @@ export class ThumbCache {
     // locking, and the point here is only to keep a job from overwriting a
     // write it can see, not to serialize the store.
     if (opts.ifGen !== undefined && opts.ifGen !== (prev?.gen ?? 0)) {
-      throw new StaleWriteError(prev?.gen ?? 0)
+      throw new StaleWriteError(prev?.gen ?? 0);
     }
 
     // Deletion (`bulk-thumbnail-jobs` D3) — a branch of its own, deliberately,
@@ -628,51 +720,63 @@ export class ThumbCache {
     // maintenance keeps the store under its cap, and this write put nothing in
     // it.
     if (opts.png === null) {
-      await rm(this.renderFile(dir, key, true), { force: true })
-      await rm(this.renderFile(dir, key, false), { force: true })
-      await this.rmSuperseded(dir, key)
-      const gen = allocateGen(prev?.gen)
+      await rm(this.renderFile(dir, key, true), { force: true });
+      await rm(this.renderFile(dir, key, false), { force: true });
+      await this.rmSuperseded(dir, key);
+      const gen = allocateGen(prev?.gen);
       await this.writeMeta(dir, key, {
         path,
         camera: merged(opts.camera, prev?.camera),
         axis: merged(opts.axis, prev?.axis),
         gen,
-      })
-      return gen
+      });
+      return gen;
     }
 
-    const prevMine = renderLabels(ao ? prev : prev?.noao)
-    const prevTheirs = renderLabels(ao ? prev?.noao : prev)
+    const prevMine = renderLabels(ao ? prev : prev?.noao);
+    const prevTheirs = renderLabels(ao ? prev?.noao : prev);
 
     let mine: RenderLabels = {
       mtime: opts.png !== undefined ? opts.mtime : prevMine.mtime,
       // Like mtime, lighting and rig describe the pixels: a PUT replacing the
       // PNG without declaring them must not keep old labels on new pixels.
-      lighting: opts.png !== undefined ? opts.lighting : (opts.lighting ?? prevMine.lighting),
+      lighting:
+        opts.png !== undefined
+          ? opts.lighting
+          : (opts.lighting ?? prevMine.lighting),
       rig: opts.png !== undefined ? opts.rig : (opts.rig ?? prevMine.rig),
-      posed: opts.png !== undefined ? opts.posed : (opts.posed ?? prevMine.posed),
-      poseKey: opts.png !== undefined ? opts.poseKey : (opts.poseKey ?? prevMine.poseKey),
-    }
-    let theirs: RenderLabels = prevTheirs
+      posed:
+        opts.png !== undefined ? opts.posed : (opts.posed ?? prevMine.posed),
+      poseKey:
+        opts.png !== undefined
+          ? opts.poseKey
+          : (opts.poseKey ?? prevMine.poseKey),
+    };
+    let theirs: RenderLabels = prevTheirs;
 
     // The model itself changed under both renders, so the sibling's pixels are
     // of a file that is gone. Strictly newer, not merely different: an equal
     // mtime is the ordinary case of drawing the second render of the same file,
     // and a written mtime *older* than the sibling's makes this write the stale
     // one — deleting the sibling's newer pixels then would be backwards.
-    const supersedes = opts.png !== undefined && theirs.mtime !== undefined && opts.mtime > theirs.mtime
-    if (supersedes) theirs = {}
+    const supersedes =
+      opts.png !== undefined &&
+      theirs.mtime !== undefined &&
+      opts.mtime > theirs.mtime;
+    if (supersedes) theirs = {};
 
-    const moved = cameraMoved(opts.camera, prev?.camera) || axisMoved(opts.axis, prev?.axis)
+    const moved =
+      cameraMoved(opts.camera, prev?.camera) ||
+      axisMoved(opts.axis, prev?.axis);
     if (moved) {
-      theirs = clearRecipe(theirs)
-      if (opts.png === undefined) mine = clearRecipe(mine)
+      theirs = clearRecipe(theirs);
+      if (opts.png === undefined) mine = clearRecipe(mine);
     }
 
     // Three states per field — set / keep / discard; the rule itself lives in
     // `merged`, which the deletion branch above applies to the same two fields.
-    const camera = merged(opts.camera, prev?.camera)
-    const axis = merged(opts.axis, prev?.axis)
+    const camera = merged(opts.camera, prev?.camera);
+    const axis = merged(opts.axis, prev?.axis);
 
     // An entry left *unowned* by this write's own merge — no camera and no axis
     // — has no stored orientation for both renders to be drawn under. Each is
@@ -711,14 +815,14 @@ export class ThumbCache {
       // under — which is one invalidation per pre-key sibling, once.
       (mine.posed !== theirs.posed || mine.poseKey !== theirs.poseKey)
     ) {
-      theirs = clearRecipe(theirs)
+      theirs = clearRecipe(theirs);
     }
 
-    const occluded = ao ? mine : theirs
-    const unoccluded = ao ? theirs : mine
+    const occluded = ao ? mine : theirs;
+    const unoccluded = ao ? theirs : mine;
     // `prev` is a floor here, never the source: see `allocateGen`. Two puts
     // that merged against the same sidecar must not land under one number.
-    const gen = allocateGen(prev?.gen)
+    const gen = allocateGen(prev?.gen);
     const meta: Meta = {
       path,
       ...occluded,
@@ -729,36 +833,39 @@ export class ThumbCache {
       // unoccluded render keeps exactly the sidecar shape it had before this
       // change — the whole of the "no migration" claim (D1).
       noao: hasLabels(unoccluded) ? unoccluded : undefined,
-    }
+    };
     if (opts.png !== undefined) {
-      await mkdir(dir, { recursive: true })
+      await mkdir(dir, { recursive: true });
       // Superseded-mtime pixels are inherently replaced: one render per key.
-      await writeFile(this.renderFile(dir, key, ao), opts.png)
+      await writeFile(this.renderFile(dir, key, ao), opts.png);
       // These new bytes are this render, so anything it was stored as before
       // this app changed encoding is now duplicate weight.
-      await this.rmSuperseded(dir, key, ao)
+      await this.rmSuperseded(dir, key, ao);
     }
     if (supersedes) {
-      await rm(this.renderFile(dir, key, !ao), { force: true })
-      await this.rmSuperseded(dir, key, !ao)
+      await rm(this.renderFile(dir, key, !ao), { force: true });
+      await this.rmSuperseded(dir, key, !ao);
     }
-    await this.writeMeta(dir, key, meta)
-    if (opts.png !== undefined && ++this.writesSinceMaintain >= this.maintainEvery) {
-      this.writesSinceMaintain = 0
-      void this.runMaintain()
+    await this.writeMeta(dir, key, meta);
+    if (
+      opts.png !== undefined &&
+      ++this.writesSinceMaintain >= this.maintainEvery
+    ) {
+      this.writesSinceMaintain = 0;
+      void this.runMaintain();
     }
-    return gen
+    return gen;
   }
 
   private async runMaintain(): Promise<void> {
-    if (this.maintaining) return
-    this.maintaining = true
+    if (this.maintaining) return;
+    this.maintaining = true;
     try {
-      await this.maintain()
+      await this.maintain();
     } catch {
       // best-effort background sweep
     } finally {
-      this.maintaining = false
+      this.maintaining = false;
     }
   }
 
@@ -775,7 +882,7 @@ export class ThumbCache {
    */
   async maintain(): Promise<void> {
     if (this.library !== undefined) {
-      if ((await this.library.state()).state !== 'ready') return
+      if ((await this.library.state()).state !== "ready") return;
       // Belt and braces, and redundant since library-root 1.7: `state()` now
       // stats the top itself, so a volume unplugged mid-session already answers
       // `missing` above. Kept because of what it guards — a `ready` read
@@ -783,19 +890,20 @@ export class ThumbCache {
       // longer stats, and a single sweep then takes the whole library's cache,
       // cameras included. The stat costs microseconds once per sweep; being
       // wrong here costs the cameras.
-      if ((await stat(this.library.realTop()).catch(() => null)) === null) return
+      if ((await stat(this.library.realTop()).catch(() => null)) === null)
+        return;
       if (!this.migrated) {
-        this.migrated = true
-        await this.migrate()
+        this.migrated = true;
+        await this.migrate();
       }
-      await this.sweepLegacy()
+      await this.sweepLegacy();
     }
-    const dir = await this.entryDir()
-    let files
+    const dir = await this.entryDir();
+    let files;
     try {
-      files = await readdir(dir)
+      files = await readdir(dir);
     } catch {
-      return
+      return;
     }
     // Renders left by an encoding this app no longer produces, taken from the
     // listing this pass already holds rather than by blind removes per entry:
@@ -803,19 +911,25 @@ export class ThumbCache {
     // sidecar would cost two syscalls per entry forever. Reading the *names*
     // also reaches an orphan whose sidecar is gone, which a per-sidecar loop
     // never visits — and that is the shape an interrupted upgrade leaves.
-    const superseded = files.filter((f) => f.endsWith('.png'))
-    for (const f of superseded) await rm(join(dir, f), { force: true })
+    const superseded = files.filter((f) => f.endsWith(".png"));
+    for (const f of superseded) await rm(join(dir, f), { force: true });
 
     // One row per *render*, not per entry (D3): the two renders of a model are
     // independent LRU candidates, so an unoccluded render nobody has looked at
     // since is evicted while the occluded one read this morning stays. The
     // existence sweep is still per entry — one model, one existence.
-    const metas: { key: string; ao: boolean; meta: Meta; pngSize: number; lastRead: number }[] = []
+    const metas: {
+      key: string;
+      ao: boolean;
+      meta: Meta;
+      pngSize: number;
+      lastRead: number;
+    }[] = [];
     for (const f of files) {
-      if (!f.endsWith('.json')) continue
-      const key = f.slice(0, -'.json'.length)
-      const meta = await this.readMeta(dir, key)
-      if (meta === null) continue
+      if (!f.endsWith(".json")) continue;
+      const key = f.slice(0, -".json".length);
+      const meta = await this.readMeta(dir, key);
+      if (meta === null) continue;
       // A `*.json` here need not be a sidecar `put` wrote — this change puts
       // `bake/bake.json` beside them, and a hand inspecting the id directory
       // can copy it up a level (`cp bake/bake.json .`). That parses fine and
@@ -825,38 +939,48 @@ export class ThumbCache {
       // cap pass either. `sweepLegacy`/`migrate` need no equivalent: their
       // `parseVPathSafe(undefined)` already answers null, so the file is
       // just removed — the flat pre-library directory's rule, not this one's.
-      if (typeof meta.path !== 'string') {
-        console.warn(`maintain: ${this.metaFile(dir, key)} has no path, skipping`)
-        continue
+      if (typeof meta.path !== "string") {
+        console.warn(
+          `maintain: ${this.metaFile(dir, key)} has no path, skipping`,
+        );
+        continue;
       }
       if (!(await this.sourceExists(meta.path))) {
-        await rm(this.metaFile(dir, key), { force: true })
-        await rm(this.renderFile(dir, key, true), { force: true })
-        await rm(this.renderFile(dir, key, false), { force: true })
-        await this.rmSuperseded(dir, key)
+        await rm(this.metaFile(dir, key), { force: true });
+        await rm(this.renderFile(dir, key, true), { force: true });
+        await rm(this.renderFile(dir, key, false), { force: true });
+        await this.rmSuperseded(dir, key);
         // The entry is gone, so the index must not go on describing it (§6.2).
         // Dropped rather than remembered as `null`: the model itself no longer
         // exists, so no listing can ever ask about this path again.
-        this.facts.delete(meta.path)
-        continue
+        this.facts.delete(meta.path);
+        continue;
       }
       // The sweep already has every sidecar in its hand, so this is where a
       // freshly started server learns the whole library's thumbnail state
       // without a scan of its own — `index.ts` runs `maintain()` at startup.
-      this.remember(meta.path, meta)
+      this.remember(meta.path, meta);
       for (const ao of [true, false]) {
-        const pngStat = await stat(this.renderFile(dir, key, ao)).catch(() => null)
-        if (pngStat === null) continue // that render is not cached: nothing to evict
-        metas.push({ key, ao, meta, pngSize: pngStat.size, lastRead: pngStat.mtimeMs })
+        const pngStat = await stat(this.renderFile(dir, key, ao)).catch(
+          () => null,
+        );
+        if (pngStat === null) continue; // that render is not cached: nothing to evict
+        metas.push({
+          key,
+          ao,
+          meta,
+          pngSize: pngStat.size,
+          lastRead: pngStat.mtimeMs,
+        });
       }
     }
 
-    let total = metas.reduce((sum, m) => sum + m.pngSize, 0)
-    if (total <= this.sizeCap) return
-    metas.sort((a, b) => a.lastRead - b.lastRead)
+    let total = metas.reduce((sum, m) => sum + m.pngSize, 0);
+    if (total <= this.sizeCap) return;
+    metas.sort((a, b) => a.lastRead - b.lastRead);
     for (const m of metas) {
-      if (total <= this.sizeCap) break
-      if (m.pngSize === 0) continue
+      if (total <= this.sizeCap) break;
+      if (m.pngSize === 0) continue;
       // A `put` can land between the snapshot above and this eviction: writing
       // the snapshot back would delete its fresh PNG and revert its camera. The
       // invariant this eviction needs is that the snapshot's LRU facts about
@@ -871,17 +995,20 @@ export class ThumbCache {
       // Leave it alone and count nothing against the cap. Otherwise the size is
       // the verified one, and evicting from the re-read lets a camera written
       // meanwhile survive.
-      const fresh = await this.readMeta(dir, m.key)
-      if (fresh === null) continue
-      const png = await stat(this.renderFile(dir, m.key, m.ao)).catch(() => null)
-      if (png === null || png.mtimeMs !== m.lastRead || png.size !== m.pngSize) continue
+      const fresh = await this.readMeta(dir, m.key);
+      if (fresh === null) continue;
+      const png = await stat(this.renderFile(dir, m.key, m.ao)).catch(
+        () => null,
+      );
+      if (png === null || png.mtimeMs !== m.lastRead || png.size !== m.pngSize)
+        continue;
       // The window that remains is accepted, and unclosable without locking: a
       // `put` landing after that stat still loses its PNG below, and a camera it
       // wrote is overwritten by the one the re-read carries. That includes a
       // put for the *sibling* render in the same window — the write-back below
       // carries the whole re-read sidecar, so the sibling's fresh labels are
       // reverted to the re-read's copy alongside; one re-render heals it.
-      await rm(this.renderFile(dir, m.key, m.ao), { force: true })
+      await rm(this.renderFile(dir, m.key, m.ao), { force: true });
       // Only this render's `mtime`, and only this render's: the labels stay and
       // ride the stale read — they say what recipe the evicted pixels were
       // under, which is what the client asks a stale answer for — and the other
@@ -900,9 +1027,14 @@ export class ThumbCache {
       await this.writeMeta(
         dir,
         m.key,
-        m.ao ? { ...fresh, mtime: undefined } : { ...fresh, noao: { ...renderLabels(fresh.noao), mtime: undefined } },
-      )
-      total -= m.pngSize
+        m.ao
+          ? { ...fresh, mtime: undefined }
+          : {
+              ...fresh,
+              noao: { ...renderLabels(fresh.noao), mtime: undefined },
+            },
+      );
+      total -= m.pngSize;
     }
   }
 
@@ -914,17 +1046,18 @@ export class ThumbCache {
    */
   private async sourceExists(path: string): Promise<boolean> {
     if (this.library === undefined) {
-      const source = parseVPathSafe(path)
-      return source !== null && (await stat(source).catch(() => null)) !== null
+      const source = parseVPathSafe(path);
+      return source !== null && (await stat(source).catch(() => null)) !== null;
     }
-    let fsPath
+    let fsPath;
     try {
-      fsPath = (await this.library.resolve(path)).fsPath
+      fsPath = (await this.library.resolve(path)).fsPath;
     } catch (err) {
-      if (err instanceof LibraryError || err instanceof VPathError) return false
-      throw err
+      if (err instanceof LibraryError || err instanceof VPathError)
+        return false;
+      throw err;
     }
-    return (await stat(fsPath).catch(() => null)) !== null
+    return (await stat(fsPath).catch(() => null)) !== null;
   }
 
   /**
@@ -943,30 +1076,30 @@ export class ThumbCache {
    * library that happened not to be plugged in.
    */
   private async sweepLegacy(): Promise<void> {
-    let files
+    let files;
     try {
-      files = await readdir(this.dir)
+      files = await readdir(this.dir);
     } catch {
-      return
+      return;
     }
     for (const f of files) {
-      if (!f.endsWith('.json')) continue
-      const key = f.slice(0, -'.json'.length)
-      const meta = await this.readMeta(this.dir, key)
-      if (meta === null) continue
+      if (!f.endsWith(".json")) continue;
+      const key = f.slice(0, -".json".length);
+      const meta = await this.readMeta(this.dir, key);
+      if (meta === null) continue;
       // A path that does not parse names no file in any library — nobody will
       // claim it and nothing else reads it — so it goes without a test.
-      const source = parseVPathSafe(meta.path)
+      const source = parseVPathSafe(meta.path);
       if (source !== null) {
-        if ((await stat(source).catch(() => null)) !== null) continue
+        if ((await stat(source).catch(() => null)) !== null) continue;
         // The file is not there. Only its containing directory can say whether
         // that is a deletion or a volume that is not mounted.
-        if ((await stat(dirname(source)).catch(() => null)) === null) continue
+        if ((await stat(dirname(source)).catch(() => null)) === null) continue;
       }
-      await rm(this.metaFile(this.dir, key), { force: true })
-      await rm(this.renderFile(this.dir, key, true), { force: true })
-      await rm(this.renderFile(this.dir, key, false), { force: true })
-      await this.rmSuperseded(this.dir, key)
+      await rm(this.metaFile(this.dir, key), { force: true });
+      await rm(this.renderFile(this.dir, key, true), { force: true });
+      await rm(this.renderFile(this.dir, key, false), { force: true });
+      await this.rmSuperseded(this.dir, key);
     }
   }
 
@@ -984,90 +1117,97 @@ export class ThumbCache {
    * is re-keyed anyway: the camera is the half that cannot be regenerated.
    */
   async migrate(): Promise<{ moved: number; left: number }> {
-    const library = this.library
-    if (library === undefined) return { moved: 0, left: 0 }
-    const realTop = library.realTop()
-    const target = join(this.dir, library.id())
-    let files
+    const library = this.library;
+    if (library === undefined) return { moved: 0, left: 0 };
+    const realTop = library.realTop();
+    const target = join(this.dir, library.id());
+    let files;
     try {
-      files = await readdir(this.dir)
+      files = await readdir(this.dir);
     } catch {
-      return { moved: 0, left: 0 }
+      return { moved: 0, left: 0 };
     }
-    let moved = 0
-    let left = 0
+    let moved = 0;
+    let left = 0;
     for (const f of files) {
-      if (!f.endsWith('.json')) continue
-      const key = f.slice(0, -'.json'.length)
-      const meta = await this.readMeta(this.dir, key)
-      if (meta === null) continue
+      if (!f.endsWith(".json")) continue;
+      const key = f.slice(0, -".json".length);
+      const meta = await this.readMeta(this.dir, key);
+      if (meta === null) continue;
       // The entry half is an opaque archive name; only the filesystem half is a
       // path in this tree, and it is the only half that is re-rooted.
-      let parsed
+      let parsed;
       try {
-        parsed = parseVPath(meta.path)
+        parsed = parseVPath(meta.path);
       } catch {
-        left++
-        continue
+        left++;
+        continue;
       }
-      let real
+      let real;
       try {
-        real = await realpath(parsed.fsPath)
+        real = await realpath(parsed.fsPath);
       } catch {
         // Gone. Leave it for the legacy sweep, which is what removes it.
-        left++
-        continue
+        left++;
+        continue;
       }
       if (real !== realTop && !real.startsWith(realTop + sep)) {
-        left++
-        continue
+        left++;
+        continue;
       }
-      const libTop = library.libPathOf(real)
-      const libPath = parsed.entry === undefined ? libTop : joinVPath(libTop, parsed.entry)
-      const newKey = this.key(libPath)
-      await mkdir(target, { recursive: true })
+      const libTop = library.libPathOf(real);
+      const libPath =
+        parsed.entry === undefined ? libTop : joinVPath(libTop, parsed.entry);
+      const newKey = this.key(libPath);
+      await mkdir(target, { recursive: true });
       if ((await this.readMeta(target, newKey)) !== null) {
         // Already claimed — by an earlier run, or by an alias of this path that
         // resolves to the same file. The old pair is a duplicate: drop it, PNG
         // included, so the flat directory keeps no pixels that no sidecar
         // describes and the legacy sweep would never reach.
-        await rm(this.metaFile(this.dir, key), { force: true })
-        await rm(this.renderFile(this.dir, key, true), { force: true })
-        await rm(this.renderFile(this.dir, key, false), { force: true })
-        await this.rmSuperseded(this.dir, key)
-        continue
+        await rm(this.metaFile(this.dir, key), { force: true });
+        await rm(this.renderFile(this.dir, key, true), { force: true });
+        await rm(this.renderFile(this.dir, key, false), { force: true });
+        await this.rmSuperseded(this.dir, key);
+        continue;
       }
       // Every file of the key moves, sibling included. A flat entry cannot
       // *have* an unoccluded render — that file is born after this change,
       // under a per-library key — so the second rename always misses; it is
       // here so the migration can never be the thing that drops one, rather
       // than because anything is expected to be found.
-      await rename(this.renderFile(this.dir, key, true), this.renderFile(target, newKey, true)).catch(() => {})
-      await rename(this.renderFile(this.dir, key, false), this.renderFile(target, newKey, false)).catch(() => {})
+      await rename(
+        this.renderFile(this.dir, key, true),
+        this.renderFile(target, newKey, true),
+      ).catch(() => {});
+      await rename(
+        this.renderFile(this.dir, key, false),
+        this.renderFile(target, newKey, false),
+      ).catch(() => {});
       // A flat entry's pixels may still be in the superseded encoding, and the
       // renames above cannot name those. They are not carried across: the
       // recipe bump that accompanied the encoding change already made them
       // unserveable, so moving them would re-file garbage under a new key. The
       // sidecar — camera and axis, the part migration exists to keep — moves
       // below; the pixels are re-rendered on the visit that finds them.
-      await this.rmSuperseded(this.dir, key)
+      await this.rmSuperseded(this.dir, key);
       // Re-keying, not writing: the pixels and every label are the ones that
       // were already there, so the generation comes across on the spread
       // unbumped along with them. A legacy entry carries none at all, which
       // reads as 0 and is correct — nothing has ever cached a generation for a
       // path under its new library key.
-      await this.writeMeta(target, newKey, { ...meta, path: libPath })
-      await rm(this.metaFile(this.dir, key), { force: true })
-      moved++
+      await this.writeMeta(target, newKey, { ...meta, path: libPath });
+      await rm(this.metaFile(this.dir, key), { force: true });
+      moved++;
     }
-    return { moved, left }
+    return { moved, left };
   }
 }
 
 function parseVPathSafe(vpath: string): string | null {
   try {
-    return parseVPath(vpath).fsPath
+    return parseVPath(vpath).fsPath;
   } catch {
-    return null
+    return null;
   }
 }

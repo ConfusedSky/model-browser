@@ -18,28 +18,28 @@
  *  (zero or negative while the tile is partly scrolled past; positive only when the
  *  listing is shorter than the scrollport and the first tile sits below a notice). */
 export interface Placement {
-  anchor: string
-  offset: number
+  anchor: string;
+  offset: number;
 }
 
 /** What a navigation asks the landing to do. Raised by whichever navigation ran,
  *  resolved once against the listing that actually landed (D5). */
 export type PlacementRequest =
-  | { kind: 'top' }
+  | { kind: "top" }
   /** Back / Forward / dismiss: the entry's own remembered placement. */
-  | { kind: 'entry'; placement: Placement | null }
+  | { kind: "entry"; placement: Placement | null }
   /** ↑: the parent row's placement, and the folder the user came out of. */
-  | { kind: 'up'; placement: Placement | null; child: string }
+  | { kind: "up"; placement: Placement | null; child: string }
   /** The existing reveal: centre the located entry. */
-  | { kind: 'reveal'; path: string }
+  | { kind: "reveal"; path: string };
 
 /** The answer of the chain: which tile, where. */
 export type Resolved =
-  | { kind: 'anchor'; path: string; offset: number }
-  | { kind: 'center'; path: string }
-  | { kind: 'top' }
+  | { kind: "anchor"; path: string; offset: number }
+  | { kind: "center"; path: string }
+  | { kind: "top" };
 
-const TOP: Resolved = { kind: 'top' }
+const TOP: Resolved = { kind: "top" };
 
 /**
  * D4's fallback chain. Presence in `entries` is the whole test — an anchor that
@@ -55,23 +55,25 @@ export function resolvePlacement(
   request: PlacementRequest,
   entries: ReadonlyArray<{ path: string }>,
 ): Resolved {
-  const present = (path: string) => entries.some((e) => e.path === path)
+  const present = (path: string) => entries.some((e) => e.path === path);
   const anchored = (placement: Placement | null): Resolved | null =>
     placement && present(placement.anchor)
-      ? { kind: 'anchor', path: placement.anchor, offset: placement.offset }
-      : null
+      ? { kind: "anchor", path: placement.anchor, offset: placement.offset }
+      : null;
   switch (request.kind) {
-    case 'top':
-      return TOP
-    case 'entry':
-      return anchored(request.placement) ?? TOP
-    case 'up':
+    case "top":
+      return TOP;
+    case "entry":
+      return anchored(request.placement) ?? TOP;
+    case "up":
       return (
         anchored(request.placement) ??
-        (present(request.child) ? { kind: 'center', path: request.child } : TOP)
-      )
-    case 'reveal':
-      return present(request.path) ? { kind: 'center', path: request.path } : TOP
+        (present(request.child) ? { kind: "center", path: request.child } : TOP)
+      );
+    case "reveal":
+      return present(request.path)
+        ? { kind: "center", path: request.path }
+        : TOP;
   }
 }
 
@@ -89,12 +91,13 @@ export function measurePlacement(
   tiles: ReadonlyArray<{ path: string; top: number; bottom: number }>,
 ): Placement | null {
   for (const tile of tiles) {
-    if (tile.bottom > scrollportTop) return { anchor: tile.path, offset: tile.top - scrollportTop }
+    if (tile.bottom > scrollportTop)
+      return { anchor: tile.path, offset: tile.top - scrollportTop };
   }
-  return null
+  return null;
 }
 
-const TILE_ATTR = 'data-entry-tile'
+const TILE_ATTR = "data-entry-tile";
 
 /**
  * Every tile the grid drew, in document order. Not a selector on the path:
@@ -106,33 +109,38 @@ const TILE_ATTR = 'data-entry-tile'
  * `measureIn` already does.
  */
 export function tilesIn(scroller: HTMLElement): HTMLElement[] {
-  return Array.from(scroller.querySelectorAll<HTMLElement>(`[${TILE_ATTR}]`))
+  return Array.from(scroller.querySelectorAll<HTMLElement>(`[${TILE_ATTR}]`));
 }
 
-export function findTile(scroller: HTMLElement, path: string): HTMLElement | null {
-  return tilesIn(scroller).find((el) => el.getAttribute(TILE_ATTR) === path) ?? null
+export function findTile(
+  scroller: HTMLElement,
+  path: string,
+): HTMLElement | null {
+  return (
+    tilesIn(scroller).find((el) => el.getAttribute(TILE_ATTR) === path) ?? null
+  );
 }
 
 /** `measurePlacement` over the scroller's tiles, rects read as the walk reaches them. */
 export function measureIn(scroller: HTMLElement): Placement | null {
   try {
-    const scrollportTop = scroller.getBoundingClientRect().top
+    const scrollportTop = scroller.getBoundingClientRect().top;
     const tiles = tilesIn(scroller).map((el) => {
-      let rect: DOMRect | null = null
-      const measure = () => (rect ??= el.getBoundingClientRect())
+      let rect: DOMRect | null = null;
+      const measure = () => (rect ??= el.getBoundingClientRect());
       return {
-        path: el.getAttribute(TILE_ATTR) ?? '',
+        path: el.getAttribute(TILE_ATTR) ?? "",
         get top() {
-          return measure().top
+          return measure().top;
         },
         get bottom() {
-          return measure().bottom
+          return measure().bottom;
         },
-      }
-    })
-    return measurePlacement(scrollportTop, tiles)
+      };
+    });
+    return measurePlacement(scrollportTop, tiles);
   } catch {
-    return null
+    return null;
   }
 }
 
@@ -148,22 +156,22 @@ export function measureIn(scroller: HTMLElement): Placement | null {
  */
 export function applyIn(scroller: HTMLElement, resolved: Resolved): boolean {
   try {
-    if (resolved.kind === 'top') {
-      scroller.scrollTop = 0
-      return true
+    if (resolved.kind === "top") {
+      scroller.scrollTop = 0;
+      return true;
     }
-    const tile = findTile(scroller, resolved.path)
-    if (!tile) return false
-    const scrollerRect = scroller.getBoundingClientRect()
-    const tileRect = tile.getBoundingClientRect()
-    if (!scrollerRect || !tileRect) return false
+    const tile = findTile(scroller, resolved.path);
+    if (!tile) return false;
+    const scrollerRect = scroller.getBoundingClientRect();
+    const tileRect = tile.getBoundingClientRect();
+    if (!scrollerRect || !tileRect) return false;
     const want =
-      resolved.kind === 'anchor'
+      resolved.kind === "anchor"
         ? resolved.offset
-        : (scroller.clientHeight - tileRect.height) / 2
-    scroller.scrollTop += tileRect.top - scrollerRect.top - want
-    return true
+        : (scroller.clientHeight - tileRect.height) / 2;
+    scroller.scrollTop += tileRect.top - scrollerRect.top - want;
+    return true;
   } catch {
-    return false
+    return false;
   }
 }

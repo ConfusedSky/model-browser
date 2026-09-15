@@ -27,7 +27,7 @@
  * navigation instead of standing traffic.
  */
 
-import type { DirEntry, IndexPose } from '../../shared/types'
+import type { DirEntry, IndexPose } from "../../shared/types";
 
 /**
  * The version of what these layers *mean* — bump when a derivation changes, so
@@ -46,7 +46,7 @@ import type { DirEntry, IndexPose } from '../../shared/types'
  * the delta's "a layer entry SHALL NOT be served once its recorded identity has
  * moved", made checkable rather than asserted.
  */
-export const LAYER_VERSION = 1
+export const LAYER_VERSION = 1;
 
 /**
  * How long a recorded pose is emitted on listings before the layer stops
@@ -75,7 +75,7 @@ export const LAYER_VERSION = 1
  * one kit and far shorter than a session, so the common case pays nothing and a
  * corrected pose still lands without a restart.
  */
-export const POSE_ANNOTATION_TTL_MS = 5 * 60_000
+export const POSE_ANNOTATION_TTL_MS = 5 * 60_000;
 
 /**
  * A recorded pose, against the moment this process learned it.
@@ -93,8 +93,8 @@ export const POSE_ANNOTATION_TTL_MS = 5 * 60_000
  * not mean "never ask again until restart".
  */
 interface HeldPose {
-  pose: IndexPose | null
-  recordedAt: number
+  pose: IndexPose | null;
+  recordedAt: number;
 }
 
 /**
@@ -106,14 +106,14 @@ interface HeldPose {
  * A space would be wrong: `/kit/Big Mech` contains one and `keyDir` below would
  * split the key in the wrong place, while a path can never contain NUL.
  */
-const KEY_SEP = '\u0000'
+const KEY_SEP = "\u0000";
 function previewKey(dirPath: string, n: number): string {
-  return `${dirPath}${KEY_SEP}${n}`
+  return `${dirPath}${KEY_SEP}${n}`;
 }
 
 /** The directory half of a `previewKey`. */
 function keyDir(key: string): string {
-  return key.slice(0, key.lastIndexOf(KEY_SEP))
+  return key.slice(0, key.lastIndexOf(KEY_SEP));
 }
 
 /**
@@ -136,23 +136,23 @@ function keyDir(key: string): string {
  * (that change's D9).
  */
 function selfAndAncestors(dirPath: string): string[] {
-  const bang = dirPath.indexOf('!/')
-  const fsHalf = bang === -1 ? dirPath : dirPath.slice(0, bang)
-  const entryHalf = bang === -1 ? '' : dirPath.slice(bang + 2)
-  const out = ['/']
-  let acc = ''
-  for (const segment of fsHalf.split('/')) {
-    if (segment === '') continue
-    acc = `${acc}/${segment}`
-    out.push(acc)
+  const bang = dirPath.indexOf("!/");
+  const fsHalf = bang === -1 ? dirPath : dirPath.slice(0, bang);
+  const entryHalf = bang === -1 ? "" : dirPath.slice(bang + 2);
+  const out = ["/"];
+  let acc = "";
+  for (const segment of fsHalf.split("/")) {
+    if (segment === "") continue;
+    acc = `${acc}/${segment}`;
+    out.push(acc);
   }
-  let inner = ''
-  for (const segment of entryHalf.split('/')) {
-    if (segment === '') continue
-    inner = inner === '' ? segment : `${inner}/${segment}`
-    out.push(`${acc}!/${inner}`)
+  let inner = "";
+  for (const segment of entryHalf.split("/")) {
+    if (segment === "") continue;
+    inner = inner === "" ? segment : `${inner}/${segment}`;
+    out.push(`${acc}!/${inner}`);
   }
-  return out
+  return out;
 }
 
 /**
@@ -162,9 +162,9 @@ function selfAndAncestors(dirPath: string): string[] {
  * `…zip!/…` rather than `…zip/…`.
  */
 function under(root: string, dirPath: string): boolean {
-  if (dirPath === root) return true
-  if (root === '/') return dirPath.startsWith('/')
-  return dirPath.startsWith(`${root}/`) || dirPath.startsWith(`${root}!/`)
+  if (dirPath === root) return true;
+  if (root === "/") return dirPath.startsWith("/");
+  return dirPath.startsWith(`${root}/`) || dirPath.startsWith(`${root}!/`);
 }
 
 /**
@@ -172,15 +172,21 @@ function under(root: string, dirPath: string): boolean {
  * where the deriver had such a fact (`recordPreview`'s `stamp`).
  */
 interface HeldPreview {
-  entries: DirEntry[]
-  stamp?: number
+  entries: DirEntry[];
+  stamp?: number;
 }
 
 /** A listing entry, copied — the layer never hands out an object it still holds. */
 function copyEntry(e: DirEntry): DirEntry {
-  const out: DirEntry = { name: e.name, path: e.path, kind: e.kind, size: e.size, mtime: e.mtime }
-  if (e.format !== undefined) out.format = e.format
-  return out
+  const out: DirEntry = {
+    name: e.name,
+    path: e.path,
+    kind: e.kind,
+    size: e.size,
+    mtime: e.mtime,
+  };
+  if (e.format !== undefined) out.format = e.format;
+  return out;
 }
 
 /**
@@ -191,8 +197,8 @@ function copyEntry(e: DirEntry): DirEntry {
  * — is discovered by the revalidation pass that class owns.
  */
 export class DerivedLayers {
-  private readonly poses = new Map<string, HeldPose>()
-  private readonly previews = new Map<string, HeldPreview>()
+  private readonly poses = new Map<string, HeldPose>();
+  private readonly previews = new Map<string, HeldPreview>();
   /**
    * The index's collection root these entries were derived against, once
    * anything has been recorded under a known one.
@@ -202,9 +208,9 @@ export class DerivedLayers {
    * wedged reports nothing, and treating that silence as a repoint would let a
    * blip empty a layer that is still perfectly valid.
    */
-  private root: string | undefined
+  private root: string | undefined;
   /** False when this layer was built for another `LAYER_VERSION`: inert. */
-  private readonly live: boolean
+  private readonly live: boolean;
 
   /**
    * `version` is what this layer's entries were derived under. Production takes
@@ -222,7 +228,7 @@ export class DerivedLayers {
      */
     private readonly now: () => number = Date.now,
   ) {
-    this.live = version === LAYER_VERSION
+    this.live = version === LAYER_VERSION;
   }
 
   /**
@@ -235,10 +241,10 @@ export class DerivedLayers {
    * and `POSE_VERSION` belongs to the client (design D7, review M9).
    */
   private reroot(collectionRoot: string | undefined): void {
-    if (collectionRoot === undefined) return
-    if (this.root === collectionRoot) return
-    if (this.root !== undefined) this.dropAll()
-    this.root = collectionRoot
+    if (collectionRoot === undefined) return;
+    if (this.root === collectionRoot) return;
+    if (this.root !== undefined) this.dropAll();
+    this.root = collectionRoot;
   }
 
   /**
@@ -263,17 +269,18 @@ export class DerivedLayers {
      */
     asked: readonly string[] = [],
   ): void {
-    if (!this.live) return
-    this.reroot(collectionRoot)
+    if (!this.live) return;
+    this.reroot(collectionRoot);
     // Re-recording an entry the index has just answered about restamps it, so a
     // model the wave keeps asking about never ages out mid-conversation; the
     // horizon is measured from the last time the index confirmed the fact, not
     // from the first.
-    const recordedAt = this.now()
+    const recordedAt = this.now();
     // Negatives first, positives over them: what the answer names is what the
     // index holds, and the rest of the question is what it does not.
-    for (const path of asked) this.poses.set(path, { pose: null, recordedAt })
-    for (const [path, pose] of Object.entries(poses)) this.poses.set(path, { pose, recordedAt })
+    for (const path of asked) this.poses.set(path, { pose: null, recordedAt });
+    for (const [path, pose] of Object.entries(poses))
+      this.poses.set(path, { pose, recordedAt });
   }
 
   /**
@@ -287,14 +294,14 @@ export class DerivedLayers {
    * on the listing path.
    */
   private held(path: string): HeldPose | undefined {
-    if (!this.live) return undefined
-    const held = this.poses.get(path)
-    if (held === undefined) return undefined
+    if (!this.live) return undefined;
+    const held = this.poses.get(path);
+    if (held === undefined) return undefined;
     if (this.now() - held.recordedAt >= POSE_ANNOTATION_TTL_MS) {
-      this.poses.delete(path)
-      return undefined
+      this.poses.delete(path);
+      return undefined;
     }
-    return held
+    return held;
   }
 
   /**
@@ -307,7 +314,7 @@ export class DerivedLayers {
    * re-ask this exists to stop.
    */
   poseKnown(path: string): boolean {
-    return this.held(path) !== undefined
+    return this.held(path) !== undefined;
   }
 
   /**
@@ -320,7 +327,7 @@ export class DerivedLayers {
    * has to be able to put *before* spending a round trip.
    */
   get isLive(): boolean {
-    return this.live
+    return this.live;
   }
 
   /**
@@ -349,11 +356,11 @@ export class DerivedLayers {
    * does exist — so that one is copied on the way in and on the way out.
    */
   poseFor(path: string): IndexPose | null | undefined {
-    const held = this.held(path)
+    const held = this.held(path);
     // `?? undefined` would collapse the recorded negative back into "unknown",
     // which is the defect this signature exists to remove: `held.pose` is
     // already `IndexPose | null`, and both halves of it are answers.
-    return held === undefined ? undefined : held.pose
+    return held === undefined ? undefined : held.pose;
   }
 
   /**
@@ -382,9 +389,12 @@ export class DerivedLayers {
     entries: readonly DirEntry[],
     stamp?: number,
   ): void {
-    if (!this.live) return
-    this.reroot(collectionRoot)
-    this.previews.set(previewKey(dirPath, n), { entries: entries.map(copyEntry), stamp })
+    if (!this.live) return;
+    this.reroot(collectionRoot);
+    this.previews.set(previewKey(dirPath, n), {
+      entries: entries.map(copyEntry),
+      stamp,
+    });
   }
 
   /**
@@ -402,8 +412,8 @@ export class DerivedLayers {
    * says nothing about the geometry of a model that is still in it.
    */
   forgetPreview(dirPath: string, n: number): void {
-    if (!this.live) return
-    this.previews.delete(previewKey(dirPath, n))
+    if (!this.live) return;
+    this.previews.delete(previewKey(dirPath, n));
   }
 
   /**
@@ -415,8 +425,8 @@ export class DerivedLayers {
    * reaches the wire.
    */
   previewStamp(dirPath: string, n: number): number | undefined {
-    if (!this.live) return undefined
-    return this.previews.get(previewKey(dirPath, n))?.stamp
+    if (!this.live) return undefined;
+    return this.previews.get(previewKey(dirPath, n))?.stamp;
   }
 
   /**
@@ -428,8 +438,8 @@ export class DerivedLayers {
    * sheet on every listing.
    */
   previewFor(dirPath: string, n: number): DirEntry[] | undefined {
-    if (!this.live) return undefined
-    return this.previews.get(previewKey(dirPath, n))?.entries.map(copyEntry)
+    if (!this.live) return undefined;
+    return this.previews.get(previewKey(dirPath, n))?.entries.map(copyEntry);
   }
 
   /**
@@ -441,11 +451,11 @@ export class DerivedLayers {
    * gaining or losing a file says nothing about the models that remain.
    */
   noteDirChanged(dirPath: string): void {
-    if (!this.live) return
-    if (this.previews.size === 0) return
-    const covered = new Set(selfAndAncestors(dirPath))
+    if (!this.live) return;
+    if (this.previews.size === 0) return;
+    const covered = new Set(selfAndAncestors(dirPath));
     for (const key of [...this.previews.keys()]) {
-      if (covered.has(keyDir(key))) this.previews.delete(key)
+      if (covered.has(keyDir(key))) this.previews.delete(key);
     }
   }
 
@@ -471,22 +481,22 @@ export class DerivedLayers {
    * that could not be re-read says nothing about the models in it.
    */
   dropPreviewsUnder(root: string): void {
-    if (!this.live) return
-    if (this.previews.size === 0) return
+    if (!this.live) return;
+    if (this.previews.size === 0) return;
     for (const key of [...this.previews.keys()]) {
-      if (under(root, keyDir(key))) this.previews.delete(key)
+      if (under(root, keyDir(key))) this.previews.delete(key);
     }
   }
 
   /** Drop both layers wholesale — a reload (D9), or a repointed index. */
   dropAll(): void {
-    this.poses.clear()
-    this.previews.clear()
-    this.root = undefined
+    this.poses.clear();
+    this.previews.clear();
+    this.root = undefined;
   }
 
   /** What the layers hold, for tests and for a future report route. */
   size(): { poses: number; previews: number } {
-    return { poses: this.poses.size, previews: this.previews.size }
+    return { poses: this.poses.size, previews: this.previews.size };
   }
 }

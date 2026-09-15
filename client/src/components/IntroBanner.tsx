@@ -13,15 +13,15 @@
  * Whether it is drawn at all, whether the chips are offered, and what a click
  * does are all `App`'s decisions — this draws them.
  */
-import { ABOUT_URL, CREDITS_URL, SOURCE_URL } from '../lib/intro'
+import { ABOUT_URL, CREDITS_URL, SOURCE_URL } from "../lib/intro";
 
 /** Every class string is a whole literal, never glued to a `${` — Tailwind's
  *  scanner reads source text, so a computed candidate never reaches the
  *  stylesheet and the browser falls back to the property's default (CLAUDE.md,
  *  2026-09-03). */
 const CHIP_CLASS =
-  'rounded-full border border-zinc-700 px-3 py-1 text-zinc-300 hover:border-zinc-500'
-const LINK_CLASS = 'text-sky-400 hover:underline'
+  "rounded-full border border-zinc-700 px-3 py-1 text-zinc-300 hover:border-zinc-500";
+const LINK_CLASS = "text-sky-400 hover:underline";
 
 /**
  * What the sentence may promise. With the index unable to answer here the chips
@@ -29,8 +29,8 @@ const LINK_CLASS = 'text-sky-400 hover:underline'
  * nothing on screen can take up — so the invitation goes with them.
  */
 const SENTENCE_WITH_SEARCH =
-  'Browse a library of 3D-printable miniatures, or describe what you are looking for:'
-const SENTENCE_PLAIN = 'Browse a library of 3D-printable miniatures.'
+  "Browse a library of 3D-printable miniatures, or describe what you are looking for:";
+const SENTENCE_PLAIN = "Browse a library of 3D-printable miniatures.";
 
 export default function IntroBanner({
   queries,
@@ -39,13 +39,13 @@ export default function IntroBanner({
   onSurprise,
   onDismiss,
 }: {
-  queries: readonly string[]
+  queries: readonly string[];
   /** Whether a meaning search would run here — the chips and the surprise
    *  action are withheld, not disabled, when it would not. */
-  meaningRunnable: boolean
-  onRun: (text: string) => void
-  onSurprise: () => void
-  onDismiss: () => void
+  meaningRunnable: boolean;
+  onRun: (text: string) => void;
+  onSurprise: () => void;
+  onDismiss: () => void;
 }) {
   return (
     <div
@@ -78,7 +78,12 @@ export default function IntroBanner({
       <a href={CREDITS_URL} className={LINK_CLASS}>
         Credits
       </a>
-      <a href={SOURCE_URL} target="_blank" rel="noreferrer" className={LINK_CLASS}>
+      <a
+        href={SOURCE_URL}
+        target="_blank"
+        rel="noreferrer"
+        className={LINK_CLASS}
+      >
         Source
       </a>
       <button
@@ -90,5 +95,5 @@ export default function IntroBanner({
         ×
       </button>
     </div>
-  )
+  );
 }

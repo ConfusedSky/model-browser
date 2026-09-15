@@ -1,5 +1,5 @@
-import type { SearchKinds, SearchMode, Tuning } from './searchOptions'
-import { clampCount, isKinds, isPool, TUNING_DEFAULTS } from './searchOptions'
+import type { SearchKinds, SearchMode, Tuning } from "./searchOptions";
+import { clampCount, isKinds, isPool, TUNING_DEFAULTS } from "./searchOptions";
 
 /**
  * The URL as a record of the committed view (url-navigation D1): query
@@ -34,9 +34,9 @@ export interface UrlView {
    * It is not special-cased anywhere: it resolves under the top like any other
    * and fails as the ordinary not-found.
    */
-  path: string
-  flat: boolean
-  q?: string
+  path: string;
+  flat: boolean;
+  q?: string;
   /**
    * The model a similarity view's neighbours were drawn from. Two optional
    * slots here rather than one union is deliberate and is not the shape `View`
@@ -44,7 +44,7 @@ export interface UrlView {
    * `resolveView` implement the rule that `similar` beats a stray `q`.
    * `toUrlView` never emits both, and `serializeView` never writes both.
    */
-  similar?: string
+  similar?: string;
   /**
    * How many neighbours a similarity view asked for, carried only when it is
    * not the default. The default lives with the subject (`SIMILAR_K`,
@@ -52,7 +52,7 @@ export interface UrlView {
    * import it back without a cycle — so this field is already
    * "non-default or absent" by the time the serializer sees it.
    */
-  k?: number
+  k?: number;
   /**
    * How a *similarity* view pools the subject's per-view scores. One `pool`
    * param in the URL, two possible readers: a meaning view reads it as tuning
@@ -60,16 +60,16 @@ export interface UrlView {
    * ways — reporting is its whole job — and the subject decides which reading
    * is in force, so the two can never both be written.
    */
-  pool?: Tuning['pool']
+  pool?: Tuning["pool"];
   /** Folder matching, default on — carried only when off. */
-  folderMatching?: boolean
+  folderMatching?: boolean;
   /** Which kinds the results present, default 'both'. */
-  kinds?: SearchKinds
+  kinds?: SearchKinds;
   /** Which corpus the query ran against, default 'name' — carried only when not. */
-  mode?: SearchMode
+  mode?: SearchMode;
   /** How a meaning query was shaped; each field carried only when not default. */
-  tuning?: Partial<Tuning>
-  model?: string
+  tuning?: Partial<Tuning>;
+  model?: string;
 }
 
 /**
@@ -91,26 +91,29 @@ export interface UrlView {
  * why that is tolerable rather than a bug to fix here.
  */
 export function parseUrl(search: string = window.location.search): UrlView {
-  const p = new URLSearchParams(search)
-  const raw = p.get('q')
-  const q = raw === null || raw === '' ? undefined : raw
-  const rawSimilar = p.get('similar')
-  const similar = rawSimilar === null || rawSimilar === '' ? undefined : rawSimilar
-  const kinds = p.get('kinds')
-  const mode = p.get('mode')
-  const pool = p.get('pool')
-  const top = Number(p.get('top'))
-  const min = Number(p.get('min'))
+  const p = new URLSearchParams(search);
+  const raw = p.get("q");
+  const q = raw === null || raw === "" ? undefined : raw;
+  const rawSimilar = p.get("similar");
+  const similar =
+    rawSimilar === null || rawSimilar === "" ? undefined : rawSimilar;
+  const kinds = p.get("kinds");
+  const mode = p.get("mode");
+  const pool = p.get("pool");
+  const top = Number(p.get("top"));
+  const min = Number(p.get("min"));
   // Read leniently, like every other param here: a `k` that is not a whole
   // number the index would accept reads as absence, which resolves to the
   // default rather than to an error over a link that names a perfectly good
   // view. The bounds are the server's own (`app.ts`, 1..1000).
-  const rawK = Number(p.get('k'))
+  const rawK = Number(p.get("k"));
   const k =
-    p.has('k') && Number.isInteger(rawK) && rawK >= 1 && rawK <= 1000 ? rawK : undefined
-  const tuning: Partial<Tuning> = {}
-  if (p.get('score-raw') === '1') tuning.raw = true
-  if (isPool(pool)) tuning.pool = pool
+    p.has("k") && Number.isInteger(rawK) && rawK >= 1 && rawK <= 1000
+      ? rawK
+      : undefined;
+  const tuning: Partial<Tuning> = {};
+  if (p.get("score-raw") === "1") tuning.raw = true;
+  if (isPool(pool)) tuning.pool = pool;
   // Each bound reported exactly when the link names it, and never otherwise:
   // presence *is* the assertion (design D4), so there is no sentinel to set and
   // no bound to clear. `resolveTuning` reads a tuning naming neither as both at
@@ -118,21 +121,23 @@ export function parseUrl(search: string = window.location.search): UrlView {
   //
   // Clamped on the way in, because a hand-edited `top=5000` would otherwise
   // spend the index's headroom on rows its cap deletes (design D5).
-  if (Number.isFinite(top) && top > 0 && p.has('top')) tuning.top = clampCount(top)
+  if (Number.isFinite(top) && top > 0 && p.has("top"))
+    tuning.top = clampCount(top);
   // `p.get('min')` blank is the trap: `Number('')` is 0, and a floor of 0 is
   // the whole collection — the one value the panel's own field refuses to read
   // out of an empty box, so a truncated or hand-edited `?min=` must not mean it
   // here either. An unparseable floor is a floor not named.
-  if (Number.isFinite(min) && (p.get('min') ?? '').trim() !== '') tuning.minScore = min
+  if (Number.isFinite(min) && (p.get("min") ?? "").trim() !== "")
+    tuning.minScore = min;
   // Blank is absence, the same reading `q` and `similar` get above: a hand-edited
   // `?path=` names no path, and `URLSearchParams.get` answers `''` rather than
   // `null` for it, so `??` alone would let `''` through as a value.
-  const rawPath = p.get('path')
+  const rawPath = p.get("path");
   return {
     // Absence is the root (D2), not "no path": the library's top is the default
     // view, so a URL that names no path names it. `''` is never a value the view
     // holds — there is no "no path" state left for it to mean.
-    path: rawPath === null || rawPath === '' ? '/' : rawPath,
+    path: rawPath === null || rawPath === "" ? "/" : rawPath,
     // The flat *toggle*, and only that (design R4). A search runs flat-shaped
     // whatever the toggle says — that shape is derived where the request is
     // built (`requestOf`), never read back out of the URL — so inferring the
@@ -140,7 +145,7 @@ export function parseUrl(search: string = window.location.search): UrlView {
     // cleared listed the whole volume, while a typed one listed nested.
     // Links written before this change carry an explicit `flat=1`, so they
     // still parse; their `flat` now honestly means flat.
-    flat: p.has('flat'),
+    flat: p.has("flat"),
     q,
     similar,
     k,
@@ -153,12 +158,12 @@ export function parseUrl(search: string = window.location.search): UrlView {
     // error, since a hand-edited link should degrade to the ordinary view. An
     // explicit `kinds=both` is one of those: the default is carried by absence,
     // so naming it reads as absence too.
-    folderMatching: p.has('nofolders') ? false : undefined,
-    kinds: isKinds(kinds) && kinds !== 'both' ? kinds : undefined,
-    mode: mode === 'meaning' ? 'meaning' : mode === 'name' ? 'name' : undefined,
+    folderMatching: p.has("nofolders") ? false : undefined,
+    kinds: isKinds(kinds) && kinds !== "both" ? kinds : undefined,
+    mode: mode === "meaning" ? "meaning" : mode === "name" ? "name" : undefined,
     tuning: Object.keys(tuning).length > 0 ? tuning : undefined,
-    model: p.get('model') ?? undefined,
-  }
+    model: p.get("model") ?? undefined,
+  };
 }
 
 /**
@@ -189,48 +194,53 @@ export function parseUrl(search: string = window.location.search): UrlView {
  * instead.
  */
 export function serializeView(view: UrlView): string {
-  const p = new URLSearchParams()
+  const p = new URLSearchParams();
   // The root is written by omission (D2) — it is the default view, and a URL
   // that carries no path is read back as it by `parseUrl`.
-  if (view.path !== '/') p.set('path', view.path)
-  if (view.flat) p.set('flat', '1')
+  if (view.path !== "/") p.set("path", view.path);
+  if (view.flat) p.set("flat", "1");
   // The subject, and only one of them can be it. `similar` wins for the same
   // reason `resolveView` resolves it first — it is the more specific parameter
   // — so a caller that somehow held both writes the similarity view, and every
   // option gate below is false, since none of them is read by that subject.
-  const similar = view.similar !== undefined && view.similar !== ''
-  if (similar) p.set('similar', view.similar as string)
+  const similar = view.similar !== undefined && view.similar !== "";
+  if (similar) p.set("similar", view.similar as string);
   // The two options a similarity subject *does* read. `k` arrives already
   // elided at its default (`toUrlView`, which owns `SIMILAR_K`), so this writes
   // whatever it is handed; `pool` has no default to elide — absent means the
   // index's own, which is a different thing from any of the three values.
-  if (similar && view.k !== undefined) p.set('k', String(view.k))
-  if (similar && view.pool !== undefined) p.set('pool', view.pool)
-  const searching = !similar && view.q !== undefined && view.q !== ''
-  if (searching) p.set('q', view.q as string)
+  if (similar && view.k !== undefined) p.set("k", String(view.k));
+  if (similar && view.pool !== undefined) p.set("pool", view.pool);
+  const searching = !similar && view.q !== undefined && view.q !== "";
+  if (searching) p.set("q", view.q as string);
   // Absence means name (see the `mode` write below), so a mode-less committed
   // view is a name view and takes the name options.
-  const naming = searching && (view.mode ?? 'name') === 'name'
-  const meaning = searching && view.mode === 'meaning'
+  const naming = searching && (view.mode ?? "name") === "name";
+  const meaning = searching && view.mode === "meaning";
   // Omitted at their defaults (D4): an ordinary search URL stays byte-identical
   // to what it was before options existed, so making a default explicit never
   // mints a history entry.
-  if (naming && view.folderMatching === false) p.set('nofolders', '1')
-  if (naming && (view.kinds === 'folders' || view.kinds === 'models')) p.set('kinds', view.kinds)
+  if (naming && view.folderMatching === false) p.set("nofolders", "1");
+  if (naming && (view.kinds === "folders" || view.kinds === "models"))
+    p.set("kinds", view.kinds);
   // Written whenever a query is committed, including the default. The other
   // options are omitted at their defaults so an ordinary search URL stays what
   // it was — but which *corpus* answered is not a preference among results, it
   // is what the query means. Leaving it implicit makes the link depend on the
   // reader's default: change that default later, or hand the link to a profile
   // that reads absence differently, and the same URL asks a different question.
-  if (searching) p.set('mode', view.mode ?? 'name')
+  if (searching) p.set("mode", view.mode ?? "name");
   // Omitted at their defaults, so an ordinary meaning link is unchanged (D3).
   // Not named `raw`: Vite's dev server 403s any URL whose query contains a
   // `raw`, `url`, or `inline` param (its special import queries, guarded since
   // CVE-2025-30208), killing deep links before the app loads.
-  if (meaning && view.tuning?.raw === true) p.set('score-raw', '1')
-  if (meaning && view.tuning?.pool !== undefined && view.tuning.pool !== TUNING_DEFAULTS.pool) {
-    p.set('pool', view.tuning.pool)
+  if (meaning && view.tuning?.raw === true) p.set("score-raw", "1");
+  if (
+    meaning &&
+    view.tuning?.pool !== undefined &&
+    view.tuning.pool !== TUNING_DEFAULTS.pool
+  ) {
+    p.set("pool", view.tuning.pool);
   }
   // Each bound in force is named — including at its own default value, because
   // absence now says "not in force" rather than "at the default", and a
@@ -243,16 +253,17 @@ export function serializeView(view: UrlView): string {
   // same view, and this writes the shorter one — which is what keeps an
   // ordinary meaning link free of tuning noise, and what makes the three
   // `parseUrl()` → `commitUrl(…, {replace:true})` sites in App idempotent.
-  const bounds = meaning ? view.tuning : undefined
+  const bounds = meaning ? view.tuning : undefined;
   const resting =
-    bounds?.top === TUNING_DEFAULTS.top && bounds?.minScore === TUNING_DEFAULTS.minScore
+    bounds?.top === TUNING_DEFAULTS.top &&
+    bounds?.minScore === TUNING_DEFAULTS.minScore;
   if (bounds !== undefined && !resting) {
-    if (bounds.minScore !== undefined) p.set('min', String(bounds.minScore))
-    if (bounds.top !== undefined) p.set('top', String(bounds.top))
+    if (bounds.minScore !== undefined) p.set("min", String(bounds.minScore));
+    if (bounds.top !== undefined) p.set("top", String(bounds.top));
   }
-  if (view.model !== undefined && view.model !== '') p.set('model', view.model)
-  const s = p.toString()
-  return s === '' ? '' : `?${s}`
+  if (view.model !== undefined && view.model !== "") p.set("model", view.model);
+  const s = p.toString();
+  return s === "" ? "" : `?${s}`;
 }
 
 /**
@@ -264,7 +275,7 @@ export function serializeView(view: UrlView): string {
  * different from itself and every re-submit stacked a dead history entry.
  */
 function sameView(a: UrlView, b: UrlView): boolean {
-  return serializeView(a) === serializeView(b)
+  return serializeView(a) === serializeView(b);
 }
 
 /**
@@ -274,8 +285,8 @@ function sameView(a: UrlView, b: UrlView): boolean {
  * stamp existed) or carries something that is not a number.
  */
 export function historyIndex(): number {
-  const idx = (window.history.state as { idx?: unknown } | null)?.idx
-  return typeof idx === 'number' ? idx : 0
+  const idx = (window.history.state as { idx?: unknown } | null)?.idx;
+  return typeof idx === "number" ? idx : 0;
 }
 
 /**
@@ -297,16 +308,17 @@ export function historyIndex(): number {
 export function commitUrl(
   view: UrlView,
   opts: { replace?: boolean; state?: unknown } = {},
-): { idx: number; wrote: 'push' | 'replace' | 'none' } {
-  if (sameView(parseUrl(), view)) return { idx: historyIndex(), wrote: 'none' }
-  const url = `${window.location.pathname}${serializeView(view)}`
-  const replace = opts.replace === true
-  const idx = replace ? historyIndex() : historyIndex() + 1
-  const marker = typeof opts.state === 'object' && opts.state !== null ? opts.state : {}
-  const state = { ...marker, idx }
-  if (replace) window.history.replaceState(state, '', url)
-  else window.history.pushState(state, '', url)
-  return { idx, wrote: replace ? 'replace' : 'push' }
+): { idx: number; wrote: "push" | "replace" | "none" } {
+  if (sameView(parseUrl(), view)) return { idx: historyIndex(), wrote: "none" };
+  const url = `${window.location.pathname}${serializeView(view)}`;
+  const replace = opts.replace === true;
+  const idx = replace ? historyIndex() : historyIndex() + 1;
+  const marker =
+    typeof opts.state === "object" && opts.state !== null ? opts.state : {};
+  const state = { ...marker, idx };
+  if (replace) window.history.replaceState(state, "", url);
+  else window.history.pushState(state, "", url);
+  return { idx, wrote: replace ? "replace" : "push" };
 }
 
 /**
@@ -317,10 +329,12 @@ export function commitUrl(
  * this survives reload and forward/back — an in-memory flag does not, and a
  * forward-reopened lightbox would then close down the deep-link path.
  */
-export const LIGHTBOX_ENTRY = { lightbox: true }
+export const LIGHTBOX_ENTRY = { lightbox: true };
 
 export function isLightboxEntry(): boolean {
-  return (window.history.state as { lightbox?: boolean } | null)?.lightbox === true
+  return (
+    (window.history.state as { lightbox?: boolean } | null)?.lightbox === true
+  );
 }
 
 /**
@@ -352,18 +366,22 @@ export function isLightboxEntry(): boolean {
  * chained find-similars alike stack, and dismissing goes back the whole run.
  * A landing from a non-similarity entry stamps 1.
  */
-export const SIMILAR_ENTRY = (depth: number): { similar: true; depth: number } => ({
+export const SIMILAR_ENTRY = (
+  depth: number,
+): { similar: true; depth: number } => ({
   similar: true,
   depth,
-})
+});
 
 export function isSimilarEntry(): boolean {
-  return (window.history.state as { similar?: boolean } | null)?.similar === true
+  return (
+    (window.history.state as { similar?: boolean } | null)?.similar === true
+  );
 }
 
 /** How deep into a similarity excursion the current entry is; 0 when it carries
  *  no marker — a listing, a query view, or a cold-loaded similarity link. */
 export function similarDepth(): number {
-  const depth = (window.history.state as { depth?: number } | null)?.depth
-  return typeof depth === 'number' && depth > 0 ? depth : 0
+  const depth = (window.history.state as { depth?: number } | null)?.depth;
+  return typeof depth === "number" && depth > 0 ? depth : 0;
 }

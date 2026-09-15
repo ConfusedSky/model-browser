@@ -1,16 +1,16 @@
-import type { CameraState, IndexPose, OrbitAxis } from '../../../shared/types'
-import { frameFor } from './camera'
+import type { CameraState, IndexPose, OrbitAxis } from "../../../shared/types";
+import { frameFor } from "./camera";
 
 const AXES: { axis: OrbitAxis; v: [number, number, number] }[] = [
-  { axis: 'x', v: [1, 0, 0] },
-  { axis: '-x', v: [-1, 0, 0] },
-  { axis: 'y', v: [0, 1, 0] },
-  { axis: '-y', v: [0, -1, 0] },
-  { axis: 'z', v: [0, 0, 1] },
-  { axis: '-z', v: [0, 0, -1] },
-]
+  { axis: "x", v: [1, 0, 0] },
+  { axis: "-x", v: [-1, 0, 0] },
+  { axis: "y", v: [0, 1, 0] },
+  { axis: "-y", v: [0, -1, 0] },
+  { axis: "z", v: [0, 0, 1] },
+  { axis: "-z", v: [0, 0, -1] },
+];
 
-const EXACT = 1e-6
+const EXACT = 1e-6;
 
 /**
  * Version of the mapping from an index pose to a camera. Bumped whenever that
@@ -31,7 +31,7 @@ const EXACT = 1e-6
  * orientation is stale and redraws at the default, recording none (D5) — the
  * same version, no orientation, the picture the live view opens at.
  */
-export const POSE_VERSION = 2
+export const POSE_VERSION = 2;
 
 /**
  * The index's up axis as one of the six spindles — by **exact lookup**, never a
@@ -46,8 +46,10 @@ export const POSE_VERSION = 2
  * the orientation and say why.
  */
 export function axisOf(up: [number, number, number]): OrbitAxis | null {
-  const match = AXES.find(({ v }) => v.every((c, i) => Math.abs(c - up[i]!) < EXACT))
-  return match?.axis ?? null
+  const match = AXES.find(({ v }) =>
+    v.every((c, i) => Math.abs(c - up[i]!) < EXACT),
+  );
+  return match?.axis ?? null;
 }
 
 /**
@@ -73,24 +75,24 @@ export function cameraForPose(
 ): { camera: CameraState; axis: OrbitAxis } | null {
   // `null` (a settled absence) and `undefined` (unsettled) both frame nothing;
   // telling them apart is the sweep's business (`useThumbnails`' `usable`).
-  if (pose == null) return null
-  const axis = axisOf(pose.up)
-  if (axis === null) return null
-  const { s, a, b } = frameFor(axis)
-  const u0 = pose.azimuth_zero
+  if (pose == null) return null;
+  const axis = axisOf(pose.up);
+  if (axis === null) return null;
+  const { s, a, b } = frameFor(axis);
+  const u0 = pose.azimuth_zero;
   // `azimuth_zero` is perpendicular to `up` by construction; a pose where it is
   // not is malformed in the same way an off-axis `up` is, and gets the same
   // answer rather than a best-effort projection.
-  if (Math.abs(s.x * u0[0] + s.y * u0[1] + s.z * u0[2]) > 1e-3) return null
+  if (Math.abs(s.x * u0[0] + s.y * u0[1] + s.z * u0[2]) > 1e-3) return null;
   const offset = Math.atan2(
     a.x * u0[0] + a.y * u0[1] + a.z * u0[2],
     b.x * u0[0] + b.y * u0[1] + b.z * u0[2],
-  )
+  );
   // No front view cached for this view config: the index prescribes azimuth 0
   // at the first elevation, which is what view 0 always is. The orientation is
   // still worth keeping — only the angles are missing.
-  const azDeg = pose.front?.azimuth_deg ?? 0
-  const elDeg = pose.front?.elevation_deg ?? 0
+  const azDeg = pose.front?.azimuth_deg ?? 0;
+  const elDeg = pose.front?.elevation_deg ?? 0;
   return {
     axis,
     camera: {
@@ -98,7 +100,7 @@ export function cameraForPose(
       az: (azDeg * Math.PI) / 180 + offset,
       el: (elDeg * Math.PI) / 180,
     },
-  }
+  };
 }
 
 /**
@@ -110,6 +112,9 @@ export function cameraForPose(
  * Four decimals of a radian is well below what a 256² render can show; a
  * real re-classification moves degrees.
  */
-export function poseKeyOf(resolved: { camera: CameraState; axis: OrbitAxis }): string {
-  return `${resolved.axis}:${resolved.camera.az.toFixed(4)}:${resolved.camera.el.toFixed(4)}`
+export function poseKeyOf(resolved: {
+  camera: CameraState;
+  axis: OrbitAxis;
+}): string {
+  return `${resolved.axis}:${resolved.camera.az.toFixed(4)}:${resolved.camera.el.toFixed(4)}`;
 }

@@ -1,18 +1,18 @@
 /** Where a tile stands relative to the viewport, as the grid reports it.
  *  Coarse on purpose: the queue is two jobs wide and cannot exploit finer
  *  resolution than "on screen, about to be, known to be neither". */
-export type Band = 'visible' | 'near' | 'far'
+export type Band = "visible" | "near" | "far";
 
 interface Job {
-  run: () => Promise<void>
-  cancelled: boolean
-  started: boolean
+  run: () => Promise<void>;
+  cancelled: boolean;
+  started: boolean;
   /** The path this render is for, or undefined for keyless work — a render the
    *  user pressed for, which belongs to no slot and is never re-ranked. */
-  key: string | undefined
+  key: string | undefined;
   /** The band the pusher pinned, or undefined for the ordinary case where the
    *  ranking decides. See `push`. */
-  band: Band | undefined
+  band: Band | undefined;
 }
 
 /**
@@ -27,8 +27,8 @@ interface Job {
  * ranking that defaulted missing keys to far would push the world to the back
  * (D1).
  */
-const RANK: Record<Band, number> = { visible: 0, near: 1, far: 3 }
-const UNREPORTED = 2
+const RANK: Record<Band, number> = { visible: 0, near: 1, far: 3 };
+const UNREPORTED = 2;
 
 /**
  * How long a far gate may hold far work before it is dispatched regardless
@@ -40,7 +40,7 @@ const UNREPORTED = 2
  * worst lookup measured on the real library (3.7 s, 2026-09-02 profile);
  * tuned in task 6.2.
  */
-export const FAR_GATE_MAX_MS = 5000
+export const FAR_GATE_MAX_MS = 5000;
 
 /**
  * Limited-concurrency thumbnail render queue. Suspends while an orbit overlay
@@ -54,22 +54,22 @@ export const FAR_GATE_MAX_MS = 5000
  * interrupted by a re-ranking; only what runs *next* changes.
  */
 export class RenderQueue {
-  private jobs: Job[] = []
+  private jobs: Job[] = [];
   /** The jobs running now — a set, not a count, so their ranks can be asked. */
-  private running = new Set<Job>()
-  private suspended = false
-  private resumeWaiters: (() => void)[] = []
-  private ranking: ReadonlyMap<string, Band> = new Map()
+  private running = new Set<Job>();
+  private suspended = false;
+  private resumeWaiters: (() => void)[] = [];
+  private ranking: ReadonlyMap<string, Band> = new Map();
   /**
    * Whether far-ranked work may start (`thumbnail-image-serving` D5): null is
    * no gate. Read at every take; when it reads closed, far jobs are skipped —
    * for at most `FAR_GATE_MAX_MS`, timed from the first closed reading, after
    * which they are taken regardless.
    */
-  private farGate: (() => boolean) | null = null
-  private gateClosedSince: number | null = null
-  private gateTimer: ReturnType<typeof setTimeout> | null = null
-  private settleFn: (() => void) | null = null
+  private farGate: (() => boolean) | null = null;
+  private gateClosedSince: number | null = null;
+  private gateTimer: ReturnType<typeof setTimeout> | null = null;
+  private settleFn: (() => void) | null = null;
 
   constructor(private concurrency = 2) {}
 
@@ -80,21 +80,22 @@ export class RenderQueue {
    * `jobs` rather than reading its length.
    */
   pendingNearerThanFar(): number {
-    let n = 0
-    for (const job of this.running) if (this.rankOf(job) < RANK.far) n++
-    for (const job of this.jobs) if (!job.cancelled && this.rankOf(job) < RANK.far) n++
-    return n
+    let n = 0;
+    for (const job of this.running) if (this.rankOf(job) < RANK.far) n++;
+    for (const job of this.jobs)
+      if (!job.cancelled && this.rankOf(job) < RANK.far) n++;
+    return n;
   }
 
   /** Install (or clear, with null) the gate far work is taken under. */
   setFarGate(open: (() => boolean) | null): void {
-    this.farGate = open
+    this.farGate = open;
     // No gate is nothing to hold for. A replaced gate keeps the clock the
     // far job already has: re-installing one on a cadence under the bound
     // would otherwise hold far work forever (fifth review, R8).
-    if (open === null) this.releaseHold()
-    else this.syncHold()
-    this.pump()
+    if (open === null) this.releaseHold();
+    else this.syncHold();
+    this.pump();
   }
 
   /**
@@ -107,10 +108,10 @@ export class RenderQueue {
    * would dispatch at once with a nearer lookup still pending (review R1).
    */
   private releaseHold(): void {
-    this.gateClosedSince = null
+    this.gateClosedSince = null;
     if (this.gateTimer !== null) {
-      clearTimeout(this.gateTimer)
-      this.gateTimer = null
+      clearTimeout(this.gateTimer);
+      this.gateTimer = null;
     }
   }
 
@@ -120,7 +121,7 @@ export class RenderQueue {
    * finds the gate already open (D5, the ordering F9 asked for). Null clears.
    */
   onSettle(fn: (() => void) | null): void {
-    this.settleFn = fn
+    this.settleFn = fn;
   }
 
   /** Re-pump: something outside this queue — another queue's settle — may
@@ -130,8 +131,8 @@ export class RenderQueue {
     // open window between takes would otherwise go unobserved and the bound
     // could span it (fifth review, R1). The hook pokes on every lookup
     // settle, which is exactly when the gate may have opened: sample it here.
-    if (this.farGate !== null && this.farGate()) this.releaseHold()
-    this.pump()
+    if (this.farGate !== null && this.farGate()) this.releaseHold();
+    this.pump();
   }
 
   /**
@@ -156,17 +157,17 @@ export class RenderQueue {
    * what a reader of the queue sees the job as being for.
    */
   push(run: () => Promise<void>, key?: string, band?: Band): () => boolean {
-    const job: Job = { run, cancelled: false, started: false, key, band }
-    this.jobs.push(job)
-    this.pump()
+    const job: Job = { run, cancelled: false, started: false, key, band };
+    this.jobs.push(job);
+    this.pump();
     return () => {
-      if (job.started || job.cancelled) return false
-      job.cancelled = true
+      if (job.started || job.cancelled) return false;
+      job.cancelled = true;
       // The job set changed: a retired far job may have been the last live
       // one, and a saturated queue has no take coming to notice (D5).
-      this.syncHold()
-      return true
-    }
+      this.syncHold();
+      return true;
+    };
   }
 
   /**
@@ -175,14 +176,14 @@ export class RenderQueue {
    * unreported, never far.
    */
   setRanking(bands: ReadonlyMap<string, Band>): void {
-    this.ranking = bands
+    this.ranking = bands;
     // The far set changed: the last far job may have been ranked nearer, with
     // no take coming to notice under a saturated queue (D5).
-    this.syncHold()
+    this.syncHold();
     // A re-ranking changes what runs next; pumping here costs nothing when
     // every slot is busy and lets a queue that emptied its runnable set
     // re-check without waiting for a push or a finish.
-    this.pump()
+    this.pump();
   }
 
   /**
@@ -192,24 +193,24 @@ export class RenderQueue {
    * their `alive()` checks already refuse a departed listing.
    */
   clear(): void {
-    for (const job of this.jobs) job.cancelled = true
-    this.jobs = []
-    this.ranking = new Map()
-    this.farGate = null
-    this.settleFn = null
-    this.releaseHold()
+    for (const job of this.jobs) job.cancelled = true;
+    this.jobs = [];
+    this.ranking = new Map();
+    this.farGate = null;
+    this.settleFn = null;
+    this.releaseHold();
   }
 
   suspend(): void {
-    this.suspended = true
+    this.suspended = true;
   }
 
   resume(): void {
-    this.suspended = false
-    const waiters = this.resumeWaiters
-    this.resumeWaiters = []
-    for (const w of waiters) w()
-    this.pump()
+    this.suspended = false;
+    const waiters = this.resumeWaiters;
+    this.resumeWaiters = [];
+    for (const w of waiters) w();
+    this.pump();
   }
 
   /**
@@ -217,8 +218,8 @@ export class RenderQueue {
    * so jobs await this before each renderer-touching stage (parse, render).
    */
   whenResumed(): Promise<void> {
-    if (!this.suspended) return Promise.resolve()
-    return new Promise((resolve) => this.resumeWaiters.push(resolve))
+    if (!this.suspended) return Promise.resolve();
+    return new Promise((resolve) => this.resumeWaiters.push(resolve));
   }
 
   private rankOf(job: Job): number {
@@ -226,10 +227,10 @@ export class RenderQueue {
     // consulted at all — not even for a key it covers, which is the whole
     // point: the grid's opinion of a bulk job's path is about the tile, not
     // about the job.
-    if (job.band !== undefined) return RANK[job.band]
-    if (job.key === undefined) return RANK.visible
-    const band = this.ranking.get(job.key)
-    return band === undefined ? UNREPORTED : RANK[band]
+    if (job.band !== undefined) return RANK[job.band];
+    if (job.key === undefined) return RANK.visible;
+    const band = this.ranking.get(job.key);
+    return band === undefined ? UNREPORTED : RANK[band];
   }
 
   /**
@@ -242,27 +243,28 @@ export class RenderQueue {
    * so the whole backlog drains rather than one job per bound (second
    * review, R7); the clock is forgotten again only when the gate reads open.
    */
-  private farAllowed(): 'open' | 'held' | 'expired' {
+  private farAllowed(): "open" | "held" | "expired" {
     if (this.farGate === null || this.farGate()) {
-      this.releaseHold()
-      return 'open'
+      this.releaseHold();
+      return "open";
     }
-    const now = Date.now()
-    if (this.gateClosedSince === null) this.gateClosedSince = now
-    const remaining = FAR_GATE_MAX_MS - (now - this.gateClosedSince)
-    if (remaining <= 0) return 'expired'
+    const now = Date.now();
+    if (this.gateClosedSince === null) this.gateClosedSince = now;
+    const remaining = FAR_GATE_MAX_MS - (now - this.gateClosedSince);
+    if (remaining <= 0) return "expired";
     if (this.gateTimer === null) {
       this.gateTimer = setTimeout(() => {
-        this.gateTimer = null
-        this.pump()
-      }, remaining)
+        this.gateTimer = null;
+        this.pump();
+      }, remaining);
     }
-    return 'held'
+    return "held";
   }
 
   private hasLiveFar(): boolean {
-    for (const job of this.jobs) if (!job.cancelled && this.rankOf(job) === RANK.far) return true
-    return false
+    for (const job of this.jobs)
+      if (!job.cancelled && this.rankOf(job) === RANK.far) return true;
+    return false;
   }
 
   /**
@@ -281,7 +283,7 @@ export class RenderQueue {
    * while no clock is running.
    */
   private syncHold(): void {
-    if (this.gateClosedSince !== null && !this.hasLiveFar()) this.releaseHold()
+    if (this.gateClosedSince !== null && !this.hasLiveFar()) this.releaseHold();
   }
 
   /**
@@ -303,55 +305,55 @@ export class RenderQueue {
    * gate timer's (`farAllowed`).
    */
   private take(): Job | undefined {
-    let bestAt = -1
-    let bestRank = Number.POSITIVE_INFINITY
-    let verdict: 'open' | 'held' | 'expired' | null = null
+    let bestAt = -1;
+    let bestRank = Number.POSITIVE_INFINITY;
+    let verdict: "open" | "held" | "expired" | null = null;
     for (let i = 0; i < this.jobs.length; ) {
-      const job = this.jobs[i]!
+      const job = this.jobs[i]!;
       if (job.cancelled) {
         // Dropped as the scan meets it, not left for every later take to
         // rescan: a listing's lifetime of retirements would otherwise pile up
         // hundreds of husks, each holding its run closure reachable.
-        this.jobs.splice(i, 1)
-        continue
+        this.jobs.splice(i, 1);
+        continue;
       }
-      const rank = this.rankOf(job)
+      const rank = this.rankOf(job);
       if (rank === RANK.far) {
-        if (verdict === null) verdict = this.farAllowed()
-        if (verdict === 'held') {
-          i++
-          continue
+        if (verdict === null) verdict = this.farAllowed();
+        if (verdict === "held") {
+          i++;
+          continue;
         }
       }
       if (rank < bestRank) {
-        bestRank = rank
-        bestAt = i
+        bestRank = rank;
+        bestAt = i;
       }
-      i++
+      i++;
     }
-    if (bestAt === -1) return undefined
-    const job = this.jobs[bestAt]!
-    this.jobs.splice(bestAt, 1)
+    if (bestAt === -1) return undefined;
+    const job = this.jobs[bestAt]!;
+    this.jobs.splice(bestAt, 1);
     // After the splice: the job taken may have been the last live far job
     // (dispatched on an expired clock), and the clock must not outlive it.
-    this.syncHold()
-    return job
+    this.syncHold();
+    return job;
   }
 
   private pump(): void {
     while (!this.suspended && this.running.size < this.concurrency) {
-      const job = this.take()
-      if (job === undefined) return
-      job.started = true
-      this.running.add(job)
+      const job = this.take();
+      if (job === undefined) return;
+      job.started = true;
+      this.running.add(job);
       void job.run().finally(() => {
-        this.running.delete(job)
+        this.running.delete(job);
         // The settle callback runs after the decrement, so a gate read from it
         // sees this job gone (D5/F9) — and before this queue's own pump, so a
         // poke it makes lands on the other queue first.
-        this.settleFn?.()
-        this.pump()
-      })
+        this.settleFn?.();
+        this.pump();
+      });
     }
   }
 }

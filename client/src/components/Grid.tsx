@@ -1,12 +1,24 @@
-import { memo, useCallback, useEffect, useRef, useState, type RefObject } from 'react'
-import { baseName } from '../../../shared/names'
-import type { DirEntry, IndexScore } from '../../../shared/types'
-import type { ThumbState } from '../hooks/useThumbnails'
-import { formatCosine, formatZ } from '../lib/format'
-import { nativeMenuRequested } from '../lib/gesture'
-import { tilesIn } from '../lib/placement'
-import { SCALE_BADGE, SCALE_SPOKEN, Z_LABEL, type ScoreScale } from '../lib/scoreScale'
-import type { Band } from '../three/queue'
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
+import { baseName } from "../../../shared/names";
+import type { DirEntry, IndexScore } from "../../../shared/types";
+import type { ThumbState } from "../hooks/useThumbnails";
+import { formatCosine, formatZ } from "../lib/format";
+import { nativeMenuRequested } from "../lib/gesture";
+import { tilesIn } from "../lib/placement";
+import {
+  SCALE_BADGE,
+  SCALE_SPOKEN,
+  Z_LABEL,
+  type ScoreScale,
+} from "../lib/scoreScale";
+import type { Band } from "../three/queue";
 
 /**
  * The far boundary: how far past the scrollport a tile may sit before its
@@ -25,10 +37,10 @@ import type { Band } from '../three/queue'
  * scales with the window; re-judge here if tile or window geometry changes
  * materially.
  */
-export const FAR_ROOT_MARGIN = '200% 0px 200% 0px'
+export const FAR_ROOT_MARGIN = "200% 0px 200% 0px";
 
 /** How near a band sorts — the per-path max ("nearest wins") compares on this. */
-const NEARNESS: Record<Band, number> = { visible: 0, near: 1, far: 2 }
+const NEARNESS: Record<Band, number> = { visible: 0, near: 1, far: 2 };
 /**
  * The band a folder's preview cells register at: one worse than the folder's
  * own. A sheet is the folder's decoration and the model tiles beside it are
@@ -37,7 +49,11 @@ const NEARNESS: Record<Band, number> = { visible: 0, near: 1, far: 2 }
  * below, first in listing order, and the sheet won (sweep-priority D2,
  * amended 2026-09-02).
  */
-const CELL_BAND: Record<Band, Band> = { visible: 'near', near: 'far', far: 'far' }
+const CELL_BAND: Record<Band, Band> = {
+  visible: "near",
+  near: "far",
+  far: "far",
+};
 
 /**
  * The grid's live column count, from geometry rather than assumed: the grid is
@@ -50,46 +66,54 @@ const CELL_BAND: Record<Band, Band> = { visible: 'near', near: 'far', far: 'far'
  * caller's row step, and the caller never reaches the step with no tiles anyway.
  */
 export function columnCount(tiles: HTMLElement[]): number {
-  const first = tiles[0]
-  if (first === undefined) return 1
-  const top = first.getBoundingClientRect().top
-  let n = 0
+  const first = tiles[0];
+  if (first === undefined) return 1;
+  const top = first.getBoundingClientRect().top;
+  let n = 0;
   for (const tile of tiles) {
-    if (tile.getBoundingClientRect().top !== top) break
-    n++
+    if (tile.getBoundingClientRect().top !== top) break;
+    n++;
   }
-  return n
+  return n;
 }
 
 interface Props {
-  entries: DirEntry[]
-  thumbs: Map<string, ThumbState>
-  onEnter: (entry: DirEntry) => void
-  onModelPointerDown: (e: React.PointerEvent, entry: DirEntry, el: HTMLElement) => void
+  entries: DirEntry[];
+  thumbs: Map<string, ThumbState>;
+  onEnter: (entry: DirEntry) => void;
+  onModelPointerDown: (
+    e: React.PointerEvent,
+    entry: DirEntry,
+    el: HTMLElement,
+  ) => void;
   /** Keyboard activation (Enter/Space) — opens the lightbox directly. */
-  onModelOpen: (entry: DirEntry, el: HTMLElement) => void
-  onModelHover: (path: string | null) => void
+  onModelOpen: (entry: DirEntry, el: HTMLElement) => void;
+  onModelHover: (path: string | null) => void;
   /** Raise the entry menu — a secondary press, or the platform's context-menu
    *  key on a focused tile. Held by identity in App like the others. */
-  onEntryMenu: (entry: DirEntry, el: HTMLElement, at: { x: number; y: number }) => void
+  onEntryMenu: (
+    entry: DirEntry,
+    el: HTMLElement,
+    at: { x: number; y: number },
+  ) => void;
   /** A listing-drawn image that failed to arrive, by the path it was for —
    *  the hook's `reportImageError`, held by identity. */
-  onImageError: (path: string) => void
+  onImageError: (path: string) => void;
   /** The entry a reveal just located, marked until the highlight fades.
    *  Component-local in App, never a view field (D8). */
-  markedPath: string | null
+  markedPath: string | null;
   /** A similarity view's subject — the model its neighbours were computed from.
    *  It is drawn first and marked as the reference; App prepends it, so this is
    *  only which of the rendered tiles is it. */
-  anchorPath?: string
+  anchorPath?: string;
   /** The one way to obtain a tile's score. A guarded lookup rather than the raw
    *  map: the anchor rule lives inside it, so this component cannot draw a badge
    *  the rule forbids even by forgetting to check. Returns the map's own object,
    *  so the memo below still compares by identity. */
-  scoreFor: (path: string) => IndexScore | undefined
+  scoreFor: (path: string) => IndexScore | undefined;
   /** Which scale those numbers are on, or `null` where the view is not a scored
    *  one — in which case no tile draws a number at all (D3). */
-  scoreScale: ScoreScale | null
+  scoreScale: ScoreScale | null;
   /**
    * What each folder tile previews, for the listing on screen: the models a
    * peek found inside it, in the order it found them
@@ -100,12 +124,12 @@ interface Props {
    * The arrays are the map's own, never rebuilt per render, so `Tile`'s memo
    * compares them by identity like `score`.
    */
-  previews: ReadonlyMap<string, DirEntry[]>
+  previews: ReadonlyMap<string, DirEntry[]>;
   /** Ask for a folder's preview — raised when a tile crosses the park
    *  boundary. App holds it by identity and its guard drops repeats (D1);
    *  since the band observer keeps watching, repeats now arrive per scroll,
    *  and that guard is the only one (sweep-priority 2.2). */
-  onPeek: (path: string) => void
+  onPeek: (path: string) => void;
   /**
    * Report every observed tile's band, wholesale, after each observer batch —
    * `visible` / `near` / `far`, with a folder's preview models registered
@@ -113,7 +137,7 @@ interface Props {
    * place taking the nearest (sweep-priority D2). App wraps this before it reaches
    * the render pipeline; held by identity like `onPeek`.
    */
-  onBands: (bands: ReadonlyMap<string, Band>) => void
+  onBands: (bands: ReadonlyMap<string, Band>) => void;
   /**
    * The scrolling container both observers use as their `root` — App's
    * `<main>`, as a `RefObject` (stable in deps; `.current` is populated
@@ -123,7 +147,7 @@ interface Props {
    * viewport root is inert and the `near` band collapses to the viewport
    * edge (sweep-priority D2).
    */
-  scrollRoot: RefObject<HTMLElement | null>
+  scrollRoot: RefObject<HTMLElement | null>;
 }
 
 /**
@@ -132,12 +156,15 @@ interface Props {
  * dispatch as the same event on the focused element — and Shift+F10 is handled
  * beside it for the platforms that do not.
  */
-function menuAt(el: HTMLElement, e: { clientX: number; clientY: number }): { x: number; y: number } {
+function menuAt(
+  el: HTMLElement,
+  e: { clientX: number; clientY: number },
+): { x: number; y: number } {
   // A keyboard-raised menu reports (0, 0) — anchor it to the tile instead, so
   // it appears where the thing it acts on is.
-  if (e.clientX !== 0 || e.clientY !== 0) return { x: e.clientX, y: e.clientY }
-  const r = el.getBoundingClientRect()
-  return { x: r.left + 8, y: r.bottom - 8 }
+  if (e.clientX !== 0 || e.clientY !== 0) return { x: e.clientX, y: e.clientY };
+  const r = el.getBoundingClientRect();
+  return { x: r.left + 8, y: r.bottom - 8 };
 }
 
 /**
@@ -164,7 +191,7 @@ function Grid({
   onBands,
   scrollRoot,
 }: Props) {
-  const gridRef = useRef<HTMLDivElement>(null)
+  const gridRef = useRef<HTMLDivElement>(null);
   /**
    * Each observed tile's last record from each observer, keyed by path. A half
    * stays `undefined` until that observer has reported the tile — the band
@@ -174,7 +201,9 @@ function Grid({
    * code-review finding 6). Component-level so `publish` can read it from
    * either effect below.
    */
-  const bandStateRef = useRef<Map<string, { inPark?: boolean; inView?: boolean }>>(new Map())
+  const bandStateRef = useRef<
+    Map<string, { inPark?: boolean; inView?: boolean }>
+  >(new Map());
   /**
    * `previews` at report time, not at effect-build time: the registration rule
    * reads it inside observer callbacks, and putting `previews` in the effect's
@@ -182,8 +211,8 @@ function Grid({
    * peek — `requestPeek`'s `land` mints a new map identity each time
    * (sweep-priority D2).
    */
-  const previewsRef = useRef(previews)
-  previewsRef.current = previews
+  const previewsRef = useRef(previews);
+  previewsRef.current = previews;
   /**
    * Report every tracked tile's band, wholesale. A component-level callback
    * over the refs and the `onBands` prop — not a closure of the observer
@@ -194,34 +223,36 @@ function Grid({
    * unreported" over work the last report had ranked (finding 3).
    */
   const publish = useCallback(() => {
-    const state = bandStateRef.current
-    if (state.size === 0) return
-    const bands = new Map<string, Band>()
+    const state = bandStateRef.current;
+    if (state.size === 0) return;
+    const bands = new Map<string, Band>();
     // The per-path max: a path shown in more than one place — its own tile
     // and a folder's preview — takes the nearest band, so a far band never
     // outranks visible work (D2).
     const put = (path: string, band: Band): void => {
-      const cur = bands.get(path)
-      if (cur === undefined || NEARNESS[band] < NEARNESS[cur]) bands.set(path, band)
-    }
-    const shown = previewsRef.current
+      const cur = bands.get(path);
+      if (cur === undefined || NEARNESS[band] < NEARNESS[cur])
+        bands.set(path, band);
+    };
+    const shown = previewsRef.current;
     for (const [path, s] of state) {
-      if (s.inPark === undefined || s.inView === undefined) continue
-      const band: Band = s.inView ? 'visible' : s.inPark ? 'near' : 'far'
-      put(path, band)
+      if (s.inPark === undefined || s.inView === undefined) continue;
+      const band: Band = s.inView ? "visible" : s.inPark ? "near" : "far";
+      put(path, band);
       // A folder's preview models register one band worse than the folder —
       // they have no tile of their own, and unregistered they would rank
       // after every visible tile even while their folder is on screen.
-      const cells = shown.get(path)
-      if (cells !== undefined) for (const cell of cells) put(cell.path, CELL_BAND[band])
+      const cells = shown.get(path);
+      if (cells !== undefined)
+        for (const cell of cells) put(cell.path, CELL_BAND[band]);
     }
     // Nothing heard by both observers yet — the first observer's initial
     // batch after a rebuild fills one half for every path — is not a report
     // either: an empty map would replace a ranking in force with "everything
     // unreported" for one observation cycle.
-    if (bands.size === 0) return
-    onBands(bands)
-  }, [onBands])
+    if (bands.size === 0) return;
+    onBands(bands);
+  }, [onBands]);
   /**
    * Two observers in one effect, rooted at the scroller (sweep-priority D2).
    * The band observer — the one `folder-contact-sheets` landed for peeks,
@@ -251,55 +282,64 @@ function Grid({
     // Cleared before the guard below: an empty listing renders no grid (no
     // `gridRef`), and the previous listing's paths must not survive in the
     // tracked state for the previews effect to publish.
-    const state = bandStateRef.current
-    state.clear()
-    const root = gridRef.current
-    const scroller = scrollRoot.current
-    if (root === null || scroller === null) return
+    const state = bandStateRef.current;
+    state.clear();
+    const root = gridRef.current;
+    const scroller = scrollRoot.current;
+    if (root === null || scroller === null) return;
     const stateOf = (path: string): { inPark?: boolean; inView?: boolean } => {
-      let s = state.get(path)
+      let s = state.get(path);
       if (s === undefined) {
-        s = {}
-        state.set(path, s)
+        s = {};
+        state.set(path, s);
       }
-      return s
-    }
+      return s;
+    };
     const apply = (
       records: IntersectionObserverEntry[],
-      half: 'inPark' | 'inView',
+      half: "inPark" | "inView",
       peeks: boolean,
     ): void => {
       for (const record of records) {
-        const el = record.target as HTMLElement
-        const path = el.dataset.dirTile ?? el.dataset.modelTile
-        if (path === undefined) continue
-        stateOf(path)[half] = record.isIntersecting
-        if (peeks && record.isIntersecting && el.dataset.dirTile !== undefined) onPeek(path)
+        const el = record.target as HTMLElement;
+        const path = el.dataset.dirTile ?? el.dataset.modelTile;
+        if (path === undefined) continue;
+        stateOf(path)[half] = record.isIntersecting;
+        if (peeks && record.isIntersecting && el.dataset.dirTile !== undefined)
+          onPeek(path);
       }
-      publish()
-    }
-    const bandObserver = new IntersectionObserver((records) => apply(records, 'inPark', true), {
-      root: scroller,
-      rootMargin: FAR_ROOT_MARGIN,
-    })
-    const viewObserver = new IntersectionObserver((records) => apply(records, 'inView', false), {
-      root: scroller,
-    })
-    for (const el of root.querySelectorAll<HTMLElement>('[data-dir-tile], [data-model-tile]')) {
-      bandObserver.observe(el)
-      viewObserver.observe(el)
+      publish();
+    };
+    const bandObserver = new IntersectionObserver(
+      (records) => apply(records, "inPark", true),
+      {
+        root: scroller,
+        rootMargin: FAR_ROOT_MARGIN,
+      },
+    );
+    const viewObserver = new IntersectionObserver(
+      (records) => apply(records, "inView", false),
+      {
+        root: scroller,
+      },
+    );
+    for (const el of root.querySelectorAll<HTMLElement>(
+      "[data-dir-tile], [data-model-tile]",
+    )) {
+      bandObserver.observe(el);
+      viewObserver.observe(el);
     }
     return () => {
-      bandObserver.disconnect()
-      viewObserver.disconnect()
-    }
-  }, [entries, onPeek, publish, scrollRoot])
+      bandObserver.disconnect();
+      viewObserver.disconnect();
+    };
+  }, [entries, onPeek, publish, scrollRoot]);
 
   /** A landed peek's models join their folder's band at once, with no
    *  observer churn: republish the already-tracked bands. */
   useEffect(() => {
-    publish()
-  }, [previews, publish])
+    publish();
+  }, [previews, publish]);
 
   /**
    * Arrow-key focus movement between tiles (grid-arrow-navigation). On the grid
@@ -318,44 +358,53 @@ function Grid({
    * tile into view (D2/D3).
    */
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
-    if (e.altKey || e.ctrlKey || e.metaKey) return
-    const { key } = e
-    if (key !== 'ArrowRight' && key !== 'ArrowLeft' && key !== 'ArrowDown' && key !== 'ArrowUp') {
-      return
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    const { key } = e;
+    if (
+      key !== "ArrowRight" &&
+      key !== "ArrowLeft" &&
+      key !== "ArrowDown" &&
+      key !== "ArrowUp"
+    ) {
+      return;
     }
-    const tiles = gridRef.current ? tilesIn(gridRef.current) : []
-    const idx = tiles.indexOf(document.activeElement as HTMLElement)
-    if (idx === -1) return
-    const last = tiles.length - 1
-    const cols = columnCount(tiles)
-    let target = idx
-    if (key === 'ArrowRight') target = Math.min(idx + 1, last)
-    else if (key === 'ArrowLeft') target = Math.max(idx - 1, 0)
-    else if (key === 'ArrowDown') {
-      const down = idx + cols
+    const tiles = gridRef.current ? tilesIn(gridRef.current) : [];
+    const idx = tiles.indexOf(document.activeElement as HTMLElement);
+    if (idx === -1) return;
+    const last = tiles.length - 1;
+    const cols = columnCount(tiles);
+    let target = idx;
+    if (key === "ArrowRight") target = Math.min(idx + 1, last);
+    else if (key === "ArrowLeft") target = Math.max(idx - 1, 0);
+    else if (key === "ArrowDown") {
+      const down = idx + cols;
       // The row below, if any: a straight step when it lands on a tile, else the
       // last tile when a partial row sits below (idx is in the last full row),
       // else a no-op (idx is already in the last row).
-      if (down <= last) target = down
-      else if (Math.floor(idx / cols) < Math.floor(last / cols)) target = last
+      if (down <= last) target = down;
+      else if (Math.floor(idx / cols) < Math.floor(last / cols)) target = last;
     } else {
       // ArrowUp: the row above, if any — never a clamp to 0, which would slide
       // focus sideways along the top row rather than reading as "up" or "stop".
-      const up = idx - cols
-      if (up >= 0) target = up
+      const up = idx - cols;
+      if (up >= 0) target = up;
     }
     // Only when focus actually moves (D3): an inert edge arrow (top-row Up,
     // bottom-row Down, or an end) is left to the browser, so the page may scroll.
-    if (target === idx) return
-    e.preventDefault()
-    tiles[target]?.focus()
-  }
+    if (target === idx) return;
+    e.preventDefault();
+    tiles[target]?.focus();
+  };
 
   // Below the hooks, not above them: the observer effect must run on every
   // render of this component, and an early return before it would make it
   // conditional.
   if (entries.length === 0) {
-    return <p className="mt-16 text-center text-sm text-zinc-600">Nothing to show here.</p>
+    return (
+      <p className="mt-16 text-center text-sm text-zinc-600">
+        Nothing to show here.
+      </p>
+    );
   }
   return (
     <div
@@ -368,7 +417,8 @@ function Grid({
         // map's own array is reference-stable across renders, so the memo sees
         // an unchanged preview list as unchanged. Only folders have one — a zip
         // is never peeked (Non-Goals), and a model is not a container.
-        const preview = entry.kind === 'dir' ? previews.get(entry.path) : undefined
+        const preview =
+          entry.kind === "dir" ? previews.get(entry.path) : undefined;
         return (
           <Tile
             key={entry.path}
@@ -406,13 +456,13 @@ function Grid({
             score={scoreScale === null ? undefined : scoreFor(entry.path)}
             scale={scoreScale}
           />
-        )
+        );
       })}
     </div>
-  )
+  );
 }
 
-export default memo(Grid)
+export default memo(Grid);
 
 /**
  * A corner badge. Small, corner-anchored, and backed opaquely enough to read
@@ -439,7 +489,7 @@ export default memo(Grid)
  * and the badges visibly jumped inward on every press.
  */
 const BADGE_CLASS =
-  'pointer-events-none absolute top-0 z-tile-badge rounded bg-zinc-950/80 px-1 py-px text-[0.625rem] font-medium tabular-nums leading-tight text-zinc-300 ring-1 ring-zinc-800/60'
+  "pointer-events-none absolute top-0 z-tile-badge rounded bg-zinc-950/80 px-1 py-px text-[0.625rem] font-medium tabular-nums leading-tight text-zinc-300 ring-1 ring-zinc-800/60";
 
 /**
  * What one thumbnail looks like at any moment: failed, drawn, or on its way.
@@ -458,14 +508,14 @@ function ThumbView({
   path,
   onImageError,
 }: {
-  thumb: ThumbState | undefined
+  thumb: ThumbState | undefined;
   /**
    * The path this view draws — the cell's own in a folder sheet, not the
    * folder's — so an image that fails to arrive is reported for the entry it
    * belongs to (`thumbnail-image-serving` D3).
    */
-  path: string
-  onImageError?: (path: string) => void
+  path: string;
+  onImageError?: (path: string) => void;
 }) {
   // Whether this view has ever shown a picture. An image drawn from the
   // listing is fetched lazily by the browser, so until its `load` the
@@ -476,17 +526,17 @@ function ThumbView({
   // and the browser keeps the old pixels showing meanwhile, so hiding them
   // behind a spinner would discard a picture already on screen (review R12).
   // A `blob:` URL is bytes the client already holds and draws at once.
-  const [everLoaded, setEverLoaded] = useState(false)
-  if (thumb?.status === 'error') {
+  const [everLoaded, setEverLoaded] = useState(false);
+  if (thumb?.status === "error") {
     return (
       <span className="text-2xl" title="Failed to load model">
         ⚠️
       </span>
-    )
+    );
   }
   if (thumb?.url !== undefined) {
-    const url = thumb.url
-    const pending = !url.startsWith('blob:') && !everLoaded
+    const url = thumb.url;
+    const pending = !url.startsWith("blob:") && !everLoaded;
     return (
       // The box is declared — the largest square the host allows, its side
       // the host's smaller axis (`100cqh` needs the host to be a size
@@ -509,17 +559,21 @@ function ThumbView({
           decoding="async"
           onLoad={() => setEverLoaded(true)}
           onError={() => onImageError?.(path)}
-          className={pending ? 'h-full w-full object-contain opacity-0' : 'h-full w-full object-contain'}
+          className={
+            pending
+              ? "h-full w-full object-contain opacity-0"
+              : "h-full w-full object-contain"
+          }
         />
         {pending ? (
           <span className="absolute size-6 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-400" />
         ) : null}
       </span>
-    )
+    );
   }
   return (
     <span className="size-6 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-400" />
-  )
+  );
 }
 
 /**
@@ -541,14 +595,14 @@ function ContactSheet({
   thumbs,
   onImageError,
 }: {
-  preview: DirEntry[]
-  thumbs: (ThumbState | undefined)[] | undefined
-  onImageError: (path: string) => void
+  preview: DirEntry[];
+  thumbs: (ThumbState | undefined)[] | undefined;
+  onImageError: (path: string) => void;
 }) {
   return (
     <div
       data-preview-sheet={preview.length}
-      className={`grid min-h-0 w-full flex-1 gap-1 ${preview.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}
+      className={`grid min-h-0 w-full flex-1 gap-1 ${preview.length === 1 ? "grid-cols-1" : "grid-cols-2"}`}
     >
       {preview.map((entry, i) => (
         <div
@@ -568,8 +622,8 @@ function ContactSheet({
           className={
             // The odd one out of three, given the full width below the pair.
             preview.length === 3 && i === 2
-              ? 'flex min-h-0 items-center justify-center overflow-hidden rounded [container-type:size] col-span-2'
-              : 'flex min-h-0 items-center justify-center overflow-hidden rounded [container-type:size]'
+              ? "flex min-h-0 items-center justify-center overflow-hidden rounded [container-type:size] col-span-2"
+              : "flex min-h-0 items-center justify-center overflow-hidden rounded [container-type:size]"
           }
         >
           <ThumbView
@@ -584,33 +638,41 @@ function ContactSheet({
         </div>
       ))}
     </div>
-  )
+  );
 }
 
 interface TileProps {
-  entry: DirEntry
-  thumb: ThumbState | undefined
-  onEnter: (entry: DirEntry) => void
-  onModelPointerDown: (e: React.PointerEvent, entry: DirEntry, el: HTMLElement) => void
-  onModelOpen: (entry: DirEntry, el: HTMLElement) => void
-  onModelHover: (path: string | null) => void
-  onEntryMenu: (entry: DirEntry, el: HTMLElement, at: { x: number; y: number }) => void
+  entry: DirEntry;
+  thumb: ThumbState | undefined;
+  onEnter: (entry: DirEntry) => void;
+  onModelPointerDown: (
+    e: React.PointerEvent,
+    entry: DirEntry,
+    el: HTMLElement,
+  ) => void;
+  onModelOpen: (entry: DirEntry, el: HTMLElement) => void;
+  onModelHover: (path: string | null) => void;
+  onEntryMenu: (
+    entry: DirEntry,
+    el: HTMLElement,
+    at: { x: number; y: number },
+  ) => void;
   /** A listing-drawn image that failed to arrive, by the path it was for
    *  (`thumbnail-image-serving` D3); held by identity like the rest. */
-  onImageError: (path: string) => void
-  marked: boolean
-  anchor: boolean
+  onImageError: (path: string) => void;
+  marked: boolean;
+  anchor: boolean;
   /** What the index scored this tile at; absent when nothing did (see `Grid`). */
-  score: IndexScore | undefined
+  score: IndexScore | undefined;
   /** Which scale `score` is on. Never read when `score` is absent. */
-  scale: ScoreScale | null
+  scale: ScoreScale | null;
   /** The models this folder previews, or absent for anything that previews
    *  none — a zip, a model, a folder whose peek has not answered or found
    *  nothing. The map's own array (see `Grid`), so compared by identity. */
-  preview: DirEntry[] | undefined
+  preview: DirEntry[] | undefined;
   /** Those models' thumbnails, positionally. Rebuilt every render, so
    *  `tilePropsEqual` is the one place that knows to compare it elementwise. */
-  previewThumbs: (ThumbState | undefined)[] | undefined
+  previewThumbs: (ThumbState | undefined)[] | undefined;
 }
 
 /**
@@ -630,17 +692,17 @@ interface TileProps {
  * it.
  */
 function tilePropsEqual(prev: TileProps, next: TileProps): boolean {
-  const keys = Object.keys(next) as (keyof TileProps)[]
-  if (keys.length !== Object.keys(prev).length) return false
+  const keys = Object.keys(next) as (keyof TileProps)[];
+  if (keys.length !== Object.keys(prev).length) return false;
   for (const key of keys) {
-    if (key === 'previewThumbs') continue
-    if (prev[key] !== next[key]) return false
+    if (key === "previewThumbs") continue;
+    if (prev[key] !== next[key]) return false;
   }
-  const a = prev.previewThumbs
-  const b = next.previewThumbs
-  if (a === b) return true
-  if (a === undefined || b === undefined || a.length !== b.length) return false
-  return a.every((state, i) => state === b[i])
+  const a = prev.previewThumbs;
+  const b = next.previewThumbs;
+  if (a === b) return true;
+  if (a === undefined || b === undefined || a.length !== b.length) return false;
+  return a.every((state, i) => state === b[i]);
 }
 
 const Tile = memo(function Tile({
@@ -659,39 +721,45 @@ const Tile = memo(function Tile({
   preview,
   previewThumbs,
 }: TileProps) {
-  const ref = useRef<HTMLButtonElement>(null)
+  const ref = useRef<HTMLButtonElement>(null);
   // Locating is not this tile's job any more: `marked` is the highlight alone.
   // App places the revealed tile — centred — through the same placement every
   // retrace uses (retrace-placement D5), against the scroller it owns, so the
   // reveal and a Back cannot drift apart in how they scroll.
 
   const base =
-    'group flex aspect-square w-full flex-col items-center justify-center gap-1 overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900 p-2 text-zinc-300 transition-colors hover:border-zinc-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-500'
+    "group flex aspect-square w-full flex-col items-center justify-center gap-1 overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900 p-2 text-zinc-300 transition-colors hover:border-zinc-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-500";
   // The mark rides a CSS animation (index.css) rather than a class swap, so the
   // fade is the browser's business and App only has to drop the state that
   // applied it.
-  const markClass = marked ? ' animate-reveal-mark' : ''
+  const markClass = marked ? " animate-reveal-mark" : "";
   // The subject of a similarity view: the model the others were compared
   // against, drawn as the reference rather than as the best result. A ring the
   // neighbours do not have, and deliberately a quiet one — anything louder
   // reads as "this one matched hardest", which is the opposite of what it is.
-  const anchorClass = anchor ? ' border-sky-800 ring-1 ring-sky-800' : ''
+  const anchorClass = anchor ? " border-sky-800 ring-1 ring-sky-800" : "";
   // The two numbers, resolved together: either both are drawn or neither is.
   // `scale` is what makes the cosine readable at all — the two scoring routes
   // run on measurably different distributions, so an unlabelled cosine invites
   // a comparison it cannot support (D2).
-  const badges = score !== undefined && scale !== null ? { score, scale } : null
+  const badges =
+    score !== undefined && scale !== null ? { score, scale } : null;
 
   const onMenuKey = (e: React.KeyboardEvent<HTMLButtonElement>): boolean => {
     // Shift+F10 for the platforms that do not send `contextmenu` for the
     // context-menu key itself.
-    if (e.key !== 'ContextMenu' && !(e.key === 'F10' && e.shiftKey)) return false
-    e.preventDefault()
-    onEntryMenu(entry, e.currentTarget, menuAt(e.currentTarget, { clientX: 0, clientY: 0 }))
-    return true
-  }
+    if (e.key !== "ContextMenu" && !(e.key === "F10" && e.shiftKey))
+      return false;
+    e.preventDefault();
+    onEntryMenu(
+      entry,
+      e.currentTarget,
+      menuAt(e.currentTarget, { clientX: 0, clientY: 0 }),
+    );
+    return true;
+  };
 
-  if (entry.kind !== 'model') {
+  if (entry.kind !== "model") {
     return (
       <button
         ref={ref}
@@ -722,7 +790,7 @@ const Tile = memo(function Tile({
         // (review round five). A named zip states the real name alone.
         aria-label={
           entry.displayName !== undefined
-            ? entry.kind === 'dir'
+            ? entry.kind === "dir"
               ? `folder ${entry.name}`
               : entry.name
             : undefined
@@ -730,16 +798,16 @@ const Tile = memo(function Tile({
         className={base + markClass + anchorClass}
         onClick={() => onEnter(entry)}
         onContextMenu={(e) => {
-          if (nativeMenuRequested(e)) return
-          e.preventDefault()
-          onEntryMenu(entry, e.currentTarget, menuAt(e.currentTarget, e))
+          if (nativeMenuRequested(e)) return;
+          e.preventDefault();
+          onEntryMenu(entry, e.currentTarget, menuAt(e.currentTarget, e));
         }}
         onKeyDown={onMenuKey}
         // What the grid's observer watches. Folders only: a zip is not peeked
         // (a central-directory read per archive is `listing-tree-cache`'s job),
         // and an attribute it does not carry is one the observer cannot pick up
         // by mistake.
-        data-dir-tile={entry.kind === 'dir' ? entry.path : undefined}
+        data-dir-tile={entry.kind === "dir" ? entry.path : undefined}
       >
         {/* The folder chrome — a tab and a framed body — IS the directory
             tile's icon, drawn whether or not anything previews (Masa,
@@ -750,7 +818,7 @@ const Tile = memo(function Tile({
             the folder, the way every desktop draws it, which is what keeps a
             one-preview sheet from reading as a model tile. Only zips keep the
             emoji — they are never previewed and are not folders. */}
-        {entry.kind === 'dir' ? (
+        {entry.kind === "dir" ? (
           // role="img" with a "folder" label: the emoji used to leak '📁' into
           // this button's content-derived accessible name, and dropping it took
           // the only type signal a screen reader had for directories while zips
@@ -768,7 +836,11 @@ const Tile = memo(function Tile({
             <div className="h-2.5 w-1/2 shrink-0 rounded-t-md bg-amber-400/40" />
             <div className="flex min-h-0 w-full flex-1 rounded-b-md rounded-tr-md bg-amber-400/40 p-1">
               {preview !== undefined && preview.length > 0 && (
-                <ContactSheet preview={preview} thumbs={previewThumbs} onImageError={onImageError} />
+                <ContactSheet
+                  preview={preview}
+                  thumbs={previewThumbs}
+                  onImageError={onImageError}
+                />
               )}
             </div>
           </div>
@@ -792,7 +864,7 @@ const Tile = memo(function Tile({
           {entry.displayName ?? baseName(entry.name)}
         </span>
       </button>
-    )
+    );
   }
 
   return (
@@ -813,10 +885,12 @@ const Tile = memo(function Tile({
       // constraint, and read aloud `k` is a letter this app already spends on
       // the neighbour count.
       aria-label={
-        (thumb?.status === 'error' ? `${entry.name} — failed to load` : entry.name) +
-        (anchor ? ' — the model these are compared against' : '') +
+        (thumb?.status === "error"
+          ? `${entry.name} — failed to load`
+          : entry.name) +
+        (anchor ? " — the model these are compared against" : "") +
         (badges === null
-          ? ''
+          ? ""
           : ` — ${SCALE_SPOKEN[badges.scale]} ${formatCosine(badges.score.score)}, ${Z_LABEL} ${formatZ(badges.score.z)}`)
       }
       className={`${base} touch-none select-none${markClass}${anchorClass}`}
@@ -827,16 +901,16 @@ const Tile = memo(function Tile({
       // prevented, not raised, so the browser's own menu appears. The missing
       // `preventDefault` on that path is the feature.
       onContextMenu={(e) => {
-        if (nativeMenuRequested(e)) return
-        e.preventDefault()
-        onEntryMenu(entry, e.currentTarget, menuAt(e.currentTarget, e))
+        if (nativeMenuRequested(e)) return;
+        e.preventDefault();
+        onEntryMenu(entry, e.currentTarget, menuAt(e.currentTarget, e));
       }}
       onKeyDown={(e) => {
-        if (onMenuKey(e)) return
+        if (onMenuKey(e)) return;
         // Keyboard activation fires click, not pointerdown — handle it here.
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          onModelOpen(entry, e.currentTarget)
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onModelOpen(entry, e.currentTarget);
         }
       }}
       onPointerEnter={() => onModelHover(entry.path)}
@@ -887,5 +961,5 @@ const Tile = memo(function Tile({
         {entry.displayName ?? baseName(entry.name)}
       </span>
     </button>
-  )
-}, tilePropsEqual)
+  );
+}, tilePropsEqual);

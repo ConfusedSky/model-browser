@@ -33,11 +33,17 @@
  * gets what it got before.
  */
 
-import type { DirEntry, DirListing } from '../../shared/types'
-import { DerivedLayers } from './layers'
-import type { Library } from './library'
-import { ListingError, RevalidationError, enumerateModels, revalidateTree, walkFlat } from './listing'
-import type { SnapshotStore } from './snapshot'
+import type { DirEntry, DirListing } from "../../shared/types";
+import { DerivedLayers } from "./layers";
+import type { Library } from "./library";
+import {
+  ListingError,
+  RevalidationError,
+  enumerateModels,
+  revalidateTree,
+  walkFlat,
+} from "./listing";
+import type { SnapshotStore } from "./snapshot";
 
 /**
  * How long a completed pass's verdict stands before the root is treated as
@@ -53,7 +59,7 @@ import type { SnapshotStore } from './snapshot'
  * is the same pass on a spinning volume, so the constant sits an order of
  * magnitude below a human's patience and an order above a request burst.
  */
-export const REVALIDATE_TTL_MS = 10_000
+export const REVALIDATE_TTL_MS = 10_000;
 
 export class ListingCache {
   /**
@@ -61,13 +67,13 @@ export class ListingCache {
    * membership: a stamp older than `REVALIDATE_TTL_MS` is no better than never
    * having checked, and is served marked while a fresh pass runs.
    */
-  private readonly validatedAt = new Map<string, number>()
+  private readonly validatedAt = new Map<string, number>();
   /**
    * The revalidation pass running for a root, so two never run at once. Carries
    * the pass's answer — whether anything moved — so a reload (§6.6) that joins
    * a pass already in flight reports what that pass found rather than nothing.
    */
-  private readonly inFlight = new Map<string, Promise<boolean>>()
+  private readonly inFlight = new Map<string, Promise<boolean>>();
 
   constructor(
     private readonly store?: SnapshotStore,
@@ -101,10 +107,11 @@ export class ListingCache {
     query?: string,
     opts: { folderMatching?: boolean } = {},
   ): Promise<DirListing> {
-    const store = this.store
-    if (store === undefined) return (await walkFlat(library, libPath, query, opts)).listing
+    const store = this.store;
+    if (store === undefined)
+      return (await walkFlat(library, libPath, query, opts)).listing;
 
-    const pending = this.inFlight.get(libPath)
+    const pending = this.inFlight.get(libPath);
     // Someone else is already asking the disk. Waiting costs the incremental
     // pass and buys a *checked* answer, which is strictly better than answering
     // stale and starting a second pass behind it.
@@ -116,20 +123,20 @@ export class ListingCache {
     // through is also why this is not a loop: the decision below either serves
     // (fresh stamp) or marks and kicks a new pass (no stamp), and never waits
     // again.
-    if (pending !== undefined) await pending
+    if (pending !== undefined) await pending;
 
-    const walked = await walkFlat(library, libPath, query, opts, store)
+    const walked = await walkFlat(library, libPath, query, opts, store);
     if (!walked.fromSnapshot) {
       // A walk that saw the whole tree has just checked the disk, and is what
       // wrote the snapshot; nothing is owed. A truncated one wrote nothing, so
       // there is no snapshot to be stale about either.
-      if (!walked.budgetExhausted) this.stamp(libPath)
-      return walked.listing
+      if (!walked.budgetExhausted) this.stamp(libPath);
+      return walked.listing;
     }
-    if (this.isValidated(libPath)) return walked.listing
-    void this.start(library, libPath)
-    walked.listing.stale = true
-    return walked.listing
+    if (this.isValidated(libPath)) return walked.listing;
+    void this.start(library, libPath);
+    walked.listing.stale = true;
+    return walked.listing;
   }
 
   /**
@@ -158,9 +165,9 @@ export class ListingCache {
     libPath: string,
   ): Promise<{ models: DirEntry[]; complete: boolean; fromSnapshot: boolean }> {
     return await enumerateModels(library, libPath, this.store, async (root) => {
-      if (this.isValidated(root)) return
-      await this.revalidate(library, root)
-    })
+      if (this.isValidated(root)) return;
+      await this.revalidate(library, root);
+    });
   }
 
   /**
@@ -175,8 +182,8 @@ export class ListingCache {
    * anything that *could* have moved, and neither is an error.
    */
   async revalidate(library: Library, root: string): Promise<boolean> {
-    if (this.store === undefined) return false
-    return await (this.inFlight.get(root) ?? this.start(library, root))
+    if (this.store === undefined) return false;
+    return await (this.inFlight.get(root) ?? this.start(library, root));
   }
 
   /**
@@ -200,13 +207,13 @@ export class ListingCache {
    * ~5.6 s measured cold — and only a reload issued during a pass pays it.
    */
   async reload(library: Library, root: string): Promise<boolean> {
-    if (this.store === undefined) return false
+    if (this.store === undefined) return false;
     // Awaiting the chained promise, not the bare pass: `start`'s `finally` has
     // already removed it from the map by the time this resolves, so the call
     // below cannot join the pass it just waited for.
-    const pending = this.inFlight.get(root)
-    if (pending !== undefined) await pending
-    return await this.start(library, root)
+    const pending = this.inFlight.get(root);
+    if (pending !== undefined) await pending;
+    return await this.start(library, root);
   }
 
   /**
@@ -215,13 +222,13 @@ export class ListingCache {
    * it is a no, and the serve that reads it is marked and re-runs the pass.
    */
   isValidated(root: string): boolean {
-    const at = this.validatedAt.get(root)
-    return at !== undefined && this.now() - at < REVALIDATE_TTL_MS
+    const at = this.validatedAt.get(root);
+    return at !== undefined && this.now() - at < REVALIDATE_TTL_MS;
   }
 
   /** Record that the disk has just been checked for `root`. */
   private stamp(root: string): void {
-    this.validatedAt.set(root, this.now())
+    this.validatedAt.set(root, this.now());
   }
 
   private start(library: Library, root: string): Promise<boolean> {
@@ -230,8 +237,8 @@ export class ListingCache {
     // one root can both arrive — without this, the second would overwrite the
     // map and run a duplicate pass (harmless bytes-wise, atomic same-content
     // saves, but "two never run at once" would be aspiration, not fact).
-    const existing = this.inFlight.get(root)
-    if (existing !== undefined) return existing
+    const existing = this.inFlight.get(root);
+    if (existing !== undefined) return existing;
     const run = this.run(library, root)
       // Never rejects: `run` handles its own failures, and this is the belt to
       // that brace — a rejection here would be unhandled, since the serving
@@ -240,32 +247,32 @@ export class ListingCache {
       // check: the corrections it would have made are not there to announce.
       .catch(() => false)
       .finally(() => {
-        this.inFlight.delete(root)
-      })
-    this.inFlight.set(root, run)
-    return run
+        this.inFlight.delete(root);
+      });
+    this.inFlight.set(root, run);
+    return run;
   }
 
   private async run(library: Library, root: string): Promise<boolean> {
-    const store = this.store
-    if (store === undefined) return false
+    const store = this.store;
+    if (store === undefined) return false;
     // A library whose volume is not present never reaches revalidation: that is
     // the `missing` state, answered before any listing (`/api/dir` is behind
     // `createApp`'s library gate), and the snapshot is neither served nor
     // discarded (D6). The check is repeated here because this pass runs
     // *after* a response, so the volume can leave between the two.
-    if (!(await isReady(library))) return false
-    let moved: boolean
+    if (!(await isReady(library))) return false;
+    let moved: boolean;
     try {
-      const pass = await revalidateTree(library, root, store)
-      moved = pass.changed
+      const pass = await revalidateTree(library, root, store);
+      moved = pass.changed;
       // The preview layer's re-derivation (§6.1, design D7's subtlety): a
       // sheet is drawn from a directory's whole subtree while a directory's
       // freshness signal does not propagate upward, so each changed directory
       // takes its ancestors' choices down with it. An unchanged sibling branch
       // keeps what it had — which is why this is driven from the pass's own
       // list rather than by dropping the layer whenever anything moved.
-      for (const dir of pass.changedDirs) this.layers.noteDirChanged(dir)
+      for (const dir of pass.changedDirs) this.layers.noteDirChanged(dir);
     } catch (err) {
       // Three failures, three answers (review finding 2). Ordered so the
       // cheapest-to-be-wrong-about is decided first.
@@ -276,7 +283,7 @@ export class ListingCache {
       //    departing volume *can* raise `RevalidationError` — a recorded
       //    directory that is suddenly gone is exactly what an unmount looks
       //    like from inside `levelFor`.
-      if (!(await isReady(library))) return false
+      if (!(await isReady(library))) return false;
       // 2. Anything else that is neither a `RevalidationError` nor a
       //    `ListingError` — the store's own `save` failing on ENOSPC, a bug —
       //    is not the filesystem contradicting the cache and must not be read
@@ -294,18 +301,19 @@ export class ListingCache {
       //    no longer exists, forever. The `isReady` recheck above is what keeps
       //    this honest — an unmounted volume raises the same error and is
       //    separated before this line.
-      if (!(err instanceof RevalidationError) && !(err instanceof ListingError)) return false
+      if (!(err instanceof RevalidationError) && !(err instanceof ListingError))
+        return false;
       // 3. A pass that could not be completed against a root that is *there*
       //    invalidates: the filesystem is authoritative and the cache loses
       //    (§4.3).
       try {
-        await store.invalidate(root)
+        await store.invalidate(root);
       } catch {
         // The invalidate itself failed, so the contradicted snapshot is still
         // on disk. Never stamp over that — a stamp would serve those very
         // entries unmarked. Unvalidated means it is re-checked at the next
         // serve and served marked until it can be.
-        return false
+        return false;
       }
       // The tree under this root is gone, so every preview choice derived from
       // it is derived from nothing (round-2 finding 8). The success path drops
@@ -317,21 +325,21 @@ export class ListingCache {
       // that cannot be explained away as cache lag. Poses are untouched, here
       // as in `noteDirChanged`: a pose is a fact about a model's geometry, not
       // about the tree it was reached through.
-      this.layers.dropPreviewsUnder(root)
+      this.layers.dropPreviewsUnder(root);
       // The snapshot is gone rather than corrected, so there is no "what moved"
       // to report — and the root is stamped below, because this process has now
       // checked it and the next serve is a walk.
-      moved = false
+      moved = false;
     }
-    this.stamp(root)
-    return moved
+    this.stamp(root);
+    return moved;
   }
 }
 
 async function isReady(library: Library): Promise<boolean> {
   try {
-    return (await library.state()).state === 'ready'
+    return (await library.state()).state === "ready";
   } catch {
-    return false
+    return false;
   }
 }

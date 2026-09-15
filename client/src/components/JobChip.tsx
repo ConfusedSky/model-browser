@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import type { JobState } from '../jobs/bulkJobs'
+import { useEffect, useState } from "react";
+import type { JobState } from "../jobs/bulkJobs";
 
 /**
  * How long a pushed entry may wait to start before the chip says it is
@@ -7,7 +7,7 @@ import type { JobState } from '../jobs/bulkJobs'
  * counter that flickered "waiting" between entries would say nothing; a job
  * genuinely behind the view waits whole seconds (`bulk-thumbnail-jobs` 5.2).
  */
-export const WAITING_AFTER_MS = 1500
+export const WAITING_AFTER_MS = 1500;
 
 /**
  * A bulk job's whole UI (`bulk-thumbnail-jobs` 2.3, D2).
@@ -37,12 +37,12 @@ export default function JobChip({
   onDismiss,
   viewOpen = false,
 }: {
-  state: JobState
+  state: JobState;
   /** Reset's consent (D5) — pressed only from the `confirming` phase. */
-  onConfirm: () => void
-  onCancel: () => void
+  onConfirm: () => void;
+  onCancel: () => void;
   /** Hide the chip. Never a cancellation. */
-  onDismiss: () => void
+  onDismiss: () => void;
   /**
    * A lightbox or orbit overlay is open. The render queue is suspended for as
    * long as it is, and an entry that already *started* waits inside its own
@@ -50,21 +50,21 @@ export default function JobChip({
    * one stall a user is most likely to cause. App knows the view; the runner
    * does not.
    */
-  viewOpen?: boolean
+  viewOpen?: boolean;
 }) {
   // "Waiting" is time-filtered, not read raw: `waiting` flips true on every
   // push and false as it starts, so only a wait that outlasts the threshold
   // is worth a word.
-  const [stalled, setStalled] = useState(false)
-  const waiting = state.phase === 'running' && (state.waiting || viewOpen)
+  const [stalled, setStalled] = useState(false);
+  const waiting = state.phase === "running" && (state.waiting || viewOpen);
   useEffect(() => {
     if (!waiting) {
-      setStalled(false)
-      return
+      setStalled(false);
+      return;
     }
-    const timer = setTimeout(() => setStalled(true), WAITING_AFTER_MS)
-    return () => clearTimeout(timer)
-  }, [waiting])
+    const timer = setTimeout(() => setStalled(true), WAITING_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, [waiting]);
   return (
     <div
       role="status"
@@ -75,9 +75,9 @@ export default function JobChip({
     >
       <p className="min-w-0 flex-1">
         {sentence(state)}
-        {stalled && ' · waiting behind what you’re looking at'}
+        {stalled && " · waiting behind what you’re looking at"}
       </p>
-      {state.phase === 'confirming' && (
+      {state.phase === "confirming" && (
         <button type="button" onClick={onConfirm} className={ACTION_CLASS}>
           Reset
         </button>
@@ -85,9 +85,9 @@ export default function JobChip({
       {/* Cancel is offered exactly while there is work to stop. A finished or
           cancelled job keeps its sentence and loses the button, rather than
           offering one that would do nothing. */}
-      {(state.phase === 'deriving' ||
-        state.phase === 'confirming' ||
-        state.phase === 'running') && (
+      {(state.phase === "deriving" ||
+        state.phase === "confirming" ||
+        state.phase === "running") && (
         <button type="button" onClick={onCancel} className={ACTION_CLASS}>
           Cancel
         </button>
@@ -101,11 +101,11 @@ export default function JobChip({
         ×
       </button>
     </div>
-  )
+  );
 }
 
 const ACTION_CLASS =
-  'shrink-0 rounded-lg border border-zinc-700 px-2 py-1 text-zinc-300 hover:border-zinc-500'
+  "shrink-0 rounded-lg border border-zinc-700 px-2 py-1 text-zinc-300 hover:border-zinc-500";
 
 /**
  * How the scope reads inside a sentence. One helper, used by every phase, so
@@ -114,7 +114,7 @@ const ACTION_CLASS =
  * "beneath the library" is not English.
  */
 function scopePhrase(label: string): string {
-  return label === 'the library' ? 'in the library' : `beneath ${label}`
+  return label === "the library" ? "in the library" : `beneath ${label}`;
 }
 
 /** The failed/skipped/cut tail every count-bearing phase shares. Each clause is
@@ -122,43 +122,45 @@ function scopePhrase(label: string): string {
  *  nothing. */
 function tail(state: JobState): string {
   return (
-    (state.failed > 0 ? ` · ${state.failed} failed` : '') +
-    (state.skipped > 0 ? ` · ${state.skipped} skipped` : '') +
-    (state.incomplete ? ' (scope cut short)' : '')
-  )
+    (state.failed > 0 ? ` · ${state.failed} failed` : "") +
+    (state.skipped > 0 ? ` · ${state.skipped} skipped` : "") +
+    (state.incomplete ? " (scope cut short)" : "")
+  );
 }
 
 /** One sentence per phase, and the counters are the only numbers in any of
  *  them. */
 function sentence(state: JobState): string {
-  const phrase = scopePhrase(state.scope.label)
+  const phrase = scopePhrase(state.scope.label);
   switch (state.phase) {
-    case 'deriving':
-      return `Counting ${state.scope.label}…`
-    case 'confirming':
+    case "deriving":
+      return `Counting ${state.scope.label}…`;
+    case "confirming":
       // Reset's alone, and the one number that is stated *before* anything is
       // sent: it is what the user is consenting to (D5).
-      return `Reset ${state.total} framings ${phrase}?`
-    case 'running':
-      return `${state.operation === 'generate' ? 'Generating thumbnails' : 'Resetting framings'} ${phrase}: ${state.done} of ${state.total}${tail(state)}`
-    case 'done':
+      return `Reset ${state.total} framings ${phrase}?`;
+    case "running":
+      return `${state.operation === "generate" ? "Generating thumbnails" : "Resetting framings"} ${phrase}: ${state.done} of ${state.total}${tail(state)}`;
+    case "done":
       // A whole-job failure replaces the count rather than joining it: with no
       // work list, or none of it processable, "0 of 0" would be a true sentence
       // that says nothing about what went wrong.
       return state.failure !== undefined
         ? state.failure
-        : state.operation === 'generate'
+        : state.operation === "generate"
           ? // "Generated" counts writes: an entry the job found already current
             // on its own lookup was processed, not drawn, and says so.
             `Generated ${state.wrote} of ${state.total} ${phrase}${
-              state.done - state.wrote > 0 ? ` · ${state.done - state.wrote} already current` : ''
+              state.done - state.wrote > 0
+                ? ` · ${state.done - state.wrote} already current`
+                : ""
             }${tail(state)}`
-          : `Reset ${state.done} of ${state.total} ${phrase}${tail(state)}`
-    case 'cancelled':
+          : `Reset ${state.done} of ${state.total} ${phrase}${tail(state)}`;
+    case "cancelled":
       // Cancelled during the derivation: there is no total to have got through,
       // so the sentence says what was interrupted instead of "0 of 0".
       return state.total === 0
         ? `Cancelled before counting ${state.scope.label}`
-        : `Cancelled after ${state.done} of ${state.total} ${phrase}${tail(state)}`
+        : `Cancelled after ${state.done} of ${state.total} ${phrase}${tail(state)}`;
   }
 }

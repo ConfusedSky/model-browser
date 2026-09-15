@@ -15,12 +15,19 @@
  * leading slash, so the top is `/` (D2).
  */
 
-import { createHash, randomUUID } from 'node:crypto'
-import type { Dirent } from 'node:fs'
-import { mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises'
-import { basename, dirname, join, posix, relative, sep } from 'node:path'
-import type { DeploymentConfig, LibraryState } from '../../shared/types'
-import { joinVPath, parseVPath } from './vpath'
+import { createHash, randomUUID } from "node:crypto";
+import type { Dirent } from "node:fs";
+import {
+  mkdir,
+  readFile,
+  readdir,
+  realpath,
+  stat,
+  writeFile,
+} from "node:fs/promises";
+import { basename, dirname, join, posix, relative, sep } from "node:path";
+import type { DeploymentConfig, LibraryState } from "../../shared/types";
+import { joinVPath, parseVPath } from "./vpath";
 
 /**
  * A request that cannot become a filesystem path. `status` is what the route
@@ -32,13 +39,13 @@ export class LibraryError extends Error {
     message: string,
     readonly status: 400 | 404,
   ) {
-    super(message)
-    this.name = 'LibraryError'
+    super(message);
+    this.name = "LibraryError";
   }
 }
 
 /** The one refusal `resolve` gives for anything outside the tree. */
-const OUTSIDE = 'path outside the library'
+const OUTSIDE = "path outside the library";
 
 /**
  * Bounds on a request's path, tested before any filesystem call is made.
@@ -50,17 +57,17 @@ const OUTSIDE = 'path outside the library'
  * above anything a real tree produces — 4096 is `PATH_MAX` on Linux, and a
  * library path is shorter than the filesystem path it becomes.
  */
-const MAX_PATH_BYTES = 4096
-const MAX_COMPONENTS = 256
+const MAX_PATH_BYTES = 4096;
+const MAX_COMPONENTS = 256;
 
 /** The refusal for a path built to be expensive rather than to name a file. */
-const TOO_LONG = 'path too long'
+const TOO_LONG = "path too long";
 
 function tooLong(libPath: string): boolean {
   return (
     Buffer.byteLength(libPath) > MAX_PATH_BYTES ||
-    libPath.split('/').length - 1 > MAX_COMPONENTS
-  )
+    libPath.split("/").length - 1 > MAX_COMPONENTS
+  );
 }
 
 /**
@@ -79,19 +86,21 @@ function tooLong(libPath: string): boolean {
  * except at the root, whose whole spelling is that slash.
  */
 export function canonicalLibPath(libPath: string): string {
-  if (!libPath.startsWith('/')) throw new LibraryError('path must be a library path', 400)
-  if (tooLong(libPath)) throw new LibraryError(TOO_LONG, 400)
-  const { fsPath, entry } = parseVPath(libPath)
-  let normalized = posix.normalize(fsPath)
-  if (normalized.length > 1 && normalized.endsWith('/')) normalized = normalized.slice(0, -1)
-  return entry === undefined ? normalized : joinVPath(normalized, entry)
+  if (!libPath.startsWith("/"))
+    throw new LibraryError("path must be a library path", 400);
+  if (tooLong(libPath)) throw new LibraryError(TOO_LONG, 400);
+  const { fsPath, entry } = parseVPath(libPath);
+  let normalized = posix.normalize(fsPath);
+  if (normalized.length > 1 && normalized.endsWith("/"))
+    normalized = normalized.slice(0, -1);
+  return entry === undefined ? normalized : joinVPath(normalized, entry);
 }
 
 export interface Resolved {
   /** Filesystem path — the file, or the containing zip for a virtual path. */
-  fsPath: string
+  fsPath: string;
   /** Entry inside the zip, verbatim from the request. Undefined for plain paths. */
-  entry?: string
+  entry?: string;
 }
 
 export interface Library {
@@ -109,7 +118,7 @@ export interface Library {
    * Concurrent calls share one evaluation: the whole body is single-flighted,
    * because everything it decides it decides across `await`s.
    */
-  state(): Promise<LibraryState>
+  state(): Promise<LibraryState>;
   /**
    * Re-evaluate marker and probe from scratch against the filesystem as it is
    * now, whatever the current state — the seam a later repoint-without-restart
@@ -121,20 +130,20 @@ export interface Library {
    * file dialog will need; it stays named rather than built speculatively,
    * because nothing outside this module calls `refresh()` today.
    */
-  refresh(): Promise<LibraryState>
+  refresh(): Promise<LibraryState>;
   /** The library top's resolved filesystem path. Throws unless `ready`. */
-  realTop(): string
+  realTop(): string;
   /** The library's identity. Throws unless `ready`. */
-  id(): string
+  id(): string;
   /** D3: the only way a request's path becomes a filesystem path. */
-  resolve(libPath: string): Promise<Resolved>
+  resolve(libPath: string): Promise<Resolved>;
   /** The reverse: an already-resolved real path under the top → its library path. */
-  libPathOf(real: string): string
+  libPathOf(real: string): string;
 }
 
 /** The marker's directory name — the home of every file this app keeps in a library. */
-export const MARKER_DIR = '.model-browser'
-const MARKER_FILE = 'library.json'
+export const MARKER_DIR = ".model-browser";
+const MARKER_FILE = "library.json";
 
 /**
  * The `ready` state as the **server** holds it. `top` is optional on the wire —
@@ -144,7 +153,7 @@ const MARKER_FILE = 'library.json'
  * re-read) needs it. Narrowed once here, so the wire's optionality stays a fact
  * about answers rather than leaking into what this module is sure of.
  */
-type Ready = Extract<LibraryState, { state: 'ready' }> & { top: string }
+type Ready = Extract<LibraryState, { state: "ready" }> & { top: string };
 
 /**
  * The root: the environment's, else the configuration's (D4).
@@ -161,10 +170,15 @@ type Ready = Extract<LibraryState, { state: 'ready' }> & { top: string }
  * the same override to the value it returns — the two agree by construction,
  * because they apply one rule.
  */
-function configuredRoot(env: NodeJS.ProcessEnv, config: DeploymentConfig): string | undefined {
-  const fromEnv = env.MODEL_BROWSER_ROOT
-  if (fromEnv !== undefined && fromEnv !== '') return fromEnv
-  return config.root !== undefined && config.root !== '' ? config.root : undefined
+function configuredRoot(
+  env: NodeJS.ProcessEnv,
+  config: DeploymentConfig,
+): string | undefined {
+  const fromEnv = env.MODEL_BROWSER_ROOT;
+  if (fromEnv !== undefined && fromEnv !== "") return fromEnv;
+  return config.root !== undefined && config.root !== ""
+    ? config.root
+    : undefined;
 }
 
 /**
@@ -178,20 +192,22 @@ function configuredRoot(env: NodeJS.ProcessEnv, config: DeploymentConfig): strin
  * caller passes over it rather than adopting it.
  */
 async function markerIdAt(dir: string): Promise<string | undefined> {
-  let parsed: unknown
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(await readFile(join(dir, MARKER_DIR, MARKER_FILE), 'utf8'))
+    parsed = JSON.parse(
+      await readFile(join(dir, MARKER_DIR, MARKER_FILE), "utf8"),
+    );
   } catch {
-    return undefined
+    return undefined;
   }
-  if (typeof parsed !== 'object' || parsed === null) return undefined
-  const id = (parsed as Record<string, unknown>).id
-  return typeof id === 'string' && id !== '' ? id : undefined
+  if (typeof parsed !== "object" || parsed === null) return undefined;
+  const id = (parsed as Record<string, unknown>).id;
+  return typeof id === "string" && id !== "" ? id : undefined;
 }
 
 /** The device of a directory — what bounds the upward walk at a mount. */
 async function deviceOf(dir: string): Promise<number> {
-  return (await stat(dir)).dev
+  return (await stat(dir)).dev;
 }
 
 /**
@@ -216,31 +232,31 @@ export async function findMarker(
   start: string,
   devOf: (dir: string) => Promise<number> = deviceOf,
 ): Promise<{ top: string; id: string } | undefined> {
-  let dir = start
-  let startDev: number
+  let dir = start;
+  let startDev: number;
   try {
-    startDev = await devOf(start)
+    startDev = await devOf(start);
   } catch {
     // "Cannot see the start" is not "no marker here", and reporting it as one
     // would be settled on: the caller would write no marker, hash the root's
     // path for an identity and keep it for the process's life, so the volume
     // coming back with its real marker would be served under the hash (F6).
     // Thrown instead, and caught by `evaluate` as the `missing` this is.
-    throw new Error('the library root cannot be read')
+    throw new Error("the library root cannot be read");
   }
   for (;;) {
-    const id = await markerIdAt(dir)
-    if (id !== undefined) return { top: dir, id }
-    const parent = dirname(dir)
-    if (parent === dir) return undefined
-    let parentDev: number
+    const id = await markerIdAt(dir);
+    if (id !== undefined) return { top: dir, id };
+    const parent = dirname(dir);
+    if (parent === dir) return undefined;
+    let parentDev: number;
     try {
-      parentDev = await devOf(parent)
+      parentDev = await devOf(parent);
     } catch {
-      return undefined
+      return undefined;
     }
-    if (parentDev !== startDev) return undefined
-    dir = parent
+    if (parentDev !== startDev) return undefined;
+    dir = parent;
   }
 }
 
@@ -290,8 +306,8 @@ export async function findMarker(
  * Both bounds are best-effort by design: running out is "not found", and the
  * root becomes a library, which is what happened before the probe existed.
  */
-const PROBE_MAX_DEPTH = 4
-const PROBE_MAX_VISITS = 2000
+const PROBE_MAX_DEPTH = 4;
+const PROBE_MAX_VISITS = 2000;
 
 /**
  * The shallowest library top beneath `start`, within the bounds above.
@@ -300,8 +316,8 @@ const PROBE_MAX_VISITS = 2000
  * shallower is the one the root would enclose most of.
  */
 async function findNestedLibrary(start: string): Promise<string | undefined> {
-  const queue: { dir: string; depth: number }[] = [{ dir: start, depth: 0 }]
-  let visited = 0
+  const queue: { dir: string; depth: number }[] = [{ dir: start, depth: 0 }];
+  let visited = 0;
   // The queue is appended to while it is walked, which an array iterator
   // follows — it re-reads the length each step, so a directory pushed below
   // gets its turn after everything already queued. That ordering *is* the
@@ -309,23 +325,23 @@ async function findNestedLibrary(start: string): Promise<string | undefined> {
   // shifted off, so `queue.length` is the number of directories ever pushed,
   // which is what the push guard below tests.
   for (const { dir, depth } of queue) {
-    if (visited >= PROBE_MAX_VISITS) break
-    visited++
+    if (visited >= PROBE_MAX_VISITS) break;
+    visited++;
     // `start` itself has already been tested by the upward walk.
-    if (depth > 0 && (await markerIdAt(dir)) !== undefined) return dir
-    if (depth === PROBE_MAX_DEPTH) continue
-    let entries: Dirent[]
+    if (depth > 0 && (await markerIdAt(dir)) !== undefined) return dir;
+    if (depth === PROBE_MAX_DEPTH) continue;
+    let entries: Dirent[];
     try {
-      entries = await readdir(dir, { withFileTypes: true })
+      entries = await readdir(dir, { withFileTypes: true });
     } catch {
       // Unreadable is not a library; the rest of the level still gets its turn.
-      continue
+      continue;
     }
     for (const e of entries) {
       // Dot-entries are skipped — the marker is opened by name above, never
       // enumerated — and a symlink's dirent is not `isDirectory()`, so the
       // probe never descends out of the tree it was pointed at.
-      if (e.name.startsWith('.') || !e.isDirectory()) continue
+      if (e.name.startsWith(".") || !e.isDirectory()) continue;
       // Memory, and only memory: nothing past the 2000th entry is ever
       // dequeued, so truncating the pushes here cannot change which
       // directories are examined — it stops the queue holding the ones that
@@ -337,34 +353,37 @@ async function findNestedLibrary(start: string): Promise<string | undefined> {
       // and logging `queue.length` beside `visited` where this function
       // returns: 2000 queued with this line, 180,601 without it, 2000 visited
       // either way.
-      if (queue.length >= PROBE_MAX_VISITS) break
-      queue.push({ dir: join(dir, e.name), depth: depth + 1 })
+      if (queue.length >= PROBE_MAX_VISITS) break;
+      queue.push({ dir: join(dir, e.name), depth: depth + 1 });
     }
   }
-  return undefined
+  return undefined;
 }
 
 /** Writes a fresh marker at `top`, or reports that the volume would not take one. */
 async function writeMarker(top: string): Promise<string | undefined> {
-  const id = randomUUID()
+  const id = randomUUID();
   try {
-    await mkdir(join(top, MARKER_DIR), { recursive: true })
-    await writeFile(join(top, MARKER_DIR, MARKER_FILE), `${JSON.stringify({ id, version: 1 })}\n`)
+    await mkdir(join(top, MARKER_DIR), { recursive: true });
+    await writeFile(
+      join(top, MARKER_DIR, MARKER_FILE),
+      `${JSON.stringify({ id, version: 1 })}\n`,
+    );
   } catch {
-    return undefined
+    return undefined;
   }
-  return id
+  return id;
 }
 
 function hashedId(realTop: string): string {
-  return createHash('sha256').update(realTop).digest('hex')
+  return createHash("sha256").update(realTop).digest("hex");
 }
 
 /** A real path under `realTop` as a library path; `/` for the top itself. */
 function toLibPath(realTop: string, real: string): string | undefined {
-  if (real === realTop) return '/'
-  if (!real.startsWith(realTop + sep)) return undefined
-  return `/${relative(realTop, real).split(sep).join(posix.sep)}`
+  if (real === realTop) return "/";
+  if (!real.startsWith(realTop + sep)) return undefined;
+  return `/${relative(realTop, real).split(sep).join(posix.sep)}`;
 }
 
 /**
@@ -380,7 +399,7 @@ function toLibPath(realTop: string, real: string): string | undefined {
  * it. Five seconds is chosen against a human at a file manager, not against a
  * poller.
  */
-const NESTED_RECHECK_MS = 5000
+const NESTED_RECHECK_MS = 5000;
 
 /**
  * @param env  the process environment; a parameter so a test points the whole
@@ -401,7 +420,7 @@ export function createLibrary(
    * once the volume goes away, when the configured spelling is the only thing
    * the user can act on.
    */
-  let settled: { ready: Ready; root: string } | undefined
+  let settled: { ready: Ready; root: string } | undefined;
 
   /**
    * Whether the last thing `state()` said about a settled library was that its
@@ -412,7 +431,7 @@ export function createLibrary(
    * places under a server that is being used — serves requests during the
    * gap, which is what makes the flag worth its one branch.
    */
-  let wasMissing = false
+  let wasMissing = false;
 
   /**
    * The last `nested` answer and when it stops standing. `nested` is not
@@ -421,20 +440,20 @@ export function createLibrary(
    * (`NESTED_RECHECK_MS`). Cleared by `refresh()`, which is the caller asking
    * for the filesystem as it is now.
    */
-  let nestedMemo: { state: LibraryState; until: number } | undefined
+  let nestedMemo: { state: LibraryState; until: number } | undefined;
 
   async function evaluate(): Promise<LibraryState> {
     if (nestedMemo !== undefined) {
-      if (Date.now() < nestedMemo.until) return nestedMemo.state
-      nestedMemo = undefined
+      if (Date.now() < nestedMemo.until) return nestedMemo.state;
+      nestedMemo = undefined;
     }
-    const root = configuredRoot(env, config)
-    if (root === undefined) return { state: 'unconfigured' }
+    const root = configuredRoot(env, config);
+    if (root === undefined) return { state: "unconfigured" };
     try {
-      if (!(await stat(root)).isDirectory()) return { state: 'missing', root }
+      if (!(await stat(root)).isDirectory()) return { state: "missing", root };
     } catch {
       // Not present at all — the usual shape of an unmounted volume.
-      return { state: 'missing', root }
+      return { state: "missing", root };
     }
     // The volume can go away between the `stat` above and this walk — an
     // unmount is not atomic with respect to this function, and both calls below
@@ -444,53 +463,59 @@ export function createLibrary(
     // served under the hash (F6). `realpath` is inside the same catch because
     // it sits one statement earlier in the identical window — catching only
     // `findMarker` would leave its ENOENT escaping `state()` as a 500.
-    let realRoot: string
-    let found: { top: string; id: string } | undefined
+    let realRoot: string;
+    let found: { top: string; id: string } | undefined;
     try {
-      realRoot = await realpath(root)
-      found = await findMarker(realRoot)
+      realRoot = await realpath(root);
+      found = await findMarker(realRoot);
     } catch {
-      return { state: 'missing', root }
+      return { state: "missing", root };
     }
     if (found !== undefined) {
       // The root is a viewpoint inside the marked tree, not the tree.
       settled = {
         ready: {
-          state: 'ready',
+          state: "ready",
           id: found.id,
           top: found.top,
-          root: toLibPath(found.top, realRoot) ?? '/',
+          root: toLibPath(found.top, realRoot) ?? "/",
         },
         root,
-      }
-      return settled.ready
+      };
+      return settled.ready;
     }
     // Nothing above it — so look *below* before claiming the root. A root
     // chosen above an existing library would otherwise write a marker over it:
     // the inner library's cache is orphaned, its cameras with it, and the only
     // signal is a line in the log (R1). The probe is bounded and runs only on
     // this branch, so a library that is already marked pays nothing for it.
-    const nested = await findNestedLibrary(realRoot)
+    const nested = await findNestedLibrary(realRoot);
     if (nested !== undefined) {
-      const state: LibraryState = { state: 'nested', root, library: nested }
-      nestedMemo = { state, until: Date.now() + NESTED_RECHECK_MS }
-      return state
+      const state: LibraryState = { state: "nested", root, library: nested };
+      nestedMemo = { state, until: Date.now() + NESTED_RECHECK_MS };
+      return state;
     }
     // No library either way: the root becomes one, if the volume will say so.
-    const written = await writeMarker(realRoot)
+    const written = await writeMarker(realRoot);
     settled = {
       ready:
         written === undefined
-          ? { state: 'ready', id: hashedId(realRoot), top: realRoot, root: '/', unmarked: true }
-          : { state: 'ready', id: written, top: realRoot, root: '/' },
+          ? {
+              state: "ready",
+              id: hashedId(realRoot),
+              top: realRoot,
+              root: "/",
+              unmarked: true,
+            }
+          : { state: "ready", id: written, top: realRoot, root: "/" },
       root,
-    }
-    return settled.ready
+    };
+    return settled.ready;
   }
 
   function requireReady(): Ready {
-    if (settled === undefined) throw new Error('the library is not ready')
-    return settled.ready
+    if (settled === undefined) throw new Error("the library is not ready");
+    return settled.ready;
   }
 
   /**
@@ -505,13 +530,13 @@ export function createLibrary(
    * once. Single-flighting the whole body makes every one of them the same
    * evaluation.
    */
-  let pending: Promise<LibraryState> | undefined
+  let pending: Promise<LibraryState> | undefined;
 
   async function compute(): Promise<LibraryState> {
-    const current = settled
+    const current = settled;
     // Not settled yet: every not-ready state is a question about the
     // filesystem right now, and is asked again every time.
-    if (current === undefined) return evaluate()
+    if (current === undefined) return evaluate();
     // Settled, but the tree it named can still go away under a running
     // server. One `stat` per request buys the difference between "the
     // library is not present" and a 404 on every path in it.
@@ -527,14 +552,14 @@ export function createLibrary(
     //   python3 -c "import os,time; p='/run/media/masa/STLLibrary'; os.stat(p); \
     //     t=time.perf_counter(); [os.stat(p) for _ in range(1000)]; \
     //     print((time.perf_counter()-t)*1e3, 'ms')"
-    const top = await stat(current.ready.top).catch(() => null)
+    const top = await stat(current.ready.top).catch(() => null);
     if (top === null || !top.isDirectory()) {
       // The cached `ready` is deliberately *not* discarded: the same tree
       // returning at the same place is the same library, and
       // `realTop()`/`id()` keep answering meanwhile — the cache's own sweep
       // guard reads them to decide it must not run (`ThumbCache.maintain`).
-      wasMissing = true
-      return { state: 'missing', root: current.root }
+      wasMissing = true;
+      return { state: "missing", root: current.root };
     }
     // Present again after an absence — the one moment a *different* tree can
     // have arrived at the same path. Two drives that automount at the same
@@ -551,52 +576,54 @@ export function createLibrary(
     // the same swap this branch exists to catch. An `unmarked` library expects
     // no marker, so `undefined` is what it compares equal to.
     if (wasMissing) {
-      const id = await markerIdAt(current.ready.top)
-      const expected = current.ready.unmarked === true ? undefined : current.ready.id
+      const id = await markerIdAt(current.ready.top);
+      const expected =
+        current.ready.unmarked === true ? undefined : current.ready.id;
       // Cleared only once the read is done, so a caller that is somehow not
       // behind the single flight still re-checks rather than skipping past it.
-      wasMissing = false
+      wasMissing = false;
       if (id !== expected) {
-        settled = undefined
-        return evaluate()
+        settled = undefined;
+        return evaluate();
       }
     }
-    return current.ready
+    return current.ready;
   }
 
   return {
     state() {
       return (pending ??= compute().finally(() => {
-        pending = undefined
-      }))
+        pending = undefined;
+      }));
     },
 
     async refresh() {
       // An evaluation already in flight is reading the state this call is about
       // to discard; let it finish rather than clearing `settled` underneath it.
-      if (pending !== undefined) await pending.catch(() => undefined)
-      settled = undefined
-      wasMissing = false
-      nestedMemo = undefined
+      if (pending !== undefined) await pending.catch(() => undefined);
+      settled = undefined;
+      wasMissing = false;
+      nestedMemo = undefined;
       return (pending ??= evaluate().finally(() => {
-        pending = undefined
-      }))
+        pending = undefined;
+      }));
     },
 
     realTop: () => requireReady().top,
     id: () => requireReady().id,
 
     async resolve(libPath) {
-      const realTop = requireReady().top
-      if (!libPath.startsWith('/')) throw new LibraryError('path must be a library path', 400)
+      const realTop = requireReady().top;
+      if (!libPath.startsWith("/"))
+        throw new LibraryError("path must be a library path", 400);
       // Before any filesystem call: the loop below pays per component of a path
       // that is not there, so its length is a cost the request chooses.
-      if (tooLong(libPath)) throw new LibraryError(TOO_LONG, 400)
+      if (tooLong(libPath)) throw new LibraryError(TOO_LONG, 400);
       // The virtual path splits **first**: only the filesystem half is a path
       // in this tree. The entry half is an opaque archive name — normalising it
       // would rewrite a cache key that is the string itself.
-      const { fsPath, entry } = parseVPath(libPath)
-      const normalized = posix.normalize(fsPath)
+      const { fsPath, entry } = parseVPath(libPath);
+      const normalized = posix.normalize(fsPath);
       // A hidden component is unreachable, not merely unlisted. Listings and
       // completions skip dot-prefixed entries, and skipping was never the same
       // thing: on a deployment that answers strangers, a trash directory a
@@ -620,22 +647,22 @@ export function createLibrary(
       // climb out. Only the filesystem half is tested: the entry half is an
       // opaque archive name this module does not normalise, and the zip
       // routes read a named entry rather than a path.
-      if (normalized.split('/').some((part) => part.startsWith('.'))) {
-        throw new LibraryError(`no such path: ${libPath}`, 404)
+      if (normalized.split("/").some((part) => part.startsWith("."))) {
+        throw new LibraryError(`no such path: ${libPath}`, 404);
       }
-      const candidate = join(realTop, normalized)
+      const candidate = join(realTop, normalized);
 
       // Confinement is decided on the nearest ancestor that exists, so a path
       // that is merely absent (a completion prefix, a deleted folder, a thumb
       // PUT racing a delete) is the route's ordinary 404 rather than either a
       // refusal or an ENOENT escaping from here.
-      let anchor = candidate
-      const missing: string[] = []
-      let anchorReal: string
+      let anchor = candidate;
+      const missing: string[] = [];
+      let anchorReal: string;
       for (;;) {
         try {
-          anchorReal = await realpath(anchor)
-          break
+          anchorReal = await realpath(anchor);
+          break;
         } catch {
           // Every `realpath` failure is read as "this component is not there",
           // ENOENT and EACCES and ELOOP and ENOTDIR alike. Deliberate, not an
@@ -645,23 +672,27 @@ export function createLibrary(
           // afterwards needs exactly the rights `realpath` was refused, so an
           // unreadable ancestor becomes the route's own error rather than
           // access to anything.
-          const parent = dirname(anchor)
+          const parent = dirname(anchor);
           // The filesystem root always resolves, so this terminates.
-          if (parent === anchor) throw new LibraryError(OUTSIDE, 400)
-          missing.unshift(basename(anchor))
-          anchor = parent
+          if (parent === anchor) throw new LibraryError(OUTSIDE, 400);
+          missing.unshift(basename(anchor));
+          anchor = parent;
         }
       }
       if (anchorReal !== realTop && !anchorReal.startsWith(realTop + sep)) {
-        throw new LibraryError(OUTSIDE, 400)
+        throw new LibraryError(OUTSIDE, 400);
       }
-      return { fsPath: missing.length === 0 ? anchorReal : join(anchorReal, ...missing), entry }
+      return {
+        fsPath:
+          missing.length === 0 ? anchorReal : join(anchorReal, ...missing),
+        entry,
+      };
     },
 
     libPathOf(real) {
-      const libPath = toLibPath(requireReady().top, real)
-      if (libPath === undefined) throw new LibraryError(OUTSIDE, 400)
-      return libPath
+      const libPath = toLibPath(requireReady().top, real);
+      if (libPath === undefined) throw new LibraryError(OUTSIDE, 400);
+      return libPath;
     },
-  }
+  };
 }

@@ -11,18 +11,18 @@
  * stands behind, in flight or asserted (`liveView`), which is why the path bar
  * shows a directory the moment it is requested.
  */
-import type { DirEntry, IndexAvailability } from '../../../shared/types'
-import type { SearchKinds, SearchMode, Tuning } from '../lib/searchOptions'
-import { liveView, type SearchState } from './reducer'
-import { requestOf, type Request, type Subject, type View } from './view'
+import type { DirEntry, IndexAvailability } from "../../../shared/types";
+import type { SearchKinds, SearchMode, Tuning } from "../lib/searchOptions";
+import { liveView, type SearchState } from "./reducer";
+import { requestOf, type Request, type Subject, type View } from "./view";
 
-export { liveView, stoodIn } from './reducer'
+export { liveView, stoodIn } from "./reducer";
 
 /** The place the user most recently asked for, in flight or committed. Every
  *  header control keys off it: the bar shows it, ↑ ascends from it, the flat
  *  toggle re-requests it. */
 export function dest(state: SearchState): string {
-  return liveView(state).path
+  return liveView(state).path;
 }
 
 /**
@@ -46,25 +46,25 @@ export function dest(state: SearchState): string {
 export function busy(state: SearchState): boolean {
   return (
     (state.inflight !== null && state.inflight.followUp !== true) ||
-    (state.phase !== 'idle' && state.result === null && state.failure === null)
-  )
+    (state.phase !== "idle" && state.result === null && state.failure === null)
+  );
 }
 
 /** The values the search controls display: the question in flight if there is
  *  one, so a click reads as pressed before its answer arrives. */
 export function controls(state: SearchState): {
-  flat: boolean
-  mode: SearchMode
-  kinds: SearchKinds
-  folderMatching: boolean
-  tuning: Tuning
+  flat: boolean;
+  mode: SearchMode;
+  kinds: SearchKinds;
+  folderMatching: boolean;
+  tuning: Tuning;
   /** What the live view is about. The subject itself rather than a phrase
    *  pulled out of it: a control that asks "is anything committed" and one that
    *  renders the committed text are different questions, and answering both
    *  from one string is what let a similarity view read as nothing committed. */
-  subject: Subject
+  subject: Subject;
 } {
-  const v = liveView(state)
+  const v = liveView(state);
   return {
     flat: v.flat,
     mode: v.mode,
@@ -72,7 +72,7 @@ export function controls(state: SearchState): {
     folderMatching: v.folderMatching,
     tuning: v.tuning,
     subject: v.subject,
-  }
+  };
 }
 
 /** The request `inflight` names, derived rather than stored (R4). The effect
@@ -80,8 +80,10 @@ export function controls(state: SearchState): {
 export function pendingRequest(
   state: SearchState,
 ): (Request & { id: number; forView: View }) | null {
-  const f = state.inflight
-  return f === null ? null : { ...requestOf(f.view), id: f.id, forView: f.asked }
+  const f = state.inflight;
+  return f === null
+    ? null
+    : { ...requestOf(f.view), id: f.id, forView: f.asked };
 }
 
 /**
@@ -111,10 +113,14 @@ export function pendingRequest(
  * A *stand-in* listing counts: it is a real listing on screen, and its tiles
  * want their orientations while the deferred search waits.
  */
-export function landedListing(state: SearchState): { id: number; entries: DirEntry[] } | null {
-  const r = state.result
-  if (r === null) return null
-  return requestOf(r.forView).kind === 'listing' ? { id: r.id, entries: r.entries } : null
+export function landedListing(
+  state: SearchState,
+): { id: number; entries: DirEntry[] } | null {
+  const r = state.result;
+  if (r === null) return null;
+  return requestOf(r.forView).kind === "listing"
+    ? { id: r.id, entries: r.entries }
+    : null;
 }
 
 /**
@@ -130,11 +136,14 @@ export function landedListing(state: SearchState): { id: number; entries: DirEnt
  * filter a grid by a rule its results never ran under.
  */
 export function byKind(state: SearchState): DirEntry[] {
-  const r = state.result
-  if (r === null) return []
-  const { subject, kinds, mode } = r.forView
-  if (subject.kind !== 'query' || mode !== 'name' || kinds === 'both') return r.entries
-  return r.entries.filter((e) => (kinds === 'folders' ? e.kind !== 'model' : e.kind === 'model'))
+  const r = state.result;
+  if (r === null) return [];
+  const { subject, kinds, mode } = r.forView;
+  if (subject.kind !== "query" || mode !== "name" || kinds === "both")
+    return r.entries;
+  return r.entries.filter((e) =>
+    kinds === "folders" ? e.kind !== "model" : e.kind === "model",
+  );
 }
 
 /** Which kinds the omitted-entries notice counts by — 'both' wherever the
@@ -142,8 +151,10 @@ export function byKind(state: SearchState): DirEntry[] {
  *  search: `byKind`'s gate, which is `serializeView`'s), where counting by it
  *  produced a sentence with no parts. */
 export function noticeKinds(state: SearchState): SearchKinds {
-  const v = state.result?.forView
-  return v !== undefined && v.subject.kind === 'query' && v.mode === 'name' ? v.kinds : 'both'
+  const v = state.result?.forView;
+  return v !== undefined && v.subject.kind === "query" && v.mode === "name"
+    ? v.kinds
+    : "both";
 }
 
 /**
@@ -165,12 +176,17 @@ export function noticeKinds(state: SearchState): SearchKinds {
  * Availability itself is `index.state`, which callers gate on separately: this
  * answers "is this path in range", not "is the index up".
  */
-export function indexCovers(index: IndexAvailability | null, path: string): boolean {
-  const root = index?.collectionRoot
-  if (root === undefined || path.includes('!/')) return false
+export function indexCovers(
+  index: IndexAvailability | null,
+  path: string,
+): boolean {
+  const root = index?.collectionRoot;
+  if (root === undefined || path.includes("!/")) return false;
   // The root is `/` whenever the index is rooted at the library top — the
   // common case — and `${'/'}/` is `//`, which no path begins with.
-  return path === root || path.startsWith(root.endsWith('/') ? root : `${root}/`)
+  return (
+    path === root || path.startsWith(root.endsWith("/") ? root : `${root}/`)
+  );
 }
 
 /**
@@ -188,8 +204,11 @@ export function indexCovers(index: IndexAvailability | null, path: string): bool
  * straight through — an unknown index cannot answer, which is the same "no"
  * an absent one gives.
  */
-export function meaningRunnableAt(index: IndexAvailability | null, path: string): boolean {
-  return index !== null && index.state === 'ready' && indexCovers(index, path)
+export function meaningRunnableAt(
+  index: IndexAvailability | null,
+  path: string,
+): boolean {
+  return index !== null && index.state === "ready" && indexCovers(index, path);
 }
 
 /**
@@ -202,18 +221,18 @@ export function meaningRunnableAt(index: IndexAvailability | null, path: string)
  * result falling through to Grid's bare "Nothing to show here."
  */
 export function labelInputs(state: SearchState): {
-  subject: Subject
-  meaning: boolean
-  weak: boolean
-  capped: boolean
-  truncated: boolean
-  matched: number | undefined
-  shown: number
-  capping: boolean
+  subject: Subject;
+  meaning: boolean;
+  weak: boolean;
+  capped: boolean;
+  truncated: boolean;
+  matched: number | undefined;
+  shown: number;
+  capping: boolean;
 } {
-  const r = state.result
+  const r = state.result;
   return {
-    subject: r?.forView.subject ?? { kind: 'none' },
+    subject: r?.forView.subject ?? { kind: "none" },
     meaning: r?.scope !== undefined && r.scope !== null,
     weak: r?.weak === true,
     capped: r?.capped === true,
@@ -244,6 +263,8 @@ export function labelInputs(state: SearchState): {
     //
     // The requirement scopes the clause the same way: *where a count caps a
     // floor-bounded set*.
-    capping: r?.forView.tuning.top !== undefined && r?.forView.tuning.minScore !== undefined,
-  }
+    capping:
+      r?.forView.tuning.top !== undefined &&
+      r?.forView.tuning.minScore !== undefined,
+  };
 }

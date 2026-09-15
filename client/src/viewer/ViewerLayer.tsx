@@ -1,5 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
-import type * as THREE from 'three'
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
+import type * as THREE from "three";
 import type {
   AppRef,
   CameraState,
@@ -8,11 +14,11 @@ import type {
   IndexScore,
   OrbitAxis,
   OverrideCredits,
-} from '../../../shared/types'
-import { renderableCredits } from '../../../shared/credits'
-import type { ApiClient } from '../api/client'
-import { MENU_ITEM_CLASS } from '../components/EntryMenu'
-import { CREDIT_LINK_CLASS, hostLabel } from '../lib/credits'
+} from "../../../shared/types";
+import { renderableCredits } from "../../../shared/credits";
+import type { ApiClient } from "../api/client";
+import { MENU_ITEM_CLASS } from "../components/EntryMenu";
+import { CREDIT_LINK_CLASS, hostLabel } from "../lib/credits";
 import {
   AXIS_CAPTION_CLASS,
   AXIS_DIVIDER_CLASS,
@@ -33,59 +39,59 @@ import {
   type CommandId,
   type EntryCommand,
   type LiveFramingView,
-} from '../lib/entryActions'
-import { formatBytes, formatCosine, formatDate, formatZ } from '../lib/format'
-import { expandLibraryPath } from '../lib/libraryPath'
-import { SCALE_BADGE, Z_LABEL, type ScoreScale } from '../lib/scoreScale'
-import { GestureTracker, nativeMenuRequested } from '../lib/gesture'
-import type { MeshLru } from '../three/lru'
-import { DEFAULT_CAMERA, defaultAxisFor } from '../three/camera'
-import { formatOfEntry } from '../three/models'
-import { cameraForPose } from '../three/pose'
-import { getRenderer } from '../three/renderer'
-import { liveRenderSize } from './renderSize'
-import { ViewerSession } from './session'
+} from "../lib/entryActions";
+import { formatBytes, formatCosine, formatDate, formatZ } from "../lib/format";
+import { expandLibraryPath } from "../lib/libraryPath";
+import { SCALE_BADGE, Z_LABEL, type ScoreScale } from "../lib/scoreScale";
+import { GestureTracker, nativeMenuRequested } from "../lib/gesture";
+import type { MeshLru } from "../three/lru";
+import { DEFAULT_CAMERA, defaultAxisFor } from "../three/camera";
+import { formatOfEntry } from "../three/models";
+import { cameraForPose } from "../three/pose";
+import { getRenderer } from "../three/renderer";
+import { liveRenderSize } from "./renderSize";
+import { ViewerSession } from "./session";
 
 export interface ViewerState {
-  mode: 'orbit' | 'lightbox'
-  entry: DirEntry
+  mode: "orbit" | "lightbox";
+  entry: DirEntry;
   /** Tile rect at pointerdown — where the orbit overlay sits. */
-  rect: { left: number; top: number; width: number; height: number }
-  originEl: HTMLElement | null
+  rect: { left: number; top: number; width: number; height: number };
+  originEl: HTMLElement | null;
 }
 
 interface Props {
-  viewer: ViewerState
-  camera: CameraState | undefined
-  axis: OrbitAxis | undefined
+  viewer: ViewerState;
+  camera: CameraState | undefined;
+  axis: OrbitAxis | undefined;
   /** The index's orientation for this model, when it has one. Advisory (D5). */
-  pose: IndexPose | null | undefined
+  pose: IndexPose | null | undefined;
   /** What the index scored this model at, when it was opened from a scored
    *  result. Absent for a model opened from any ordinary listing. */
-  score: IndexScore | undefined
+  score: IndexScore | undefined;
   /** Which scale `score` is on — the same derivation the tile reads, so the two
    *  surfaces cannot report the number under different names (D7). */
-  scoreScale: ScoreScale | null
+  scoreScale: ScoreScale | null;
   /** Ambient occlusion on/off — a prop (not read from the store) so toggling
    *  repaints the live view. */
-  ao: boolean
-  api: ApiClient
-  lru: MeshLru<THREE.Object3D>
-  tracker: GestureTracker
-  onPromote: () => void
+  ao: boolean;
+  api: ApiClient;
+  lru: MeshLru<THREE.Object3D>;
+  tracker: GestureTracker;
+  onPromote: () => void;
   /**
    * Lightbox close affordances (✕, Escape, backdrop) raise an intent instead
    * of closing: App owns the history question — back out of a pushed entry,
    * or drop a deep-linked param — and answers via `closeSignal`.
    */
-  onCloseIntent: () => void
+  onCloseIntent: () => void;
   /** Increments when App wants the persisting close to run (url-navigation D3). */
-  closeSignal: number
-  onDismiss: () => void
+  closeSignal: number;
+  onDismiss: () => void;
   /** Write the view — camera, axis and pixels — after a manipulation: an
    *  orbit release, an axis change, or the close that follows one. */
-  onPersist: (session: ViewerSession) => Promise<void>
-  onLoadError: (message: string) => void
+  onPersist: (session: ViewerSession) => Promise<void>;
+  onLoadError: (message: string) => void;
   /**
    * Raise the shared entry menu on this viewer's own entry, at the pointer.
    *
@@ -105,7 +111,7 @@ interface Props {
      *  is private to this component, so the menu's surface hands it over the
      *  way the panel's presses do. */
     live?: () => LiveFramingView | null,
-  ) => void
+  ) => void;
   /**
    * Whether that menu is currently raised, read live.
    *
@@ -114,13 +120,13 @@ interface Props {
    * below — which focuses the dialog on every run and would pull focus straight
    * out of the menu it just raised.
    */
-  menuOpen: { readonly current: boolean }
+  menuOpen: { readonly current: boolean };
   /**
    * The entry actions this panel offers, decided by `entryActions` for this
    * entry and this surface (`LIGHTBOX_PANEL_EXCLUDES`) and asked by App — never
    * re-decided here, exactly as the menu never re-decides its own items.
    */
-  panelCommands: readonly EntryCommand[]
+  panelCommands: readonly EntryCommand[];
   /**
    * The library's top as a filesystem path, or null while the library is not
    * `ready` (library R4). App reads it once from `ApiClient.library()`; this
@@ -133,7 +139,7 @@ interface Props {
    * test, the entry lookups, the thumb cache key — goes on reading
    * `viewer.entry.path`, which is and stays the library path.
    */
-  libraryTop: string | null
+  libraryTop: string | null;
   /**
    * The panel's open-in row (open-in-slicer L10, reversed 2026-08-25): the
    * applications the platform associates with this model's type, default
@@ -146,14 +152,14 @@ interface Props {
    * pills under it is an affordance that does nothing, and what does not
    * apply is absent rather than present and inert.
    */
-  openIn?: { apps: AppRef[]; onChoose: (appId: string) => void } | null
+  openIn?: { apps: AppRef[]; onChoose: (appId: string) => void } | null;
   /**
    * Run one of them. The bodies are the shared ones and App holds the host, so
    * this component carries no copy of any command — only the live view a reset
    * needs to re-frame, which is the one thing App cannot reach: the session is
    * private to this component.
    */
-  onCommand: (id: CommandId, live: LiveFramingView | null) => void
+  onCommand: (id: CommandId, live: LiveFramingView | null) => void;
   /**
    * A shared command's brief sentence, rendered *here* rather than under the
    * path bar. The lightbox is `fixed inset-0 z-lightbox` over that bar behind a
@@ -167,22 +173,22 @@ interface Props {
    * copy's confirmation, which entry-actions requires and which the menu raised
    * on this surface could not previously show at all.
    */
-  actionNote?: { text: string; tone: 'ok' | 'error' } | null
+  actionNote?: { text: string; tone: "ok" | "error" } | null;
   /**
    * Step the lightbox to a sibling model (lightbox-sibling-stepping). App swaps
    * `viewer.entry` and the URL together; `goTo` here reproduces the persisting
    * close's branch first (D3). Reached through a ref from the key handler so it
    * never closes over a leaving render's `onPersist` (the `endGestureRef` bug).
    */
-  onNavigate: (entry: DirEntry) => void
+  onNavigate: (entry: DirEntry) => void;
   /** The previous / next model in shown order, or `null` at the ends (D1/D2) —
    *  the arrow controls disable and the arrow keys no-op where `null`. */
-  prevEntry: DirEntry | null
-  nextEntry: DirEntry | null
+  prevEntry: DirEntry | null;
+  nextEntry: DirEntry | null;
 }
 
 /** Longest the orbit overlay holds its dismissal waiting for the refreshed thumbnail. */
-export const PERSIST_HOLD_MS = 1500
+export const PERSIST_HOLD_MS = 1500;
 
 /**
  * The single live-canvas layer: in 'orbit' mode it overlays the pressed tile;
@@ -216,23 +222,23 @@ export default function ViewerLayer({
   prevEntry,
   nextEntry,
 }: Props) {
-  const [session, setSession] = useState<ViewerSession | null>(null)
+  const [session, setSession] = useState<ViewerSession | null>(null);
   /**
    * The spindle this model turns about when nothing names one: its format's
    * up axis, from the one definition (file-frame-spindle D2). Read at the
    * state seed, at every branch of the saved-framing read, and by the live
    * view a reset moves, so the picker, the session and the reset agree.
    */
-  const fallbackAxis = defaultAxisFor(formatOfEntry(viewer.entry))
+  const fallbackAxis = defaultAxisFor(formatOfEntry(viewer.entry));
   // The seed is overwritten by the open's answer before the picker (gated on
   // `session`) draws; it is the entry's default so no letter is fixed here.
-  const [sessionAxis, setSessionAxis] = useState<OrbitAxis>(fallbackAxis)
+  const [sessionAxis, setSessionAxis] = useState<OrbitAxis>(fallbackAxis);
   /** Mesh-load failure message — the viewer shows it instead of dismissing. */
-  const [loadError, setLoadError] = useState<string | null>(null)
-  const [copied, setCopied] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   /** The panel's brief failure report — the surface half of the shared copy
    *  command's failure path (task 1.2/1.3). */
-  const [copyError, setCopyError] = useState<string | null>(null)
+  const [copyError, setCopyError] = useState<string | null>(null);
   /**
    * What the library's override store credits this entry to, or `null` for
    * every way of having nothing to show — no store, no covering key, a read
@@ -241,9 +247,9 @@ export default function ViewerLayer({
    * and failed are the same picture, and no placeholder stands in for either
    * (`library-overrides` D4).
    */
-  const [credits, setCredits] = useState<OverrideCredits | null>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
-  const canvasHostRef = useRef<HTMLDivElement>(null)
+  const [credits, setCredits] = useState<OverrideCredits | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const canvasHostRef = useRef<HTMLDivElement>(null);
   /**
    * Whether the orientation on screen is the index's rather than the user's —
    * A framing reset that landed **before this session existed** — the panel and
@@ -263,34 +269,39 @@ export default function ViewerLayer({
    * already resolved through `framingAfterDiscard`, handed over by `reframe`, so
    * this component learns no second copy of the rule.
    */
-  const pendingReframeRef = useRef<{ camera: CameraState; axis: OrbitAxis } | null>(null)
-  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const pendingReframeRef = useRef<{
+    camera: CameraState;
+    axis: OrbitAxis;
+  } | null>(null);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
   // A pointer-opened viewer mounts mid-press (orbit); a keyboard-opened one
   // mounts directly in lightbox mode with no pointer down.
-  const pointer = useRef({ down: viewer.mode === 'orbit', lastX: 0, lastY: 0 })
+  const pointer = useRef({ down: viewer.mode === "orbit", lastX: 0, lastY: 0 });
   // A held dismissal can keep this component mounted while a new press
   // replaces the viewer prop — re-arm the gesture state exactly as a fresh
   // mount would, or the new tile's drag/promote would be dead (D4).
-  const prevViewerRef = useRef(viewer)
+  const prevViewerRef = useRef(viewer);
   if (prevViewerRef.current !== viewer) {
-    prevViewerRef.current = viewer
-    pointer.current = { down: viewer.mode === 'orbit', lastX: 0, lastY: 0 }
+    prevViewerRef.current = viewer;
+    pointer.current = { down: viewer.mode === "orbit", lastX: 0, lastY: 0 };
   }
-  const sessionRef = useRef<ViewerSession | null>(null)
-  const modeRef = useRef(viewer.mode)
-  modeRef.current = viewer.mode
-  const viewerRef = useRef(viewer)
-  viewerRef.current = viewer
+  const sessionRef = useRef<ViewerSession | null>(null);
+  const modeRef = useRef(viewer.mode);
+  modeRef.current = viewer.mode;
+  const viewerRef = useRef(viewer);
+  viewerRef.current = viewer;
   // A close in progress (lightbox-sibling-stepping D3) and a step in progress.
   // `goTo` awaits a persist before it navigates; a close landing in that window
   // must abort the pending step (`closingRef`, set at the top of `closeLightbox`)
   // so it does not flash the neighbour on its way out, and a second step in the
   // window is ignored (`steppingRef`) so a rapid double-press neither double-
   // persists nor lands on the wrong model. Never reset: a close unmounts.
-  const closingRef = useRef(false)
-  const steppingRef = useRef(false)
+  const closingRef = useRef(false);
+  const steppingRef = useRef(false);
   /** In-flight settle→persist chain from the last drag release (D1). */
-  const pendingPersistRef = useRef<Promise<void> | null>(null)
+  const pendingPersistRef = useRef<Promise<void> | null>(null);
 
   /**
    * Post-drag dismissal: hold the overlay until the refreshed thumbnail is
@@ -299,20 +310,23 @@ export default function ViewerLayer({
    * yields to any newer interaction (D4).
    */
   async function dismissAfterPersist(): Promise<void> {
-    const pending = pendingPersistRef.current
+    const pending = pendingPersistRef.current;
     if (pending === null) {
-      onDismiss()
-      return
+      onDismiss();
+      return;
     }
-    const scheduledViewer = viewerRef.current
-    await Promise.race([pending, new Promise((r) => setTimeout(r, PERSIST_HOLD_MS))])
+    const scheduledViewer = viewerRef.current;
+    await Promise.race([
+      pending,
+      new Promise((r) => setTimeout(r, PERSIST_HOLD_MS)),
+    ]);
     // Two rAFs: let React commit the new <img> src and the browser paint it
     // beneath the still-mounted overlay before unmounting.
-    await new Promise(requestAnimationFrame)
-    await new Promise(requestAnimationFrame)
-    if (pointer.current.down) return // a new gesture owns dismissal now
-    if (viewerRef.current !== scheduledViewer) return // a newer viewer replaced this one
-    onDismiss()
+    await new Promise(requestAnimationFrame);
+    await new Promise(requestAnimationFrame);
+    if (pointer.current.down) return; // a new gesture owns dismissal now
+    if (viewerRef.current !== scheduledViewer) return; // a newer viewer replaced this one
+    onDismiss();
   }
 
   // Load the mesh (spinner until warm) and build the session. The saved
@@ -321,7 +335,7 @@ export default function ViewerLayer({
   // orientation with the default view on persist. Camera and axis live in the
   // same cache entry, so a present camera means the axis prop is settled too.
   useEffect(() => {
-    let alive = true
+    let alive = true;
     // A step swaps `viewer.entry` under a live lightbox (lightbox-sibling-stepping
     // D5): clear this component's own session and error state up front so the
     // neighbour draws the spinner (and no stale ⚠) rather than the leaving
@@ -330,62 +344,72 @@ export default function ViewerLayer({
     // group and the error block all gate on — so without this reset a cold step
     // shows the previous frame beside the new name. A no-op on the first open,
     // where both are already null/absent.
-    setSession(null)
-    setLoadError(null)
+    setSession(null);
+    setLoadError(null);
     // An index orientation is the *default* only: a stored axis or camera is
     // the user's own and wins, and applying a pose persists nothing — the
     // sidecar is written by orbiting, not by opening (semantic-search D5).
-    const fromPose = cameraForPose(pose, DEFAULT_CAMERA)
+    const fromPose = cameraForPose(pose, DEFAULT_CAMERA);
     // A new session has discarded nothing yet — a held dismissal can keep this
     // component mounted across entries, and a reframe recorded for the open
     // that was in flight must not be adopted by the one replacing it. The next
     // open re-reads a cache the store half has already updated anyway.
-    pendingReframeRef.current = null
+    pendingReframeRef.current = null;
     const savedPromise: Promise<{ camera?: CameraState; axis: OrbitAxis }> =
       camera !== undefined
         ? Promise.resolve({ camera, axis: axis ?? fallbackAxis })
         : api
             .getThumb(viewer.entry.path, viewer.entry.mtime)
             .then((r) => {
-              const posed = r.camera === undefined && r.axis === undefined && fromPose !== null
+              const posed =
+                r.camera === undefined &&
+                r.axis === undefined &&
+                fromPose !== null;
               return {
                 camera: posed ? fromPose.camera : r.camera,
                 axis: r.axis ?? (posed ? fromPose.axis : fallbackAxis),
-              }
+              };
             })
-            .catch(() => ({ camera: fromPose?.camera, axis: fromPose?.axis ?? fallbackAxis }))
+            .catch(() => ({
+              camera: fromPose?.camera,
+              axis: fromPose?.axis ?? fallbackAxis,
+            }));
     void Promise.all([lru.acquire(viewer.entry.path), savedPromise])
       .then(([object, saved]) => {
-        if (!alive) return
+        if (!alive) return;
         // A framing reset pressed while this open was in flight wins over the
         // orientation the open resolved: `saved` is the very thing the press
         // gave up.
-        const discarded = pendingReframeRef.current
-        if (discarded !== null) pendingReframeRef.current = null
+        const discarded = pendingReframeRef.current;
+        if (discarded !== null) pendingReframeRef.current = null;
         // A discard resolves the axis with the camera — the pose's, or the
         // file's own default (`pose-rerender` D7) — so a pending one names it.
-        const axisAt = discarded !== null ? discarded.axis : saved.axis
-        const s = new ViewerSession(object, axisAt, discarded?.camera ?? saved.camera)
-        sessionRef.current = s
-        setSession(s)
-        setSessionAxis(axisAt)
+        const axisAt = discarded !== null ? discarded.axis : saved.axis;
+        const s = new ViewerSession(
+          object,
+          axisAt,
+          discarded?.camera ?? saved.camera,
+        );
+        sessionRef.current = s;
+        setSession(s);
+        setSessionAxis(axisAt);
       })
       .catch((err: unknown) => {
         // Missing file / gone zip entry / parse failure: show it, don't
         // silently dismiss — and flip the tile so the stale thumbnail stops
         // advertising a healthy model.
-        if (!alive) return
-        const message = err instanceof Error ? err.message : String(err)
-        setLoadError(message)
-        onLoadError(message)
-      })
+        if (!alive) return;
+        const message = err instanceof Error ? err.message : String(err);
+        setLoadError(message);
+        onLoadError(message);
+      });
     return () => {
-      alive = false
-      sessionRef.current?.close()
-      sessionRef.current = null
-    }
+      alive = false;
+      sessionRef.current?.close();
+      sessionRef.current = null;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewer.entry.path, lru])
+  }, [viewer.entry.path, lru]);
 
   // The credits, followed to the viewer's subject on the ignore-on-stale idiom
   // of the read above — an `alive` flag, never an AbortController (D4): the
@@ -404,45 +428,45 @@ export default function ViewerLayer({
   // open costs exactly one. Failure is caught into the same `null` as absence —
   // no error state, by requirement.
   useEffect(() => {
-    let alive = true
+    let alive = true;
     const forget = (): void => {
-      alive = false
-    }
-    setCredits(null)
-    if (viewer.mode !== 'lightbox') return forget
+      alive = false;
+    };
+    setCredits(null);
+    if (viewer.mode !== "lightbox") return forget;
     api
       .overrides(viewer.entry.path)
       .then((resolved) => {
-        if (alive) setCredits(renderableCredits(resolved.credits))
+        if (alive) setCredits(renderableCredits(resolved.credits));
       })
       .catch(() => {
-        if (alive) setCredits(null)
-      })
-    return forget
-  }, [viewer.entry.path, viewer.mode, api])
+        if (alive) setCredits(null);
+      });
+    return forget;
+  }, [viewer.entry.path, viewer.mode, api]);
 
   // Attach the shared canvas and render whenever session/mode/size changes —
   // and on an AO toggle, so the switch is visible without a drag.
   useEffect(() => {
-    if (session === null) return
-    const host = canvasHostRef.current
-    if (host === null) return
-    const canvas = getRenderer().domElement
-    canvas.style.width = '100%'
-    canvas.style.height = '100%'
-    canvas.style.display = 'block'
-    host.appendChild(canvas)
-    renderNow()
+    if (session === null) return;
+    const host = canvasHostRef.current;
+    if (host === null) return;
+    const canvas = getRenderer().domElement;
+    canvas.style.width = "100%";
+    canvas.style.height = "100%";
+    canvas.style.display = "block";
+    host.appendChild(canvas);
+    renderNow();
     return () => {
-      if (canvas.parentElement === host) host.removeChild(canvas)
-    }
+      if (canvas.parentElement === host) host.removeChild(canvas);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, viewer.mode, ao])
+  }, [session, viewer.mode, ao]);
 
   function renderNow(): void {
-    const s = sessionRef.current
-    const host = canvasHostRef.current
-    if (s === null || host === null) return
+    const s = sessionRef.current;
+    const host = canvasHostRef.current;
+    if (s === null || host === null) return;
     // Above device resolution, so the browser downsamples: a thumbnail is a
     // 512² render shown in a ~176 px tile, and matching that sample density is
     // what keeps the live view from reading as the aliased one at handoff.
@@ -450,8 +474,8 @@ export default function ViewerLayer({
       host.clientWidth,
       host.clientHeight,
       window.devicePixelRatio || 1,
-    )
-    s.render(width, height)
+    );
+    s.render(width, height);
   }
 
   /**
@@ -469,14 +493,17 @@ export default function ViewerLayer({
    * old tile's path (found in review, pre-existing; the bypass path, which is
    * re-created per render, was the first caller to see the props in force).
    */
-  function endGesture(at: { clientX: number; clientY: number }, { promote }: { promote: boolean }): void {
-    if (!pointer.current.down) return
-    pointer.current.down = false
+  function endGesture(
+    at: { clientX: number; clientY: number },
+    { promote }: { promote: boolean },
+  ): void {
+    if (!pointer.current.down) return;
+    pointer.current.down = false;
     if (!tracker.isDrag) {
-      if (promote && modeRef.current === 'orbit') onPromote()
-      return
+      if (promote && modeRef.current === "orbit") onPromote();
+      return;
     }
-    const s = sessionRef.current
+    const s = sessionRef.current;
     // Level the horizon and rebase the rest state, then persist that view.
     // The chain is kept so post-drag dismissals can await it (D1).
     if (s !== null) {
@@ -484,47 +511,47 @@ export default function ViewerLayer({
         .settle(renderNow)
         .then(() => onPersist(s))
         .finally(() => {
-          if (pendingPersistRef.current === p) pendingPersistRef.current = null
-        })
-      pendingPersistRef.current = p
+          if (pendingPersistRef.current === p) pendingPersistRef.current = null;
+        });
+      pendingPersistRef.current = p;
     }
     // A drag released outside the tile gets no later pointerleave — the
     // overlay would be stuck. Dismiss (persistence-aware) if the release
     // landed outside.
-    if (modeRef.current === 'orbit') {
-      const rect = containerRef.current?.getBoundingClientRect()
+    if (modeRef.current === "orbit") {
+      const rect = containerRef.current?.getBoundingClientRect();
       const inside =
         rect !== undefined &&
         at.clientX >= rect.left &&
         at.clientX <= rect.right &&
         at.clientY >= rect.top &&
-        at.clientY <= rect.bottom
-      if (!inside) void dismissAfterPersist()
+        at.clientY <= rect.bottom;
+      if (!inside) void dismissAfterPersist();
     }
   }
-  const endGestureRef = useRef(endGesture)
-  endGestureRef.current = endGesture
+  const endGestureRef = useRef(endGesture);
+  endGestureRef.current = endGesture;
 
   // Global gesture handling: the press that opened the overlay is already in
   // progress, so listeners live on window — and must attach synchronously
   // (before paint), or a fast click's pointerup arrives before they exist.
   useLayoutEffect(() => {
     function onMove(e: PointerEvent): void {
-      if (!pointer.current.down) return
-      const wasDrag = tracker.isDrag
-      const isDrag = tracker.move(e.clientX, e.clientY)
+      if (!pointer.current.down) return;
+      const wasDrag = tracker.isDrag;
+      const isDrag = tracker.move(e.clientX, e.clientY);
       if (isDrag && sessionRef.current !== null) {
         if (!wasDrag) {
-          pointer.current.lastX = e.clientX
-          pointer.current.lastY = e.clientY
+          pointer.current.lastX = e.clientX;
+          pointer.current.lastY = e.clientY;
         }
         sessionRef.current.orbit(
           e.clientX - pointer.current.lastX,
           e.clientY - pointer.current.lastY,
-        )
-        pointer.current.lastX = e.clientX
-        pointer.current.lastY = e.clientY
-        renderNow()
+        );
+        pointer.current.lastX = e.clientX;
+        pointer.current.lastY = e.clientY;
+        renderNow();
       }
     }
     function onUp(e: PointerEvent): void {
@@ -533,32 +560,32 @@ export default function ViewerLayer({
       // without this the *secondary* button's release mid-hold ended the
       // gesture as if the primary had let go, and a right-click without a
       // drag opened the lightbox under the menu it had just raised.
-      if (e.button !== 0) return
-      endGestureRef.current(e, { promote: true })
+      if (e.button !== 0) return;
+      endGestureRef.current(e, { promote: true });
     }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
     return () => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-    }
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tracker])
+  }, [tracker]);
 
   // Orbit mode: dismiss on scroll/resize rather than track the tile.
   useEffect(() => {
-    if (viewer.mode !== 'orbit') return
+    if (viewer.mode !== "orbit") return;
     function dismiss(): void {
-      onDismiss()
+      onDismiss();
     }
-    window.addEventListener('scroll', dismiss, { capture: true })
-    window.addEventListener('resize', dismiss)
+    window.addEventListener("scroll", dismiss, { capture: true });
+    window.addEventListener("resize", dismiss);
     return () => {
-      window.removeEventListener('scroll', dismiss, { capture: true })
-      window.removeEventListener('resize', dismiss)
-    }
+      window.removeEventListener("scroll", dismiss, { capture: true });
+      window.removeEventListener("resize", dismiss);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewer.mode])
+  }, [viewer.mode]);
 
   /**
    * Step to a sibling model (lightbox-sibling-stepping D3). Persist the leaving
@@ -580,48 +607,55 @@ export default function ViewerLayer({
   // and closing `onKey` over a leaving render's `onPersist` is the `endGestureRef`
   // bug — the new tile's pixels under the old tile's path. Updated on render so
   // both the key handler and the on-screen buttons see the current values.
-  const onNavigateRef = useRef(onNavigate)
-  onNavigateRef.current = onNavigate
-  const prevEntryRef = useRef(prevEntry)
-  prevEntryRef.current = prevEntry
-  const nextEntryRef = useRef(nextEntry)
-  nextEntryRef.current = nextEntry
+  const onNavigateRef = useRef(onNavigate);
+  onNavigateRef.current = onNavigate;
+  const prevEntryRef = useRef(prevEntry);
+  prevEntryRef.current = prevEntry;
+  const nextEntryRef = useRef(nextEntry);
+  nextEntryRef.current = nextEntry;
   async function goTo(entry: DirEntry): Promise<void> {
     // Already closing, or a step's persist is still in flight — do nothing (D3):
     // the first covers a close that raced the press, the second a rapid double
     // press while the leaving model is being written.
-    if (closingRef.current || steppingRef.current) return
-    const started = viewerRef.current
-    const s = sessionRef.current
+    if (closingRef.current || steppingRef.current) return;
+    const started = viewerRef.current;
+    const s = sessionRef.current;
     if (s !== null && s.everManipulated) {
-      steppingRef.current = true
+      steppingRef.current = true;
       try {
-        await s.settle(renderNow)
-        await onPersist(s)
+        await s.settle(renderNow);
+        await onPersist(s);
       } finally {
-        steppingRef.current = false
+        steppingRef.current = false;
       }
     }
     // Bail if a close landed in the persist window, or the viewer was replaced or
     // left the lightbox: App's `navigateSibling` also mode-guards the commit, so
     // a lost race writes no `modelOpen` and cannot re-open over the backed-to list.
-    if (closingRef.current || viewerRef.current !== started || modeRef.current !== 'lightbox') {
-      return
+    if (
+      closingRef.current ||
+      viewerRef.current !== started ||
+      modeRef.current !== "lightbox"
+    ) {
+      return;
     }
-    onNavigateRef.current(entry)
+    onNavigateRef.current(entry);
   }
-  const goToRef = useRef(goTo)
-  goToRef.current = goTo
+  const goToRef = useRef(goTo);
+  goToRef.current = goTo;
 
   // Lightbox: focus trap + Esc close; re-render on window resize.
   useEffect(() => {
-    if (viewer.mode !== 'lightbox') return
+    if (viewer.mode !== "lightbox") return;
     // Conditional, not unconditional (D6): grab focus when the lightbox opens
     // (focus is outside the dialog then), but do NOT yank it back on every step
     // (the effect re-runs as `session` changes), or a keyboard user could
     // activate the on-screen Next control only once before focus jumped away.
-    if (containerRef.current !== null && !containerRef.current.contains(document.activeElement)) {
-      containerRef.current.focus()
+    if (
+      containerRef.current !== null &&
+      !containerRef.current.contains(document.activeElement)
+    ) {
+      containerRef.current.focus();
     }
     function onKey(e: KeyboardEvent): void {
       // The entry menu can now be raised over this view, and while it is up it
@@ -629,55 +663,59 @@ export default function ViewerLayer({
       // stands down, so one press dismisses one thing. The next press finds the
       // ref false and closes the lightbox as before. Same idiom, same reason as
       // App's find control standing down for a menu.
-      if (e.key === 'Escape') {
-        if (menuOpen.current) return
-        onCloseIntent()
+      if (e.key === "Escape") {
+        if (menuOpen.current) return;
+        onCloseIntent();
       }
-      if (e.key === 'Tab') {
+      if (e.key === "Tab") {
         // Real trap: cycle focus through the dialog and its controls.
-        e.preventDefault()
-        const dialog = containerRef.current
-        if (dialog === null) return
+        e.preventDefault();
+        const dialog = containerRef.current;
+        if (dialog === null) return;
         // `:not([disabled])` — a disabled button (a prev/next control at an end,
         // D2) cannot take focus, so `focus()` on it is a no-op and the trap would
         // dead-stop there. On the first model the disabled Previous control is the
         // first button in the ring, so without this Tab is inert in the lightbox.
-        const focusables = [dialog, ...dialog.querySelectorAll<HTMLElement>('button:not([disabled])')]
-        const idx = focusables.indexOf(document.activeElement as HTMLElement)
+        const focusables = [
+          dialog,
+          ...dialog.querySelectorAll<HTMLElement>("button:not([disabled])"),
+        ];
+        const idx = focusables.indexOf(document.activeElement as HTMLElement);
         const next = e.shiftKey
           ? (idx - 1 + focusables.length) % focusables.length
-          : (idx + 1) % focusables.length
-        focusables[next]?.focus()
+          : (idx + 1) % focusables.length;
+        focusables[next]?.focus();
       }
-      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
         // Leave Alt+Arrow to the browser (it is Back/Forward — Alt+Left is the
         // very gesture that closes the lightbox), and Ctrl/Meta+Arrow to the OS
         // (D6). Stand down for the entry menu as Escape does.
-        if (e.altKey || e.ctrlKey || e.metaKey) return
-        if (menuOpen.current) return
-        const target = e.key === 'ArrowLeft' ? prevEntryRef.current : nextEntryRef.current
-        if (target === null) return // no wrap; the end control is disabled (D2)
-        e.preventDefault()
-        void goToRef.current(target)
+        if (e.altKey || e.ctrlKey || e.metaKey) return;
+        if (menuOpen.current) return;
+        const target =
+          e.key === "ArrowLeft" ? prevEntryRef.current : nextEntryRef.current;
+        if (target === null) return; // no wrap; the end control is disabled (D2)
+        e.preventDefault();
+        void goToRef.current(target);
       }
     }
     function onResize(): void {
-      renderNow()
+      renderNow();
     }
-    window.addEventListener('keydown', onKey)
-    window.addEventListener('resize', onResize)
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("resize", onResize);
     return () => {
-      window.removeEventListener('keydown', onKey)
-      window.removeEventListener('resize', onResize)
-    }
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", onResize);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewer.mode, session])
+  }, [viewer.mode, session]);
 
   async function closeLightbox(): Promise<void> {
     // Mark the close first (lightbox-sibling-stepping D3): a step whose persist is
     // still awaiting must see this and abort rather than navigate on its way out.
-    closingRef.current = true
-    const s = sessionRef.current
+    closingRef.current = true;
+    const s = sessionRef.current;
     // A close persists — camera, axis and pixels, like an orbit release — only
     // after the user manipulated the view (`pose-rerender` D4): an orbit, a
     // zoom or an axis change. Untouched, it writes nothing at all. What an
@@ -692,22 +730,22 @@ export default function ViewerLayer({
     // one writes nothing unless the user orbited again — which is what "not
     // written back by the close that follows" always meant.
     if (s !== null && s.everManipulated) {
-      await s.settle(renderNow) // no-op if already level (e.g. Esc mid-drag aside)
-      await onPersist(s)
+      await s.settle(renderNow); // no-op if already level (e.g. Esc mid-drag aside)
+      await onPersist(s);
     }
-    onDismiss()
+    onDismiss();
   }
 
   // App's answer to a close intent (and the browser-back path): run the SAME
   // async teardown as every in-app affordance — settle, persist, dismiss. The
   // session is private to this component, so no one else can run it.
-  const handledCloseRef = useRef(closeSignal)
+  const handledCloseRef = useRef(closeSignal);
   useEffect(() => {
-    if (closeSignal === handledCloseRef.current) return
-    handledCloseRef.current = closeSignal
-    if (viewer.mode === 'lightbox') void closeLightbox()
+    if (closeSignal === handledCloseRef.current) return;
+    handledCloseRef.current = closeSignal;
+    if (viewer.mode === "lightbox") void closeLightbox();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [closeSignal])
+  }, [closeSignal]);
 
   function startGesture(e: React.PointerEvent): void {
     // Primary button only, exactly as the tile's own handler decides
@@ -715,9 +753,9 @@ export default function ViewerLayer({
     // the menu's. Without this the release after a right-click would find a
     // gesture in progress and promote the overlay to the lightbox behind the
     // menu it just raised.
-    if (e.button !== 0) return
-    pointer.current = { down: true, lastX: e.clientX, lastY: e.clientY }
-    tracker.start(e.clientX, e.clientY)
+    if (e.button !== 0) return;
+    pointer.current = { down: true, lastX: e.clientX, lastY: e.clientY };
+    tracker.start(e.clientX, e.clientY);
   }
 
   /**
@@ -733,14 +771,19 @@ export default function ViewerLayer({
    */
   function raiseEntryMenu(e: React.MouseEvent): void {
     if (nativeMenuRequested(e)) {
-      endGestureRef.current(e, { promote: false })
-      return
+      endGestureRef.current(e, { promote: false });
+      return;
     }
-    e.preventDefault()
-    onEntryMenu(viewer.entry, containerRef.current, { x: e.clientX, y: e.clientY }, liveFramingView)
+    e.preventDefault();
+    onEntryMenu(
+      viewer.entry,
+      containerRef.current,
+      { x: e.clientX, y: e.clientY },
+      liveFramingView,
+    );
   }
 
-  useEffect(() => () => clearTimeout(copyTimerRef.current), [])
+  useEffect(() => () => clearTimeout(copyTimerRef.current), []);
 
   /**
    * The copy affordance, through the shared command (entry-actions R1) — the
@@ -755,19 +798,19 @@ export default function ViewerLayer({
     copyEntryPath(viewer.entry, {
       libraryTop,
       confirm: () => {
-        setCopyError(null)
-        setCopied(true)
-        clearTimeout(copyTimerRef.current)
-        copyTimerRef.current = setTimeout(() => setCopied(false), 1500)
+        setCopyError(null);
+        setCopied(true);
+        clearTimeout(copyTimerRef.current);
+        copyTimerRef.current = setTimeout(() => setCopied(false), 1500);
       },
       report: (message) => {
         // An earlier copy's confirmation must not outlive this failure.
-        clearTimeout(copyTimerRef.current)
-        setCopied(false)
-        setCopyError(message)
-        copyTimerRef.current = setTimeout(() => setCopyError(null), 2500)
+        clearTimeout(copyTimerRef.current);
+        setCopied(false);
+        setCopyError(message);
+        copyTimerRef.current = setTimeout(() => setCopyError(null), 2500);
       },
-    })
+    });
   }
 
   /**
@@ -791,71 +834,76 @@ export default function ViewerLayer({
    * `pendingReframeRef` says why.
    */
   function liveFramingView(): LiveFramingView {
-    const s = sessionRef.current
+    const s = sessionRef.current;
     return {
       reframe: (nextCamera, nextAxis) => {
         if (s !== null) {
-          s.reframe(nextCamera, nextAxis)
-          runTweenLoop()
+          s.reframe(nextCamera, nextAxis);
+          runTweenLoop();
         } else {
           // Nothing on screen to move yet; the open in flight adopts this
           // instead of the orientation it resolved before the press.
-          pendingReframeRef.current = { camera: nextCamera, axis: nextAxis }
+          pendingReframeRef.current = { camera: nextCamera, axis: nextAxis };
         }
-        setSessionAxis(nextAxis)
+        setSessionAxis(nextAxis);
         // The view on screen is now the index's orientation or the default —
         // either way not the user's. `s.reframe` gave up the session's claim,
         // so the close that follows writes nothing unless the user orbits
         // again; the pixels are the reset's own render, queued behind this
         // view's suspension (`resetFramingLive`).
       },
-    }
+    };
   }
 
   function runPanelCommand(id: CommandId): void {
-    onCommand(id, liveFramingView())
+    onCommand(id, liveFramingView());
   }
 
   // Drives renders while an axis-change tween is in flight. The loop ends on
   // its own when the tween completes or a drag/zoom cancels it.
-  const tweenLoopActive = useRef(false)
+  const tweenLoopActive = useRef(false);
   function runTweenLoop(): void {
-    if (tweenLoopActive.current) return
-    tweenLoopActive.current = true
+    if (tweenLoopActive.current) return;
+    tweenLoopActive.current = true;
     const step = (): void => {
-      renderNow()
-      if (sessionRef.current?.animating === true) requestAnimationFrame(step)
-      else tweenLoopActive.current = false
-    }
-    requestAnimationFrame(step)
+      renderNow();
+      if (sessionRef.current?.animating === true) requestAnimationFrame(step);
+      else tweenLoopActive.current = false;
+    };
+    requestAnimationFrame(step);
   }
 
   // The rest state is already the new spindle's default view, so persistence
   // is immediate — only the visible camera takes the scenic route.
   function changeAxis(next: OrbitAxis): void {
-    const s = sessionRef.current
-    if (s === null || next === s.axis) return
-    s.setAxis(next)
-    setSessionAxis(next)
-    runTweenLoop()
-    void onPersist(s)
+    const s = sessionRef.current;
+    if (s === null || next === s.axis) return;
+    s.setAxis(next);
+    setSessionAxis(next);
+    runTweenLoop();
+    void onPersist(s);
   }
 
   const spinner = (
     <span className="absolute left-1/2 top-1/2 size-8 -translate-x-1/2 -translate-y-1/2 animate-spin rounded-full border-2 border-zinc-600 border-t-zinc-200" />
-  )
+  );
 
-  if (viewer.mode === 'orbit') {
-    const { rect } = viewer
+  if (viewer.mode === "orbit") {
+    const { rect } = viewer;
     return (
       <div
         ref={containerRef}
         className="fixed z-orbit-overlay cursor-grab touch-none rounded-lg bg-zinc-900 active:cursor-grabbing"
-        style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
+        style={{
+          left: rect.left,
+          top: rect.top,
+          width: rect.width,
+          height: rect.height,
+        }}
         onPointerDown={startGesture}
         onContextMenu={raiseEntryMenu}
         onPointerLeave={() => {
-          if (!pointer.current.down) void dismissAfterPersist()
+          if (!pointer.current.down) void dismissAfterPersist();
         }}
       >
         <div ref={canvasHostRef} className="h-full w-full" />
@@ -871,7 +919,7 @@ export default function ViewerLayer({
             spinner
           ))}
       </div>
-    )
+    );
   }
 
   return (
@@ -882,7 +930,7 @@ export default function ViewerLayer({
         // Primary button only, for the same reason `startGesture` checks it: a
         // secondary press on the backdrop raises the menu, and closing the view
         // out from under the menu it just raised is not what was asked.
-        if (e.button === 0 && e.target === e.currentTarget) onCloseIntent()
+        if (e.button === 0 && e.target === e.currentTarget) onCloseIntent();
       }}
     >
       <div
@@ -898,7 +946,7 @@ export default function ViewerLayer({
         // are read, not restated. Three sites used to spell `95vw`, `18rem` and
         // `w-72` independently, and a panel widened in one place would have
         // silently overlapped the model rather than visibly breaking.
-        style={{ '--lb-width': '95vw', '--lb-panel': '18rem' } as CSSProperties}
+        style={{ "--lb-width": "95vw", "--lb-panel": "18rem" } as CSSProperties}
         className="relative flex max-w-[var(--lb-width)] overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-900 outline-none"
       >
         {/* The square is load-bearing: snapshot() captures at aspect = 1, so a
@@ -926,8 +974,8 @@ export default function ViewerLayer({
             className="h-full w-full cursor-grab touch-none active:cursor-grabbing"
             onPointerDown={startGesture}
             onWheel={(e) => {
-              sessionRef.current?.zoom(e.deltaY > 0 ? 1.1 : 0.9)
-              renderNow()
+              sessionRef.current?.zoom(e.deltaY > 0 ? 1.1 : 0.9);
+              renderNow();
             }}
           />
           {/* Prev/next affordances (lightbox-sibling-stepping D2). Siblings of
@@ -941,7 +989,7 @@ export default function ViewerLayer({
             aria-label="Previous model"
             disabled={prevEntry === null}
             onClick={() => {
-              if (prevEntry !== null) void goTo(prevEntry)
+              if (prevEntry !== null) void goTo(prevEntry);
             }}
             className="absolute left-2 top-1/2 z-10 -translate-y-1/2 rounded-full bg-zinc-800/80 p-2 text-zinc-200 hover:bg-zinc-700 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-zinc-800/80"
           >
@@ -963,7 +1011,7 @@ export default function ViewerLayer({
             aria-label="Next model"
             disabled={nextEntry === null}
             onClick={() => {
-              if (nextEntry !== null) void goTo(nextEntry)
+              if (nextEntry !== null) void goTo(nextEntry);
             }}
             className="absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-full bg-zinc-800/80 p-2 text-zinc-200 hover:bg-zinc-700 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-zinc-800/80"
           >
@@ -989,7 +1037,9 @@ export default function ViewerLayer({
                 <span className="text-2xl" aria-hidden="true">
                   ⚠
                 </span>
-                <p className="text-sm font-medium text-zinc-200">{viewer.entry.name}</p>
+                <p className="text-sm font-medium text-zinc-200">
+                  {viewer.entry.name}
+                </p>
                 <p className="text-xs text-red-400">{loadError}</p>
               </div>
             ) : (
@@ -1000,21 +1050,26 @@ export default function ViewerLayer({
             // group draws the same four buttons from the same strings and
             // rules, which live in `entryActions` so neither copy can drift
             // (second look at 6.8).
-            <div className={`absolute left-3 top-3 ${AXIS_GROUP_CLASS}`} aria-label="Orbit axis">
+            <div
+              className={`absolute left-3 top-3 ${AXIS_GROUP_CLASS}`}
+              aria-label="Orbit axis"
+            >
               <span className={AXIS_CAPTION_CLASS}>axis</span>
               {AXIS_LETTERS.map((letter) => {
-                const active = axisLetter(sessionAxis) === letter
+                const active = axisLetter(sessionAxis) === letter;
                 return (
                   <button
                     key={letter}
                     type="button"
                     aria-pressed={active}
-                    onClick={() => changeAxis(axisWithLetter(sessionAxis, letter))}
+                    onClick={() =>
+                      changeAxis(axisWithLetter(sessionAxis, letter))
+                    }
                     className={axisPillClass(active)}
                   >
                     {letter.toUpperCase()}
                   </button>
-                )
+                );
               })}
               <span className={AXIS_DIVIDER_CLASS} />
               <button
@@ -1031,7 +1086,9 @@ export default function ViewerLayer({
         </div>
         <div className="flex w-[var(--lb-panel)] min-w-0 flex-col gap-4 overflow-y-auto p-4">
           {/* pr-9 keeps the name clear of the dialog-anchored close button */}
-          <p className="break-all pr-9 text-sm font-medium text-zinc-200">{viewer.entry.name}</p>
+          <p className="break-all pr-9 text-sm font-medium text-zinc-200">
+            {viewer.entry.name}
+          </p>
           <div className="flex flex-col gap-1">
             <div className="flex items-center justify-between">
               <span className="text-xs text-zinc-500">path</span>
@@ -1041,7 +1098,7 @@ export default function ViewerLayer({
                 onClick={copyPath}
                 className="rounded-full bg-zinc-800 px-2.5 py-0.5 text-xs text-zinc-300 hover:bg-zinc-700"
               >
-                {copied ? 'copied' : 'copy'}
+                {copied ? "copied" : "copy"}
               </button>
             </div>
             {/* The filesystem path, not the library path (library R2): this
@@ -1061,18 +1118,26 @@ export default function ViewerLayer({
             {viewer.entry.format !== undefined && (
               <div className="flex justify-between gap-2">
                 <dt className="text-zinc-500">format</dt>
-                <dd className="uppercase text-zinc-300">{viewer.entry.format}</dd>
+                <dd className="uppercase text-zinc-300">
+                  {viewer.entry.format}
+                </dd>
               </div>
             )}
             <div className="flex justify-between gap-2">
               <dt className="text-zinc-500">size</dt>
-              <dd className="text-zinc-300">{formatBytes(viewer.entry.size)}</dd>
+              <dd className="text-zinc-300">
+                {formatBytes(viewer.entry.size)}
+              </dd>
             </div>
             <div className="flex justify-between gap-2">
               <dt className="text-zinc-500">
-                {viewer.entry.path.includes('!/') ? 'modified (zip)' : 'modified'}
+                {viewer.entry.path.includes("!/")
+                  ? "modified (zip)"
+                  : "modified"}
               </dt>
-              <dd className="text-right text-zinc-300">{formatDate(viewer.entry.mtime)}</dd>
+              <dd className="text-right text-zinc-300">
+                {formatDate(viewer.entry.mtime)}
+              </dd>
             </div>
             {/* Among the metadata and before the action strip: the panel
                 describes the model first and offers what can be done to it
@@ -1085,11 +1150,15 @@ export default function ViewerLayer({
               <>
                 <div className="flex justify-between gap-2">
                   <dt className="text-zinc-500">{SCALE_BADGE[scoreScale]}</dt>
-                  <dd className="tabular-nums text-zinc-300">{formatCosine(score.score)}</dd>
+                  <dd className="tabular-nums text-zinc-300">
+                    {formatCosine(score.score)}
+                  </dd>
                 </div>
                 <div className="flex justify-between gap-2">
                   <dt className="text-zinc-500">{Z_LABEL}</dt>
-                  <dd className="tabular-nums text-zinc-300">{formatZ(score.z)}</dd>
+                  <dd className="tabular-nums text-zinc-300">
+                    {formatZ(score.z)}
+                  </dd>
                 </div>
               </>
             )}
@@ -1111,7 +1180,10 @@ export default function ViewerLayer({
             {credits !== null && (
               <>
                 {credits.author !== undefined && (
-                  <div data-credit="author" className="flex justify-between gap-2">
+                  <div
+                    data-credit="author"
+                    className="flex justify-between gap-2"
+                  >
                     <dt className="text-zinc-500">author</dt>
                     <dd className="min-w-0 text-right text-zinc-300">
                       {credits.authorUrl !== undefined ? (
@@ -1131,7 +1203,10 @@ export default function ViewerLayer({
                   </div>
                 )}
                 {credits.license !== undefined && (
-                  <div data-credit="license" className="flex justify-between gap-2">
+                  <div
+                    data-credit="license"
+                    className="flex justify-between gap-2"
+                  >
                     <dt className="text-zinc-500">license</dt>
                     <dd className="min-w-0 break-words text-right text-zinc-300">
                       {/* The label stays the corpus's string and links to the
@@ -1154,7 +1229,10 @@ export default function ViewerLayer({
                   </div>
                 )}
                 {credits.sourceUrl !== undefined && (
-                  <div data-credit="source" className="flex justify-between gap-2">
+                  <div
+                    data-credit="source"
+                    className="flex justify-between gap-2"
+                  >
                     <dt className="text-zinc-500">source</dt>
                     <dd className="min-w-0 text-right text-zinc-300">
                       <a
@@ -1176,7 +1254,10 @@ export default function ViewerLayer({
                     above already labels the file's date `modified`, and the
                     phrase is about the copy, not the date (D4). */}
                 {credits.modified !== undefined && (
-                  <div data-credit="modified" className="flex justify-between gap-2">
+                  <div
+                    data-credit="modified"
+                    className="flex justify-between gap-2"
+                  >
                     <dt className="text-zinc-500">this copy</dt>
                     <dd className="min-w-0 break-words text-right text-zinc-300">
                       {credits.modified}
@@ -1209,8 +1290,14 @@ export default function ViewerLayer({
             // row. Not a menu, so the pills are plain buttons in a labelled
             // group, named the way the strip beside them is; they carry
             // `data-app-id` and no `data-command`, exactly as the menu's do.
-            <div role="group" aria-label="Open in" className={OPEN_IN_GROUP_CLASS}>
-              <span className={OPEN_IN_PANEL_CAPTION_CLASS}>{OPEN_IN_CAPTION}</span>
+            <div
+              role="group"
+              aria-label="Open in"
+              className={OPEN_IN_GROUP_CLASS}
+            >
+              <span className={OPEN_IN_PANEL_CAPTION_CLASS}>
+                {OPEN_IN_CAPTION}
+              </span>
               {openIn.apps.map((app) => (
                 <button
                   key={app.id}
@@ -1250,7 +1337,7 @@ export default function ViewerLayer({
             <p
               role="status"
               className={`text-xs ${
-                actionNote.tone === 'error' ? 'text-red-400' : 'text-zinc-400'
+                actionNote.tone === "error" ? "text-red-400" : "text-zinc-400"
               }`}
             >
               {actionNote.text}
@@ -1267,5 +1354,5 @@ export default function ViewerLayer({
         </button>
       </div>
     </div>
-  )
+  );
 }

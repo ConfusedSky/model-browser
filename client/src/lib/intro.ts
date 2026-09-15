@@ -12,7 +12,7 @@
  * No `three` and no React: the About entry may import this without dragging a
  * renderer into its bundle.
  */
-import { stored } from './stored'
+import { stored } from "./stored";
 
 /**
  * Per browser, never shared: dismissal is a reader's choice about their own
@@ -21,21 +21,21 @@ import { stored } from './stored'
  * to "not dismissed" instead of to an error.
  */
 export const introDismissedStore = stored<boolean>(
-  'model-browser:intro-dismissed',
-  (raw) => raw === '1',
-  (v) => (v ? '1' : '0'),
-)
+  "model-browser:intro-dismissed",
+  (raw) => raw === "1",
+  (v) => (v ? "1" : "0"),
+);
 
 /**
  * The About document, which is a second entry of the built client and not a
  * view of the app (D2) — so it is named with its extension, exactly as the
  * static handler serves it.
  */
-export const ABOUT_URL = '/about.html'
+export const ABOUT_URL = "/about.html";
 /** The About page's credits section, which the banner's third link leads to. */
-export const CREDITS_URL = '/about.html#credits'
+export const CREDITS_URL = "/about.html#credits";
 /** Where the code is. Off-site, so its anchor opens in a new tab. */
-export const SOURCE_URL = 'https://github.com/ConfusedSky/model-browser'
+export const SOURCE_URL = "https://github.com/ConfusedSky/model-browser";
 
 /**
  * One of the example queries, uniformly. `random` is a parameter so a test can
@@ -50,8 +50,12 @@ export function pickExample(
   queries: readonly string[],
   random: () => number = Math.random,
 ): string {
-  if (queries.length === 0) return ''
+  if (queries.length === 0) return "";
   // Clamped, because `random()` is documented as `[0, 1)` but a stub in a test
   // may hand back 1 — and the `??` is `noUncheckedIndexedAccess` alone.
-  return queries[Math.min(Math.floor(random() * queries.length), queries.length - 1)] ?? ''
+  return (
+    queries[
+      Math.min(Math.floor(random() * queries.length), queries.length - 1)
+    ] ?? ""
+  );
 }

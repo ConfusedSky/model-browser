@@ -10,6 +10,11 @@
  * test harness that fakes the client can use the real builder instead of a
  * copy that would drift from it.
  */
-export function thumbImageUrl(path: string, mtime: number, ao: boolean, gen?: number): string {
-  return `/api/thumb/image?path=${encodeURIComponent(path)}&mtime=${mtime}${ao ? '' : '&ao=off'}${gen !== undefined ? `&gen=${gen}` : ''}`
+export function thumbImageUrl(
+  path: string,
+  mtime: number,
+  ao: boolean,
+  gen?: number,
+): string {
+  return `/api/thumb/image?path=${encodeURIComponent(path)}&mtime=${mtime}${ao ? "" : "&ao=off"}${gen !== undefined ? `&gen=${gen}` : ""}`;
 }

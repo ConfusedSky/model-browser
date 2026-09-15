@@ -11,13 +11,13 @@
  * (D1). Storage is the default for the next search; the URL governs the view
  * it names, and opening someone's link never writes to storage (D2).
  */
-import { MAX_RESULT_COUNT, type SemanticTuning } from '../../../shared/types'
-import { stored } from './stored'
+import { MAX_RESULT_COUNT, type SemanticTuning } from "../../../shared/types";
+import { stored } from "./stored";
 
-const MODE_KEY = 'model-browser:search-mode'
-const MATCH_KEY = 'model-browser:search-folder-matching'
-const KINDS_KEY = 'model-browser:search-kinds'
-const TUNING_KEY = 'model-browser:search-tuning'
+const MODE_KEY = "model-browser:search-mode";
+const MATCH_KEY = "model-browser:search-folder-matching";
+const KINDS_KEY = "model-browser:search-kinds";
+const TUNING_KEY = "model-browser:search-tuning";
 
 /**
  * Which corpus a submit consults. A mode rather than a second action: two
@@ -25,46 +25,46 @@ const TUNING_KEY = 'model-browser:search-tuning'
  * persistent visible state, and it inherits this module's stickiness, the URL
  * carriage, and re-issue-on-change for free (D2).
  */
-export type SearchMode = 'name' | 'meaning'
+export type SearchMode = "name" | "meaning";
 
 /** Which kinds a search presents. Applied client-side over `kind` (D3). */
-export type SearchKinds = 'both' | 'folders' | 'models'
+export type SearchKinds = "both" | "folders" | "models";
 
-const KINDS: readonly SearchKinds[] = ['both', 'folders', 'models']
+const KINDS: readonly SearchKinds[] = ["both", "folders", "models"];
 
 /** The one reader of a `kinds` string, wherever it comes from — storage or URL. */
 export function isKinds(v: string | null): v is SearchKinds {
-  return v !== null && (KINDS as readonly string[]).includes(v)
+  return v !== null && (KINDS as readonly string[]).includes(v);
 }
 
 const modeStore = stored<SearchMode>(
   MODE_KEY,
-  (raw) => (raw === 'meaning' ? 'meaning' : 'name'),
+  (raw) => (raw === "meaning" ? "meaning" : "name"),
   (v) => v,
-)
-let mode: SearchMode = modeStore.read()
+);
+let mode: SearchMode = modeStore.read();
 
 const matchStore = stored(
   MATCH_KEY,
-  (raw) => raw !== 'off',
-  (on) => (on ? 'on' : 'off'),
-)
-let folderMatching: boolean = matchStore.read()
+  (raw) => raw !== "off",
+  (on) => (on ? "on" : "off"),
+);
+let folderMatching: boolean = matchStore.read();
 
 const kindsStore = stored<SearchKinds>(
   KINDS_KEY,
-  (raw) => (isKinds(raw) ? raw : 'both'),
+  (raw) => (isKinds(raw) ? raw : "both"),
   (v) => v,
-)
-let kinds: SearchKinds = kindsStore.read()
+);
+let kinds: SearchKinds = kindsStore.read();
 
 export function searchMode(): SearchMode {
-  return mode
+  return mode;
 }
 
 export function setSearchMode(next: SearchMode): void {
-  mode = next
-  modeStore.write(next)
+  mode = next;
+  modeStore.write(next);
 }
 
 /**
@@ -80,9 +80,9 @@ export function setSearchMode(next: SearchMode): void {
  */
 export function hasStoredSearchMode(): boolean {
   try {
-    return localStorage.getItem(MODE_KEY) !== null
+    return localStorage.getItem(MODE_KEY) !== null;
   } catch {
-    return false
+    return false;
   }
 }
 
@@ -97,7 +97,7 @@ export function hasStoredSearchMode(): boolean {
  * choice (`landing-page` D5).
  */
 export function applySessionSearchMode(next: SearchMode): void {
-  mode = next
+  mode = next;
 }
 
 /**
@@ -113,17 +113,17 @@ export function applySessionSearchMode(next: SearchMode): void {
  * (design D4). `resolveTuning` is where a partial becomes one of these.
  */
 export interface Tuning {
-  raw: boolean
-  pool: 'mean' | 'max' | 'softmax'
+  raw: boolean;
+  pool: "mean" | "max" | "softmax";
   /** Result count, capping whatever the floor let through. Absent = uncapped. */
-  top?: number
+  top?: number;
   /** Score floor, applied before the count. Absent = no floor. */
-  minScore?: number
+  minScore?: number;
 }
 
 export const TUNING_DEFAULTS: Tuning = {
   raw: false,
-  pool: 'softmax',
+  pool: "softmax",
   // Both bounds are in force by default (design D3): the floor keeps the grid
   // relevant, the count keeps it a grid. The resting state of the controls and
   // the meaning of an unadorned link are the same thing.
@@ -133,11 +133,11 @@ export const TUNING_DEFAULTS: Tuning = {
   // round. A count answers "the best N of whatever there is"; a floor answers
   // "everything at least this similar", which is the question a phrase asks.
   minScore: 0.1,
-} satisfies SemanticTuning
+} satisfies SemanticTuning;
 
 /** A count a user or a link supplied, held to what the index will return. */
 export function clampCount(n: number): number {
-  return Math.min(Math.max(Math.floor(n), 1), MAX_RESULT_COUNT)
+  return Math.min(Math.max(Math.floor(n), 1), MAX_RESULT_COUNT);
 }
 
 /**
@@ -160,24 +160,28 @@ export function resolveTuning(partial: Partial<Tuning> | undefined): Tuning {
   const base = {
     raw: partial?.raw ?? TUNING_DEFAULTS.raw,
     pool: partial?.pool ?? TUNING_DEFAULTS.pool,
-  }
-  const top = partial?.top
-  const minScore = partial?.minScore
+  };
+  const top = partial?.top;
+  const minScore = partial?.minScore;
   if (top === undefined && minScore === undefined) {
-    return { ...base, top: TUNING_DEFAULTS.top, minScore: TUNING_DEFAULTS.minScore }
+    return {
+      ...base,
+      top: TUNING_DEFAULTS.top,
+      minScore: TUNING_DEFAULTS.minScore,
+    };
   }
   return {
     ...base,
     ...(top !== undefined ? { top: clampCount(top) } : {}),
     ...(minScore !== undefined ? { minScore } : {}),
-  }
+  };
 }
 
-export const POOLS = ['mean', 'max', 'softmax'] as const
+export const POOLS = ["mean", "max", "softmax"] as const;
 
 /** The one reader of a `pool` value, wherever it comes from — storage or URL. */
-export function isPool(v: unknown): v is Tuning['pool'] {
-  return typeof v === 'string' && (POOLS as readonly string[]).includes(v)
+export function isPool(v: unknown): v is Tuning["pool"] {
+  return typeof v === "string" && (POOLS as readonly string[]).includes(v);
 }
 
 /**
@@ -191,13 +195,15 @@ export function isPool(v: unknown): v is Tuning['pool'] {
  * `null` is still accepted on read, because profiles written under the sentinel
  * are on disk and must keep meaning what they meant (design D4's table).
  */
-type StoredTuning = Omit<Partial<Tuning>, 'minScore'> & { minScore?: number | null }
+type StoredTuning = Omit<Partial<Tuning>, "minScore"> & {
+  minScore?: number | null;
+};
 
 const tuningStore = stored<Tuning>(
   TUNING_KEY,
   (raw) => {
-    if (raw === null) return { ...TUNING_DEFAULTS }
-    const v = JSON.parse(raw) as StoredTuning
+    if (raw === null) return { ...TUNING_DEFAULTS };
+    const v = JSON.parse(raw) as StoredTuning;
     // Each bound validated on its own, and a malformed one reads as *absent*
     // rather than as its default: a value that cannot be parsed cannot testify
     // that its bound was in force. If that leaves no bound at all, the rule
@@ -217,7 +223,7 @@ const tuningStore = stored<Tuning>(
       ...(v.minScore !== null && Number.isFinite(v.minScore)
         ? { minScore: v.minScore as number }
         : {}),
-    })
+    });
   },
   // Presence, on disk as everywhere else: a bound not in force is not written.
   (v) =>
@@ -227,32 +233,32 @@ const tuningStore = stored<Tuning>(
       ...(v.top !== undefined ? { top: v.top } : {}),
       ...(v.minScore !== undefined ? { minScore: v.minScore } : {}),
     } satisfies StoredTuning),
-)
-let tuning: Tuning = tuningStore.read()
+);
+let tuning: Tuning = tuningStore.read();
 
 export function searchTuning(): Tuning {
-  return tuning
+  return tuning;
 }
 
 export function setSearchTuning(next: Tuning): void {
-  tuning = next
-  tuningStore.write(next)
+  tuning = next;
+  tuningStore.write(next);
 }
 
 export function folderMatchingEnabled(): boolean {
-  return folderMatching
+  return folderMatching;
 }
 
 export function setFolderMatchingEnabled(on: boolean): void {
-  folderMatching = on
-  matchStore.write(on)
+  folderMatching = on;
+  matchStore.write(on);
 }
 
 export function searchKinds(): SearchKinds {
-  return kinds
+  return kinds;
 }
 
 export function setSearchKinds(value: SearchKinds): void {
-  kinds = value
-  kindsStore.write(value)
+  kinds = value;
+  kindsStore.write(value);
 }
