@@ -90,7 +90,7 @@
       sidecars annotate afterwards). The flat-manifest control is 1.7's landed cell in
       `server/test/cache.test.ts`, not duplicated here. **Open**: the live "manifest
       survives a restart" check, after the bake of 3.2.
-- [ ] 1.5 `--ship <user@host> --ship-dir <box id dir>` (D5): runs the rsync, `ssh <host>
+- [x] 1.5 `--ship <user@host> --ship-dir <box id dir>` (D5): runs the rsync, `ssh <host>
       'cd /opt/model-browser && docker compose -f deploy/demo/compose.yaml restart app'`,
       then the two hit checks of 4.2 against `https://models.masamaeda.com` for the first
       three enumerated models; without the flag, prints the same three commands. Verify:
@@ -103,8 +103,15 @@
       `--ship` path itself. 4.1 was shipped by running those printed commands by hand,
       deliberately — re-running the bake under `--ship` would have rewritten the manifest
       with a second run's near-zero `rate`/`elapsed` and destroyed the measured figures
-      3.2 exists to record. Exercise the flag on the next incremental re-bake, when the
-      figures it overwrites are worth nothing.
+      3.2 exists to record. **Done 2026-09-15, on exactly that occasion.** The
+      corpus gained `/Ghoul_3466743/Ghoul.stl` and the operator re-indexed and uploaded it,
+      so the re-bake was incremental with nothing to render, and the manifest's `rate` and
+      `elapsed` were worth nothing to keep — 3.2 and D-cost hold the measured figures.
+      `--ship root@157.90.25.110 --ship-dir /srv/cache/54c0a4e9-d05b-4a53-8aad-e37a8b384422`
+      ran the rsync, the `restart app` and all six hit checks (three models × two variants,
+      each `hit` with `rig 7`, `posed 2`, a `poseKey`, `image/webp` and the immutable
+      header) in 25 s, unattended. **Follow-up 9.x, added by `landing-page`, is unblocked
+      by this.**
 - [x] 1.6 The pose audit (D1 step 8), after both passes and `verifyBake`: every
       unlabelled path POSTed to the bake instance's `/api/semantic/poses` in batches of at
       most `POSES_MAX` (imported from `shared/types.ts`, 1024), `/api/semantic/status?fresh=true`
@@ -288,6 +295,18 @@
       locally after the corpus ship). `sourceExists` doing its job, and incidentally the
       proof that the sweep ran to completion. `snapshots/` was excluded by the ship; the
       box rewrote its own snapshot at startup (same name, same 742,314 bytes, new mtime).
+      **Re-shipped 2026-09-15** after the operator added `/Ghoul_3466743/Ghoul.stl` to the
+      corpus and to the index. This is D6's third trigger arriving for real: `pose-cache.json`
+      moved (`46405ea1…` → `7a0f032a…`) while `run-params.json` did not, so the manifest's
+      fingerprint went stale and the next redeploy would have been refused. Checked before
+      shipping the index: **one entry added, none removed, and zero shared entries whose
+      `8v-e20-ev2` front moved** — so no existing render went stale, and the re-bake had
+      nothing to render. Order: index files to `/srv/index` and `restart index`, then the
+      re-bake under `--ship`. The box now holds **3,122 sidecars and 6,244 renders**, its
+      own `check-bake.sh … /srv/index` exits 0 (only the non-fatal `commit:` line prints),
+      and `/Ghoul_3466743/Ghoul.stl` answers `hit` on both variants with the file's mtime
+      matching the sidecar's. It carries no `posed`/`poseKey`: it has no pose-cache entry,
+      so it is one of the 146 settled absences the audit passed, not a re-render.
 - [x] 4.2 Hit checks on the live host, for three models including
       `/Player_Character_Pack_03_3750572/CatfolkRogue.stl` with its recorded mtime:
       `GET /api/thumb?path=<model>&mtime=<mtime>` and the same with `&ao=off` appended
