@@ -2,7 +2,9 @@
 
 ## Purpose
 TBD - created by archiving change url-navigation-state. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: The URL names the committed view
 The client SHALL reflect the committed view in the page URL as query parameters on its single route: the current directory or zip path, whether the flat view is active, what the view is *about* — a committed search query or the model a similarity view was derived from — the options under which a committed query was run, including which search mode produced it, and the open lightbox's model path. Every path the URL carries SHALL be library-relative (see `library`); the library's top is the default view and SHALL be named by omitting the path parameter. The mode SHALL be carried whenever a query is committed, since the same query text under a different mode names a different view over a different corpus. An option SHALL appear only when the view's subject actually reads it: a plain listing names no search options, a name search names no meaning tuning, a meaning search names no kind restriction, and a similarity view — whose subject is a model rather than a phrase — names none of the options a phrase is read under, since none of them selects anything within it. What such a view SHALL name beyond the model is what its own subject reads: the parameters the neighbours were computed under, each carried only when it is not the default, so a view that adjusted nothing is named exactly as it was before they could be adjusted. The URL SHALL describe only views that actually rendered — in-flight navigation targets, failed requests, and superseded responses SHALL NOT reach it. Ephemeral and preference state (the live filter text, the orbit overlay, the ambient-occlusion preference) SHALL stay out of the URL. A stored preference SHALL nonetheless appear in the URL when it determines *which* entries a view contains rather than how they are drawn: search options qualify and are carried, because a shared search that omitted them would reproduce different results for the recipient than the sender saw, whereas the ambient-occlusion preference changes only a model's appearance and stays out. Options carried this way SHALL govern the view named by the URL without overwriting the viewer's own stored preferences.
 
@@ -120,3 +122,27 @@ Every URL the client writes into history SHALL be produced by serializing the co
 - **WHEN** the user searches with the flat toggle off, shares the resulting URL, and the recipient clears the query
 - **THEN** the recipient sees the nested listing — the same listing the sender would see clearing it — because the search's URL recorded the toggle, not the flat shape the search ran in
 
+### Requirement: Stepping updates the model parameter in place
+When the user steps the open lightbox to a sibling model (the *Lightbox steps between
+sibling models* behaviour), the client SHALL update the model URL parameter to name the
+model now on screen, so the address names the model shown and a reload or a shared URL
+reproduces it. The client SHALL make this update in place — replacing the current history
+entry, not pushing a new one — so that a run of steps leaves a single history entry and the
+browser back action still closes the lightbox onto the listing it opened from, rather than
+retracing the steps one model at a time. The update SHALL carry the current history entry's
+state forward, so that the lightbox-as-modal history behaviour (back closes it, forward
+re-opens it) is unaffected by having stepped. The model parameter and the model the lightbox
+displays SHALL never disagree while stepping: the parameter SHALL move with the view in the
+same update, so no step is seen as the model leaving the view.
+
+#### Scenario: The parameter follows the step
+- **WHEN** the user opens a model's lightbox and steps to the next model
+- **THEN** the model URL parameter names the next model, and reloading or sharing that URL opens the lightbox on it
+
+#### Scenario: Stepping adds no history entries
+- **WHEN** the user opens a lightbox and steps through several siblings
+- **THEN** no history entries are added for the steps, and one browser back action closes the lightbox onto the listing it was opened from
+
+#### Scenario: Back still closes a stepped lightbox
+- **WHEN** the user opens a lightbox, steps forward some models, and presses the browser back button
+- **THEN** the lightbox closes onto the unchanged listing and forward re-opens the model that was on screen
