@@ -76,8 +76,10 @@
         removing `goTo`'s snapshot bail ALONE does NOT re-open (App's `navigateSibling` mode
         guard is the load-bearing half for the close case; ViewerLayer's `viewerRef`/`modeRef`
         freeze on unmount) — the close-during-persist cell asserts the D3 OUTCOME and is
-        covered by `closingRef` + the App mode guard, not the bail; the bail is falsifiable
-        only for the second-step-lands-first case
+        falsifiable only through the App mode guard; `closingRef` additionally suppresses the
+        transient neighbour-flash mid-close, which no cell asserts (a close always unmounts,
+        so the flash leaves no end-state to check); the `goTo` bail is falsifiable only for
+        the second-step-lands-first case
 
 ## 4. Land it
 
