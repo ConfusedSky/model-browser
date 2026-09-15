@@ -1,11 +1,11 @@
 ## 1. The bake script
 
-- [ ] 1.1 Lift `findModule`/`findChrome` out of `scripts/encoder-probe.mjs` into
+- [x] 1.1 Lift `findModule`/`findChrome` out of `scripts/encoder-probe.mjs` into
       `scripts/playwright-found.mjs` (one export each, same search: `~/.npm/_npx` for the
       library, `~/.cache/ms-playwright` newest first for the browser); `encoder-probe.mjs`
       imports them. Verify: `node scripts/encoder-probe.mjs` still runs its encoder check
       and prints the same shape of report
-- [ ] 1.2 `scripts/bake-demo.ts`, the exported core (Node APIs only): `verifyBake(cacheDir,
+- [x] 1.2 `scripts/bake-demo.ts`, the exported core (Node APIs only): `verifyBake(cacheDir,
       libraryId, models: {path, mtime}[], recipe: {rig, poseVersion, lighting})` returning
       the per-model misses, the posed/unposed counts and the list of unlabelled paths
       under design D1 step 7 (both renders on disk, both label sets at the model's mtime,
@@ -40,17 +40,26 @@
       complete enumeration, and the two headless generate passes. Per pass the stopping
       rule is D1 step 6's: the chip (`role="status"`) has settled — no Cancel button,
       `BulkJobs.run`'s last patch — the button reads `Generate 0 missing thumbnails`,
-      **and** a relaunch settles at `Generated 0 of 0 in the library`; only then is the
+      **and** a *primed* re-count reads zero (the button cannot be pressed at zero —
+      `SidePanel`'s `libraryOps.map` renders it `disabled={n === null || n === 0}`, so
+      D1 step 6's original "press it once more" was unreachable; the driver runs the
+      launch's pose wave by hand instead, corrected 2026-09-15); only then is the
       `ssao` pill toggled and the tab reopened for the other variant, because
       `renderEntryThumbnail` reads `aoEnabled()` live and an entry in flight at the
       toggle would be filed under the new variant. Verify by a dry run over one kit as
       its own library (`--root <kit dir>`, the index started by the user on that kit, or
-      the whole corpus with a scoped enumeration) — the run ends with both passes at
-      `Generated 0 of 0`, `ps` shows no `server/src/index.ts` on the scratch port
+      the whole corpus with a scoped enumeration) — the run ends with both passes at a primed
+      count of zero, `ps` shows no `server/src/index.ts` on the scratch port
       afterwards, and a `Ctrl-C` mid-pass leaves the port free. Verify the settle wait
       by contriving its absence once: toggle the pill by hand while a pass's chip still
       offers Cancel and confirm the next count for the *first* variant is non-zero — the
       bug the wait exists to close; restore the wait and confirm it reads zero
+      **Code landed 2026-09-15** (`4e037db`): the scratch build, the owned server killed
+      on normal end/throw/SIGINT/SIGTERM, the port refusal, both index checks, the
+      enumeration and both passes under the corrected stopping rule; cells for `parseArgs`,
+      the `cache_dir` compare and the batcher, five of them falsified. **Open**: the live
+      dry run and the contrived settle-wait falsification, which need the GPU and the
+      shared ports — the coordinator's, with the index restarted on `decimated` first.
 - [ ] 1.4 The manifest (D1 step 9) written into `<cache>/<id>/bake/bake.json` after the
       server is stopped; the fingerprint is the SHA-256 of `<--index-cache>/pose-cache.json`
       **and** of `<--index-cache>/run-params.json`, each under its own key
@@ -76,13 +85,21 @@
       control becomes: the file survives, `maintain()` resolves, one warning names it,
       and every sidecar is annotated — 1.7's cell. Never assert that a flat manifest is
       removed at the id level; it is not (design Context, second bullet)
+      **Code and cells landed 2026-09-15** (`35a3b77` the writer and `indexFingerprint`,
+      `4e037db` the `bake/` sweep cell: the manifest survives `maintain()` and both
+      sidecars annotate afterwards). The flat-manifest control is 1.7's landed cell in
+      `server/test/cache.test.ts`, not duplicated here. **Open**: the live "manifest
+      survives a restart" check, after the bake of 3.2.
 - [ ] 1.5 `--ship <user@host> --ship-dir <box id dir>` (D5): runs the rsync, `ssh <host>
       'cd /opt/model-browser && docker compose -f deploy/demo/compose.yaml restart app'`,
       then the two hit checks of 4.2 against `https://models.masamaeda.com` for the first
       three enumerated models; without the flag, prints the same three commands. Verify:
       without the flag the printed rsync names both ids and excludes `snapshots/`; the
       flag's path is exercised in 4.1
-- [ ] 1.6 The pose audit (D1 step 8), after both passes and `verifyBake`: every
+      **Code landed 2026-09-15** (`4e037db`): `--ship`/`--ship-dir` run the rsync, the
+      restart and 4.2's hit checks; without the flag the three commands print. **Open**:
+      the printed-path check and the flag's path, both exercised live in 4.1.
+- [x] 1.6 The pose audit (D1 step 8), after both passes and `verifyBake`: every
       unlabelled path POSTed to the bake instance's `/api/semantic/poses` in batches of at
       most `POSES_MAX` (imported from `shared/types.ts`, 1024), `/api/semantic/status?fresh=true`
       read `ready` before the first batch and after the last (a `null` filed under an
@@ -97,7 +114,7 @@
       the two answers merge. Falsify: make `auditUnposed` read `answer[p] === undefined`
       as settled (the `??`/`!==` confusion `enumerate`'s comment warns about) → the
       absent-path cell fails
-- [ ] 1.7 The guard in `maintain` (`server/src/cache.ts`, design D2): in the loop over
+- [x] 1.7 The guard in `maintain` (`server/src/cache.ts`, design D2): in the loop over
       the id directory's `*.json`, a parsed object whose `path` is not a string is
       skipped with one `console.warn` naming the file, before `sourceExists` is asked and
       before it can join the cap pass. Cell in `server/test/cache.test.ts`, beside its
@@ -115,7 +132,7 @@
 
 ## 2. The pin check
 
-- [ ] 2.1 `deploy/demo/check-bake.sh <manifest> [<index dir>]` (D2): POSIX sh; the two
+- [x] 2.1 `deploy/demo/check-bake.sh <manifest> [<index dir>]` (D2): POSIX sh; the two
       source extractions with the exactly-one-line guard; the four manifest reads by
       line (`"rig"`, `"poseVersion"`, `"poseCacheSha256"`, `"runParamsSha256"`) with the
       same exactly-one-line guard; the two `sha256sum` compares when an index directory
@@ -149,7 +166,10 @@
       as its last step (D1 step 10) and fails the bake on a non-zero exit. Verify: a bake
       run with `POSE_VERSION` edited to `3` in the working tree after the build but before
       the check (a contrived tree, restored after) fails at the check naming `poseVersion`
-- [ ] 2.3 `deploy/demo/README.md` §6: the redeploy line becomes `git pull && sh
+      **Code landed 2026-09-15** (`4e037db`): the check is the last step and a non-zero
+      exit fails the bake. **Open**: the contrived `POSE_VERSION = 3` run, the
+      coordinator's.
+- [x] 2.3 `deploy/demo/README.md` §6: the redeploy line becomes `git pull && sh
       deploy/demo/check-bake.sh /srv/cache/<id>/bake/bake.json /srv/index && docker
       compose … up -d --build`, with two sentences: what the refusal means (the build
       does not start, the stack keeps serving) and what to do (re-bake, §7); **the
@@ -157,7 +177,7 @@
       deploy/demo/check-bake.sh … && docker compose … up -d --build` — and the rollback
       paragraph says a rollback across a bump is refused the same way and needs that
       revision's bake. §4's first deploy says why it runs without the check
-- [ ] 2.4 `docs/platform-surface.md`: the latent-POSIX-assumptions bullet names the bake
+- [x] 2.4 `docs/platform-surface.md`: the latent-POSIX-assumptions bullet names the bake
       and the check — `sh`, `grep`, `sed`, `sha256sum`, `rsync`, `ssh`, a Playwright
       Chromium found under `~/.cache/ms-playwright` — as developer-machine and box
       assumptions, Linux only as everything else there is
@@ -181,7 +201,7 @@
       dir beside the library id the bake instance logs — that id does **not** exist yet
       (`decimated/` carries no `.model-browser/`, so the bake mints it on first start;
       `5358d071-…` is `clustered-hq`'s, not it)
-- [ ] 3.2 The run: both passes settled at `Generated 0 of 0`, `verifyBake` clean, the
+- [ ] 3.2 The run: both passes settled at a primed count of zero, `verifyBake` clean, the
       pose audit passing (every unlabelled path present-and-`null` — record the count
       here; the pre-script run's 145 per variant passed it by hand, D-cost), manifest
       written, `check-bake.sh` passing. **Record here, and in design D-cost**:
@@ -193,7 +213,7 @@
       baked directory is kept at `~/.cache/model-browser-bake/2026-09-14/cache/<local id>/`, with the ad-hoc driver (`bake.mjs`, `dryrun.mjs`), its config and its log beside it, until the script's own run reproduces it and ships; the driver is the script's precedent, not its shape)* The dry run of the same day for scale: 15 renders at 9.6/s off and
       9.2/s on, every sidecar `rig: 7`, `posed: 2`, `poseKey` present. **What must
       reproduce is structural, not the rate**: 3,121 sidecars, 6,242 WebP, both passes
-      settled at `Generated 0 of 0`, every sidecar `rig: 7` and `lighting: camera`, 2,976
+      settled at a primed count of zero, every sidecar `rig: 7` and `lighting: camera`, 2,976
       posed with a `poseKey` and 145 settled-null per variant, zero failures. The rates
       will differ — decimated's meshes are the larger of the two trees on this corpus and
       mesh load shares the render queue
@@ -244,7 +264,7 @@
 
 ## 5. Records
 
-- [ ] 5.1 `deploy/demo/README.md` §7 rewritten around the script: the command with its
+- [x] 5.1 `deploy/demo/README.md` §7 rewritten around the script: the command with its
       arguments, the index precondition (root at `decimated`, `--no-volume`, the
       `cache_dir` the script cross-checks), what ships and what does not (D4), the
       restart and why (D3), the manifest's location and why it is in `bake/` (and what a
@@ -256,7 +276,7 @@
       the top and item 8's "bake both" line updated with the date, the figures from 3.2
       and 4.3, and a pointer to this change; the Decided table's bake row, if it has one,
       names the manifest and the check
-- [ ] 5.3 CLAUDE.md, under Testing's cache bullet: `bake/` under the id directory is the
+- [x] 5.3 CLAUDE.md, under Testing's cache bullet: `bake/` under the id directory is the
       manifest's home; a `*.json` at the cache top is removed by the legacy sweep, and one
       at the id level with no `path` is skipped with a warning since 1.7 (before it, the
       startup sweep threw on it silently and left every later sidecar unremembered)

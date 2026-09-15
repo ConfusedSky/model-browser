@@ -385,8 +385,9 @@ tree the box serves, §3.2), `--cache` a scratch directory that is not
 index was started on. The script builds the client to a scratch directory (never
 `client/dist`, which the dev instance on 3177 serves), starts its own server on
 `--port` with writes and maintenance on, drives *Generate* in a headless Chromium
-twice — once per occlusion pill state, each pass settled at `Generated 0 of 0`
-before the pill is toggled — verifies every sidecar and both renders on disk
+twice — once per occlusion pill state, each pass settled and then re-counted with
+the poses primed, at zero, before the pill is toggled — verifies every sidecar and
+both renders on disk
 against the enumeration, audits every unposed render against the index, writes
 the manifest, runs the check below on it, and prints the ship commands (or runs
 them under `--ship`). Its server is killed on every exit path, so a `Ctrl-C`

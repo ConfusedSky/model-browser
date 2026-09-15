@@ -247,14 +247,27 @@ The run, in order; each step's failure stops the run with the server killed:
    `library` tab (`[role="tab"]` with text `library`), reads the `Generate N missing
    thumbnails` button, presses it, and polls — reopening the tab between polls, since
    the count re-derives on open and on job end. **A pass is over when two things hold:
-   the job is settled and a relaunch derives nothing.** Settled is read off the chip
-   (`role="status"` with no Cancel button; `BulkJobs.run`'s last patch sets `phase:
-   'done'` and `settled: true` together) — not off the count, which reads zero while
-   the last entries are still in flight. Then the button is pressed once more: a
-   launch runs the full pose wave that a count does not (`needsPose`), so a work list
-   of zero from a *launch* — the chip settling at `Generated 0 of 0 in the library`
-   (`JobChip`'s `sentence`, the `done` case, no Cancel offered) — is the stopping
-   rule; a count of zero alone is not. Only after that is the
+   the job is settled and a *primed* count derives nothing.** Settled is read off the
+   chip (`role="status"` with no Cancel button; `BulkJobs.run`'s last patch sets
+   `phase: 'done'` and `settled: true` together) — not off the count, which reads zero
+   while the last entries are still in flight.
+   **Corrected 2026-09-15, against the DOM (W4's check-in, verified by the
+   coordinator):** this step used to say the button is pressed once more and the
+   stopping rule is a *launch* settling at `Generated 0 of 0 in the library`. That
+   press is impossible — `SidePanel`'s `libraryOps.map` renders the button
+   `disabled={n === null || n === 0}`, and Chromium fires no click on a disabled
+   control, so no launch can ever derive zero. What the relaunch was wanted for was
+   never the launch: it was the **pose wave**, which `BulkJobs.enumerate` runs for a
+   `generate` purpose and skips for a `count` (`needsPose`), and without which a model
+   whose pose has not landed is judged `current` and its work hidden. So the driver
+   runs that wave by hand: at a settled count of zero it enumerates `/api/models`,
+   POSTs every entry with `pose === undefined` to `/api/semantic/poses` in `POSES_MAX`
+   batches — the route records what it answers through `layers.recordPoses`, and the
+   listing's `annotate` reads it back through `layers.poseFor`, so the next
+   enumeration carries the poses a launch would have fetched — and reopens the tab.
+   **Zero from that primed count is the stopping rule; a bare count of zero is not.**
+   If the primed count reads more than zero, the button is enabled again and the pass
+   continues. Only after the primed zero is the
    `ssao` pill toggled, the tab reopened, and the same done for the other variant. The
    order matters because `renderEntryThumbnail` reads `aoEnabled()` live: a pill
    toggled with an entry in flight files that entry under the new variant and
@@ -425,7 +438,12 @@ the check would not refuse it. There is no override flag — the two ways past a
 re-bake (the answer) or leaving the check off the line (visible in the shell history,
 and the README says what it costs). §4's first deploy runs without the check, because
 it precedes the bake by construction (the id directory does not exist until the app
-has written the marker, `demo-infrastructure` D4).
+has written the marker, `demo-infrastructure` D4). **So does the one redeploy that
+moves `root`** (recorded 2026-09-15 from W5's check-in): the box mints a new id on
+that start, no manifest can exist under it yet, and the check would refuse with `no
+bake manifest` — refusing the very deploy the bake depends on. The exemption is
+scoped to the *absent id directory*, never to a check that answered no; it is §4's
+reason arriving on §6's line, and the README says so on both.
 
 **The commit is recorded, the versions are enforced.** A redeploy whose commit differs
 from the bake's at equal versions proceeds: CLAUDE.md routes every pixel change through
