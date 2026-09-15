@@ -86,6 +86,18 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   **partially staged** file has only its index blob formatted (`update-index --cacheinfo`),
   working tree untouched, so an unstaged hunk is never swept into the commit — which is
   what makes it safe with parallel sessions in this tree
+- `jean.json` - Jean's per-project automation. `scripts.setup` runs when Jean creates a
+  worktree (`bun install && bun run hooks:install`), under `bash`, and a failure is
+  **non-fatal**: the worktree still comes up `ready` and only a toast says otherwise, so
+  read the setup output rather than trusting that the worktree is provisioned. The
+  schema is `{scripts:{setup,run},ports}`; `run` is left null, so Jean's Run button
+  reports "No run script configured in jean.json" by design. What a fresh worktree is
+  actually missing is `node_modules` (gitignored, per-directory, ~0.3 s to restore) —
+  **not** the hooks path: `core.hooksPath` lives in the shared `.git/config`, and the
+  relative `.githooks` resolves against each worktree's own top level, so the pre-commit
+  hook already fires in a new worktree with no dependencies installed at all (Prettier
+  comes from `bunx`, not from `node_modules`). `hooks:install` stays in the setup line
+  only because it is idempotent and covers a fresh *clone*
 - `scripts/spec-diff.sh [change | capability change [requirement]]` - diff delta specs
   vs main specs (no args = all active changes; prints `new spec <path>` for new capabilities)
 - `openspec validate <name>` takes the change name positionally (`--change` works on

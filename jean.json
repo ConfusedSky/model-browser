@@ -1,0 +1,6 @@
+{
+  "scripts": {
+    "setup": "bun install && bun run hooks:install",
+    "run": null
+  }
+}
