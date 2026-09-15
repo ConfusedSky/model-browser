@@ -42,10 +42,14 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   line `library <id> at <top>` names the top actually resolved — read it
 - Semantic search needs a second server, not started by `bun run dev` (its collection root
   must lie inside the library, or the index covers nothing):
-  `cd <mini-classify checkout> && .venv/bin/python serve_api.py --cache-dir <cache> --port 8077`
-  — the checkout location and which embedding cache holds which collection are
-  machine-specific, so they live outside the repo; ask the running server's `/status`
-  which cache and root it loaded rather than assuming. It answers `/status` at once with
+  `cd <mini-classify checkout> && .venv/bin/python serve_api.py [<collection root>] --cache-dir <cache> [--no-volume] --port 8077`
+  — the positional root overrides the one recorded in the cache's `run-params.json`
+  (the demo corpus was embedded from `miniatures/deduplicated`; serving it for
+  `clustered-hq`, as the box does, needs the positional root, and `--no-volume` serves
+  poses from the records without reading files). The checkout location and which
+  embedding cache holds which collection are machine-specific, so they live outside the
+  repo; ask the running server's `/status` which cache and root it loaded rather than
+  assuming. It answers `/status` at once with
   `ready:false` and 503s queries for ~16s while SigLIP loads, so a connection refusal
   means not started, not warming — and a server that *stays* `ready:false` with a
   `CacheUnusable` failure was started against a cache with no embeddings, which is a

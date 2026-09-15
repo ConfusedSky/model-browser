@@ -177,8 +177,7 @@
       442 s, 8.6 and 7.0 renders/s, zero failures, 3,121 sidecars / 6,242 WebP / 32.3 MB
       of images, 33 MB with sidecars by bytes, 56 MB by `du`; 2,976 posed and keyed per
       variant, 145 settled-null unlabelled — asked of `/poses` directly, all `null`; the
-      baked directory is kept at the scratch path until the script's own run reproduces
-      it and ships.)* The dry run of the same day for scale: 15 renders at 9.6/s off and
+      baked directory is kept at `~/.cache/model-browser-bake/2026-09-14/cache/<local id>/`, with the ad-hoc driver (`bake.mjs`, `dryrun.mjs`), its config and its log beside it, until the script's own run reproduces it and ships; the driver is the script's precedent, not its shape)* The dry run of the same day for scale: 15 renders at 9.6/s off and
       9.2/s on, every sidecar `rig: 7`, `posed: 2`, `poseKey` present
 
 ## 4. Ship and verify (live)
