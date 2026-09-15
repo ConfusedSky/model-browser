@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Format staged files with Prettier, then re-stage them.
+#
+# A file that is staged in full is formatted in the working tree and re-added.
+# A file that is only partially staged keeps its working tree untouched: only
+# the blob recorded in the index is formatted, so an unstaged hunk is never
+# swept into the commit. Several sessions edit this tree at once, which makes
+# that distinction load-bearing.
+set -euo pipefail
+
+PRETTIER=(bunx prettier@3.8.3 --log-level warn)
+
+mapfile -d '' staged < <(git diff --cached --name-only --diff-filter=ACMR -z)
+[ "${#staged[@]}" -eq 0 ] && exit 0
+
+clean=()
+partial=()
+for f in "${staged[@]}"; do
+  case "$f" in
+    *.ts | *.tsx | *.css | *.json) ;;
+    *) continue ;;
+  esac
+  if git diff --quiet -- "$f"; then
+    clean+=("$f")
+  else
+    partial+=("$f")
+  fi
+done
+
+if [ "${#clean[@]}" -gt 0 ]; then
+  # Twice: Prettier is not idempotent on every input. Some files in this repo
+  # reach a stable form only on the second pass, and a single pass would commit
+  # a file that "bun run format:check" then rejects.
+  "${PRETTIER[@]}" --write -- "${clean[@]}"
+  "${PRETTIER[@]}" --write -- "${clean[@]}"
+  git add -- "${clean[@]}"
+  printf 'prettier: formatted and re-staged %d file(s)\n' "${#clean[@]}"
+fi
+
+if [ "${#partial[@]}" -gt 0 ]; then
+  tmp="$(git rev-parse --git-dir)/prettier-precommit.tmp"
+  for f in "${partial[@]}"; do
+    mode="$(git ls-files --stage -- "$f" | awk '{print $1}')"
+    git cat-file blob ":$f" \
+      | "${PRETTIER[@]}" --stdin-filepath "$f" \
+      | "${PRETTIER[@]}" --stdin-filepath "$f" > "$tmp"
+    hash="$(git hash-object -w -- "$tmp")"
+    git update-index --cacheinfo "$mode,$hash,$f"
+    printf 'prettier: formatted staged copy of %s (working tree left alone)\n' "$f"
+  done
+  rm -f "$tmp"
+fi

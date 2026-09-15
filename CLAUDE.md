@@ -71,6 +71,21 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   configured (this machine: chooser → the dotfiles rofi `open-with` script). Read once
   at server start — restart after editing. `/api/open` launches GUI apps, so the
   server needs the user session env (a terminal-started `bun run dev` has it)
+- `bun run format` / `bun run format:check` - Prettier over `**/*.{ts,tsx,css,json}`
+  (`.prettierignore` drops `dist/`, the demo cache and the frame-ab output; markdown is
+  left alone on purpose, since reflowing wraps the spec prose the whitespace-collapsed
+  grep habit depends on). Prettier is **pinned in the command** (`bunx prettier@3.8.3`),
+  not installed as a dependency — an unpinned `bunx prettier` reformats the tree on the
+  next major. **Prettier is not idempotent here**: a handful of files (`apiClient.test.ts`
+  among them) reach a stable form only on the second pass, so both the script and the hook
+  run `--write` twice; one pass commits a file that `format:check` then rejects
+- Pre-commit formatting lives in `.githooks/pre-commit`, tracked, and is **off until each
+  clone runs `bun run hooks:install`** (`git config core.hooksPath .githooks`) — hooks are
+  local config, so a fresh clone or a new worktree silently has none. It formats only
+  *staged* files. A file staged in full is formatted in the working tree and re-added; a
+  **partially staged** file has only its index blob formatted (`update-index --cacheinfo`),
+  working tree untouched, so an unstaged hunk is never swept into the commit — which is
+  what makes it safe with parallel sessions in this tree
 - `scripts/spec-diff.sh [change | capability change [requirement]]` - diff delta specs
   vs main specs (no args = all active changes; prints `new spec <path>` for new capabilities)
 - `openspec validate <name>` takes the change name positionally (`--change` works on

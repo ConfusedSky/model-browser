@@ -12,6 +12,9 @@
     "dev": "bun run --filter '*' dev",
     "dev:demo": "MODEL_BROWSER_CONFIG=$PWD/deploy/demo/config.json MODEL_BROWSER_ROOT=${MODEL_BROWSER_ROOT:-$HOME/Documents/tests/test-models/miniatures/decimated} bun run --filter '*' dev",
     "test": "bun run --filter '*' test",
-    "typecheck": "bun run --filter '*' typecheck"
+    "typecheck": "bun run --filter '*' typecheck",
+    "format": "bunx prettier@3.8.3 --write \"**/*.{ts,tsx,css,json}\"",
+    "format:check": "bunx prettier@3.8.3 --check \"**/*.{ts,tsx,css,json}\"",
+    "hooks:install": "git config core.hooksPath .githooks"
   }
 }
