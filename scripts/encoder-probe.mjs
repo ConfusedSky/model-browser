@@ -29,40 +29,9 @@
  * Re-run it when the encoder, its quality, `THUMB_SIZE` or `RIG_VERSION`
  * change; it gates nothing, so nothing runs it for you.
  */
-import { existsSync, readdirSync } from 'node:fs'
-import { join } from 'node:path'
-import { homedir } from 'node:os'
-
-/**
- * Playwright is deliberately not a dependency of this repo — that it is not is
- * half of what 3.1b decided — so both halves of it are found rather than
- * installed: the library from whatever copy `npx` has already downloaded, and
- * the browser from Playwright's own cache, newest first.
- */
-function findModule() {
-  const npx = join(homedir(), '.npm/_npx')
-  if (!existsSync(npx)) return null
-  for (const dir of readdirSync(npx)) {
-    const entry = join(npx, dir, 'node_modules/playwright-core/index.mjs')
-    if (existsSync(entry)) return entry
-  }
-  return null
-}
-
-function findChrome() {
-  const cache = join(homedir(), '.cache/ms-playwright')
-  if (!existsSync(cache)) return null
-  const builds = readdirSync(cache)
-    .filter((d) => d.startsWith('chromium-'))
-    .sort((a, b) => Number(b.split('-')[1]) - Number(a.split('-')[1]))
-  for (const build of builds) {
-    for (const layout of ['chrome-linux64/chrome', 'chrome-linux/chrome', 'chrome-mac/Chromium.app/Contents/MacOS/Chromium']) {
-      const bin = join(cache, build, layout)
-      if (existsSync(bin)) return bin
-    }
-  }
-  return null
-}
+// Playwright is found, never installed (`playwright-found.mjs` says where and
+// why); what to do when it is absent stays here.
+import { findChrome, findModule } from './playwright-found.mjs'
 
 const url = process.argv.includes('--url')
   ? process.argv[process.argv.indexOf('--url') + 1]
