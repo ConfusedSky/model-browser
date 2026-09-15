@@ -17,14 +17,17 @@ import type {
   LibraryState,
   OrbitAxis,
 } from '../../shared/types'
+import { EXAMPLE_QUERIES } from '../../shared/exampleQueries'
 import { HttpApiClient, HttpError, type ApiClient } from './api/client'
 import { withLocalFramings } from './api/localFramings'
 import EntryMenu from './components/EntryMenu'
 import FindBar from './components/FindBar'
 import Grid from './components/Grid'
+import IntroBanner from './components/IntroBanner'
 import JobChip from './components/JobChip'
 import SidePanel from './components/SidePanel'
 import PathBar from './components/PathBar'
+import { useCyclingPlaceholder } from './hooks/useCyclingPlaceholder'
 import { SKELETON_DELAY_MS, useDelayedFlag } from './hooks/useDelayedFlag'
 import { useThumbnails, type ThumbState } from './hooks/useThumbnails'
 import { BulkJobs, useBulkJobState, type JobOperation } from './jobs/bulkJobs'
@@ -51,12 +54,15 @@ import {
 } from './lib/entryActions'
 import { GestureTracker } from './lib/gesture'
 import { createHoverWarmer } from './lib/hover'
+import { ABOUT_URL, introDismissedStore, pickExample } from './lib/intro'
 import { fitSquareBox, type Box } from './lib/layout'
 import { applyIn, findTile, measureIn, resolvePlacement, type PlacementRequest } from './lib/placement'
 import { pushRecent } from './lib/recents'
 import { scaleOf } from './lib/scoreScale'
 import {
+  applySessionSearchMode,
   folderMatchingEnabled,
+  hasStoredSearchMode,
   searchKinds,
   searchMode,
   searchTuning,
@@ -98,6 +104,7 @@ import {
   labelInputs,
   landedListing,
   liveView,
+  meaningRunnableAt,
   noticeKinds,
   pendingRequest,
 } from './state/selectors'
@@ -726,6 +733,27 @@ export default function App() {
    * job, and a client that ignored this would lose UX, never gain access.
    */
   const [features, setFeatures] = useState<FeatureReport | null>(null)
+  /**
+   * Whether this browser has dismissed the visitor introduction
+   * (`landing-page` D7). Read once into component state — the `SidePanel`
+   * `collapsed` pattern — rather than into a module closure, so a test's
+   * `localStorage.clear()` between cells actually resets it.
+   *
+   * A write that fails leaves this `true` anyway: the banner is gone for the
+   * page's lifetime and back on the next load, which is the spec's answer for
+   * storage that cannot be written — never an error.
+   */
+  const [introDismissed, setIntroDismissed] = useState(() => introDismissedStore.read())
+  /**
+   * Whether the boot URL named a mode. Captured at mount, because the starting
+   * mode rule must not read it again after the first navigation has rewritten
+   * the address bar: a URL that carries `mode` governs its own view, and only
+   * a URL that named none leaves a start to make (D5).
+   */
+  const bootHadModeRef = useRef(parseUrl().mode !== undefined)
+  /** The starting mode fires once per page. Once this is set the rule never
+   *  runs again, whatever the report or the index do afterwards. */
+  const introModeApplied = useRef(false)
   /**
    * The library tab's "Reset N framings", moved by the user's own hand: the
    * running sum of how many models became or stopped being resettable through
@@ -1930,6 +1958,22 @@ export default function App() {
   }
 
   /**
+   * Run a phrase the introduction supplied — an example query's chip, or the
+   * surprise action (`landing-page` D4). `setSearchMode` and not
+   * `applySessionSearchMode`: clicking a chip *is* the visitor choosing meaning
+   * mode, so it persists exactly as the mode radio does, and the starting-mode
+   * rule that leaves the key unset has nothing to do with it.
+   *
+   * `commit` and not `dispatch`, so the search owns the URL and enters history
+   * as any submitted one does — which is what makes Back from a chip's results
+   * return to the top the visitor clicked from.
+   */
+  function runQuery(text: string): void {
+    setSearchMode('meaning')
+    commit({ type: 'runQuery', text, mode: 'meaning' })
+  }
+
+  /**
    * Tuning shapes what the index returns, so changing it with a meaning query
    * committed re-runs that query — the same rule the mode and folder matching
    * follow. Trying a parameter is the point, and a setting that only applied to
@@ -2109,6 +2153,39 @@ export default function App() {
       alive = false
     }
   }, [api, features, state.view.path])
+
+  /**
+   * The introduction's starting mode (`landing-page` D5), applied once per page
+   * on the first render where every condition holds at the same time: a known
+   * report declaring the introduction offered, an index that can actually
+   * answer at the library's top, no stored choice, no mode in the boot URL, and
+   * nothing committed.
+   *
+   * Every clause earns its place. The index, because meaning mode is not
+   * selectable while the index cannot answer (`semantic-search`) and a start is
+   * a selection — so this cannot fire and then sit in a mode that refuses.
+   * Nothing committed, because `'setMode'` re-asks a committed query: a report
+   * or an index arriving after the visitor already searched by name would
+   * otherwise re-run their search against the index behind them.
+   *
+   * `applySessionSearchMode` **and** the dispatch, because they answer
+   * different questions: the closure is what `ownPrefs()` re-seeds from on
+   * every folder click, and the view is what this screen reads. The store is
+   * left alone — a browser that never chose keeps following the deployment.
+   * `dispatch` and not `commit`, matching what the action does here: with
+   * nothing committed `'setMode'` is a fetchless patch, and the projection
+   * writes what it patched.
+   */
+  useEffect(() => {
+    if (introModeApplied.current) return
+    if (features?.intro !== true) return
+    if (!meaningRunnableAt(state.index, '/')) return
+    if (hasStoredSearchMode() || bootHadModeRef.current) return
+    if (liveView(state).subject.kind !== 'none') return
+    introModeApplied.current = true
+    applySessionSearchMode('meaning')
+    dispatch({ type: 'setMode', mode: 'meaning' })
+  }, [dispatch, features, state])
 
   /**
    * Read the platform registry into the session's held report — the whole of
@@ -3273,6 +3350,50 @@ export default function App() {
         ? { text: error, tone: 'error' }
         : null)
 
+  /**
+   * The visitor introduction (`landing-page` D3). `features?.intro === true` and
+   * nothing looser: an unknown report, a failed read and a report declaring it
+   * off all withhold, as every gated surface is withheld.
+   */
+  const introOffered = features?.intro === true
+  /** Whether a meaning search would run at the library's top — what the banner's
+   *  chips and the header's surprise action are gated on. The top and not the
+   *  current path: that is where a chip's search runs. */
+  const introSearchable = meaningRunnableAt(state.index, '/')
+  /**
+   * The banner is the library's top with nothing committed — the top's shortest
+   * URL (`url-navigation`) — so a deep link into a folder or a search lands on
+   * what it names. The *committed* view, not the live one: a banner that
+   * vanished the instant a chip was clicked, before its results arrived, would
+   * be a flicker.
+   */
+  const atTop =
+    state.view.path === '/' && state.view.subject.kind === 'none' && !state.view.flat
+  const bannerDrawn = introOffered && !introDismissed && atTop
+  /**
+   * The example in the search box, for a visitor the banner no longer reaches
+   * (D6). Withheld while the banner is drawn — it is already showing the same
+   * phrases — and while anything would make the typed example fail to find what
+   * it names: name mode, an index that cannot answer *here*, or a draft the
+   * placeholder is not visible behind anyway.
+   */
+  const placeholderExample = useCyclingPlaceholder(
+    EXAMPLE_QUERIES,
+    introOffered &&
+      !bannerDrawn &&
+      state.view.mode === 'meaning' &&
+      meaningRunnableAt(state.index, state.view.path) &&
+      state.drafts.queryText === '',
+  )
+
+  /** Dismissal records the choice and hides the banner. The write first, the
+   *  state whatever the write did: `stored` never throws, and a browser that
+   *  refuses storage still gets the banner gone for this page's lifetime. */
+  function dismissIntro(): void {
+    introDismissedStore.write(true)
+    setIntroDismissed(true)
+  }
+
   return (
     <div className="flex h-screen flex-col bg-zinc-950 text-zinc-100">
       {/* A block header around a flex row, so the transient line below can grow
@@ -3304,7 +3425,9 @@ export default function App() {
             onKeyDown={(e) => {
               if (e.key === 'Enter') submitSearch()
             }}
-            placeholder="Search names and folders…"
+            placeholder={placeholderExample ?? 'Search names and folders…'}
+            // Never the placeholder: the accessible name must not change under
+            // a screen reader while the visible hint cycles (D6).
             aria-label="Search names and folders"
             spellCheck={false}
             className="w-64 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-500"
@@ -3331,6 +3454,27 @@ export default function App() {
           >
             Flat
           </button>
+          {/* What the banner offered, after it is gone (`landing-page` D3): the
+              header is the one chrome that never scrolls, so About stays one
+              click away for the whole visit. Drawn whenever the introduction is
+              offered, dismissed or not — the banner's own links are the same
+              addresses, and a reader who has not dismissed it loses nothing by
+              seeing both. The surprise action joins it only where a meaning
+              search would actually run, as on the banner. */}
+          {introOffered && (
+            <a href={ABOUT_URL} className="ml-auto text-xs text-zinc-400 hover:text-zinc-200">
+              About
+            </a>
+          )}
+          {introOffered && introSearchable && (
+            <button
+              type="button"
+              onClick={() => runQuery(pickExample(EXAMPLE_QUERIES))}
+              className="text-xs text-zinc-400 hover:text-zinc-200"
+            >
+              Surprise me
+            </button>
+          )}
         </div>
         {headerMessage !== null && (
           <p
@@ -3342,6 +3486,20 @@ export default function App() {
           </p>
         )}
       </header>
+      {/* Between the header and the row, which is to say **outside** `<main>`
+          (D3): the strip spans the side panel too, it does not scroll with the
+          grid, and — the part a cell asserts — the grid's height is the same
+          whether the listing is in flight or rendered, because the banner is
+          not in the branch that swaps them. */}
+      {bannerDrawn && (
+        <IntroBanner
+          queries={EXAMPLE_QUERIES}
+          meaningRunnable={introSearchable}
+          onRun={runQuery}
+          onSurprise={() => runQuery(pickExample(EXAMPLE_QUERIES))}
+          onDismiss={dismissIntro}
+        />
+      )}
       <div className="flex min-h-0 flex-1">
         {/* `scrollbar-gutter: stable` keeps the gutter reserved whether or not
             this scrolls. Without it a listing that fits and one that does not

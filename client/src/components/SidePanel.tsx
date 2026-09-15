@@ -9,7 +9,7 @@ import type { JobOperation } from '../jobs/bulkJobs'
 import type { SearchKinds, SearchMode, Tuning } from '../lib/searchOptions'
 import { clampCount, POOLS, TUNING_DEFAULTS } from '../lib/searchOptions'
 import { stored } from '../lib/stored'
-import { indexCovers } from '../state/selectors'
+import { meaningRunnableAt } from '../state/selectors'
 
 /** Predates the tab host, and kept: renaming it would drop every profile's state. */
 const COLLAPSE_KEY = 'model-browser:chat-collapsed'
@@ -518,11 +518,12 @@ export default function SidePanel({
 
   // Ready is necessary and not sufficient: the index covers one collection and
   // no archive interiors, so offering the mode elsewhere promises an answer the
-  // server will refuse. The in-range rule is `indexCovers` and not a copy of it
-  // — the find-similar command asks the same question of a model's path, and two
+  // server will refuse. The rule is `meaningRunnableAt` and not a copy of it
+  // — the find-similar command asks the same question of a model's path and the
+  // introduction's example queries ask it of the library's top, and two
   // affordances over one index disagreeing about what it covers is the drift
   // that produces a menu item and a mode button contradicting each other.
-  const meaningRunnable = index.state === 'ready' && indexCovers(index, path)
+  const meaningRunnable = meaningRunnableAt(index, path)
   // The mode control is offered when meaning could run — and whenever meaning
   // is *in force*, however it got there, because a mode you cannot see and
   // cannot leave is a trap: a link can put this app in meaning mode on a

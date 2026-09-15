@@ -68,6 +68,39 @@ export function setSearchMode(next: SearchMode): void {
 }
 
 /**
+ * Whether this browser has ever *chosen* a mode, as opposed to taking the
+ * default. `modeStore.read()` cannot answer it — an unset key and a stored
+ * `name` both read as `'name'` — so the raw key is what is asked, inside the
+ * same never-throw guard `stored` uses: a browser that refuses storage has
+ * chosen nothing.
+ *
+ * The visitor introduction's starting mode reads this (`landing-page` D5): a
+ * stored choice is never overridden, and "never chose" is the only state the
+ * deployment's own default may fill.
+ */
+export function hasStoredSearchMode(): boolean {
+  try {
+    return localStorage.getItem(MODE_KEY) !== null
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Put a mode in force for this page **without** recording it as a choice.
+ *
+ * The closure and not the view, because `ownPrefs()` reads this closure on
+ * every `navigate` — a mode set only in the view would revert on the first
+ * folder click. No `modeStore.write`, because the deployment chose it and not
+ * the visitor: leaving the key unset is what lets a browser that never chose go
+ * on following the deployment, and lets a later radio click be the first real
+ * choice (`landing-page` D5).
+ */
+export function applySessionSearchMode(next: SearchMode): void {
+  mode = next
+}
+
+/**
  * How a meaning query is shaped. Sticky like every other option that decides
  * which entries a view contains — and carried in the URL for the same reason:
  * the first thing anyone does after finding a setting that works is send

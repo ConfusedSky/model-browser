@@ -174,6 +174,25 @@ export function indexCovers(index: IndexAvailability | null, path: string): bool
 }
 
 /**
+ * Whether a meaning search would actually run here: the index is up **and** it
+ * covers this path. Ready is necessary and not sufficient — the index covers one
+ * collection and no archive interiors — which is why the two halves are one
+ * function rather than a pair of conditions each caller re-spells.
+ *
+ * Lifted out of `SidePanel`, which owned the rule, because the visitor
+ * introduction asks it too (`landing-page` D3): the mode control and the
+ * banner's example queries are two affordances over one index, and two copies
+ * of this would eventually disagree about what it covers.
+ *
+ * `null` is accepted so a caller holding the raw `state.index` can pass it
+ * straight through — an unknown index cannot answer, which is the same "no"
+ * an absent one gives.
+ */
+export function meaningRunnableAt(index: IndexAvailability | null, path: string): boolean {
+  return index !== null && index.state === 'ready' && indexCovers(index, path)
+}
+
+/**
  * Everything the results label is built from, all of it from the answer.
  *
  * The subject rather than a query string: the label reads it to say what the

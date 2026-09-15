@@ -202,6 +202,15 @@ export type Action =
   | { type: 'navigate'; path: string; prefs: Prefs }
   /** Commit `drafts.queryText`. The corpus decides what that means. */
   | { type: 'submit' }
+  /**
+   * Run a phrase the app supplied rather than one the user typed — the
+   * introduction's example queries and its surprise action (`landing-page` D4).
+   * One transition, because "set the draft, then submit" is two dispatches
+   * across a render and would need a pending ref and an effect to join them.
+   * The mode travels with it for the same reason: a chip is a meaning search,
+   * and a `setMode` dispatched beside a `submit` would be a second transition.
+   */
+  | { type: 'runQuery'; text: string; mode: SearchMode }
   | { type: 'toggleFlat' }
   | { type: 'setMode'; mode: SearchMode }
   /** `run: false` records a value the debounce is still holding; `run: true`
@@ -412,6 +421,21 @@ function askCommitted(state: SearchState, view: View, source: Source): SearchSta
 }
 
 /**
+ * Commit whatever the draft holds, of whichever corpus owns it — the whole of
+ * `'submit'`, and the tail of `'runQuery'` (`landing-page` D4). A shared
+ * function rather than a copied body: the blank guard and the subject it builds
+ * are one rule, and a chip must reach the grid, the URL and history by exactly
+ * the path a typed submit does or the two would drift.
+ */
+function commitDraft(state: SearchState): SearchState {
+  const q = state.drafts.queryText.trim()
+  // A blank or whitespace-only submit is not a search — nothing to commit.
+  if (q === '') return state
+  const view: View = { ...liveView(state), subject: { kind: 'query', text: q }, model: null }
+  return askCommitted(state, view, 'user')
+}
+
+/**
  * Leave the committed subject (D9): it becomes `none`, any deferral ends on the
  * way through, and the location's ordinary listing is re-asked — asserted at
  * landing like any other fetch.
@@ -450,13 +474,22 @@ export function reducer(state: SearchState, action: Action): SearchState {
       )
     }
 
-    case 'submit': {
-      const q = state.drafts.queryText.trim()
-      // A blank or whitespace-only submit is not a search — nothing to commit.
-      if (q === '') return state
-      const view: View = { ...liveView(state), subject: { kind: 'query', text: q }, model: null }
-      return askCommitted(state, view, 'user')
-    }
+    case 'submit':
+      return commitDraft(state)
+
+    case 'runQuery':
+      // The draft first — the input holds the phrase after the click, exactly
+      // as it holds a typed one after Enter — then the mode as `'setMode'`
+      // asserts it (a fetchless patch: nothing is committed yet for it to
+      // re-ask), then the ordinary commit. `patch` reaches the answer on screen
+      // too, so the listing the chip was clicked over does not go on claiming
+      // the old mode while the URL names the new one.
+      return commitDraft(
+        patch(
+          { ...state, drafts: { ...state.drafts, queryText: action.text } },
+          { mode: action.mode },
+        ),
+      )
 
     case 'similar': {
       // A model's neighbours, anchored at the location the user is standing in
