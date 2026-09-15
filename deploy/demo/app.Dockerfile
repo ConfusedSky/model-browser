@@ -38,6 +38,10 @@ COPY tsconfig.base.json ./
 COPY shared/ ./shared/
 COPY client/ ./client/
 COPY server/ ./server/
+# The client's typecheck covers its tests, and `client/test/checkBake.test.ts`
+# imports the bake script's core from `scripts/` (`corpus-bake`) — without the
+# directory the build stage fails on TS2307 before Vite runs (the box, 2026-09-15).
+COPY scripts/ ./scripts/
 RUN bun run --filter client build
 
 FROM oven/bun:1.3.14
