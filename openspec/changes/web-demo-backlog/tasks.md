@@ -61,7 +61,11 @@
       baked** (1.7), so until then every visitor renders every tile in their own browser
       and nothing persists. `deploy/demo/config.json` was written in full by
       `public-deployment`
-- [ ] 1.5 the landing page — contents **decided 2026-09-03** (Masa; recorded on notes item 4
+- [ ] 1.5 *(drafted 2026-09-15 as `landing-page` — proposal, design, `visitor-intro` plus
+      `feature-report` and `library-overrides` deltas, tasks; folds in issues #12 and #15
+      and gives 1.8's credits list a home at `/about.html#credits`; cold-reviewed, the
+      review's findings applied; validates and archive-dry-runs clean; the line below is
+      the original)* the landing page — contents **decided 2026-09-03** (Masa; recorded on notes item 4
       the same day): a slim banner over the grid — one sentence, query chips that run on
       click, About and credits links — dismissed once per browser via localStorage; a full
       About page carrying license/provenance, corpus alterations and the print warning,

@@ -323,6 +323,13 @@ own origin"; only its body hardcodes loopback.
    the decided always-on VM the ~16 s lands at deploy, never on a visitor, and `App.tsx`
    already re-reads index status on mount and every 2 s while warming, so a restart
    under a visitor recovers without a reload. Nothing to add.
+   **Drafted 2026-09-15 as `landing-page`** (`openspec/changes/landing-page`), which
+   supersedes this item: a new `intro` report field, the banner between the header and
+   the grid row, an About document as a second client entry at `/about.html` with the
+   credits list at `#credits`, example queries in `shared/exampleQueries.ts` proven by
+   `scripts/check-example-queries.ts` under the visitor's search options, and a
+   meaning-mode start for a browser that never chose. The decisions stay here for
+   history; the change's design.md is now the reference.
 5. **Names.** Rename folders at corpus build (re-embed — needed anyway) or
    display-name from the store (near-free if #1 is sidecars; ids stay in paths).
    **Resolved 2026-08-31 (Masa): display names from the store.** Near-free now
