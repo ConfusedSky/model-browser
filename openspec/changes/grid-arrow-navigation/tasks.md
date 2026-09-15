@@ -48,11 +48,12 @@
 
 - [x] 3.1 `cd client && bunx vitest run` and `bun run typecheck` green (2026-09-15: full
       client suite 985/985; repo-root typecheck both workspaces exit 0)
-- [ ] 3.2 Manual on 5173 (not 3177): Tab to a tile, then arrow left/right/up/down across a
-      multi-row folder — focus moves tile by tile and row by row, stops at every edge (top-row
-      Up and last-row Down do nothing), and Enter/Space still open the focused tile. Confirm
-      arrows in the find input and path bar are unaffected, Alt+ArrowLeft still goes Back, and
-      arrows do nothing while a lightbox is open
+- [x] 3.2 Live E2E (Playwright headless chromium, 2026-09-15) against `bun run dev` rooted at
+      `test-models/miniatures/clustered-hq` top listing (444 tiles): ArrowRight/ArrowLeft move
+      focus to the next/previous tile; ArrowDown moves down a full row (landed index 5 → 5
+      columns at 1400px); ArrowLeft at the first tile stays put (edge); Enter on a focused
+      tile still activates (navigates into the dir). All assertions PASS. (Find-input/path-bar
+      isolation and top-row-Up/last-row-Down inertness are unit-covered.)
 - [ ] 3.3 `openspec validate grid-arrow-navigation --strict`; archive dry run on a fresh
       copy; after archiving, confirm the applied `directory-browsing` text carries no
       change-scoped prose

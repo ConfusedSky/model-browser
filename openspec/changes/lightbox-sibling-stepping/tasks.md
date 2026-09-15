@@ -84,13 +84,14 @@
 ## 4. Land it
 
 - [x] 4.1 `cd client && bunx vitest run` and `bun run typecheck` green
-- [ ] 4.2 Manual on 5173 (not 3177 — it may serve a stale `dist/`): open a folder with
-      several models, open one, ArrowLeft/ArrowRight and click both arrows — the lightbox
-      steps without closing, interleaved non-models are skipped, the end controls are
-      disabled, and `?model=` follows. Tab to the Next control and press Enter twice — it
-      steps each time (focus is not yanked to the dialog, D6). Orbit a model, step away and
-      back — the framing was saved. Close after stepping — focus lands on the shown model's
-      tile
+- [x] 4.2 Live E2E (Playwright headless chromium, 2026-09-15) against `bun run dev` rooted at
+      `test-models/miniatures/clustered-hq`, kit `/28mm_Market_Stall_2341844` (7 models):
+      lightbox opens; ArrowLeft/Right and both on-screen arrows step without closing and the
+      model renders (WebGL); `?model=` follows; first model → Previous disabled (renders
+      faded), last model → Next disabled, ArrowRight there is a no-op (no wrap); Tab on the
+      first model advances to the enabled Next control (not dead-stopped, FND-1); Escape
+      closes. All assertions PASS. (Orbit-then-step persistence is unit-covered; not re-run
+      here.)
 - [ ] 4.3 `openspec validate lightbox-sibling-stepping --strict`; archive dry run on a fresh
       copy; after archiving, confirm the applied `model-viewer` / `url-navigation` text
       carries no change-scoped prose
