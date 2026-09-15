@@ -3462,7 +3462,10 @@ export default function App() {
               seeing both. The surprise action joins it only where a meaning
               search would actually run, as on the banner. */}
           {introOffered && (
-            <a href={ABOUT_URL} className="ml-auto text-xs text-zinc-400 hover:text-zinc-200">
+            <a
+              href={ABOUT_URL}
+              className="ml-auto rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-500"
+            >
               About
             </a>
           )}
@@ -3470,7 +3473,7 @@ export default function App() {
             <button
               type="button"
               onClick={() => runQuery(pickExample(EXAMPLE_QUERIES))}
-              className="text-xs text-zinc-400 hover:text-zinc-200"
+              className="rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-500"
             >
               Surprise me
             </button>
