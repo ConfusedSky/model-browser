@@ -105,7 +105,7 @@ const TILE_ATTR = 'data-entry-tile'
  * same test `resolvePlacement` makes on `entries`, and the walk is the one
  * `measureIn` already does.
  */
-function tilesIn(scroller: HTMLElement): HTMLElement[] {
+export function tilesIn(scroller: HTMLElement): HTMLElement[] {
   return Array.from(scroller.querySelectorAll<HTMLElement>(`[${TILE_ATTR}]`))
 }
 

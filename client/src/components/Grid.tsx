@@ -4,6 +4,7 @@ import type { DirEntry, IndexScore } from '../../../shared/types'
 import type { ThumbState } from '../hooks/useThumbnails'
 import { formatCosine, formatZ } from '../lib/format'
 import { nativeMenuRequested } from '../lib/gesture'
+import { tilesIn } from '../lib/placement'
 import { SCALE_BADGE, SCALE_SPOKEN, Z_LABEL, type ScoreScale } from '../lib/scoreScale'
 import type { Band } from '../three/queue'
 
@@ -37,6 +38,28 @@ const NEARNESS: Record<Band, number> = { visible: 0, near: 1, far: 2 }
  * amended 2026-09-02).
  */
 const CELL_BAND: Record<Band, Band> = { visible: 'near', near: 'far', far: 'far' }
+
+/**
+ * The grid's live column count, from geometry rather than assumed: the grid is
+ * `auto-fill`, so the columns are whatever the viewport width currently yields
+ * (grid-arrow-navigation D2). The tiles are uniform (`aspect-square w-full`), so
+ * the leading run whose `getBoundingClientRect().top` equals the first tile's is
+ * exactly the top row — its length is the column count. Pure over the rects so
+ * `gridArrowNav.test.tsx` can call it with stubbed per-tile rects (happy-dom
+ * lays nothing out). Empty grid returns 1: never a divisor of zero for the
+ * caller's row step, and the caller never reaches the step with no tiles anyway.
+ */
+export function columnCount(tiles: HTMLElement[]): number {
+  const first = tiles[0]
+  if (first === undefined) return 1
+  const top = first.getBoundingClientRect().top
+  let n = 0
+  for (const tile of tiles) {
+    if (tile.getBoundingClientRect().top !== top) break
+    n++
+  }
+  return n
+}
 
 interface Props {
   entries: DirEntry[]
@@ -278,6 +301,53 @@ function Grid({
     publish()
   }, [previews, publish])
 
+  /**
+   * Arrow-key focus movement between tiles (grid-arrow-navigation). On the grid
+   * container, whose only focusables are the tile buttons — so a keydown from
+   * the find input or the path bar (both rendered in `<main>` outside `gridRef`)
+   * never reaches here, and the handler is silent while the lightbox traps focus
+   * in its dialog. That container scoping, not a guard, is what isolates the
+   * other fields (D3).
+   *
+   * Left/Right step one tile in DOM (listing) order, clamped at the ends;
+   * Up/Down step ±(live column count). Alt/Ctrl/Meta arrows are left to the
+   * browser (Alt+Arrow is Back/Forward). `activeElement` being a tile is the
+   * index source, not the isolation — when focus is on the container itself
+   * rather than a tile the handler declines. `preventDefault` on a move stops
+   * the arrow scrolling `<main>`; the browser still scrolls the newly focused
+   * tile into view (D2/D3).
+   */
+  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (e.altKey || e.ctrlKey || e.metaKey) return
+    const { key } = e
+    if (key !== 'ArrowRight' && key !== 'ArrowLeft' && key !== 'ArrowDown' && key !== 'ArrowUp') {
+      return
+    }
+    const tiles = gridRef.current ? tilesIn(gridRef.current) : []
+    const idx = tiles.indexOf(document.activeElement as HTMLElement)
+    if (idx === -1) return
+    e.preventDefault()
+    const last = tiles.length - 1
+    const cols = columnCount(tiles)
+    let target = idx
+    if (key === 'ArrowRight') target = Math.min(idx + 1, last)
+    else if (key === 'ArrowLeft') target = Math.max(idx - 1, 0)
+    else if (key === 'ArrowDown') {
+      const down = idx + cols
+      // The row below, if any: a straight step when it lands on a tile, else the
+      // last tile when a partial row sits below (idx is in the last full row),
+      // else a no-op (idx is already in the last row).
+      if (down <= last) target = down
+      else if (Math.floor(idx / cols) < Math.floor(last / cols)) target = last
+    } else {
+      // ArrowUp: the row above, if any — never a clamp to 0, which would slide
+      // focus sideways along the top row rather than reading as "up" or "stop".
+      const up = idx - cols
+      if (up >= 0) target = up
+    }
+    tiles[target]?.focus()
+  }
+
   // Below the hooks, not above them: the observer effect must run on every
   // render of this component, and an early return before it would make it
   // conditional.
@@ -285,7 +355,11 @@ function Grid({
     return <p className="mt-16 text-center text-sm text-zinc-600">Nothing to show here.</p>
   }
   return (
-    <div ref={gridRef} className="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-3 p-4">
+    <div
+      ref={gridRef}
+      className="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-3 p-4"
+      onKeyDown={onKeyDown}
+    >
       {entries.map((entry) => {
         // Resolved here rather than in the tile, for the reason `score` is: the
         // map's own array is reference-stable across renders, so the memo sees
