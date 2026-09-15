@@ -83,6 +83,6 @@ ENV HF_HUB_OFFLINE=1 \
 # .../miniatures/deduplicated and you have asked for /library/... — `cache_root`
 # warns and proceeds for read-only tools. It is the shipped cache's recorded
 # root, not a fault; the probe run on the box saw the same and came back ready.
-CMD ["python", "serve_api.py", "/library/miniatures/clustered-hq", \
+CMD ["python", "serve_api.py", "/library/miniatures/decimated", \
      "--cache-dir", "/index", "--no-volume", \
      "--host", "127.0.0.1", "--port", "8077"]

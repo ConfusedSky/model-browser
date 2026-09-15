@@ -128,8 +128,8 @@ committed defaults are the ones this repository's own machine rehearses with. So
 never touches it.
 
 `CORPUS_DIR` is the *library root's parent tree*, not the kit directory: the
-committed `config.json` sets `root` to `/library/miniatures/clustered-hq`, so the
-corpus must arrive at `$CORPUS_DIR/miniatures/clustered-hq`.
+committed `config.json` sets `root` to `/library/miniatures/decimated`, so the
+corpus must arrive at `$CORPUS_DIR/miniatures/decimated`.
 
 ## 3. Populate the volumes
 
@@ -144,18 +144,25 @@ docker compose -f deploy/demo/compose.yaml --profile setup run --rm --build setu
 from a developer machine it would be a 4.3 GB upload. It is the one container
 that talks to the internet on purpose (`HF_HUB_OFFLINE=0` for that run only).
 
-**3.2 The corpus**, from this machine (1.8 GB, ~24 MB/s on the probe run):
+**3.2 The corpus**, from this machine (4.6 GB, ~24 MB/s on the probe run). The
+bytes ship from `miniatures/decimated/` (quadric decimation, since 2026-09-15 —
+vertex clustering altered ND-licensed models too far in spirit; `clustered-hq`
+shipped before). The *file set* is still `clustered-hq`'s, because that tree is
+the deduplicated one with the incomplete kits dropped, while `decimated/` mirrors
+`original/` whole — 282 byte-identical duplicates and 11 directories more. So the
+list comes from one tree and the bytes from the other:
 
 ```sh
-ssh root@<ip> 'mkdir -p /srv/corpus/miniatures/clustered-hq/.model-browser /srv/cache /srv/index'
+ssh root@<ip> 'mkdir -p /srv/corpus/miniatures/decimated/.model-browser /srv/cache /srv/index'
 
-# Models only. The dot entries and anything that is not a model are excluded by
-# policy — the app refuses non-model paths now, but what is not shipped cannot
-# be served by a later change of mind either.
-rsync -az --info=progress2 \
-  --exclude '.*' --include '*/' --include '*.stl' --exclude '*' \
-  ~/Documents/tests/test-models/miniatures/clustered-hq/ \
-  root@<ip>:/srv/corpus/miniatures/clustered-hq/
+# Models only, by list. The dot entries and anything that is not a model are
+# excluded by policy — the app refuses non-model paths now, but what is not
+# shipped cannot be served by a later change of mind either.
+(cd ~/Documents/tests/test-models/miniatures/clustered-hq && \
+  find . -type f -iname '*.stl' ! -path './.model-browser/*' | sed 's|^\./||' | sort) > /tmp/ship-files.txt
+rsync -az --info=progress2 --files-from=/tmp/ship-files.txt \
+  ~/Documents/tests/test-models/miniatures/decimated/ \
+  root@<ip>:/srv/corpus/miniatures/decimated/
 ```
 
 Then the one dot-path that *does* travel:
@@ -163,7 +170,7 @@ Then the one dot-path that *does* travel:
 ```sh
 rsync -az \
   ~/Documents/tests/test-models/miniatures/clustered-hq/.model-browser/overrides.json \
-  root@<ip>:/srv/corpus/miniatures/clustered-hq/.model-browser/
+  root@<ip>:/srv/corpus/miniatures/decimated/.model-browser/
 ```
 
 `overrides.json` is the override store (`library-overrides`), and on this corpus
@@ -235,11 +242,11 @@ be read at all (`hostDetails` withholds it on the wire):
 ```sh
 docker compose -f deploy/demo/compose.yaml logs app | grep -E 'client at|library '
 # client at /app/client/dist
-# library <id> at /library/miniatures/clustered-hq
+# library <id> at /library/miniatures/decimated
 ```
 
 Two things to look at in that second line. The path must be
-`/library/miniatures/clustered-hq` — the index reports the same absolute path as
+`/library/miniatures/decimated` — the index reports the same absolute path as
 its collection root, and if the two disagree the index silently covers nothing.
 And the `<id>` must **not** be the id in this machine's corpus marker
 (`.model-browser/library.json`, `5358d071-…` as of 2026-09-08): a different id is
@@ -269,7 +276,7 @@ docker compose -f deploy/demo/compose.yaml exec caddy wget -qO- http://127.0.0.1
 search through the app answers. Expected noise on the way, not a fault: a
 paragraph saying the cache was built against
 `/home/masa/.../miniatures/deduplicated` and you have asked for
-`/library/miniatures/clustered-hq`. That is `cache_root` reporting the recorded
+`/library/miniatures/decimated`. That is `cache_root` reporting the recorded
 root of the shipped cache; read-only tools warn and proceed, and the probe run on
 the box saw the same before answering correctly.
 

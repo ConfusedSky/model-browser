@@ -222,7 +222,7 @@ describe('the committed demo configuration', () => {
 
   it('loads, and declares the demo posture', async () => {
     const config = await loadConfig({ MODEL_BROWSER_CONFIG: file })
-    expect(config.root).toBe('/library/miniatures/clustered-hq')
+    expect(config.root).toBe('/library/miniatures/decimated')
     expect(config.origins).toEqual(['https://models.masamaeda.com'])
     expect(config.listen).toEqual({ host: '127.0.0.1', port: 3177 })
     // Every field is stated in the file, including the ones that match a

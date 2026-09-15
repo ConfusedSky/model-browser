@@ -16,7 +16,11 @@ the shipped set), no zips. *(Stale since the corpus was rewritten 2026-09-11 —
 licences — BY 305, BY-SA 31, BY-ND 29, CC0 23, BY-NC-SA 22, BY-NC-ND 18, BY-NC 16 — and
 the metadata carries each kit's deed URL with version, `license_url`, and a `modified`
 phrase; the corpus repo's CLAUDE.md, "NoDerivatives is accepted, after checking", records
-why the modification notice is compliant under every one of them.)* Provenance per kit in `metadata/miniatures.json`
+why the modification notice is compliant under every one of them. Then 2026-09-15, Masa:
+vertex clustering alters ND-licensed models too far in spirit to pass as a technical
+modification, so the demo ships `miniatures/decimated/` bytes — quadric decimation,
+1.53 MB/model mean, 4.6 GB — over `clustered-hq`'s file set; deploy/demo/README.md §3.2
+has the recipe.)* Provenance per kit in `metadata/miniatures.json`
 (`name`, `author`, `author_url`, `source_url`, `license`, per-file `sha256`) —
 **gitignored, exists only on that disk.** Index: mini-classify `embed-cache-test`,
 2,165 models = 2,254 − ~89 `NON_MODEL_TAGS` drops (consistent, not confirmed by
@@ -260,7 +264,8 @@ own origin"; only its body hardcodes loopback.
    precedent), with About reachable from a persistent spot afterwards. Everything else
    goes on the About page: license and provenance (CC-BY, not Masa's models, per-model
    attribution in the lightbox); how the corpus was altered (dedup, non-model drops,
-   vertex-clustering decimation with small meshes passed through byte-identical, display
+   quadric decimation (`convert.py`'s `decimated/`; vertex clustering until 2026-09-15,
+   dropped because it altered ND-licensed models too far in spirit), display
    names from the store) and that downloads are display copies — print from the source;
    what differs from the desktop app (the `public-deployment` list: Download replaces
    Open-in/Open-with, Copy path is Copy link, chat tab withheld, thumbnails baked and
