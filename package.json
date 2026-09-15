@@ -10,6 +10,7 @@
   ],
   "scripts": {
     "dev": "bun run --filter '*' dev",
+    "dev:demo": "MODEL_BROWSER_CONFIG=$PWD/deploy/demo/config.json bun run --filter '*' dev",
     "test": "bun run --filter '*' test",
     "typecheck": "bun run --filter '*' typecheck"
   }

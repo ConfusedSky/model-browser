@@ -40,6 +40,11 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   at index 555 on Node and index 0 on Bun). A `nested` answer is memoised for 5 s, so
   repointing the root shows up on the next window rather than the next request. The startup
   line `library <id> at <top>` names the top actually resolved — read it
+- `MODEL_BROWSER_ROOT=<local corpus> bun run dev:demo` - the same, under the shipped demo
+  posture (`deploy/demo/config.json` via `MODEL_BROWSER_CONFIG`: every capability off,
+  `intro` on). The root override is required — the file's `root` is the box's path — and
+  the config path is absolute on purpose: the workspaces start with their own cwd, and a
+  relative `MODEL_BROWSER_CONFIG` is an absent file, which is silent and means the defaults
 - Semantic search needs a second server, not started by `bun run dev` (its collection root
   must lie inside the library, or the index covers nothing):
   `cd <mini-classify checkout> && .venv/bin/python serve_api.py [<collection root>] --cache-dir <cache> [--no-volume] --port 8077`
