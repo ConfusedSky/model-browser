@@ -11,10 +11,17 @@ file before relying on it):
   (the model file's), `lighting`, `rig`, `posed` and, where a pose framed the render,
   `poseKey` (`RenderLabels`, `Meta`). The key is the **library** path and the `mtime`
   label is the file's own, so a sidecar written locally is a hit on the box exactly
-  when the relative path and the mtime agree there — which they do: `rsync -az`
-  preserved mtimes to the nanosecond (coordinator, 2026-09-14, e.g.
-  `Player_Character_Pack_03_3750572/CatfolkRogue.stl` 2026-08-31 22:05:07.037828483 UTC
-  on both machines).
+  when the relative path and the mtime agree there. That equality is the whole ship,
+  and it holds only against the tree the box actually serves. The corpus moved to
+  `miniatures/decimated` on 2026-09-15 (`8cb6683`) and every file in that tree was
+  regenerated on 2026-09-14 between 21:26 and 21:45 local, so
+  `Player_Character_Pack_03_3750572/CatfolkRogue.stl` is 2026-09-15 04:26:15.358908391
+  UTC and 2,500,084 bytes there against `clustered-hq`'s 2026-08-31 22:05:07.037828483
+  UTC and 1,459,484 bytes: the 2026-09-14 bake is keyed to the latter and reads `stale`
+  on every tile of the shipping corpus. `rsync -az` preserves mtimes to the nanosecond
+  (measured on the 2026-09-14 clustered-hq ship), so the box agrees once the decimated
+  corpus is there — which the ship proves by `stat`ing a model on the box (task 4.1),
+  never assumes.
 - **The two sweeps parse every `*.json` they find as a sidecar, and a JSON file that is
   not one breaks the sweep that reads it.** `maintain` lists the id directory,
   `readMeta`s every `.json` name (a bare `JSON.parse`, no shape check) and asks
@@ -102,11 +109,20 @@ file before relying on it):
   configuration leaves it alone and moves every `front`, hence every `poseKey`, all the
   same ("an index cached at 8 views means nothing at 4", `pose_of`'s docstring). Both
   files are what README §3.3 rsyncs to `/srv/index/`. Locally the index must be started
-  with the collection root **at `clustered-hq`**, not the `deduplicated` tree its
-  `run-params.json` records: `cd ~/Documents/tests/mini-classify && .venv/bin/python
-  serve_api.py ~/Documents/tests/test-models/miniatures/clustered-hq --cache-dir
-  embed-cache-test --no-volume --port 8077` (coordinator, 2026-09-14). Starting the
-  index is the user's act, not the script's.
+  with the collection root **at `decimated`**, the tree the demo ships, not the
+  `deduplicated` tree its `run-params.json` records: `cd ~/Documents/tests/mini-classify
+  && .venv/bin/python serve_api.py ~/Documents/tests/test-models/miniatures/decimated
+  --cache-dir embed-cache-test --no-volume --port 8077`. Starting the index is the
+  user's act, not the script's. **The positional root is a string prefix and nothing
+  more** (read 2026-09-15): under `--no-volume`, `Collection.load` takes the manifest
+  branch, `load_embedding_matrix_from_poses` carries each `pose-cache.json` key into its
+  row as the row's identity, `row_of` matches a caller's path lexically and `pose_of`
+  looks up the identity it was handed, so no model file is ever stat'd and the answers
+  do not depend on the bytes under the root. That is why the corpus could move from
+  `clustered-hq` to `decimated` without re-embedding: the same 2,976 of 3,121 paths
+  answer a pose and the same 145 answer a settled `null`, because that split is a
+  property of which entries have an `.npy` under these run parameters. `/status` will
+  report `n_models: 2976` and `collection_root` as the positional root.
 - **A cache hit is a `blob:` URL too.** `ApiClient.getThumb` mints `pngUrl` from the
   answer's base64 with `base64ToBlobUrl` (`URL.createObjectURL`), so an `img` whose
   `src` is `blob:` is either a client render or a lookup hit; only a listing-annotated
@@ -204,11 +220,13 @@ The run, in order; each step's failure stops the run with the server killed:
    that makes an unposed bake impossible: with the root at `deduplicated` the app asks
    for no poses and every render would be unposed corpus-wide. **It also catches a
    wrongly rooted bake**, which is why it cannot be skipped even when the index is
-   known to be right: a marker left above `clustered-hq` (a stray
+   known to be right: a marker left above `decimated` (a stray
    `.model-browser/library.json` in `test-models`, the CLAUDE.md symptom) makes the
-   bake library's top `test-models`, every sidecar key `/miniatures/clustered-hq/…` —
+   bake library's top `test-models`, every sidecar key `/miniatures/decimated/…` —
    wrong for the box, whose keys start at the kit — and `collectionRoot` reads
-   `/miniatures/clustered-hq`, not `/`. One check, both mistakes.
+   `/miniatures/decimated`, not `/`. One check, both mistakes. The hazard is live but
+   sideways here: markers exist under `clustered-hq` and `deduplicated`, which are
+   *siblings* of `decimated` and which `findMarker`'s upward walk never sees.
    Then **directly**, the index's own `/status` at `MODEL_BROWSER_INDEX` (default
    `http://127.0.0.1:8077`): `ready: true`, and `cache_dir` must name the directory
    `--index-cache` points at. `/status` reports the string the index was started with
@@ -282,9 +300,13 @@ The run, in order; each step's failure stops the run with the server killed:
     is proven against the constants the bake imported, on every bake.
 11. **Print the ship commands** (D4), or run them behind `--ship` (D5).
 
-The library id the bake instance writes locally (`5358d071-…`, the marker under
-`clustered-hq/.model-browser/`) differs from the box's (`54c0a4e9-…`); the script
-reads the local one from `/api/library` and never assumes it.
+The library id the bake instance writes locally differs from the box's, and **neither
+is known in advance**. `decimated/` carries no `.model-browser/` at all, so the bake
+mints a marker there on its first start; `5358d071-…` is `clustered-hq`'s id and is not
+it. The box mints its own under the decimated root the same way (`54c0a4e9-…` was the
+clustered-hq era's, and its `/srv/cache` directory is left behind holding `snapshots/`).
+The script reads the local id from `/api/library` and never assumes it; the box's is
+read from its startup line, `library <id> at /library/miniatures/decimated` (task 4.1).
 
 ### D2: The manifest lives in `bake/`, the sweep tolerates a stranger, and the pin check is POSIX sh on the box
 
@@ -333,7 +355,7 @@ read twice):
   "index": {
     "collectionRoot": "/",
     "cacheDir": "<as /status reports it>",
-    "models": 3121,
+    "models": 2976,
     "views": 8,
     "elevations": [
       20
@@ -350,7 +372,10 @@ Names: `recipe.poseVersion` is the pose mapping version (`POSE_VERSION`), never
 collides with a count's name in the same file (`posedModels`) was the reviewer's
 misread waiting to happen. Counts are `posedModels`/`unposedModels`. The `index`
 block records what the index's own `/status` said at bake time (D1 step 4) beside the
-two hashes.
+two hashes; `index.models` is that answer's `n_models` — how many models the index can
+answer a pose for — and is **not** the enumeration's top-level `models`. On this corpus
+they differ (2,976 against 3,121), which is the same split `posedModels` reports from
+the other side.
 
 **In a subdirectory**, not beside the sidecars and not at the cache top: both are
 enumerated by sweeps that treat every `*.json` as a sidecar (Context, second bullet),
@@ -406,8 +431,12 @@ has written the marker, `demo-infrastructure` D4).
 from the bake's at equal versions proceeds: CLAUDE.md routes every pixel change through
 `RIG_VERSION`, and `POSE_VERSION` names the pose mapping, so equal versions are the
 recipe's own statement that the pixels are the same; refusing on the commit would
-demand an eleven-minute bake for every copy change. The check prints both commits when
-they differ, so the operator sees it.
+demand an eleven-minute bake for every copy change. So the check prints
+`commit: checkout <a>, bake <b>` when they differ and **does not change its exit code** —
+the one line in the script that reports without refusing. It needs `git` and a checkout
+to answer, so it stays silent when `git rev-parse HEAD` fails or when the manifest
+carries no `client.commit`: a silent line is neither a pass nor a failure, only an
+absence of information, and the four enforced values are unaffected either way.
 
 **Where the cells live.** `server/test/checkBake.test.ts` spawns `sh` on the script
 against manifests that `manifestFor` produced in a temp dir — never hand-written JSON,
@@ -471,7 +500,9 @@ Three things, said in full:
   the `*.json` sidecars, the `*.webp` and `*.noao.webp` renders and `bake/`, and
   tomorrow means whatever else the store files under its id, since the command is an
   exclusion, not a list — rsynced **into the box's id directory**, whose name differs
-  (`54c0a4e9-…` on the box against `5358d071-…` here). The command is
+  and which each side minted for itself: the local one is read from `/api/library`, the
+  box's from its startup line (the `54c0a4e9-…`/`5358d071-…` pair was the clustered-hq
+  era's and neither survives the move). The command is
   `rsync -az --info=progress2 --exclude 'snapshots/' <local cache>/<local id>/
   <user@host>:<box cache>/<box id>/` — trailing slashes on both, no `--delete`
   (nothing on the box is removed by a ship; a stale sidecar is overwritten by key).
@@ -537,7 +568,20 @@ Projected from the dry run: 6,242 renders at ~10/s ≈ 11 min plus mesh loads on
 larger models. The full run started 2026-09-14 at ~10 PUTs/s (`Generate 3102 missing
 thumbnails` at its start — 3,121 less the dry run's 19).
 
-**Measured — the coordinator's full run:** 2026-09-14, this machine (local GPU; headless Chromium via playwright-core with `--use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader`), a scratch instance on 3199 rooted at `clustered-hq` with writes on and its own cache directory, the index at 8077 on `embed-cache-test` rooted at `clustered-hq` with `--no-volume`, driven by an ad-hoc driver before the script existed (the script's first run is task 3.2 proper; these are the figures it must reproduce): variant A (occlusion off) `Generate 3102 missing thumbnails` → 3,106 PUTs in 361 s = 8.6 renders/s; variant B (on) `Generate 3088` → 3,106 PUTs in 442 s = 7.0/s; wall 815 s for 6,212 PUTs, zero non-200; the id directory holds 3,121 sidecars and 6,242 WebP renders — 32,314,572 bytes of WebP (32.3 MB, 5.2 KB per render), 875,080 bytes of sidecars, 33.9 MB apparent with `snapshots/`, 56 MB as `du -sh` reports it (4 KiB blocks; re-measured 2026-09-15 on the scratch cache, `find -printf '%s'` summed). Labels: every sidecar `rig: 7`, `lighting: camera` on both variants; 2,976 per variant `posed: 2` with a `poseKey`; 145 per variant unlabelled — the index answers `null` for those paths (bases, terrain: `/Werewolf_Miniatures_3712197/werewolfmalebase.stl` and the like; the coordinator asked `/poses` directly for all 145 on 2026-09-14 and every one came back present-and-`null`, which is D1 step 8's audit passed by hand — relayed, and re-run by the script in task 3.2), which under `pose-rerender`'s rule is a settled absence over an unlabelled render, a hit. No sidecar holds a camera or an axis. The dry run's 9.6/s over one small kit was the ceiling; the corpus mean is lower because mesh load and decode share the queue with the render.
+**Measured on `clustered-hq`, 2026-09-14 — superseded as the ship's store by the decimated re-run (task 3.2):** this machine (local GPU; headless Chromium via playwright-core with `--use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader`), a scratch instance on 3199 rooted at `clustered-hq` with writes on and its own cache directory, the index at 8077 on `embed-cache-test` rooted at `clustered-hq` with `--no-volume`, driven by an ad-hoc driver before the script existed (the script's first run is task 3.2 proper; these are the figures it must reproduce): variant A (occlusion off) `Generate 3102 missing thumbnails` → 3,106 PUTs in 361 s = 8.6 renders/s; variant B (on) `Generate 3088` → 3,106 PUTs in 442 s = 7.0/s; wall 815 s for 6,212 PUTs, zero non-200; the id directory holds 3,121 sidecars and 6,242 WebP renders — 32,314,572 bytes of WebP (32.3 MB, 5.2 KB per render), 875,080 bytes of sidecars, 33.9 MB apparent with `snapshots/`, 56 MB as `du -sh` reports it (4 KiB blocks; re-measured 2026-09-15 on the scratch cache, `find -printf '%s'` summed). Labels: every sidecar `rig: 7`, `lighting: camera` on both variants; 2,976 per variant `posed: 2` with a `poseKey`; 145 per variant unlabelled — the index answers `null` for those paths (bases, terrain: `/Werewolf_Miniatures_3712197/werewolfmalebase.stl` and the like; the coordinator asked `/poses` directly for all 145 on 2026-09-14 and every one came back present-and-`null`, which is D1 step 8's audit passed by hand — relayed, and re-run by the script in task 3.2), which under `pose-rerender`'s rule is a settled absence over an unlabelled render, a hit. No sidecar holds a camera or an axis. The dry run's 9.6/s over one small kit was the ceiling; the corpus mean is lower because mesh load and decode share the queue with the render.
+
+**Superseded, 2026-09-15.** The corpus moved to `miniatures/decimated` (`8cb6683`) and
+that tree's files carry 2026-09-14 mtimes, so every sidecar above reads `stale` against
+the shipping corpus and the store cannot ship. It is kept at
+`~/.cache/model-browser-bake/2026-09-14/`, with the ad-hoc driver, its config and its
+log, as the driver's precedent and the cost scale only. What carries over is structural:
+3,121 models and 6,242 renders (the two trees hold the same 3,121 relative paths), and
+2,976 posed with 145 settled-null per variant — that split is the index's property, not
+the tree's, since `--no-volume` answers from the cache's records and never reads a model
+file (Context, *The index*). What does not carry over is the rate: decimated's meshes are
+the larger of the two on this corpus (`CatfolkRogue.stl` 2.5 MB against 1.46 MB) and mesh
+load shares the render queue, so task 3.2 records its own figures rather than reproducing
+these.
 
 ## Risks / Trade-offs
 
@@ -581,8 +625,11 @@ thumbnails` at its start — 3,121 less the dry run's 19).
 ## Migration Plan
 
 1. Land the script, the check, the guard and the cells (tasks §1–§2).
-2. Run the first full bake locally (§3) — already done once as the coordinator's run;
-   its figures fill D-cost, and the script's run must reproduce them and pass the audit.
+2. Run the first full bake locally (§3), against `decimated`. The coordinator's
+   2026-09-14 run was against `clustered-hq` and is superseded (D-cost): its figures are
+   the scale, not a reproduction target, and its store cannot ship. The invariants the
+   run must reproduce are the structural ones — 3,121 sidecars, 6,242 renders, 2,976
+   posed and 145 settled-null per variant, zero failures — with the audit passing.
 3. Ship: rsync, `restart app`, the hit checks and the first-visit measurement (§4).
 4. Records (§5), then the redeploy and rollback lines carry the check from the next
    redeploy on.

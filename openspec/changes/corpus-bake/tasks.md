@@ -124,7 +124,11 @@
       spawns `sh` on the script with manifests **produced by `manifestFor`** in a temp dir
       — never hand-written JSON, so a fixture cannot drift from the writer's formatting:
       equal → 0 and no output; `rig` one ahead → 1 and the line `rig: checkout <n>, bake
-      <n-1>`; a pose cache whose hash differs → 1; a `run-params.json` whose hash differs
+      <n-1>`; **the commit line** — a manifest whose `client.commit` differs from `git
+      rev-parse HEAD` prints `commit: checkout <a>, bake <b>` and still **exits 0**; one
+      whose commit equals it prints nothing; one with no `client.commit`, and a run where
+      `git rev-parse HEAD` fails, print nothing and exit 0 (the only reporting line in the
+      script — it never moves the exit code, D2); a pose cache whose hash differs → 1; a `run-params.json` whose hash differs
       → 1 naming it; an index directory missing one of the two → 1; missing manifest → 1;
       a copy of `renderer.ts` with the constant duplicated, pointed at by an env override
       the script honours for tests only → 1 naming "2 lines"; a manifest re-serialised
@@ -160,35 +164,58 @@
 
 ## 3. The first full bake (live — the coordinator's run)
 
-- [ ] 3.1 Preconditions recorded: the index started by the user with the collection root
-      at `clustered-hq` (`cd ~/Documents/tests/mini-classify && .venv/bin/python
-      serve_api.py ~/Documents/tests/test-models/miniatures/clustered-hq --cache-dir
-      embed-cache-test --no-volume --port 8077`), `/api/semantic/status` on the bake
-      instance answering `ready` with `collectionRoot: '/'`, the index's own `/status`
-      answering `cache_dir: embed-cache-test` with its `views`, `elevations`, `up_axis`
-      and `n_models` (record them here — they go into the manifest); the dev instance on
+- [ ] 3.1 Preconditions recorded: the index started with the collection root at
+      **`decimated`**, the tree the demo ships (`cd ~/Documents/tests/mini-classify &&
+      .venv/bin/python serve_api.py ~/Documents/tests/test-models/miniatures/decimated
+      --cache-dir embed-cache-test --no-volume --port 8077`) — 8077 held a *different*
+      index until 2026-09-15 (`embed-cache512` rooted at `/run/media/masa/STLLibrary`,
+      stopped by the user), so read what answers there before starting anything;
+      `/api/semantic/status` on the bake instance answering `ready` with
+      `collectionRoot: '/'`, the index's own `/status` answering
+      `cache_dir: embed-cache-test` with its `views`, `elevations`, `up_axis` and
+      `n_models` (record them here — they go into the manifest). **Expect
+      `n_models: 2976`** — the 2,976 of 3,121 pose entries with an `.npy` under these run
+      parameters, a property of the cache and not of the tree (design Context, *The
+      index*); anything else stops the line before a render is drawn. The dev instance on
       3177 untouched; the scratch port free. Record the index's `/status` count and cache
-      dir beside the library id the bake instance logs
+      dir beside the library id the bake instance logs — that id does **not** exist yet
+      (`decimated/` carries no `.model-browser/`, so the bake mints it on first start;
+      `5358d071-…` is `clustered-hq`'s, not it)
 - [ ] 3.2 The run: both passes settled at `Generated 0 of 0`, `verifyBake` clean, the
       pose audit passing (every unlabelled path present-and-`null` — record the count
       here; the pre-script run's 145 per variant passed it by hand, D-cost), manifest
       written, `check-bake.sh` passing. **Record here, and in design D-cost**:
-      *(pre-script run recorded in design D-cost, 2026-09-14: 3,106 + 3,106 PUTs, 361 s +
+      *(pre-script run on `clustered-hq`, recorded in design D-cost, 2026-09-14 and
+      superseded — the scale, not a reproduction target: 3,106 + 3,106 PUTs, 361 s +
       442 s, 8.6 and 7.0 renders/s, zero failures, 3,121 sidecars / 6,242 WebP / 32.3 MB
       of images, 33 MB with sidecars by bytes, 56 MB by `du`; 2,976 posed and keyed per
       variant, 145 settled-null unlabelled — asked of `/poses` directly, all `null`; the
       baked directory is kept at `~/.cache/model-browser-bake/2026-09-14/cache/<local id>/`, with the ad-hoc driver (`bake.mjs`, `dryrun.mjs`), its config and its log beside it, until the script's own run reproduces it and ships; the driver is the script's precedent, not its shape)* The dry run of the same day for scale: 15 renders at 9.6/s off and
-      9.2/s on, every sidecar `rig: 7`, `posed: 2`, `poseKey` present
+      9.2/s on, every sidecar `rig: 7`, `posed: 2`, `poseKey` present. **What must
+      reproduce is structural, not the rate**: 3,121 sidecars, 6,242 WebP, both passes
+      settled at `Generated 0 of 0`, every sidecar `rig: 7` and `lighting: camera`, 2,976
+      posed with a `poseKey` and 145 settled-null per variant, zero failures. The rates
+      will differ — decimated's meshes are the larger of the two trees on this corpus and
+      mesh load shares the render queue
 
 ## 4. Ship and verify (live)
 
-- [ ] 4.1 Ship: the printed rsync into `/srv/cache/54c0a4e9-d05b-4a53-8aad-e37a8b384422/`
-      (the box's id, read from its startup line — re-read it, do not assume), then
+- [ ] 4.1 Ship: the printed rsync into `/srv/cache/<box id>/`, the id read from the box's
+      startup line `library <id> at /library/miniatures/decimated` — **it is a new id**:
+      the box mints its own marker under the decimated root (the operator's call,
+      2026-09-15), so `54c0a4e9-d05b-4a53-8aad-e37a8b384422` is the clustered-hq era's and
+      its directory is left behind. Before the rsync, `stat` three shipped models inside
+      the app container and confirm each mtime equals this machine's decimated copy to the
+      nanosecond (`Player_Character_Pack_03_3750572/CatfolkRogue.stl` is 2026-09-15
+      04:26:15.358908391 UTC, 2,500,084 bytes) — a mismatch means the box still serves
+      other bytes and every shipped sidecar would read `stale`, which no visitor can heal.
+      Then
       `ssh <host> 'cd /opt/model-browser && docker compose -f deploy/demo/compose.yaml
       restart app'` (D3: for the startup sweep's index, not for correctness). Record the
       rsync's transferred bytes and file count (expect ~34 MB and 9,364 files: 3,121 +
-      6,242 + the manifest), and confirm `snapshots/` on the box is unchanged (`ls -la
-      --time-style=full-iso` before and after) and that `bake/bake.json` is present after
+      6,242 + the manifest), and confirm `snapshots/` under the target id is unchanged (`ls -la
+      --time-style=full-iso` before and after; under a freshly minted id it holds only
+      what the box has written since its first start there — record which) and that `bake/bake.json` is present after
       the restart, and that the container's log after the restart carries no `maintain`
       warning (1.7's guard found no stranger)
 - [ ] 4.2 Hit checks on the live host, for three models including
@@ -218,7 +245,7 @@
 ## 5. Records
 
 - [ ] 5.1 `deploy/demo/README.md` §7 rewritten around the script: the command with its
-      arguments, the index precondition (root at `clustered-hq`, `--no-volume`, the
+      arguments, the index precondition (root at `decimated`, `--no-volume`, the
       `cache_dir` the script cross-checks), what ships and what does not (D4), the
       restart and why (D3), the manifest's location and why it is in `bake/` (and what a
       flat one does to the sweep, now a warning), the re-bake triggers (D6, both index

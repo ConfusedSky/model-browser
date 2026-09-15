@@ -4,7 +4,10 @@ The demo's thumbnail store is empty. The 2,254 renders of 2026-09-05 were filed 
 the previous library identity; the corpus re-sync of 2026-09-09 had the box write a new
 marker (`library.json` dated 2026-09-09 06:10 on the box), and the new id directory
 `/srv/cache/54c0a4e9-…/` holds only `snapshots/` (coordinator, 2026-09-14, read on the
-box). With `thumbWrites: false` a visitor's client renders every tile in its own browser
+box). Since then the corpus has moved again — `miniatures/decimated` replaced
+`clustered-hq` on 2026-09-15 (`8cb6683`) and the box mints a fresh id under the new root
+— so the store to fill is a third one, and the 2026-09-14 pre-script bake, keyed to
+`clustered-hq`'s mtimes, cannot be shipped into it (design Context, D-cost). With `thumbWrites: false` a visitor's client renders every tile in its own browser
 and stores nothing, so every first visit pays the unbaked cost the notes measured — the
 one thing `web-demo-backlog` 1.7 exists to remove. The shape was decided 2026-09-02
 (notes, "1.3's bake shape"): preview paths on directory entries, which
