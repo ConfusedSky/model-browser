@@ -39,7 +39,7 @@ export function hostLabel(url: string): string {
  * the whole app down to visit a model page. `rel="noreferrer"` implies
  * `noopener`, so one word covers both.
  *
- * `break-words`, never `break-all` (2026-09-16, Masa). `break-all` is
+ * `break-words`, never `break-all` (2026-09-15, Masa). `break-all` is
  * `word-break: break-all`, which breaks at *any* character, so the About page
  * drew "Creative Commons licence" as "Creative Commons licen / ce" whenever the
  * phrase met the end of a line — measured in Chromium at a 1280 px viewport,

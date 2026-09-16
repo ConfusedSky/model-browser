@@ -124,7 +124,7 @@ describe("the banner at the library top", () => {
     expect(buttonNamed("Surprise me")).toBeDefined();
     expect(dismissButton()).not.toBeNull();
     // About, Credits and Source were the banner's last three items until
-    // 2026-09-16 and are gone (Masa): About is the header's, and the other two
+    // 2026-09-15 and are gone (Masa): About is the header's, and the other two
     // are the About page's own. Asserted as "no anchor anywhere in the strip"
     // rather than as three absent addresses, so a fourth link cannot be added
     // here without a cell saying so — `linkTo` searches the whole tree, where

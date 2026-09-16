@@ -3,7 +3,7 @@
  * (`landing-page` D3): one sentence saying what this is, the example queries as
  * clickable chips, the surprise action and a dismiss affordance.
  *
- * It carried About, Credits and Source until 2026-09-16, and carries none of
+ * It carried About, Credits and Source until 2026-09-15, and carries none of
  * them now (Masa). About is in the header, where it outlives the dismissal;
  * Credits and Source are the About page's own, and a strip whose job is to say
  * what this is and offer a first query was spending three of its items sending

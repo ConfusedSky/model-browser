@@ -130,7 +130,7 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
         {/* The way back, first and unmissable: a plain anchor to the library's
           top, because the app has one route and `/` is it.
 
-          The source sits beside it, opposite, from 2026-09-16 (Masa): the
+          The source sits beside it, opposite, from 2026-09-15 (Masa): the
           banner used to carry About, Credits and Source and no longer carries
           any of them — About is in the header, and the other two belong to this
           page, which is where a reader who wants either has arrived. Buried in
@@ -156,7 +156,7 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
           deploy/demo/config.json (the library this deployment opens).
 
           "It draws every model in the browser rather than shipping pictures of
-          them" was false of this deployment until 2026-09-16, and backwards
+          them" was false of this deployment until 2026-09-15, and backwards
           about the half a visitor sees first (Masa). A tile here **is** a
           picture: `corpus-bake` pre-renders every model server-side, the
           listing annotates the entry as a `hit`, and `useThumbnails` hands the
@@ -166,7 +166,7 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
           model itself in the lightbox, which is what `fetchModel`'s `/api/file`
           is for. The claim describes the desktop app over an unbaked library.
 
-          Measured on the deployment, 2026-09-16, `/Ghoul_3466743/Ghoul.stl`:
+          Measured on the deployment, 2026-09-15, `/Ghoul_3466743/Ghoul.stl`:
 
             curl -so /dev/null -w '%{size_download}\n' \
               'https://models.masamaeda.com/api/thumb/image?path=%2FGhoul_3466743%2FGhoul.stl&mtime=<mtime>&ao=on'
@@ -235,6 +235,17 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
           vertex clustering used until 2026-09-15 (docs/web-demo-notes.md item
           4). The corpus repository is private, so it is named and not linked.
 
+          "The names on the tiles come from the corpus's metadata, not from
+          file names" was true of a kit's tile and false of every tile inside
+          one (found by a review, 2026-09-15). `/api/dir?path=/` answers each
+          kit a `displayName`; `/api/dir` inside a kit answers its models none,
+          and `Grid` draws `entry.displayName ?? baseName(entry.name)` — so a
+          model tile is its file name with the extension dropped
+          (`CatfolkRogue.stl` reads "CatfolkRogue"). The override store has no
+          per-file name to give it: `listCredits` and `/api/overrides` are
+          kit-keyed. Both halves are stated now, with the one example the live
+          listing actually returns.
+
           The closing paragraph said "what you download from here is a display
           copy" until 2026-09-15. Nothing here offers a download: `grep -rai
           download client/src` finds no action, and `entryActions.ts` has
@@ -261,8 +272,14 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
               than in a slicer.
             </li>
             <li>
-              The names on the tiles come from the corpus&rsquo;s metadata, not
-              from file names.
+              A kit&rsquo;s own tile is named from the corpus&rsquo;s metadata
+              rather than from its folder, so the folder{" "}
+              <span className="break-words text-zinc-400">
+                1_Treasure_Token_for_DD_or_Other_RPG_2615634
+              </span>{" "}
+              reads as “1&quot; Treasure Token for D&amp;D or Other RPG”. The
+              models inside a kit keep their own file names, which are the
+              designer&rsquo;s.
             </li>
           </ul>
           <p className="mb-2">
@@ -347,7 +364,7 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
         {/* source: `gh repo view ConfusedSky/model-browser` (PUBLIC) and
           `gh repo view ConfusedSky/model-browser-corpus` (PRIVATE, so it gets
           no link — see the provenance section above). The repository's own line
-          moved to the head of the page on 2026-09-16 and is not repeated here. */}
+          moved to the head of the page on 2026-09-15 and is not repeated here. */}
         <Section id="links" title="Links">
           <ul className="list-disc space-y-1 pl-5">
             <li>
@@ -438,9 +455,19 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
           "a single WebGL renderer shared between the grid's thumbnails and the
           viewer" described the app, not this deployment, and read as though a
           tile here were rendered on arrival — the same mistake the "What this
-          is" section carried until 2026-09-16. One renderer app-wide is real
+          is" section carried until 2026-09-15. One renderer app-wide is real
           (D2, `client/src/three/renderer.ts`), and it is what draws a tile the
           bake does not answer for; it is simply idle for the rest.
+
+          "pooled from all of its views rather than read off one of them" was
+          absolute and the search options falsify it (review, 2026-09-15):
+          `POOLS` is `mean | max | softmax`, the panel offers all three under
+          "Pool views by", and `pool_sims` (mini-classify `src/query.py`) for
+          `max` is `view_sims.max(axis)` — one view decides. Live on the
+          deployment, `a vampire` under `max` answers a different order from
+          `softmax` within the first three hits. The default is what the
+          sentence describes, so it names the exception rather than dropping the
+          point.
 
           The index holds **several** renders per model, not one: the embedding
           cache's own `run-params.json` records `views: 8` over a single
@@ -475,7 +502,7 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
           a claim in the other direction with no better evidence. What is
           stated is what the tier does and what asks for it.
 
-          "Pose" was the page's one undefined term (Masa, 2026-09-16): the word
+          "Pose" was the page's one undefined term (Masa, 2026-09-15): the word
           appeared three times in the rendered copy, all of it in this section,
           with nothing binding it to a meaning — and the interface never says it
           at all, so a reader had nowhere else to pick it up. It is defined at
@@ -492,8 +519,9 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
             as seen from several angles, so a typed phrase and a picture of a
             model are compared in one embedding space — which is why a
             description finds things whose file names say nothing. A
-            model&rsquo;s score for a phrase is pooled from all of its views
-            rather than read off one of them.
+            model&rsquo;s score for a phrase is pooled from all of its views by
+            default, rather than read off one of them — the search options can
+            ask for its single best view instead.
           </p>
           <p className="mb-2">
             Before a model is drawn at all, something has to settle which way up
@@ -580,6 +608,15 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
           its collection and do NOT reproduce here (this index answers
           Gnome_Mage.stl and Bard_on_a__Broom.stl first), so they are not used.
 
+          The vampire bullet said the list "opens with zombies, dark elves and
+          robed spellcasters". Re-run 2026-09-15, the first ten are two Jim
+          Darkmagics, `Zombie_NEW`, `MadMageFigure`, `ElfArmoredMage`,
+          `Half_Elf_Rogue`, `KindleCleric_000`, `Zombie_pose_3`,
+          `Elf_with_the_stand` and `Zombie_Female_Pose_1` — no drow at all.
+          `Drow_Rouge` is 11th and `Drow_Elite_Warrior` 12th, so they follow the
+          opening rather than make it. The example still reproduces; only the
+          description of it was wrong, and it now names what the run returns.
+
           Re-run them before trusting this section again; an example that stops
           reproducing is dropped, not reworded. */}
         <Section id="limitations" title="What the search does badly">
@@ -617,13 +654,13 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
               <span className="font-semibold text-zinc-100">
                 Neighbouring concepts blur.
               </span>{" "}
-              Ask for <em>a vampire</em> and the list opens with zombies, dark
-              elves and robed spellcasters — with neither of the two kits whose
-              names actually say <em>vampire</em> among them. One of those sits
-              well down the list and the first ghoul further down still. Each of
-              the things above them is a fair reading of part of what a vampire
-              is — undead, sinister, caped — and the search cannot pull them
-              apart.
+              Ask for <em>a vampire</em> and the list opens with robed
+              spellcasters, zombies and elves — with neither of the two kits
+              whose names actually say <em>vampire</em> among them. The drow
+              follow those, one of the vampire kits sits well down the list, and
+              the first ghoul further down still. Each of the things above them
+              is a fair reading of part of what a vampire is — undead, sinister,
+              caped — and the search cannot pull them apart.
             </li>
             <li>
               <span className="font-semibold text-zinc-100">

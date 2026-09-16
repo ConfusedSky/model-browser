@@ -147,7 +147,7 @@ describe("the page as a document", () => {
     expect(back?.getAttribute("href")).toBe("/");
     expect(back?.textContent).toContain("Back to the models");
     // The repository moved here from the Links section at the foot on
-    // 2026-09-16 (Masa), when the banner stopped carrying it: this page is
+    // 2026-09-15 (Masa), when the banner stopped carrying it: this page is
     // where a reader who wants the code has arrived, and it was the one thing
     // on it they might have come for and could not see. Asserted as the second
     // anchor, so burying it again is a red cell rather than a silent move.
@@ -183,7 +183,7 @@ describe("the page as a document", () => {
   });
 
   it("says the tiles are served as pictures, not drawn on arrival", async () => {
-    // The page claimed the opposite until 2026-09-16 — "draws every model in
+    // The page claimed the opposite until 2026-09-15 — "draws every model in
     // the browser rather than shipping pictures of them" — while its own
     // Differences list said thumbnails were rendered ahead of time. On this
     // deployment `corpus-bake` pre-renders every model and `useThumbnails`
@@ -205,7 +205,7 @@ describe("the page as a document", () => {
 
   it("defines \u201cpose\u201d where it first uses it", async () => {
     // The page's one piece of jargon, and the interface never says it, so a
-    // reader has nowhere else to pick it up (Masa, 2026-09-16). Whitespace
+    // reader has nowhere else to pick it up (Masa, 2026-09-15). Whitespace
     // collapsed before matching: JSX wraps a sentence across source lines, so
     // the rendered text carries the indentation.
     await mount(fakeApi(() => Promise.resolve([])));

@@ -33,7 +33,7 @@ export const introDismissedStore = stored<boolean>(
  */
 export const ABOUT_URL = "/about.html";
 // `CREDITS_URL` and `SOURCE_URL` lived here for the banner's other two links
-// and went with them on 2026-09-16. The About page holds its own `SOURCE_URL`
+// and went with them on 2026-09-15. The About page holds its own `SOURCE_URL`
 // and its credits are a section of it, so neither needs an address a second
 // module can drift from.
 

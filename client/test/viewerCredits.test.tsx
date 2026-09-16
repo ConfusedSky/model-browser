@@ -332,7 +332,7 @@ describe("a stored URL reads as its host", () => {
 describe("how a credit link may break", () => {
   it("wraps at its spaces, never inside a word", () => {
     // `break-all` here drew the About page's "Creative Commons licence" as
-    // "…licen / ce" (Masa, 2026-09-16, measured in Chromium at 1280 px: the
+    // "…licen / ce" (Masa, 2026-09-15, measured in Chromium at 1280 px: the
     // seam fell between `licen` and `ce`). The rule came from the lightbox's
     // 18rem column, where `break-words` was measured to contain a 60-character
     // unbroken name just as well — 280 px over two lines inside 288, the same
