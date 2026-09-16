@@ -20,26 +20,22 @@ import AboutPage from "../src/components/AboutPage";
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
 /**
- * Every section the requirement asks for, in the order the page puts them.
- *
- * The set is the contract (`visitor-intro`: the page "SHALL carry, as
- * sections: …"), and so are the `id`s — the banner's credits link is
- * `/about.html#credits`. The *order* is editorial and the requirement does not
- * fix it, so it is pinned here only to make a reorder deliberate rather than
- * accidental: reordering the page is a one-line edit to this list (Masa
- * reordered it on 2026-09-16), dropping a section is not.
+ * Every section the requirement asks for, with the `id` it is addressed by
+ * (`visitor-intro`: the page "SHALL carry, as sections: …"; the banner's
+ * credits link is `/about.html#credits`). The set is the contract; the order
+ * the page puts them in is editorial, and is not asserted.
  */
 const SECTIONS: readonly (readonly [string, string])[] = [
   ["what", "What this is"],
-  ["links", "Links"],
-  ["how-to", "How to use it"],
-  ["technical", "Under the hood"],
-  ["limitations", "What the search does badly"],
-  ["differences", "What differs from the desktop app"],
-  ["webgl", "WebGL and the desktop build"],
   ["licence", "Licence and provenance"],
   ["corpus", "How the corpus was altered"],
+  ["differences", "What differs from the desktop app"],
+  ["how-to", "How to use it"],
+  ["links", "Links"],
   ["privacy", "Privacy"],
+  ["webgl", "WebGL and the desktop build"],
+  ["technical", "Under the hood"],
+  ["limitations", "What the search does badly"],
   ["credits", "Credits"],
 ];
 
@@ -138,11 +134,16 @@ afterEach(async () => {
 });
 
 describe("the page as a document", () => {
-  it("carries every section, in order, with its id and heading", async () => {
+  it("carries every section, with its id and heading", async () => {
     await mount(fakeApi(() => Promise.resolve([])));
-    expect(sections().map((s) => s.id)).toEqual(SECTIONS.map(([id]) => id));
-    expect(sections().map((s) => s.querySelector("h2")?.textContent)).toEqual(
-      SECTIONS.map(([, title]) => title),
+    const drawn = sections().map(
+      (s) => [s.id, s.querySelector("h2")?.textContent] as const,
+    );
+    // Sorted on both sides: which section comes first is an editorial choice,
+    // and asserting it only turns every reordering into a failing test.
+    const key = ([id]: readonly [string, unknown]) => id;
+    expect([...drawn].sort((a, b) => key(a).localeCompare(key(b)))).toEqual(
+      [...SECTIONS].sort((a, b) => key(a).localeCompare(key(b))),
     );
   });
 
