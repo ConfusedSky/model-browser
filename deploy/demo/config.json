@@ -8,6 +8,6 @@
     "chatTab": false,
     "hostDetails": false,
     "maintenance": false,
-    "intro": false
+    "intro": true
   }
 }

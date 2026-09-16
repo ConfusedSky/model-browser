@@ -22,4 +22,5 @@ export const EXAMPLE_QUERIES: readonly string[] = [
   "a rogue wielding two daggers",
   "a sorcerer with an energy beam",
   "a character with a hammer and shield",
+  "a demon with wings",
 ];
