@@ -180,13 +180,15 @@ file before relying on it):
 
 `bun run scripts/bake-demo.ts --root <corpus top> --cache <scratch cache dir>
 --index-cache <the index's cache dir> [--port 3199] [--client <scratch build dir>]
-[--ship <user@host> --ship-dir </srv/cache/<box id>> [--origin <https://url>]]`.
+[--ship <user@host> --ship-dir </srv/cache/<box id>>] [--origin <https://url>]`.
 
 TypeScript under `bun run` rather than an `.mjs`, for the reason `gen-overrides.ts`
 gives: the script imports what it must agree with — `RIG_VERSION`, `THUMB_LIGHTING`,
 `THUMB_SIZE` from client/src/three/renderer.ts, `POSE_VERSION` from
-client/src/three/pose.ts, `SNAPSHOT_DIR` from server/src/snapshot.ts, `MARKER_DIR` from
-server/src/library.ts, `POSES_MAX` from shared/types.ts — instead of restating any of
+client/src/three/pose.ts, `SNAPSHOT_DIR` from server/src/snapshot.ts,
+`POSES_MAX` and `THUMB_MIME` from shared/types.ts, and — since the ship step verifies the
+introduction too — `EXAMPLE_QUERIES` from shared/exampleQueries.ts with
+`checkExampleQueries` from scripts/check-example-queries.ts — instead of restating any of
 them, and its core (the sidecar verification, the pose audit's judgement, the manifest,
 the rsync command) is exported and exercised by the server suite under Node, as
 `genOverrides.test.ts` exercises that script. Node APIs only in the core; the driver may
@@ -420,7 +422,8 @@ TypeScript program there. It:
   anything but exactly one line** — a moved or renamed constant breaks the check
   loudly rather than letting it compare against nothing;
 - reads `"rig"`, `"poseVersion"`, `"poseCacheSha256"` and `"runParamsSha256"` from the
-  manifest by line (`^ *"rig": [0-9]*,\{0,1\}$` and the like — the writer's formatting
+  manifest by line (`^ *"rig": \([0-9]\{1,\}\),\{0,1\}$` and the like — one capture,
+  consuming the whole line, so `sed` prints the capture alone; the writer's formatting
   is pinned above), under **the same exactly-one-line guard** as the source reads: a
   manifest a hand edited onto one line, or a future key that shares a name, refuses
   rather than comparing against nothing or against the wrong line. No `jq` on the box;
@@ -538,8 +541,11 @@ Three things, said in full:
   `rsync -az --info=progress2 --exclude 'snapshots/' <local cache>/<local id>/
   <user@host>:<box cache>/<box id>/` — trailing slashes on both, no `--delete`
   (nothing on the box is removed by a ship; a stale sidecar is overwritten by key).
-  The script prints the command with both ids filled in, since the id mapping is the
-  part a hand gets wrong.
+  The script prints the command with the bake machine's id filled in always, and the
+  box's directory and host as given — `--ship-dir` and `--ship` when it has them, the
+  `<box id>`/`<user@host>` placeholders when it does not. The id mapping is the part a
+  hand gets wrong, which is why the run path takes both as resolved values and refuses a
+  placeholder rather than rsyncing to one.
 - **Does not ship**: `snapshots/`. The tree snapshot is the box's own (`SnapshotStore`,
   filed under the same id directory) and carries its own root and stats; the box
   revalidates it at startup.
@@ -560,8 +566,14 @@ the demo bakes both, so the adaptive default and the pill switch instantly), one
 source. The manifest records the commit; the check enforces the versions (D2). A bake
 run on a dirty tree is recorded as such.
 
-`--ship` runs the rsync, the restart and the two hit checks (task 4.2) in sequence
-against the origin `--origin` names — required when `--ship`'s host is a bare IP, since
+`--ship` runs the rsync and the restart, then **verifies** (`verifyShip`): it waits for
+`/api/library` to answer `ready`, refuses unless that answer's library id is the one the
+store was copied into — a ship to one box verified against another box's store is the
+miscarriage this whole path exists to prevent — runs six hit checks (three models × both
+occlusion variants, task 4.2), and finally runs the introduction's example queries
+(`landing-page` D9). Every one of those refuses the run, because a bake that copied bytes
+and restarted the box must not report success without them. It runs against the origin
+`--origin` names — required when `--ship`'s host is a bare IP, since
 no https origin follows from one and a hardcoded default would verify a ship to one box
 against another box's store (third-pass review, 2026-09-15); the run refuses at argv
 rather than shipping and leaving 4.2 undone —

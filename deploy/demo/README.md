@@ -414,7 +414,7 @@ nothing but the container engine — by `scripts/bake-demo.ts`
 ```sh
 bun run scripts/bake-demo.ts --root <corpus top> --cache <scratch cache dir> \
   --index-cache <the index's cache dir> [--port 3199] [--client <scratch build dir>] \
-  [--ship <user@host> --ship-dir </srv/cache/<box id>> [--origin <https://url>]]
+  [--ship <user@host> --ship-dir </srv/cache/<box id>>] [--origin <https://url>]
 ```
 
 **`--origin` is required whenever `--ship`'s host is a bare IP**, which the box's

@@ -92,13 +92,16 @@
       survives a restart" check, after the bake of 3.2.
 - [x] 1.5 `--ship <user@host> --ship-dir <box id dir>` (D5): runs the rsync, `ssh <host>
       'cd /opt/model-browser && docker compose -f deploy/demo/compose.yaml restart app'`,
-      then the two hit checks of 4.2 for the first three enumerated models, against the
-      origin **`--origin` names**; without the flag, prints the same three commands.
+      then verifies: `/api/library` read as `ready`, its library id checked against the
+      directory the store went into, the six hit checks of 4.2 (three models × both
+      variants) and the introduction's example queries — each of which refuses the run.
+      Without the flag, the commands print.
       `--origin` is required whenever `--ship`'s host is a bare IP, as the box's is — no
       https origin can be derived from one, and the run refuses at argv rather than
       shipping and skipping the verification (third-pass review, 2026-09-15). Verify:
-      without the flag the printed rsync names both ids and excludes `snapshots/`; the
-      flag's path is exercised in 4.1
+      without the flag the printed rsync carries the bake machine's id and excludes
+      `snapshots/`, with the box's directory and host as placeholders until `--ship-dir`
+      and `--ship` supply them; the flag's path is exercised in 4.1
       **Code landed 2026-09-15**, over four commits rather than one: `4e037db` first, then
       `db935a3`, `339e3aa` and `552499a` as three review passes took the ship path apart.
       As it stands, `--ship`/`--ship-dir` run the rsync and the restart, then
@@ -106,9 +109,9 @@
       both variants and runs the introduction's example queries; without the flag the
       commands print. `--origin` names the hit-check target and is required when
       `--ship`'s host is a bare IP. **Verified 2026-09-15**: the
-      print path ran at the end of every bake — the rsync names both ids and excludes
-      `snapshots/`, followed by the ssh restart and nine `curl` lines. **Still open**: the
-      `--ship` path itself. 4.1 was shipped by running those printed commands by hand,
+      print path ran at the end of every bake — the rsync carries the local id and
+      excludes `snapshots/`, followed by the ssh restart and nine `curl` lines. **The `--ship` path itself was open at that point, and closed later the same day** —
+      see the note below. 4.1 was shipped by running those printed commands by hand,
       deliberately — re-running the bake under `--ship` would have rewritten the manifest
       with a second run's near-zero `rate`/`elapsed` and destroyed the measured figures
       3.2 exists to record. **Done 2026-09-15, on exactly that occasion.** The
@@ -199,8 +202,10 @@
       run with `POSE_VERSION` edited to `3` in the working tree after the build but before
       the check (a contrived tree, restored after) fails at the check naming `poseVersion`
       **Code landed 2026-09-15** (`4e037db`): the check is the last step and a non-zero
-      exit fails the bake. **Open**: the contrived `POSE_VERSION = 3` run, the
-      coordinator's.
+      exit fails the bake. **Verified live the same day**: a bake run with
+      `CHECK_BAKE_POSE_TS` pointed at a copy of `pose.ts` carrying `POSE_VERSION = 3`
+      failed at the check with `poseVersion: checkout 3, bake 2` and exited 1, without the
+      repo's own file being touched — the override exists for exactly this.
 - [x] 2.3 `deploy/demo/README.md` §6: the redeploy line becomes `git pull && sh
       deploy/demo/check-bake.sh /srv/cache/<id>/bake/bake.json /srv/index && docker
       compose … up -d --build`, with two sentences: what the refusal means (the build
@@ -470,10 +475,10 @@
       restart (`landing-page` D9): every example query the banner offers must answer on
       the box, and the ship step is the one place that fires HTTP at the origin after a
       restart. **Corrected 2026-09-15** — this line was written as "when 1.5's `--ship`
-      lands", and 1.5 had already landed (`4e037db`) when it was written. The step
-      exists and **still does not run the check**: `grep -n 'check-example'
-      scripts/bake-demo.ts` matches nothing, and the only mentions of the script in the
-      tree are the script itself and `deploy/demo/README.md`'s §5 step. So nothing is
+      lands", and 1.5 had already landed (`4e037db`) when it was written. **Retracted 2026-09-15**: this said the step "still does not run the check", with a
+      `grep` that then matched nothing. A parallel session landed `23f53c5`, and the ship
+      step now runs the queries through `checkExampleQueries` inside `verifyShip`, where a
+      dead one refuses the run. So nothing is
       waiting on anything — what is left is the one call inside `ship`, beside the hit
       checks it already runs. Also: the demo image now copies `scripts/` (c53f64a, cbad523) because
       `client/test/checkBake.test.ts` imports the bake script and the client build

@@ -78,8 +78,38 @@ derives them in memory from a listing; orientations SHALL NOT be shipped, since 
 are the index's and are already deployed with it. After the copy the application SHALL
 be restarted, so that its startup sweep indexes the shipped store and, once that sweep
 has completed, the first listing of every folder carries each tile as a hit rather than
-provoking one lookup per tile. The bake SHALL print the exact copy and restart commands
-with both library identities filled in, and MAY run them on request.
+provoking one lookup per tile. The bake SHALL print the exact copy and restart commands,
+filling in every identity it knows — the bake machine's library identity always, the
+deployment's and the host's when it was told them — and MAY run them on request.
+
+When the bake runs them, it SHALL verify the deployment afterwards and SHALL NOT report
+success unless that verification passed: a run that has copied the store and restarted
+the application has changed what visitors see, and reporting success without checking
+leaves a broken deployment looking like a finished one. The verification SHALL wait for
+the application to answer as ready, SHALL confirm that the application's library identity
+is the one the store was copied into, SHALL read back several models under both occlusion
+settings as hits carrying the shipping recipe, and SHALL exercise whatever queries the
+deployment offers a first-time visitor. A verification that cannot be aimed at the
+deployment it copied to SHALL be refused before anything is copied, rather than aimed
+somewhere else.
+
+#### Scenario: A ship that cannot be verified is refused before it copies anything
+- **WHEN** a ship is asked for against a deployment whose address the bake cannot turn into
+  an origin to verify, and none is given
+- **THEN** the bake refuses before copying anything, naming the address and what to pass,
+  rather than copying the store and leaving the verification undone
+
+#### Scenario: A deployment that never becomes ready fails the ship
+- **WHEN** the bake has copied the store and restarted the application, and the application
+  does not answer as ready within the bake's own bound
+- **THEN** the bake reports the failure with the commands to finish the verification by
+  hand, and does not report success
+
+#### Scenario: The verification refuses a deployment it did not ship to
+- **WHEN** the bake is pointed at an origin whose library identity is not the one the store
+  was copied into
+- **THEN** the bake refuses, naming both identities, rather than passing on another
+  deployment's store
 
 #### Scenario: The store answers from the first visit
 - **WHEN** the bake has been shipped, the application restarted and its startup sweep has completed, and a visitor opens the library's top and one kit for the first time
