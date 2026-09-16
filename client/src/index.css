@@ -1,6 +1,32 @@
 @import "tailwindcss";
 
 /**
+ * The document's own ground, for both of the build's entries (`landing-page`
+ * D2: the app and the About page are two documents, and this stylesheet is the
+ * one thing they share — `main.tsx` and `about.tsx` each import it).
+ *
+ * Not on the React root, and not on either `<main>`. Both of those elements are
+ * written by a bundle that has to be fetched, parsed and run first, so until it
+ * renders the document is the browser's default white — and the parts that are
+ * never any element's stay white even afterwards: the overscroll rubber-band
+ * past the top and bottom of the page, and the scrollbars. First paint here is
+ * the one that a stranger following a link sees, so it is the one that has to
+ * be right. The build emits this file as a `<link>` in each document's head,
+ * which blocks the first paint; the dev server injects it through JS, so a
+ * flash on 5173 is the dev server and not this rule failing.
+ *
+ * `color-scheme` is what recolours the scrollbars and anything else the UA
+ * draws for itself; `background-color` is `bg-zinc-950`'s own value, taken from
+ * Tailwind's variable so the two cannot drift, with the literal behind it for
+ * the same reason `animate-reveal-mark` carries one — this rule has to hold
+ * even where the theme variable was not emitted.
+ */
+:root {
+  color-scheme: dark;
+  background-color: var(--color-zinc-950, #09090b);
+}
+
+/**
  * The paint order, in one place. A bare `z-40` in a component says nothing
  * about what it is meant to beat, and that is how the header's path
  * suggestions came to be painted through by a tile's score badges: the badges

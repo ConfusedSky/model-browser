@@ -18,10 +18,12 @@ export default defineConfig({
       // `dist/about.html` beside `dist/index.html` and `createStaticHandler`
       // serves it at `/about.html` with no change to the server.
       //
-      // Both names are asserted by client/test/viteEntries.test.ts, which reads
-      // this file as text: a dropped entry then fails in CI rather than on the
-      // box, where the only symptom is a 404 that the SPA fallback dresses up
-      // as the app.
+      // Both names are asserted by client/test/viteEntries.test.ts, which
+      // imports this file and reads the object below: a dropped entry then
+      // fails in CI rather than on the box, where the only symptom is a 404
+      // that the SPA fallback dresses up as the app. It read the file as *text*
+      // until 2026-09-15, and matched loosely enough that commenting an entry
+      // out still passed.
       input: {
         main: fileURLToPath(new URL("index.html", import.meta.url)),
         about: fileURLToPath(new URL("about.html", import.meta.url)),

@@ -76,6 +76,28 @@ const KITS: CreditedKit[] = [
   },
 ];
 
+/**
+ * A kit whose stored URLs are not addresses this page will follow. Operator
+ * data, so this is not an attack the deployment expects — it is the row shape a
+ * typo or a bad import produces, and React renders `href="javascript:…"` as a
+ * live link with nothing but a console warning.
+ *
+ * The licence URL carries leading spaces deliberately: the URL parser strips
+ * them before it reads the scheme, so this is the string a `startsWith("http")`
+ * guard would wave through.
+ */
+const HOSTILE: CreditedKit = {
+  path: "/Hostile_Kit",
+  name: "Hostile Kit",
+  credits: {
+    author: "Mallory",
+    authorUrl: "javascript:alert(1)",
+    license: "Creative Commons - Attribution",
+    licenseUrl: "  javascript:alert(2)",
+    sourceUrl: "javascript:alert(3)",
+  },
+};
+
 /** An API client that answers `credits()` and nothing else — the only method
  *  this page calls. */
 function fakeApi(credits: () => Promise<CreditedKit[]>): ApiClient {
@@ -152,40 +174,142 @@ describe("the page as a document", () => {
   });
 });
 
+/**
+ * The sections the page asked to scroll, in order, with the reader's position
+ * made observable.
+ *
+ * happy-dom lays nothing out and `scrollIntoView` moves nothing there, so the
+ * stub plays the browser: it records the section and, where `landsAt` is given,
+ * scrolls the window the way a real `scrollIntoView` would. That is what lets a
+ * cell distinguish "the reader stayed where the first scroll put them" from
+ * "the reader is at 0", which is the whole subject below — a stub that left
+ * `scrollY` at 0 would pass a page that recorded its position *before*
+ * scrolling instead of after.
+ */
+function watchScrolls(landsAt?: number): {
+  ids: string[];
+  restore: () => void;
+} {
+  const ids: string[] = [];
+  const original = Element.prototype.scrollIntoView;
+  Element.prototype.scrollIntoView = function (this: Element) {
+    ids.push(this.id);
+    if (landsAt !== undefined) window.scrollTo(0, landsAt);
+  };
+  return {
+    ids,
+    restore: () => {
+      Element.prototype.scrollIntoView = original;
+    },
+  };
+}
+
+/** A `credits()` whose answer this cell hands over when it chooses to. */
+function deferredApi(): {
+  api: ApiClient;
+  resolve: (kits: CreditedKit[]) => void;
+  reject: (err: unknown) => void;
+} {
+  let resolve!: (kits: CreditedKit[]) => void;
+  let reject!: (err: unknown) => void;
+  const pending = new Promise<CreditedKit[]>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { api: fakeApi(() => pending), resolve, reject };
+}
+
 describe("a fragment in the URL", () => {
-  it("scrolls to the named section once the sections exist", async () => {
+  beforeEach(() => window.scrollTo(0, 0));
+  afterEach(() => window.history.replaceState(null, "", "/about.html"));
+
+  it("scrolls to the named section, then again once the list fills it", async () => {
     // The browser looks for the fragment before React has rendered a single
     // section, so the page has to do the scroll itself after mount (found on
-    // 5173: `/about.html#credits` opened at the top). happy-dom lays nothing
-    // out, so the assertion is that the credits section was asked to scroll.
-    const calls: Element[] = [];
-    const original = Element.prototype.scrollIntoView;
-    Element.prototype.scrollIntoView = function (this: Element) {
-      calls.push(this);
-    };
+    // 5173: `/about.html#credits` opened at the top). It does it a second time
+    // when the credits settle, because the section is the last on the page and
+    // a list still saying "Loading…" leaves too little document below it to
+    // bring to the top (measured: 2190 px scrolled, the section still 758 px
+    // down). The second scroll is licensed only by the reader not having moved
+    // — which here means still standing where the *first* scroll left them,
+    // 900, and not at the 0 they started from.
+    const watch = watchScrolls(900);
     window.history.replaceState(null, "", "/about.html#credits");
     try {
       await mount(fakeApi(() => Promise.resolve([])));
-      // Once after mount and once when the list settles — the section is the
-      // last on the page, and only the filled list gives it room to reach the top.
-      expect(calls.map((el) => el.id)).toEqual(["credits", "credits"]);
+      expect(watch.ids).toEqual(["credits", "credits"]);
     } finally {
-      Element.prototype.scrollIntoView = original;
-      window.history.replaceState(null, "", "/about.html");
+      watch.restore();
+    }
+  });
+
+  it("leaves a reader who has moved since the first scroll where they are", async () => {
+    // The yank this replaced: someone who opened `#credits`, then scrolled up
+    // to read Licence while the credits were still loading, was thrown back
+    // down the moment they arrived.
+    const watch = watchScrolls(900);
+    window.history.replaceState(null, "", "/about.html#credits");
+    const { api, resolve } = deferredApi();
+    try {
+      await mount(api);
+      expect(watch.ids).toEqual(["credits"]);
+      window.scrollTo(0, 300);
+      await act(async () => {
+        resolve([]);
+      });
+      expect(watch.ids).toEqual(["credits"]);
+    } finally {
+      watch.restore();
+    }
+  });
+
+  it("scrolls again when the credits could not be loaded", async () => {
+    // The failed read settles the section too, and a reader who asked for
+    // `#credits` still wants to be at it — the sentence saying the list is
+    // missing is the answer they came for. This is the reject arm of
+    // `onSettled`, which the resolve arm's cells say nothing about.
+    const watch = watchScrolls(900);
+    window.history.replaceState(null, "", "/about.html#credits");
+    const { api, reject } = deferredApi();
+    try {
+      await mount(api);
+      expect(watch.ids).toEqual(["credits"]);
+      await act(async () => {
+        reject(new Error("offline"));
+      });
+      expect(watch.ids).toEqual(["credits", "credits"]);
+    } finally {
+      watch.restore();
+    }
+  });
+
+  it("scrolls nowhere for a fragment that arrived after the page did", async () => {
+    // Someone who opened `/about.html` and then clicked the in-page credits
+    // link: that navigation was the browser's own, over a document already
+    // laid out, so there is no first scroll of ours to correct — and the
+    // settling list must not invent one, wherever they have read to by then.
+    const watch = watchScrolls(900);
+    const { api, resolve } = deferredApi();
+    try {
+      await mount(api);
+      window.history.replaceState(null, "", "/about.html#credits");
+      window.scrollTo(0, 1500);
+      await act(async () => {
+        resolve([]);
+      });
+      expect(watch.ids).toEqual([]);
+    } finally {
+      watch.restore();
     }
   });
 
   it("scrolls nowhere without one", async () => {
-    const calls: Element[] = [];
-    const original = Element.prototype.scrollIntoView;
-    Element.prototype.scrollIntoView = function (this: Element) {
-      calls.push(this);
-    };
+    const watch = watchScrolls();
     try {
       await mount(fakeApi(() => Promise.resolve([])));
-      expect(calls).toEqual([]);
+      expect(watch.ids).toEqual([]);
     } finally {
-      Element.prototype.scrollIntoView = original;
+      watch.restore();
     }
   });
 });
@@ -252,6 +376,23 @@ describe("the credits list", () => {
     );
     expect(field(second, "modified")).toBeNull();
     expect(field(third, "modified")).toBeNull();
+  });
+
+  it("draws a URL it will not follow as text, never as a link", async () => {
+    await mount(fakeApi(() => Promise.resolve([HOSTILE])));
+    const [line] = lines() as [HTMLElement];
+    // Not one anchor anywhere in the row — which is stronger than checking
+    // each field's `href`, since a scheme that reached any of them would show
+    // up here whichever field grew a link next.
+    expect(line.querySelectorAll("a")).toHaveLength(0);
+    // The fields themselves stay: attribution is what this page is for, and a
+    // row that vanished over a malformed URL would take the author's name with
+    // it (`hostLabel`'s rule, which this follows).
+    expect(field(line, "author")?.textContent).toContain("Mallory");
+    expect(field(line, "license")?.textContent).toContain(
+      "Creative Commons - Attribution",
+    );
+    expect(field(line, "source")?.textContent).toContain("javascript:alert(3)");
   });
 
   it("says so rather than rendering empty when the store holds no credits", async () => {
