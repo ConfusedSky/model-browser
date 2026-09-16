@@ -92,8 +92,11 @@
       survives a restart" check, after the bake of 3.2.
 - [x] 1.5 `--ship <user@host> --ship-dir <box id dir>` (D5): runs the rsync, `ssh <host>
       'cd /opt/model-browser && docker compose -f deploy/demo/compose.yaml restart app'`,
-      then the two hit checks of 4.2 against `https://models.masamaeda.com` for the first
-      three enumerated models; without the flag, prints the same three commands. Verify:
+      then the two hit checks of 4.2 for the first three enumerated models, against the
+      origin **`--origin` names**; without the flag, prints the same three commands.
+      `--origin` is required whenever `--ship`'s host is a bare IP, as the box's is — no
+      https origin can be derived from one, and the run refuses at argv rather than
+      shipping and skipping the verification (third-pass review, 2026-09-15). Verify:
       without the flag the printed rsync names both ids and excludes `snapshots/`; the
       flag's path is exercised in 4.1
       **Code landed 2026-09-15** (`4e037db`): `--ship`/`--ship-dir` run the rsync, the
@@ -110,7 +113,11 @@
       `--ship root@157.90.25.110 --ship-dir /srv/cache/54c0a4e9-d05b-4a53-8aad-e37a8b384422`
       ran the rsync, the `restart app` and all six hit checks (three models × two variants,
       each `hit` with `rig 7`, `posed 2`, a `poseKey`, `image/webp` and the immutable
-      header) in 25 s, unattended. **The flag ran three times that evening**, and only
+      header) in 25 s, unattended. **That argv is no longer accepted**: it worked because
+      the hit-check origin was then the hardcoded `https://models.masamaeda.com`, which a
+      later review found would verify one box's ship against another box's store. The same
+      run today needs `--origin https://models.masamaeda.com`; the evidence above stands as
+      taken under the earlier behaviour. **The flag ran three times that evening**, and only
       the last run's manifest is the one on disk: the first (`logs/rebake.log`, 15:43)
       shipped with nothing to render; the second (`logs/rebake2.log`, 15:57) **refused** —
       `verifyBake: 1 of 3122 models fail verification`, `miss /Ghoul_3466743/Ghoul.stl: …

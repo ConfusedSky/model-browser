@@ -357,8 +357,9 @@ the ones the shipped store was rendered under, and the SHA-256 of
 and exits non-zero on any disagreement. The `&&` is the refusal: the build does
 not start and the running stack keeps serving — nothing is half-deployed. Give it
 the index directory: called without one it prints `index: not checked, no index
-directory given` and checks only the two version constants, which is a weaker gate
-than the line above promises. What to
+directory given` and skips the two hash **comparisons** — it still enforces both hash
+lines' format, and still refuses a manifest whose hash line is malformed or duplicated —
+which is a weaker gate than the line above promises. What to
 do about it is a re-bake (§7) from the checkout you meant to deploy, shipped
 before the `up` is retried. There is no override flag; leaving the check off the
 line is the shell history's record that a build whose every tile re-renders on
@@ -413,7 +414,7 @@ nothing but the container engine — by `scripts/bake-demo.ts`
 ```sh
 bun run scripts/bake-demo.ts --root <corpus top> --cache <scratch cache dir> \
   --index-cache <the index's cache dir> [--port 3199] [--client <scratch build dir>] \
-  [--ship <user@host> --ship-dir /srv/cache/<box id>]
+  [--ship <user@host> --ship-dir /srv/cache/<box id> [--origin <https://url>]]
 ```
 
 For the demo `--root` is `~/Documents/tests/test-models/miniatures/decimated` (the

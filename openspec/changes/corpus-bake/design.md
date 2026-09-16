@@ -180,7 +180,7 @@ file before relying on it):
 
 `bun run scripts/bake-demo.ts --root <corpus top> --cache <scratch cache dir>
 --index-cache <the index's cache dir> [--port 3199] [--client <scratch build dir>]
-[--ship <user@host> --ship-dir </srv/cache/<box id>>]`.
+[--ship <user@host> --ship-dir </srv/cache/<box id>> [--origin <https://url>]]`.
 
 TypeScript under `bun run` rather than an `.mjs`, for the reason `gen-overrides.ts`
 gives: the script imports what it must agree with — `RIG_VERSION`, `THUMB_LIGHTING`,
@@ -428,8 +428,8 @@ TypeScript program there. It:
   `<dir>/pose-cache.json` and `<dir>/run-params.json` and compares each with its
   manifest line; a missing file is a disagreement, not a skip. When the argument is
   **absent or empty** the fingerprint is not checked, and the script says so —
-  `index: not checked, no index directory given`, on an exit-0 path — so an omission
-  cannot be mistaken for an agreement;
+  `index: not checked, no index directory given` — printed whatever the exit code, and
+  never affecting it, so an omission cannot be mistaken for an agreement;
 - exits 0 when all agree, else prints each disagreement as `rig: checkout 8,
   bake 7` and exits 1; a missing manifest is exit 1 with `no bake manifest at <path>`.
   Two lines print without refusing: the `commit:` line above, and the index notice.
@@ -560,7 +560,11 @@ the demo bakes both, so the adaptive default and the pill switch instantly), one
 source. The manifest records the commit; the check enforces the versions (D2). A bake
 run on a dirty tree is recorded as such.
 
-`--ship` runs the rsync, the restart and the two hit checks (task 4.2) in sequence,
+`--ship` runs the rsync, the restart and the two hit checks (task 4.2) in sequence
+against the origin `--origin` names — required when `--ship`'s host is a bare IP, since
+no https origin follows from one and a hardcoded default would verify a ship to one box
+against another box's store (third-pass review, 2026-09-15); the run refuses at argv
+rather than shipping and leaving 4.2 undone —
 because the verification needs the model list the script already holds and the id
 mapping it already printed. Without the flag it prints them. Argued over print-only:
 the three commands plus the GETs are the recipe an operator would otherwise retype
