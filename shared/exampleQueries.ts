@@ -9,32 +9,33 @@
  * answer. Each is a phrase a visitor could plausibly have typed, short enough
  * to read on a chip.
  *
- * Chosen 2026-09-15 by running ten candidates against the live demo,
- * https://models.masamaeda.com, under the body a chip's click sends
- * (`{ text, ...TUNING_DEFAULTS }`) and keeping the ones whose first screen is
- * unmistakably right. The index that day answered
- * `/api/semantic/status` with
- * `{"state":"ready","covers":["stl"],"elapsed":5000.1,"collectionRoot":"/"}`.
- * Entry counts from that run, in this order: 60, 60, 60, 60, 58, 60 — the
- * visitor's `top: 60` is the ceiling, so five of the six were cut by the count
- * rather than by the floor. Two candidates were dropped for their *first
- * screen* rather than for a count: "a knight with a sword and shield" (top hit
- * a hobgoblin) and "a pirate" (one unambiguous pirate in five). "a giant
- * spider" answered with 10, which is right but the least headroom against the
- * corpus moving, and was dropped for that.
- *
  * Re-run the whole sweep with `bun run scripts/check-example-queries.ts
  * <origin>`, which is a deploy step: it prints every phrase's entry count in
- * this order — the figures above, re-measured rather than re-typed — and fails
- * naming any phrase that has gone dead, whose remedy is to replace it here. It
- * cannot judge a *first screen*, which is what the two dropped candidates were
- * dropped for, so that half of the choice is a reading and not a run.
+ * this order and fails naming any phrase that has gone dead, whose remedy is to
+ * replace it here. It cannot judge a *first screen* — whether the models that
+ * come back are unmistakably the thing asked for — so that half of the choice
+ * is a reading, not a run.
+ *
+ * This list is Masa's, 2026-09-16. Measured that day against
+ * https://models.masamaeda.com (`/api/semantic/status`:
+ * `{"state":"ready","covers":["stl"],"collectionRoot":"/"}`), the counts in
+ * this order were 60, 60, 60, 59, 60, 60, 60, 60 — the visitor's `top: 60` is
+ * the ceiling, so seven of the eight were cut by the count rather than by the
+ * floor, and none came back `weak`.
+ *
+ * Four carried spelling or article slips when they were written ("flamming",
+ * "weilding", "an rogue", "an hammer", and a missing "a"); each was corrected
+ * after checking the live index answered the corrected phrase as well as the
+ * misspelled one, which it did — same first four hits for three of them, and
+ * one count of 60 becoming 59.
  */
 export const EXAMPLE_QUERIES: readonly string[] = [
-  "a dragon",
-  "an elf archer",
-  "a skeleton warrior",
-  "a wizard casting a spell",
-  "a treasure chest",
   "a stone golem",
+  "a warrior with a comically large sword",
+  "a flaming hammer",
+  "a dwarf with a flaming hammer",
+  "a weird little guy",
+  "a rogue wielding two daggers",
+  "a sorcerer with an energy beam",
+  "a character with a hammer and shield",
 ];
