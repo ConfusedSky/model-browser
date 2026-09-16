@@ -25,7 +25,12 @@ const ORIGIN = "https://demo.example";
  * answers `{ entries: [] }` and `status` answers a failure code.
  */
 function fakeIndex(
-  opts: { empty?: string[]; status?: Record<string, number> } = {},
+  opts: {
+    empty?: string[];
+    status?: Record<string, number>;
+    /** How many entries a named query answers with, where one is not the point. */
+    count?: Record<string, number>;
+  } = {},
 ) {
   const sent: {
     url: string;
@@ -39,10 +44,12 @@ function fakeIndex(
     const status = opts.status?.[text];
     if (status !== undefined)
       return new Response("the index fell over", { status });
-    const entries =
-      opts.empty?.includes(text) === true
-        ? []
-        : [{ path: `/kit/${text}.stl`, name: "a model" }];
+    const held =
+      opts.empty?.includes(text) === true ? 0 : (opts.count?.[text] ?? 1);
+    const entries = Array.from({ length: held }, (_, i) => ({
+      path: `/kit/${text}-${String(i)}.stl`,
+      name: "a model",
+    }));
     return new Response(JSON.stringify({ path: "/", entries }), {
       status: 200,
       headers: { "content-type": "application/json" },
@@ -62,6 +69,11 @@ describe("checkExampleQueries", () => {
     await expect(checkExampleQueries(ORIGIN, THREE, fetchFn)).resolves.toEqual({
       dead: ["a treasure chest"],
       failed: [],
+      counts: [
+        { text: "a dragon", entries: 1 },
+        { text: "a treasure chest", entries: 0 },
+        { text: "a stone golem", entries: 1 },
+      ],
     });
   });
 
@@ -72,6 +84,11 @@ describe("checkExampleQueries", () => {
     await expect(checkExampleQueries(ORIGIN, THREE, fetchFn)).resolves.toEqual({
       dead: [],
       failed: ["a stone golem"],
+      // The refused one is in neither count: nothing was measured about it.
+      counts: [
+        { text: "a dragon", entries: 1 },
+        { text: "a treasure chest", entries: 1 },
+      ],
     });
   });
 
@@ -87,6 +104,10 @@ describe("checkExampleQueries", () => {
     await expect(checkExampleQueries(ORIGIN, THREE, flaky)).resolves.toEqual({
       dead: [],
       failed: ["a dragon"],
+      counts: [
+        { text: "a treasure chest", entries: 1 },
+        { text: "a stone golem", entries: 1 },
+      ],
     });
     expect(sent.map((s) => s.body.text)).toEqual([
       "a treasure chest",
@@ -118,7 +139,30 @@ describe("checkExampleQueries", () => {
     await expect(checkExampleQueries(ORIGIN, THREE, fetchFn)).resolves.toEqual({
       dead: [],
       failed: [],
+      counts: THREE.map((text) => ({ text, entries: 1 })),
     });
+  });
+
+  it("reports how much each live query found, in the order asked", async () => {
+    // The counts are the sweep `shared/exampleQueries.ts` cites for its chosen
+    // list (`landing-page` 2.1): a pass/fail line cannot say whether a
+    // surviving chip answered with the ceiling or with three, so the figures
+    // in that comment could not be re-run before this. Distinct numbers, so a
+    // count read off the wrong query fails here.
+    const { fetchFn } = fakeIndex({
+      count: { "a dragon": 60, "a stone golem": 7 },
+    });
+    const { counts, dead, failed } = await checkExampleQueries(
+      ORIGIN,
+      THREE,
+      fetchFn,
+    );
+    expect(counts).toEqual([
+      { text: "a dragon", entries: 60 },
+      { text: "a treasure chest", entries: 1 },
+      { text: "a stone golem", entries: 7 },
+    ]);
+    expect({ dead, failed }).toEqual({ dead: [], failed: [] });
   });
 });
 

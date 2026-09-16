@@ -33,12 +33,25 @@ export type FetchLike = (
   init?: RequestInit,
 ) => Promise<Response>;
 
-/** What a run found: the queries that answered nothing, and the ones that could not be asked. */
+/** What a run found: the queries that answered nothing, the ones that could not be asked, and how much every asked one found. */
 export interface CheckResult {
   /** Asked successfully, and the grid would be empty — `entries` came back with nothing in it. */
   dead: string[];
   /** Never answered: a non-2xx status, or a request that threw. */
   failed: string[];
+  /**
+   * One line per query that was asked and answered, in the order asked, with
+   * the number of entries the visitor's grid would have held.
+   *
+   * It exists so the sweep behind `EXAMPLE_QUERIES`' chosen list can be
+   * **re-run** rather than re-typed (the repo's rule about measurements). That
+   * comment records counts from 2026-09-15 and told a reader to re-run them
+   * with this script, which until now printed only what had died — so the
+   * figures it points at could not come back. A count is also the headroom a
+   * dead chip would have to cross: 60 is `TUNING_DEFAULTS`' ceiling, 10 is one
+   * re-bake away from trouble, and neither is visible in a pass/fail line.
+   */
+  counts: { text: string; entries: number }[];
 }
 
 /**
@@ -46,9 +59,9 @@ export interface CheckResult {
  * chip's click sends: `{ text, ...TUNING_DEFAULTS }`.
  *
  * **Sequentially**, deliberately. The box is a 2-vCPU host running SigLIP
- * beside the app, and ten queries fired at once is a load spike that would make
- * this check the reason the demo was slow while it ran. Seven round trips in
- * series is a few seconds.
+ * beside the app, and every query fired at once is a load spike that would make
+ * this check the reason the demo was slow while it ran. The six round trips
+ * `EXAMPLE_QUERIES` asks for, in series, are a few seconds.
  *
  * A failure is never a dead query: the two lists are separate because they have
  * different remedies — a dead query is replaced in `shared/exampleQueries.ts`,
@@ -61,6 +74,7 @@ export async function checkExampleQueries(
 ): Promise<CheckResult> {
   const dead: string[] = [];
   const failed: string[] = [];
+  const counts: { text: string; entries: number }[] = [];
   for (const text of queries) {
     let entries: unknown;
     try {
@@ -82,9 +96,14 @@ export async function checkExampleQueries(
     // A 200 that carries no `entries` array is not a listing this client could
     // draw either, so it counts as dead rather than passing for lack of a
     // length to read.
-    if (!Array.isArray(entries) || entries.length === 0) dead.push(text);
+    // A 200 whose body carries no array counted as 0: the grid it describes is
+    // empty either way, and a count the answer did not contain is not a
+    // measurement to report.
+    const found = Array.isArray(entries) ? entries.length : 0;
+    counts.push({ text, entries: found });
+    if (found === 0) dead.push(text);
   }
-  return { dead, failed };
+  return { dead, failed, counts };
 }
 
 /** One positional origin, required — no flags, so a second argument is a mistake rather than an origin. */
@@ -111,7 +130,12 @@ if (
   }
   const named = origin;
   checkExampleQueries(named, EXAMPLE_QUERIES)
-    .then(({ dead, failed }) => {
+    .then(({ dead, failed, counts }) => {
+      // Always, pass or fail: the counts are the sweep `shared/exampleQueries.ts`
+      // cites, and a run that printed them only on success would be unable to
+      // say how close the survivors were on the day one chip died.
+      for (const { text, entries } of counts)
+        console.log(`${String(entries).padStart(3)}  ${text}`);
       if (dead.length === 0 && failed.length === 0) {
         console.log(
           `${EXAMPLE_QUERIES.length} example queries answer on ${named}`,

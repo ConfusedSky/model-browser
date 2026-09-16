@@ -24,8 +24,11 @@
  * corpus moving, and was dropped for that.
  *
  * Re-run the whole sweep with `bun run scripts/check-example-queries.ts
- * <origin>`, which is a deploy step: it fails naming any phrase that has gone
- * dead, and the remedy is to replace that phrase here.
+ * <origin>`, which is a deploy step: it prints every phrase's entry count in
+ * this order — the figures above, re-measured rather than re-typed — and fails
+ * naming any phrase that has gone dead, whose remedy is to replace it here. It
+ * cannot judge a *first screen*, which is what the two dropped candidates were
+ * dropped for, so that half of the choice is a reading and not a run.
  */
 export const EXAMPLE_QUERIES: readonly string[] = [
   "a dragon",
