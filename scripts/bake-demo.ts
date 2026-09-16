@@ -526,6 +526,16 @@ type Flag = (typeof FLAGS)[number];
  * silently defaulted is how a wrong run would look clean — and the three
  * required flags are required. `--ship` needs `--ship-dir` (the rsync has no
  * target without it); `--ship-dir` alone only fills in the printed command.
+ *
+ * `--origin` must be an absolute `http:`/`https:` URL, and needs `--ship` —
+ * there is no hit-check target to resolve it for otherwise, and the no-`--ship`
+ * branch always prints the production template regardless. `--ship` itself
+ * needs a derivable origin: when its host is a bare IPv4/IPv6 literal (no
+ * certificate answers for one) and `--origin` was not given either, the run
+ * refuses here, before any work happens — a ship whose task 4.2 cannot run
+ * must never leave the argv stage, since `ship()` failing open there once
+ * meant the store shipped, the box restarted, and the process exited 0 with
+ * the hit check silently skipped.
  */
 export function parseArgs(argv: string[]): BakeArgs {
   const values: Partial<Record<Flag, string>> = {};
@@ -549,6 +559,31 @@ export function parseArgs(argv: string[]): BakeArgs {
     throw new Error(`--port must be a port number, got ${values.port}`);
   if (values.ship !== undefined && values["ship-dir"] === undefined)
     throw new Error(`--ship needs --ship-dir\n${USAGE}`);
+  if (values.origin !== undefined) {
+    let validOrigin = false;
+    try {
+      const u = new URL(values.origin);
+      validOrigin = u.protocol === "http:" || u.protocol === "https:";
+    } catch {
+      validOrigin = false;
+    }
+    if (!validOrigin)
+      throw new Error(
+        `--origin must be an absolute http(s) URL, got ${values.origin}\n${USAGE}`,
+      );
+  }
+  if (values.origin !== undefined && values.ship === undefined)
+    throw new Error(`--origin needs --ship\n${USAGE}`);
+  if (
+    values.ship !== undefined &&
+    originFromShip(values.ship, values.origin) === null
+  ) {
+    const at = values.ship.lastIndexOf("@");
+    const host = at === -1 ? values.ship : values.ship.slice(at + 1);
+    throw new Error(
+      `--ship ${values.ship} names ${host === "" ? "no host" : `the host ${host}`}, which no https origin can be derived from — pass --origin <https://url> naming task 4.2's hit-check target\n${USAGE}`,
+    );
+  }
   // Absolute against `process.cwd()` here, once — everything downstream
   // (`writeManifest`, `realpath`, `indexFingerprint`, step 10's
   // `check-bake.sh` run under `cwd: repo`) reads these paths as given, so a
@@ -1376,11 +1411,22 @@ async function generateBoth(
  * (`SHIP_READY_PROBE_TIMEOUT_MS`): `SHIP_READY_DEADLINE_MS` is otherwise
  * only checked *between* attempts, so one black-holed connect (Linux's
  * ~130s default) could overrun the whole deadline on a single try.
+ *
+ * `fetchFn` is a `FetchLike`, the way `fetchPoses` takes one, so a cell can
+ * drive this without a network; `deadlineMs`/`pollMs` default to the real
+ * constants and exist so a cell can shrink both rather than waiting out a
+ * real 60s deadline to prove a non-ready answer keeps polling instead of
+ * resolving early.
  */
-async function waitForShipReady(origin: string): Promise<void> {
-  const deadline = Date.now() + SHIP_READY_DEADLINE_MS;
+export async function waitForShipReady(
+  origin: string,
+  fetchFn: FetchLike = fetch,
+  deadlineMs: number = SHIP_READY_DEADLINE_MS,
+  pollMs: number = POLL_MS,
+): Promise<void> {
+  const deadline = Date.now() + deadlineMs;
   for (;;) {
-    const state = await fetch(`${origin}/api/library`, {
+    const state = await fetchFn(`${origin}/api/library`, {
       signal: AbortSignal.timeout(SHIP_READY_PROBE_TIMEOUT_MS),
     })
       .then((r) => (r.ok ? (r.json() as Promise<LibraryState>) : null))
@@ -1389,9 +1435,9 @@ async function waitForShipReady(origin: string): Promise<void> {
     if (state === "ready") return;
     if (Date.now() >= deadline)
       throw new Error(
-        `${origin}/api/library did not answer ready within ${SHIP_READY_DEADLINE_MS / 1000}s of the restart`,
+        `${origin}/api/library did not answer ready within ${deadlineMs / 1000}s of the restart`,
       );
-    await sleep(POLL_MS);
+    await sleep(pollMs);
   }
 }
 
@@ -1479,11 +1525,14 @@ async function ship(
   try {
     await waitForShipReady(origin);
   } catch (err) {
+    // Printed for the operator, then rethrown: the store already shipped and
+    // the box already restarted, but task 4.2 never ran, and a run that
+    // shipped bytes must not exit 0 without it.
     console.log(
       `\nthe store shipped and the container restarted, but ${err instanceof Error ? err.message : String(err)} — finish task 4.2 by hand:`,
     );
     for (const c of hitCheckCommands(three, origin)) console.log(`  ${c}`);
-    return;
+    throw err;
   }
   for (const m of three)
     for (const ao of [true, false])

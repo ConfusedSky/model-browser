@@ -28,6 +28,7 @@ import {
   shouldRefuse,
   sidecarKey,
   verifyBake,
+  waitForShipReady,
   writeManifest,
 } from "../../scripts/bake-demo";
 import {
@@ -732,10 +733,61 @@ describe("parseArgs", () => {
   it("accepts --origin, passed through unresolved (a URL, not a path)", () => {
     const args = parseArgs([
       ...required,
+      "--ship",
+      "root@box",
+      "--ship-dir",
+      "/srv/cache/box-id",
       "--origin",
       "https://staging.example.com",
     ]);
     expect(args.origin).toBe("https://staging.example.com");
+  });
+
+  it("refuses a --ship to a bare IPv4 host with no --origin, naming the host and the flag — a ship whose task 4.2 cannot run must never leave argv parsing", () => {
+    expect(() =>
+      parseArgs([
+        ...required,
+        "--ship",
+        "root@157.90.25.110",
+        "--ship-dir",
+        "/srv/cache/box-id",
+      ]),
+    ).toThrow(/157\.90\.25\.110[\s\S]*--origin/);
+  });
+
+  it("accepts the same --ship once --origin names task 4.2's target", () => {
+    const args = parseArgs([
+      ...required,
+      "--ship",
+      "root@157.90.25.110",
+      "--ship-dir",
+      "/srv/cache/box-id",
+      "--origin",
+      "https://models.masamaeda.com",
+    ]);
+    expect(args.origin).toBe("https://models.masamaeda.com");
+  });
+
+  it("rejects --origin with no scheme — the exact string tasks.md 1.5 uses", () => {
+    expect(() =>
+      parseArgs([
+        ...required,
+        "--ship",
+        "root@box",
+        "--ship-dir",
+        "/srv/cache/box-id",
+        "--origin",
+        "models.masamaeda.com",
+      ]),
+    ).toThrow(
+      /--origin must be an absolute http\(s\) URL, got models\.masamaeda\.com/,
+    );
+  });
+
+  it("rejects --origin without --ship rather than silently ignoring it", () => {
+    expect(() =>
+      parseArgs([...required, "--origin", "https://staging.example.com"]),
+    ).toThrow(/--origin needs --ship/);
   });
 });
 
@@ -771,6 +823,13 @@ describe("originFromShip", () => {
     expect(originFromShip("root@[2001:db8::1]")).toBeNull();
   });
 
+  it("refuses to derive an origin from an empty host (--ship root@)", () => {
+    // Without this arm an empty host falls through to `https://${host}`,
+    // i.e. the bare string "https://" — not null, so parseArgs would treat
+    // it as a derived origin instead of refusing and asking for --origin.
+    expect(originFromShip("root@")).toBeNull();
+  });
+
   it("an explicit origin wins outright, even over a derivable name", () => {
     expect(
       originFromShip("models.masamaeda.com", "https://staging.example.com"),
@@ -778,6 +837,71 @@ describe("originFromShip", () => {
     expect(
       originFromShip("root@157.90.25.110", "https://staging.example.com"),
     ).toBe("https://staging.example.com");
+  });
+});
+
+/**
+ * `ship()`'s post-restart readiness poll (task 4.2's gate), driven with a
+ * fake `fetch` and a shrunk deadline/poll so a cell does not wait out a real
+ * 60s — each of these answers must be read as "not ready yet" and keep
+ * polling rather than resolving early, then the run must still end at the
+ * deadline rather than hanging.
+ */
+describe("waitForShipReady", () => {
+  it("keeps polling a body that is not JSON, then hits the deadline", async () => {
+    let calls = 0;
+    const fetchFn: FetchLike = async () => {
+      calls++;
+      return new Response("not json", { status: 200 });
+    };
+    await expect(
+      waitForShipReady("http://box", fetchFn, 50, 10),
+    ).rejects.toThrow(
+      /http:\/\/box\/api\/library did not answer ready within 0\.05s/,
+    );
+    expect(calls).toBeGreaterThan(1);
+  });
+
+  it("keeps polling a 404, then hits the deadline", async () => {
+    let calls = 0;
+    const fetchFn: FetchLike = async () => {
+      calls++;
+      return new Response(null, { status: 404 });
+    };
+    await expect(
+      waitForShipReady("http://box", fetchFn, 50, 10),
+    ).rejects.toThrow(/did not answer ready within 0\.05s/);
+    expect(calls).toBeGreaterThan(1);
+  });
+
+  it('keeps polling a settled-but-not-ready state ({"state":"missing"}), then hits the deadline', async () => {
+    let calls = 0;
+    const fetchFn: FetchLike = async () => {
+      calls++;
+      return new Response(JSON.stringify({ state: "missing" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+    await expect(
+      waitForShipReady("http://box", fetchFn, 50, 10),
+    ).rejects.toThrow(/did not answer ready within 0\.05s/);
+    expect(calls).toBeGreaterThan(1);
+  });
+
+  it("resolves as soon as the state reads ready, without waiting for the deadline", async () => {
+    let calls = 0;
+    const fetchFn: FetchLike = async () => {
+      calls++;
+      return new Response(JSON.stringify({ state: "ready" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+    await expect(
+      waitForShipReady("http://box", fetchFn, 50, 10),
+    ).resolves.toBeUndefined();
+    expect(calls).toBe(1);
   });
 });
 
@@ -823,6 +947,31 @@ describe("shouldRefuse (runPass's launch budget)", () => {
   it("a flat count (5, 5, 5, …) refuses after MAX_LAUNCHES", () => {
     const result = drive([5, 5, 5, 5]);
     expect(result.refusal).toMatch(/the count stuck at 5 after 2 launches/);
+  });
+
+  it("a monotone-descending count past 200 launches hits the hard ceiling, not the stuck-count budget", () => {
+    // Every count is progress (strictly lower than the last), so `launches`
+    // (MAX_LAUNCHES) never trips — the only thing here is MAX_TOTAL_LAUNCHES.
+    // Deleting that block leaves this 40/40-green (task 5): the monotone cell
+    // above stops at 120, well under the ceiling.
+    const counts = Array.from({ length: 201 }, (_, i) => 1000 - i);
+    const result = drive(counts);
+    expect(result.refusal).toMatch(/hit the hard ceiling of 200 launches/);
+    expect(result.launches).toBe(200);
+  });
+
+  it("a slow sawtooth that keeps making real progress (100, 99, 100, 98, 100, 97, …) still hits the hard ceiling", () => {
+    // Every other launch dips below the all-time best (100→99→…), so
+    // `launches` resets on every progressing step and never trips either —
+    // the oscillating cell above only catches a count that repeats a value
+    // it has already seen, which this sequence never does. Only the hard
+    // ceiling, at total 200, stops it.
+    const counts: number[] = [];
+    let low = 100;
+    for (let i = 0; i < 220; i++) counts.push(i % 2 === 0 ? 100 : (low -= 1));
+    const result = drive(counts);
+    expect(result.refusal).toMatch(/hit the hard ceiling of 200 launches/);
+    expect(result.launches).toBe(200);
   });
 });
 
