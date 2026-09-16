@@ -35,6 +35,19 @@ export default defineConfig({
   // the named layers are ordered. Nothing else in the suite imports CSS.
   test: { css: true },
   server: {
+    // Both default to Vite's own behaviour (loopback, no extra hosts) and are
+    // set only to reach the dev server from another machine — e.g. behind
+    // `tailscale serve`, which proxies to an IPv4 loopback address and passes
+    // the tailnet name through as `Host`, a name Vite refuses unless it is
+    // named here:
+    //
+    //     VITE_HOST=127.0.0.1 VITE_ALLOWED_HOSTS=<name>.ts.net bun run dev
+    //
+    // The API's guard has to admit that same name as an origin
+    // (`origins` in the deployment's configuration) — the proxy below forwards
+    // the browser's `Host` rather than rewriting it.
+    host: process.env.VITE_HOST,
+    allowedHosts: process.env.VITE_ALLOWED_HOSTS?.split(",") ?? [],
     proxy: {
       "/api": "http://127.0.0.1:3177",
     },

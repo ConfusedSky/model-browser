@@ -48,6 +48,19 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   `MODEL_BROWSER_ROOT` to point it elsewhere. The config path is absolute on purpose: the
   workspaces start with their own cwd, and a relative `MODEL_BROWSER_CONFIG` is an absent
   file, which is silent and means the defaults
+- `bun run dev:remote` - the same servers, reachable from the other machines on this
+  tailnet (`scripts/dev-remote.sh`). Both still bind loopback; what reaches them is
+  `tailscale serve`, which terminates TLS at the tailnet name and proxies to those ports,
+  so the difference is three names agreeing: Vite's `allowedHosts` (`VITE_ALLOWED_HOSTS`,
+  set from `tailscale status`), an `origins` entry for `https://<name>:5173` in the
+  deployment's configuration — Vite's proxy forwards the browser's `Host` rather than
+  rewriting it, so the guard sees the tailnet name — and a serve entry for 5173. The
+  script warns about the last two rather than fixing them: the configuration is read once
+  at server start, and `tailscale serve` needs root
+  (`sudo tailscale serve --bg --https=5173 127.0.0.1:5173`, once per port, persistent).
+  `VITE_HOST=127.0.0.1` is why it works at all — Vite's default bind is IPv6-only and
+  serve proxies to 127.0.0.1. 3177 is served on the tailnet the same way, but it runs
+  `client/dist`, so a client edit needs a rebuild there where 5173 has HMR
 - Semantic search needs a second server, not started by `bun run dev` (its collection root
   must lie inside the library, or the index covers nothing):
   `cd <mini-classify checkout> && .venv/bin/python serve_api.py [<collection root>] --cache-dir <cache> [--no-volume] --port 8077`
