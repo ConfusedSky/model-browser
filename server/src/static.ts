@@ -127,7 +127,8 @@ const REVALIDATE = "no-cache";
  * (`landing-page` D2 — everything the banner has no room for), so a deployment
  * whose `intro` capability is off withholds it with a 404. The build still
  * carries the file; a deployment declares the introduction in its
- * configuration, not by what it ships.
+ * configuration, not by what it ships. The gate is decided on the **resolved**
+ * candidate, for the reason given at `aboutPath`.
  */
 export function createStaticHandler(
   distDir: string,
@@ -135,6 +136,23 @@ export function createStaticHandler(
 ): (req: Request) => Promise<Response | null> {
   const root = resolvePath(distDir);
   const indexPath = resolvePath(root, "index.html");
+  /**
+   * The withheld document, as the path the `stat` below would open — because
+   * the gate has to refuse **every spelling that reaches the file**, and a
+   * comparison against the request's own string refuses only the spelling it
+   * was written with. `resolvePath` drops a trailing slash and a `.` segment,
+   * so `/about.html/`, `/about.html/.`, `/about.html/./` and the encoded
+   * `/about.html%2F` all name this file while none of them equals
+   * `"/about.html"`; before this was keyed on the resolved candidate the demo
+   * served the withheld page under all four, on the live box (200, 484 bytes).
+   * Deciding on the same value the read uses is what makes the two agree by
+   * construction rather than by enumerating spellings.
+   *
+   * Compared exactly, case included: on the case-sensitive filesystems this is
+   * deployed to, `/About.html` names no file and is the entry document's, like
+   * any other unmatched path.
+   */
+  const aboutPath = resolvePath(root, "about.html");
 
   async function send(
     file: string,
@@ -182,15 +200,18 @@ export function createStaticHandler(
       return new Response("forbidden", { status: 403 });
     }
     const normalized = posix.normalize(decoded);
-    if (!intro && normalized === "/about.html") {
-      return new Response("not found", { status: 404 });
-    }
     const candidate = resolvePath(root, `.${normalized}`);
     // Belt and braces: whatever the rules above let through must still land
     // under the build, and this is the one check a later rule cannot weaken by
     // accident.
     if (candidate !== root && !candidate.startsWith(root + sep)) {
       return new Response("forbidden", { status: 403 });
+    }
+    // After the confinement check and before any read, so the withheld
+    // document is refused on the file it names rather than on how it was
+    // spelled.
+    if (!intro && candidate === aboutPath) {
+      return new Response("not found", { status: 404 });
     }
     if (candidate !== root) {
       const file = await send(

@@ -31,6 +31,10 @@ writeFileSync(
 writeFileSync(join(dist, "favicon.ico"), Buffer.from([0, 0, 1, 0]));
 const ABOUT = "<!doctype html><title>about</title>";
 writeFileSync(join(dist, "about.html"), ABOUT);
+// A name the withholding gate must *not* catch, and the one a `startsWith`
+// spelling of it would: same prefix, a different file.
+const NEARLY = "<!doctype html><title>not the about page</title>";
+writeFileSync(join(dist, "about.html.bak"), NEARLY);
 const secret = realTempDir("mb-static-outside-");
 writeFileSync(join(secret, "secret.txt"), "not yours");
 
@@ -137,27 +141,55 @@ describe("the static handler", () => {
     expect(await js?.text()).toBe(BUNDLE);
   });
 
-  it("withholds the About page when the introduction is off", async () => {
+  it("withholds the About page when the introduction is off, however it is spelled", async () => {
     // The page is the visitor introduction's own document (`landing-page`
     // D2): a deployment declares the introduction in its configuration, and
     // the build carrying the file is not a declaration. Off, the page is a
     // 404 — not the entry document, which would draw the app at that address
     // and read as the page having moved.
-    expect(await (await ask("/about.html"))?.text()).toBe(ABOUT);
+    //
+    // Every spelling, because the gate that asked its question of the
+    // request's own string answered it for one of them: `resolvePath` drops a
+    // trailing slash and a `.` segment, so each address below reaches the same
+    // file, and the four beyond the first served the withheld page on the live
+    // box (200, 484 bytes) while `/about.html` 404'd. The gate is keyed on the
+    // resolved candidate now, which is the value the read uses.
+    const spellings = [
+      "/about.html",
+      "/about.html/",
+      "/about.html/.",
+      "/about.html/./",
+      "/about.html%2F",
+      "//about.html",
+    ];
+    // With the introduction on, every one of them is the page — this is the
+    // resolution the gate has to agree with, and the reason enumerating
+    // spellings at the gate is the wrong shape.
+    for (const path of spellings) {
+      const on = await ask(path);
+      expect(on?.status, path).toBe(200);
+      expect(await on?.text(), path).toBe(ABOUT);
+    }
     const withheld = createStaticHandler(dist, { intro: false });
-    const off = await withheld(new Request("http://models.example/about.html"));
-    expect(off?.status).toBe(404);
-    // Only that document: the app and its assets are unaffected.
-    expect(
-      (await withheld(new Request("http://models.example/")))?.status,
-    ).toBe(200);
-    expect(
-      (
-        await withheld(
-          new Request("http://models.example/assets/main-abc123.js"),
-        )
-      )?.status,
-    ).toBe(200);
+    const off = (path: string) =>
+      withheld(new Request(`http://models.example${path}`));
+    for (const path of spellings) {
+      const res = await off(path);
+      expect(res?.status, path).toBe(404);
+      expect(await res?.text(), path).not.toContain("about");
+    }
+    // Only that document: the app, its assets and every other file in the
+    // build are unaffected — including the name that shares the withheld
+    // one's prefix, which is what a `startsWith` gate would swallow.
+    expect((await off("/"))?.status).toBe(200);
+    expect((await off("/assets/main-abc123.js"))?.status).toBe(200);
+    expect((await off("/index.html"))?.status).toBe(200);
+    expect(await (await off("/about.html.bak"))?.text()).toBe(NEARLY);
+    // And a path naming no file is still the entry document, not a 404: the
+    // gate withholds one document, it does not turn the fallback off.
+    const deep = await off("/kits/dragons");
+    expect(deep?.status).toBe(200);
+    expect(await deep?.text()).toBe(INDEX);
   });
 
   it("has nothing to serve when there is no entry document", async () => {

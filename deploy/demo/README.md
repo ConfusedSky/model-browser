@@ -238,10 +238,21 @@ carries the ACME error — `docker compose logs caddy`.
 **The app.**
 
 ```sh
-curl -s https://models.masamaeda.com/api/features        # the demo posture: every field false but `intro`
+curl -s https://models.masamaeda.com/api/features        # the demo posture: every field false, `intro` included
 curl -s https://models.masamaeda.com/ | head -5          # the client's index.html, not JSON
 curl -s https://models.masamaeda.com/api/library         # ready, and **no `top`** — hostDetails is off
+curl -s -o /dev/null -w '%{http_code}\n' https://models.masamaeda.com/about.html   # 404 while `intro` is off
 ```
+
+`intro` went off on 2026-09-15, pending a review of the introduction and the
+About page — both went live that day unreviewed. The last line is what that
+posture looks like from outside: the build still carries `about.html`, and the
+app withholds it because the configuration says so. Worth asking rather than
+assuming — the withholding gate was keyed on the request's *spelling* when it
+landed, so `/about.html/` and `/about.html%2F` served the page while
+`/about.html` 404'd. Ask one of those too. Turning the introduction on is a
+`config.json` change, deployed like any other (§6), after which every one of
+them answers 200.
 
 **The two startup lines**, which are the only place the resolved library top can
 be read at all (`hostDetails` withholds it on the wire):
@@ -279,6 +290,11 @@ It asks each chip's phrase under the options a visitor's click runs with, so a
 that phrase in `shared/exampleQueries.ts` with one the corpus answers. A
 `failed:` line is not about the phrases at all — the origin or its index is not
 answering.
+
+While `intro` is off no visitor sees those chips at all, so a `dead:` line is
+not a live defect today; it is what the introduction would show the day the
+capability goes back on, which is why the check stays in this list rather than
+waiting for it.
 
 **The guard is alive.** A foreign `Origin` is the check, not a foreign `Host` —
 Caddy's site block never forwards a `Host` it does not serve:

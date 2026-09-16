@@ -814,9 +814,13 @@ export interface FeatureReport {
    * placeholder examples and the meaning-mode start (`visitor-intro`).
    *
    * Its default is **off**: the introduction speaks to a visitor who does not
-   * know what the app is, and a personal installation has none. No route serves
-   * it, so there is nothing for the server to refuse — like `chatTab` it is
-   * purely an offer the client draws or withholds. It names a *surface*, never a
+   * know what the app is, and a personal installation has none. Almost all of
+   * it is an offer the client draws or withholds, like `chatTab` — no `/api`
+   * route is gated on this field. The one thing the server itself withholds is
+   * the introduction's own document: with this off, the static handler answers
+   * `/about.html` with a 404 rather than serving it out of the build, because a
+   * deployment declares the introduction in its configuration and the build
+   * carrying the file is not a declaration. It names a *surface*, never a
    * deployment kind: a deployment that wants the introduction declares this
    * field, and nothing infers it from `hostDetails` or `thumbWrites`
    * (`landing-page` D1).
