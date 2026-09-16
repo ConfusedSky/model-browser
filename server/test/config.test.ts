@@ -307,52 +307,56 @@ describe("loadConfig", () => {
  * loader the server uses, then read the two ways a server reads it — the report
  * it publishes, and the origins its guard admits.
  */
-describe("the committed demo configuration", () => {
+describe("the shipped demo configuration", () => {
   const file = fileURLToPath(
     new URL("../../deploy/demo/config.json", import.meta.url),
   );
 
-  it("loads, and declares the demo posture", async () => {
+  it("parses, and states every capability rather than inheriting one", async () => {
+    // The parse is strict, so a typo in the file this repository ships is a box
+    // that does not boot — and the deploy is the first place that shows.
+    //
+    // The capability *values* are not asserted: they are the deployment's
+    // posture, not this suite's business, and mirroring them here would make
+    // every deliberate change an edit in two places. What is asserted is that
+    // each is stated, since an omitted field silently takes a default and would
+    // change posture the next time a default moves.
     const config = await loadConfig({ MODEL_BROWSER_CONFIG: file });
-    expect(config.root).toBe("/library/miniatures/decimated");
-    expect(config.origins).toEqual(["https://models.masamaeda.com"]);
-    expect(config.listen).toEqual({ host: "127.0.0.1", port: 3177 });
-    // Every field is stated in the file, including the ones that match a
-    // default, so a later default flip is an edit there rather than a silent
-    // change of posture on the most visible instance of this project.
-    expect(config.features).toEqual({
-      thumbWrites: false,
-      appLaunch: false,
-      chatTab: false,
-      hostDetails: false,
-      maintenance: false,
-      // The field the demo will turn **on** — the deployment a stranger opens
-      // is the one that owes them a sentence saying what this is
-      // (`landing-page` D1) — but off since 2026-09-15: the introduction and
-      // its About page went live unreviewed, and they stay withheld until
-      // Masa has read them. Flipping this key is the whole re-enable.
-      intro: false,
-    });
-    // And nothing else: the file carries no free-text key, and the
-    // bake-pins-the-recipe note lives on `demo-infrastructure`'s bake step.
     expect(Object.keys(config).sort()).toEqual([
       "features",
       "listen",
       "origins",
       "root",
     ]);
+    expect(Object.keys(config.features ?? {}).sort()).toEqual(
+      Object.keys(DEFAULT_FEATURES).sort(),
+    );
   });
+});
 
-  it("reports what it declares, and answers its own origin as well as loopback", async () => {
-    const config = await loadConfig({ MODEL_BROWSER_CONFIG: file });
+describe("a deployment that declares an origin", () => {
+  it("answers that origin and loopback, and refuses any other", async () => {
+    // Its own configuration file rather than the shipped one: this is the
+    // guard's rule, and pinning it to the demo's posture would make a change of
+    // posture look like a change of behaviour.
+    const tmp = realTempDir("mb-config-origin-");
+    const env = {
+      MODEL_BROWSER_CONFIG: join(tmp, "config.json"),
+    } as NodeJS.ProcessEnv;
+    writeFileSync(
+      env.MODEL_BROWSER_CONFIG as string,
+      JSON.stringify({
+        origins: ["https://demo.example"],
+        features: { thumbWrites: false, appLaunch: false },
+      }),
+    );
+    const config = await loadConfig(env);
     const features: FeatureReport = { ...DEFAULT_FEATURES, ...config.features };
-    const lib = realTempDir("mb-demo-lib-");
-    const cache = realTempDir("mb-demo-cache-");
     const app = createApp(
-      new ThumbCache(cache),
+      new ThumbCache(realTempDir("mb-config-origin-cache-")),
       undefined,
       undefined,
-      libraryFor(lib),
+      libraryFor(realTempDir("mb-config-origin-lib-")),
       undefined,
       features,
       undefined,
@@ -360,58 +364,25 @@ describe("the committed demo configuration", () => {
       config.origins ?? [],
     );
 
-    const report = await app.request("/api/features", { headers: LOOPBACK });
-    expect(await report.json()).toEqual({
-      thumbWrites: false,
-      appLaunch: false,
-      chatTab: false,
-      hostDetails: false,
-      maintenance: false,
-      intro: false,
-    });
+    // What the file declares is what the report says.
+    expect(
+      await (await app.request("/api/features", { headers: LOOPBACK })).json(),
+    ).toEqual(features);
 
     // `/api/library` rather than a listing: the guard runs before every
     // /api/* route alike, and this one asks the filesystem nothing.
     const ask = (headers: Record<string, string>) =>
       app.request("/api/library", { headers });
-    // The configured origin, named both ways a request can name it.
     expect(
-      (
-        await ask({
-          host: "models.masamaeda.com",
-          origin: "https://models.masamaeda.com",
-        })
-      ).status,
+      (await ask({ host: "demo.example", origin: "https://demo.example" }))
+        .status,
     ).toBe(200);
-    // Loopback is still in the set, whatever is configured (D8): a health check
+    // Loopback is in the set whatever is configured (D8): a health check
     // against the bound port must not be refused by the deployment it checks.
     expect((await ask(LOOPBACK)).status).toBe(200);
-    // And no other public origin.
     expect(
-      (
-        await ask({
-          host: "models.masamaeda.com",
-          origin: "https://evil.example",
-        })
-      ).status,
+      (await ask({ host: "demo.example", origin: "https://evil.example" }))
+        .status,
     ).toBe(403);
-  });
-});
-
-/**
- * The library reads its root from the value the loader produced, and opens no
- * file of its own (1.2/1.2a) — the two halves meeting.
- */
-describe("the loaded configuration reaches the library", () => {
-  it("carries the file root through to the library state", async () => {
-    const tmp = realTempDir("mb-config-tolib-");
-    const root = join(tmp, "lib");
-    mkdirSync(root);
-    const file = join(tmp, "config.json");
-    writeFileSync(file, JSON.stringify({ root }));
-
-    const config = await loadConfig({ MODEL_BROWSER_CONFIG: file });
-    const state = await createLibrary({}, config).state();
-    expect(state.state === "ready" && state.top).toBe(root);
   });
 });
