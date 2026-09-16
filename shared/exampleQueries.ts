@@ -23,4 +23,6 @@ export const EXAMPLE_QUERIES: readonly string[] = [
   "a sorcerer with an energy beam",
   "a character with a hammer and shield",
   "a demon with wings",
+  "an unarmed minotaur",
+  "a minotaur with a large axe",
 ];
