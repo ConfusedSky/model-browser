@@ -52,6 +52,14 @@ const HEAD = execFileSync("git", ["rev-parse", "HEAD"], {
 }).trim();
 const OTHER_COMMIT = "f".repeat(40);
 
+// The script's shebang says `#!/bin/sh`, and the box runs dash — but `sh` on
+// this machine resolves to bash, which tolerates bashisms a POSIX-only script
+// must not lean on. `check()` below re-runs every case under dash too, when
+// one is installed, and asserts the two shells agree; a machine with no dash
+// just gets sh coverage, same as before this cell existed.
+const HAS_DASH =
+  spawnSync("sh", ["-c", "command -v dash"], { encoding: "utf8" }).status === 0;
+
 const dirs: string[] = [];
 afterAll(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
@@ -119,13 +127,14 @@ interface Run {
   stderr: string;
 }
 
-function check(
+function runUnder(
+  shell: string,
   manifest: string,
-  index?: string,
-  env: Record<string, string> = {},
+  index: string | undefined,
+  env: Record<string, string>,
 ): Run {
   const r = spawnSync(
-    "sh",
+    shell,
     [SCRIPT, manifest, ...(index === undefined ? [] : [index])],
     {
       encoding: "utf8",
@@ -133,6 +142,18 @@ function check(
     },
   );
   return { status: r.status, stdout: r.stdout, stderr: r.stderr };
+}
+
+function check(
+  manifest: string,
+  index?: string,
+  env: Record<string, string> = {},
+): Run {
+  const r = runUnder("sh", manifest, index, env);
+  if (HAS_DASH) {
+    expect(runUnder("dash", manifest, index, env)).toEqual(r);
+  }
+  return r;
 }
 
 /** A source-file fixture the script is pointed at through its test-only override. */
@@ -210,6 +231,20 @@ describe("check-bake.sh", () => {
         `rig: checkout ${RIG}, bake ${RIG - 1}\ncommit: checkout ${HEAD}, bake ${OTHER_COMMIT}\n`,
       );
     });
+
+    it("refuses a manifest whose commit line appears twice", async () => {
+      const f = await fixture();
+      const text = readFileSync(f.manifest, "utf8");
+      const line = text.split("\n").find((l) => l.includes('"commit"'));
+      if (line === undefined) throw new Error("no commit line");
+      const mutated = text.replace(line, `${line}\n${line}`);
+      writeFileSync(f.manifest, mutated);
+      const r = check(f.manifest, f.index);
+      expect(r.status).toBe(1);
+      expect(r.stdout).toBe(
+        `"commit": 2 lines match in ${f.manifest}, expected at most 1\n`,
+      );
+    });
   });
 
   describe("the index fingerprint", () => {
@@ -255,10 +290,56 @@ describe("check-bake.sh", () => {
       );
     });
 
-    it("compares no hashes when no index directory is given", async () => {
+    it("compares no hashes when no index directory is given, but says so", async () => {
       const f = await fixture();
       writeFileSync(join(f.index, POSE_CACHE_FILE), "rewritten");
-      expect(check(f.manifest)).toEqual(SILENT_OK);
+      expect(check(f.manifest)).toEqual({
+        status: 0,
+        stdout: "index: not checked, no index directory given\n",
+        stderr: "",
+      });
+    });
+
+    it("compares no hashes when the index argument is empty, and says so too", async () => {
+      const f = await fixture();
+      writeFileSync(join(f.index, POSE_CACHE_FILE), "rewritten");
+      expect(check(f.manifest, "")).toEqual({
+        status: 0,
+        stdout: "index: not checked, no index directory given\n",
+        stderr: "",
+      });
+    });
+
+    it("refuses a poseCacheSha256 that is not 64 hex chars, naming the read", async () => {
+      const f = await fixture();
+      const text = readFileSync(f.manifest, "utf8");
+      const mutated = text.replace(
+        /"poseCacheSha256": "[0-9a-f]{64}"/,
+        '"poseCacheSha256": "not-a-hash"',
+      );
+      expect(mutated).not.toBe(text);
+      writeFileSync(f.manifest, mutated);
+      const r = check(f.manifest, f.index);
+      expect(r.status).toBe(1);
+      expect(r.stdout).toBe(
+        `"poseCacheSha256": 0 lines match in ${f.manifest}, expected exactly 1\n`,
+      );
+    });
+
+    it("refuses a manifest whose poseCacheSha256 line appears twice, naming the read", async () => {
+      const f = await fixture();
+      const text = readFileSync(f.manifest, "utf8");
+      const line = text
+        .split("\n")
+        .find((l) => l.includes('"poseCacheSha256"'));
+      if (line === undefined) throw new Error("no poseCacheSha256 line");
+      const mutated = text.replace(line, `${line}\n${line}`);
+      writeFileSync(f.manifest, mutated);
+      const r = check(f.manifest, f.index);
+      expect(r.status).toBe(1);
+      expect(r.stdout).toBe(
+        `"poseCacheSha256": 2 lines match in ${f.manifest}, expected exactly 1\n`,
+      );
     });
   });
 
@@ -361,6 +442,26 @@ describe("check-bake.sh", () => {
         stdout: "rig: checkout 12, bake 11\n",
         stderr: "",
       });
+    });
+  });
+
+  describe("usage", () => {
+    // check() only ever spawns 1 or 2 argv entries (manifest, optional index);
+    // the invalid-argc arm needs a raw spawn to reach 0 or 3+.
+    it("exits 2 with a usage line when given no arguments", () => {
+      const r = spawnSync("sh", [SCRIPT], { encoding: "utf8" });
+      expect(r.status).toBe(2);
+      expect(r.stdout).toBe("");
+      expect(r.stderr).toBe(`usage: ${SCRIPT} <manifest> [<index dir>]\n`);
+    });
+
+    it("exits 2 with a usage line when given three arguments", () => {
+      const r = spawnSync("sh", [SCRIPT, "a", "b", "c"], {
+        encoding: "utf8",
+      });
+      expect(r.status).toBe(2);
+      expect(r.stdout).toBe("");
+      expect(r.stderr).toBe(`usage: ${SCRIPT} <manifest> [<index dir>]\n`);
     });
   });
 });

@@ -7,7 +7,11 @@
 # them against the manifest's "rig" and "poseVersion", and — when an index
 # directory is given — the sha256 of its pose-cache.json and run-params.json
 # against the manifest's "poseCacheSha256" and "runParamsSha256". A missing
-# index file is a disagreement, not a skip.
+# index file is a disagreement, not a skip; an omitted or empty index
+# argument *is* a skip, and prints `index: not checked, no index directory
+# given` so a re-embed cannot pass the gate silently just because the caller
+# left the second argument off (the exit code is unaffected — the omitted
+# form is what the bake script's own step 10, and the box, never do).
 #
 # One line reports without refusing: when the manifest's client.commit differs
 # from `git rev-parse HEAD` it prints `commit: checkout <a>, bake <b>` and
@@ -132,6 +136,8 @@ check_index_file() {
 if [ -n "$index" ]; then
   check_index_file pose-cache.json "$man_pose_cache"
   check_index_file run-params.json "$man_run_params"
+else
+  echo "index: not checked, no index directory given"
 fi
 
 # The commit: reported, never enforced. Zero "commit" lines is a bake that did
