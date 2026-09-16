@@ -59,6 +59,11 @@ const OTHER_COMMIT = "f".repeat(40);
 // just gets sh coverage, same as before this cell existed.
 const HAS_DASH =
   spawnSync("sh", ["-c", "command -v dash"], { encoding: "utf8" }).status === 0;
+if (!HAS_DASH) {
+  console.warn(
+    "checkBake.test.ts: no dash on this machine — POSIX parity (sh vs dash) was NOT checked this run",
+  );
+}
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -127,21 +132,25 @@ interface Run {
   stderr: string;
 }
 
-function runUnder(
+function runArgv(
   shell: string,
-  manifest: string,
-  index: string | undefined,
+  argv: string[],
   env: Record<string, string>,
 ): Run {
-  const r = spawnSync(
-    shell,
-    [SCRIPT, manifest, ...(index === undefined ? [] : [index])],
-    {
-      encoding: "utf8",
-      env: { ...process.env, ...env },
-    },
-  );
+  const r = spawnSync(shell, [SCRIPT, ...argv], {
+    encoding: "utf8",
+    env: { ...process.env, ...env },
+  });
   return { status: r.status, stdout: r.stdout, stderr: r.stderr };
+}
+
+/** Runs raw argv under sh, and under dash too when one is installed, asserting agreement. */
+function checkArgv(argv: string[], env: Record<string, string> = {}): Run {
+  const r = runArgv("sh", argv, env);
+  if (HAS_DASH) {
+    expect(runArgv("dash", argv, env)).toEqual(r);
+  }
+  return r;
 }
 
 function check(
@@ -149,11 +158,7 @@ function check(
   index?: string,
   env: Record<string, string> = {},
 ): Run {
-  const r = runUnder("sh", manifest, index, env);
-  if (HAS_DASH) {
-    expect(runUnder("dash", manifest, index, env)).toEqual(r);
-  }
-  return r;
+  return checkArgv([manifest, ...(index === undefined ? [] : [index])], env);
 }
 
 /** A source-file fixture the script is pointed at through its test-only override. */
@@ -341,6 +346,38 @@ describe("check-bake.sh", () => {
         `"poseCacheSha256": 2 lines match in ${f.manifest}, expected exactly 1\n`,
       );
     });
+
+    it("refuses a runParamsSha256 that is not 64 hex chars, naming the read", async () => {
+      const f = await fixture();
+      const text = readFileSync(f.manifest, "utf8");
+      const mutated = text.replace(
+        /"runParamsSha256": "[0-9a-f]{64}"/,
+        '"runParamsSha256": "not-a-hash"',
+      );
+      expect(mutated).not.toBe(text);
+      writeFileSync(f.manifest, mutated);
+      const r = check(f.manifest, f.index);
+      expect(r.status).toBe(1);
+      expect(r.stdout).toBe(
+        `"runParamsSha256": 0 lines match in ${f.manifest}, expected exactly 1\n`,
+      );
+    });
+
+    it("refuses a manifest whose runParamsSha256 line appears twice, naming the read", async () => {
+      const f = await fixture();
+      const text = readFileSync(f.manifest, "utf8");
+      const line = text
+        .split("\n")
+        .find((l) => l.includes('"runParamsSha256"'));
+      if (line === undefined) throw new Error("no runParamsSha256 line");
+      const mutated = text.replace(line, `${line}\n${line}`);
+      writeFileSync(f.manifest, mutated);
+      const r = check(f.manifest, f.index);
+      expect(r.status).toBe(1);
+      expect(r.stdout).toBe(
+        `"runParamsSha256": 2 lines match in ${f.manifest}, expected exactly 1\n`,
+      );
+    });
   });
 
   it("exits 1 naming the path when the manifest is missing", async () => {
@@ -447,18 +484,17 @@ describe("check-bake.sh", () => {
 
   describe("usage", () => {
     // check() only ever spawns 1 or 2 argv entries (manifest, optional index);
-    // the invalid-argc arm needs a raw spawn to reach 0 or 3+.
+    // the invalid-argc arm needs a 0- or 3-argv variant, routed through
+    // checkArgv so it too runs under dash when one is installed.
     it("exits 2 with a usage line when given no arguments", () => {
-      const r = spawnSync("sh", [SCRIPT], { encoding: "utf8" });
+      const r = checkArgv([]);
       expect(r.status).toBe(2);
       expect(r.stdout).toBe("");
       expect(r.stderr).toBe(`usage: ${SCRIPT} <manifest> [<index dir>]\n`);
     });
 
     it("exits 2 with a usage line when given three arguments", () => {
-      const r = spawnSync("sh", [SCRIPT, "a", "b", "c"], {
-        encoding: "utf8",
-      });
+      const r = checkArgv(["a", "b", "c"]);
       expect(r.status).toBe(2);
       expect(r.stdout).toBe("");
       expect(r.stderr).toBe(`usage: ${SCRIPT} <manifest> [<index dir>]\n`);
