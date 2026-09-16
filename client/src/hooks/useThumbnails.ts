@@ -72,12 +72,17 @@ function usable(
   pose: IndexPose | null | undefined,
 ): boolean {
   const unowned = camera === undefined && axis === undefined;
+  // `undefined` where the pose is unsettled *or* frames no render — an
+  // off-axis `up`, an `azimuth_zero` that is not perpendicular. Neither can
+  // make a render stale: there is no orientation it should have been drawn
+  // under.
+  const poseKey = poseKeyFor(pose);
   const poseStale =
     unowned &&
     (pose === null
       ? labels.posed !== undefined || labels.poseKey !== undefined
-      : pose !== undefined &&
-        (labels.posed !== POSE_VERSION || labels.poseKey !== poseKeyFor(pose)));
+      : poseKey !== undefined &&
+        (labels.posed !== POSE_VERSION || labels.poseKey !== poseKey));
   return (
     labels.lighting === THUMB_LIGHTING &&
     labels.rig === RIG_VERSION &&
@@ -85,8 +90,8 @@ function usable(
   );
 }
 
-/** **Known gap**: a pose that frames no render leaves the render unlabelled,
- *  so it is stale on every visit and re-rendered identically each time. */
+/** `undefined` for a pose that frames no render, which `usable` reads as
+ *  nothing to be stale against. */
 function poseKeyFor(pose: IndexPose | null | undefined): string | undefined {
   const resolved = cameraForPose(pose, DEFAULT_CAMERA);
   return resolved === null ? undefined : poseKeyOf(resolved);

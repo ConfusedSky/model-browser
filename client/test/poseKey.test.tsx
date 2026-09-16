@@ -185,6 +185,49 @@ describe("a render made under a different pose", () => {
   });
 });
 
+describe("a pose that frames no render", () => {
+  // `cameraForPose` refuses an off-axis `up` and an `azimuth_zero` that is not
+  // perpendicular to it. There is no orientation such a pose asks for, so a
+  // render cannot be stale against it — judging it stale re-rendered and
+  // re-uploaded the same pixels on every visit.
+  const MALFORMED: IndexPose = {
+    ...POSE_A,
+    up: [0.5, 0.5, 0.5],
+  };
+  const WAVE_BAD: PosesResponse = { poses: { "/models/hero.stl": MALFORMED } };
+
+  it("frames nothing, so it is not an orientation to be stale against", () => {
+    expect(cameraForPose(MALFORMED, DEFAULT_CAMERA)).toBeNull();
+  });
+
+  it("leaves an unlabelled hit alone rather than re-rendering it every visit", async () => {
+    getThumb.mockResolvedValue(UNPOSED_HIT);
+    semanticPosesFor.mockResolvedValue(WAVE_BAD);
+    listDir.mockResolvedValue(LISTING);
+    await mountApp("/models", LISTING);
+    await settle();
+    await settle();
+    expect(renderThumbnail).not.toHaveBeenCalled();
+    expect(lastPut()).toBeUndefined();
+
+    // And still on the next landing, which is where the loop showed itself.
+    await awayAndBack();
+    expect(renderThumbnail).not.toHaveBeenCalled();
+    expect(lastPut()).toBeUndefined();
+  });
+
+  it("control: a well-formed pose over the same hit does re-render it", async () => {
+    getThumb.mockResolvedValue(UNPOSED_HIT);
+    semanticPosesFor.mockResolvedValue(WAVE_A);
+    listDir.mockResolvedValue(LISTING);
+    await mountApp("/models", LISTING);
+    await settle();
+    await settle();
+    expect(renderThumbnail).toHaveBeenCalled();
+    expect(lastPut()?.poseKey).toBe(KEY_A);
+  });
+});
+
 describe("the source settled to hold nothing (`pose-rerender` D5)", () => {
   // Three pose states reach `usable`: a pose, `null` (settled: asked and none,
   // or the index known absent) and `undefined` (unsettled: warming, or an ask
