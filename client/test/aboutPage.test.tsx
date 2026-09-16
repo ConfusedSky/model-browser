@@ -20,21 +20,26 @@ import AboutPage from "../src/components/AboutPage";
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
 /**
- * The sections the requirement lists, in the order it lists them, paired with
- * the `id` each one is addressed by. The `id`s are part of the contract, not
- * styling: the banner's credits link is `/about.html#credits`.
+ * Every section the requirement asks for, in the order the page puts them.
+ *
+ * The set is the contract (`visitor-intro`: the page "SHALL carry, as
+ * sections: …"), and so are the `id`s — the banner's credits link is
+ * `/about.html#credits`. The *order* is editorial and the requirement does not
+ * fix it, so it is pinned here only to make a reorder deliberate rather than
+ * accidental: reordering the page is a one-line edit to this list (Masa
+ * reordered it on 2026-09-16), dropping a section is not.
  */
 const SECTIONS: readonly (readonly [string, string])[] = [
   ["what", "What this is"],
-  ["licence", "Licence and provenance"],
-  ["corpus", "How the corpus was altered"],
-  ["differences", "What differs from the desktop app"],
-  ["how-to", "How to use it"],
   ["links", "Links"],
-  ["privacy", "Privacy"],
-  ["webgl", "WebGL and the desktop build"],
+  ["how-to", "How to use it"],
   ["technical", "Under the hood"],
   ["limitations", "What the search does badly"],
+  ["differences", "What differs from the desktop app"],
+  ["webgl", "WebGL and the desktop build"],
+  ["licence", "Licence and provenance"],
+  ["corpus", "How the corpus was altered"],
+  ["privacy", "Privacy"],
   ["credits", "Credits"],
 ];
 
