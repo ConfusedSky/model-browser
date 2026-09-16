@@ -14,14 +14,19 @@ constraints this design works under, each verified against the source on 2026-09
   until it resolves. Every gate follows one pattern — `features?.chatTab === true`
   offers, anything else withholds. The config parser's `FEATURE_KEYS` is
   `Object.keys(DEFAULT_FEATURES)`, so a new field is accepted by the strict parse the
-  moment it has a default. The demo config sets every field false and the runbook's §5
-  check reads "the demo posture: every field false".
+  moment it has a default. At draft time the demo config set every field false and the
+  runbook's §5 check read "the demo posture: every field false"; the change made both
+  say "every field false but `intro`", `beaef45` put the config back to every field
+  false, and the runbook line has since been corrected to match ("every field false,
+  `intro` included") — the two move together, and go back together at tasks 6.6.
 - **The client has one route** (`client/src/lib/urlState.ts`: all state in query
   params, `commitUrl` preserves `window.location.pathname`). No router dependency.
   `createStaticHandler` in `server/src/static.ts` serves any file under `client/dist`
   — `/assets/*` immutable, everything else `no-cache` — and answers `index.html` for
   a name matching no file; `route` only composes it with the API. Vite serves whatever
-  `.html` files exist under `client/`.
+  `.html` files exist under `client/`. Since `beaef45` the handler takes the `intro`
+  field and has exactly one exception to those rules: the About page, 404 where the
+  introduction is off (D2).
 - **`App`'s tree** is `<div className="flex h-screen flex-col">` → `<header>` → a row
   `<div className="flex min-h-0 flex-1">` holding `<main ref={mainRef} … overflow-auto>`
   and the side panel as siblings. `View.subject` is a discriminated union whose empty
@@ -48,9 +53,15 @@ constraints this design works under, each verified against the source on 2026-09
   `client/src/lib/stored.ts` (never throws); preference keys use the
   `model-browser:` prefix. `client/test/CLAUDE.md` warns that a value read into a
   module closure is not reset by `localStorage.clear()` between cells.
-- **The bake** (`corpus-bake`): `scripts/bake-demo.ts` has landed (35a3b77); its
-  `--ship` step (that change's task 1.5) has not, and will be the one place that fires
-  HTTP at the public origin after a restart. Its on-box check `deploy/demo/check-bake.sh`
+- **The bake** (`corpus-bake`): `scripts/bake-demo.ts` has landed (35a3b77), **and so
+  has its `--ship` step** (that change's task 1.5, `4e037db`) — this bullet said it had
+  not, which was already untrue when it was written 74 minutes later (`c38d41f`). The
+  `ship` function in that script runs the rsync, the `restart app` over ssh and the hit
+  checks, which makes it the one place that fires HTTP at the public origin after a
+  restart. It does **not** call `scripts/check-example-queries.ts` — `grep -n
+  'check-example' scripts/bake-demo.ts` matches nothing — so the wiring D9 asks for is
+  still unwritten work, not a landed call (tasks 7.2, and `corpus-bake`'s own 9.x).
+  Its on-box check `deploy/demo/check-bake.sh`
   is POSIX-only and offline by contract, so no query test can live there. The box has
   no Bun outside the container: anything written in TypeScript runs from the developer
   machine.
@@ -95,16 +106,24 @@ constraints this design works under, each verified against the source on 2026-09
 The banner could be gated on `hostDetails: false` or `thumbWrites: false`, which the
 demo sets. That is inferring a deployment kind from unrelated capabilities, which
 `feature-report` forbids in words (*names a surface … never a deployment kind*). So
-`FeatureReport.intro: boolean`, default `false` in `DEFAULT_FEATURES`, `true` in
-`deploy/demo/config.json`. It has no route to refuse — like `chatTab`, it is an offer
-the client draws or withholds. Every gate reads `features?.intro === true`; a `null`
-report withholds, matching *No flash of a denied surface*.
+`FeatureReport.intro: boolean`, default `false` in `DEFAULT_FEATURES`, and stated in
+`deploy/demo/config.json` — set `true` when this change landed, and `false` since
+`beaef45` the same day (D2: withheld pending review). Every gate reads
+`features?.intro === true`; a `null` report withholds, matching *No flash of a denied
+surface*. It was drafted as a field with no route to refuse, like `chatTab`; `beaef45`
+gave it one — the About document, refused by `createStaticHandler` where the field is
+off (D2).
 
-Consequences that must land together: `server/test/features.test.ts` and
-`refusals.test.ts` spell the report out and gain the field; `config.test.ts`'s demo
-configuration cell expects `intro: true`; `client/test/appHarness.tsx`'s `DEFAULT_REPORT`
-gains `intro: false` (spelt out on purpose — do not import the server constant); the
-runbook's "every field false" line becomes "every field false but `intro`".
+Consequences that must land together: `server/test/features.test.ts` spells the report
+out and gains the field — it is the **only** server cell that would fail if `intro`
+were dropped from `DEFAULT_FEATURES`, because `refusals.test.ts` asserts
+`toEqual(DEFAULT_FEATURES)` against the spread constant and so compares the report to
+itself whatever fields it has (`reported(app)`'s equality cell, and the `...DEFAULT_FEATURES`
+fixture above it); `config.test.ts`'s demo configuration cell expects the field, today
+`intro: false`; `client/test/appHarness.tsx`'s `DEFAULT_REPORT` gains `intro: false`
+(spelt out on purpose — do not import the server constant); the runbook's "every field
+false" line became "every field false but `intro`" and, after `beaef45`, "every field
+false, `intro` included" — it tracks the key, see tasks 2.3 and 6.6.
 
 ### D2: The About page is a second Vite entry, `client/about.html`, not a view of the app
 
@@ -120,9 +139,27 @@ Production](https://vite.dev/guide/build)). Vite dev serves `/about.html` from t
 source tree. The entry `client/src/about.tsx` renders `AboutPage` into its own root,
 imports `index.css` for the same Tailwind layers, and constructs its own
 `HttpApiClient` for the one dynamic section (D1 of the app: no raw fetch). The way back
-is a plain `<a href="/">`. The page is not gated: it is a file in the bundle, reachable
-by typing its name on any deployment, and nothing on a desktop build links to it —
-accepted, and stated in the proposal's Impact.
+is a plain `<a href="/">`.
+
+**The document follows the capability (decided 2026-09-15, `beaef45`; supersedes the
+paragraph below).** `createStaticHandler` takes the `intro` field and answers 404 for
+the About page wherever it is off — the decision keyed on the *resolved* candidate, so
+every spelling that reaches the file is refused alike. The reason is not the desktop
+build, which still links to nothing: a visitor-facing page ships withheld until it has
+been read on the live host, and the introduction and this page went live unreviewed on
+2026-09-15. A capability the client draws its surfaces from is the one switch that
+already means "this deployment offers the introduction", so the document it belongs to
+follows it rather than being published by the mere fact that the build carries it.
+`server/src/index.ts` passes `features.intro` when it builds the handler; the gate is
+specified on `feature-report` and on `visitor-intro`, and has its own cells in
+`server/test/static.test.ts`.
+
+*The superseded decision, kept so the change reads in order:* the page was not gated —
+a file in the bundle, reachable by typing its name on any deployment, with nothing on a
+desktop build linking to it — accepted at draft time and stated in the proposal's
+Impact. What that left out is that "nothing links to it" is not the same as "nobody
+reaches it": the demo's address is public, and an unreviewed page was reachable there
+for the hours between the deploy and the withholding.
 
 The URL is `/about.html`, not `/about`: an extensionless name would need the static
 handler to try `<name>.html` before its fallback, a `public-deployment` requirement
@@ -139,15 +176,24 @@ header, which is the shape wanted. It renders when
 `features?.intro === true && !dismissed && atTop`, where `atTop` is the committed view
 being `/` with `subject.kind === 'none'` and `flat === false` (the top's shortest URL,
 `url-navigation`). It takes what it needs as props: the example queries, an `onRun(text)`,
-`meaningRunnable`, `onDismiss`, and the links. Header affordances after dismissal: an
-`About` link and, when `meaningRunnable`, a `Surprise me` button at the right end of
-the header's flex row — the header is the one chrome that never scrolls, and the
-bottom-left pill is for view options.
+`meaningRunnable`, `onDismiss`, and the links. Header affordances: an `About` link and,
+when `meaningRunnable`, a `Surprise me` button at the right end of the header's flex
+row — the header is the one chrome that never scrolls, and the bottom-left pill is for
+view options. **Drawn wherever the introduction is offered, dismissed or not** — which
+is what `App` does (`introOffered` gates both, with no reference to `introDismissed`)
+and what the spec requires (*Wherever the introduction is offered — dismissed or not*).
+This decision first said "after dismissal", describing only the case it was written
+for; the banner and the header carry the same addresses, so a reader who has not
+dismissed the banner loses nothing by the header having them too, and a header that
+appeared on dismissal would move the row under the visitor.
 
 `meaningRunnable` is computed in `App` from `state.index` exactly as `SidePanel`
 computes it (`index.state === 'ready' && indexCovers(index, '/')`) — lifted into
 `client/src/state/selectors.ts` as `meaningRunnableAt(index, path)` so the two cannot
-drift; `SidePanel` switches to it in the same commit.
+drift; `SidePanel` switches to it in the same commit. `App` holds the top's answer as
+`introSearchable` (`meaningRunnableAt(state.index, '/')`) for the banner's chips and
+the header's surprise action — the top is where a chip's search runs, whatever view the
+visitor is on.
 
 ### D4: A chip is one reducer transition, `{ type: 'runQuery', text, mode: 'meaning' }`
 
@@ -162,6 +208,16 @@ in `commit` apply as for any submit. The surprise action is `runQuery(pick())` w
 `pick` a uniform choice over `EXAMPLE_QUERIES`; in tests the choice is injected so the
 cell asserts on one query.
 
+**Where the phrase runs: the library's top, wherever the visitor is standing.** The
+reducer case builds `{ ...liveView(held), path: '/', flat: false }` and hands it to
+`commitDraft` as the base — the one difference between a chip and a typed submit, which
+follows the user (R1). An introduction-supplied phrase is not a search of where the
+visitor stands: the chips are gated on `meaningRunnableAt` at `/` and the deploy-time
+check proves them with no `path` at all, so committed at the current path a chip clicked
+inside an archive sends the index a location it covers nowhere (a 400), and one clicked
+while a folder navigation was in flight silently searched that folder.
+`client/test/introBanner.test.tsx` has a cell for each of those two.
+
 ### D5: The starting mode is applied once, in memory, when the report and the index both allow it
 
 `searchOptions.ts` gains two functions: `hasStoredSearchMode(): boolean`, which reads
@@ -171,12 +227,27 @@ the raw key inside the same never-throw guard `stored` uses (blocked storage ans
 `navigate`, a mode set only in the view would revert on the first folder click.
 
 The rule fires once per page, on the first render in which all of these hold: the
-report is known with `intro: true`; `meaningRunnableAt(state.index, '/')` (the
-`semantic-search` rule that meaning mode is not selectable while the index cannot
-answer applies to a start as much as to a radio); no mode is stored; the boot URL
-carried no `mode` (captured at mount from `parseUrl()`); and
-`liveView(state).subject.kind === 'none'` — a report that resolves after the visitor
-already committed a name search must not re-run it, which `'setMode'` would do. It
+report is known with `intro: true`; `meaningRunnableAt(state.index, liveView(state).path)`
+(the `semantic-search` rule that meaning mode is not selectable while the index cannot
+answer applies to a start as much as to a radio); no mode is stored; the URL names no
+`mode`; and `liveView(state).subject.kind === 'none'` — a report that resolves after the
+visitor already committed a name search must not re-run it, which `'setMode'` would do.
+
+Two clauses have moved since this was drafted, and the code is the record:
+**the landed path, not the library's top.** The mode this puts in force governs
+whatever the visitor landed on, so a deep link into an archive interior — which
+`indexCovers` covers nowhere — would otherwise start in a mode whose first typed phrase
+earns a 400. The rule simply has not fired there, and fires on the first landing that is
+covered (`introStartMode.test.tsx`: "leaves the mode alone where the index cannot answer
+the landing path").
+**The URL is read live (`parseUrl().mode`), not captured at mount.** The clause is about
+one view, not about the page: a mount-time flag went on governing every view after it,
+so a visitor who opened a shared chip link (`?q=…&mode=meaning`) and backed out to the
+top was left in the stored default with the banner up — the entry path this rule exists
+for. Leaving the view lets the clause lapse, because the projection writes `mode` only
+under a committed query (`serializeView`), so the param lives exactly as long as the
+view it belongs to (two cells: "obeys a URL that names a mode with nothing committed",
+"lets that clause lapse once the view the URL named is left"). It
 calls `applySessionSearchMode('meaning')` and dispatches
 `{ type: 'setMode', mode: 'meaning' }`; with nothing committed that is a fetchless
 patch. `model-browser:search-mode` stays unset, so a browser that never chose keeps
@@ -191,7 +262,16 @@ is the first field whose on state adds one).
 
 `useCyclingPlaceholder(items, active, periodMs)` in `client/src/hooks/` returns the
 current item or `null`; active is `features?.intro === true && !bannerDrawn &&
-state.view.mode === 'meaning' && meaningRunnable && state.drafts.queryText === ''`.
+state.view.mode === 'meaning' && meaningRunnableAt(state.index, state.view.path) &&
+state.drafts.queryText === ''`. **The path the visitor is on, not the library's top**
+(the draft of this decision said the top, and the code has never done that): the
+placeholder's job is a phrase worth *typing here*, and typing it runs the search at the
+current path, so the index must be able to answer *there* — a folder inside an archive
+is covered by neither. `client/test/introPlaceholder.test.tsx` asserts the path-based
+rule from both sides ("reaches a deep link too — the folder is inside what the index
+covers" and "shows the ordinary text where the index cannot answer here"). The banner's
+chips keep the top's answer (D3's `introSearchable`), because that is where a chip's
+search runs.
 Period 4 s, `setInterval` cleared on inactivity. The input's `placeholder` becomes
 `example ?? 'Search names and folders…'`; `aria-label` is untouched, which is also what
 `client/test/appHarness.tsx`'s `searchInput()` selects by. A visible placeholder that
@@ -204,7 +284,9 @@ changes is not announced by screen readers, which is the accessible outcome want
 `useState(() => introDismissedStore.read())` (the `SidePanel` `collapsed` pattern), so
 `localStorage.clear()` between test cells actually resets it. Dismissing writes `'1'`
 and sets state; a failed write leaves state set, so the banner is gone for the page's
-lifetime and back next load, as the spec says.
+lifetime and back next load, as the spec says. `dismissIntro` also focuses the search
+input, because the control that had focus is the ✕ it unmounts and the banner's offer
+was "describe what you are looking for" — a cell covers it.
 
 ### D8: One credits route, `GET /api/credits`, answering the store's own keys
 
@@ -248,10 +330,19 @@ only (`fetch`), imports the queries and the defaults so neither can be restated
 `localStorage`). It runs **from the developer machine** against the public origin —
 the box has no Bun outside the container, and the guard admits an `Origin`-less POST
 with the right `Host` — as a step of the runbook (§5, after the feature and library
-checks, labelled as run from the workstation) and of `corpus-bake`'s `--ship` step:
-that change adds the one call when its 1.5 lands — a soft ordering, either may
-archive first, recorded in both tasks files. Until then the proof is a runbook step
-a human runs, which is what the notes' "or the bake fails" becomes for now.
+checks, labelled as run from the workstation) and of `corpus-bake`'s `--ship` step.
+That step has since landed (`4e037db`) **without** the call — the ordering the draft
+described ("when its 1.5 lands") is spent, and what remains is one line to write in
+`scripts/bake-demo.ts`'s `ship`, owned by `corpus-bake` (its 9.x, this change's 7.2).
+Until it is written the proof is a runbook step a human runs, which is what the notes'
+"or the bake fails" becomes for now.
+
+What the script prints is `dead:` and `failed:` lines, or `N example queries answer on
+<origin>` — never a per-query count. That matters for anything that cites counts: the
+entry counts recorded in `shared/exampleQueries.ts`'s comment came from a hand probe on
+2026-09-15, not from this script, and re-running the script re-checks that each query
+is *alive*, not what its count was. A sweep that reproduced those numbers would need
+the script to print each query's `entries.length` beside its name.
 
 ### D10: The About copy is written at apply against named sources, not drafted here
 
@@ -280,7 +371,14 @@ Two more findings from the same pass: the corpus repository
 link it; and "a bicycle" returned **zero** results under the visitor's `minScore: 0.1`,
 so the notes' claim that meaning search "always answers" holds only at the index's own
 floor — the Limitations copy says what comes back is whatever was least far, and does
-not claim there is never an empty answer. The fragment link `#credits` needed one
+not claim there is never an empty answer. The same grep settles the *download* wording:
+there is no download action anywhere in the client, so the page cannot describe one.
+The `visitor-intro` requirement was reworded (2026-09-15) to ask for what is true of
+the copies — what is served is a display copy, print from the source a model's credits
+link to — rather than for a promise about an action. The page's own sentence followed
+the same day: "what you download from here is a display copy" became "every model here
+is a display copy, reduced to be drawn in a browser tab and not to be printed… print
+from that", with the reason in the section's source comment. The fragment link `#credits` needed one
 mount effect: the browser resolves the fragment before React has rendered a section,
 so `AboutPage` scrolls to the named section itself after mount (found on 5173).
 
@@ -298,7 +396,10 @@ so `AboutPage` scrolls to the named section itself after mount (found on 5173).
 - [The example queries go stale as the corpus changes] → the check runs on every
   redeploy and the bake's ship step; a failing check names the query to replace.
 - [`/about.html` is reachable on the desktop build] → nothing links to it there;
-  its copy names the demo explicitly. Accepted (D2).
+  its copy names the demo explicitly. Accepted at draft; **superseded 2026-09-15**
+  (`beaef45`) — the document now follows the `intro` capability and is 404 wherever
+  that is off, which is every deployment that does not declare the introduction,
+  desktop builds included (D2).
 - [The credits answer grows with the corpus] → 444 kits today; if the corpus
   reaches thousands, paginate then. Not now.
 - [`corpus-bake` and this change both touch `deploy/demo/README.md` §5] → different
@@ -311,7 +412,10 @@ so `AboutPage` scrolls to the named section itself after mount (found on 5173).
 
 1. Land server + shared + client together (one field, one route, the banner, the
    page, the script); `bun run test` and `typecheck` green.
-2. `deploy/demo/config.json` gains `"intro": true` in the same commit.
+2. `deploy/demo/config.json` gains `"intro": true` in the same commit. **Since
+   `beaef45` (2026-09-15) it is `false` again** — the introduction and the About page
+   reached the live host unreviewed, and stay withheld until Masa has read them there.
+   Re-enabling is that one key and a redeploy; nothing else in this plan changes.
 3. Redeploy per the runbook (`git pull && … up -d --build`; with `corpus-bake`
    landed, its check gates the pull as it specifies). Run
    `bun run scripts/check-example-queries.ts https://models.masamaeda.com`.

@@ -148,19 +148,27 @@ mode SHALL be what it is today.
 ### Requirement: The About page carries what the banner cannot
 The deployment SHALL serve an About page as a document of the built client, reachable
 from the banner and from the header's persistent link, with a way back to the models.
+The page is a surface of the introduction like any other: where the introduction is not
+offered the deployment SHALL NOT serve it (see `feature-report`), so a build that
+carries the document does not publish it.
 It SHALL carry, as sections: what this is; licence and provenance — that the models are
 not the operator's, that every model is credited where it is shown, under which
 licences; how the corpus was altered — deduplication, non-model files dropped,
-decimation, display names from the store — and that downloads are display copies to be
-printed from the source; what differs from the desktop app, described as the deployment
+decimation, display names from the store — and that what is served is a display copy
+rather than the designer's file, to be printed from the source a model's credits link
+to, said of the copies themselves and never as a description of a download action,
+which this deployment does not offer; what differs from the desktop app, described as the deployment
 behaves on the day the copy is written and never as a promise — opening in an
 application not offered, a copied path being a library path, the chat tab withheld,
 thumbnails baked and read-only, orbits saved per browser, host details hidden — so that
 a change to those actions (a Download action, a Copy link label) is a change to this
 copy; a how-to
 of at most five lines that names Ctrl+F as the one binding that replaces the browser's
-own and notes that Shift+right-click reaches the browser's menu; links — source, corpus
-repository, contact, credits, where to report a problem; a privacy line — no accounts,
+own and notes that Shift+right-click reaches the browser's menu; links — the public source
+repository, where to report a problem, contact, and the page's own credits section,
+each of them a link the reader can follow; the corpus repository SHALL be named where
+the alterations are described and SHALL NOT be linked while it is private, so the page
+never offers an address a reader cannot open; a privacy line — no accounts,
 this browser's storage only; a note on WebGL and the desktop build; a technical section
 for a reader who builds things — the stack, meaning search, and how models are posed,
 described as three tiers with the front chosen in the same embedding space and the pose
@@ -175,6 +183,10 @@ than kept.
 #### Scenario: The page is reachable and returns
 - **WHEN** a visitor follows the About link from the banner or the header
 - **THEN** the About page opens with every section above, and its way back lands on the models
+
+#### Scenario: The page is withheld where the introduction is not offered
+- **WHEN** a deployment whose configuration declares the introduction off is asked for the About page's address
+- **THEN** it is not served, however the address is spelled, and the build still carrying the document changes nothing
 
 #### Scenario: No figure, no host
 - **WHEN** the About page is read in full

@@ -6,8 +6,12 @@
 > ADDs one to `library-overrides`, and creates `visitor-intro`; no active change
 > carries a delta on any of the three. `corpus-bake` owns the active
 > `deployment-infrastructure` block, so the runbook edit here is docs only and its
-> script call into the bake's `--ship` step (its 1.5, not yet landed) is that change's
-> one-line follow-up (D9) — either may archive first. `entry-stat-revalidation`'s
+> script call into the bake's `--ship` step is that change's one-line follow-up (D9) —
+> either may archive first. **Corrected 2026-09-15:** this sentence read "its 1.5, not
+> yet landed"; 1.5 landed at `4e037db`, 74 minutes before the commit (`c38d41f`) that
+> wrote the claim. The `--ship` step exists and does not call the check (`grep -n
+> 'check-example' scripts/bake-demo.ts` → no match), so 7.2 is unwritten work rather
+> than a blocked dependency. `entry-stat-revalidation`'s
 > `public-deployment` delta gives every report field an environment override the
 > moment it has a default, so `intro` gains one for free whichever lands first.
 > **Shared files:** `deploy/demo/README.md` §5 with `corpus-bake` (different lines;
@@ -19,14 +23,27 @@
 ## 1. The field and the credits route (server + shared)
 
 - [x] 1.1 *(worker A, commit 8686bbc; server 801/client 996 green; falsified by dropping `intro` from DEFAULT_FEATURES: 4 cells failed incl. the strict parser refusing the shipped file)* Add `intro: boolean` to `FeatureReport` in `shared/types.ts` with its doc
-      comment (an offer, no route, default off) and `intro: false` to `DEFAULT_FEATURES`
-      in `server/src/app.ts`; verify `server/test/features.test.ts`' spelt-out report and
-      `refusals.test.ts`' `reported(app)` equality gain the field and pass, and that
+      comment (an offer, default off — `beaef45` later gave it one route to refuse, the
+      About document; D2) and `intro: false` to `DEFAULT_FEATURES`
+      in `server/src/app.ts`; verify `server/test/features.test.ts`' spelt-out report
+      gains the field and passes, and that
       `FEATURE_KEYS` accepts `intro` in `config.test.ts` (a config with `"intro": true`
-      loads; a misspelt key is still refused)
-- [x] 1.2 *(worker A, commit 8686bbc; server 801/client 996 green; falsified)* Set `"intro": true` in `deploy/demo/config.json`; verify the demo
-      configuration cell in `server/test/config.test.ts` expects the field on and every
-      other field as before
+      loads; a misspelt key is still refused).
+      **Corrected 2026-09-15:** this line and D1 also named `refusals.test.ts`' `reported(app)`
+      equality as a cell that "spells the report out and gains the field". It does not:
+      it asserts `toEqual(DEFAULT_FEATURES)` against the spread constant, so it compares
+      the report to itself and would pass with `intro` dropped from `DEFAULT_FEATURES`.
+      `features.test.ts` is the one server cell that spells `intro: false` out, and the
+      falsification above rested on it plus the strict parser and the demo-config cell
+- [x] 1.2 *(worker A, commit 8686bbc; server 801/client 996 green; falsified — then **reversed the same day** by `beaef45`)* Set `"intro"` in `deploy/demo/config.json`; verify the demo
+      configuration cell in `server/test/config.test.ts` expects what the file declares
+      and every other field as before.
+      **What the file says now: `"intro": false`.** It was set `true` at 8686bbc and
+      back to `false` at `beaef45`, because the introduction and its About page went
+      live unreviewed; `config.test.ts`'s demo cell asserts `intro: false` and the live
+      host answers every field false at `/api/features`, `intro` among them, with
+      `/about.html` 404
+      (both read 2026-09-15). The re-enable is 6.6, left open on purpose
 - [x] 1.3 *(worker A, 8686bbc: `shared/credits.ts` and `client/src/lib/credits.ts`; ViewerLayer imports both)* Move `renderableCredits` from `client/src/viewer/ViewerLayer.tsx` to
       `shared/credits.ts` (pure, no imports) and import it back in `ViewerLayer`; move
       `hostLabel` and `CREDIT_LINK_CLASS` to a new `client/src/lib/credits.ts` and
@@ -53,7 +70,18 @@
       https://models.masamaeda.com and keeping those whose first screen is
       unmistakably right; record the date and the index's `/status` counts in the
       module's comment; verify a `client/test/exampleQueries.test.ts` cell asserts
-      non-empty, unique, each under `SEARCH_TEXT_MAX`
+      non-empty, unique, each under `SEARCH_TEXT_MAX`.
+      **Correction 2026-09-15 — the counts are a one-off observation, not a re-runnable
+      measurement.** `shared/exampleQueries.ts`'s comment records "60, 60, 60, 60, 58,
+      60" and tells a reader to "re-run the whole sweep with `bun run
+      scripts/check-example-queries.ts <origin>`". That script cannot produce those
+      numbers: it prints only `dead:`/`failed:` lines or `N example queries answer on
+      <origin>` (`checkExampleQueries` keeps two name lists and reads `entries.length`
+      only to decide emptiness). The counts came from a hand probe against the live
+      origin on 2026-09-15 by worker A; what the script re-runs is *aliveness*. To make
+      the figure re-runnable the script would have to print each query's
+      `entries.length` beside its name on success — a change to `scripts/`, which this
+      change does not own; until then read those six numbers as dated observations
 - [x] 2.2 *(worker A, 8686bbc: six cells; falsified by ignoring an empty `entries`; live run `6 example queries answer on https://models.masamaeda.com`, exit 0; against 127.0.0.1:1 six `failed:` lines, exit 1)* `scripts/check-example-queries.ts <origin>` (D9): POST each query to
       `<origin>/api/semantic` as `{ text, ...TUNING_DEFAULTS }` (imported from
       `client/src/lib/searchOptions.ts`), exit 1 naming every query with no `entries`
@@ -66,7 +94,13 @@
       but `intro`", and add the check as a post-deploy step after the library check,
       labelled as run from the developer machine (the box has no Bun); verify the
       section reads in order and `corpus-bake`'s pending §5 edits are not overwritten
-      (re-read the file first)
+      (re-read the file first).
+      **Went stale at `beaef45` and has been corrected since** (re-read 2026-09-15): the
+      line read "the demo posture: every field false but `intro`" while the shipped
+      configuration and the live host said every field false; it now reads "every field
+      false, `intro` included", which is what the host answers. It goes back the other
+      way as part of 6.6 — the runbook line and the config key say the same thing and
+      move together
 
 ## 3. The banner, the header affordances and the chip transition (client)
 
@@ -105,7 +139,17 @@
       (happy-dom lays nothing out, so no rect is meaningful there); the real check is in
       the browser on 5173, measuring `getBoundingClientRect` of the grid's first tile
       before and after the top listing resolves (equal `top`), restoring anything the
-      probe touches inside the same `evaluate`
+      probe touches inside the same `evaluate`.
+      **The four numbers in the annotation are a one-off observation, not a stored
+      probe** (noted 2026-09-15): banner top 63 / height 55, `<main>` top 118, first
+      tile top 130 were read by worker B through Playwright's
+      `getBoundingClientRect` on 5173 on 2026-09-15, at that window size, and nothing
+      in the tree re-runs them — no test asserts a rect (happy-dom lays nothing out)
+      and no script re-measures. They say the banner sat outside the scroller that day;
+      they are not a bound anything is checked against. The re-runnable half is the
+      happy-dom cell in `introBanner.test.tsx` ("is outside <main> while the
+      listing is in flight and after it renders"), which is what a regression would
+      fail
 
 ## 4. The placeholder and the starting mode
 
@@ -126,7 +170,17 @@
       and the mode stays name; with `DEFAULT_REPORT` the mode is name — the closure is
       reset in `beforeEach` with `applySessionSearchMode('name')` plus
       `localStorage.clear()`, never with `setSearchMode`, which writes the key the
-      cells test for absence
+      cells test for absence.
+      **Coverage, checked twice on 2026-09-15.** At first check D5's
+      "`hasStoredSearchMode()` never throws" had no cell anywhere: `grep -rn
+      hasStoredSearchMode client/` matched only its definition in `searchOptions.ts` and
+      its one call in `App.tsx`, and the app cells above exercise it only through `App`
+      with storage working. It is covered now — `client/test/intro.test.ts`'s
+      `hasStoredSearchMode` block asserts false-before/true-after a recorded choice and,
+      under a `Storage.prototype.getItem` that throws, `false` rather than an exception.
+      Also changed since this line was written: the rule reads the URL live
+      (`parseUrl().mode`) instead of a mount-captured flag, and gates on the **landed**
+      path rather than `/` — design D5 carries both, with the cells that hold them
 
 ## 5. The About page
 
@@ -140,8 +194,30 @@
       order, with `id`s (`#credits` among them) and the way back; the copy written at
       apply against D10's sources, each Limitations example and each example query run
       against the live index that day; verify a cell renders every section heading, and
-      a grep of the page for `%`, `/run/`, `/srv/`, `/home/` and `cache` matches nothing
-      but the privacy line's "this browser's storage"
+      grep the page for `%`, `/run/`, `/srv/`, `/home/` and `cache`.
+      **What that grep actually returns (re-run 2026-09-15, this is the corrected
+      line):** `%`, `/run/`, `/srv/` and `/home/` match **nothing** in
+      `client/src/components/AboutPage.tsx`. `cache` matches only **JSX source
+      comments** — the one `{/* source: … */}` block above the technical section, which
+      cite mini-classify's write-ups and the demo cache's `run-params.json` and never
+      reach a reader — and no rendered line. It does **not** match the privacy line,
+      which reads "is kept in this browser's own storage and is sent nowhere": the
+      earlier wording named that line as the one hit, which was wrong in both
+      directions. Re-run it after any copy edit; the count of comment hits moves (one
+      on the first check, six after the Limitations rewrite) and a *rendered* hit is
+      the thing that would matter. The requirement the grep stands for — no accuracy figure, no host
+      location — holds.
+      **Two more requirement rewordings, 2026-09-15**, both to what the page does rather
+      than what the draft imagined: the links section asks for four *links* (source,
+      report a problem, contact, the credits section — which is what `AboutPage`'s
+      `#links` carries) and names the corpus repository unlinked where the alterations
+      are described, because it is private (D10); and the provenance clause says what is
+      served is a display copy to print from the source, instead of asking the page to
+      describe a *download action* that does not exist anywhere in the client
+      (`grep -rnai download client/src` hits only this page's own source comment
+      recording the rewrite). The page's closing provenance paragraph now reads "every
+      model here is a display copy, reduced to be drawn in a browser tab and not to be
+      printed… print from that"
 - [x] 5.3 *(worker C, 9ea1d0d; falsified by removing the empty-answer branch)* `CreditsList` in `AboutPage` via `api.credits()`, importing `hostLabel` and
       `CREDIT_LINK_CLASS` from `client/src/lib/credits.ts` (never from `ViewerLayer`;
       verify with `bun run build` that `dist/assets` has no three.js chunk reachable
@@ -167,18 +243,39 @@
 - [x] 6.4 *(deployed 2026-09-15 at cbad523 after two image fixes (c53f64a copies scripts/, cbad523 un-ignores it — corpus-bake's checkBake.test.ts had broken the box build); check-bake ok; from outside: features every field false but intro, /about.html 200, /api/credits 444, `6 example queries answer`; in the browser on the live host: banner at /, six chips, a chip → q=a stone golem&mode=meaning with 60 tiles, Back → banner again, dismissal flag written)* Deploy per the runbook and run the check against the public origin; verify
       on https://models.masamaeda.com: banner at `/`, none on a folder URL, a chip runs
       and the URL names it, dismissal holds across reload, `/about.html#credits` lists
-      the kits, and `curl /api/features` shows `intro: true` with every other field
-      false
+      the kits, and `curl /api/features` shows the `intro` field with every other field
+      false.
+      **Superseded the same day by `beaef45`, and this annotation no longer describes
+      the host.** What the deploy at cbad523 put live is accurate as history; what is
+      live now (read 2026-09-15): `/api/features` →
+      `{"thumbWrites":false,"appLaunch":false,"chatTab":false,"hostDetails":false,"maintenance":false,"intro":false}`
+      and `/about.html` → **404**. No banner, no header affordances, no About page —
+      the introduction is withheld pending review, not broken. 6.6 is what puts it back
 - [ ] 6.5 Close issues #12 and #15 with the live evidence; leave #18 to 1.6
+- [ ] 6.6 **Re-enable the introduction on the demo, once Masa has read it live.** Gated
+      on that reading, not on any code: flip `"intro"` back to `true` in
+      `deploy/demo/config.json`, correct `deploy/demo/README.md` §5's feature line back
+      to "every field false but `intro`" in the same commit, update `server/test/config.test.ts`'s
+      demo cell and its comment, and redeploy (push, then pull + check-bake +
+      `up -d --build` on the box — and only with Masa's go-ahead). Verify afterwards on
+      https://models.masamaeda.com: `/api/features` reports `intro: true`,
+      `/about.html` answers 200, the banner is drawn at `/`. Reviewing the page is the
+      work; flipping the key is the whole re-enable — **do not tick this until the page
+      has been read on the live host and Masa has said to ship it**
 
 ## 7. Follow-ups found at apply (2026-09-15)
 
 - [ ] 7.1 Backlog 1.6 updates the About page's differences list when Download and Copy
       link land — the list describes what ships (spec reworded at apply; design "Decided at
       apply"); verify by re-reading `#differences` on the live host after 1.6
-- [ ] 7.2 `corpus-bake` 1.5 (`--ship`) calls `bun run scripts/check-example-queries.ts
-      <origin>` after the restart — one line in that script; recorded in its tasks.md as a
-      follow-up; verify the ship run prints the count
+- [ ] 7.2 `scripts/bake-demo.ts`'s `ship` calls `bun run scripts/check-example-queries.ts
+      <origin>` after the restart — one line in that script; recorded in `corpus-bake`'s
+      tasks.md as its 9.x; verify the ship run prints the count.
+      **Not blocked (corrected 2026-09-15):** `corpus-bake` 1.5 landed at `4e037db` and
+      the `--ship` path has been run against the box, so the step this line waits on
+      exists. What is missing is the call itself — `grep -n 'check-example'
+      scripts/bake-demo.ts` matches nothing today. Owned by `corpus-bake` (scripts/ is
+      that change's); this line stays open until that grep matches
 - [x] 7.3 *(fixed c53f64a + cbad523)* the demo image's build stage copies `scripts/` and the
       build context no longer ignores it — `client/test/checkBake.test.ts` (corpus-bake)
       imports `../../scripts/bake-demo`, and the client build runs `tsc --noEmit` over its
@@ -186,4 +283,21 @@
       kept serving through both failed builds
 - [ ] 7.4 The About page could take the `/about` name if the static handler tried
       `<name>.html` before its fallback (design D2 declined it); leave unless it grates
+- [ ] 7.5 **Scenarios with no cell** (checked against the suite twice on 2026-09-15 — a
+      spec sentence is not coverage, and neither is a tasks line claiming it).
+      *Closed while this was being written:* `visitor-intro`'s *The desktop build shows
+      nothing* and `feature-report`'s *Withheld until known* both end "or the read
+      failed", and that half had no cell — the withholding cells covered a report
+      declaring the introduction off and a report that never resolves, and nothing
+      rejected the read. `client/test/introBanner.test.tsx` now carries "is absent when
+      the report could not be read at all" (`features.mockRejectedValue`), which is that
+      clause.
+      **Still open: `feature-report`'s *Not inferred*.** It asks for a report with
+      thumbnail writes and host details **off** and the introduction unsaid; every intro
+      cell runs against the harness's `DEFAULT_REPORT`, which has both `true`
+      (`grep -rn thumbWrites client/test/intro*` matches nothing). One app cell with
+      `{ ...DEFAULT_REPORT, thumbWrites: false, hostDetails: false }` asserting the
+      banner, the header affordances and the placeholder all absent is what that
+      scenario is worth — the demo's posture is exactly that report, so the cell is the
+      one that would catch a future gate reaching for a proxy field
 

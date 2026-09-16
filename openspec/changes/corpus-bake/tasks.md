@@ -415,11 +415,17 @@
       collision. The applied `deployment-infrastructure` and `model-thumbnails` text was
       read for change-scoped prose: no "this delta"/"this change" survived into either.
 
-- [ ] 9.x *(added by `landing-page`, 2026-09-15 — not that change's session)* when 1.5's
-      `--ship` lands, call `bun run scripts/check-example-queries.ts <origin>` after the
+- [ ] 9.x *(added by `landing-page`, 2026-09-15 — not that change's session)* call `bun
+      run scripts/check-example-queries.ts <origin>` from the `--ship` step after the
       restart (`landing-page` D9): every example query the banner offers must answer on
       the box, and the ship step is the one place that fires HTTP at the origin after a
-      restart. Also: the demo image now copies `scripts/` (c53f64a, cbad523) because
+      restart. **Corrected 2026-09-15** — this line was written as "when 1.5's `--ship`
+      lands", and 1.5 had already landed (`4e037db`) when it was written. The step
+      exists and **still does not run the check**: `grep -n 'check-example'
+      scripts/bake-demo.ts` matches nothing, and the only mentions of the script in the
+      tree are the script itself and `deploy/demo/README.md`'s §5 step. So nothing is
+      waiting on anything — what is left is the one call inside `ship`, beside the hit
+      checks it already runs. Also: the demo image now copies `scripts/` (c53f64a, cbad523) because
       `client/test/checkBake.test.ts` imports the bake script and the client build
       typechecks its tests — the box could not build from the day that test landed
 

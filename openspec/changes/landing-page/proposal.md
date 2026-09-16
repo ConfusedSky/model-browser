@@ -36,15 +36,21 @@ landing page raises; what remains is to build it.
   links, privacy, a WebGL note, a technical section with posing, a Limitations section
   of verified examples, and a **credits list** of every kit generated from the override
   store (backlog 1.8's courtesy). No accuracy figure, no host location.
-- **A new feature-report field, `intro`**, default off, on in `deploy/demo/config.json`.
-  It names a surface the deployment offers, never a deployment kind.
+- **A new feature-report field, `intro`**, default off, stated in
+  `deploy/demo/config.json`. It names a surface the deployment offers, never a
+  deployment kind. Set on when this landed and **off again since `beaef45`**
+  (2026-09-15): the introduction reached the public host unreviewed, and stays withheld
+  until it has been read there (design D2, tasks 6.6). The About document follows the
+  field — 404 where it is off — so the field has one route to refuse after all.
 - **The store's credits become listable**: one route answers every kit's display name and
   credits, so the About page's list is drawn from the same data the lightbox shows.
 - **Example queries are proven against the deployed index**: a script runs each one
   against a named origin, under the options a visitor's click runs with, and fails on
   any that returns no hit. It is a post-deploy step of the runbook, run from the
-  developer machine, and a call in the bake's ship step once `corpus-bake`'s 1.5 lands;
-  until then the notes' "or the bake fails" is a step a human runs. The example queries
+  developer machine, and is to become a call in the bake's ship step — `corpus-bake`'s
+  1.5 has since landed (`4e037db`) without it, so that call is one unwritten line in
+  `scripts/bake-demo.ts` rather than a pending dependency; until it is written the
+  notes' "or the bake fails" is a step a human runs. The example queries
   live in one shared module the banner, the placeholder and the script import.
 
 ## Capabilities
@@ -62,8 +68,10 @@ landing page raises; what remains is to build it.
   report") is scoped to fields that gate a surface the client had before the report,
   since `intro` is the first field whose on state adds one; every scenario carried,
   one body reworded under its title. ADDED *A deployment may offer a visitor
-  introduction* — the `intro` field, its default off, no route of its own to refuse,
-  the client withholding the surfaces unless a known report declares it on. No active
+  introduction* — the `intro` field, its default off, the client withholding the
+  surfaces unless a known report declares it on, and the one thing the server itself
+  withholds on it: the introduction's own document, the About page, refused where the
+  field is off (`beaef45`; the requirement first said the field had no route to refuse). No active
   change carries a `feature-report` delta.
 - `library-overrides`: ADDED *The store's credits are listable* — one answer carrying
   every kit that resolves credits, by library path, with its display name. ADD-only; no
@@ -99,11 +107,16 @@ is stated on the new capability and cites the existing one).
   entry in `client/vite.config.ts`). `client/src/api/client.ts` and
   `client/src/api/localFramings.ts` — `credits()`. `client/test/appHarness.tsx`'s
   spelt-out `DEFAULT_REPORT` and new cells.
-- `scripts/check-example-queries.ts` (new). `deploy/demo/config.json` gains
-  `"intro": true`; `deploy/demo/README.md` §5's feature line and post-deploy checks.
+- `scripts/check-example-queries.ts` (new). `deploy/demo/config.json` gains `"intro"`
+  — `true` at apply, `false` since `beaef45`; `deploy/demo/README.md` §5's feature line
+  and post-deploy checks (its "every field false but `intro`" is stale while the key is
+  off — tasks 2.3, 6.6). `server/src/static.ts` and `server/src/index.ts` — the About
+  document gated on the field (`beaef45`).
 - `docs/web-demo-notes.md` item 4 marked superseded by this change; the backlog's 1.5
   and 1.8 lines closed at archive; `corpus-bake`'s tasks gain the one-line ship-step
   follow-up. Issues #12 and #15 are satisfied when this lands; #18 (licence at the
   Download action) stays with 1.6.
 - Nothing changes for a deployment that does not declare `intro`: the desktop build
-  renders as before, the About document exists in the bundle but nothing links to it.
+  renders as before, and the About document, though present in the bundle, is not
+  served there at all — 404 since `beaef45`, where this line used to say it existed but
+  nothing linked to it.

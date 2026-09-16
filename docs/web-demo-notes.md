@@ -357,11 +357,23 @@ own origin"; only its body hardcodes loopback.
    credits list at `#credits`, example queries in `shared/exampleQueries.ts` proven by
    `scripts/check-example-queries.ts` under the visitor's search options, and a
    meaning-mode start for a browser that never chose. The decisions stay here for
-   history; the change's design.md is now the reference. **Applied and live 2026-09-15.**
-   One correction from the apply: (i) above says search "always answers" — at the
+   history; the change's design.md is now the reference. **Applied 2026-09-15, shipped
+   to the demo the same day — and withheld the same day** (`beaef45`): the introduction
+   and the About page reached models.masamaeda.com unreviewed, so
+   `deploy/demo/config.json` declares `"intro": false` and the server 404s
+   `/about.html` while that is off. Confirmed live 2026-09-15: `/api/features` reports
+   every field false, `/about.html` 404 — no banner, no About page, nothing broken.
+   Re-enabling is that one key, gated on Masa reading the page on the live host
+   (`landing-page` tasks 6.6).
+   Two corrections from the apply: (i) above says search "always answers" — at the
    visitor's floor (`minScore: 0.1`) it does not: "a bicycle" returned zero results on
    the live index, so the About copy says what comes back is whatever was least far and
-   does not claim there is never an empty answer.
+   does not claim there is never an empty answer. (ii) above says "on the web build the
+   app's menu offers only Download and Copy link" — neither exists: both are backlog
+   1.6's and unbuilt (`grep -rnai download client/src` finds no action, and the label in
+   `entryActions.ts` is `Copy path`). The Shift+right-click line on About still earns
+   its place, but the reason is the app's own menu, not those two items; the About copy
+   describes what ships.
 5. **Names.** Rename folders at corpus build (re-embed — needed anyway) or
    display-name from the store (near-free if #1 is sidecars; ids stay in paths).
    **Resolved 2026-08-31 (Masa): display names from the store.** Near-free now

@@ -52,17 +52,26 @@ field on and every other field keeps its own value, and nothing in the report or
 client infers the introduction from any other field. The client SHALL withhold every
 surface of the introduction unless a known report declares the field on — withheld
 while the report is in flight, when the read failed and when a known report declares
-it off — and SHALL withhold the introduction alone, moving no other behaviour. No route
-serves the introduction, so there is nothing for the server to refuse: the field is
-purely an offer.
+it off — and SHALL withhold the introduction alone, moving no other behaviour. The field
+is an offer the client draws or withholds in every surface but one: the introduction's
+own document, the About page, is served by the deployment itself, so where a known
+configuration declares the field off the deployment SHALL NOT serve that document —
+answering the request as not found rather than serving it or falling back to the
+client's entry document — and a build that carries the page therefore does not publish
+it. A deployment declares the introduction in its configuration, never by what its
+build ships.
 
 #### Scenario: Off by default
 - **WHEN** the report is read from a server with no configuration
 - **THEN** it declares the introduction off
 
-#### Scenario: The demo declares it on
+#### Scenario: What the shipped public configuration declares
 - **WHEN** the shipped public configuration is loaded
-- **THEN** its report declares the introduction on, and the configuration's other fields are as they were
+- **THEN** its report declares the introduction **off** — the field is stated in the file, and set off while the introduction and its About page await a reading on the live host — and the configuration's other fields are as they were
+
+#### Scenario: The introduction's document follows the field
+- **WHEN** a request names the About page on a deployment whose known configuration declares the introduction off, in any spelling that reaches the file
+- **THEN** the deployment answers not found, neither serving the page nor falling back to the client's entry document
 
 #### Scenario: Not inferred
 - **WHEN** a deployment declares thumbnail writes and host details off but says nothing about the introduction

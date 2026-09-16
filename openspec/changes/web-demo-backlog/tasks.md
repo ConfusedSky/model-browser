@@ -61,7 +61,7 @@
       baked** until 2026-09-15 (1.7), so until then every visitor rendered every tile in
       their own browser and nothing persisted. `deploy/demo/config.json` was written in full by
       `public-deployment`
-- [x] 1.5 *(drafted and **applied 2026-09-15** as `landing-page` — live on models.masamaeda.com at cbad523: the `intro` field, the banner, six proven example queries, the About page at /about.html with the credits list; drafted the same day — proposal, design, `visitor-intro` plus
+- [x] 1.5 *(drafted and **applied 2026-09-15** as `landing-page` — the `intro` field, the banner, six proven example queries, the About page at /about.html with the credits list. **Shipped to models.masamaeda.com at cbad523 and withheld the same day at `beaef45`**: the introduction and the About page went live unreviewed, so `deploy/demo/config.json` declares `"intro": false` and the static handler 404s /about.html while it is off. Live 2026-09-15: `/api/features` reports every field false, `/about.html` 404. Re-enabling is that one key, gated on Masa reading the page live — `landing-page` tasks 6.6; drafted the same day — proposal, design, `visitor-intro` plus
       `feature-report` and `library-overrides` deltas, tasks; folds in issues #12 and #15
       and gives 1.8's credits list a home at `/about.html#credits`; cold-reviewed, the
       review's findings applied; validates and archive-dry-runs clean; the line below is
