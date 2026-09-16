@@ -28,6 +28,16 @@
  * after checking the live index answered the corrected phrase as well as the
  * misspelled one, which it did — same first four hits for three of them, and
  * one count of 60 becoming 59.
+ *
+ * **The two hammer phrases are a pair, not a duplicate**, and they are adjacent
+ * so the contrast is on one row of chips: they are there to show a visitor that
+ * narrowing a query changes what comes back. "a flaming hammer" leads with the
+ * hammer itself (`Spell_Effects_Pt_1_3332365/SpiritualHammerSpell.stl`); adding
+ * "a dwarf with" drops that to fifth and leads with an azer — a fire dwarf —
+ * then dwarves. Measured 2026-09-16: they share 4 of the first 5 but only 5 of
+ * the first 10, and 26 entries of ~60 overall. Keep both, keep them adjacent,
+ * and if either is ever replaced, replace it with another pair that shows the
+ * same thing.
  */
 export const EXAMPLE_QUERIES: readonly string[] = [
   "a stone golem",
