@@ -190,14 +190,33 @@ describe("a pose that frames no render", () => {
   // perpendicular to it. There is no orientation such a pose asks for, so a
   // render cannot be stale against it — judging it stale re-rendered and
   // re-uploaded the same pixels on every visit.
+  /** An `up` outside the six axes. */
   const MALFORMED: IndexPose = {
     ...POSE_A,
     up: [0.5, 0.5, 0.5],
   };
+  /** The other refusal: an `azimuth_zero` that is not perpendicular to `up`.
+   *  Both reach `usable` through one call, so the cells below drive the first
+   *  and this one holds the two to the same answer. */
+  const SKEWED: IndexPose = { ...POSE_A, azimuth_zero: [0, 1, 0] };
   const WAVE_BAD: PosesResponse = { poses: { "/models/hero.stl": MALFORMED } };
 
-  it("frames nothing, so it is not an orientation to be stale against", () => {
+  it("frames nothing, whichever way it is malformed", () => {
     expect(cameraForPose(MALFORMED, DEFAULT_CAMERA)).toBeNull();
+    expect(cameraForPose(SKEWED, DEFAULT_CAMERA)).toBeNull();
+  });
+
+  it("the skewed one reads the same as the off-axis one", async () => {
+    getThumb.mockResolvedValue(HIT_UNDER_A);
+    semanticPosesFor.mockResolvedValue({
+      poses: { "/models/hero.stl": SKEWED },
+    });
+    listDir.mockResolvedValue(LISTING);
+    await mountApp("/models", LISTING);
+    await settle();
+    await settle();
+    expect(renderThumbnail).toHaveBeenCalledTimes(1);
+    expect(lastPut()?.poseKey).toBeUndefined();
   });
 
   it("leaves an unlabelled hit alone rather than re-rendering it every visit", async () => {
