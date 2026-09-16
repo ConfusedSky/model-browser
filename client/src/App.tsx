@@ -711,6 +711,10 @@ export default function App() {
   const menuOpenRef = useRef(false);
   menuOpenRef.current = menu !== null;
 
+  /** Same reason: the Alt+ArrowUp listener subscribes once and must call the
+   *  current `goUp`, which closes over the live `target`. */
+  const goUpRef = useRef<() => void>(() => {});
+
   /**
    * The library's state (library R4), the app's one new concept (design D7).
    * App-level state deliberately, never a `View` field: it is a fact about the
@@ -2390,9 +2394,9 @@ export default function App() {
         closeFind();
         return;
       }
-      if (e.key !== "f" || !(e.ctrlKey || e.metaKey) || e.altKey) return;
       // Not while the user is typing somewhere else for their own reasons —
-      // Ctrl-F inside a query or a path is a surprise, not a shortcut.
+      // Ctrl-F inside a query or a path is a surprise, not a shortcut, and
+      // Alt+ArrowUp must stand down while any input holds the keyboard.
       // The event's own target, not `document.activeElement`: for a real
       // keydown they are the same element, and the target is the one the
       // keystroke actually belongs to.
@@ -2402,6 +2406,24 @@ export default function App() {
         el instanceof HTMLInputElement ||
         el instanceof HTMLTextAreaElement ||
         (el instanceof HTMLElement && el.isContentEditable);
+      // Alt+ArrowUp ascends one level, the same as the header's ↑ button —
+      // and stands down under the same three conditions Escape does: while the
+      // user is typing (path bar, search, find), while a viewer owns the
+      // keyboard, and while an entry menu is raised. `goUp` is the top guard
+      // itself (no-op at the library top).
+      if (
+        e.key === "ArrowUp" &&
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey
+      ) {
+        if (typing || viewerRef.current !== null || menuOpenRef.current) return;
+        e.preventDefault();
+        goUpRef.current();
+        return;
+      }
+      if (e.key !== "f" || !(e.ctrlKey || e.metaKey) || e.altKey) return;
       if (typing && el.closest("[data-find-bar]") === null) return;
       // Not while a viewer owns the keyboard. The lightbox traps focus, and
       // opening a find control behind it would pull focus out of the trap into
@@ -3255,6 +3277,8 @@ export default function App() {
       handDelta,
     ],
   );
+
+  goUpRef.current = goUp;
 
   function goUp(): void {
     // Ascend from `dest`, not the committed path (D3): pressing ↑ twice during

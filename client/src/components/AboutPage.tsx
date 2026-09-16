@@ -303,8 +303,8 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
 
         {/* source: client/src/components/Grid.tsx (the tile's `onKeyDown` —
           Enter and Space — and `onMenuKey`, which takes `ContextMenu` and
-          Shift+F10), client/src/App.tsx's window keydown effect (Ctrl/Cmd+F,
-          and the ambient-occlusion pill at `fixed bottom-3 left-3`),
+          Shift+F10), client/src/App.tsx's window keydown effect (Ctrl/Cmd+F and
+          Alt+ArrowUp, and the ambient-occlusion pill at `fixed bottom-3 left-3`),
           client/src/lib/gesture.ts (`nativeMenuRequested`: a shifted secondary
           press is left to the browser) and ViewerLayer's Escape handler. */}
         <Section id="how-to" title="How to use it">
@@ -321,6 +321,10 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
               Ctrl+F — Cmd+F on a Mac — narrows the folder you are in by name.
               It is the one binding that replaces your browser&rsquo;s own find
               while you are here.
+            </li>
+            <li>
+              Alt+&uarr; goes up a folder, the same as the &uarr; button at the
+              top left.
             </li>
             <li>
               Shift+F10, or the menu key, opens a tile&rsquo;s actions;
