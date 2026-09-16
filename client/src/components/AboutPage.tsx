@@ -12,24 +12,20 @@
  * `hostLabel` and `CREDIT_LINK_CLASS` come from `lib/credits.ts` for exactly
  * that reason.
  *
- * **Every factual sentence below was checked against a named source when it
- * was written (D10)**, and each section carries a comment saying which. The
- * page states no accuracy figure and names no location on the machine the
- * server runs on: the first would have to be re-run to stay true and the
- * second is not the viewer's business (`feature-report`). The four
- * Limitations examples were run against the deployed index on the day; one
- * that stops reproducing is removed rather than kept as lore.
+ * **Every factual sentence below was checked against a named source (D10)**,
+ * and each section's comment says which. The page states no accuracy figure
+ * and names no location on the machine the server runs on: the first would
+ * have to be re-run to stay true, the second is not the viewer's business
+ * (`feature-report`). The four Limitations examples were run against the
+ * deployed index; one that stops reproducing is removed rather than kept as
+ * lore.
  *
- * Six sentences were wrong anyway, and were corrected on 2026-09-15 — each
- * section's comment carries what it said, what replaced it and what settled
- * it. They share a shape worth knowing before editing this file: every one was
- * true of something *near* its own subject. The corpus does hold a kit named
- * Strahd — but not only one. The preferences are kept in this browser — but
- * the search options travel with the query too. The pose pipeline did gate its
- * arbiter on geometry — until `POSE_CACHE_VERSION` v2, and it is at v4. The
- * index does hold a render of each model — eight of them. So re-check a
- * sentence's own subject against the code or the corpus, never the citation
- * beside it: a correct citation is what every one of these had.
+ * Nine sentences here have been wrong anyway, and they shared a shape: each
+ * was true of something *near* its own subject — of the desktop app rather
+ * than this deployment, of a kit's tile rather than a model's, of the default
+ * pooling rather than the one a reader can pick. **A correct citation is what
+ * every one of them had.** So check a sentence's own subject against the code,
+ * the corpus or a live route, never against the citation beside it.
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { CreditedKit } from "../../../shared/types";
@@ -127,18 +123,12 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
     // of its own the page rendered light text on white (seen on 5174).
     <main className="min-h-screen bg-zinc-950 text-zinc-200">
       <div className="mx-auto max-w-3xl p-6">
-        {/* The way back, first and unmissable: a plain anchor to the library's
-          top, because the app has one route and `/` is it.
-
-          The source sits beside it, opposite, from 2026-09-15 (Masa): the
-          banner used to carry About, Credits and Source and no longer carries
-          any of them — About is in the header, and the other two belong to this
-          page, which is where a reader who wants either has arrived. Buried in
-          the Links section at the foot, the repository was the one thing on
-          this page a visitor might have come for and could not see; the Links
-          bullet for it is gone, and the issue tracker and the contact stay
-          there because they are follow-ups to it rather than the thing itself.
-          Baseline-aligned rather than centred so the two read as one line. */}
+        {/* The way back and the repository, one line, baseline-aligned. The banner
+          carries neither — About is the header's, and the credits and the
+          source are this page's, which is where a reader who wants them has
+          arrived. The Links section lists the issue tracker and the contact,
+          which are follow-ups to the repository, and not the repository
+          itself. */}
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
           <a href="/" className="text-sm text-sky-400 hover:underline">
             ← Back to the models
@@ -155,30 +145,21 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
         {/* source: openspec/changes/landing-page/proposal.md (Why),
           deploy/demo/config.json (the library this deployment opens).
 
-          "It draws every model in the browser rather than shipping pictures of
-          them" was false of this deployment until 2026-09-15, and backwards
-          about the half a visitor sees first (Masa). A tile here **is** a
-          picture: `corpus-bake` pre-renders every model server-side, the
-          listing annotates the entry as a `hit`, and `useThumbnails` hands the
-          tile `api.thumbImageUrl(...)` — no geometry is fetched and nothing is
-          drawn. The browser draws a tile only where the bake does not answer
-          (an entry the listing reports `stale` or `miss`), and it draws the
-          model itself in the lightbox, which is what `fetchModel`'s `/api/file`
-          is for. The claim describes the desktop app over an unbaked library.
+          **A tile here is a picture, not a render.** `corpus-bake` pre-renders
+          every model, the listing annotates the entry a `hit`, and
+          `useThumbnails` hands the tile `api.thumbImageUrl(...)`: no geometry
+          is fetched. The browser draws a tile only where the bake does not
+          answer (`stale` or `miss`), and draws the model in the lightbox, which
+          is what `fetchModel`'s `/api/file` is for. Anything implying otherwise
+          describes the desktop app over an unbaked library, and has been
+          written here twice.
 
-          Measured on the deployment, 2026-09-15, `/Ghoul_3466743/Ghoul.stl`:
-
-            curl -so /dev/null -w '%{size_download}\n' \
-              'https://models.masamaeda.com/api/thumb/image?path=%2FGhoul_3466743%2FGhoul.stl&mtime=<mtime>&ao=on'
-            curl -so /dev/null -w '%{size_download}\n' \
-              'https://models.masamaeda.com/api/file?path=%2FGhoul_3466743%2FGhoul.stl'
-
-          6,514 bytes of WebP against 2,500,084 of STL — the ratio is this
-          model's, not a constant, so the copy says "kilobytes, not megabytes"
-          and quotes neither. The bake's own manifest
-          (`<cache-id>/bake/bake.json` on the host) recorded 3,122 models with
-          an `ao` and a `noao` render each on 2026-09-15, which is what "every
-          model" rests on. */}
+          Measured 2026-09-15 on the deployment, `/Ghoul_3466743/Ghoul.stl`:
+          6,514 bytes from `/api/thumb/image?…&ao=on` against 2,500,084 from
+          `/api/file` (both need the `mtime` a listing gives). One model's
+          ratio, not a constant — hence "kilobytes, not megabytes" and no
+          figure. "Every model" rests on the bake manifest's 3,122, an `ao` and
+          a `noao` render each. */}
         <Section id="what" title="What this is">
           <p className="mb-2">
             A public demo of Model Browser, a viewer for a library of 3D-print
@@ -227,31 +208,22 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
           </p>
         </Section>
 
-        {/* source: the corpus repository's convert.py (`decimate`, which is
-          quadric decimation over a welded mesh, and `modified_phrase`) and its
-          CLAUDE.md layout table; NOTES.md ("Publishers reuse meshes heavily",
-          the decimation policy); deploy/demo/config.json, whose root is the
-          `decimated/` tree — quadric decimation is what ships, replacing the
-          vertex clustering used until 2026-09-15 (docs/web-demo-notes.md item
-          4). The corpus repository is private, so it is named and not linked.
+        {/* source: the corpus repository's convert.py (`decimate`, quadric
+          decimation over a welded mesh, and `modified_phrase`), its CLAUDE.md
+          layout table and NOTES.md; deploy/demo/config.json, whose root is the
+          `decimated/` tree. The corpus repository is private, so it is named
+          and not linked.
 
-          "The names on the tiles come from the corpus's metadata, not from
-          file names" was true of a kit's tile and false of every tile inside
-          one (found by a review, 2026-09-15). `/api/dir?path=/` answers each
-          kit a `displayName`; `/api/dir` inside a kit answers its models none,
-          and `Grid` draws `entry.displayName ?? baseName(entry.name)` — so a
-          model tile is its file name with the extension dropped
-          (`CatfolkRogue.stl` reads "CatfolkRogue"). The override store has no
-          per-file name to give it: `listCredits` and `/api/overrides` are
-          kit-keyed. Both halves are stated now, with the one example the live
-          listing actually returns.
+          Tile names are two rules, not one: `/api/dir` answers a **kit** a
+          `displayName` and answers the models inside it none, and `Grid` draws
+          `entry.displayName ?? baseName(entry.name)` — so a model tile is its
+          file name, extension dropped. The override store has no per-file name
+          to give it (`listCredits` and `/api/overrides` are kit-keyed).
 
-          The closing paragraph said "what you download from here is a display
-          copy" until 2026-09-15. Nothing here offers a download: `grep -rai
-          download client/src` finds no action, and `entryActions.ts` has
-          `copyPath` and no sibling to it — the Download action is backlog 1.6's
-          and unbuilt (D10). The point the sentence carries is the copies, not
-          an action, so it now says what the file *is*. */}
+          Nothing here offers a download (`grep -rai download client/src`;
+          `entryActions.ts` has `copyPath` and no sibling), so the closing
+          paragraph says what the file *is* rather than what you get. The
+          Download action is backlog 1.6's and unbuilt (D10). */}
         <Section id="corpus" title="How the corpus was altered">
           <p className="mb-2">
             What is served here is not the designers&rsquo; files verbatim, and
@@ -386,26 +358,17 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
         </Section>
 
         {/* source: client/src/lib/stored.ts and the `model-browser:` preference
-          keys read through it (the introduction's dismissal in `lib/intro.ts`,
-          the ambient-occlusion setting in `viewer/aoToggle.ts`, the search
-          options in `lib/searchOptions.ts`), plus `api/localFramings.ts`, which
-          is where a framing goes on a deployment that refuses thumbnail writes;
-          client/index.html and this page, neither of which loads a third-party
-          script.
+          keys read through it (`lib/intro.ts`, `viewer/aoToggle.ts`,
+          `lib/searchOptions.ts`), plus `api/localFramings.ts`, where a framing
+          goes on a deployment that refuses thumbnail writes; client/index.html
+          and this page, neither of which loads a third-party script.
 
-          The search options are called out rather than folded in with the rest,
-          because the old sentence ("your search options … is kept in this
-          browser's own storage and is sent nowhere") was false of them twice
-          over: `HttpApiClient.semanticSearch` posts `{ text, path, ...tuning }`,
-          so the tuning is part of the query, and `lib/urlState.ts` writes the
-          mode and the tuning into the address bar, so a copied link carries
-          them (D10, and `searchOptions.ts`'s own header states both).
-
-          What the remaining three claim is only that the *server* keeps none of
-          them — not that no request reflects one. The ambient-occlusion setting
-          does ride on a thumbnail request as `&ao=off` (`thumbImageUrl`), which
-          is why the sentence says where they are kept rather than that they go
-          nowhere. */}
+          The search options are called out because they are not local:
+          `HttpApiClient.semanticSearch` posts `{ text, path, ...tuning }` and
+          `lib/urlState.ts` writes the mode and the tuning into the address bar
+          (D10). The other three claim only that the *server* keeps none of
+          them, never that no request reflects one — the ambient-occlusion
+          setting rides a thumbnail request as `&ao=off` (`thumbImageUrl`). */}
         <Section id="privacy" title="Privacy">
           <p className="mb-2">
             There are no accounts and nothing to sign in to, and no analytics
@@ -442,74 +405,40 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
 
         {/* source: CLAUDE.md at the repository root (Bun + Hono server,
           React/Vite/three.js client, one renderer) and server/src/app.ts; for
-          the posing, mini-classify's write-ups —
-          docs/learnings/2026-08-11-canonical-pose.md (the runner-up/best flat-
-          base ratio, the front view scored against front/back prompts in the
-          cached view embeddings) and
-          docs/archive/superpowers/specs/2026-08-10-pose-pipeline-design.md, the
-          2026-08-11 "SigLIP also decides the up axis" entry (six candidate-up
-          tiles scored against upright/toppled probes, run on every model). No
-          figure from either is quoted: the tuned numbers there are marked not
-          to publish.
+          the posing, mini-classify's `src/pose.py` and `src/query.py`
+          themselves. **Its write-ups are stale on two points** —
+          docs/learnings/2026-08-11-canonical-pose.md and
+          docs/archive/superpowers/specs/2026-08-10-pose-pipeline-design.md
+          describe the two votes as averaged and the arbiter as gated on
+          geometry's own confidence. Neither holds (checked 2026-09-15):
+          `combine_up` is `geo_weight(geo) * unit(geo) + unit(siglip)` with
+          `geo_weight` = `min(1, best / ABS_SCORE_FLOOR) ** GEO_FLOOR_POWER`, so
+          a mesh with no print base is nearly silenced rather than averaged in;
+          and `needs_arbiter_margin` measures the *combined* vote's margin
+          against `MARGIN_THRESHOLD`, its docstring recording that gating on
+          geometry escalated models the ensemble already had right. Read the
+          source, not the write-ups.
 
-          "a single WebGL renderer shared between the grid's thumbnails and the
-          viewer" described the app, not this deployment, and read as though a
-          tile here were rendered on arrival — the same mistake the "What this
-          is" section carried until 2026-09-15. One renderer app-wide is real
-          (D2, `client/src/three/renderer.ts`), and it is what draws a tile the
-          bake does not answer for; it is simply idle for the rest.
+          No figure from either appears here: their tuned numbers are marked not
+          to publish. The view count is likewise unstated — `views: 8` is what
+          this machine's copy of the demo cache was built with, and the deployed
+          index's parameters cannot be read from here (ask its `/status`).
+          Whether the third tier is on for the served poses is unstated for the
+          same reason: `pose.py` records production running `--pose-vlm off`,
+          while this machine's copy of the pose cache carries 597 of 3321
+          entries at `source: "vlm"`, and the deployed copy cannot be counted
+          from here. What is stated is what the tier does and what asks for it.
 
-          "pooled from all of its views rather than read off one of them" was
-          absolute and the search options falsify it (review, 2026-09-15):
-          `POOLS` is `mean | max | softmax`, the panel offers all three under
-          "Pool views by", and `pool_sims` (mini-classify `src/query.py`) for
-          `max` is `view_sims.max(axis)` — one view decides. Live on the
-          deployment, `a vampire` under `max` answers a different order from
-          `softmax` within the first three hits. The default is what the
-          sentence describes, so it names the exception rather than dropping the
-          point.
+          Two claims to keep honest. Pooling is **selectable**: `POOLS` is
+          `mean | max | softmax` and `pool_sims` for `max` is
+          `view_sims.max(axis)`, one view deciding — so the copy names the
+          default and the exception. And a tile here is a baked picture (see the
+          "What this is" comment), so the one renderer draws the viewer and the
+          tiles the bake misses, not the grid.
 
-          The index holds **several** renders per model, not one: the embedding
-          cache's own `run-params.json` records `views: 8` over a single
-          elevation, and `pool_sims` (mini-classify's `src/query.py`) reduces a
-          model's per-view similarities to the one score a result is ranked by.
-          No count is printed on the page — 8 is what this machine's copy of the
-          demo cache was built with, and the deployed index's own parameters
-          cannot be read from here (ask its `/status`).
-
-          The write-ups are no longer the last word on two points, and mini-
-          classify's `src/pose.py` is (checked 2026-09-15):
-
-          — The two votes are not averaged. `combine_up` is
-          `geo_weight(geo) * unit(geo) + unit(siglip)`, and `geo_weight` is
-          `min(1, best / ABS_SCORE_FLOOR) ** GEO_FLOOR_POWER` — geometry's
-          amplitude falls towards zero as the best flat-base score falls under
-          the floor, so a mesh with no print base is nearly silenced rather than
-          averaged in at full volume.
-
-          — The arbiter gate is the *ensemble's* doubt, not geometry's:
-          `needs_arbiter_margin` compares `MARGIN_THRESHOLD` against
-          `combine_up`'s margin (winner minus runner-up of the combined score).
-          Its own docstring says gating on geometry escalated models the
-          ensemble already had right.
-
-          The page does not say whether that third tier is on or off here.
-          `pose.py` records that production runs `--pose-vlm off`, but this
-          machine's copy of the demo corpus's pose cache disagrees for the poses
-          actually served — 597 of 3321 entries carry `source: "vlm"` (counted
-          over `embed-cache-test/pose-cache.json`; the deployed copy of that
-          cache cannot be counted from here) — so "off for these poses" would be
-          a claim in the other direction with no better evidence. What is
-          stated is what the tier does and what asks for it.
-
-          "Pose" was the page's one undefined term (Masa, 2026-09-15): the word
-          appeared three times in the rendered copy, all of it in this section,
-          with nothing binding it to a meaning — and the interface never says it
-          at all, so a reader had nowhere else to pick it up. It is defined at
-          its first use now, as the pair the pipeline actually settles: which
-          way up the model stands and which side faces the reader. That is what
-          a record holds — `up`, and a `front` of view, azimuth and elevation —
-          and what `poseKey` spells (`-y:4.7124:0.3491`). */}
+          "Pose" is defined at its first use because the interface never says
+          the word: the pair a record holds, `up` and a `front` of view, azimuth
+          and elevation — what `poseKey` spells (`-y:4.7124:0.3491`). */}
         <Section id="technical" title="Under the hood">
           <p className="mb-2">
             The server is Bun and Hono; the client is React and three.js, with
@@ -557,65 +486,44 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
         {/* source: each example run against this deployment's own index on
           2026-09-15, with the body a visitor's search sends
           (`{"raw":false,"pool":"softmax","top":60,"minScore":0.1}`). First five
-          entries of each run, in order, and the flags the index returned:
+          entries in order, and the flags returned:
 
-          "a bicycle" — 0 entries, `matched: 0`: nothing cleared the 0.10
-          floor, and App renders `Nothing matched "a bicycle"` (the
-          `searchHasNoMatches` branch of `emptyNotice`).
+          "a bicycle" — 0 entries, `matched: 0`. Nothing cleared the 0.10 floor,
+          and App renders `Nothing matched` (`emptyNotice`'s
+          `searchHasNoMatches` branch).
 
-          "a submarine" (31 entries, `weak: false`) — Giant_Mimic_Miniature_25mm_
-          3761513/Giant_Mimic.stl, Rogue_and_Ranger_Collection_2435041/Quiver.stl,
-          Singer_Sewing_Machine_Keyring_2662532/miniature_sewing_machine.stl,
-          DnD_Longboat_-_Oars_and_Mast_2870994/Longboat.stl,
-          Mini_Borderlands_Loot_Chest_1280412/lid.stl. Its best hit stood at
-          z 3.55 against mini-classify's WEAK_Z of 2.0 (`src/query.py`), which
-          is why the "Nothing stood out" notice did not fire: the flag is a
-          robust z of the best score over the collection's own spread, set to
-          catch unambiguous noise only.
+          "a submarine" — 31 entries, `weak: false`. Giant_Mimic, Quiver,
+          miniature_sewing_machine, Longboat, Mini_Borderlands_Loot_Chest/lid.
+          Its best hit stood at z 3.55 against `WEAK_Z` 2.0 (`src/query.py`),
+          which is why no "Nothing stood out" notice: the flag is a robust z of
+          the best score over the collection's spread, set to catch unambiguous
+          noise only.
 
-          "a vampire" (60 entries, `matched: 405`) — The_Acquisitions_
-          Incorporated_Miniature_Collection_2653936/Jim_Darkmagic.stl,
-          …/The_REAL_Jim_Darkmagic.stl, Zombie_Collection_2847691/Zombie_NEW.stl,
-          Player_Character_Pack_02_3101042/MadMageFigure.stl,
-          Player_Character_Pack_03_3750572/ElfArmoredMage.stl. Drow from 11th;
-          Vampire_Lord_Monstrous_Strahd_Von_Zarovich_3854115/Strahd_smaller_2.stl
-          came eighteenth; the first ghoul 23rd.
+          "a vampire" — 60 entries, `matched: 405`. Jim_Darkmagic, The_REAL_Jim_
+          Darkmagic, Zombie_NEW, MadMageFigure, ElfArmoredMage; then
+          Half_Elf_Rogue, KindleCleric_000, Zombie_pose_3, Elf_with_the_stand,
+          Zombie_Female_Pose_1. No drow in the first ten — `Drow_Rouge` is 11th,
+          `Drow_Elite_Warrior` 12th. Strahd 18th, first ghoul 23rd.
 
-          This entry called Strahd "the corpus's one vampire kit" and the copy
-          said "the one kit in this corpus that actually names a vampire" until
-          2026-09-15. There are two: `find <corpus root> -maxdepth 1 -iname
-          '*vamp*'` over this machine's copy of the demo corpus answers
-          Vampire_Lord_Monstrous_Strahd_Von_Zarovich_3854115 and
-          Ancient_Vampire_Lord_UPDATED_511925. The second one's rank is *not*
-          recorded — the run above was read under the belief that there was only
-          one — so the copy now says only what that run shows: neither is among
-          the five above, and one of them sits well down. Re-running this query
-          is what it would take to say more.
+          "an elf carrying an orb" — 60 entries. Elven_mage,
+          Female_Halfling_Sorceress, Female_Ogre_BODY_AND_STAND,
+          Human_Male_Warlock_with_Orb, Mage.
 
-          "an elf carrying an orb" (60 entries) — Elven_Mage_Miniature_3507584/
-          Elven_mage.stl, Wizard_Warlock_Sorcerer_and_Druid_Collection_2435009/
-          Female_Halfling_Sorceress.stl, Ogre_2843189/
-          Female_Ogre_BODY_AND_STAND.stl, …/Human_Male_Warlock_with_Orb.stl,
-          …/Mage.stl. The bullet used to close "the full matches tend to lead
-          and the partial ones trail", which nothing measured supports and this
-          very run contradicts: the third entry matches neither half of the
-          phrase, and the only name claiming an orb is fourth. A tendency is a
-          distribution, and no sweep of these queries exists — so the bullet now
-          states the ordering this run shows and stops there.
+          Three traps this section has already sprung:
 
-          README.md's "wizard with a staff → orc shaman" and "witch on a
-          broomstick → mounted rider" are mini-classify's own measurements on
-          its collection and do NOT reproduce here (this index answers
-          Gnome_Mage.stl and Bard_on_a__Broom.stl first), so they are not used.
+          — **Two kits name a vampire**, not one: `find <corpus root> -maxdepth
+          1 -iname '*vamp*'` answers Strahd and Ancient_Vampire_Lord_UPDATED_
+          511925. The second's rank is unrecorded, so the copy says only what
+          the run shows.
 
-          The vampire bullet said the list "opens with zombies, dark elves and
-          robed spellcasters". Re-run 2026-09-15, the first ten are two Jim
-          Darkmagics, `Zombie_NEW`, `MadMageFigure`, `ElfArmoredMage`,
-          `Half_Elf_Rogue`, `KindleCleric_000`, `Zombie_pose_3`,
-          `Elf_with_the_stand` and `Zombie_Female_Pose_1` — no drow at all.
-          `Drow_Rouge` is 11th and `Drow_Elite_Warrior` 12th, so they follow the
-          opening rather than make it. The example still reproduces; only the
-          description of it was wrong, and it now names what the run returns.
+          — **No sweep of these queries exists**, so no claim about a *tendency*
+          ("full matches lead, partial ones trail") can be made from one run —
+          this run's own third entry matches neither half of its phrase.
+
+          — README.md's "wizard with a staff → orc shaman" and "witch on a
+          broomstick → mounted rider" are mini-classify's measurements on its
+          own collection and do NOT reproduce here (this index answers
+          Gnome_Mage and Bard_on_a__Broom first).
 
           Re-run them before trusting this section again; an example that stops
           reproducing is dropped, not reworded. */}
