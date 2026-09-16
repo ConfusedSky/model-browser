@@ -137,13 +137,44 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
         </h1>
 
         {/* source: openspec/changes/landing-page/proposal.md (Why),
-          deploy/demo/config.json (the library this deployment opens). */}
+          deploy/demo/config.json (the library this deployment opens).
+
+          "It draws every model in the browser rather than shipping pictures of
+          them" was false of this deployment until 2026-09-16, and backwards
+          about the half a visitor sees first (Masa). A tile here **is** a
+          picture: `corpus-bake` pre-renders every model server-side, the
+          listing annotates the entry as a `hit`, and `useThumbnails` hands the
+          tile `api.thumbImageUrl(...)` — no geometry is fetched and nothing is
+          drawn. The browser draws a tile only where the bake does not answer
+          (an entry the listing reports `stale` or `miss`), and it draws the
+          model itself in the lightbox, which is what `fetchModel`'s `/api/file`
+          is for. The claim describes the desktop app over an unbaked library.
+
+          Measured on the deployment, 2026-09-16, `/Ghoul_3466743/Ghoul.stl`:
+
+            curl -so /dev/null -w '%{size_download}\n' \
+              'https://models.masamaeda.com/api/thumb/image?path=%2FGhoul_3466743%2FGhoul.stl&mtime=<mtime>&ao=on'
+            curl -so /dev/null -w '%{size_download}\n' \
+              'https://models.masamaeda.com/api/file?path=%2FGhoul_3466743%2FGhoul.stl'
+
+          6,514 bytes of WebP against 2,500,084 of STL — the ratio is this
+          model's, not a constant, so the copy says "kilobytes, not megabytes"
+          and quotes neither. The bake's own manifest
+          (`<cache-id>/bake/bake.json` on the host) recorded 3,122 models with
+          an `ao` and a `noao` render each on 2026-09-15, which is what "every
+          model" rests on. */}
         <Section id="what" title="What this is">
           <p className="mb-2">
             A public demo of Model Browser, a viewer for a library of 3D-print
-            models. It draws every model in the browser rather than shipping
-            pictures of them, turns any tile you drag, and can search by what a
-            model looks like instead of by what its file is called.
+            models. It can search by what a model looks like instead of by what
+            its file is called.
+          </p>
+          <p className="mb-2">
+            The tiles are pictures. This deployment renders one for every model
+            ahead of time and serves it, so a screen of them costs kilobytes
+            rather than the megabytes the models themselves weigh. Open one and
+            the mesh is sent to your browser and drawn with WebGL — that is the
+            model you turn, and why turning it is smooth once it arrives.
           </p>
           <p>
             The library it opens here is a corpus of tabletop miniatures
@@ -391,6 +422,13 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
           figure from either is quoted: the tuned numbers there are marked not
           to publish.
 
+          "a single WebGL renderer shared between the grid's thumbnails and the
+          viewer" described the app, not this deployment, and read as though a
+          tile here were rendered on arrival — the same mistake the "What this
+          is" section carried until 2026-09-16. One renderer app-wide is real
+          (D2, `client/src/three/renderer.ts`), and it is what draws a tile the
+          bake does not answer for; it is simply idle for the rest.
+
           The index holds **several** renders per model, not one: the embedding
           cache's own `run-params.json` records `views: 8` over a single
           elevation, and `pool_sims` (mini-classify's `src/query.py`) reduces a
@@ -425,14 +463,15 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
           stated is what the tier does and what asks for it. */}
         <Section id="technical" title="Under the hood">
           <p className="mb-2">
-            The server is Bun and Hono; the client is React and three.js, with a
-            single WebGL renderer shared between the grid&rsquo;s thumbnails and
-            the viewer. Meaning search is a separate service holding SigLIP
-            embeddings of each model as seen from several angles, so a typed
-            phrase and a picture of a model are compared in one embedding space
-            — which is why a description finds things whose file names say
-            nothing. A model&rsquo;s score for a phrase is pooled from all of
-            its views rather than read off one of them.
+            The server is Bun and Hono; the client is React and three.js, with
+            one WebGL renderer for the whole page — it draws the viewer, and any
+            tile the pre-rendered set does not already answer for. Meaning
+            search is a separate service holding SigLIP embeddings of each model
+            as seen from several angles, so a typed phrase and a picture of a
+            model are compared in one embedding space — which is why a
+            description finds things whose file names say nothing. A
+            model&rsquo;s score for a phrase is pooled from all of its views
+            rather than read off one of them.
           </p>
           <p className="mb-2">
             Models are posed before they are ever drawn. That is the harder half

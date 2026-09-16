@@ -148,6 +148,27 @@ describe("the page as a document", () => {
     expect(back?.textContent).toContain("Back to the models");
   });
 
+  it("says the tiles are served as pictures, not drawn on arrival", async () => {
+    // The page claimed the opposite until 2026-09-16 — "draws every model in
+    // the browser rather than shipping pictures of them" — while its own
+    // Differences list said thumbnails were rendered ahead of time. On this
+    // deployment `corpus-bake` pre-renders every model and `useThumbnails`
+    // hands an annotated hit `api.thumbImageUrl(...)`, so a tile costs a WebP
+    // and no geometry; the mesh is fetched only when a model is opened.
+    await mount(fakeApi(() => Promise.resolve([])));
+    const what = (host.querySelector("#what")?.textContent ?? "").replace(
+      /\s+/g,
+      " ",
+    );
+    // Both halves, because either alone is the misreading: the grid is
+    // pictures, and opening one is what sends the model.
+    expect(what).toContain("The tiles are pictures.");
+    expect(what).toMatch(/Open one and the mesh is sent to your browser/);
+    // The retracted claim, in the shape it was written — a reinstatement is
+    // what this cell exists to catch.
+    expect(what).not.toMatch(/draws every model in the browser/i);
+  });
+
   it("states no figure and names nothing on the host", async () => {
     await mount(fakeApi(() => Promise.resolve([])));
     const text = document.body.textContent ?? "";
