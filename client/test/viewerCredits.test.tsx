@@ -12,7 +12,7 @@
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DirListing, OverrideCredits } from "../../shared/types";
-import { hostLabel } from "../src/lib/credits";
+import { CREDIT_LINK_CLASS, hostLabel } from "../src/lib/credits";
 import {
   container,
   dir,
@@ -326,5 +326,23 @@ describe("a stored URL reads as its host", () => {
     // Corpus data need not be a URL. A reader can still act on the text; a row
     // that silently is not there credits nobody.
     expect(hostLabel("thingiverse, probably")).toBe("thingiverse, probably");
+  });
+});
+
+describe("how a credit link may break", () => {
+  it("wraps at its spaces, never inside a word", () => {
+    // `break-all` here drew the About page's "Creative Commons licence" as
+    // "…licen / ce" (Masa, 2026-09-16, measured in Chromium at 1280 px: the
+    // seam fell between `licen` and `ce`). The rule came from the lightbox's
+    // 18rem column, where `break-words` was measured to contain a 60-character
+    // unbroken name just as well — 280 px over two lines inside 288, the same
+    // as `break-all` gave.
+    //
+    // A string assertion, and only a string assertion: happy-dom applies no
+    // Tailwind CSS, so the class here has no computed style to read, and a
+    // cell that appeared to check the layout would be checking nothing. What
+    // this catches is the constant being changed back.
+    expect(CREDIT_LINK_CLASS).toContain("break-words");
+    expect(CREDIT_LINK_CLASS).not.toContain("break-all");
   });
 });

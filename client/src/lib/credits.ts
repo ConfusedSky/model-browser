@@ -38,5 +38,20 @@ export function hostLabel(url: string): string {
  * a live session over a loaded mesh, and following a credit in place would tear
  * the whole app down to visit a model page. `rel="noreferrer"` implies
  * `noopener`, so one word covers both.
+ *
+ * `break-words`, never `break-all` (2026-09-16, Masa). `break-all` is
+ * `word-break: break-all`, which breaks at *any* character, so the About page
+ * drew "Creative Commons licence" as "Creative Commons licen / ce" whenever the
+ * phrase met the end of a line — measured in Chromium at a 1280 px viewport,
+ * the seam falling between `licen` and `ce` with the anchor's computed
+ * `word-break` reading `break-all`. The rule was written for the lightbox's
+ * 18rem column and is over-broad even there: `break-words`
+ * (`overflow-wrap: break-word`) breaks a word only where it cannot fit on a
+ * line of its own, which is the case the panel actually has — a long unbroken
+ * author name — while leaving ordinary prose to wrap at its spaces.
+ *
+ * happy-dom applies no Tailwind CSS, so no unit test can see this: the check is
+ * a computed `word-break` in a real browser, or the seam probe that produced
+ * the measurement above (CLAUDE.md, the Tailwind note).
  */
-export const CREDIT_LINK_CLASS = "break-all text-sky-400 hover:underline";
+export const CREDIT_LINK_CLASS = "break-words text-sky-400 hover:underline";
