@@ -1,31 +1,20 @@
 /**
- * The About page — everything the banner has no room for (`landing-page` D2,
- * `visitor-intro`).
+ * The About page — everything the banner has no room for (`landing-page` D2).
  *
- * A document, not a view: no reducer, no history, no focus trap, one `<main>`
- * column of sections with fixed `id`s so `/about.html#credits` lands where the
- * banner's credits link points. The only dynamic part is `CreditsList`.
+ * A document, not a view: one `<main>` column of sections with fixed `id`s, so
+ * `/about.html#credits` lands where a link to it points. `CreditsList` is the
+ * only dynamic part.
  *
- * **Imports nothing from `viewer/`, `three/`, `App` or any other component.**
- * `ViewerLayer` value-imports the renderer, so a single import from it would
- * drag three.js into a bundle whose job is to draw a list of names (D8) —
- * `hostLabel` and `CREDIT_LINK_CLASS` come from `lib/credits.ts` for exactly
- * that reason.
+ * **Imports nothing from `viewer/`, `three/` or `App`** — `ViewerLayer`
+ * value-imports the renderer, and one import from it would drag three.js into
+ * a bundle whose job is to draw a list of names (D8).
  *
- * **Every factual sentence below was checked against a named source (D10)**,
- * and each section's comment says which. The page states no accuracy figure
- * and names no location on the machine the server runs on: the first would
- * have to be re-run to stay true, the second is not the viewer's business
- * (`feature-report`). The four Limitations examples were run against the
- * deployed index; one that stops reproducing is removed rather than kept as
- * lore.
- *
- * Nine sentences here have been wrong anyway, and they shared a shape: each
- * was true of something *near* its own subject — of the desktop app rather
- * than this deployment, of a kit's tile rather than a model's, of the default
- * pooling rather than the one a reader can pick. **A correct citation is what
- * every one of them had.** So check a sentence's own subject against the code,
- * the corpus or a live route, never against the citation beside it.
+ * Each section's comment names the source its claims rest on (D10). No
+ * accuracy figure, and no location on the machine the server runs on
+ * (`feature-report`). Nine sentences here have been wrong despite a correct
+ * citation, every one of them true of something *near* its subject — so check
+ * a claim against the code, the corpus or a live route, not against the
+ * citation beside it.
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { CreditedKit } from "../../../shared/types";
@@ -74,11 +63,9 @@ function Out({
   );
 }
 
-/**
- * Bring the URL's fragment into view, answering the scroll position that left
- * the reader at — or `null` where there was no fragment, or no section by that
- * name, which the caller reads as "no scroll happened".
- */
+/** Bring the URL's fragment into view, answering the scroll position that
+ *  left the reader at — `null` where there was no fragment or no such
+ *  section, which the caller reads as "no scroll happened". */
 function scrollToFragment(): number | null {
   const id = window.location.hash.slice(1);
   if (id === "") return null;
@@ -91,22 +78,13 @@ function scrollToFragment(): number | null {
 }
 
 export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
-  // The document's sections exist only once React has rendered them, which is
-  // after the browser has already looked for the URL's fragment and found
-  // nothing — so a link to `#credits` opened cold landed at the top (found on
-  // 5173, 2026-09-15). The page scrolls itself, twice: once after mount, and
-  // again when the credits list settles — the section is the last on the page,
-  // and while its list still says "Loading…" there is not enough document below
-  // it for the browser to bring it to the top (measured: 2190 px scrolled, the
-  // section still 758 px down). The second scroll, over the filled list, lands it.
+  // React renders the sections after the browser has already looked for the
+  // fragment, so `#credits` opened cold landed at the top. Scrolled twice:
+  // after mount, and again once the credits list gives the page its height.
   const [creditsSettled, setCreditsSettled] = useState(false);
-  // Where the *first* scroll left the reader, and `null` while no first scroll
-  // has happened. Both readings gate the second one, because the second scroll
-  // is a correction of the first and not an event of its own: correcting a
-  // reader who has since scrolled away yanks them back mid-sentence, and there
-  // is nothing to correct at all for a reader who reached `#credits` by
-  // clicking the in-page link — that navigation was the browser's, over a
-  // document already laid out, and it needed no help from here.
+  // Where the first scroll left the reader, `null` while none has happened.
+  // Both gate the second: a reader who has since scrolled away must not be
+  // yanked back, and one who clicked an in-page link needed no help.
   const landedAt = useRef<number | null>(null);
   useEffect(() => {
     landedAt.current = scrollToFragment();
@@ -118,17 +96,12 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
     landedAt.current = scrollToFragment();
   }, [creditsSettled]);
   return (
-    // The app's root sets the dark ground on its own top-level element rather
-    // than on `body`, and this document has no such element — without a ground
-    // of its own the page rendered light text on white (seen on 5174).
+    // The app's root grounds itself on its own top-level element; this
+    // document has none, and without a ground of its own it rendered light text
+    // on white.
     <main className="min-h-screen bg-zinc-950 text-zinc-200">
       <div className="mx-auto max-w-3xl p-6">
-        {/* The way back and the repository, one line, baseline-aligned. The banner
-          carries neither — About is the header's, and the credits and the
-          source are this page's, which is where a reader who wants them has
-          arrived. The Links section lists the issue tracker and the contact,
-          which are follow-ups to the repository, and not the repository
-          itself. */}
+        {/* The way back, and the repository opposite it. */}
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
           <a href="/" className="text-sm text-sky-400 hover:underline">
             ← Back to the models
@@ -142,24 +115,11 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
           About this demo
         </h1>
 
-        {/* source: openspec/changes/landing-page/proposal.md (Why),
-          deploy/demo/config.json (the library this deployment opens).
-
-          **A tile here is a picture, not a render.** `corpus-bake` pre-renders
-          every model, the listing annotates the entry a `hit`, and
-          `useThumbnails` hands the tile `api.thumbImageUrl(...)`: no geometry
-          is fetched. The browser draws a tile only where the bake does not
-          answer (`stale` or `miss`), and draws the model in the lightbox, which
-          is what `fetchModel`'s `/api/file` is for. Anything implying otherwise
-          describes the desktop app over an unbaked library, and has been
-          written here twice.
-
-          Measured 2026-09-15 on the deployment, `/Ghoul_3466743/Ghoul.stl`:
-          6,514 bytes from `/api/thumb/image?…&ao=on` against 2,500,084 from
-          `/api/file` (both need the `mtime` a listing gives). One model's
-          ratio, not a constant — hence "kilobytes, not megabytes" and no
-          figure. "Every model" rests on the bake manifest's 3,122, an `ao` and
-          a `noao` render each. */}
+        {/* source: landing-page's proposal.md; deploy/demo/config.json.
+          A tile here is a baked picture (`corpus-bake`), not a render: only the
+          lightbox fetches a model. 6,514 bytes against 2,500,084 for
+          `/Ghoul_3466743/Ghoul.stl`, which is why the copy says kilobytes and
+          megabytes and quotes neither. */}
         <Section id="what" title="What this is">
           <p className="mb-2">
             A public demo of Model Browser, a viewer for a library of 3D-print
@@ -180,10 +140,8 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
           </p>
         </Section>
 
-        {/* source: the corpus repository's CLAUDE.md ("Metadata contract with
-          model-browser", the licence-vocabulary rules) and NOTES.md; the
-          lightbox's own credit rows in client/src/viewer/ViewerLayer.tsx;
-          shared/types.ts `OverrideCredits`. */}
+        {/* source: the corpus repository's metadata contract and NOTES.md;
+          ViewerLayer's credit rows; `OverrideCredits`. */}
         <Section id="licence" title="Licence and provenance">
           <p className="mb-2">
             None of these models are mine. Each was published by its designer
@@ -208,22 +166,11 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
           </p>
         </Section>
 
-        {/* source: the corpus repository's convert.py (`decimate`, quadric
-          decimation over a welded mesh, and `modified_phrase`), its CLAUDE.md
-          layout table and NOTES.md; deploy/demo/config.json, whose root is the
-          `decimated/` tree. The corpus repository is private, so it is named
-          and not linked.
-
-          Tile names are two rules, not one: `/api/dir` answers a **kit** a
-          `displayName` and answers the models inside it none, and `Grid` draws
-          `entry.displayName ?? baseName(entry.name)` — so a model tile is its
-          file name, extension dropped. The override store has no per-file name
-          to give it (`listCredits` and `/api/overrides` are kit-keyed).
-
-          Nothing here offers a download (`grep -rai download client/src`;
-          `entryActions.ts` has `copyPath` and no sibling), so the closing
-          paragraph says what the file *is* rather than what you get. The
-          Download action is backlog 1.6's and unbuilt (D10). */}
+        {/* source: the corpus repository's convert.py and NOTES.md (private, so
+          named and not linked); deploy/demo/config.json's `decimated/` root.
+          Tile names are two rules: `/api/dir` gives a kit a `displayName` and
+          gives the models inside it none, so `Grid` falls back to the file
+          name. No download action exists (D10). */}
         <Section id="corpus" title="How the corpus was altered">
           <p className="mb-2">
             What is served here is not the designers&rsquo; files verbatim, and
@@ -267,13 +214,8 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
           </p>
         </Section>
 
-        {/* source: deploy/demo/config.json (`appLaunch`, `chatTab`,
-          `thumbWrites`, `hostDetails`, `maintenance` all false) and the
-          feature-report specification's requirements for each field;
-          client/src/lib/entryActions.ts for the actions those fields withhold.
-          Stated as what this deployment does rather than as a promised
-          replacement: the Download action and the Copy-link label are backlog
-          1.6's and have not been built. */}
+        {/* source: deploy/demo/config.json's `features`, and entryActions.ts for
+          what each withholds. The Download action is unbuilt (D10). */}
         <Section id="differences" title="What differs from the desktop app">
           <ul className="list-disc space-y-1 pl-5">
             <li>
@@ -301,12 +243,8 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
           </ul>
         </Section>
 
-        {/* source: client/src/components/Grid.tsx (the tile's `onKeyDown` —
-          Enter and Space — and `onMenuKey`, which takes `ContextMenu` and
-          Shift+F10), client/src/App.tsx's window keydown effect (Ctrl/Cmd+F and
-          Alt+ArrowUp, and the ambient-occlusion pill at `fixed bottom-3 left-3`),
-          client/src/lib/gesture.ts (`nativeMenuRequested`: a shifted secondary
-          press is left to the browser) and ViewerLayer's Escape handler. */}
+        {/* source: Grid's `onKeyDown` and `onMenuKey`, ViewerLayer's Escape
+          handler, App's find binding. */}
         <Section id="how-to" title="How to use it">
           <ul className="list-disc space-y-1 pl-5">
             <li>
@@ -337,10 +275,7 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
           </ul>
         </Section>
 
-        {/* source: `gh repo view ConfusedSky/model-browser` (PUBLIC) and
-          `gh repo view ConfusedSky/model-browser-corpus` (PRIVATE, so it gets
-          no link — see the provenance section above). The repository's own line
-          moved to the head of the page on 2026-09-15 and is not repeated here. */}
+        {/* The corpus repository is private and gets no link. */}
         <Section id="links" title="Links">
           <ul className="list-disc space-y-1 pl-5">
             <li>
@@ -361,23 +296,12 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
           </ul>
         </Section>
 
-        {/* source: client/src/lib/stored.ts and the `model-browser:` preference
-          keys read through it (`lib/intro.ts`, `viewer/aoToggle.ts`,
-          `lib/searchOptions.ts`); client/index.html and this page, neither of
-          which loads a third-party script.
-
-          A framing is the claim that moved: `api/localFramings.ts` is where one
-          would go on a deployment that refuses thumbnail writes, and its
-          `FRAMINGS_KEPT_LOCALLY` is off until issue #28 lands, so nothing is
-          written and nothing is read back. Both paragraphs above say so, and
-          both have to move again when that constant does.
-
-          The search options are called out because they are not local:
-          `HttpApiClient.semanticSearch` posts `{ text, path, ...tuning }` and
-          `lib/urlState.ts` writes the mode and the tuning into the address bar
-          (D10). The other three claim only that the *server* keeps none of
-          them, never that no request reflects one — the ambient-occlusion
-          setting rides a thumbnail request as `&ao=off` (`thumbImageUrl`). */}
+        {/* source: the `model-browser:` keys read through lib/stored.ts, and
+          api/localFramings.ts. The search options are the exception because
+          they are not local: `semanticSearch` posts the tuning and
+          lib/urlState.ts writes it into the address bar. The other three claim
+          only that the *server* keeps none of them — the ambient-occlusion
+          setting still rides a thumbnail request as `&ao=off`. */}
         <Section id="privacy" title="Privacy">
           <p className="mb-2">
             There are no accounts and nothing to sign in to, and no analytics
@@ -397,9 +321,7 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
           </p>
         </Section>
 
-        {/* source: client/src/three/renderer.ts (one WebGLRenderer app-wide) and
-          the repository's own architecture notes; the README's description of
-          running the server over a local library. */}
+        {/* source: three/renderer.ts (one renderer app-wide, D2). */}
         <Section id="webgl" title="WebGL and the desktop build">
           <p className="mb-2">
             The models are drawn with WebGL. A browser or a machine without it
@@ -413,42 +335,14 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
           </p>
         </Section>
 
-        {/* source: CLAUDE.md at the repository root (Bun + Hono server,
-          React/Vite/three.js client, one renderer) and server/src/app.ts; for
-          the posing, mini-classify's `src/pose.py` and `src/query.py`
-          themselves. **Its write-ups are stale on two points** —
-          docs/learnings/2026-08-11-canonical-pose.md and
-          docs/archive/superpowers/specs/2026-08-10-pose-pipeline-design.md
-          describe the two votes as averaged and the arbiter as gated on
-          geometry's own confidence. Neither holds (checked 2026-09-15):
-          `combine_up` is `geo_weight(geo) * unit(geo) + unit(siglip)` with
-          `geo_weight` = `min(1, best / ABS_SCORE_FLOOR) ** GEO_FLOOR_POWER`, so
-          a mesh with no print base is nearly silenced rather than averaged in;
-          and `needs_arbiter_margin` measures the *combined* vote's margin
-          against `MARGIN_THRESHOLD`, its docstring recording that gating on
-          geometry escalated models the ensemble already had right. Read the
-          source, not the write-ups.
-
-          No figure from either appears here: their tuned numbers are marked not
-          to publish. The view count is likewise unstated — `views: 8` is what
-          this machine's copy of the demo cache was built with, and the deployed
-          index's parameters cannot be read from here (ask its `/status`).
-          Whether the third tier is on for the served poses is unstated for the
-          same reason: `pose.py` records production running `--pose-vlm off`,
-          while this machine's copy of the pose cache carries 597 of 3321
-          entries at `source: "vlm"`, and the deployed copy cannot be counted
-          from here. What is stated is what the tier does and what asks for it.
-
-          Two claims to keep honest. Pooling is **selectable**: `POOLS` is
-          `mean | max | softmax` and `pool_sims` for `max` is
-          `view_sims.max(axis)`, one view deciding — so the copy names the
-          default and the exception. And a tile here is a baked picture (see the
-          "What this is" comment), so the one renderer draws the viewer and the
-          tiles the bake misses, not the grid.
-
-          "Pose" is defined at its first use because the interface never says
-          the word: the pair a record holds, `up` and a `front` of view, azimuth
-          and elevation — what `poseKey` spells (`-y:4.7124:0.3491`). */}
+        {/* source: mini-classify's `src/pose.py` and `src/query.py`. **Read
+          those, not its write-ups** — the write-ups describe the two votes as
+          averaged and the arbiter as gated on geometry, and `combine_up` and
+          `needs_arbiter_margin` are neither. No figure from them is published,
+          and the view count and the arbiter's on/off state are unstated because
+          the deployed index's parameters cannot be read from here. Pooling is
+          selectable: `pool_sims` for `max` is one view, so the copy names the
+          default and the exception. */}
         <Section id="technical" title="Under the hood">
           <p className="mb-2">
             The server is Bun and Hono; the client is React and three.js, with
@@ -493,50 +387,14 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
           </p>
         </Section>
 
-        {/* source: each example run against this deployment's own index on
-          2026-09-15, with the body a visitor's search sends
-          (`{"raw":false,"pool":"softmax","top":60,"minScore":0.1}`). First five
-          entries in order, and the flags returned:
-
-          "a bicycle" — 0 entries, `matched: 0`. Nothing cleared the 0.10 floor,
-          and App renders `Nothing matched` (`emptyNotice`'s
-          `searchHasNoMatches` branch).
-
-          "a submarine" — 31 entries, `weak: false`. Giant_Mimic, Quiver,
-          miniature_sewing_machine, Longboat, Mini_Borderlands_Loot_Chest/lid.
-          Its best hit stood at z 3.55 against `WEAK_Z` 2.0 (`src/query.py`),
-          which is why no "Nothing stood out" notice: the flag is a robust z of
-          the best score over the collection's spread, set to catch unambiguous
-          noise only.
-
-          "a vampire" — 60 entries, `matched: 405`. Jim_Darkmagic, The_REAL_Jim_
-          Darkmagic, Zombie_NEW, MadMageFigure, ElfArmoredMage; then
-          Half_Elf_Rogue, KindleCleric_000, Zombie_pose_3, Elf_with_the_stand,
-          Zombie_Female_Pose_1. No drow in the first ten — `Drow_Rouge` is 11th,
-          `Drow_Elite_Warrior` 12th. Strahd 18th, first ghoul 23rd.
-
-          "an elf carrying an orb" — 60 entries. Elven_mage,
-          Female_Halfling_Sorceress, Female_Ogre_BODY_AND_STAND,
-          Human_Male_Warlock_with_Orb, Mage.
-
-          Three traps this section has already sprung:
-
-          — **Two kits name a vampire**, not one: `find <corpus root> -maxdepth
-          1 -iname '*vamp*'` answers Strahd and Ancient_Vampire_Lord_UPDATED_
-          511925. The second's rank is unrecorded, so the copy says only what
-          the run shows.
-
-          — **No sweep of these queries exists**, so no claim about a *tendency*
-          ("full matches lead, partial ones trail") can be made from one run —
-          this run's own third entry matches neither half of its phrase.
-
-          — README.md's "wizard with a staff → orc shaman" and "witch on a
-          broomstick → mounted rider" are mini-classify's measurements on its
-          own collection and do NOT reproduce here (this index answers
-          Gnome_Mage and Bard_on_a__Broom first).
-
-          Re-run them before trusting this section again; an example that stops
-          reproducing is dropped, not reworded. */}
+        {/* source: each example run against the deployment's own index, with the
+          body a visitor sends
+          (`{"raw":false,"pool":"softmax","top":60,"minScore":0.1}`). The copy
+          names what each run returned, so it is its own record — re-run the
+          four before trusting it, and drop an example that stops reproducing
+          rather than rewording it. Two traps: **two** kits name a vampire, and
+          README.md's staff/broomstick examples are mini-classify's own and do
+          not reproduce here. */}
         <Section id="limitations" title="What the search does badly">
           <p className="mb-2">
             Meaning search returns the nearest things to what you described, and
@@ -594,9 +452,8 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
           </ul>
         </Section>
 
-        {/* source: the `visitor-intro` requirement "The credits list is every kit
-          the store credits" and `library-overrides`' "The store's credits are
-          listable"; the row markup is ViewerLayer's, field for field. */}
+        {/* source: `library-overrides` — the rows are ViewerLayer's, field for
+          field. */}
         <Section id="credits" title="Credits">
           <p className="mb-2">
             Every model is credited in the panel beside it when you open it in
@@ -616,15 +473,9 @@ type CreditsState =
   | { kind: "failed" }
   | { kind: "ready"; kits: readonly CreditedKit[] };
 
-/**
- * The one dynamic part of the page: every credited kit the deployment's store
- * holds, drawn from the same data the lightbox draws a single kit's credits
- * from, so the two cannot disagree (`library-overrides`).
- *
- * Ignore-on-stale rather than an abort, like the panel's own overrides read:
- * there is nothing running server-side to stop, and the only thing that can
- * supersede this read is the page going away.
- */
+/** Every credited kit the store holds, from the data the lightbox draws one
+ *  kit's credits from, so the two cannot disagree. Ignore-on-stale rather than
+ *  an abort: nothing runs server-side to stop. */
 export function CreditsList({
   api,
   onSettled,
@@ -684,19 +535,10 @@ function lastSegment(path: string): string {
 /**
  * A stored URL fit to be an `href`, or `undefined` where it is not.
  *
- * Depth rather than a boundary: the credits store is operator data — the
- * corpus's own metadata, written by whoever runs the deployment — so nothing
- * here is defending against a visitor. It is worth the handful of lines because React
- * does not close this by itself: a `javascript:` URL in an `href` renders as a
- * live link and React only warns in the console, so one bad row would be a
- * script every reader of this page could click.
- *
- * Absolute `http:`/`https:` only, and *parsed* rather than prefix-matched: the
- * URL parser strips leading whitespace and embedded control characters before
- * it decides the scheme, so a string a `startsWith` check reads as relative can
- * still navigate as `javascript:`. Anything refused keeps its text and loses
- * only its link — `hostLabel` already draws an unparseable URL verbatim for the
- * same reason, that attribution must not go quiet on a malformed field.
+ * Not a boundary — this is operator data — but React renders a `javascript:`
+ * URL as a live link and only warns, so one bad row would be a script every
+ * reader could click. *Parsed* rather than prefix-matched: the parser strips
+ * leading whitespace and control characters before deciding the scheme.
  */
 function safeHref(url: string | undefined): string | undefined {
   if (url === undefined) return undefined;
@@ -708,18 +550,12 @@ function safeHref(url: string | undefined): string | undefined {
   }
 }
 
-/**
- * One kit's line. The fields, their order and their link rules are the
- * lightbox panel's rows (`credits-completion` D4: author, licence, source,
- * then what was done to this copy), reproduced here as one line rather than as
- * a description list because a page of them is a list of kits, not a
- * description of one.
- */
+/** One kit's line — the lightbox panel's fields and order
+ *  (`credits-completion` D4), as a line because a page of them is a list. */
 function CreditLine({ kit }: { kit: CreditedKit }): ReactNode {
   const { credits } = kit;
-  // Each link's `href` decided once, before the row is drawn: a field with a
-  // URL this page will not follow is drawn exactly as a field with no URL at
-  // all, which is a shape the row already has.
+  // Decided once: a field whose URL this page will not follow is drawn as a
+  // field with no URL, a shape the row already has.
   const authorHref = safeHref(credits.authorUrl);
   const licenseHref = safeHref(credits.licenseUrl);
   const sourceHref = safeHref(credits.sourceUrl);
