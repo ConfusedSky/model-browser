@@ -805,6 +805,10 @@ export function createApp(
    * so joining them would silently under-fill whichever arrived second, for a
    * saving of nothing: they are never issued together in practice, and the join
    * exists for the case where they are literally the same request.
+   *
+   * `JSON.stringify` rather than a delimiter: `q` and `libPath` are both
+   * arbitrary text, so any separator they could contain lets two different
+   * listings share a key.
    */
   function fillKey(
     libPath: string,
@@ -812,7 +816,7 @@ export function createApp(
     q: string | undefined,
     folders: boolean,
   ): string {
-    return `${flat ? "flat" : "dir"} ${folders ? "f" : ""} ${q ?? ""} ${libPath}`;
+    return JSON.stringify([flat, folders, q ?? "", libPath]);
   }
 
   async function fillOnce(entries: readonly DirEntry[]): Promise<void> {

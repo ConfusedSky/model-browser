@@ -1585,6 +1585,39 @@ describe("emission fills what the layers lack, under a budget (§6.9)", () => {
     await settle(20);
   });
 
+  it("does not join two searches that differ only in their query", async () => {
+    // The join is keyed on what makes a listing, not on its path: two searches
+    // over one folder put different entries on screen, and sharing a fill would
+    // under-fill whichever arrived second.
+    const f = await fixture("ly-fill-search-keys");
+    const s = serverFor(f);
+    const index = stubFillIndex(f.top, { [join(f.kit, "loose.stl")]: POSE });
+    await warmProbe(s);
+
+    let release: () => void = () => {};
+    index.control.gate = new Promise<void>((r) => {
+      release = r;
+    });
+
+    const search = async (q: string): Promise<DirListing> => {
+      const res = await s.app.request(
+        `/api/dir?flat=true&path=${encodeURIComponent(ROOT)}&q=${encodeURIComponent(q)}`,
+        { headers: LOOPBACK },
+      );
+      expect(res.status).toBe(200);
+      return (await res.json()) as DirListing;
+    };
+    // Both match `loose.stl`, so both listings carry the one model the index is
+    // asked about — the count is the join, not the match.
+    const [a, b] = await Promise.all([search("loose"), search("oose")]);
+    expect(index.posesAbout(join(f.kit, "loose.stl"))).toBe(2);
+    expect(a.entries.map((e) => e.name)).toContain("loose.stl");
+    expect(b.entries.map((e) => e.name)).toContain("loose.stl");
+
+    release();
+    await settle(20);
+  });
+
   it("records the poses its preview derivations learn, so sheet cells arrive posed", async () => {
     const f = await fixture("ly-fill-sheet-poses");
     const s = serverFor(f);
