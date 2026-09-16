@@ -34,21 +34,18 @@ export default function IntroBanner({
       className="flex flex-wrap items-center gap-2 border-b border-zinc-800 bg-zinc-900/60 p-3 text-sm text-zinc-300"
     >
       <span>{meaningRunnable ? SENTENCE_WITH_SEARCH : SENTENCE_PLAIN}</span>
-      {meaningRunnable && (
-        <div className="flex flex-wrap items-center gap-2">
-          {queries.map((q) => (
-            <button
-              key={q}
-              type="button"
-              data-example-query={q}
-              onClick={() => onRun(q)}
-              className={CHIP_CLASS}
-            >
-              {q}
-            </button>
-          ))}
-        </div>
-      )}
+      {meaningRunnable &&
+        queries.map((q) => (
+          <button
+            key={q}
+            type="button"
+            data-example-query={q}
+            onClick={() => onRun(q)}
+            className={CHIP_CLASS}
+          >
+            {q}
+          </button>
+        ))}
       <button
         type="button"
         onClick={onDismiss}
