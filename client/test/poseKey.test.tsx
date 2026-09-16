@@ -226,6 +226,9 @@ describe("a pose that frames no render", () => {
     await mountApp("/models", LISTING);
     await settle();
     await settle();
+    // The wave fired: without this the cell is green for an unsettled source
+    // too, which stands for a different reason.
+    expect(semanticPosesFor).toHaveBeenCalled();
     expect(renderThumbnail).not.toHaveBeenCalled();
     expect(lastPut()).toBeUndefined();
 
@@ -249,6 +252,14 @@ describe("a pose that frames no render", () => {
     expect(renderThumbnail).toHaveBeenCalledTimes(1);
     expect(lastPut()?.posed).toBeUndefined();
     expect(lastPut()?.poseKey).toBeUndefined();
+    // Drawn at the default, which is what the lightbox opens such a model at.
+    const drawn = renderThumbnail.mock.calls[0] as unknown as [
+      unknown,
+      CameraState,
+      OrbitAxis,
+    ];
+    expect(drawn[1]).toEqual(DEFAULT_CAMERA);
+    expect(drawn[2]).toBe("z");
 
     // Once, not on every landing: the render it just wrote is unlabelled, and
     // an unlabelled render under a pose that frames nothing stands.

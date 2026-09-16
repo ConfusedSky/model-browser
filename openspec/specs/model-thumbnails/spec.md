@@ -242,8 +242,8 @@ nothing, or it is known not to be there — a render that records an orientation
 - **THEN** it is re-rendered under the current orientation and records its key, and is a hit on the next visit
 
 #### Scenario: The source is settled to hold nothing
-- **WHEN** a model with no orientation of its own is displayed, its cached thumbnail drawn under an orientation, and the source is settled to hold none for it — asked and answered none, or known not to be there
-- **THEN** the thumbnail is re-rendered at the default framing, recording no orientation, keeping the old image until the replacement lands, and is a hit on later visits until the source holds an orientation for it again
+- **WHEN** a model with no orientation of its own is displayed, its cached thumbnail drawn under an orientation, and the source is settled to hold none it can frame — asked and answered none, answered with an orientation that frames nothing, or known not to be there
+- **THEN** the thumbnail is re-rendered at the default framing, recording no orientation, keeping the old image until the replacement lands, and is a hit on later visits until the source holds an orientation for it again — so a thumbnail already recording none is a hit at once, and nothing is rendered or uploaded
 
 #### Scenario: An unanswered source settles nothing
 - **WHEN** a model with no orientation of its own is displayed, its cached thumbnail drawn under an orientation, and the source is still warming or the ask about it has not been answered

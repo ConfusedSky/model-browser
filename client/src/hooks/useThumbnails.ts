@@ -57,8 +57,8 @@ function release(url: string): void {
 /**
  * Asked of a lookup and of a listing annotation alike, so the two cannot drift
  * (`thumbnail-image-serving` D2/D3). `pose` has three states (`pose-rerender`
- * D5): one the render must have been drawn under, a settled `null` that makes a
- * posed render stale, and `undefined` — unsettled, so the render stands.
+ * D5): an orientation, a settled `null`, and `undefined` — unsettled, so the
+ * render stands whatever it carries.
  */
 function usable(
   labels: {
@@ -72,18 +72,16 @@ function usable(
   pose: IndexPose | null | undefined,
 ): boolean {
   const unowned = camera === undefined && axis === undefined;
-  // The orientation the source asks for, or `undefined` where it asks for
-  // none. A settled source that frames nothing — `null`, or a pose
-  // `cameraForPose` refuses — wants the default, so a render carrying a key is
-  // stale against it and an unlabelled one is not. Judging the unlabelled one
-  // stale too would re-render it identically on every visit, forever.
+  // The orientation the source asks for, `undefined` where it asks for none —
+  // a settled `null`, or a pose `cameraForPose` refuses, both of which want the
+  // default. So the render's labels must be what the source asks for: a key, or
+  // none. An unsettled source asks for nothing and stales nothing.
   const framed = poseKeyFor(pose);
   const poseStale =
     unowned &&
-    (pose !== undefined && framed === undefined
-      ? labels.posed !== undefined || labels.poseKey !== undefined
-      : framed !== undefined &&
-        (labels.posed !== POSE_VERSION || labels.poseKey !== framed));
+    pose !== undefined &&
+    (labels.poseKey !== framed ||
+      labels.posed !== (framed === undefined ? undefined : POSE_VERSION));
   return (
     labels.lighting === THUMB_LIGHTING &&
     labels.rig === RIG_VERSION &&
@@ -91,8 +89,8 @@ function usable(
   );
 }
 
-/** `undefined` for a pose that frames no render, which `usable` reads as the
- *  source asking for the default. */
+/** The key a render drawn under this pose would carry — `undefined` where the
+ *  source holds none or `cameraForPose` refuses what it holds. */
 function poseKeyFor(pose: IndexPose | null | undefined): string | undefined {
   const resolved = cameraForPose(pose, DEFAULT_CAMERA);
   return resolved === null ? undefined : poseKeyOf(resolved);
