@@ -203,6 +203,24 @@ describe("the page as a document", () => {
     expect(what).not.toMatch(/draws every model in the browser/i);
   });
 
+  it("defines \u201cpose\u201d where it first uses it", async () => {
+    // The page's one piece of jargon, and the interface never says it, so a
+    // reader has nowhere else to pick it up (Masa, 2026-09-16). Whitespace
+    // collapsed before matching: JSX wraps a sentence across source lines, so
+    // the rendered text carries the indentation.
+    await mount(fakeApi(() => Promise.resolve([])));
+    const text = (host.textContent ?? "").replace(/\s+/g, " ");
+    const defined = text.indexOf("That pair is its pose");
+    expect(defined).toBeGreaterThan(-1);
+    // The first use *is* the definition — not a use somewhere above it.
+    expect(text.search(/\bpos(e|ed|es)\b/)).toBe(
+      defined + "That pair is its ".length,
+    );
+    // And the definition says what the pair is, in the reader's terms rather
+    // than the record's (`up` and a `front` of view, azimuth and elevation).
+    expect(text).toContain("which way up it stands and which side of it faces");
+  });
+
   it("states no figure and names nothing on the host", async () => {
     await mount(fakeApi(() => Promise.resolve([])));
     const text = document.body.textContent ?? "";

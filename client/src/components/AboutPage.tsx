@@ -473,7 +473,16 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
           over `embed-cache-test/pose-cache.json`; the deployed copy of that
           cache cannot be counted from here) — so "off for these poses" would be
           a claim in the other direction with no better evidence. What is
-          stated is what the tier does and what asks for it. */}
+          stated is what the tier does and what asks for it.
+
+          "Pose" was the page's one undefined term (Masa, 2026-09-16): the word
+          appeared three times in the rendered copy, all of it in this section,
+          with nothing binding it to a meaning — and the interface never says it
+          at all, so a reader had nowhere else to pick it up. It is defined at
+          its first use now, as the pair the pipeline actually settles: which
+          way up the model stands and which side faces the reader. That is what
+          a record holds — `up`, and a `front` of view, azimuth and elevation —
+          and what `poseKey` spells (`-y:4.7124:0.3491`). */}
         <Section id="technical" title="Under the hood">
           <p className="mb-2">
             The server is Bun and Hono; the client is React and three.js, with
@@ -487,22 +496,24 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
             rather than read off one of them.
           </p>
           <p className="mb-2">
-            Models are posed before they are ever drawn. That is the harder half
-            and the invisible one: a library of miniatures lying on their sides
-            is unreadable, and nothing in an STL says which way is up. Three
-            tiers decide it. The first is geometry — how much of the mesh rests
-            flat on each candidate base, with the runner-up&rsquo;s score
-            against the best standing for confidence. The second renders the
-            model under each of six candidate ups and scores those renders
-            against text prompts for upright and toppled; it runs on every
-            model, and its scores are added to geometry&rsquo;s with
-            geometry&rsquo;s turned down in proportion to how much flat base it
-            found. A figure with none at all — leaping, flying, based on a rock
-            — is where geometry is confidently wrong, and turning it down is how
-            the pictures get to overrule it there. The third tier asks a
-            vision-language model, and it is asked only where the first two
-            together came out close: what opens that gate is how narrowly the
-            combined vote won, not how sure the geometry was.
+            Before a model is drawn at all, something has to settle which way up
+            it stands and which side of it faces you. That pair is its pose, and
+            finding it is the harder half of this and the invisible one: a
+            library of miniatures lying on their sides is unreadable, and
+            nothing in an STL says which way is up. Three tiers decide the up.
+            The first is geometry — how much of the mesh rests flat on each
+            candidate base, with the runner-up&rsquo;s score against the best
+            standing for confidence. The second renders the model under each of
+            six candidate ups and scores those renders against text prompts for
+            upright and toppled; it runs on every model, and its scores are
+            added to geometry&rsquo;s with geometry&rsquo;s turned down in
+            proportion to how much flat base it found. A figure with none at all
+            — leaping, flying, based on a rock — is where geometry is
+            confidently wrong, and turning it down is how the pictures get to
+            overrule it there. The third tier asks a vision-language model, and
+            it is asked only where the first two together came out close: what
+            opens that gate is how narrowly the combined vote won, not how sure
+            the geometry was.
           </p>
           <p>
             The front view is chosen the same way, by scoring the model&rsquo;s
