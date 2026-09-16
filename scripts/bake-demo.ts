@@ -5,7 +5,7 @@
  * to ship it (corpus-bake D1).
  *
  * usage: bun run scripts/bake-demo.ts --root <corpus top> --cache <scratch cache dir> --index-cache <the index's cache dir>
- *          [--port 3199] [--client <scratch build dir>] [--ship <user@host> --ship-dir </srv/cache/<box id>> [--origin <https://url>]]
+ *          [--port 3199] [--client <scratch build dir>] [--ship <user@host> --ship-dir </srv/cache/<box id>>] [--origin <https://url>]
  *
  * Node APIs only in the core below, though the driver may use Bun: the core is
  * exported and exercised by `server/test/bakeDemo.test.ts`, whose tsconfig
@@ -464,21 +464,66 @@ function contentsOf(dir: string): string {
 }
 
 /**
- * D4: the local id directory, whole, minus `snapshots/` (the box's own tree
- * snapshot), into the box's id directory — trailing slashes on both, so the
- * contents land in the target rather than a directory of the local id's name
- * under it, and **no `--delete`**: nothing on the box is removed by a ship, a
- * stale sidecar is overwritten by key. `boxDir` is the box's `/srv/cache/<box
- * id>`, an id that differs from the local one and is read from the box's
- * startup line, never assumed.
+ * D4's flags and paths — shared between `rsyncCommand`'s printed string and
+ * `rsyncArgv`'s spawn form, so the two cannot drift the way a hand-edited
+ * pair would: minus `snapshots/` (the box's own tree snapshot), trailing
+ * slashes on both source and destination so the contents land in the target
+ * rather than a directory of the local id's name under it, and **no
+ * `--delete`**: nothing on the box is removed by a ship, a stale sidecar is
+ * overwritten by key. `boxDir` is the box's `/srv/cache/<box id>`, an id that
+ * differs from the local one and is read from the box's startup line, never
+ * assumed.
  */
+function rsyncPieces(
+  localCache: string,
+  localId: string,
+  boxDir: string,
+): { exclude: string; src: string; dest: string } {
+  return {
+    exclude: `${SNAPSHOT_DIR}/`,
+    src: contentsOf(join(localCache, localId)),
+    dest: contentsOf(boxDir),
+  };
+}
+
+/** D4, as the string an operator pastes into a shell. */
 export function rsyncCommand(
   localCache: string,
   localId: string,
   host: string,
   boxDir: string,
 ): string {
-  return `rsync -az --info=progress2 --exclude '${SNAPSHOT_DIR}/' ${contentsOf(join(localCache, localId))} ${host}:${contentsOf(boxDir)}`;
+  const { exclude, src, dest } = rsyncPieces(localCache, localId, boxDir);
+  return `rsync -az --info=progress2 --exclude '${exclude}' ${src} ${host}:${dest}`;
+}
+
+/**
+ * D4, as an argv array for `spawn` rather than `sh -c` (Fix 5): a `--cache`,
+ * `--ship` or `--ship-dir` carrying a space or a shell metacharacter reaches
+ * `rsync` as one argument each instead of being re-split or executed by a
+ * shell. Shares `rsyncPieces` with `rsyncCommand` so the flags and paths
+ * cannot say two different things.
+ */
+export function rsyncArgv(
+  localCache: string,
+  localId: string,
+  host: string,
+  boxDir: string,
+): string[] {
+  const { exclude, src, dest } = rsyncPieces(localCache, localId, boxDir);
+  return [
+    "-az",
+    "--info=progress2",
+    "--exclude",
+    exclude,
+    src,
+    `${host}:${dest}`,
+  ];
+}
+
+/** The restart, as an argv array beside `RESTART_COMMAND`'s printed `ssh … '…'` template — same reason as `rsyncArgv`. */
+export function sshRestartArgv(host: string): string[] {
+  return [host, RESTART_COMMAND];
 }
 
 // ─── The driver ──────────────────────────────────────────────────────────────
@@ -507,7 +552,7 @@ export interface BakeArgs {
 }
 
 export const USAGE = `usage: bun run scripts/bake-demo.ts --root <corpus top> --cache <scratch cache dir> --index-cache <the index's cache dir>
-         [--port 3199] [--client <scratch build dir>] [--ship <user@host> --ship-dir </srv/cache/<box id>> [--origin <https://url>]]`;
+         [--port 3199] [--client <scratch build dir>] [--ship <user@host> --ship-dir </srv/cache/<box id>>] [--origin <https://url>]`;
 
 const FLAGS = [
   "root",
@@ -814,6 +859,9 @@ async function loadRecipe(repo: string): Promise<ManifestRecipe> {
     size: THUMB_SIZE,
   };
 }
+
+/** `run`'s shape, injectable the way `FetchLike` is — `ship()`'s seam onto the rsync/restart (Fix 1). */
+export type RunLike = (cmd: string, args: string[], cwd: string) => void;
 
 function run(cmd: string, args: string[], cwd: string): void {
   log("$", cmd, ...args);
@@ -1510,6 +1558,47 @@ function hitCheckCommands(models: BakeModel[], origin: string): string[] {
 }
 
 /**
+ * `bake()`'s origin decision (Fix 3), pulled out as a pure function so a cell
+ * can pin it without running a bake: `--origin` when given, or `https://` +
+ * the host `--ship` names when that host is derivable; a caller that built
+ * `BakeArgs` by hand — skipping `parseArgs`' own refusal for a `--ship` this
+ * cannot resolve an origin for — is refused here too, ahead of the rsync
+ * `ship()` would otherwise run, rather than shipping bytes and restarting the
+ * box before finding out. No `--ship` yields `--origin` when given, else the
+ * `<origin>` print placeholder `shipInstructions` reads.
+ */
+export function resolveShipOrigin(args: BakeArgs): string {
+  if (args.ship === undefined) return args.origin ?? "<origin>";
+  const resolved = originFromShip(args.ship, args.origin);
+  if (resolved === null)
+    throw new Error(
+      `--ship ${args.ship} names no origin task 4.2 can hit-check — parseArgs should already have refused this`,
+    );
+  return resolved;
+}
+
+/**
+ * `bake()`'s box-directory decision (Fix 4), mirroring `resolveShipOrigin`:
+ * `--ship-dir` when given; a `--ship` with no `--ship-dir` refuses here
+ * rather than falling back to a placeholder that would otherwise reach a real
+ * rsync target (`root@box:/srv/cache/<box id>/`, accidentally harmless only
+ * because a shell reads `<box` as a redirection). `parseArgs` already refuses
+ * `--ship` without `--ship-dir`, so this is the same belt-and-braces this
+ * file already keeps for a hand-built `BakeArgs`. No `--ship` yields
+ * `--ship-dir` when given, else the placeholder `shipInstructions` prints —
+ * unused by `ship()` on that branch, since `shipInstructions` resolves its
+ * own placeholder from `args` directly.
+ */
+export function resolveShipBoxDir(args: BakeArgs): string {
+  if (args.ship === undefined) return args.shipDir ?? "/srv/cache/<box id>";
+  if (args.shipDir === undefined)
+    throw new Error(
+      `--ship ${args.ship} needs --ship-dir — parseArgs should already have refused this`,
+    );
+  return args.shipDir;
+}
+
+/**
  * The printed "how to ship" template (no `--ship`): the rsync, the restart,
  * task 4.2's hit-check commands and the example-query check, against
  * `origin` — `bake()` resolves that to `--origin`'s value when given, else
@@ -1581,30 +1670,37 @@ async function shipExampleQueries(
 
 /**
  * `ship()`'s post-restart sequence (task 4.2 and landing-page D9): wait for
- * the box to answer ready, hit-check its first three models, then confirm
- * every example query the introduction offers still answers. Exported —
- * with an injected `FetchLike`, the way `fetchPoses`/`waitForShipReady`
- * already take one — so a cell can drive it without a network: a box that
- * never answers ready rejects (`waitForShipReady`'s own error), a ready box
- * whose hit checks then disagree also rejects (`hitCheck`'s), and a ready,
- * hit-check-clean box with a dead or failed example query rejects too
- * (`shipExampleQueries`'s). None of the three may resolve — bytes have
- * already shipped and the box has already restarted by the time this runs,
- * so returning normally here would mean task 4.2 (or D9) silently never
- * happened.
+ * the box to answer ready, confirm the box that answered is the one this run
+ * shipped to, hit-check its first three models, then confirm every example
+ * query the introduction offers still answers. Exported — with an injected
+ * `FetchLike`, the way `fetchPoses`/`waitForShipReady` already take one — so
+ * a cell can drive it without a network: a box that never answers ready
+ * rejects (`waitForShipReady`'s own error), a ready box whose `/api/library`
+ * `id` disagrees with `shippedId` rejects naming both (Fix 2 — nothing else
+ * ties `--origin` to `--ship`, so an origin pointed at a *different* box
+ * would otherwise hit-check that box's store and exit 0 on it), a ready,
+ * right-box whose hit checks then disagree also rejects (`hitCheck`'s, every
+ * failure collected rather than only the first — a hand fixing a store wants
+ * the whole list), and a clean box with a dead or failed example query
+ * rejects too (`shipExampleQueries`'s). None of the four may resolve — bytes
+ * have already shipped and the box has already restarted by the time this
+ * runs, so returning normally here would mean task 4.2 (or D9) silently
+ * never happened.
  */
 export async function verifyShip(
   origin: string,
   models: BakeModel[],
   recipe: ManifestRecipe,
+  shippedId: string,
   fetchFn: FetchLike = fetch,
   deadlineMs: number = SHIP_READY_DEADLINE_MS,
   pollMs: number = POLL_MS,
+  probeTimeoutMs: number = SHIP_READY_PROBE_TIMEOUT_MS,
 ): Promise<void> {
   const three = models.slice(0, 3);
   log(`waiting for ${origin} to answer /api/library after the restart`);
   try {
-    await waitForShipReady(origin, fetchFn, deadlineMs, pollMs);
+    await waitForShipReady(origin, fetchFn, deadlineMs, pollMs, probeTimeoutMs);
   } catch (err) {
     // Printed for the operator, then rethrown: the store already shipped and
     // the box already restarted, but task 4.2 never ran, and a run that
@@ -1615,38 +1711,85 @@ export async function verifyShip(
     for (const c of hitCheckCommands(three, origin)) console.log(`  ${c}`);
     throw err;
   }
+  // Fix 2: `--origin` and `--ship`/`--ship-dir` are independent flags — an
+  // operator who ships to one box (`--ship-dir /srv/cache/newid`) but names
+  // another's public origin would otherwise hit-check *that* box's store and
+  // exit 0, the exact miscarriage the hardcoded default was deleted to
+  // prevent. `id` survives `hostDetails: false` (only `top` is withheld —
+  // `viewerState` in server/src/app.ts), so it is read straight off the same
+  // ready answer `waitForShipReady` just settled on.
+  const state = await getJson<LibraryState>(`${origin}/api/library`, fetchFn);
+  if (state.state !== "ready" || state.id !== shippedId) {
+    throw new Error(
+      `${origin}/api/library answers library id ${state.state === "ready" ? state.id : `(state ${state.state})`}, but this run shipped to id ${shippedId} — the hit check would verify the wrong box's store`,
+    );
+  }
+  const failures: string[] = [];
   for (const m of three)
-    for (const ao of [true, false])
-      log("hit check:", await hitCheck(m, ao, recipe, origin, fetchFn));
+    for (const ao of [true, false]) {
+      try {
+        log("hit check:", await hitCheck(m, ao, recipe, origin, fetchFn));
+      } catch (err) {
+        failures.push(err instanceof Error ? err.message : String(err));
+      }
+    }
+  if (failures.length > 0)
+    throw new Error(
+      `${failures.length} hit check(s) failed:\n  ${failures.join("\n  ")}`,
+    );
   await shipExampleQueries(origin, fetchFn);
 }
 
 /**
  * D1 step 11 / D5: the rsync, the restart and task 4.2's hit checks — run
- * behind `--ship`, printed (via `shipInstructions`) without it. `origin` is
- * resolved by the caller (`bake()`), once, before any of this runs — never
- * derived in here — so a caller that cannot derive one refuses before a
+ * behind `--ship`, printed (via `shipInstructions`) without it. `origin` and
+ * `boxDir` are resolved by the caller (`bake()`, via `resolveShipOrigin` and
+ * `resolveShipBoxDir`), once, before any of this runs — never derived or
+ * defaulted in here — so a caller that cannot resolve either refuses before a
  * single byte ships, not after the rsync and the restart that used to sit
  * ahead of the same check.
+ *
+ * Exported, with `runCmd`/`fetchFn` injected (Fix 1): the invariant this
+ * whole file serves — a run that ships bytes and restarts the box must never
+ * exit 0 without `verifyShip` having run against that box — has its
+ * production call site right here, and a cell can now pin that a stubbed
+ * `--ship` run rejects when `verifyShip` does, with the rsync and the restart
+ * already recorded by the stub beforehand.
  */
-async function ship(
+export async function ship(
   args: BakeArgs,
   libraryId: string,
   models: BakeModel[],
   recipe: ManifestRecipe,
   origin: string,
+  boxDir: string,
+  runCmd: RunLike = run,
+  fetchFn: FetchLike = fetch,
+  deadlineMs: number = SHIP_READY_DEADLINE_MS,
+  pollMs: number = POLL_MS,
+  probeTimeoutMs: number = SHIP_READY_PROBE_TIMEOUT_MS,
 ): Promise<void> {
   if (args.ship === undefined) {
     for (const line of shipInstructions(args, libraryId, models, origin))
       console.log(line);
     return;
   }
-  const boxDir = args.shipDir ?? "/srv/cache/<box id>";
-  const rsync = rsyncCommand(args.cache, libraryId, args.ship, boxDir);
-  const restart = `ssh ${args.ship} '${RESTART_COMMAND}'`;
-  run("sh", ["-c", rsync], process.cwd());
-  run("sh", ["-c", restart], process.cwd());
-  await verifyShip(origin, models, recipe);
+  runCmd(
+    "rsync",
+    rsyncArgv(args.cache, libraryId, args.ship, boxDir),
+    process.cwd(),
+  );
+  runCmd("ssh", sshRestartArgv(args.ship), process.cwd());
+  await verifyShip(
+    origin,
+    models,
+    recipe,
+    basename(boxDir),
+    fetchFn,
+    deadlineMs,
+    pollMs,
+    probeTimeoutMs,
+  );
 }
 
 /** The whole run, D1's eleven steps in order; the child server is stopped on every path out. */
@@ -1791,25 +1934,16 @@ export async function bake(args: BakeArgs): Promise<void> {
   run("sh", ["deploy/demo/check-bake.sh", file, args.indexCache], repo);
   log("check-bake.sh passed");
 
-  // 11. The ship, or its commands. `origin` is resolved here, once, before
-  // any shipping happens: `--origin` when given (or the `<origin>` print
-  // placeholder when neither flag was), else derived from `--ship`. `bake`
-  // is exported, so a caller that built `BakeArgs` by hand — skipping
-  // `parseArgs`' own refusal for a `--ship` this cannot resolve an origin
-  // for — is refused here too, ahead of the rsync a few lines down, rather
-  // than shipping bytes and restarting the box before finding out.
-  let origin: string;
-  if (args.ship === undefined) {
-    origin = args.origin ?? "<origin>";
-  } else {
-    const resolved = originFromShip(args.ship, args.origin);
-    if (resolved === null)
-      throw new Error(
-        `--ship ${args.ship} names no origin task 4.2 can hit-check — parseArgs should already have refused this`,
-      );
-    origin = resolved;
-  }
-  await ship(args, libraryId, models, recipe, origin);
+  // 11. The ship, or its commands. `origin` and `boxDir` are resolved here,
+  // once, before any shipping happens (`resolveShipOrigin`/
+  // `resolveShipBoxDir`) — `bake` is exported, so a caller that built
+  // `BakeArgs` by hand, skipping `parseArgs`' own refusals for a `--ship`
+  // this cannot resolve an origin or a box directory for, is refused here
+  // too, ahead of the rsync a few lines down, rather than shipping bytes and
+  // restarting the box before finding out.
+  const origin = resolveShipOrigin(args);
+  const boxDir = resolveShipBoxDir(args);
+  await ship(args, libraryId, models, recipe, origin, boxDir);
 }
 
 // Run only when invoked directly, so the core above can be imported by the

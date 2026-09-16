@@ -16,8 +16,10 @@ import {
   type LaunchBudget,
   type ManifestInput,
   type ManifestRecipe,
+  type RunLike,
   INITIAL_LAUNCH_BUDGET,
   POLL_MS,
+  RESTART_COMMAND,
   SHIP_READY_DEADLINE_MS,
   SHIP_READY_PROBE_TIMEOUT_MS,
   auditUnposed,
@@ -28,10 +30,15 @@ import {
   manifestPath,
   originFromShip,
   parseArgs,
+  resolveShipBoxDir,
+  resolveShipOrigin,
+  rsyncArgv,
   rsyncCommand,
+  ship,
   shipInstructions,
   shouldRefuse,
   sidecarKey,
+  sshRestartArgv,
   verifyBake,
   verifyShip,
   waitForShipReady,
@@ -406,6 +413,56 @@ describe("rsyncCommand", () => {
       ),
     ).toBe(expected);
     expect(expected).not.toContain("--delete");
+  });
+});
+
+describe("rsyncArgv / sshRestartArgv (Fix 5: the spawn form beside the printed strings)", () => {
+  it("carries the same --exclude 'snapshots/', both trailing slashes and no --delete as rsyncCommand — they share rsyncPieces", () => {
+    const argv = rsyncArgv(
+      "/home/me/.cache/model-browser-bake/cache",
+      "local-id",
+      "root@157.90.25.110",
+      "/srv/cache/box-id",
+    );
+    expect(argv).toEqual([
+      "-az",
+      "--info=progress2",
+      "--exclude",
+      "snapshots/",
+      "/home/me/.cache/model-browser-bake/cache/local-id/",
+      "root@157.90.25.110:/srv/cache/box-id/",
+    ]);
+    expect(argv).not.toContain("--delete");
+  });
+
+  it("keeps a local cache path with a space as one argv element — sh -c would split it into two rsync sources", () => {
+    const argv = rsyncArgv(
+      "/home/me/.cache/my cache",
+      "local-id",
+      "root@box",
+      "/srv/cache/box-id",
+    );
+    expect(argv).toContain("/home/me/.cache/my cache/local-id/");
+    // Exactly one source and one destination, whatever it contains — a
+    // sh -c interpolation of an unquoted space would instead hand rsync two
+    // separate source arguments.
+    expect(argv).toHaveLength(6);
+  });
+
+  it("keeps a --ship-dir carrying a shell metacharacter as inert data, never executed", () => {
+    // `sh -c` with this interpolated unquoted would run `rm -rf /` after the
+    // rsync; as one argv element it is just a (bogus, rsync-refused) path.
+    const argv = rsyncArgv(
+      "/home/me/.cache/model-browser-bake/cache",
+      "local-id",
+      "root@box",
+      "/srv/cache/box-id; rm -rf /",
+    );
+    expect(argv[argv.length - 1]).toBe("root@box:/srv/cache/box-id; rm -rf /");
+  });
+
+  it("sshRestartArgv pairs the host with RESTART_COMMAND as two argv elements, not a shell string", () => {
+    expect(sshRestartArgv("root@box")).toEqual(["root@box", RESTART_COMMAND]);
   });
 });
 
@@ -978,6 +1035,29 @@ describe("waitForShipReady", () => {
     ).resolves.toBeUndefined();
     expect(calls).toBe(1);
   });
+
+  it("pins probeTimeoutMs onto the per-attempt AbortSignal.timeout — Fix 6: a fetchFn that only settles once the signal aborts proves the injected value is armed, not the real 5s default", async () => {
+    // Deleting `probeTimeoutMs` from `AbortSignal.timeout(probeTimeoutMs)` in
+    // favour of the `SHIP_READY_PROBE_TIMEOUT_MS` constant leaves the cell
+    // above green (it never lets a real timeout fire) — this one only passes
+    // when the value actually reaches the signal: at the real 5s default the
+    // very first attempt would still be waiting long after the assertions
+    // below run.
+    let aborts = 0;
+    const fetchFn: FetchLike = (_input, init) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          aborts++;
+          reject(new Error("aborted"));
+        });
+      });
+    const start = Date.now();
+    await expect(
+      waitForShipReady("http://box", fetchFn, 100, 10, 20),
+    ).rejects.toThrow(/did not answer ready within 0\.1s/);
+    expect(Date.now() - start).toBeLessThan(500);
+    expect(aborts).toBeGreaterThan(1);
+  });
 });
 
 const BASE_ARGS: BakeArgs = {
@@ -986,6 +1066,84 @@ const BASE_ARGS: BakeArgs = {
   indexCache: "/index",
   port: 3199,
 };
+
+/**
+ * `bake()`'s origin decision (Fix 3), pulled out of `bake()` as
+ * `resolveShipOrigin` so it can be celled without running a bake.
+ *
+ * Falsifies the pre-Fix-3 regression: replacing the `resolved === null`
+ * refusal with `origin = resolved ?? "<origin>"` turns the first cell below
+ * from a refusal into a silent `"<origin>"` — a `--ship` whose task 4.2
+ * cannot run reaching `ship()` instead of being stopped in `bake()`.
+ */
+describe("resolveShipOrigin (bake()'s origin decision, pulled out to be celled)", () => {
+  it("refuses a --ship to a bare IP with no --origin", () => {
+    expect(() =>
+      resolveShipOrigin({ ...BASE_ARGS, ship: "root@157.90.25.110" }),
+    ).toThrow(/157\.90\.25\.110/);
+  });
+
+  it("resolves --origin when given, even for a bare-IP --ship", () => {
+    expect(
+      resolveShipOrigin({
+        ...BASE_ARGS,
+        ship: "root@157.90.25.110",
+        origin: "https://staging.example.com",
+      }),
+    ).toBe("https://staging.example.com");
+  });
+
+  it("derives https://<host> from a named --ship host", () => {
+    expect(
+      resolveShipOrigin({ ...BASE_ARGS, ship: "root@box.example.com" }),
+    ).toBe("https://box.example.com");
+  });
+
+  it("without --ship, yields --origin when given, else the <origin> placeholder", () => {
+    expect(resolveShipOrigin(BASE_ARGS)).toBe("<origin>");
+    expect(
+      resolveShipOrigin({
+        ...BASE_ARGS,
+        origin: "https://staging.example.com",
+      }),
+    ).toBe("https://staging.example.com");
+  });
+});
+
+/**
+ * `bake()`'s box-directory decision (Fix 4), mirroring `resolveShipOrigin`.
+ *
+ * Falsifies the pre-Fix-4 regression: replacing the `args.shipDir ===
+ * undefined` refusal with `boxDir = args.shipDir ?? "/srv/cache/<box id>"`
+ * turns the first cell below from a refusal into a silent placeholder —
+ * which sat on `ship()`'s *running* branch, so a hand-built `BakeArgs` with
+ * `ship` set and `shipDir` absent would have built a real rsync target of
+ * `root@host:/srv/cache/<box id>/`.
+ */
+describe("resolveShipBoxDir (bake()'s box-directory decision)", () => {
+  it("refuses a --ship with no --ship-dir — parseArgs should already have refused this", () => {
+    expect(() => resolveShipBoxDir({ ...BASE_ARGS, ship: "root@box" })).toThrow(
+      /--ship-dir/,
+    );
+  });
+
+  it("resolves --ship-dir verbatim when --ship is given", () => {
+    expect(
+      resolveShipBoxDir({
+        ...BASE_ARGS,
+        ship: "root@box",
+        shipDir: "/srv/cache/box-id",
+      }),
+    ).toBe("/srv/cache/box-id");
+  });
+
+  it("without --ship, answers --ship-dir when given, else the same placeholder shipInstructions prints (unused by ship() on that branch)", () => {
+    expect(resolveShipBoxDir(BASE_ARGS)).toBe("/srv/cache/<box id>");
+    expect(
+      resolveShipBoxDir({ ...BASE_ARGS, shipDir: "/srv/cache/box-id" }),
+    ).toBe("/srv/cache/box-id");
+  });
+});
 
 describe("shipInstructions (the no-`--ship` printed template)", () => {
   it("uses the resolved origin, not a hardcoded demo one — including the example-queries line landing-page D9 added", () => {
@@ -1011,12 +1169,15 @@ describe("shipInstructions (the no-`--ship` printed template)", () => {
   });
 });
 
+/** The id this run "shipped to" in every cell below — what `readyFetch`'s `/api/library` answers and what `verifyShip` is asked to confirm against. */
+const SHIPPED_ID = "local-id";
+
 /** A hit-check response `hitCheck` accepts cleanly: a hit at the recipe's rig, an ok image at THUMB_MIME with an immutable cache-control. */
 function readyFetch(): FetchLike {
   return async (url) => {
     const u = String(url);
     if (u.includes("/api/library"))
-      return new Response(JSON.stringify({ state: "ready" }), {
+      return new Response(JSON.stringify({ state: "ready", id: SHIPPED_ID }), {
         status: 200,
         headers: { "content-type": "application/json" },
       });
@@ -1037,11 +1198,29 @@ function readyFetch(): FetchLike {
   };
 }
 
+/** A `readyFetch` whose every example query answers non-empty — the whole chain past the hit checks passes. */
+function readyFetchWithLiveExamples(): FetchLike {
+  const ready = readyFetch();
+  return async (url, init) => {
+    const u = String(url);
+    if (u.includes("/api/semantic"))
+      return new Response(
+        JSON.stringify({ entries: [{ path: "/kit/a.stl" }] }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      );
+    return ready(u, init);
+  };
+}
+
 /**
  * `ship()`'s post-restart sequence, extracted as `verifyShip` so it can be
- * driven without a network or a shell (`ship()` itself is not exported: its
- * shipping branch runs a real `rsync`/`ssh`). All three paths a run that has
- * already shipped bytes and restarted the box must not survive as exit 0.
+ * driven without a network or a shell (`ship()`'s own shipping branch runs a
+ * real `rsync`/`ssh`, and is celled separately below with a stubbed
+ * `runCmd`). Every path a run that has already shipped bytes and restarted
+ * the box must not survive as exit 0.
  *
  * Falsifies the regression `339e3aa` fixed and this round's own structural
  * fix depends on: reverting `throw err;` to `return;` in the catch block
@@ -1056,14 +1235,48 @@ describe("verifyShip (ship()'s post-restart sequence, task 4.2 and landing-page 
         headers: { "content-type": "application/json" },
       });
     await expect(
-      verifyShip("http://box", MODELS, RECIPE, fetchFn, 50, 10),
+      verifyShip("http://box", MODELS, RECIPE, SHIPPED_ID, fetchFn, 50, 10, 10),
     ).rejects.toThrow(/did not answer ready within 0\.05s/);
+  });
+
+  it("rejects naming both ids when the box's ready id does not match what this run shipped to — Fix 2: nothing else ties --origin to --ship, so a mismatched origin must not hit-check a different box's store", async () => {
+    await expect(
+      verifyShip(
+        "http://box",
+        MODELS,
+        RECIPE,
+        "other-id",
+        readyFetch(),
+        50,
+        10,
+        10,
+      ),
+    ).rejects.toThrow(
+      new RegExp(
+        `${SHIPPED_ID}[\\s\\S]*other-id|other-id[\\s\\S]*${SHIPPED_ID}`,
+      ),
+    );
+  });
+
+  it("proceeds past the readiness/id gate when the box's ready id matches what this run shipped to", async () => {
+    await expect(
+      verifyShip(
+        "http://box",
+        MODELS,
+        RECIPE,
+        SHIPPED_ID,
+        readyFetchWithLiveExamples(),
+        50,
+        10,
+        10,
+      ),
+    ).resolves.toBeUndefined();
   });
 
   it("rejects when the box answers ready but a hit check then fails — a shipped store must not exit 0 with a bad render live", async () => {
     const fetchFn: FetchLike = async (url) => {
       const body = String(url).includes("/api/library")
-        ? { state: "ready" }
+        ? { state: "ready", id: SHIPPED_ID }
         : { status: "miss" };
       return new Response(JSON.stringify(body), {
         status: 200,
@@ -1071,11 +1284,64 @@ describe("verifyShip (ship()'s post-restart sequence, task 4.2 and landing-page 
       });
     };
     await expect(
-      verifyShip("http://box", MODELS, RECIPE, fetchFn, 50, 10),
+      verifyShip("http://box", MODELS, RECIPE, SHIPPED_ID, fetchFn, 50, 10, 10),
     ).rejects.toThrow(/hit check failed/);
   });
 
-  it("rejects when the box is ready and every hit check passes, but an example query comes back dead — a shipped store must not exit 0 with a dead chip on the landing page", async () => {
+  it("collects every failing hit check rather than throwing on the first — Fix 7: a hand fixing a store wants the whole list", async () => {
+    const aStl = encodeURIComponent("/kit/a.stl");
+    const bStl = encodeURIComponent("/kit/b.stl");
+    const fetchFn: FetchLike = async (url) => {
+      const u = String(url);
+      if (u.includes("/api/library"))
+        return new Response(
+          JSON.stringify({ state: "ready", id: SHIPPED_ID }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      if (u.includes("/api/thumb/image"))
+        return new Response("webp bytes", {
+          status: 200,
+          headers: {
+            "content-type": "image/webp",
+            "cache-control": "public, max-age=31536000, immutable",
+          },
+        });
+      if (u.includes("/api/thumb?")) {
+        // a's ao=on check fails; b's ao=off (noao) check fails; every other
+        // model/variant hits — exactly two failures, on two different models.
+        const bad =
+          (u.includes(aStl) && !u.includes("ao=off")) ||
+          (u.includes(bStl) && u.includes("ao=off"));
+        return new Response(
+          JSON.stringify({ status: bad ? "miss" : "hit", rig: RECIPE.rig }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      throw new Error(`unexpected request ${u}`);
+    };
+    let caught: unknown;
+    try {
+      await verifyShip(
+        "http://box",
+        MODELS,
+        RECIPE,
+        SHIPPED_ID,
+        fetchFn,
+        50,
+        10,
+        10,
+      );
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    const message = (caught as Error).message;
+    expect(message).toMatch(/^2 hit check\(s\) failed:/);
+    expect(message).toContain("/kit/a.stl ao");
+    expect(message).toContain("/kit/b.stl noao");
+  });
+
+  it("rejects when the box is ready, the id matches and every hit check passes, but an example query comes back dead — a shipped store must not exit 0 with a dead chip on the landing page", async () => {
     const ready = readyFetch();
     const fetchFn: FetchLike = async (url, init) => {
       const u = String(url);
@@ -1088,8 +1354,120 @@ describe("verifyShip (ship()'s post-restart sequence, task 4.2 and landing-page 
       return ready(u, init);
     };
     await expect(
-      verifyShip("http://box", MODELS, RECIPE, fetchFn, 50, 10),
+      verifyShip("http://box", MODELS, RECIPE, SHIPPED_ID, fetchFn, 50, 10, 10),
     ).rejects.toThrow(/example queries did not all answer/);
+  });
+
+  it("threads probeTimeoutMs to the readiness poll rather than arming the real 5s default per attempt", async () => {
+    let aborts = 0;
+    const fetchFn: FetchLike = (_input, init) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          aborts++;
+          reject(new Error("aborted"));
+        });
+      });
+    const start = Date.now();
+    await expect(
+      verifyShip(
+        "http://box",
+        MODELS,
+        RECIPE,
+        SHIPPED_ID,
+        fetchFn,
+        100,
+        10,
+        20,
+      ),
+    ).rejects.toThrow(/did not answer ready within 0\.1s/);
+    // At a 20ms per-attempt probe timeout, several attempts fit inside the
+    // 100ms deadline; at the real 5s default (the constant this parameter
+    // replaces on the production path), the very first attempt alone would
+    // still be waiting long after this assertion runs.
+    expect(Date.now() - start).toBeLessThan(500);
+    expect(aborts).toBeGreaterThan(1);
+  });
+});
+
+/**
+ * `ship()`'s own shipping branch (Fix 1): the invariant this whole file
+ * serves — a run that ships bytes and restarts the box must never exit 0
+ * without `verifyShip` having run against it — has its production call site
+ * here, and this is the seam that lets a cell pin it without a network or a
+ * shell. A never-ready `fetchFn` makes `verifyShip` reject the way a real box
+ * that never comes back up after the restart would, proving `ship()` awaits
+ * it rather than firing-and-forgetting.
+ *
+ * Falsifies the round-five regression Fix 1 targets: deleting `await
+ * verifyShip(...)` from `ship()`'s body turns this cell's rejection into a
+ * silent resolution while every other cell in the suite (60/60 before this
+ * round) stays green.
+ */
+describe("ship (the injectable seam onto rsync/ssh/verifyShip — Fix 1)", () => {
+  function stubRun(): {
+    calls: { cmd: string; args: string[] }[];
+    runCmd: RunLike;
+  } {
+    const calls: { cmd: string; args: string[] }[] = [];
+    const runCmd: RunLike = (cmd, args) => {
+      calls.push({ cmd, args });
+    };
+    return { calls, runCmd };
+  }
+
+  it("rejects when verifyShip's readiness wait never settles — the stub already recorded the rsync and the restart", async () => {
+    const { calls, runCmd } = stubRun();
+    const neverReady: FetchLike = async () =>
+      new Response(JSON.stringify({ state: "missing" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    await expect(
+      ship(
+        { ...BASE_ARGS, ship: "root@box", shipDir: "/srv/cache/box-id" },
+        "local-id",
+        MODELS,
+        RECIPE,
+        "https://box.example.com",
+        "/srv/cache/box-id",
+        runCmd,
+        neverReady,
+        50,
+        10,
+        10,
+      ),
+    ).rejects.toThrow(/did not answer ready within 0\.05s/);
+    expect(calls).toEqual([
+      {
+        cmd: "rsync",
+        args: rsyncArgv(
+          BASE_ARGS.cache,
+          "local-id",
+          "root@box",
+          "/srv/cache/box-id",
+        ),
+      },
+      { cmd: "ssh", args: sshRestartArgv("root@box") },
+    ]);
+  });
+
+  it("prints the no-ship template and never calls runCmd when --ship is absent", async () => {
+    const { calls, runCmd } = stubRun();
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await ship(
+        BASE_ARGS,
+        "local-id",
+        MODELS,
+        RECIPE,
+        "<origin>",
+        "/srv/cache/<box id>",
+        runCmd,
+      );
+    } finally {
+      log.mockRestore();
+    }
+    expect(calls).toEqual([]);
   });
 });
 
