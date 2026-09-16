@@ -61,6 +61,14 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   `VITE_HOST=127.0.0.1` is why it works at all — Vite's default bind is IPv6-only and
   serve proxies to 127.0.0.1. 3177 is served on the tailnet the same way, but it runs
   `client/dist`, so a client edit needs a rebuild there where 5173 has HMR
+- `bun run dev:remote-demo` - the same, under the demo posture (`--demo`). The shipped
+  `deploy/demo/config.json` names the *public* origin and is what the box deploys, so the
+  tailnet name has no business in it: the script writes a copy with this machine's origin
+  appended to `$XDG_RUNTIME_DIR/model-browser-dev-remote-demo.json` (rewritten per run) and
+  points `MODEL_BROWSER_CONFIG` there, leaving the tracked file alone. `root` is overridden
+  like `dev:demo` does it, same default. The posture is the reason to prefer this one
+  remotely: every capability off, so no `/api/open` and no thumbnail writes from another
+  machine
 - Semantic search needs a second server, not started by `bun run dev` (its collection root
   must lie inside the library, or the index covers nothing):
   `cd <mini-classify checkout> && .venv/bin/python serve_api.py [<collection root>] --cache-dir <cache> [--no-volume] --port 8077`
