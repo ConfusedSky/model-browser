@@ -128,10 +128,26 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
     <main className="min-h-screen bg-zinc-950 text-zinc-200">
       <div className="mx-auto max-w-3xl p-6">
         {/* The way back, first and unmissable: a plain anchor to the library's
-          top, because the app has one route and `/` is it. */}
-        <a href="/" className="text-sm text-sky-400 hover:underline">
-          ← Back to the models
-        </a>
+          top, because the app has one route and `/` is it.
+
+          The source sits beside it, opposite, from 2026-09-16 (Masa): the
+          banner used to carry About, Credits and Source and no longer carries
+          any of them — About is in the header, and the other two belong to this
+          page, which is where a reader who wants either has arrived. Buried in
+          the Links section at the foot, the repository was the one thing on
+          this page a visitor might have come for and could not see; the Links
+          bullet for it is gone, and the issue tracker and the contact stay
+          there because they are follow-ups to it rather than the thing itself.
+          Baseline-aligned rather than centred so the two read as one line. */}
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+          <a href="/" className="text-sm text-sky-400 hover:underline">
+            ← Back to the models
+          </a>
+          <span className="text-sm text-zinc-400">
+            Source:{" "}
+            <Out href={SOURCE_URL}>github.com/ConfusedSky/model-browser</Out>
+          </span>
+        </div>
         <h1 className="mt-4 text-2xl font-semibold text-zinc-100">
           About this demo
         </h1>
@@ -330,13 +346,10 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
 
         {/* source: `gh repo view ConfusedSky/model-browser` (PUBLIC) and
           `gh repo view ConfusedSky/model-browser-corpus` (PRIVATE, so it gets
-          no link — see the provenance section above). */}
+          no link — see the provenance section above). The repository's own line
+          moved to the head of the page on 2026-09-16 and is not repeated here. */}
         <Section id="links" title="Links">
           <ul className="list-disc space-y-1 pl-5">
-            <li>
-              Source:{" "}
-              <Out href={SOURCE_URL}>github.com/ConfusedSky/model-browser</Out>
-            </li>
             <li>
               Report a problem:{" "}
               <Out href={`${SOURCE_URL}/issues`}>the issue tracker</Out>

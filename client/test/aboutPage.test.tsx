@@ -141,11 +141,45 @@ describe("the page as a document", () => {
     );
   });
 
-  it("leads with a way back to the models", async () => {
+  it("leads with a way back to the models, and the source beside it", async () => {
     await mount(fakeApi(() => Promise.resolve([])));
     const back = host.querySelector("a");
     expect(back?.getAttribute("href")).toBe("/");
     expect(back?.textContent).toContain("Back to the models");
+    // The repository moved here from the Links section at the foot on
+    // 2026-09-16 (Masa), when the banner stopped carrying it: this page is
+    // where a reader who wants the code has arrived, and it was the one thing
+    // on it they might have come for and could not see. Asserted as the second
+    // anchor, so burying it again is a red cell rather than a silent move.
+    const anchors = Array.from(host.querySelectorAll("a"));
+    const source = anchors[1];
+    expect(source?.getAttribute("href")).toBe(
+      "https://github.com/ConfusedSky/model-browser",
+    );
+    // Before every section, which is what "at the top" has to mean for a
+    // document whose sections are all headed.
+    const firstSection = host.querySelector("section");
+    expect(firstSection).not.toBeNull();
+    expect(
+      source!.compareDocumentPosition(firstSection!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // And the Links section no longer lists it: the head carries it, the
+    // bullet is gone, and the issue tracker and the contact stay because they
+    // are follow-ups to the repository rather than the repository. The
+    // desktop-build paragraph's own "source" is left alone — that one is a
+    // sentence's link, not a second listing of the address.
+    const links = host.querySelector("#links");
+    expect(
+      links?.querySelector(
+        'a[href="https://github.com/ConfusedSky/model-browser"]',
+      ),
+    ).toBeNull();
+    expect(
+      links?.querySelector(
+        'a[href="https://github.com/ConfusedSky/model-browser/issues"]',
+      ),
+    ).not.toBeNull();
   });
 
   it("says the tiles are served as pictures, not drawn on arrival", async () => {

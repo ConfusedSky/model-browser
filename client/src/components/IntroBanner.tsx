@@ -1,7 +1,13 @@
 /**
  * The slim strip a public deployment draws over the grid at the library's top
  * (`landing-page` D3): one sentence saying what this is, the example queries as
- * clickable chips, the surprise action, three links and a dismiss affordance.
+ * clickable chips, the surprise action and a dismiss affordance.
+ *
+ * It carried About, Credits and Source until 2026-09-16, and carries none of
+ * them now (Masa). About is in the header, where it outlives the dismissal;
+ * Credits and Source are the About page's own, and a strip whose job is to say
+ * what this is and offer a first query was spending three of its items sending
+ * the reader away from the grid it introduces.
  *
  * It is mounted between `<header>` and the row that holds `<main>` and the side
  * panel, so it spans both and — the part that matters — sits *outside* the
@@ -13,7 +19,6 @@
  * Whether it is drawn at all, whether the chips are offered, and what a click
  * does are all `App`'s decisions — this draws them.
  */
-import { ABOUT_URL, CREDITS_URL, SOURCE_URL } from "../lib/intro";
 
 /** Every class string is a whole literal, never glued to a `${` — Tailwind's
  *  scanner reads source text, so a computed candidate never reaches the
@@ -21,7 +26,6 @@ import { ABOUT_URL, CREDITS_URL, SOURCE_URL } from "../lib/intro";
  *  2026-09-03). */
 const CHIP_CLASS =
   "rounded-full border border-zinc-700 px-3 py-1 text-zinc-300 hover:border-zinc-500";
-const LINK_CLASS = "text-sky-400 hover:underline";
 
 /**
  * What the sentence may promise. With the index unable to answer here the chips
@@ -72,20 +76,6 @@ export default function IntroBanner({
           </button>
         </div>
       )}
-      <a href={ABOUT_URL} className={LINK_CLASS}>
-        About
-      </a>
-      <a href={CREDITS_URL} className={LINK_CLASS}>
-        Credits
-      </a>
-      <a
-        href={SOURCE_URL}
-        target="_blank"
-        rel="noreferrer"
-        className={LINK_CLASS}
-      >
-        Source
-      </a>
       <button
         type="button"
         onClick={onDismiss}

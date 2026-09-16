@@ -1,7 +1,7 @@
 /**
  * The visitor introduction's small state and its fixed addresses
  * (`landing-page` D3/D7): whether this browser has dismissed the banner, where
- * the three links go, and how the surprise action picks a query.
+ * the About link goes, and how the surprise action picks a query.
  *
  * Nothing here reads storage at module init, unlike `lib/searchOptions.ts`:
  * `App` reads the flag with `useState(() => introDismissedStore.read())` — the
@@ -32,10 +32,10 @@ export const introDismissedStore = stored<boolean>(
  * static handler serves it.
  */
 export const ABOUT_URL = "/about.html";
-/** The About page's credits section, which the banner's third link leads to. */
-export const CREDITS_URL = "/about.html#credits";
-/** Where the code is. Off-site, so its anchor opens in a new tab. */
-export const SOURCE_URL = "https://github.com/ConfusedSky/model-browser";
+// `CREDITS_URL` and `SOURCE_URL` lived here for the banner's other two links
+// and went with them on 2026-09-16. The About page holds its own `SOURCE_URL`
+// and its credits are a section of it, so neither needs an address a second
+// module can drift from.
 
 /**
  * One of the example queries, uniformly. `random` is a parameter so a test can

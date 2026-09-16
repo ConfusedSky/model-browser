@@ -10,13 +10,8 @@
 // view in ONE transition, which is the whole reason the action exists.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { IndexAvailability } from "../../shared/types";
-import {
-  ABOUT_URL,
-  CREDITS_URL,
-  introDismissedStore,
-  pickExample,
-  SOURCE_URL,
-} from "../src/lib/intro";
+import * as intro from "../src/lib/intro";
+import { ABOUT_URL, introDismissedStore, pickExample } from "../src/lib/intro";
 import { hasStoredSearchMode, TUNING_DEFAULTS } from "../src/lib/searchOptions";
 import { initialState, reducer, type SearchState } from "../src/state/reducer";
 import { pendingRequest } from "../src/state/selectors";
@@ -178,9 +173,19 @@ describe("the chip's transition", () => {
 describe("the links", () => {
   it("names the About document by the file the static handler serves", () => {
     // D2: a second Vite entry, not a route — so the extension is part of the
-    // address and the credits link is that document's own anchor.
+    // address, and the server's own withholding gate compares the same name.
     expect(ABOUT_URL).toBe("/about.html");
-    expect(CREDITS_URL).toBe("/about.html#credits");
-    expect(SOURCE_URL.startsWith("https://")).toBe(true);
+  });
+
+  it("is the header's one address — the banner's other two are gone", () => {
+    // `CREDITS_URL` and `SOURCE_URL` were the banner's second and third links
+    // and were retired with them on 2026-09-16. The credits are a section of
+    // the About page and the source sits at its head, so neither address has a
+    // second definition here to drift from the page's own.
+    expect(Object.keys(intro).sort()).toEqual([
+      "ABOUT_URL",
+      "introDismissedStore",
+      "pickExample",
+    ]);
   });
 });

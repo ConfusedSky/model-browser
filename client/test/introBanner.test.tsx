@@ -107,7 +107,7 @@ beforeEach(() => {
 afterEach(() => unmountApp());
 
 describe("the banner at the library top", () => {
-  it("is drawn with its sentence, its chips, the surprise action and three links", async () => {
+  it("is drawn with its sentence, its chips, the surprise action and no links", async () => {
     features.mockResolvedValue(INTRO);
     indexAvailability.mockResolvedValue(READY);
     await mountAppAtCurrentUrl("/", TOP);
@@ -122,12 +122,15 @@ describe("the banner at the library top", () => {
       ...EXAMPLE_QUERIES,
     ]);
     expect(buttonNamed("Surprise me")).toBeDefined();
-    expect(linkTo("/about.html")).not.toBeNull();
-    expect(linkTo("/about.html#credits")).not.toBeNull();
-    expect(
-      linkTo("https://github.com/ConfusedSky/model-browser"),
-    ).not.toBeNull();
     expect(dismissButton()).not.toBeNull();
+    // About, Credits and Source were the banner's last three items until
+    // 2026-09-16 and are gone (Masa): About is the header's, and the other two
+    // are the About page's own. Asserted as "no anchor anywhere in the strip"
+    // rather than as three absent addresses, so a fourth link cannot be added
+    // here without a cell saying so — `linkTo` searches the whole tree, where
+    // the header's own About is a legitimate match.
+    expect(b!.querySelectorAll("a")).toHaveLength(0);
+    expect(headerAbout()).not.toBeNull();
   });
 
   it("is absent on the report a server with no configuration answers", async () => {
