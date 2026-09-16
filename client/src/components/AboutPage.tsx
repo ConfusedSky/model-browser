@@ -1,20 +1,14 @@
 /**
  * The About page — everything the banner has no room for (`landing-page` D2).
- *
  * A document, not a view: one `<main>` column of sections with fixed `id`s, so
- * `/about.html#credits` lands where a link to it points. `CreditsList` is the
- * only dynamic part.
+ * `/about.html#credits` lands where a link to it points.
  *
- * **Imports nothing from `viewer/`, `three/` or `App`** — `ViewerLayer`
- * value-imports the renderer, and one import from it would drag three.js into
- * a bundle whose job is to draw a list of names (D8).
+ * **Imports nothing from `viewer/`, `three/` or `App`** — one import would drag
+ * three.js into a bundle whose job is to draw a list of names (D8).
  *
- * Each section's comment names the source its claims rest on (D10). No
- * accuracy figure, and no location on the machine the server runs on
- * (`feature-report`). Nine sentences here have been wrong despite a correct
- * citation, every one of them true of something *near* its subject — so check
- * a claim against the code, the corpus or a live route, not against the
- * citation beside it.
+ * Each section's comment names where its claims can be checked (D10). Claims
+ * here have been wrong while their citation was right, so check the subject,
+ * not the citation. No accuracy figure, and no location on the host.
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { CreditedKit } from "../../../shared/types";
@@ -63,9 +57,8 @@ function Out({
   );
 }
 
-/** Bring the URL's fragment into view, answering the scroll position that
- *  left the reader at — `null` where there was no fragment or no such
- *  section, which the caller reads as "no scroll happened". */
+/** Bring the URL's fragment into view, answering the scroll position it left
+ *  the reader at — `null` where nothing was scrolled. */
 function scrollToFragment(): number | null {
   const id = window.location.hash.slice(1);
   if (id === "") return null;
@@ -84,7 +77,7 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
   const [creditsSettled, setCreditsSettled] = useState(false);
   // Where the first scroll left the reader, `null` while none has happened.
   // Both gate the second: a reader who has since scrolled away must not be
-  // yanked back, and one who clicked an in-page link needed no help.
+  // yanked back.
   const landedAt = useRef<number | null>(null);
   useEffect(() => {
     landedAt.current = scrollToFragment();
@@ -115,11 +108,9 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
           About this demo
         </h1>
 
-        {/* source: landing-page's proposal.md; deploy/demo/config.json.
-          A tile here is a baked picture (`corpus-bake`), not a render: only the
-          lightbox fetches a model. 6,514 bytes against 2,500,084 for
-          `/Ghoul_3466743/Ghoul.stl`, which is why the copy says kilobytes and
-          megabytes and quotes neither. */}
+        {/* source: landing-page's proposal.md; deploy/demo/config.json. A tile
+          here is a baked picture (`corpus-bake`), not a render — only the
+          lightbox fetches a model. */}
         <Section id="what" title="What this is">
           <p className="mb-2">
             A public demo of Model Browser, a viewer for a library of 3D-print
@@ -193,14 +184,10 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
           </ul>
         </Section>
 
-        {/* source: mini-classify's `src/pose.py` and `src/query.py`. **Read
-          those, not its write-ups** — the write-ups describe the two votes as
-          averaged and the arbiter as gated on geometry, and `combine_up` and
-          `needs_arbiter_margin` are neither. No figure from them is published,
-          and the view count and the arbiter's on/off state are unstated because
-          the deployed index's parameters cannot be read from here. Pooling is
-          selectable: `pool_sims` for `max` is one view, so the copy names the
-          default and the exception. */}
+        {/* source: mini-classify's `src/pose.py` and `src/query.py` — **read
+          those, not its write-ups**, which are stale on how the two votes
+          combine and on what opens the arbiter. Pooling is selectable, so the
+          copy names the default and the exception. */}
         <Section id="technical" title="Under the hood">
           <p className="mb-2">
             The server is Bun and Hono; the client is React and three.js, with
@@ -245,14 +232,10 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
           </p>
         </Section>
 
-        {/* source: each example run against the deployment's own index, with the
-          body a visitor sends
-          (`{"raw":false,"pool":"softmax","top":60,"minScore":0.1}`). The copy
-          names what each run returned, so it is its own record — re-run the
-          four before trusting it, and drop an example that stops reproducing
-          rather than rewording it. Two traps: **two** kits name a vampire, and
-          README.md's staff/broomstick examples are mini-classify's own and do
-          not reproduce here. */}
+        {/* source: each example run against the deployment's own index — the copy
+          names what each returned, so re-run the four rather than trusting it.
+          Two traps: **two** kits name a vampire, and README.md's
+          staff/broomstick examples do not reproduce on this index. */}
         <Section id="limitations" title="What the search does badly">
           <p className="mb-2">
             Meaning search returns the nearest things to what you described, and
@@ -380,10 +363,9 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
         </Section>
 
         {/* source: the corpus repository's convert.py and NOTES.md (private, so
-          named and not linked); deploy/demo/config.json's `decimated/` root.
-          Tile names are two rules: `/api/dir` gives a kit a `displayName` and
-          gives the models inside it none, so `Grid` falls back to the file
-          name. No download action exists (D10). */}
+          named and not linked). Tile names are two rules: `/api/dir` gives a
+          kit a `displayName` and gives the models inside it none. No download
+          action exists (D10). */}
         <Section id="corpus" title="How the corpus was altered">
           <p className="mb-2">
             What is served here is not the designers&rsquo; files verbatim, and
@@ -429,10 +411,8 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
 
         {/* source: the `model-browser:` keys read through lib/stored.ts, and
           api/localFramings.ts. The search options are the exception because
-          they are not local: `semanticSearch` posts the tuning and
-          lib/urlState.ts writes it into the address bar. The other three claim
-          only that the *server* keeps none of them — the ambient-occlusion
-          setting still rides a thumbnail request as `&ao=off`. */}
+          they are not local: the tuning is posted with the query and written
+          into the address bar. */}
         <Section id="privacy" title="Privacy">
           <p className="mb-2">
             There are no accounts and nothing to sign in to, and no analytics
@@ -533,12 +513,10 @@ function lastSegment(path: string): string {
 }
 
 /**
- * A stored URL fit to be an `href`, or `undefined` where it is not.
- *
- * Not a boundary — this is operator data — but React renders a `javascript:`
- * URL as a live link and only warns, so one bad row would be a script every
- * reader could click. *Parsed* rather than prefix-matched: the parser strips
- * leading whitespace and control characters before deciding the scheme.
+ * A stored URL fit to be an `href`, or `undefined` where it is not. Not a
+ * boundary — this is operator data — but React renders a `javascript:` URL as a
+ * live link and only warns. *Parsed* rather than prefix-matched: the parser
+ * strips leading whitespace and control characters before deciding the scheme.
  */
 function safeHref(url: string | undefined): string | undefined {
   if (url === undefined) return undefined;

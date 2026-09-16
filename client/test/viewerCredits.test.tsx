@@ -331,17 +331,9 @@ describe("a stored URL reads as its host", () => {
 
 describe("how a credit link may break", () => {
   it("wraps at its spaces, never inside a word", () => {
-    // `break-all` here drew the About page's "Creative Commons licence" as
-    // "…licen / ce" (Masa, 2026-09-15, measured in Chromium at 1280 px: the
-    // seam fell between `licen` and `ce`). The rule came from the lightbox's
-    // 18rem column, where `break-words` was measured to contain a 60-character
-    // unbroken name just as well — 280 px over two lines inside 288, the same
-    // as `break-all` gave.
-    //
-    // A string assertion, and only a string assertion: happy-dom applies no
-    // Tailwind CSS, so the class here has no computed style to read, and a
-    // cell that appeared to check the layout would be checking nothing. What
-    // this catches is the constant being changed back.
+    // `break-all` splits ordinary words mid-word, which the About page shows.
+    // A string assertion only: happy-dom applies no Tailwind CSS, so there is
+    // no computed style here to read.
     expect(CREDIT_LINK_CLASS).toContain("break-words");
     expect(CREDIT_LINK_CLASS).not.toContain("break-all");
   });

@@ -177,11 +177,9 @@ describe("the links", () => {
     expect(ABOUT_URL).toBe("/about.html");
   });
 
-  it("is the header's one address — the banner's other two are gone", () => {
-    // `CREDITS_URL` and `SOURCE_URL` were the banner's second and third links
-    // and were retired with them on 2026-09-15. The credits are a section of
-    // the About page and the source sits at its head, so neither address has a
-    // second definition here to drift from the page's own.
+  it("holds the About address and no other", () => {
+    // The credits are a section of the About page and the source sits at its
+    // head, so neither needs a second definition here to drift from it.
     expect(Object.keys(intro).sort()).toEqual([
       "ABOUT_URL",
       "introDismissedStore",

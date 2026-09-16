@@ -152,11 +152,8 @@ describe("the page as a document", () => {
     const back = host.querySelector("a");
     expect(back?.getAttribute("href")).toBe("/");
     expect(back?.textContent).toContain("Back to the models");
-    // The repository moved here from the Links section at the foot on
-    // 2026-09-15 (Masa), when the banner stopped carrying it: this page is
-    // where a reader who wants the code has arrived, and it was the one thing
-    // on it they might have come for and could not see. Asserted as the second
-    // anchor, so burying it again is a red cell rather than a silent move.
+    // The repository belongs at the head: the banner no longer carries it, and
+    // this page is where a reader who wants the code has arrived.
     const anchors = Array.from(host.querySelectorAll("a"));
     const source = anchors[1];
     expect(source?.getAttribute("href")).toBe(
@@ -170,11 +167,8 @@ describe("the page as a document", () => {
       source!.compareDocumentPosition(firstSection!) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
-    // And the Links section no longer lists it: the head carries it, the
-    // bullet is gone, and the issue tracker and the contact stay because they
-    // are follow-ups to the repository rather than the repository. The
-    // desktop-build paragraph's own "source" is left alone — that one is a
-    // sentence's link, not a second listing of the address.
+    // Listed once. The Links section keeps the issue tracker and the contact,
+    // which are follow-ups to the repository rather than the repository.
     const links = host.querySelector("#links");
     expect(
       links?.querySelector(
@@ -189,31 +183,24 @@ describe("the page as a document", () => {
   });
 
   it("says the tiles are served as pictures, not drawn on arrival", async () => {
-    // The page claimed the opposite until 2026-09-15 — "draws every model in
-    // the browser rather than shipping pictures of them" — while its own
-    // Differences list said thumbnails were rendered ahead of time. On this
-    // deployment `corpus-bake` pre-renders every model and `useThumbnails`
-    // hands an annotated hit `api.thumbImageUrl(...)`, so a tile costs a WebP
-    // and no geometry; the mesh is fetched only when a model is opened.
+    // A tile here is a baked picture and only an opened model is fetched, and
+    // the page has claimed the opposite twice.
     await mount(fakeApi(() => Promise.resolve([])));
     const what = (host.querySelector("#what")?.textContent ?? "").replace(
       /\s+/g,
       " ",
     );
-    // Both halves, because either alone is the misreading: the grid is
-    // pictures, and opening one is what sends the model.
+    // Both halves: either alone is the misreading.
     expect(what).toContain("The tiles are pictures.");
     expect(what).toMatch(/Open one and the mesh is sent to your browser/);
-    // The retracted claim, in the shape it was written — a reinstatement is
-    // what this cell exists to catch.
+    // The retracted claim, in the shape it was written.
     expect(what).not.toMatch(/draws every model in the browser/i);
   });
 
   it("defines \u201cpose\u201d where it first uses it", async () => {
     // The page's one piece of jargon, and the interface never says it, so a
-    // reader has nowhere else to pick it up (Masa, 2026-09-15). Whitespace
-    // collapsed before matching: JSX wraps a sentence across source lines, so
-    // the rendered text carries the indentation.
+    // reader has nowhere else to pick it up. Whitespace collapsed because JSX
+    // wraps a sentence across source lines.
     await mount(fakeApi(() => Promise.resolve([])));
     const text = (host.textContent ?? "").replace(/\s+/g, " ");
     const defined = text.indexOf("That pair is its pose");

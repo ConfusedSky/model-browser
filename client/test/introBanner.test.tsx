@@ -107,7 +107,7 @@ beforeEach(() => {
 afterEach(() => unmountApp());
 
 describe("the banner at the library top", () => {
-  it("is drawn with its sentence, its chips, the surprise action and no links", async () => {
+  it("is drawn with its sentence, its chips and nothing else", async () => {
     features.mockResolvedValue(INTRO);
     indexAvailability.mockResolvedValue(READY);
     await mountAppAtCurrentUrl("/", TOP);
@@ -121,16 +121,16 @@ describe("the banner at the library top", () => {
     expect(chips().map((c) => c.dataset.exampleQuery)).toEqual([
       ...EXAMPLE_QUERIES,
     ]);
-    expect(buttonNamed("Surprise me")).toBeDefined();
     expect(dismissButton()).not.toBeNull();
-    // About, Credits and Source were the banner's last three items until
-    // 2026-09-15 and are gone (Masa): About is the header's, and the other two
-    // are the About page's own. Asserted as "no anchor anywhere in the strip"
-    // rather than as three absent addresses, so a fourth link cannot be added
-    // here without a cell saying so — `linkTo` searches the whole tree, where
-    // the header's own About is a legitimate match.
+    // No links and no surprise action in the strip itself — both are the
+    // header's, which is where they outlive the dismissal. Asserted against the
+    // strip, since the query helpers search the whole tree.
     expect(b!.querySelectorAll("a")).toHaveLength(0);
+    expect(
+      [...b!.querySelectorAll("button")].map((x) => x.textContent),
+    ).not.toContain("Surprise me");
     expect(headerAbout()).not.toBeNull();
+    expect(headerSurprise()).toBeDefined();
   });
 
   it("is absent on the report a server with no configuration answers", async () => {
