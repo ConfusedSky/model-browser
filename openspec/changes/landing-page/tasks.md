@@ -251,7 +251,10 @@
       `{"thumbWrites":false,"appLaunch":false,"chatTab":false,"hostDetails":false,"maintenance":false,"intro":false}`
       and `/about.html` → **404**. No banner, no header affordances, no About page —
       the introduction is withheld pending review, not broken. 6.6 is what puts it back
-- [ ] 6.5 Close issues #12 and #15 with the live evidence; leave #18 to 1.6
+- [x] 6.5 *(both closed 2026-09-15 with the live evidence — #12 by the Surprise action and
+      the six chips, #15 by the cycling placeholder; #18 left to 1.6. Note for whoever reads
+      them next: the closing comments say the surfaces are live, and they were at `cbad523`,
+      but `beaef45` withheld them — 6.6 is what makes those comments true again)* Close issues #12 and #15 with the live evidence; leave #18 to 1.6
 - [ ] 6.6 **Re-enable the introduction on the demo, once Masa has read it live.** Gated
       on that reading, not on any code: flip `"intro"` back to `true` in
       `deploy/demo/config.json`, correct `deploy/demo/README.md` §5's feature line back
@@ -268,7 +271,9 @@
 - [ ] 7.1 Backlog 1.6 updates the About page's differences list when Download and Copy
       link land — the list describes what ships (spec reworded at apply; design "Decided at
       apply"); verify by re-reading `#differences` on the live host after 1.6
-- [ ] 7.2 `scripts/bake-demo.ts`'s `ship` calls `bun run scripts/check-example-queries.ts
+- [x] 7.2 *(done 2026-09-15: `shipExampleQueries` runs after `ship`'s hit checks and throws
+      on a dead or failed query; `grep -n 'check-example' scripts/bake-demo.ts` now matches.
+      The core is imported, not spawned — same six requests, no cwd dependency)* `scripts/bake-demo.ts`'s `ship` calls `bun run scripts/check-example-queries.ts
       <origin>` after the restart — one line in that script; recorded in `corpus-bake`'s
       tasks.md as its 9.x; verify the ship run prints the count.
       **Not blocked (corrected 2026-09-15):** `corpus-bake` 1.5 landed at `4e037db` and
@@ -283,7 +288,12 @@
       kept serving through both failed builds
 - [ ] 7.4 The About page could take the `/about` name if the static handler tried
       `<name>.html` before its fallback (design D2 declined it); leave unless it grates
-- [ ] 7.5 **Scenarios with no cell** (checked against the suite twice on 2026-09-15 — a
+- [x] 7.5 *(closed 2026-09-15: `feature-report`'s *Not inferred* now has a cell —
+      `introBanner.test.tsx` "is not inferred from the capabilities being off" mounts
+      `{ ...DEFAULT_REPORT, thumbWrites: false, hostDetails: false }` with meaning mode in
+      force and the index ready, and asserts the banner, the header About, the header
+      surprise action and the cycling placeholder all absent. Falsified: rewriting
+      `introOffered` in `App.tsx` as `features.thumbWrites === false` fails that cell)* **Scenarios with no cell** (checked against the suite twice on 2026-09-15 — a
       spec sentence is not coverage, and neither is a tasks line claiming it).
       *Closed while this was being written:* `visitor-intro`'s *The desktop build shows
       nothing* and `feature-report`'s *Withheld until known* both end "or the read

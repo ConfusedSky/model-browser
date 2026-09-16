@@ -456,7 +456,11 @@
       collision. The applied `deployment-infrastructure` and `model-thumbnails` text was
       read for change-scoped prose: no "this delta"/"this change" survived into either.
 
-- [ ] 9.x *(added by `landing-page`, 2026-09-15 — not that change's session)* call `bun
+- [x] 9.x *(done 2026-09-15: `shipExampleQueries` in `scripts/bake-demo.ts` runs after the
+      hit checks, prints one line per query with its entry count, and throws when any query
+      is dead or failed — the script's exported core is imported rather than spawned, so the
+      call does not depend on the cwd a ship runs from; the no-`--ship` template prints the
+      `bun run scripts/check-example-queries.ts <origin>` line for a by-hand run)* call `bun
       run scripts/check-example-queries.ts <origin>` from the `--ship` step after the
       restart (`landing-page` D9): every example query the banner offers must answer on
       the box, and the ship step is the one place that fires HTTP at the origin after a

@@ -42,6 +42,7 @@ import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, normalize, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { SNAPSHOT_DIR } from "../server/src/snapshot";
+import { EXAMPLE_QUERIES } from "../shared/exampleQueries";
 import {
   type DirEntry,
   type IndexAvailability,
@@ -54,6 +55,7 @@ import {
   THUMB_MIME,
   type ThumbGetResponse,
 } from "../shared/types";
+import { checkExampleQueries } from "./check-example-queries";
 
 /** One enumerated model — `/api/models`' library path and file mtime. */
 export interface BakeModel {
@@ -1508,6 +1510,9 @@ async function ship(
     console.log(`  ${rsync}`);
     console.log(`  ${restart}`);
     for (const c of hitCheckCommands(three, DEMO_ORIGIN)) console.log(`  ${c}`);
+    console.log(
+      `  bun run scripts/check-example-queries.ts ${DEMO_ORIGIN}   # landing-page D9, run for you behind --ship`,
+    );
     return;
   }
   run("sh", ["-c", rsync], process.cwd());
@@ -1537,6 +1542,41 @@ async function ship(
   for (const m of three)
     for (const ao of [true, false])
       log("hit check:", await hitCheck(m, ao, recipe, origin));
+  await shipExampleQueries(origin);
+}
+
+/**
+ * `landing-page` D9 from the ship step: every chip the introduction offers must
+ * answer on the origin this run just restarted. The corpus moves under the
+ * queries, so a re-bake is exactly when a chip dies, and a visitor's first
+ * click on an empty grid is the worst first impression the demo can make.
+ *
+ * The core of `scripts/check-example-queries.ts` is imported rather than
+ * spawned as `bun run scripts/check-example-queries.ts <origin>`: the same six
+ * requests, with no dependency on the cwd a ship happens to run from, and the
+ * counts still printed. It throws for the reason the readiness poll rethrows —
+ * a run that shipped bytes must not exit 0 with a dead chip behind it.
+ */
+async function shipExampleQueries(origin: string): Promise<void> {
+  const { dead, failed, counts } = await checkExampleQueries(
+    origin,
+    EXAMPLE_QUERIES,
+  );
+  // Always, pass or fail: the counts are the headroom a dead chip had to cross,
+  // and they are the sweep `shared/exampleQueries.ts` cites.
+  for (const { text, entries } of counts)
+    log(`example query: ${String(entries).padStart(3)}  ${text}`);
+  if (dead.length === 0 && failed.length === 0) {
+    log(`${EXAMPLE_QUERIES.length} example queries answer on ${origin}`);
+    return;
+  }
+  const trouble = [
+    ...dead.map((q) => `dead: ${q}`),
+    ...failed.map((q) => `failed: ${q}`),
+  ];
+  throw new Error(
+    `the store shipped and the container restarted, but the introduction's example queries did not all answer on ${origin} — replace a dead query in shared/exampleQueries.ts; a failed one means the origin or the index is not answering:\n  ${trouble.join("\n  ")}`,
+  );
 }
 
 /** The whole run, D1's eleven steps in order; the child server is stopped on every path out. */

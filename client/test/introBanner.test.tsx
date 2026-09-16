@@ -141,6 +141,28 @@ describe("the banner at the library top", () => {
     expect(headerAbout()).toBeNull();
   });
 
+  it("is not inferred from the capabilities being off — a report that never said `intro` draws nothing", async () => {
+    // `feature-report`'s *Not inferred*. Thumbnail writes and host details off
+    // is the demo's own posture, and so the report a gate reaching for a proxy
+    // field would mistake for "this deployment is public". Meaning mode is in
+    // force and the index covers the top, so the cycling placeholder's other
+    // conditions all hold and the report is the only thing withholding it.
+    applySessionSearchMode("meaning");
+    features.mockResolvedValue({
+      ...DEFAULT_REPORT,
+      thumbWrites: false,
+      hostDetails: false,
+    });
+    indexAvailability.mockResolvedValue(READY);
+    await mountAppAtCurrentUrl("/", TOP);
+    await settle();
+
+    expect(banner()).toBeNull();
+    expect(headerAbout()).toBeNull();
+    expect(headerSurprise()).toBeUndefined();
+    expect(searchInput().placeholder).toBe("Search names and folders…");
+  });
+
   it("is absent while the report has not resolved — withheld, never withdrawn", async () => {
     features.mockReturnValue(new Promise(() => {}));
     indexAvailability.mockResolvedValue(READY);
