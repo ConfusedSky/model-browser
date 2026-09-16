@@ -1,3 +1,14 @@
+/**
+ * A visitor's own framings, kept in their browser where the deployment refuses
+ * thumbnail writes (`public-deployment` D6). One store holding one precedence —
+ * this browser, then the server, then an orientation source, then the default —
+ * for the decorator below and `useThumbnails`' seed alike.
+ *
+ * **Nothing here may throw.** `localStorage` is absent in some environments and
+ * refused in others, and a framing is a convenience: what cannot be read is
+ * "nothing stored" and what cannot be written is dropped.
+ */
+
 import type {
   AppsReport,
   CameraState,
@@ -22,17 +33,6 @@ import type {
   ThumbResult,
   ThumbSave,
 } from "./client";
-
-/**
- * A visitor's own framings, kept in their browser where the deployment refuses
- * thumbnail writes (`public-deployment` D6). One store holding one precedence —
- * this browser, then the server, then an orientation source, then the default —
- * for the decorator below and `useThumbnails`' seed alike.
- *
- * **Nothing here may throw.** `localStorage` is absent in some environments and
- * refused in others, and a framing is a convenience: what cannot be read is
- * "nothing stored" and what cannot be written is dropped.
- */
 
 /** So a test can pass a plain object. */
 export type FramingStorage = Pick<

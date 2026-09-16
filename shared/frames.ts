@@ -1,9 +1,9 @@
-import type { ModelFormat, OrbitAxis } from "./types";
-
 /**
  * Spindle frames as plain arithmetic. No `three` import: the server project
  * compiles `shared/` and has no `three`.
  */
+
+import type { ModelFormat, OrbitAxis } from "./types";
 
 export type Triple = readonly [number, number, number];
 
