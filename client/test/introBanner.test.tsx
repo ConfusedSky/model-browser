@@ -133,6 +133,26 @@ describe("the banner at the library top", () => {
     expect(headerSurprise()).toBeDefined();
   });
 
+  it("keeps the dismiss control out of the chips' own wrapping flow", async () => {
+    // happy-dom lays nothing out and applies no Tailwind, so no rectangle here
+    // means anything: what this cell can hold is the *shape* the wrap depends
+    // on. Sentence and chips must share one flow container, and the dismiss
+    // button must sit outside it — as the chips' sibling it is pushed onto a
+    // line of its own once they wrap. Judge the pixels on a real browser.
+    features.mockResolvedValue(INTRO);
+    indexAvailability.mockResolvedValue(READY);
+    await mountAppAtCurrentUrl("/", TOP);
+    await settle();
+
+    const flow = banner()!.querySelector<HTMLElement>("[data-intro-flow]");
+    expect(flow).not.toBeNull();
+    expect(flow!.querySelector("span")!.textContent).toContain(
+      "Browse a library of 3D-printable miniatures",
+    );
+    for (const chip of chips()) expect(chip.parentElement).toBe(flow);
+    expect(flow!.contains(dismissButton())).toBe(false);
+  });
+
   it("is absent on the report a server with no configuration answers", async () => {
     indexAvailability.mockResolvedValue(READY);
     await mountAppAtCurrentUrl("/", TOP);

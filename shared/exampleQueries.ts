@@ -9,8 +9,9 @@
  * first screen is *right* is a reading, not a run.
  *
  * **The two hammer phrases are a pair, not a duplicate**, and they are adjacent
- * so the contrast is on one row of chips: they are there to show a visitor that
- * narrowing a query changes what comes back.
+ * so a visitor reads them together: they are there to show that narrowing a
+ * query changes what comes back. Where the wrap puts them is the viewport's
+ * call, so adjacency is all the order can promise.
  */
 export const EXAMPLE_QUERIES: readonly string[] = [
   "a stone golem",
