@@ -140,105 +140,23 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
           </p>
         </Section>
 
-        {/* source: the corpus repository's metadata contract and NOTES.md;
-          ViewerLayer's credit rows; `OverrideCredits`. */}
-        <Section id="licence" title="Licence and provenance">
-          <p className="mb-2">
-            None of these models are mine. Each was published by its designer
-            under a{" "}
-            <Out href="https://creativecommons.org/licenses/">
-              Creative Commons licence
-            </Out>{" "}
-            and is redistributed here on those terms. The licences differ from
-            model to model, and each model&rsquo;s own is linked from its
-            credits.
-          </p>
-          <p>
-            Every model is credited where it is shown: open one and the panel
-            beside it names the author, the licence — linked to the deed that
-            carries its version — and the page the file came from, with a line
-            saying what was done to this copy where the file served is not the
-            author&rsquo;s own. The same credits for the whole corpus are{" "}
-            <a href="#credits" className="text-sky-400 hover:underline">
-              listed at the bottom of this page
-            </a>
-            .
-          </p>
-        </Section>
-
-        {/* source: the corpus repository's convert.py and NOTES.md (private, so
-          named and not linked); deploy/demo/config.json's `decimated/` root.
-          Tile names are two rules: `/api/dir` gives a kit a `displayName` and
-          gives the models inside it none, so `Grid` falls back to the file
-          name. No download action exists (D10). */}
-        <Section id="corpus" title="How the corpus was altered">
-          <p className="mb-2">
-            What is served here is not the designers&rsquo; files verbatim, and
-            each model&rsquo;s credits say so in the corpus&rsquo;s own words:
-          </p>
-          <ul className="mb-2 list-disc space-y-1 pl-5">
-            <li>
-              Duplicates were removed. Publishers reuse meshes heavily, and
-              geometry uploaded more than once is kept once.
-            </li>
-            <li>
-              Only the meshes were kept; the other files that came with a kit
-              are not here.
-            </li>
-            <li>
-              Every mesh was re-exported as STL and reduced for display by
-              quadric decimation, so a model arrives in a browser tab rather
-              than in a slicer.
-            </li>
-            <li>
-              A kit&rsquo;s own tile is named from the corpus&rsquo;s metadata
-              rather than from its folder, so the folder{" "}
-              <span className="break-words text-zinc-400">
-                1_Treasure_Token_for_DD_or_Other_RPG_2615634
-              </span>{" "}
-              reads as “1&quot; Treasure Token for D&amp;D or Other RPG”. The
-              models inside a kit keep their own file names, which are the
-              designer&rsquo;s.
-            </li>
-          </ul>
-          <p className="mb-2">
-            So every model here is a display copy, reduced to be drawn in a
-            browser tab and not to be printed. The designer&rsquo;s own file is
-            where the source link in a model&rsquo;s credits leads; print from
-            that.
-          </p>
-          <p>
-            The scripts that fetched the models and the metadata that records
-            their provenance live in a separate, private repository; this one
-            holds the application.
-          </p>
-        </Section>
-
-        {/* source: deploy/demo/config.json's `features`, and entryActions.ts for
-          what each withholds. The Download action is unbuilt (D10). */}
-        <Section id="differences" title="What differs from the desktop app">
+        {/* The corpus repository is private and gets no link. */}
+        <Section id="links" title="Links">
           <ul className="list-disc space-y-1 pl-5">
             <li>
-              Opening a model in a slicer or any other application is not
-              offered here — that is a desktop action, and a server has
-              nobody&rsquo;s desktop to open it on.
+              Report a problem:{" "}
+              <Out href={`${SOURCE_URL}/issues`}>the issue tracker</Out>
             </li>
             <li>
-              Copying a model&rsquo;s path copies its place in this library, not
-              a location on the machine serving it.
+              Contact:{" "}
+              <Out href="https://github.com/ConfusedSky">
+                ConfusedSky on GitHub
+              </Out>
             </li>
             <li>
-              Thumbnails were rendered ahead of time and are read-only: nothing
-              you do writes anything back to the server.
-            </li>
-            <li>
-              A model you turn stays turned while you are looking at it and no
-              longer, where the desktop app would save the framing for everyone.
-            </li>
-            <li>
-              Nothing here names the machine this runs on, so an explanation
-              that would send you to fix something on it is replaced by a plain
-              statement that a thing is unavailable.
+              <a href="#credits" className="text-sky-400 hover:underline">
+                Credits for every kit in the corpus
+              </a>
             </li>
           </ul>
         </Section>
@@ -261,8 +179,8 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
               while you are here.
             </li>
             <li>
-              Alt+&uarr; goes up a folder, the same as the &uarr; button at the
-              top left.
+              Alt+Up Arrow; goes up a folder, the same as the &uarr; button at
+              the top left.
             </li>
             <li>
               Shift+F10, or the menu key, opens a tile&rsquo;s actions;
@@ -273,66 +191,6 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
               if turning a model feels slow.
             </li>
           </ul>
-        </Section>
-
-        {/* The corpus repository is private and gets no link. */}
-        <Section id="links" title="Links">
-          <ul className="list-disc space-y-1 pl-5">
-            <li>
-              Report a problem:{" "}
-              <Out href={`${SOURCE_URL}/issues`}>the issue tracker</Out>
-            </li>
-            <li>
-              Contact:{" "}
-              <Out href="https://github.com/ConfusedSky">
-                ConfusedSky on GitHub
-              </Out>
-            </li>
-            <li>
-              <a href="#credits" className="text-sky-400 hover:underline">
-                Credits for every kit in the corpus
-              </a>
-            </li>
-          </ul>
-        </Section>
-
-        {/* source: the `model-browser:` keys read through lib/stored.ts, and
-          api/localFramings.ts. The search options are the exception because
-          they are not local: `semanticSearch` posts the tuning and
-          lib/urlState.ts writes it into the address bar. The other three claim
-          only that the *server* keeps none of them — the ambient-occlusion
-          setting still rides a thumbnail request as `&ao=off`. */}
-        <Section id="privacy" title="Privacy">
-          <p className="mb-2">
-            There are no accounts and nothing to sign in to, and no analytics
-            script runs on these pages. Whether you dismissed the introduction
-            and the ambient-occlusion setting are kept in this browser&rsquo;s
-            own storage; the server holds neither for you, and clearing this
-            site&rsquo;s data is the whole of forgetting them. How you have
-            turned a model is kept nowhere at all &mdash; not here, not on the
-            server.
-          </p>
-          <p>
-            Your search options are the exception, and they are one by design:
-            they say which models a search returns, so the mode and the tuning
-            travel with the query and are written into the address bar. A link
-            you copy carries them, which is what makes the results you send
-            someone the results they see.
-          </p>
-        </Section>
-
-        {/* source: three/renderer.ts (one renderer app-wide, D2). */}
-        <Section id="webgl" title="WebGL and the desktop build">
-          <p className="mb-2">
-            The models are drawn with WebGL. A browser or a machine without it
-            will show these pages and the tiles, but no geometry.
-          </p>
-          <p>
-            This is the same application you can run over your own library:
-            point the server at a folder and it browses that instead, with the
-            actions this deployment withholds restored. The{" "}
-            <Out href={SOURCE_URL}>source</Out> is what you would build.
-          </p>
         </Section>
 
         {/* source: mini-classify's `src/pose.py` and `src/query.py`. **Read
@@ -450,6 +308,148 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
               says it carries an orb.
             </li>
           </ul>
+        </Section>
+
+        {/* source: deploy/demo/config.json's `features`, and entryActions.ts for
+          what each withholds. The Download action is unbuilt (D10). */}
+        <Section id="differences" title="What differs from the desktop app">
+          <ul className="list-disc space-y-1 pl-5">
+            <li>
+              Opening a model in a slicer or any other application is not
+              offered here — that is a desktop action, and a server has
+              nobody&rsquo;s desktop to open it on.
+            </li>
+            <li>
+              Copying a model&rsquo;s path copies its place in this library, not
+              a location on the machine serving it.
+            </li>
+            <li>
+              Thumbnails were rendered ahead of time and are read-only: nothing
+              you do writes anything back to the server.
+            </li>
+            <li>
+              A model you turn stays turned while you are looking at it and no
+              longer, where the desktop app would save the framing for everyone.
+            </li>
+            <li>
+              Nothing here names the machine this runs on, so an explanation
+              that would send you to fix something on it is replaced by a plain
+              statement that a thing is unavailable.
+            </li>
+          </ul>
+        </Section>
+
+        {/* source: three/renderer.ts (one renderer app-wide, D2). */}
+        <Section id="webgl" title="WebGL and the desktop build">
+          <p className="mb-2">
+            The models are drawn with WebGL. A browser or a machine without it
+            will show these pages and the tiles, but no geometry.
+          </p>
+          <p>
+            This is the same application you can run over your own library:
+            point the server at a folder and it browses that instead, with the
+            actions this deployment withholds restored. The{" "}
+            <Out href={SOURCE_URL}>source</Out> is what you would build.
+          </p>
+        </Section>
+
+        {/* source: the corpus repository's metadata contract and NOTES.md;
+          ViewerLayer's credit rows; `OverrideCredits`. */}
+        <Section id="licence" title="Licence and provenance">
+          <p className="mb-2">
+            None of these models are mine. Each was published by its designer
+            under a{" "}
+            <Out href="https://creativecommons.org/licenses/">
+              Creative Commons licence
+            </Out>{" "}
+            and is redistributed here on those terms. The licences differ from
+            model to model, and each model&rsquo;s own is linked from its
+            credits.
+          </p>
+          <p>
+            Every model is credited where it is shown: open one and the panel
+            beside it names the author, the licence — linked to the deed that
+            carries its version — and the page the file came from, with a line
+            saying what was done to this copy where the file served is not the
+            author&rsquo;s own. The same credits for the whole corpus are{" "}
+            <a href="#credits" className="text-sky-400 hover:underline">
+              listed at the bottom of this page
+            </a>
+            .
+          </p>
+        </Section>
+
+        {/* source: the corpus repository's convert.py and NOTES.md (private, so
+          named and not linked); deploy/demo/config.json's `decimated/` root.
+          Tile names are two rules: `/api/dir` gives a kit a `displayName` and
+          gives the models inside it none, so `Grid` falls back to the file
+          name. No download action exists (D10). */}
+        <Section id="corpus" title="How the corpus was altered">
+          <p className="mb-2">
+            What is served here is not the designers&rsquo; files verbatim, and
+            each model&rsquo;s credits say so in the corpus&rsquo;s own words:
+          </p>
+          <ul className="mb-2 list-disc space-y-1 pl-5">
+            <li>
+              Duplicates were removed. Publishers reuse meshes heavily, and
+              geometry uploaded more than once is kept once.
+            </li>
+            <li>
+              Only the meshes were kept; the other files that came with a kit
+              are not here.
+            </li>
+            <li>
+              Every mesh was re-exported as STL and reduced for display by
+              quadric decimation, so a model arrives in a browser tab rather
+              than in a slicer.
+            </li>
+            <li>
+              A kit&rsquo;s own tile is named from the corpus&rsquo;s metadata
+              rather than from its folder, so the folder{" "}
+              <span className="break-words text-zinc-400">
+                1_Treasure_Token_for_DD_or_Other_RPG_2615634
+              </span>{" "}
+              reads as “1&quot; Treasure Token for D&amp;D or Other RPG”. The
+              models inside a kit keep their own file names, which are the
+              designer&rsquo;s.
+            </li>
+          </ul>
+          <p className="mb-2">
+            So every model here is a display copy, reduced to be drawn in a
+            browser tab and not to be printed. The designer&rsquo;s own file is
+            where the source link in a model&rsquo;s credits leads; print from
+            that.
+          </p>
+          <p>
+            The scripts that fetched the models and the metadata that records
+            their provenance live in a separate, private repository; this one
+            holds the application.
+          </p>
+        </Section>
+
+        {/* source: the `model-browser:` keys read through lib/stored.ts, and
+          api/localFramings.ts. The search options are the exception because
+          they are not local: `semanticSearch` posts the tuning and
+          lib/urlState.ts writes it into the address bar. The other three claim
+          only that the *server* keeps none of them — the ambient-occlusion
+          setting still rides a thumbnail request as `&ao=off`. */}
+        <Section id="privacy" title="Privacy">
+          <p className="mb-2">
+            There are no accounts and nothing to sign in to, and no analytics
+            script runs on these pages. Whether you dismissed the introduction
+            and the ambient-occlusion setting are kept in this browser&rsquo;s
+            own storage; the server holds neither for you, and clearing this
+            site&rsquo;s data is the whole of forgetting them. How you have
+            turned a model is kept nowhere at all &mdash; not here, not on the
+            server.
+          </p>
+          <p>
+            Your search options are the exception, and they are one by design:
+            they say which models a search returns, so the mode and the tuning
+            travel with the query and are written into the address bar. A link
+            you copy carries them, which is what makes the results you send
+            someone the results they see.
+          </p>
         </Section>
 
         {/* source: `library-overrides` — the rows are ViewerLayer's, field for
