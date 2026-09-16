@@ -72,17 +72,18 @@ function usable(
   pose: IndexPose | null | undefined,
 ): boolean {
   const unowned = camera === undefined && axis === undefined;
-  // `undefined` where the pose is unsettled *or* frames no render — an
-  // off-axis `up`, an `azimuth_zero` that is not perpendicular. Neither can
-  // make a render stale: there is no orientation it should have been drawn
-  // under.
-  const poseKey = poseKeyFor(pose);
+  // The orientation the source asks for, or `undefined` where it asks for
+  // none. A settled source that frames nothing — `null`, or a pose
+  // `cameraForPose` refuses — wants the default, so a render carrying a key is
+  // stale against it and an unlabelled one is not. Judging the unlabelled one
+  // stale too would re-render it identically on every visit, forever.
+  const framed = poseKeyFor(pose);
   const poseStale =
     unowned &&
-    (pose === null
+    (pose !== undefined && framed === undefined
       ? labels.posed !== undefined || labels.poseKey !== undefined
-      : poseKey !== undefined &&
-        (labels.posed !== POSE_VERSION || labels.poseKey !== poseKey));
+      : framed !== undefined &&
+        (labels.posed !== POSE_VERSION || labels.poseKey !== framed));
   return (
     labels.lighting === THUMB_LIGHTING &&
     labels.rig === RIG_VERSION &&
@@ -90,8 +91,8 @@ function usable(
   );
 }
 
-/** `undefined` for a pose that frames no render, which `usable` reads as
- *  nothing to be stale against. */
+/** `undefined` for a pose that frames no render, which `usable` reads as the
+ *  source asking for the default. */
 function poseKeyFor(pose: IndexPose | null | undefined): string | undefined {
   const resolved = cameraForPose(pose, DEFAULT_CAMERA);
   return resolved === null ? undefined : poseKeyOf(resolved);

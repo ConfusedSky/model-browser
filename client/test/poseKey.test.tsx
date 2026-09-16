@@ -216,6 +216,29 @@ describe("a pose that frames no render", () => {
     expect(lastPut()).toBeUndefined();
   });
 
+  it("re-renders a posed hit once, to the default, and then stands", async () => {
+    // The tile was drawn under pose A and the source's answer has since gone
+    // malformed. Leaving it alone keeps an orientation nothing else agrees
+    // with — the lightbox opens such a model at the default — so it converges
+    // there, once, and is a hit from then on.
+    getThumb.mockResolvedValue(HIT_UNDER_A);
+    semanticPosesFor.mockResolvedValue(WAVE_BAD);
+    listDir.mockResolvedValue(LISTING);
+    await mountApp("/models", LISTING);
+    await settle();
+    await settle();
+    expect(renderThumbnail).toHaveBeenCalledTimes(1);
+    expect(lastPut()?.posed).toBeUndefined();
+    expect(lastPut()?.poseKey).toBeUndefined();
+
+    // Once, not on every landing: the render it just wrote is unlabelled, and
+    // an unlabelled render under a pose that frames nothing stands.
+    getThumb.mockResolvedValue(UNPOSED_HIT);
+    renderThumbnail.mockClear();
+    await awayAndBack();
+    expect(renderThumbnail).not.toHaveBeenCalled();
+  });
+
   it("control: a well-formed pose over the same hit does re-render it", async () => {
     getThumb.mockResolvedValue(UNPOSED_HIT);
     semanticPosesFor.mockResolvedValue(WAVE_A);
