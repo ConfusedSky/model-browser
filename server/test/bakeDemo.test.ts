@@ -10,12 +10,16 @@ import { readFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
+  type BakeArgs,
   type BakeModel,
   type FetchLike,
   type LaunchBudget,
   type ManifestInput,
   type ManifestRecipe,
   INITIAL_LAUNCH_BUDGET,
+  POLL_MS,
+  SHIP_READY_DEADLINE_MS,
+  SHIP_READY_PROBE_TIMEOUT_MS,
   auditUnposed,
   fetchPoses,
   indexCacheDirMatches,
@@ -25,9 +29,11 @@ import {
   originFromShip,
   parseArgs,
   rsyncCommand,
+  shipInstructions,
   shouldRefuse,
   sidecarKey,
   verifyBake,
+  verifyShip,
   waitForShipReady,
   writeManifest,
 } from "../../scripts/bake-demo";
@@ -730,7 +736,7 @@ describe("parseArgs", () => {
     expect(absolute.shipDir).toBe("/srv/cache/box-id");
   });
 
-  it("accepts --origin, passed through unresolved (a URL, not a path)", () => {
+  it("accepts --origin already in its normalized form unchanged", () => {
     const args = parseArgs([
       ...required,
       "--ship",
@@ -741,6 +747,48 @@ describe("parseArgs", () => {
       "https://staging.example.com",
     ]);
     expect(args.origin).toBe("https://staging.example.com");
+  });
+
+  it("normalizes a trailing-slash --origin — the address-bar copy-paste form, which `${origin}/api/…` would otherwise turn into `//api/…`", () => {
+    const args = parseArgs([
+      ...required,
+      "--ship",
+      "root@box",
+      "--ship-dir",
+      "/srv/cache/box-id",
+      "--origin",
+      "https://staging.example.com/",
+    ]);
+    expect(args.origin).toBe("https://staging.example.com");
+  });
+
+  it("normalizes a --origin carrying a path component to just the origin", () => {
+    const args = parseArgs([
+      ...required,
+      "--ship",
+      "root@box",
+      "--ship-dir",
+      "/srv/cache/box-id",
+      "--origin",
+      "https://staging.example.com/demo",
+    ]);
+    expect(args.origin).toBe("https://staging.example.com");
+  });
+
+  it("rejects a non-http(s) scheme (ftp) — the only cell that reaches the protocol check itself rather than dying in `new URL`", () => {
+    expect(() =>
+      parseArgs([
+        ...required,
+        "--ship",
+        "root@box",
+        "--ship-dir",
+        "/srv/cache/box-id",
+        "--origin",
+        "ftp://models.masamaeda.com",
+      ]),
+    ).toThrow(
+      /--origin must be an absolute http\(s\) URL, got ftp:\/\/models\.masamaeda\.com/,
+    );
   });
 
   it("refuses a --ship to a bare IPv4 host with no --origin, naming the host and the flag — a ship whose task 4.2 cannot run must never leave argv parsing", () => {
@@ -784,10 +832,14 @@ describe("parseArgs", () => {
     );
   });
 
-  it("rejects --origin without --ship rather than silently ignoring it", () => {
-    expect(() =>
-      parseArgs([...required, "--origin", "https://staging.example.com"]),
-    ).toThrow(/--origin needs --ship/);
+  it("accepts --origin alone, without --ship — it only retargets the printed no-ship template (shipInstructions)", () => {
+    const args = parseArgs([
+      ...required,
+      "--origin",
+      "https://staging.example.com",
+    ]);
+    expect(args.origin).toBe("https://staging.example.com");
+    expect(args.ship).toBeUndefined();
   });
 });
 
@@ -845,9 +897,21 @@ describe("originFromShip", () => {
  * fake `fetch` and a shrunk deadline/poll so a cell does not wait out a real
  * 60s — each of these answers must be read as "not ready yet" and keep
  * polling rather than resolving early, then the run must still end at the
- * deadline rather than hanging.
+ * deadline rather than hanging. Each also bounds the call count: a 50ms
+ * deadline at a 10ms poll interval makes at most ~6 attempts — nowhere near
+ * what removing the `sleep(pollMs)` between attempts would produce (a hot
+ * spin bounded only by wall-clock time, which is hundreds of calls even in
+ * 50ms) — so the ceiling catches an unpaced poll a bare `calls > 1` cannot.
  */
 describe("waitForShipReady", () => {
+  const CALL_CEILING = 20;
+
+  it("SHIP_READY_DEADLINE_MS / POLL_MS / SHIP_READY_PROBE_TIMEOUT_MS are the real constants the exported defaults reference", () => {
+    expect(SHIP_READY_DEADLINE_MS).toBe(60_000);
+    expect(POLL_MS).toBe(2_000);
+    expect(SHIP_READY_PROBE_TIMEOUT_MS).toBe(5_000);
+  });
+
   it("keeps polling a body that is not JSON, then hits the deadline", async () => {
     let calls = 0;
     const fetchFn: FetchLike = async () => {
@@ -860,18 +924,28 @@ describe("waitForShipReady", () => {
       /http:\/\/box\/api\/library did not answer ready within 0\.05s/,
     );
     expect(calls).toBeGreaterThan(1);
+    expect(calls).toBeLessThan(CALL_CEILING);
   });
 
-  it("keeps polling a 404, then hits the deadline", async () => {
+  it("keeps polling a 404 even with a parseable ready body, then hits the deadline", async () => {
+    // The body is deliberately a settled `{state:"ready"}` — the fixture
+    // Fix 4 replaced a bodyless 404 with. Deleting the `r.ok` guard
+    // (`.then((r) => (r.ok ? r.json() : null))` → `.then((r) => r.json())`)
+    // would read this body as ready on the very first call and resolve
+    // instead of rejecting; a bodyless 404 could not tell the two apart,
+    // since `r.json()` rejects either way once `r.ok` is gone.
     let calls = 0;
     const fetchFn: FetchLike = async () => {
       calls++;
-      return new Response(null, { status: 404 });
+      return new Response(JSON.stringify({ state: "ready" }), {
+        status: 404,
+      });
     };
     await expect(
       waitForShipReady("http://box", fetchFn, 50, 10),
     ).rejects.toThrow(/did not answer ready within 0\.05s/);
     expect(calls).toBeGreaterThan(1);
+    expect(calls).toBeLessThan(CALL_CEILING);
   });
 
   it('keeps polling a settled-but-not-ready state ({"state":"missing"}), then hits the deadline', async () => {
@@ -887,9 +961,10 @@ describe("waitForShipReady", () => {
       waitForShipReady("http://box", fetchFn, 50, 10),
     ).rejects.toThrow(/did not answer ready within 0\.05s/);
     expect(calls).toBeGreaterThan(1);
+    expect(calls).toBeLessThan(CALL_CEILING);
   });
 
-  it("resolves as soon as the state reads ready, without waiting for the deadline", async () => {
+  it("resolves as soon as the state reads ready, without waiting for the deadline — probeTimeoutMs is injectable too", async () => {
     let calls = 0;
     const fetchFn: FetchLike = async () => {
       calls++;
@@ -899,9 +974,122 @@ describe("waitForShipReady", () => {
       });
     };
     await expect(
-      waitForShipReady("http://box", fetchFn, 50, 10),
+      waitForShipReady("http://box", fetchFn, 50, 10, 1_000),
     ).resolves.toBeUndefined();
     expect(calls).toBe(1);
+  });
+});
+
+const BASE_ARGS: BakeArgs = {
+  root: "/corpus",
+  cache: "/scratch",
+  indexCache: "/index",
+  port: 3199,
+};
+
+describe("shipInstructions (the no-`--ship` printed template)", () => {
+  it("uses the resolved origin, not a hardcoded demo one — including the example-queries line landing-page D9 added", () => {
+    const lines = shipInstructions(
+      BASE_ARGS,
+      "local-id",
+      MODELS,
+      "https://staging.example.com",
+    );
+    expect(lines.some((l) => l.includes("staging.example.com"))).toBe(true);
+    expect(lines.some((l) => l.includes("models.masamaeda.com"))).toBe(false);
+    expect(
+      lines.some((l) =>
+        l.includes("check-example-queries.ts https://staging.example.com"),
+      ),
+    ).toBe(true);
+  });
+
+  it("prints the <origin> placeholder when neither --ship nor --origin was given, and never the demo's origin", () => {
+    const lines = shipInstructions(BASE_ARGS, "local-id", MODELS, "<origin>");
+    expect(lines.some((l) => l.includes("<origin>"))).toBe(true);
+    expect(lines.some((l) => l.includes("models.masamaeda.com"))).toBe(false);
+  });
+});
+
+/** A hit-check response `hitCheck` accepts cleanly: a hit at the recipe's rig, an ok image at THUMB_MIME with an immutable cache-control. */
+function readyFetch(): FetchLike {
+  return async (url) => {
+    const u = String(url);
+    if (u.includes("/api/library"))
+      return new Response(JSON.stringify({ state: "ready" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    if (u.includes("/api/thumb/image"))
+      return new Response("webp bytes", {
+        status: 200,
+        headers: {
+          "content-type": "image/webp",
+          "cache-control": "public, max-age=31536000, immutable",
+        },
+      });
+    if (u.includes("/api/thumb?"))
+      return new Response(JSON.stringify({ status: "hit", rig: RECIPE.rig }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    throw new Error(`readyFetch: unexpected request ${u}`);
+  };
+}
+
+/**
+ * `ship()`'s post-restart sequence, extracted as `verifyShip` so it can be
+ * driven without a network or a shell (`ship()` itself is not exported: its
+ * shipping branch runs a real `rsync`/`ssh`). All three paths a run that has
+ * already shipped bytes and restarted the box must not survive as exit 0.
+ *
+ * Falsifies the regression `339e3aa` fixed and this round's own structural
+ * fix depends on: reverting `throw err;` to `return;` in the catch block
+ * below turns the first cell's rejection into a silent resolution — the
+ * cell that follows records that failure verbatim.
+ */
+describe("verifyShip (ship()'s post-restart sequence, task 4.2 and landing-page D9)", () => {
+  it("rejects when the box never answers ready — a never-ready ship must not exit 0", async () => {
+    const fetchFn: FetchLike = async () =>
+      new Response(JSON.stringify({ state: "missing" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    await expect(
+      verifyShip("http://box", MODELS, RECIPE, fetchFn, 50, 10),
+    ).rejects.toThrow(/did not answer ready within 0\.05s/);
+  });
+
+  it("rejects when the box answers ready but a hit check then fails — a shipped store must not exit 0 with a bad render live", async () => {
+    const fetchFn: FetchLike = async (url) => {
+      const body = String(url).includes("/api/library")
+        ? { state: "ready" }
+        : { status: "miss" };
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+    await expect(
+      verifyShip("http://box", MODELS, RECIPE, fetchFn, 50, 10),
+    ).rejects.toThrow(/hit check failed/);
+  });
+
+  it("rejects when the box is ready and every hit check passes, but an example query comes back dead — a shipped store must not exit 0 with a dead chip on the landing page", async () => {
+    const ready = readyFetch();
+    const fetchFn: FetchLike = async (url, init) => {
+      const u = String(url);
+      if (u.includes("/api/semantic"))
+        // Every example query's grid comes back empty — all dead.
+        return new Response(JSON.stringify({ entries: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      return ready(u, init);
+    };
+    await expect(
+      verifyShip("http://box", MODELS, RECIPE, fetchFn, 50, 10),
+    ).rejects.toThrow(/example queries did not all answer/);
   });
 });
 

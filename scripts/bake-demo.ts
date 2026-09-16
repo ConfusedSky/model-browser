@@ -4,9 +4,8 @@
  * against the index, write the manifest the box's pin check reads, and say how
  * to ship it (corpus-bake D1).
  *
- *   bun run scripts/bake-demo.ts --root <corpus top> --cache <scratch cache dir>
- *     --index-cache <the index's cache dir> [--port 3199] [--client <scratch build dir>]
- *     [--ship <user@host> --ship-dir </srv/cache/<box id>>]
+ * usage: bun run scripts/bake-demo.ts --root <corpus top> --cache <scratch cache dir> --index-cache <the index's cache dir>
+ *          [--port 3199] [--client <scratch build dir>] [--ship <user@host> --ship-dir </srv/cache/<box id>> [--origin <https://url>]]
  *
  * Node APIs only in the core below, though the driver may use Bun: the core is
  * exported and exercised by `server/test/bakeDemo.test.ts`, whose tsconfig
@@ -529,15 +528,24 @@ type Flag = (typeof FLAGS)[number];
  * required flags are required. `--ship` needs `--ship-dir` (the rsync has no
  * target without it); `--ship-dir` alone only fills in the printed command.
  *
- * `--origin` must be an absolute `http:`/`https:` URL, and needs `--ship` —
- * there is no hit-check target to resolve it for otherwise, and the no-`--ship`
- * branch always prints the production template regardless. `--ship` itself
- * needs a derivable origin: when its host is a bare IPv4/IPv6 literal (no
- * certificate answers for one) and `--origin` was not given either, the run
- * refuses here, before any work happens — a ship whose task 4.2 cannot run
- * must never leave the argv stage, since `ship()` failing open there once
- * meant the store shipped, the box restarted, and the process exited 0 with
- * the hit check silently skipped.
+ * `--origin` must be an absolute `http:`/`https:` URL and is stored
+ * normalized to `new URL(...).origin` — scheme, host and port only, never a
+ * path or a trailing slash — so the address-bar copy-paste form
+ * (`https://models.masamaeda.com/`) and a URL carrying a path component both
+ * resolve to the same hit-check target rather than the one Hono 404s on
+ * (a trailing slash already in `origin`, concatenated as `${origin}/api/…`,
+ * reads `//api/…`). It needs no `--ship`: it also retargets the no-`--ship`
+ * printed template (`shipInstructions`), which otherwise has no way to name
+ * a box other than the demo's. `--ship` itself needs a derivable origin:
+ * when its host is a bare IPv4/IPv6 literal (no certificate answers for one)
+ * and `--origin` was not given either, the run refuses here, before any work
+ * happens — a ship whose task 4.2 cannot run must never leave the argv
+ * stage, since `ship()` failing open there once meant the store shipped, the
+ * box restarted, and the process exited 0 with the hit check silently
+ * skipped. The origin format check runs before that derivability check:
+ * `originFromShip` trusts an explicit `--origin` outright, so a malformed
+ * one must already be refused by the time it could otherwise be accepted as
+ * task 4.2's target.
  */
 export function parseArgs(argv: string[]): BakeArgs {
   const values: Partial<Record<Flag, string>> = {};
@@ -562,26 +570,25 @@ export function parseArgs(argv: string[]): BakeArgs {
   if (values.ship !== undefined && values["ship-dir"] === undefined)
     throw new Error(`--ship needs --ship-dir\n${USAGE}`);
   if (values.origin !== undefined) {
-    let validOrigin = false;
+    let normalized: string | null = null;
     try {
       const u = new URL(values.origin);
-      validOrigin = u.protocol === "http:" || u.protocol === "https:";
+      if (u.protocol === "http:" || u.protocol === "https:")
+        normalized = u.origin;
     } catch {
-      validOrigin = false;
+      normalized = null;
     }
-    if (!validOrigin)
+    if (normalized === null)
       throw new Error(
         `--origin must be an absolute http(s) URL, got ${values.origin}\n${USAGE}`,
       );
+    values.origin = normalized;
   }
-  if (values.origin !== undefined && values.ship === undefined)
-    throw new Error(`--origin needs --ship\n${USAGE}`);
   if (
     values.ship !== undefined &&
     originFromShip(values.ship, values.origin) === null
   ) {
-    const at = values.ship.lastIndexOf("@");
-    const host = at === -1 ? values.ship : values.ship.slice(at + 1);
+    const host = hostOfShip(values.ship);
     throw new Error(
       `--ship ${values.ship} names ${host === "" ? "no host" : `the host ${host}`}, which no https origin can be derived from — pass --origin <https://url> naming task 4.2's hit-check target\n${USAGE}`,
     );
@@ -611,8 +618,8 @@ export function parseArgs(argv: string[]): BakeArgs {
 const WARMING_DEADLINE_MS = 180_000;
 /** How long `/api/library` may refuse connections while the child starts. */
 const START_DEADLINE_MS = 60_000;
-/** Between chip reads while a pass runs. */
-const POLL_MS = 2_000;
+/** Between chip reads while a pass runs; also `waitForShipReady`'s default poll interval. */
+export const POLL_MS = 2_000;
 /** A chip whose sentence has not changed for this long is a stuck pass (D1 step 6's "bounded time"). */
 const STALL_MS = 5 * 60_000;
 /**
@@ -639,15 +646,26 @@ const MAX_LAUNCHES = 2;
 const MAX_TOTAL_LAUNCHES = 200;
 /** The default index base — `semantic.ts`'s `DEFAULT_BASE`, read from the same variable. */
 const DEFAULT_INDEX = "http://127.0.0.1:8077";
-/** Printed in the no-`--ship` template only — there is no `--ship` host to derive anything from yet. */
-export const DEMO_ORIGIN = "https://models.masamaeda.com";
 /** The restart after a ship (D3: for the startup sweep's memo, not for correctness). */
 export const RESTART_COMMAND =
   "cd /opt/model-browser && docker compose -f deploy/demo/compose.yaml restart app";
 /** How long the shipped app may still be booting, after `restart app`, before the first hit check. */
-const SHIP_READY_DEADLINE_MS = 60_000;
+export const SHIP_READY_DEADLINE_MS = 60_000;
 /** Per-attempt bound on the readiness probe itself — `SHIP_READY_DEADLINE_MS` is only checked between attempts, so one black-holed connect (Linux's ~130s default) could otherwise overrun it. */
-const SHIP_READY_PROBE_TIMEOUT_MS = 5_000;
+export const SHIP_READY_PROBE_TIMEOUT_MS = 5_000;
+
+/**
+ * The host portion of a `--ship user@host` (or bare `host`) argument —
+ * split at the rightmost `@`, the one `ssh`/`rsync` themselves would use (a
+ * user portion that itself contains one, `user@host@weird`, must still split
+ * at the last). The one place that split happens: `originFromShip` and
+ * `parseArgs`' refusal message both read a `--ship`'s host through this, so
+ * neither can name a different host than the other actually used.
+ */
+export function hostOfShip(ship: string): string {
+  const at = ship.lastIndexOf("@");
+  return at === -1 ? ship : ship.slice(at + 1);
+}
 
 /**
  * Task 4.2's hit-check origin, resolved in this order: `--origin` when given
@@ -655,22 +673,19 @@ const SHIP_READY_PROBE_TIMEOUT_MS = 5_000;
  * a name `--ship` would otherwise derive one from); else `https://<host>`
  * derived from `--ship`'s `user@host` (or bare `host`) when that host is a
  * *name*; else `null` — no origin can be derived, so hit-checking is refused
- * rather than defaulting to production (`DEMO_ORIGIN`), which would silently
- * verify the wrong box's store whenever `--ship` names any IP address (the
- * demo box itself is reached as `root@157.90.25.110` for `ssh`/`rsync` but
- * serves the demo at `models.masamaeda.com` — no certificate answers for the
- * bare address, and neither a bare IPv4 nor an IPv6 literal names anything a
- * `https://` origin could mean). `lastIndexOf` for the `@`, not `indexOf`:
- * a user portion that itself contains one (`user@host@weird`) must split at
- * the rightmost `@`, the one `ssh`/`rsync` themselves would use.
+ * rather than defaulting to production, which would silently verify the
+ * wrong box's store whenever `--ship` names any IP address (the demo box
+ * itself is reached as `root@157.90.25.110` for `ssh`/`rsync` but serves the
+ * demo at `models.masamaeda.com` — no certificate answers for the bare
+ * address, and neither a bare IPv4 nor an IPv6 literal names anything a
+ * `https://` origin could mean).
  */
 export function originFromShip(
   ship: string,
   explicitOrigin?: string,
 ): string | null {
   if (explicitOrigin !== undefined) return explicitOrigin;
-  const at = ship.lastIndexOf("@");
-  const host = at === -1 ? ship : ship.slice(at + 1);
+  const host = hostOfShip(ship);
   const isIPv4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
   const isIPv6 = host.includes(":");
   return host === "" || isIPv4 || isIPv6 ? null : `https://${host}`;
@@ -1415,21 +1430,22 @@ async function generateBoth(
  * ~130s default) could overrun the whole deadline on a single try.
  *
  * `fetchFn` is a `FetchLike`, the way `fetchPoses` takes one, so a cell can
- * drive this without a network; `deadlineMs`/`pollMs` default to the real
- * constants and exist so a cell can shrink both rather than waiting out a
- * real 60s deadline to prove a non-ready answer keeps polling instead of
- * resolving early.
+ * drive this without a network; `deadlineMs`/`pollMs`/`probeTimeoutMs`
+ * default to the real constants and exist so a cell can shrink all three
+ * rather than waiting out a real 60s deadline to prove a non-ready answer
+ * keeps polling instead of resolving early.
  */
 export async function waitForShipReady(
   origin: string,
   fetchFn: FetchLike = fetch,
   deadlineMs: number = SHIP_READY_DEADLINE_MS,
   pollMs: number = POLL_MS,
+  probeTimeoutMs: number = SHIP_READY_PROBE_TIMEOUT_MS,
 ): Promise<void> {
   const deadline = Date.now() + deadlineMs;
   for (;;) {
     const state = await fetchFn(`${origin}/api/library`, {
-      signal: AbortSignal.timeout(SHIP_READY_PROBE_TIMEOUT_MS),
+      signal: AbortSignal.timeout(probeTimeoutMs),
     })
       .then((r) => (r.ok ? (r.json() as Promise<LibraryState>) : null))
       .then((s) => s?.state ?? null)
@@ -1449,10 +1465,12 @@ async function hitCheck(
   ao: boolean,
   recipe: ManifestRecipe,
   origin: string,
+  fetchFn: FetchLike = fetch,
 ): Promise<string> {
   const q = `path=${encodeURIComponent(model.path)}&mtime=${model.mtime}${ao ? "" : "&ao=off"}`;
   const info = await getJson<ThumbGetResponse & { gen?: number }>(
     `${origin}/api/thumb?${q}`,
+    fetchFn,
   );
   const problems: string[] = [];
   if (info.status !== "hit") problems.push(`status ${info.status}`);
@@ -1465,7 +1483,7 @@ async function hitCheck(
       `posed ${String(info.posed)} poseKey ${String(info.poseKey)}`,
     );
   }
-  const image = await fetch(
+  const image = await fetchFn(
     `${origin}/api/thumb/image?${q}${info.gen !== undefined ? `&gen=${info.gen}` : ""}`,
   );
   const type = image.headers.get("content-type") ?? "";
@@ -1491,76 +1509,58 @@ function hitCheckCommands(models: BakeModel[], origin: string): string[] {
   });
 }
 
-/** D1 step 11 / D5: the rsync, the restart and task 4.2's hit checks — run behind `--ship`, printed without it. */
-async function ship(
+/**
+ * The printed "how to ship" template (no `--ship`): the rsync, the restart,
+ * task 4.2's hit-check commands and the example-query check, against
+ * `origin` — `bake()` resolves that to `--origin`'s value when given, else
+ * the `<origin>` placeholder, before this is ever called. Pulled out of
+ * `ship()` as a pure function so a cell can pin what it prints without a
+ * network or a shell.
+ */
+export function shipInstructions(
   args: BakeArgs,
   libraryId: string,
   models: BakeModel[],
-  recipe: ManifestRecipe,
-): Promise<void> {
+  origin: string,
+): string[] {
   const host = args.ship ?? "<user@host>";
   const boxDir = args.shipDir ?? "/srv/cache/<box id>";
   const rsync = rsyncCommand(args.cache, libraryId, host, boxDir);
   const restart = `ssh ${host} '${RESTART_COMMAND}'`;
-  const three = models.slice(0, 3);
-  if (args.ship === undefined) {
-    console.log(
-      "\nTo ship (D4/D5) — the box id is read from its startup line `library <id> at …`, never assumed:",
-    );
-    console.log(`  ${rsync}`);
-    console.log(`  ${restart}`);
-    for (const c of hitCheckCommands(three, DEMO_ORIGIN)) console.log(`  ${c}`);
-    console.log(
-      `  bun run scripts/check-example-queries.ts ${DEMO_ORIGIN}   # landing-page D9, run for you behind --ship`,
-    );
-    return;
-  }
-  run("sh", ["-c", rsync], process.cwd());
-  run("sh", ["-c", restart], process.cwd());
-  const origin = originFromShip(host, args.origin);
-  if (origin === null) {
-    console.log(
-      `\nthe store shipped and the container restarted, but task 4.2's origin could not be derived from --ship ${host} (a bare IP names no certificate) — pass --origin <https://url> to hit-check automatically. Finish task 4.2 by hand:`,
-    );
-    for (const c of hitCheckCommands(three, "<origin — pass --origin>"))
-      console.log(`  ${c}`);
-    return;
-  }
-  log(`waiting for ${origin} to answer /api/library after the restart`);
-  try {
-    await waitForShipReady(origin);
-  } catch (err) {
-    // Printed for the operator, then rethrown: the store already shipped and
-    // the box already restarted, but task 4.2 never ran, and a run that
-    // shipped bytes must not exit 0 without it.
-    console.log(
-      `\nthe store shipped and the container restarted, but ${err instanceof Error ? err.message : String(err)} — finish task 4.2 by hand:`,
-    );
-    for (const c of hitCheckCommands(three, origin)) console.log(`  ${c}`);
-    throw err;
-  }
-  for (const m of three)
-    for (const ao of [true, false])
-      log("hit check:", await hitCheck(m, ao, recipe, origin));
-  await shipExampleQueries(origin);
+  return [
+    "\nTo ship (D4/D5) — the box id is read from its startup line `library <id> at …`, never assumed:",
+    `  ${rsync}`,
+    `  ${restart}`,
+    ...hitCheckCommands(models.slice(0, 3), origin).map((c) => `  ${c}`),
+    `  bun run scripts/check-example-queries.ts ${origin}   # landing-page D9, run for you behind --ship`,
+  ];
 }
 
 /**
- * `landing-page` D9 from the ship step: every chip the introduction offers must
- * answer on the origin this run just restarted. The corpus moves under the
- * queries, so a re-bake is exactly when a chip dies, and a visitor's first
- * click on an empty grid is the worst first impression the demo can make.
+ * `landing-page` D9 from `verifyShip`: every chip the introduction offers
+ * must answer on the origin this run just restarted. The corpus moves under
+ * the queries, so a re-bake is exactly when a chip dies, and a visitor's
+ * first click on an empty grid is the worst first impression the demo can
+ * make. Runs after the hit checks, as part of "task 4.2 ran and the box is
+ * good" — it rejects through the same path `verifyShip`'s readiness wait
+ * does, for the same reason: a run that shipped bytes must not exit 0 with a
+ * dead chip behind it.
  *
  * The core of `scripts/check-example-queries.ts` is imported rather than
- * spawned as `bun run scripts/check-example-queries.ts <origin>`: the same six
- * requests, with no dependency on the cwd a ship happens to run from, and the
- * counts still printed. It throws for the reason the readiness poll rethrows —
- * a run that shipped bytes must not exit 0 with a dead chip behind it.
+ * spawned as `bun run scripts/check-example-queries.ts <origin>`: the same
+ * six requests, with no dependency on the cwd a ship happens to run from,
+ * and the counts still printed. `checkExampleQueries` already takes a
+ * `FetchLike` (`fetch` by default), so it is cellable through the same seam
+ * as the rest of `verifyShip` without touching that file.
  */
-async function shipExampleQueries(origin: string): Promise<void> {
+async function shipExampleQueries(
+  origin: string,
+  fetchFn: FetchLike = fetch,
+): Promise<void> {
   const { dead, failed, counts } = await checkExampleQueries(
     origin,
     EXAMPLE_QUERIES,
+    fetchFn,
   );
   // Always, pass or fail: the counts are the headroom a dead chip had to cross,
   // and they are the sweep `shared/exampleQueries.ts` cites.
@@ -1577,6 +1577,76 @@ async function shipExampleQueries(origin: string): Promise<void> {
   throw new Error(
     `the store shipped and the container restarted, but the introduction's example queries did not all answer on ${origin} — replace a dead query in shared/exampleQueries.ts; a failed one means the origin or the index is not answering:\n  ${trouble.join("\n  ")}`,
   );
+}
+
+/**
+ * `ship()`'s post-restart sequence (task 4.2 and landing-page D9): wait for
+ * the box to answer ready, hit-check its first three models, then confirm
+ * every example query the introduction offers still answers. Exported —
+ * with an injected `FetchLike`, the way `fetchPoses`/`waitForShipReady`
+ * already take one — so a cell can drive it without a network: a box that
+ * never answers ready rejects (`waitForShipReady`'s own error), a ready box
+ * whose hit checks then disagree also rejects (`hitCheck`'s), and a ready,
+ * hit-check-clean box with a dead or failed example query rejects too
+ * (`shipExampleQueries`'s). None of the three may resolve — bytes have
+ * already shipped and the box has already restarted by the time this runs,
+ * so returning normally here would mean task 4.2 (or D9) silently never
+ * happened.
+ */
+export async function verifyShip(
+  origin: string,
+  models: BakeModel[],
+  recipe: ManifestRecipe,
+  fetchFn: FetchLike = fetch,
+  deadlineMs: number = SHIP_READY_DEADLINE_MS,
+  pollMs: number = POLL_MS,
+): Promise<void> {
+  const three = models.slice(0, 3);
+  log(`waiting for ${origin} to answer /api/library after the restart`);
+  try {
+    await waitForShipReady(origin, fetchFn, deadlineMs, pollMs);
+  } catch (err) {
+    // Printed for the operator, then rethrown: the store already shipped and
+    // the box already restarted, but task 4.2 never ran, and a run that
+    // shipped bytes must not exit 0 without it.
+    console.log(
+      `\nthe store shipped and the container restarted, but ${err instanceof Error ? err.message : String(err)} — finish task 4.2 by hand:`,
+    );
+    for (const c of hitCheckCommands(three, origin)) console.log(`  ${c}`);
+    throw err;
+  }
+  for (const m of three)
+    for (const ao of [true, false])
+      log("hit check:", await hitCheck(m, ao, recipe, origin, fetchFn));
+  await shipExampleQueries(origin, fetchFn);
+}
+
+/**
+ * D1 step 11 / D5: the rsync, the restart and task 4.2's hit checks — run
+ * behind `--ship`, printed (via `shipInstructions`) without it. `origin` is
+ * resolved by the caller (`bake()`), once, before any of this runs — never
+ * derived in here — so a caller that cannot derive one refuses before a
+ * single byte ships, not after the rsync and the restart that used to sit
+ * ahead of the same check.
+ */
+async function ship(
+  args: BakeArgs,
+  libraryId: string,
+  models: BakeModel[],
+  recipe: ManifestRecipe,
+  origin: string,
+): Promise<void> {
+  if (args.ship === undefined) {
+    for (const line of shipInstructions(args, libraryId, models, origin))
+      console.log(line);
+    return;
+  }
+  const boxDir = args.shipDir ?? "/srv/cache/<box id>";
+  const rsync = rsyncCommand(args.cache, libraryId, args.ship, boxDir);
+  const restart = `ssh ${args.ship} '${RESTART_COMMAND}'`;
+  run("sh", ["-c", rsync], process.cwd());
+  run("sh", ["-c", restart], process.cwd());
+  await verifyShip(origin, models, recipe);
 }
 
 /** The whole run, D1's eleven steps in order; the child server is stopped on every path out. */
@@ -1721,8 +1791,25 @@ export async function bake(args: BakeArgs): Promise<void> {
   run("sh", ["deploy/demo/check-bake.sh", file, args.indexCache], repo);
   log("check-bake.sh passed");
 
-  // 11. The ship, or its commands.
-  await ship(args, libraryId, models, recipe);
+  // 11. The ship, or its commands. `origin` is resolved here, once, before
+  // any shipping happens: `--origin` when given (or the `<origin>` print
+  // placeholder when neither flag was), else derived from `--ship`. `bake`
+  // is exported, so a caller that built `BakeArgs` by hand — skipping
+  // `parseArgs`' own refusal for a `--ship` this cannot resolve an origin
+  // for — is refused here too, ahead of the rsync a few lines down, rather
+  // than shipping bytes and restarting the box before finding out.
+  let origin: string;
+  if (args.ship === undefined) {
+    origin = args.origin ?? "<origin>";
+  } else {
+    const resolved = originFromShip(args.ship, args.origin);
+    if (resolved === null)
+      throw new Error(
+        `--ship ${args.ship} names no origin task 4.2 can hit-check — parseArgs should already have refused this`,
+      );
+    origin = resolved;
+  }
+  await ship(args, libraryId, models, recipe, origin);
 }
 
 // Run only when invoked directly, so the core above can be imported by the
