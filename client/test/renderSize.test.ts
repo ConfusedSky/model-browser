@@ -6,9 +6,10 @@ const SUPERSAMPLE = 1.5;
 const MAX_PIXELS = 6_000_000;
 
 describe("live canvas render size", () => {
-  it("supersamples a tile-sized overlay to the density a thumbnail already has", () => {
-    // The orbit overlay is tile-sized: 176 CSS px. A thumbnail is 512² shown in
-    // that box — ~1.45× device pixels at DPR 2, which is what this matches.
+  it("supersamples a tile-sized overlay", () => {
+    // The factor is for shading aliasing, which MSAA cannot touch — not for
+    // matching a thumbnail's sample density, which `LIVE_SUPERSAMPLE` no longer
+    // claims.
     const { width, height } = liveRenderSize(176, 176, 2);
     expect(width).toBe(Math.round(176 * 2 * SUPERSAMPLE));
     expect(height).toBe(width);

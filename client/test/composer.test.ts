@@ -109,7 +109,8 @@ describe("post-process chains", () => {
     expect(thumb.composer.renderTarget2.texture.type).toBe(
       THREE.UnsignedByteType,
     );
-    // Fixed 512², never resized, and never pointed at the visible canvas.
+    // Fixed at `THUMB_SIZE`, never resized, and never pointed at the visible
+    // canvas.
     expect(thumb.composer.renderTarget1.width).toBe(THUMB_SIZE);
     expect(thumb.composer.renderTarget1.height).toBe(THUMB_SIZE);
     expect(thumb.composer.renderToScreen).toBe(false);
@@ -158,7 +159,7 @@ describe("render paths go through the chains, never renderer.render", () => {
     session.close();
   });
 
-  it("reads the thumbnail back from the chain readBuffer as 512² RGBA", () => {
+  it("reads the thumbnail back from the chain readBuffer as RGBA", () => {
     const chain = getThumbChain();
     const composed = vi
       .spyOn(chain.composer, "render")
