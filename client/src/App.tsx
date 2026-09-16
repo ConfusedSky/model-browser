@@ -3821,7 +3821,6 @@ export default function App() {
           queries={EXAMPLE_QUERIES}
           meaningRunnable={introSearchable}
           onRun={runQuery}
-          onSurprise={() => runQuery(pickExample(EXAMPLE_QUERIES))}
           onDismiss={dismissIntro}
         />
       )}
