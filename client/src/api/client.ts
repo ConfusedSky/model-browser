@@ -45,7 +45,8 @@ export interface ThumbResult {
    *  key existed — and a posed render without it is stale to `useThumbnails`,
    *  as one without its lighting or rig label is. */
   poseKey?: string;
-  /** Object URL for the cached PNG, present on 'hit'. */
+  /** Object URL for the cached PNG. Present on a 'hit', unless the read asked
+   *  for no pixels — a `pixels: false` lookup mints none, by design. */
   pngUrl?: string;
   /**
    * The entry's write generation, as the server last reported it
@@ -293,19 +294,20 @@ export interface ApiClient {
    * The cached thumbnail for one render of `path`. `ao` names which — occluded
    * by default, which is what a request with no `ao` has always meant and what
    * the server still reads an absent parameter as.
-   */
-  /**
+   *
    * `gen` names the write generation the caller believes this entry is at. Sent
    * only when known: an answer at that generation can be cached indefinitely,
    * and one that is no longer current comes back uncacheable with the current
    * number so the caller re-keys (D2).
-   */
-  /**
+   *
    * `pixels` false asks for the answer without the render: the caller gets the
    * camera, the axis, the labels and the status, and no `pngUrl` at all. For
    * the readers that only ever wanted the orientation or the verdict — the
    * base64 render is the whole weight of this answer, and a caller that does
    * not use it also has no object URL to revoke.
+   *
+   * (Three paragraphs, one block: consecutive JSDoc comments are not merged by
+   * tooling, and only the last of them reaches a hover.)
    */
   getThumb(
     path: string,

@@ -556,11 +556,12 @@ describe("thumbnail cache API", () => {
   });
 
   it("serves the answer without the render when `pixels=off`, and still revalidates", async () => {
-    // The pixels are the whole weight of this answer (~7.5 KB of base64
-    // against a few hundred bytes of labels), and the readers that only want
-    // the orientation or the staleness verdict — a lightbox resolving a saved
-    // camera, a re-render deciding whether it has anything to do — were paying
-    // it on every call.
+    // The pixels are the whole weight of this answer — the route's own
+    // comment carries the measurement and the command that re-runs it, so it
+    // is not retyped here — and the readers that only want the orientation or
+    // the staleness verdict, a lightbox resolving a saved camera or a
+    // re-render deciding whether it has anything to do, were paying it on
+    // every call.
     const res = await get(
       `/api/thumb?path=${encodeURIComponent(path)}&mtime=111&pixels=off`,
     );
@@ -579,6 +580,19 @@ describe("thumbnail cache API", () => {
       { headers: { ...LOOPBACK, "if-none-match": etag! } },
     );
     expect(again.status).toBe(304);
+  });
+
+  it("reads an explicit `pixels=on` as the render, exactly as an absent one", async () => {
+    // The parameter's default is a compatibility claim: a client that names
+    // `on` and one that names nothing must get the same answer, or the
+    // back-compatibility the absent case rests on is only half tested.
+    const named = (await (
+      await get(
+        `/api/thumb?path=${encodeURIComponent(path)}&mtime=111&pixels=on`,
+      )
+    ).json()) as ThumbGetResponse;
+    expect(named.status).toBe("hit");
+    expect(named.png).toBe(png);
   });
 
   it("rejects a `pixels` query that is neither on nor off", async () => {

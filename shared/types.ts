@@ -341,7 +341,8 @@ export interface ThumbGetResponse {
    * — a posed render with no key is stale like one with no rig label.
    */
   poseKey?: string;
-  /** base64 PNG, present when status === 'hit'. */
+  /** base64 PNG, present when status === 'hit' — unless the request asked
+   *  `pixels=off`, which is a read of the labels and the orientation alone. */
   png?: string;
   /**
    * The entry's write generation — a counter the server moves on **every**

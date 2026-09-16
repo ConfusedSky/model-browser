@@ -2345,9 +2345,13 @@ export function createApp(
     // route want the orientation and the staleness verdict, not the pixels —
     // the lightbox resolving a saved camera, a re-render deciding whether it
     // has anything to do — and the pixels are the whole payload. Measured over
-    // this machine's cache, 415 renders (`find ~/.cache/model-browser -name
-    // "*.webp" -printf "%s\n"`): 5,938 bytes median, 17,284 max, so 7.9 KB
-    // median of base64 against a few hundred bytes of labels. Absent is `on`, so a
+    // this machine's cache on 2026-09-15, 608 renders (`find
+    // ~/.cache/model-browser -name "*.webp" -printf "%s\n" | sort -n`): 6,260
+    // bytes median, 17,334 max, so ~8.3 KB of base64 at the median against a
+    // few hundred bytes of labels. The sample grows as the cache does — it
+    // read 415/5,938 earlier the same day — so re-run it rather than quoting
+    // it; what is stable is the ratio, not the count.
+    // Absent is `on`, so a
     // client that does not know about this parameter reads exactly what it
     // always read; `off` is a different URL, so the two answers can never
     // share a cache entry.
