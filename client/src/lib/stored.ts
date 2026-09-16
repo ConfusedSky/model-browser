@@ -1,16 +1,10 @@
 /**
  * A preference kept in `localStorage`, per browser profile.
  *
- * Neither half may throw. Reads happen at module init, where an exception would
- * take the app down before it rendered, and writes happen in event handlers on
- * browsers (and test environments) where storage can be absent or refused — so
- * a read falls back to `parse(null)`, the same answer an unset key gives, and a
- * failed write leaves the value in memory only.
- *
- * `parse` is handed the raw string or `null` and is the single place a stored
- * value is validated: a malformed one reads as the default rather than
- * propagating, since a key edited by hand should degrade to the ordinary
- * setting.
+ * Neither half may throw: reads happen at module init, where an exception takes
+ * the app down before it renders, and storage can be absent or refused. `parse`
+ * is the single place a stored value is validated, and a malformed one reads as
+ * the default.
  */
 export interface Stored<T> {
   read(): T;

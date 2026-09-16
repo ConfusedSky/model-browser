@@ -1,25 +1,13 @@
 /**
- * Bulk thumbnail jobs: warm a scope to fully thumbnailed, or give up its stored
- * framings (`bulk-thumbnail-jobs` §1).
- *
- * A job is `(operation, scope)` and nothing else (D1). Its work list is
- * **derived at launch** from the per-entry state the server's caches already
- * hold — the scope enumeration `ApiClient.models` answers — and is never
- * persisted: every completed entry's own state change drops it out of any later
- * derivation, so "resume" is "launch it again" and the second run's derivation
- * is exactly the remainder. Cancel plus re-run *is* pause.
- *
- * One job at a time (D2). A launch while one is alive answers `'busy'`, starts
- * nothing, and un-dismisses the running job's chip — the chip being the job's
- * whole UI, and surfacing it is what the second press is for.
+ * Bulk thumbnail jobs: warm a scope, or give up its stored framings
+ * (`bulk-thumbnail-jobs` §1). A job is `(operation, scope)` and nothing else
+ * (D1); its work list is derived at launch and never persisted, so "resume" is
+ * "launch it again" and cancel plus re-run *is* pause. One job at a time (D2).
  *
  * **Every write carries the generation the derivation snapshotted** (D4), so a
- * model the user orbited after the launch refuses the job's write (412) and is
- * counted as skipped rather than overwritten. That works because each operation
- * here writes each entry exactly **once**: an accepted write moves the entry's
- * generation, so a second write under the same launch snapshot would refuse
- * itself. An operation that ever needs two writes to one entry must re-key from
- * the generation the first PUT answered with, not from the snapshot.
+ * model the user orbited after the launch refuses the write (412) and counts as
+ * skipped. That holds only because each operation writes each entry **once**:
+ * an operation needing two writes must re-key from the first PUT's answer.
  */
 import { useSyncExternalStore } from "react";
 import type * as THREE from "three";
@@ -36,17 +24,16 @@ import type { RenderQueue } from "../three/queue";
 
 export type JobOperation = "generate" | "reset";
 
-/** Where a job runs and what the chip calls it. `label` is display only — the
- *  folder's own name, or "the library" for the root. */
+/** `label` is display only — the folder's name, or "the library" for the root. */
 export interface JobScope {
   path: string;
   label: string;
 }
 
 /**
- * `deriving` → (`confirming` →) `running` → `done`, or `cancelled` from any of
- * the three live phases. `confirming` is reset's alone (D5): it discards
- * framings no re-run can rederive, so it asks before it sends anything.
+ * `deriving` → (`confirming` →) `running` → `done`, or `cancelled` from any live
+ * phase. `confirming` is reset's alone (D5): it discards framings no re-run can
+ * rederive, so it asks before sending anything.
  */
 export type JobPhase =
   | "deriving"
@@ -56,71 +43,40 @@ export type JobPhase =
   | "cancelled";
 
 export interface JobState {
-  /**
-   * Which launch this state describes — a counter, new per `launch`. Every
-   * patch builds a new state object, so a reader that wants "once per job"
-   * (App's recount on a job that wrote) keys on this, not on object identity:
-   * keyed on identity, a Dismiss after the job settled re-fired the recount.
-   */
+  /** A reader wanting "once per job" must key on this: every patch is a new
+   *  state object, so on identity a Dismiss after settling fires again. */
   runId: number;
   operation: JobOperation;
   scope: JobScope;
   phase: JobPhase;
-  /** What the derivation found. Zero until it lands. */
   total: number;
   done: number;
   failed: number;
   /** Entries whose generation had moved: the user's write stands (D4). */
   skipped: number;
-  /**
-   * Entries this job actually wrote — a landed PUT. `done` counts entries
-   * processed, which includes a generate finding its entry already current
-   * (one lookup, no write); the tab recounts only for a job that wrote.
-   */
+  /** Entries a PUT landed on, where `done` counts entries processed: a generate
+   *  can find its entry current. The tab recounts only on a write. */
   wrote: number;
-  /**
-   * The run loop has finished — its last entry landed, whether the job ended
-   * `done` or was cancelled. `cancelled` is set the instant the user presses
-   * Cancel, while the in-flight entry may still land and count; anything that
-   * wants "the job is over and its counters are final" waits for this. One
-   * write can still go unreported: a relaunch the instant after Cancel makes
-   * the abandoned run's landing patch stale (`patchRun` refuses it), so its
-   * `wrote` never reaches a reader — narrow, and cancel-plus-relaunch is
-   * "pause" by D1; the next derivation absorbs it.
-   */
+  /** The counters are final: `cancelled` is set the instant Cancel is pressed,
+   *  while the in-flight entry may still land and count. */
   settled: boolean;
-  /**
-   * A generate entry has been handed to the render queue and has not started:
-   * it is pinned to the far band, so it waits behind everything the user is
-   * looking at — and behind the far gate while nearer lookups are pending.
-   * Seen live at a 200-folder root (2026-09-03): a job sat at "0 of 96" for
-   * over twelve seconds with nothing wrong, and the chip could not say why.
-   * This is one of the two facts the chip's "waiting behind what you're
-   * looking at" reads; the other is App's — an open lightbox or orbit overlay
-   * suspends the queue, and an entry that already started then waits inside
-   * the core's own `whenResumed()` gates, which this flag cannot see (it went
-   * false the moment the callback began). Never true for a reset, which sends
-   * its writes directly.
-   */
+  /** Pinned far and not started, so a job can sit at zero with nothing wrong —
+   *  which the chip has to be able to say. It cannot see an entry that
+   *  *started* and then parked in a `whenResumed()` gate; that half is App's. */
   waiting: boolean;
-  /** The enumeration ran out of budget — this job covers what was found, and
-   *  the chip says the scope was cut. */
+  /** The enumeration ran out of budget, so the chip says the scope was cut. */
   incomplete: boolean;
   /** The chip is hidden. Never a cancellation (D2): the job runs on. */
   dismissed: boolean;
-  /** Set only where the job as a whole failed — no work list at all, or a work
-   *  list of which nothing could proceed. */
+  /** Only where the job as a whole failed. */
   failure?: string;
 }
 
-/** One derived entry, with everything the per-entry op needs and nothing it
- *  would have to go and read again. */
 export interface JobEntry {
   entry: DirEntry;
-  /** The write generation at launch — every write is conditional on it (D4). */
+  /** The generation at launch; every write is conditional on it (D4). */
   gen: number;
-  /** The index's orientation: the enumeration's own — a settled `null`
-   *  included — else the job's wave. */
+  /** The enumeration's own, a settled `null` included, else the job's wave. */
   pose: IndexPose | null | undefined;
 }
 
@@ -134,68 +90,42 @@ export interface JobDeps {
   lru: Pick<MeshLru<THREE.Object3D>, "acquire">;
   queue: Pick<RenderQueue, "push" | "whenResumed">;
   setThumb: ActionHost["setThumb"];
-  /** `useThumbnails`' per-path restart, for the in-memory half of a reset: an
-   *  on-screen tile drops the image the write just deleted and looks up again.
-   *  A path this listing does not have is a no-op there. */
+  /** The in-memory half of a reset; off-screen paths are a no-op there. */
   refetch: (path: string) => void;
-  /** The occlusion preference in force, read once per derivation — it decides
-   *  which of an entry's two render blocks the staleness test reads. */
+  /** Read once per derivation, so half a scope cannot be judged on the other
+   *  variant. */
   ao: () => boolean;
 }
 
-/** The scope could not be enumerated, so there is no work list and no job. The
- *  one failure that lands before anything runs. */
+/** No work list and no job: the one failure that lands before anything runs. */
 export const SCOPE_UNREADABLE = "Could not enumerate the scope.";
-/** Every derived entry failed. The spec's "the job fails as a whole only when
- *  nothing in it could proceed" — one skip or one success is not this. */
+/** Every derived entry failed; one skip or one success is not this. */
 export const NOTHING_PROCESSED = "Nothing in this scope could be processed.";
 
 /**
- * One run's identity, handed to the loop rather than read off the state.
- *
- * It carries the cancel flag, which is what the loop tests before every push
- * and every send — but the object itself is the more important half. A run
- * outlives the job it belongs to: a cancel does not recall the entry already in
- * flight (nothing can), and the user is free to launch a *second* job the
- * instant the first is cancelled. The abandoned entry then settles inside a
- * process whose `this.current` describes somebody else's job, and every
- * unguarded write from it — a counter, a phase — lands on that job instead.
- *
- * So `this.token === token` is what "this run still owns the state" means, and
- * `patchRun` is the only way a run may write. A bare `cancelled` flag cannot
- * express it: the stale run *is* cancelled, and it is exactly its cancelled
- * tail that would otherwise flip a freshly launched job to `cancelled` while
- * its own derivation was still in flight.
+ * One run's identity, because a run outlives its job: a cancel cannot recall the
+ * entry in flight, and the next job may already be running when it settles.
+ * `this.token === token` is what "this run still owns the state" means, and
+ * `patchRun` is the only way a run may write — a bare `cancelled` flag cannot
+ * express it, since the stale run *is* cancelled and would flip the new job.
  */
 interface RunToken {
   cancelled: boolean;
 }
 
 /**
- * Whether an operation touches this model — the derivation's one filter,
- * shared by `derive` (the work list) and `count` (the buttons), so the button
- * cannot promise a different number from the one the job touches.
- *
- * The judgement stays client-side (D8). The server states facts per model —
- * presence and labels per variant, `gen`, `framed` — and the recipe constants
- * that decide what those facts *mean* live here, so generate asks
- * `isCurrentRender`, the very predicate the sweep's hit branch asks, rather
- * than a second reading of it.
+ * Shared by `derive` and `count`, so a button cannot promise a different number
+ * from the one the job touches. The judgement stays client-side (D8): the server
+ * states facts, and the constants that decide what they *mean* live here.
  */
 function keeps(operation: JobOperation, c: JobEntry, ao: boolean): boolean {
   const { thumb } = c.entry;
   if (operation === "reset") {
-    // `framed` is the server's word for "a camera **or** an axis is stored"
-    // (M4), and since `pose-rerender` D7 that is exactly what a reset changes
-    // — both are given up, whatever the index holds — asked of the shared
-    // rule, never restated. (`framed` itself is not consulted: the server
-    // spells the camera and axis whenever either is stored, so the rule's own
-    // answer already implies it.)
+    // Asked of the shared rule, never restated (`pose-rerender` D7).
     return thumb !== undefined && resettable(thumb.camera, thumb.axis);
   }
-  // An absent annotation means nothing is cached, not "unknown": the server's
-  // index is seeded by the startup sweep and learns every write, so an entry
-  // it holds nothing for has no stored render.
+  // An absent annotation is nothing cached, not "unknown": the server's index
+  // is seeded at startup and learns every write.
   return (
     thumb === undefined ||
     !isCurrentRender(
@@ -208,15 +138,12 @@ function keeps(operation: JobOperation, c: JobEntry, ao: boolean): boolean {
 }
 
 export class BulkJobs {
-  /** Null until the first launch; the last job's state stays readable after it
-   *  ends, because the chip outlives the work it reported on. */
+  /** The last job's state stays readable: the chip outlives its work. */
   private current: JobState | null = null;
   private listeners = new Set<() => void>();
   private token: RunToken | null = null;
-  /** Launches so far — `JobState.runId`'s source. */
   private runs = 0;
-  /** Resolves the `confirming` wait — by `confirm()`, and by `cancel()`, which
-   *  has to release the loop so it can unwind rather than sit there forever. */
+  /** `cancel()` resolves it too, or the loop waits for ever. */
   private confirmWaiter: (() => void) | null = null;
 
   constructor(private readonly deps: JobDeps) {}
@@ -225,11 +152,8 @@ export class BulkJobs {
     return this.current;
   }
 
-  /**
-   * For `useSyncExternalStore`. An arrow property, not a method: the hook holds
-   * the reference across renders and an unbound method would re-subscribe on
-   * every one of them.
-   */
+  /** An arrow property, not a method: `useSyncExternalStore` holds the reference
+   *  across renders and an unbound method would re-subscribe on each. */
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
     return () => {
@@ -237,18 +161,8 @@ export class BulkJobs {
     };
   };
 
-  /**
-   * The work list for `(operation, scope)`, derived from the enumeration and
-   * nothing else. Public because the library tab's counts are the same
-   * derivation run without launching anything (D5): a count is a derivation,
-   * not a reservation.
-   *
-   * The judgement stays client-side (D8). The server states facts per model —
-   * presence and labels per variant, `gen`, `framed` — and the recipe constants
-   * that decide what those facts *mean* live here, so generate asks
-   * `isCurrentRender`, the very predicate the sweep's hit branch asks, rather
-   * than a second reading of it.
-   */
+  /** Public because the tab's counts are this derivation without a launch: a
+   *  count is not a reservation (D5). */
   async derive(operation: JobOperation, scope: JobScope): Promise<Derivation> {
     const scan = await this.enumerate(scope, operation);
     return {
@@ -257,12 +171,8 @@ export class BulkJobs {
     };
   }
 
-  /**
-   * Both operations' counts from **one** enumeration and one wave — what the
-   * library tab's buttons show (D5). Two `derive` calls would walk the same
-   * scope twice and ask the index about the same unknowns twice, for two
-   * numbers that are two filters over one answer.
-   */
+  /** Both counts from **one** enumeration and wave: two `derive` calls would
+   *  walk the scope twice for two filters over one answer. */
   async count(
     scope: JobScope,
   ): Promise<{ generate: number; reset: number; incomplete: boolean }> {
@@ -276,35 +186,21 @@ export class BulkJobs {
     return { generate, reset, incomplete: scan.incomplete };
   }
 
-  /**
-   * The enumeration and the wave, once per ask; `keeps` applies an operation
-   * over the result. Every model beneath the scope is a candidate; which ones
-   * a job touches is the operation's filter — and the wave is sized to the
-   * purpose, so the filter sees a pose exactly where its rule reads one.
-   */
+  /** The wave is sized to the purpose, so the filter sees a pose exactly where
+   *  its rule reads one. */
   private async enumerate(
     scope: JobScope,
     purpose: JobOperation | "count",
   ): Promise<{ candidates: JobEntry[]; incomplete: boolean; ao: boolean }> {
     const listing = await this.deps.api.models(scope.path);
     const models = listing.entries.filter((e) => e.kind === "model");
-    // Wave only over the models whose rule needs a pose it does not have.
-    // Measured on the real library (2026-09-02; re-run: `curl -s
-    // 'http://127.0.0.1:3177/api/models?path=/'` and count entries, entries
-    // without `pose`, bytes and time): 18,737 models, 7.8 MB in 0.47 s, 15,357
-    // with no pose in the enumeration, so a full wave is sixteen index requests — paid
-    // once per opening of the tab and once per press of Reset before Masa
-    // objected. Only *generate* needs the index's opinion of every unowned
-    // model (a render whose `posed` is behind is stale). A *reset* and a
-    // *count* need none (`pose-rerender` D7): a reset gives up the camera and
-    // the axis whatever the index holds, so the wire's `framed` is the whole
-    // answer. The generate count can miss a pose-stale render the layer has
-    // not learned yet; a generate launch's full wave still finds it.
+    // Only *generate* needs the index's opinion of every unowned model; a reset
+    // gives the framing up whatever the index holds (`pose-rerender` D7), and a
+    // full wave over the library is many requests. The cost is a generate
+    // *count* that can miss a pose-stale render the launch itself still finds.
     const needsPose = (_e: DirEntry): boolean => purpose === "generate";
-    // Only the models the enumeration could not answer for. The tree cache's
-    // pose layer rides an enumeration as it rides a listing, so asking about a
-    // model that already carries one would be asking the library what the index
-    // has already said (D8, the 6.4 rule). No unknowns, no round trip at all.
+    // Only what the enumeration could not answer for: its pose layer already
+    // carries the rest (D8), so no unknowns means no round trip.
     const unknown = models
       .filter((e) => e.pose === undefined && needsPose(e))
       .map((e) => e.path);
@@ -338,13 +234,8 @@ export class BulkJobs {
     return { candidates, incomplete: !listing.complete, ao };
   }
 
-  /**
-   * Start `(operation, scope)`, or surface the job already running.
-   *
-   * `'busy'` is not a refusal the user has to decode: D2's answer to a second
-   * launch is the running job's chip, so the dismissed flag is cleared on the
-   * way out and nothing else happens.
-   */
+  /** D2's answer to a second launch is the running job's chip, so `'busy'`
+   *  clears the dismissed flag and does nothing else. */
   launch(operation: JobOperation, scope: JobScope): "started" | "busy" {
     const phase = this.current?.phase;
     if (phase === "deriving" || phase === "confirming" || phase === "running") {
@@ -373,8 +264,7 @@ export class BulkJobs {
     return "started";
   }
 
-  /** Reset's consent (D5). A no-op in every other phase, so a stray press on a
-   *  chip that has moved on cannot start anything. */
+  /** Reset's consent (D5), a no-op in every other phase. */
   confirm(): void {
     if (this.current?.phase !== "confirming") return;
     const go = this.confirmWaiter;
@@ -384,13 +274,9 @@ export class BulkJobs {
   }
 
   /**
-   * Stop at once: nothing further is pushed or sent. The entry already in
-   * flight finishes or fails and is still counted — a render cannot be recalled
-   * from the GPU and a PUT cannot be recalled from the wire, and pretending
-   * otherwise would lose a count for work that really happened.
-   *
-   * A derivation still in flight is discarded on arrival: nothing was started,
-   * so there is nothing to stop.
+   * Nothing further is pushed or sent. The entry already in flight finishes and
+   * is still counted: a render cannot be recalled from the GPU, and pretending
+   * otherwise loses a count for work that happened.
    */
   cancel(): void {
     const phase = this.current?.phase;
@@ -405,26 +291,21 @@ export class BulkJobs {
     go?.();
   }
 
-  /** Hide the chip. **Never** a cancellation (D2): the job runs on, and the
-   *  next launch brings the chip back rather than starting a second job. */
+  /** **Never** a cancellation (D2): the job runs on. */
   dismiss(): void {
     if (this.current === null) return;
     this.patch({ dismissed: true });
   }
 
-  /**
-   * A write from inside `run`, applied only while that run still owns the
-   * state. Every patch the loop makes goes through here; `cancel`, `confirm`
-   * and `dismiss` use `patch` directly, because they are pressed on the job
-   * that is live by construction.
-   */
+  /** Every patch the loop makes goes through here; the pressed actions use
+   *  `patch`, being on the live job by construction. */
   private patchRun(token: RunToken, fields: Partial<JobState>): void {
     if (this.token !== token) return;
     this.patch(fields);
   }
 
-  /** One new state object per change, so `state` is a stable reference between
-   *  changes — which is what `useSyncExternalStore` requires of a snapshot. */
+  /** One new object per change, so `state` is the stable reference
+   *  `useSyncExternalStore` requires of a snapshot. */
   private patch(fields: Partial<JobState>): void {
     if (this.current === null) return;
     this.current = { ...this.current, ...fields };
@@ -441,8 +322,7 @@ export class BulkJobs {
     try {
       derivation = await this.derive(operation, scope);
     } catch {
-      // Not a per-entry failure: with no work list there is no job at all.
-      // Settled either way: a derivation that failed while cancelled is over too.
+      // With no work list there is no job. Settled either way.
       this.patchRun(
         token,
         token.cancelled
@@ -460,15 +340,14 @@ export class BulkJobs {
       incomplete: derivation.incomplete,
     });
     if (derivation.entries.length === 0) {
-      // An honest nothing: the scope was read and holds no work. Not a failure
-      // — a generate over a fully warm folder ends here every time.
+      // Not a failure: a generate over a fully warm folder ends here.
       this.patchRun(token, { phase: "done", settled: true });
       return;
     }
 
     if (operation === "reset") {
-      // D5: the count exists now, and the surface states it before anything is
-      // discarded. Cancelling here sends nothing at all.
+      // The count exists now, and the chip states it before anything is
+      // discarded (D5). Cancelling here sends nothing.
       this.patchRun(token, { phase: "confirming" });
       await new Promise<void>((resolve) => {
         this.confirmWaiter = resolve;
@@ -485,15 +364,14 @@ export class BulkJobs {
     let failed = 0;
     let skipped = 0;
     let wrote = 0;
-    // Sequential, one entry in flight (1.2). The queue is two wide, so a single
-    // pending job entry always leaves a slot for interactive work — and cancel
-    // is instant, because there is never a backlog of the job's own pushes to
-    // discard.
+    // Sequential, one entry in flight: a single pending job entry always leaves
+    // a queue slot for interactive work, and cancel is instant because there is
+    // never a backlog of the job's own pushes to discard.
     for (const job of derivation.entries) {
       if (token.cancelled) break;
       if (operation === "generate") {
         await new Promise<void>((resolve) => {
-          // Pushed, not started: the far band and the far gate decide when.
+          // Pushed, not started: the band and the far gate decide when.
           this.patchRun(token, { waiting: true });
           this.deps.queue.push(
             async () => {
@@ -506,9 +384,8 @@ export class BulkJobs {
                     discardFraming: false,
                     pose: job.pose,
                     ifGen: job.gen,
-                    // The derivation judged from an annotation; the core's own
-                    // fresh lookup is the last word, and an entry that went
-                    // current in between costs one GET rather than a render.
+                    // The derivation judged from an annotation, so the fresh
+                    // lookup is the last word.
                     skipIfCurrent: true,
                   },
                 );
@@ -518,54 +395,45 @@ export class BulkJobs {
                   if (outcome === "done") wrote++;
                 }
               } catch {
-                // Counted, never reported through a host: one sentence per
-                // failed model, fanned over a kit, is a wall of them (D7). The
-                // chip carries the number instead.
+                // Counted, never said: one sentence per failed model is a wall
+                // of them (D7).
                 failed++;
               } finally {
                 resolve();
               }
             },
             job.entry.path,
-            // Pinned, not ranked (1.2): the key is an ordinary model path the
-            // grid may well call `visible`, and the spec says job work ranks no
-            // better than deferred far work whatever the grid says.
+            // Pinned, not ranked: the key is an ordinary model path the grid
+            // may well call `visible`, and job work ranks no better than
+            // deferred far work whatever the grid says.
             "far",
           );
         });
       } else {
-        // No queue, no mesh, no render (D3): reset is a write.
+        // No queue, no mesh, no render (D3).
         try {
           const written = await this.deps.api.putThumb({
             path: job.entry.path,
             mtime: job.entry.mtime,
-            // The discard, exactly as the per-model action writes it: the
-            // camera and the axis, both (`pose-rerender` D7).
+            // The discard as the per-model action writes it (`pose-rerender` D7).
             camera: null,
             axis: null,
-            // And the pixels go with it — both variants were drawn under the
-            // orientation just given up (D3).
+            // The pixels go too: both were drawn under the discarded framing.
             png: null,
             ifGen: job.gen,
           });
           done++;
-          // The same rule the generate path gets through `renderEntryThumbnail`'s
-          // `skipped`, applied to the write this path makes itself: `wrote`
-          // counts entries a PUT actually landed on, and a resolved `putThumb`
-          // is not that on its own. Where the deployment refuses writes the
-          // local-framing decorator answers `{ dropped: true }` without
-          // reaching the store, and counting it would have the chip report
-          // writes nobody made.
+          // A resolved `putThumb` is not a landed write: a write-refusing
+          // deployment answers `{ dropped: true }` without reaching the store.
           if (written.dropped !== true) wrote++;
-          // The in-memory half: a tile on screen is showing pixels the server
-          // no longer has.
+          // A tile on screen is showing pixels the server no longer has.
           this.deps.refetch(job.entry.path);
         } catch (err) {
           if (err instanceof HttpError && err.status === 412) skipped++;
           else failed++;
         }
       }
-      // Published per entry, so the chip's counters actually move.
+      // Per entry, so the chip's counters move.
       this.patchRun(token, { done, failed, skipped, wrote });
     }
 
@@ -582,8 +450,7 @@ export class BulkJobs {
   }
 }
 
-/** The chip's read of the running job. One line, and the only React in this
- *  module — the runner itself is plain and testable without a DOM. */
+/** The only React here: the runner is plain, and testable without a DOM. */
 export function useBulkJobState(jobs: BulkJobs): JobState | null {
   return useSyncExternalStore(jobs.subscribe, () => jobs.state);
 }

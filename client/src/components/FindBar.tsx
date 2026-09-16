@@ -1,15 +1,9 @@
 import { useEffect, useRef } from "react";
 
 /**
- * The find control: summoned over a listing to narrow it by name, dismissed
- * with Escape. It exists on demand rather than as a permanent field because
- * filtering is ephemeral view state — navigation discards it, and it is absent
- * from the URL — and a box that appears when asked for says that, where a
- * permanent one implies a persistence the filter does not have.
- *
- * It also keeps the search input holding one thing. The two shared a box until
- * the filter moved here, which was coherent only while both matched the same
- * string.
+ * Summoned rather than permanent, because filtering is ephemeral view state —
+ * navigation discards it and no URL names it — and a permanent box implies a
+ * persistence the filter does not have.
  */
 export default function FindBar({
   value,
@@ -19,22 +13,17 @@ export default function FindBar({
   onClose,
 }: {
   value: string;
-  /**
-   * Entries currently visible, so the user can see the filter working — null
-   * while a listing is in flight, when the count would describe the listing
-   * being replaced rather than the one arriving.
-   */
+  /** `null` while a listing is in flight, when the count would describe the
+   *  listing being replaced rather than the one arriving. */
   count: number | null;
-  /** Bumped when the user asks for the control again; refocuses it. */
   focusSignal: number;
   onChange: (value: string) => void;
   onClose: () => void;
 }) {
   const ref = useRef<HTMLInputElement>(null);
 
-  // Focused on open, and again whenever the user asks for it while it is
-  // already open — a control you summon and then have to click into has not
-  // finished appearing.
+  // Also when asked for while already open: a control you summon and then have
+  // to click into has not finished appearing.
   useEffect(() => {
     ref.current?.focus();
     ref.current?.select();

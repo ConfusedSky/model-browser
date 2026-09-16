@@ -6,11 +6,9 @@ export interface Box {
 }
 
 /**
- * Largest centered square inside a box — where a square thumbnail would sit.
- * Used as the orbit-overlay rect when a tile has no rendered <img> yet; when
- * one exists, its own rect IS the image box (512×512 intrinsic scaled
- * uniformly by max-constraints), which is why overlay aspect is always 1 and
- * framing matches the thumbnail camera exactly.
+ * The orbit-overlay rect for a tile with no rendered `<img>` yet; where one
+ * exists its own rect *is* the image box, which is why the overlay's aspect is
+ * always 1 and its framing matches the thumbnail camera exactly.
  */
 export function fitSquareBox(box: Box): Box {
   const side = Math.min(box.width, box.height);

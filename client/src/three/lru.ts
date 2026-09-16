@@ -11,11 +11,8 @@ export interface LoadedModel<T> {
 
 const DEFAULT_BUDGET = 1024 ** 3; // ~1GB of parsed geometry on the JS heap
 
-/**
- * Byte-budgeted LRU of parsed meshes. Budget measures parsed geometry on the
- * JS heap, not entry count. Eviction calls dispose() so GPU buffers are freed
- * — dropping the reference alone leaks VRAM.
- */
+/** Byte-budgeted over parsed geometry on the JS heap, not entry count.
+ *  **Eviction calls `dispose()`** — dropping the reference leaks VRAM. */
 export class MeshLru<T> {
   private entries = new Map<string, { object: T; bytes: number }>();
   private loading = new Map<string, Promise<T>>();
@@ -39,7 +36,6 @@ export class MeshLru<T> {
     return this.entries.has(path);
   }
 
-  /** Get the mesh, loading it if needed. Marks the entry most-recently-used. */
   async acquire(path: string): Promise<T> {
     const hit = this.entries.get(path);
     if (hit !== undefined) {
@@ -59,12 +55,11 @@ export class MeshLru<T> {
     return promise;
   }
 
-  /** Hover-warm: same as acquire but swallows errors (the real use surfaces them). */
+  /** Hover-warm; the real use surfaces the errors this swallows. */
   warm(path: string): void {
     void this.acquire(path).catch(() => {});
   }
 
-  /** Remove everything (e.g. on navigation away), disposing each entry. */
   clear(): void {
     for (const e of this.entries.values()) this.disposeFn(e.object);
     this.entries.clear();

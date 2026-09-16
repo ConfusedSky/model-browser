@@ -1,37 +1,10 @@
 /**
- * The listing cache's durable store: walked-tree snapshots and archive
- * directories (`listing-tree-cache` §2–§3).
+ * The listing cache's durable store (`listing-tree-cache` §2–§3, D2): one file
+ * per walked root plus one `archives.json`, under `<cache>/<id>/snapshots/`.
  *
- * Node APIs only — the Hono app must run un-Bun'd (global D1).
- *
- * **Where it lives, and why not simply beside the thumbnails (design D2).**
- * The store is `<cache>/<library-id>/snapshots/`: inside the thumbnail cache's
- * per-library directory, so it follows the library to another mount point
- * exactly as the thumbnails do and the documented `rm -rf <id-dir>` reset still
- * takes everything — but in a subdirectory of its own, because
- * `ThumbCache.maintain()` treats *every* `*.json` in that directory as a
- * thumbnail sidecar. A snapshot filed flat beside them makes the sweep's
- * `sourceExists(meta.path)` throw on an undefined path, which aborts the whole
- * sweep silently, and would be deleted outright as a dead thumbnail the day a
- * snapshot grew a `path` field. A plain directory name fails that loop's own
- * `.endsWith('.json')` test, so `maintain()` is byte-unchanged and blind to
- * this store.
- *
- * It therefore carries its own bound in the same policy shape rather than a
- * share of the thumbnail pool: one validated env knob, oldest-first eviction. A
- * ~2 MB snapshot in a 2 GB PNG budget would otherwise let thumbnail churn evict
- * thirty seconds of cold-walk protection to reclaim 0.1% of the cap.
- *
- * **Granularity (settled at implementation).** One file per *walked root*,
- * `tree-<sha256(root library path)>.json`, plus one `archives.json` for the
- * library. Per-root keeps §4.1a's "only a complete traversal is persisted" rule
- * honest independently for each root, and makes revalidation cost scale with
- * the roots actually walked. The accepted cost, recorded here so stage 2
- * inherits the fact rather than rediscovering it: a walk of `/` and a walk of
- * `/kit` store that subtree twice. The archive layer is per *library* because an
- * archive's identity has nothing to do with which root was walked — keying it
- * per root would re-read the same zip tails once per root, which is precisely
- * the cost D3 exists to delete.
+ * A **subdirectory** because `ThumbCache.maintain()` reads every `*.json` at its
+ * own level as a thumbnail sidecar, and its own size cap because sharing the
+ * thumbnail pool would let pixel churn evict a cold walk's protection.
  */
 
 import { createHash } from "node:crypto";
@@ -54,45 +27,28 @@ import { VPathError } from "./vpath";
 import type { ArchiveId, ZipDirCache, ZipEntry } from "./zip";
 
 /**
- * The on-disk format version. Bump on any change to what a stored file means;
- * a file carrying anything else is treated as absent rather than guessed at
- * (`overrides.ts`'s `VERSION` is the precedent and the same reasoning).
- *
- * This is the *second* line of defense, not the only one: writes are atomic, so
- * a torn file should never reach a reader in the first place. The guard is what
- * covers the case atomicity cannot — a file written whole by an older or newer
- * build, whose fields parse but no longer mean what this build thinks.
+ * Bump on any change to what a stored file *means*: writes are atomic, so what
+ * this covers is a whole file from another build whose fields still parse.
  */
 export const SNAPSHOT_VERSION = 1;
 
-/** The subdirectory, inside the per-library cache directory, that holds it all. */
 export const SNAPSHOT_DIR = "snapshots";
 
-/** The archive-directory layer's file name, one per library. */
 export const ARCHIVES_FILE = "archives.json";
 
 /** Default bound for the whole store: 64 MB of metadata, per design D2. */
 const DEFAULT_CAP = 64 * 1024 ** 2;
 
 /**
- * How old a `.tmp` must be before the sweep reaps it. Sized against the race it
- * exists for, not against the files: a `writeAtomic` temp lives for one write —
- * milliseconds — and the startup sweep runs concurrently with the revalidation
- * pass's first saves, so anything younger than this is presumed live.
+ * How old a `.tmp` must be before the sweep reaps it: a temp lives for one write,
+ * and the startup sweep runs beside the pass's own saves, so younger is live.
  */
 const TMP_REAP_MS = 60_000;
 
 /**
- * One entry as the walk saw it.
- *
- * Deliberately **not** `DirEntry`. The two carry the same walk facts, but
- * `DirEntry` also carries `displayName`, which `applyDisplayNames` sets on
- * emitted entries *in place* and never clears. Persisting that shape would let
- * one request's override names be written into the snapshot and served back to
- * every later request, across a store removal or a library repoint — the exact
- * failure the delta's "serve copies, never the cached objects" rule exists to
- * prevent. A separate type makes the annotation fields unrepresentable here
- * rather than merely discouraged; stage 2 maps these to fresh `DirEntry`s.
+ * Deliberately **not** `DirEntry`: that carries `displayName`, which
+ * `applyDisplayNames` sets in place and never clears, so persisting it would
+ * write one request's override names into every later answer.
  */
 export interface SnapshotEntry {
   name: string;
@@ -107,11 +63,8 @@ export interface SnapshotEntry {
 }
 
 /**
- * Per-directory freshness state (D4): the signal revalidation re-checks.
- *
- * A record rather than a bare number so the readdir-fingerprint fallback D4
- * keeps as a contingency for other filesystems — entry count plus total size —
- * can be added as fields without a format bump changing what `mtime` means.
+ * Per-directory freshness state (D4). A record, not a bare number, so D4's
+ * fallback fingerprint can be added without a format bump.
  */
 export interface SnapshotDir {
   /** Library path of the directory. */
@@ -120,7 +73,7 @@ export interface SnapshotDir {
   mtime: number;
 }
 
-/** A complete walk of one root, as stage 2 will serve and revalidate it. */
+/** A complete walk of one root, as it is served and revalidated. */
 export interface TreeSnapshot {
   /** The walked root's library path — the second half of the key. */
   root: string;
@@ -133,12 +86,7 @@ export interface TreeSnapshot {
 /** A tree snapshot as it sits on disk. */
 interface TreeFile extends TreeSnapshot {
   version: number;
-  /**
-   * The library this belongs to. Redundant with the directory it is filed in,
-   * and kept anyway: it is what makes a snapshot self-describing, so a file
-   * copied or restored into the wrong library's directory is rejected on its
-   * own contents rather than served as that library's tree.
-   */
+  /** Redundant with the directory, so a file restored into the wrong one is caught. */
   library: string;
 }
 
@@ -155,30 +103,15 @@ interface ArchivesFile {
   archives: Record<string, ArchiveRecord>;
 }
 
-/**
- * The size cap from the environment — `env.ts`'s one parser, which owns the
- * rule this used to restate: malformed or non-positive falls back, the floor
- * runs before the positivity test, and the store is never silently unbounded.
- * `Number('64MB')` is NaN, and a NaN cap makes `total <= cap` false forever — a
- * malformed knob that evicts everything on every sweep, which is what that
- * shape exists to refuse.
- */
+/** The size cap from the environment, through `env.ts`'s one validated parser. */
 function envCap(): number {
   return envPositiveInt("MODEL_BROWSER_SNAPSHOT_CAP", DEFAULT_CAP);
 }
 
 /**
- * Replace a file atomically and durably: write a temp file beside it, fsync it,
- * then rename over the target. `overrides.ts`'s `writeOverrides` is the
- * precedent and this is the same procedure — a reader sees the old file or the
- * new one, never half of one, so the version guard above is never the only
- * thing standing between a crash and a mis-parse.
- *
- * The temp file is dot-prefixed and removed if anything fails, so a failed
- * write leaves the directory as it found it. The directory fsync afterwards is
- * what makes the *rename* durable rather than just the bytes; it is
- * best-effort, because not every filesystem this library can live on (exFAT,
- * notably) supports it.
+ * Temp file, fsync, rename — `overrides.ts`'s `writeOverrides` procedure, so a
+ * reader sees the old file or the new one. The directory fsync is what makes the
+ * *rename* durable, and is best-effort: exFAT does not support it.
  */
 async function writeAtomic(
   dir: string,
@@ -187,8 +120,7 @@ async function writeAtomic(
 ): Promise<void> {
   await mkdir(dir, { recursive: true });
   const target = join(dir, name);
-  // pid + ms alone can collide (two writes in one tick of one process); the
-  // random suffix cannot, and a stray loser is dot-prefixed and swept below.
+  // pid + ms collide within one tick; the random suffix is what does not.
   const temp = join(
     dir,
     `.${name}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`,
@@ -214,12 +146,8 @@ async function writeAtomic(
 }
 
 /**
- * The walked-tree and archive-directory store for one library.
- *
- * Constructed like `ThumbCache` — the cache root and the library are
- * constructor arguments, so a test never depends on `MODEL_BROWSER_CACHE` or on
- * the developer's real cache. Omitting the library is test-only: entries then
- * live in `<dir>/snapshots/` with no library identity to check.
+ * Constructed like `ThumbCache`, so a test never touches the real cache.
+ * Omitting the library is test-only: no identity is then checked.
  */
 export class SnapshotStore {
   /** The archive layer, loaded once per process and flushed on demand. */
@@ -236,12 +164,7 @@ export class SnapshotStore {
     private readonly library?: Library,
   ) {}
 
-  /**
-   * Where this library's snapshots live. Awaiting the state is what makes the
-   * id readable — `id()` throws until the library has been evaluated once — and
-   * it keeps the read lazy, so the store can be constructed before the volume
-   * has been looked at at all. `ThumbCache.entryDir` is the same shape.
-   */
+  /** Awaited because `id()` throws until the library has been evaluated once. */
   private async storeDir(): Promise<string> {
     if (this.library === undefined) return join(this.dir, SNAPSHOT_DIR);
     await this.library.state();
@@ -255,21 +178,14 @@ export class SnapshotStore {
     return this.library.id();
   }
 
-  /**
-   * A root's file name. Hashed for the same reason `ThumbCache` hashes: library
-   * paths contain `/`, `!` and spaces, none of which survive being a file name.
-   */
+  /** Hashed because a library path is not a file name. */
   private treeFile(root: string): string {
     return `tree-${createHash("sha256").update(root).digest("hex")}.json`;
   }
 
   /**
-   * The snapshot for `root`, or null — absent, unreadable, torn, of another
-   * format version, or belonging to another library.
-   *
-   * Reading is **pure**: a file rejected here is left where it is rather than
-   * deleted, so a read can never destroy a snapshot a newer build could still
-   * use. `maintain` is what reaps them.
+   * The snapshot for `root`, or null. Reading is **pure** — a rejected file is
+   * left where it is, so a read cannot destroy what a newer build could use.
    */
   async load(root: string): Promise<TreeSnapshot | null> {
     const dir = await this.storeDir();
@@ -278,15 +194,12 @@ export class SnapshotStore {
     if (parsed === null) return null;
     if (parsed.version !== SNAPSHOT_VERSION) return null;
     if (parsed.library !== (await this.libraryId())) return null;
-    // The hash makes a collision vanishingly unlikely, not impossible, and a
-    // stored root that is not the one asked for would serve another directory's
-    // tree. Cheap to check, catastrophic to skip.
+    // A hash collision would serve another directory's tree.
     if (parsed.root !== root) return null;
     if (!Array.isArray(parsed.entries) || !Array.isArray(parsed.dirs))
       return null;
-    // The LRU clock for the size cap is the file's own mtime, bumped on read
-    // via `utimes` — `ThumbCache`'s trick, and for its reason: it cannot be
-    // caught mid-write by the sweep the way rewriting the file could.
+    // The LRU clock is the file's mtime, bumped via `utimes` rather than by
+    // rewriting, which the sweep could catch mid-write.
     const now = new Date();
     await utimes(file, now, now).catch(() => undefined);
     return {
@@ -298,20 +211,9 @@ export class SnapshotStore {
   }
 
   /**
-   * Every root this library has a usable snapshot for.
-   *
-   * What startup revalidation (§6.5) and the reload endpoint (§6.6) iterate:
-   * both mean "the trees this library has cached", and only the files know
-   * which those are — the store is keyed by a hash, so a root cannot be read
-   * back out of a file name.
-   *
-   * Deliberately does **not** bump the LRU clock the way `load` does. This is a
-   * census, not a serve: a root nobody has listed for a month should not be
-   * defended from the size cap by the fact that a reload counted it.
-   *
-   * An absent store directory is an empty list, on `maintain`'s reasoning: a
-   * cache from before this change has no `snapshots/`, and neither does a
-   * library nothing has walked.
+   * Every root this library has a snapshot for — the files are the only census,
+   * since the key is a hash. Deliberately does **not** bump the LRU clock:
+   * counting a root is not listing it.
    */
   async roots(): Promise<string[]> {
     const dir = await this.storeDir();
@@ -338,16 +240,9 @@ export class SnapshotStore {
   }
 
   /**
-   * Persist a snapshot for its root, replacing any previous one.
-   *
-   * The caller owns the rule this store cannot check: **only a traversal that
-   * ran to completion may be saved** (D1/§4.1a). A partial tree stored as a
-   * whole one is indistinguishable from the real thing and permanently wrong,
-   * and completeness is a fact about `walkFlat`'s `budgetExhausted`, which is
-   * not visible from here.
-   *
-   * Flushes the archive layer too: a completed walk is exactly the moment both
-   * halves of what it learned should become durable together.
+   * The caller owns the rule this store cannot check: **only a completed
+   * traversal may be saved** (D1/§4.1a), which only `budgetExhausted` knows.
+   * Flushes the archive layer, so both halves of a walk land together.
    */
   async save(snapshot: TreeSnapshot): Promise<void> {
     const dir = await this.storeDir();
@@ -363,20 +258,13 @@ export class SnapshotStore {
     await this.flush();
   }
 
-  /**
-   * Drop the snapshot for one root — what revalidation calls when the
-   * filesystem has contradicted it (D6). Absent is success.
-   */
+  /** What revalidation calls on a contradiction (D6). Absent is success. */
   async invalidate(root: string): Promise<void> {
     const dir = await this.storeDir();
     await rm(join(dir, this.treeFile(root)), { force: true });
   }
 
-  /**
-   * Drop every tree snapshot for this library, archive layer included. The
-   * blunt instrument behind an explicit reload (D9) and behind "the format
-   * changed under us".
-   */
+  /** The blunt instrument behind an explicit reload (D9). */
   async invalidateAll(): Promise<void> {
     const dir = await this.storeDir();
     this.archives = new Map();
@@ -387,12 +275,8 @@ export class SnapshotStore {
   // ---- archive directories (D3) ----
 
   /**
-   * The `ZipDirCache` to hand `listZipEntries`. Keyed on the archive's
-   * `{mtime, size}`, so an unchanged archive is answered without being opened.
-   *
-   * Held in memory across a walk and written once, by `flush` or by `save`:
-   * persisting on every `set` would mean rewriting the whole layer 409 times
-   * during the walk that populates it.
+   * Held in memory across a walk and written once, by `flush` or `save`:
+   * persisting per `set` rewrites the whole layer once per archive.
    */
   archiveCache(): ZipDirCache {
     return {
@@ -400,9 +284,7 @@ export class SnapshotStore {
         const key = await this.archiveKey(zipPath);
         const held = (await this.loadArchives()).get(key);
         if (held === undefined) return undefined;
-        // The whole of D3's soundness: a rewritten archive necessarily rewrites
-        // its tail, so a moved mtime or size means the cached directory
-        // describes bytes that are gone.
+        // D3's soundness: a rewritten archive rewrites its tail.
         if (held.mtime !== id.mtime || held.size !== id.size) return undefined;
         return held.entries;
       },
@@ -419,14 +301,9 @@ export class SnapshotStore {
   }
 
   /**
-   * The archive's key: its **library path**, so the layer survives a remount
-   * exactly as the tree snapshots do. `zip.ts` deals in filesystem paths and
-   * must not be taught otherwise, so the translation happens here.
-   *
-   * A path the library refuses — outside the top, or unresolvable — falls back
-   * to the filesystem path. That is the honest answer for a library-less store,
-   * and for anything genuinely outside the library it degrades to a
-   * mount-point-specific key rather than a wrong one.
+   * The **library path**, so the layer survives a remount; `zip.ts` speaks
+   * filesystem paths, so the translation happens here. A path the library
+   * refuses falls back to the filesystem one — mount-specific, but not wrong.
    */
   private async archiveKey(zipPath: string): Promise<string> {
     if (this.library === undefined) return zipPath;
@@ -440,11 +317,7 @@ export class SnapshotStore {
     }
   }
 
-  /**
-   * Load the archive layer once. Single-flighted: a walk fires many `get`s
-   * before the first has resolved, and without this each would read and parse
-   * the file.
-   */
+  /** Single-flighted: a walk fires many `get`s before the first has resolved. */
   private async loadArchives(): Promise<Map<string, ArchiveRecord>> {
     if (this.archives !== undefined) return this.archives;
     return (this.loadingArchives ??= this.readArchives().finally(() => {
@@ -478,30 +351,21 @@ export class SnapshotStore {
   }
 
   /**
-   * Write the archive layer if anything changed. A process that never calls
-   * this (nor `save`) keeps what it learned in memory only, which is correct
-   * for a walk that was cancelled or truncated and must persist nothing.
+   * A process that never calls this (nor `save`) keeps what it learned in memory
+   * only, which is right for a walk that must persist nothing.
    */
   async flush(): Promise<void> {
-    // **One flush at a time, per store** (round-2 finding 10). Every walk's
-    // completing `save` calls this, and a server answers several roots at once:
-    // two flushes could serialize the layer, then interleave inside
-    // `writeAtomic`'s five awaits and commit their `rename`s in either order —
-    // so the *earlier*, smaller serialization could land last and permanently
-    // lose whatever the later one had learned. Atomicity makes each write whole;
-    // it says nothing about which whole write wins.
-    //
-    // Chained rather than locked, because the correction is entirely about
-    // order: each flush re-reads `archives` when its turn comes, so the last one
-    // through writes the newest state by construction. A failed flush must not
-    // wedge the chain, hence the `catch` on what the next one waits for — the
-    // error still reaches *this* caller through `run`.
+    // **One flush at a time, per store.** Atomicity makes each write whole and
+    // says nothing about which whole write wins: two flushes could interleave
+    // inside `writeAtomic` and commit their `rename`s in either order, the older
+    // serialization landing last. Chained rather than locked, because each flush
+    // re-reads `archives` on its turn; the `catch` keeps a failure from wedging
+    // the chain, and `run` still rejects for this caller.
     const run = this.flushing.then(() => this.flushLocked());
     this.flushing = run.catch(() => undefined);
     return await run;
   }
 
-  /** One flush's own work, with the chain above guaranteeing it runs alone. */
   private async flushLocked(): Promise<void> {
     if (!this.archivesDirty || this.archives === undefined) return;
     const dir = await this.storeDir();
@@ -511,19 +375,13 @@ export class SnapshotStore {
       archives: Object.fromEntries(this.archives),
     };
     const text = JSON.stringify(file);
-    // **Clean before the await, against the serialised copy above** (review
-    // finding 9). `writeAtomic` is several awaits long and a walk's `set`s land
-    // between them: clearing the flag *after* the write would clear a flag that
-    // a later `set` had raised, and that archive's directory — already read,
-    // already paid for — would never be persisted, so the next process opens
-    // the archive again. Marking clean first means such a `set` re-dirties and
-    // the following flush carries it, at the cost of one redundant write.
+    // **Clean before the await, against the serialised copy above**: clearing it
+    // afterwards would clear a flag a `set` raised mid-write, losing that
+    // archive's directory. This way it re-dirties and the next flush carries it.
     this.archivesDirty = false;
     try {
       await writeAtomic(dir, ARCHIVES_FILE, text);
     } catch (err) {
-      // A write that did not happen leaves the layer unpersisted, which is
-      // exactly what dirty means.
       this.archivesDirty = true;
       throw err;
     }
@@ -532,16 +390,8 @@ export class SnapshotStore {
   // ---- maintenance ----
 
   /**
-   * Sweep and bound this store: reap files this build cannot use, then evict
-   * oldest-read-first until the total is under the cap.
-   *
-   * Separate from `ThumbCache.maintain()` by design (D2) and independent of it:
-   * one location, one policy shape, two bounds. The LRU clock is each file's
-   * mtime, which `load` bumps.
-   *
-   * An absent store directory is success and nothing else: a cache directory
-   * from before this change has no `snapshots/` in it, and neither does a
-   * library nothing has walked yet.
+   * Reap what this build cannot use, then evict oldest-read-first under the cap.
+   * Its own bound, separate from `ThumbCache.maintain()` (D2).
    */
   async maintain(): Promise<void> {
     const dir = await this.storeDir();
@@ -561,41 +411,26 @@ export class SnapshotStore {
       const path = join(dir, name);
       const info = await stat(path).catch(() => null);
       if (info === null || !info.isFile()) continue;
-      // A stray temp file from an interrupted write is nobody's snapshot and
-      // will never be read — but **only once it is stale** (review finding 8).
-      // The startup sweep (`index.ts`) runs beside the revalidation pass's own
-      // saves, and `writeAtomic`'s temp exists for the length of one write:
-      // reaping on sight unlinks a live one out from under the `rename` that
-      // was about to commit it. A minute is orders of magnitude longer than any
-      // write here and orders shorter than the interval between sweeps.
+      // **Only once it is stale**: reaping on sight unlinks a live temp out from
+      // under the `rename` about to commit it.
       if (name.endsWith(".tmp")) {
         if (Date.now() - info.mtimeMs > TMP_REAP_MS)
           await rm(path, { force: true });
         continue;
       }
-      // Reaped here rather than on read, so a read stays pure: a file this
-      // build cannot parse or whose version it does not know is dead weight
-      // against the cap and will never be served.
+      // Reaped here rather than on read, which stays pure.
       if (!(await this.usable(name, path))) {
         await rm(path, { force: true });
-        // The reaped archive layer must be dropped from memory too, or the next
-        // flush writes the file this sweep just deleted straight back — the
-        // write-back loop the eviction branch below used to guard against, met
-        // here instead, since eviction no longer reaches this file at all.
+        // Or the next flush writes the file this sweep just deleted back.
         if (name === ARCHIVES_FILE) {
           this.archives = new Map();
           this.archivesDirty = false;
         }
         continue;
       }
-      // `archives.json` counts against the cap but is never *evicted* (review
-      // finding 9). It is one small file per library, self-bounding in the only
-      // way that matters — an archive it records that is gone is answered by
-      // `{mtime, size}` and re-read once — and it holds what the walk learned
-      // most expensively (6.7 s of zip-tail seeks, measured). Evicting it to
-      // reclaim its ~1.5 MB was the pathological case: the sweep would throw
-      // away every archive directory in the library to free a fraction of a
-      // percent of a 64 MB cap, and the next walk would re-read all 409 tails.
+      // `archives.json` counts against the cap but is never *evicted*: it is one
+      // small file holding every zip tail in the library, so evicting it frees
+      // nothing much and costs the next walk all of those seeks.
       files.push({
         path,
         size: info.size,
@@ -614,7 +449,6 @@ export class SnapshotStore {
     }
   }
 
-  /** Can this build read this file at all? Version and owner, not contents. */
   private async usable(name: string, path: string): Promise<boolean> {
     if (name !== ARCHIVES_FILE && !name.startsWith("tree-")) return false;
     const parsed = await readJson<{ version?: unknown; library?: unknown }>(

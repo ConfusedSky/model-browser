@@ -1,34 +1,19 @@
 import { useEffect, useState } from "react";
 import type { JobState } from "../jobs/bulkJobs";
 
-/**
- * How long a pushed entry may wait to start before the chip says it is
- * waiting. Every entry waits a little — the queue is two wide — and a
- * counter that flickered "waiting" between entries would say nothing; a job
- * genuinely behind the view waits whole seconds (`bulk-thumbnail-jobs` 5.2).
- */
+/** Every entry waits a little on a two-wide queue, so a counter that flickered
+ *  "waiting" between entries would say nothing. */
 export const WAITING_AFTER_MS = 1500;
 
 /**
- * A bulk job's whole UI (`bulk-thumbnail-jobs` 2.3, D2).
+ * A bulk job's whole UI (`bulk-thumbnail-jobs` D2). App-level and corner-fixed,
+ * so it survives the navigation away from the folder whose menu launched it.
  *
- * App-level and fixed to the corner, so it survives navigation: the job it
- * reports on outlives the folder whose menu launched it, and a chip that lived
- * in the grid would vanish with the listing while the work carried on
- * invisibly. One chip whichever launcher started the job — a container's menu
- * entry or the library tab — because there is only ever one job.
+ * **Props, no store**, which is what lets the runner's cells assert counters
+ * without a DOM and this component's without a runner.
  *
- * **Props, no store.** It reads no store and makes no request: every number on
- * screen is a field of `JobState`, and every button is one of the runner's four
- * verbs handed down. That is what lets the runner's cells assert counters
- * without a DOM and this component's assert copy without a runner. The one
- * word that is not a field is "waiting behind what you’re looking at": a wait
- * the runner reports (`JobState.waiting`) or a view App reports (`viewOpen`),
- * filtered through this component's own clock so the moment every entry waits
- * says nothing (5.2).
- *
- * *Dismiss is not Cancel* (D2): it hides the chip and the job runs on. They are
- * two buttons for a reason, and the × never reaches `onCancel`.
+ * ***Dismiss is not Cancel***: it hides the chip and the job runs on, so the ×
+ * never reaches `onCancel`.
  */
 export default function JobChip({
   state,
@@ -38,23 +23,18 @@ export default function JobChip({
   viewOpen = false,
 }: {
   state: JobState;
-  /** Reset's consent (D5) — pressed only from the `confirming` phase. */
+  /** Reset's consent, pressed only from `confirming` (D5). */
   onConfirm: () => void;
   onCancel: () => void;
-  /** Hide the chip. Never a cancellation. */
+  /** Never a cancellation. */
   onDismiss: () => void;
-  /**
-   * A lightbox or orbit overlay is open. The render queue is suspended for as
-   * long as it is, and an entry that already *started* waits inside its own
-   * `whenResumed()` gates where the runner's `waiting` cannot see it — the
-   * one stall a user is most likely to cause. App knows the view; the runner
-   * does not.
-   */
+  /** An entry that already started waits inside its own `whenResumed()` gates,
+   *  where the runner's `waiting` cannot see it — and App knows the view, where
+   *  the runner does not. */
   viewOpen?: boolean;
 }) {
-  // "Waiting" is time-filtered, not read raw: `waiting` flips true on every
-  // push and false as it starts, so only a wait that outlasts the threshold
-  // is worth a word.
+  // `waiting` flips true on every push and false as it starts, so only a wait
+  // outlasting the threshold is worth a word.
   const [stalled, setStalled] = useState(false);
   const waiting = state.phase === "running" && (state.waiting || viewOpen);
   useEffect(() => {
@@ -69,8 +49,8 @@ export default function JobChip({
     <div
       role="status"
       aria-live="polite"
-      // Above the occlusion pill, which owns the corner itself (`fixed bottom-3
-      // left-3` in App): the two would otherwise overlap exactly, the pill on top.
+      // Above the occlusion pill, which owns the corner itself: the two would
+      // otherwise overlap exactly.
       className="fixed bottom-14 left-3 z-20 flex max-w-sm items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900/95 px-3 py-2 text-xs text-zinc-200"
     >
       <p className="min-w-0 flex-1">
@@ -107,19 +87,14 @@ export default function JobChip({
 const ACTION_CLASS =
   "shrink-0 rounded-lg border border-zinc-700 px-2 py-1 text-zinc-300 hover:border-zinc-500";
 
-/**
- * How the scope reads inside a sentence. One helper, used by every phase, so
- * the library and a folder are never described two different ways in two
- * places — the whole-library scope is labelled `'the library'` by App (D8) and
- * "beneath the library" is not English.
- */
+/** One helper for every phase, so the library and a folder are never described
+ *  two ways: App labels the whole-library scope `'the library'` (D8), and
+ *  "beneath the library" is not English. */
 function scopePhrase(label: string): string {
   return label === "the library" ? "in the library" : `beneath ${label}`;
 }
 
-/** The failed/skipped/cut tail every count-bearing phase shares. Each clause is
- *  present only when it has something to say — a `· 0 failed` is noise about
- *  nothing. */
+/** Each clause only when it has something to say: `· 0 failed` is noise. */
 function tail(state: JobState): string {
   return (
     (state.failed > 0 ? ` · ${state.failed} failed` : "") +
@@ -128,22 +103,19 @@ function tail(state: JobState): string {
   );
 }
 
-/** One sentence per phase, and the counters are the only numbers in any of
- *  them. */
 function sentence(state: JobState): string {
   const phrase = scopePhrase(state.scope.label);
   switch (state.phase) {
     case "deriving":
       return `Counting ${state.scope.label}…`;
     case "confirming":
-      // Reset's alone, and the one number that is stated *before* anything is
-      // sent: it is what the user is consenting to (D5).
+      // The one number stated *before* anything is sent: what the user is
+      // consenting to (D5).
       return `Reset ${state.total} framings ${phrase}?`;
     case "running":
       return `${state.operation === "generate" ? "Generating thumbnails" : "Resetting framings"} ${phrase}: ${state.done} of ${state.total}${tail(state)}`;
     case "done":
-      // A whole-job failure replaces the count rather than joining it: with no
-      // work list, or none of it processable, "0 of 0" would be a true sentence
+      // Replaces the count rather than joining it: "0 of 0" is a true sentence
       // that says nothing about what went wrong.
       return state.failure !== undefined
         ? state.failure
@@ -157,8 +129,7 @@ function sentence(state: JobState): string {
             }${tail(state)}`
           : `Reset ${state.done} of ${state.total} ${phrase}${tail(state)}`;
     case "cancelled":
-      // Cancelled during the derivation: there is no total to have got through,
-      // so the sentence says what was interrupted instead of "0 of 0".
+      // No total to have got through, so it says what was interrupted.
       return state.total === 0
         ? `Cancelled before counting ${state.scope.label}`
         : `Cancelled after ${state.done} of ${state.total} ${phrase}${tail(state)}`;

@@ -12,39 +12,14 @@ const AXES: { axis: OrbitAxis; v: [number, number, number] }[] = [
 
 const EXACT = 1e-6;
 
-/**
- * Version of the mapping from an index pose to a camera. Bumped whenever that
- * mapping changes what a posed thumbnail looks like — the same contract as
- * `RIG_VERSION`, and for the same reason: the pixels depend on an input the
- * cache key does not carry, so without a version a wrong render stays wrong
- * while looking fresh.
- *
- * 1 = read the index's axes as scene axes while STL geometry was baked
- * `rotateX(-π/2)` on load, which put the spindle 90° from the model's actual
- * up and rendered models lying down. 2 = the index's axes and the spindle are
- * the same file frame (`file-frame-spindle` removed the bake and the mapping
- * together; the picture was unchanged, so no bump then). The orientation a
- * posed render was drawn under is its own label, `poseKey` (`pose-rerender`
- * D2), whose absence is stale like the lighting and rig labels' — so the key
- * needed no version bump. Nor is a settled absence one: where the index is
- * asked and holds none, or is known not to be there, a render that records an
- * orientation is stale and redraws at the default, recording none (D5) — the
- * same version, no orientation, the picture the live view opens at.
- */
+/** `RIG_VERSION`'s contract for the pose→camera mapping: **bump it whenever the
+ *  mapping changes what a posed thumbnail looks like**. Which orientation a
+ *  render was drawn under is `poseKey` (`pose-rerender` D2). */
 export const POSE_VERSION = 2;
 
-/**
- * The index's up axis as one of the six spindles — by **exact lookup**, never a
- * nearest-axis snap (D5). The index measures in the file's coordinates and so
- * does the spindle, so the up axis *is* the spindle: `[0,0,1]` is `z`.
- *
- * Pose resolution picks its winner from a fixed set of six unit axis vectors
- * and returns it unchanged, so anything else is a fault upstream. Rounding it
- * would absorb that fault into a plausible-looking spindle, and because a
- * subsequent orbit persists the axis to the thumbnail sidecar, the rounding
- * would then be durable and invisible. Returns null so the caller can ignore
- * the orientation and say why.
- */
+/** By **exact lookup, never a nearest-axis snap** (D5): the index answers from
+ *  a fixed set of six unit vectors, so anything else is a fault upstream — and
+ *  a rounded one is persisted to the sidecar by the next orbit. */
 export function axisOf(up: [number, number, number]): OrbitAxis | null {
   const match = AXES.find(({ v }) =>
     v.every((c, i) => Math.abs(c - up[i]!) < EXACT),
@@ -53,44 +28,30 @@ export function axisOf(up: [number, number, number]): OrbitAxis | null {
 }
 
 /**
- * Camera state for an index pose, or null when the pose is not one this app can
- * express.
- *
- * The azimuth offset is **derived** from `azimuth_zero`, not tabulated. The
- * index measures its angles after rotating the mesh so `up` points at +Z; this
- * app never rotates a mesh — the spindle is how it expresses a non-Z-up model —
- * so the rotation has to be paid for in the azimuth instead. Since `az = 0`
- * points along the spindle frame's `b`, the offset is the angle from `b` to the
- * index's zero direction about the spindle.
- *
- * Deriving it rather than hard-coding the six constants means a change to the
- * index's rotation arrives as a different value in a field already being read.
- * Passing `azimuth_deg` through unmodified is a quarter turn out for three of
- * the six axes — 1,520 of 2,945 models in the primary cache, `y` (the library's
- * commonest up axis) among them.
+ * The azimuth offset is **derived** from `azimuth_zero`, not tabulated: the
+ * index measures after rotating the mesh to +Z up and this app rotates no mesh,
+ * so the rotation is paid for in the azimuth — `azimuth_deg` unmodified is a
+ * quarter turn out for three of the six axes.
  */
 export function cameraForPose(
   pose: IndexPose | null | undefined,
   base: CameraState,
 ): { camera: CameraState; axis: OrbitAxis } | null {
-  // `null` (a settled absence) and `undefined` (unsettled) both frame nothing;
-  // telling them apart is the sweep's business (`useThumbnails`' `usable`).
+  // Telling a settled absence from an unsettled one is the sweep's business.
   if (pose == null) return null;
   const axis = axisOf(pose.up);
   if (axis === null) return null;
   const { s, a, b } = frameFor(axis);
   const u0 = pose.azimuth_zero;
-  // `azimuth_zero` is perpendicular to `up` by construction; a pose where it is
-  // not is malformed in the same way an off-axis `up` is, and gets the same
-  // answer rather than a best-effort projection.
+  // Perpendicular to `up` by construction; one that is not is malformed the
+  // way an off-axis `up` is, and gets the same answer.
   if (Math.abs(s.x * u0[0] + s.y * u0[1] + s.z * u0[2]) > 1e-3) return null;
   const offset = Math.atan2(
     a.x * u0[0] + a.y * u0[1] + a.z * u0[2],
     b.x * u0[0] + b.y * u0[1] + b.z * u0[2],
   );
-  // No front view cached for this view config: the index prescribes azimuth 0
-  // at the first elevation, which is what view 0 always is. The orientation is
-  // still worth keeping — only the angles are missing.
+  // No front view cached: the index prescribes azimuth 0 at the first
+  // elevation. The orientation is still worth keeping.
   const azDeg = pose.front?.azimuth_deg ?? 0;
   const elDeg = pose.front?.elevation_deg ?? 0;
   return {
@@ -103,15 +64,9 @@ export function cameraForPose(
   };
 }
 
-/**
- * The label a render drawn under a pose records beside `POSE_VERSION`: which
- * orientation it was drawn under (`pose-rerender` D2). Over `cameraForPose`'s
- * answer rather than the pose's raw fields, because the answer is what the
- * pixels depended on and nothing else — two opinions that derive the same
- * view should not re-render, and `source` and `confidence` touch no pixel.
- * Four decimals of a radian is well below what a 256² render can show; a
- * real re-classification moves degrees.
- */
+/** Over `cameraForPose`'s answer, not the pose's raw fields: the answer is what
+ *  the pixels depended on, so two opinions deriving one view do not re-render.
+ *  Four decimals is far below what a thumbnail can show. */
 export function poseKeyOf(resolved: {
   camera: CameraState;
   axis: OrbitAxis;

@@ -19,14 +19,9 @@ export class ListingError extends Error {
 }
 
 /**
- * A revalidation pass that cannot be completed against a root that is *there*
- * (`listing-tree-cache` §4.3, design D6). Its own class because `walkFsLevel`
- * deliberately **swallows** an unreadable subdirectory — a folder the user
- * cannot read is skipped, not a failed listing — and revalidation must not
- * inherit that: the snapshot says this directory was readable and held these
- * entries, the filesystem now says otherwise, and the filesystem wins. Thrown
- * only on the revalidation path, where a recorded directory is the one that
- * failed; a walk with no snapshot behind it raises nothing new.
+ * A revalidation pass that cannot complete against a root that is *there* (§4.3,
+ * D6). Its own class because `walkFsLevel` skips an unreadable subdirectory and
+ * revalidation must not: the filesystem wins against the snapshot.
  */
 export class RevalidationError extends Error {}
 
@@ -39,12 +34,9 @@ export function modelFormat(name: string): ModelFormat | undefined {
 }
 
 /**
- * A listing entry plus the filesystem path it was read from. Every emitted
- * `path` is the **logical** library path — the route the client asks for again
- * — while the walk descends filesystem paths (library-root D3); re-resolving a
- * logical path inside the walk would realpath an in-library alias onto its
- * target and collapse the two routes into one. `fsPath` never leaves this
- * module: `wire` strips it at the boundary.
+ * Emitted paths are **logical** while the walk descends filesystem ones
+ * (library-root D3): re-resolving inside the walk would collapse an in-library
+ * alias onto its target. `wire` strips `fsPath` at the boundary.
  */
 interface FsEntry extends DirEntry {
   fsPath: string;
@@ -71,67 +63,34 @@ function wire(entries: readonly DirEntry[]): DirEntry[] {
 }
 
 interface FlatWalk {
-  /**
-   * Walk steps left: every directory entry examined costs 1. Seeded from the
-   * search budget or the browse budget depending on the request (D5).
-   */
+  /** Every directory entry examined costs 1; seeded per request (D5). */
   budget: number;
   /** Realpaths of directories already entered — cycle guard and alias dedup. */
   visited: Set<string>;
   models: DirEntry[];
   /**
-   * Every container *below* the root level, named by root-relative path like
-   * the models are (D2). The root's own children are not here — they are the
-   * containers path's job in `listFlat`, and collecting them twice would
-   * return two tiles for one folder.
-   *
-   * Collected unconditionally: the query is applied afterwards, in `listFlat`.
-   * Collecting these conditionally on `q` would make a walk's output depend on
-   * the query, which `search-cancellation` (one traversal shared across
-   * requests) and `listing-tree-cache` (tree snapshot keyed by root alone)
-   * both assume is false.
+   * Containers *below* the root level (D2); the root's own are `listFlat`'s, or
+   * one folder gets two tiles. Collected unconditionally — a walk whose output
+   * depended on the query would break the snapshot keyed by root alone.
    */
   dirs: DirEntry[];
   /**
-   * The walk stopped against its step budget: what it collected is a *prefix*
-   * of the tree, and the rest was never looked at.
-   *
-   * Split from `capped` below, and the wire does not know the difference —
-   * `DirListing.truncated` is their OR and stays exactly what it was. The
-   * distinction is `listing-tree-cache`'s: its 4.1a rule is that only a
-   * **complete** traversal may be persisted, since a partial tree stored as a
-   * whole one is indistinguishable from the real thing and permanently wrong.
-   * That is a question about the walk, and only this flag answers it — a
-   * response cap says nothing about whether the tree was fully seen.
+   * The walk stopped against its budget, so what it holds is a *prefix* of the
+   * tree. Split from `capped` because §4.1a persists only a complete traversal,
+   * and a response cap says nothing about whether the tree was fully seen.
    */
   budgetExhausted: boolean;
-  /**
-   * A response cap cut entries the walk *did* find — the model cap or the
-   * folder cap in `listFlat`. The tree may have been traversed in full; only
-   * the answer is short. Never a reason to distrust a snapshot.
-   */
+  /** A cap cut what the walk found: the answer is short, the tree was not. */
   capped: boolean;
   /**
-   * Every directory this walk actually read, by library path, against the
-   * `mtimeMs` it had when it was read — D4's per-directory freshness signal and
-   * the whole of what revalidation re-checks. Populated by `levelFor`, so a
-   * directory that was skipped (an alias already visited, an unreadable one) is
-   * absent: revalidation must make exactly the decisions this walk made, and a
-   * directory it never opened is not one of them.
+   * Every directory this walk *read*, against the mtime it had then — D4's
+   * freshness signal. A skipped directory is absent, because revalidation must
+   * make the decisions this walk made and never opening one was such a decision.
    */
   dirMtimes: Map<string, number>;
-  /**
-   * Revalidation only (§4.2): what the snapshot recorded, per directory. A
-   * directory whose mtime still matches is answered from here instead of being
-   * `readdir`'d, which is what makes the pass cost one `stat` per directory
-   * rather than one per entry. Absent on an ordinary walk.
-   */
+  /** Revalidation only (§4.2): an unmoved mtime is answered from here, not read. */
   reuse?: Map<string, ReusedLevel>;
-  /**
-   * The archive-directory layer (D3), threaded to every `listZipEntries` the
-   * walk makes so an unchanged archive is never opened — on the walking path
-   * and on the revalidation path alike. Absent when no store was supplied.
-   */
+  /** The archive layer (D3), so an unchanged archive is never opened. */
   zips?: ZipDirCache;
 }
 
@@ -152,11 +111,7 @@ function takeStep(walk: FlatWalk): boolean {
   return true;
 }
 
-/**
- * One filesystem directory: `fsDir` is read, `browseLibPath` names what is
- * found. Failures name the library path — a miss that described the volume
- * would be a probe of the tree the server just declined to show.
- */
+/** Failures name the library path: naming the volume would be a probe of it. */
 async function listFsDir(
   fsDir: string,
   browseLibPath: string,
@@ -169,30 +124,19 @@ async function listFsDir(
   } catch {
     throw new ListingError(404, `cannot read directory: ${browseLibPath}`);
   }
-  // Code-point order, fixed here rather than left as whatever the filesystem
-  // listed (D2). The loop below charges a walk step per entry and breaks at the
-  // budget, so an over-budget level keeps the entries `readdir` happened to
-  // return first — and that order differs between runtimes and volumes, which
-  // would make a bounded walk cut differently on two machines holding the same
-  // library. Deliberately not `sortEntries`' `localeCompare`: ICU collation is
-  // locale-dependent and cannot promise the same cut either. `sortEntries` still
-  // runs on the way out, so the *display* order is unchanged; this only fixes
-  // which entries a bound keeps, for the peek and for `listFlat`'s truncation
-  // alike.
+  // Code-point order, so a bounded walk cuts the same level on every machine
+  // (D2): `readdir` order differs between runtimes and volumes, and ICU
+  // collation differs between locales. Display order is `sortEntries`', below.
   names.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   const entries: FsEntry[] = [];
   for (const d of names) {
     if (d.name.startsWith(".")) continue;
-    // A flat walk pays for every entry it examines, not just the ones it
-    // keeps: the stat below is the walk's real per-entry cost, so a folder of
-    // a million non-model files has to consume budget too.
+    // Charged per entry examined, not per entry kept: the stat below is the cost.
     if (walk !== undefined && !takeStep(walk)) break;
     const full = join(fsDir, d.name);
-    // Confinement, entry by entry — but only for symlinks: a plain entry can
-    // only leave the library through an ancestor the descent has already
-    // confined, and a 200,000-step search walk cannot afford an lstat chain per
-    // entry (design Risks). The dirent's flag is reliable: Node resolves a
-    // DT_UNKNOWN with an lstat before answering `isSymbolicLink`.
+    // Only symlinks are confined here: a plain entry can leave the library only
+    // through an ancestor the descent already confined, and a full search walk
+    // cannot afford an lstat chain per entry.
     if (d.isSymbolicLink()) {
       const real = await realpath(full).catch(() => null);
       if (real === null || !within(realTop, real)) continue;
@@ -242,21 +186,9 @@ async function listFsDir(
 }
 
 /**
- * One directory's level for a *flat* walk: `listFsDir`, plus the two things the
- * tree cache needs around it.
- *
- * Recording — every walk notes the directory's library path against the mtime
- * it had when it was read, which is what the snapshot's `dirs` becomes. The
- * mtime is the one the parent's own `stat` already produced (the dirent stat in
- * `listFsDir`, or the root's stat in `gatherFlat`), so an ordinary walk pays
- * nothing extra for it. It is taken *before* the read, deliberately: a
- * directory changed mid-read records the older stamp and is re-read next time,
- * which is the safe direction to be wrong in.
- *
- * Reuse — on the revalidation path the recorded level is returned outright when
- * the directory's mtime has not moved (D4). There the mtime **must** be stat'd
- * fresh rather than taken from the caller: on that path the caller's copy came
- * out of the snapshot, and would compare equal to itself forever.
+ * `listFsDir` plus what the tree cache needs: the mtime taken *before* the read,
+ * and reuse of a level whose mtime has not moved (D4) — stat'd fresh there, the
+ * caller's copy having come from the snapshot.
  */
 async function levelFor(
   fsDir: string,
@@ -266,9 +198,7 @@ async function levelFor(
   mtime: number,
   charge: boolean,
 ): Promise<FsEntry[]> {
-  // The root level is the request's baseline work — the listing a nested browse
-  // would do anyway — so it is not charged to the walk budget; everything below
-  // it is.
+  // The root level is the request's baseline work, so it is not charged.
   const charged = charge ? walk : undefined;
   if (walk.reuse === undefined) {
     const level = await listFsDir(fsDir, libPath, realTop, charged);
@@ -278,42 +208,18 @@ async function levelFor(
   const held = walk.reuse.get(libPath);
   const s = await stat(fsDir).catch(() => null);
   if (s === null) {
-    // A directory the snapshot recorded and that is no longer there. Normally
-    // unreachable — removing it moves its parent's mtime, so the parent is
-    // re-read and this level is never descended into — but reachable inside one
-    // granule of the parent's mtime resolution, and the cache is what loses.
+    // Normally unreachable, removing a directory moving its parent's mtime — but
+    // reachable inside one granule of that mtime's resolution.
     if (held !== undefined)
       throw new RevalidationError(`directory is gone: ${libPath}`);
     throw new ListingError(404, `cannot read directory: ${libPath}`);
   }
   if (held !== undefined && held.mtime === s.mtimeMs) {
-    // **`chmod` moves no mtime** (review finding 4), so the stat above cannot
-    // see a directory that is still there, still stamped the same, and no
-    // longer readable — and the reuse branch would go on serving its recorded
-    // children forever. `walkFsLevel`'s `realpath` catches only the case where
-    // a *subdirectory* is what became unreadable; a folder of models under a
-    // revoked directory has no subdirectory to trip over, and neither does a
-    // walked root whose `r` bit was dropped while `x` stayed.
-    //
-    // Present-but-unreadable is D6's case, so this is a contradiction rather
-    // than a folder to skip. Costs one `access` per *reused non-empty*
-    // directory — the pass already pays one `stat` there, so it stays
-    // proportional to the tree's shape (2,318 directories here) and not to its
-    // entries.
-    //
-    // **Only when the recorded level is non-empty** (round-2 finding 5). The
-    // probe must be no stricter than the walk it stands in for, and the walk is
-    // *lenient* about an unreadable directory: `walkFsLevel` catches
-    // `listFsDir`'s failure and skips the folder, contributing nothing. So a
-    // directory the snapshot recorded as empty contributes nothing either way —
-    // the reused level and a real re-read agree exactly — and calling that a
-    // contradiction invalidates a snapshot the filesystem has not disagreed
-    // with. Worse, it does not converge: the invalidate forces a full walk, the
-    // walk records the still-unreadable folder as empty again, and the next
-    // pass invalidates again, so a single `chmod 644` on one empty folder turns
-    // every cadence into the ~32 s cold walk this change exists to remove. A
-    // recorded *non-empty* level is the real contradiction: the snapshot says
-    // these entries were there and the pass can no longer confirm any of them.
+    // **`chmod` moves no mtime**, so nothing above sees a directory still stamped
+    // the same and no longer readable, and reuse would serve its children
+    // forever. **Only when the recorded level is non-empty**, or this cannot
+    // converge: the walk records an unreadable folder as empty, so invalidating
+    // on that forces a cold walk at every cadence.
     if (held.children.length > 0) {
       const reachable = await access(
         fsDir,
@@ -341,11 +247,9 @@ async function levelFor(
 }
 
 /**
- * A recorded level as `listFsDir` would have returned it: fresh objects, the
- * bare name the walk prefixes (the snapshot stores the root-relative one, and
- * the library path's basename is the same string), the filesystem path rebuilt
- * under the directory being read now — so a remount is followed rather than
- * remembered — and the same `sortEntries` ordering `listFsDir` ends with.
+ * As `listFsDir` would have returned it: fresh objects, sorted the same, with the
+ * filesystem path rebuilt under the directory being read now, so a remount is
+ * followed rather than remembered.
  */
 function reusedLevel(held: ReusedLevel, fsDir: string): FsEntry[] {
   return sortEntries(
@@ -374,17 +278,10 @@ async function listZipDir(
   let zipStat, zipEntries;
   try {
     zipStat = await stat(zipFsPath);
-    // Inside the `try` with the `stat`, and this is the half that was outside
-    // it: `stat` succeeds on an archive whose mode is 000 — reading a file's
-    // metadata needs no permission on the file — so the failure lands on the
-    // `open` in here, and escaped untyped as `EACCES: permission denied, open
-    // '<host path>'`, a 500 naming the operator's filesystem. Same taxonomy as
-    // `walkZip`'s: a corrupt archive is a `ZipError` and says so, an unreadable
-    // one is this library entry failing and is named by its library path.
-    // Through the archive layer since `archive-interior-sheets` D3: without it
-    // this read and the interior peeks that follow it each paid their own tail
-    // read of the same archive, because a listing populated nothing. The
-    // listing is what reaches an archive first, so it is what should warm it.
+    // Inside the `try`: `stat` succeeds on a mode-000 archive, so the failure
+    // lands here and an untyped escape is a 500 naming the operator's filesystem.
+    // Through the archive layer (`archive-interior-sheets` D3), because a listing
+    // reaches an archive first and so should warm it for the peeks that follow.
     zipEntries = await listZipEntries(zipFsPath, zips);
   } catch (err) {
     if (err instanceof ZipError) throw err;
@@ -393,8 +290,7 @@ async function listZipDir(
   const norm =
     prefix === "" ? "" : prefix.endsWith("/") ? prefix : `${prefix}/`;
 
-  // A prefix that is itself a *file* entry in the archive is not a directory.
-  // If that file is a zip, this is the nested-zip case.
+  // A prefix that is a *file* entry is not a directory; a zip one is nesting.
   const exactFile =
     norm === ""
       ? undefined
@@ -451,21 +347,16 @@ async function listZipDir(
 }
 
 /**
- * Case-insensitive substring match on an entry's whole root-relative name
- * (D1): the query matches anywhere in the path below the search root — the
- * file's own name, any containing folder, or a containing archive. This is the
- * same string the client's live filter matches, so typing and submitting mean
- * the same thing.
+ * Matches anywhere in the path below the root (D1), and on the same string the
+ * client's live filter uses, so typing and submitting mean the same thing.
  */
 function matchesQuery(name: string, q: string): boolean {
   return name.toLowerCase().includes(q);
 }
 
 /**
- * A container matches on its **own** name, not its path (D2) — deliberately a
- * different predicate from `matchesQuery`. A folder inside a matching folder is
- * not itself a tile, or one hit would return a subtree of them; its models
- * still come back through the path predicate above.
+ * A container matches on its **own** name (D2): a folder inside a matching folder
+ * is not itself a tile, or one hit would return a subtree of them.
  */
 function matchesOwnName(name: string, q: string): boolean {
   return baseName(name).toLowerCase().includes(q);
@@ -484,24 +375,15 @@ function sortEntries<T extends DirEntry>(entries: T[]): T[] {
   );
 }
 
-/**
- * The library path of a request's filesystem half, canonicalised the way the
- * resolver canonicalises it — so an entry's emitted path is a route the client
- * can ask for again, whatever spelling this request arrived in.
- */
+/** Canonicalised as the resolver does, so an emitted path is a route again. */
 function libHalfOf(libPath: string): string {
   return posix.normalize(parseVPath(libPath).fsPath);
 }
 
 /**
- * A request carrying an entry half only means something when the filesystem
- * half is an archive. Read as one, a directory raises `EISDIR` from the first
- * `open` and a text file raises `ZipError`, so `/kit!/` answered 500 with an
- * errno and the filesystem path in it — a fault where the request was simply
- * malformed, and a probe of the tree besides.
- *
- * A path that does not stat at all is left alone: that is the zip readers' own
- * 404, and "not found" and "not an archive" are different answers.
+ * An entry half means nothing unless the filesystem half is an archive: read as
+ * one, a directory raises `EISDIR` and a 500 naming the operator's filesystem. A
+ * path that does not stat is left to the zip readers' 404.
  */
 async function requireArchive(fsPath: string, libPath: string): Promise<void> {
   const s = await stat(fsPath).catch(() => null);
@@ -543,46 +425,20 @@ export async function listDir(
   };
 }
 
-/**
- * How many entries a folder tile's preview may examine. A module constant, not
- * an environment knob (D2): a preview is a glance, not a search, and a knob
- * would let one machine's contact sheet disagree with another's.
- */
+/** A constant, not a knob (D2): two machines must draw the same contact sheet. */
 const PEEK_BUDGET = 64;
 
 /**
- * The most models one peek's walk can possibly find: every model it keeps cost
- * it a walk step, so the entry bound above caps the finds too.
- *
- * Exported because the pose-ranked peek asks for exactly this many — that is
- * how "walk to the entry bound rather than stopping at four" is spelled without
- * a second stop rule inside `peekLevel` (`pose-for-every-model` D4). It is also
- * what keeps that peek's single `/poses` request far under the index's
- * thousand-path bound, whatever the folder held.
+ * Every model kept cost a step, so the entry bound caps the finds too. Exported
+ * because the pose-ranked peek asks for exactly this many, which is how "walk to
+ * the entry bound" is said without a second stop rule (`pose-for-every-model` D4).
  */
 export const PEEK_MAX_FINDS = PEEK_BUDGET;
 
 /**
- * One level of a peek: this level's models in order, then its subdirectories in
- * order, depth-first, until `n` models are found or the walk runs out of
- * budget.
- *
- * Not `walkFsLevel`, which takes a level in kind order — dirs first — and so
- * would reach a subfolder's models before the level's own. Its confinement and
- * cycle guards are replicated here because this recurses over `listFsDir`
- * directly: a subdirectory whose real path leaves the library is neither
- * previewed nor descended into, and a directory already entered under another
- * name is not entered twice.
- *
- * **The depth needs no cap of its own, and this has been checked.** Every level
- * of a descending chain is a *dirent* in its parent, and `listFsDir` spends a
- * `takeStep` on each dirent before it stats anything — so a chain costs one
- * step per level and `PEEK_BUDGET` (64) bounds the recursion as tightly as it
- * bounds the stats. Measured against the real module under Bun: a 500-deep
- * chain of one-subdirectory-each, with a model at every tenth level, returns
- * normally with `at9 … at49` — dead against the budget at depth ~50, never near
- * a stack limit. (`PATH_MAX` is the physical backstop behind that: building the
- * fixture failed with ENOENT at depth 836.)
+ * This level's models first, then its subdirectories — not `walkFsLevel`, whose
+ * kind order reaches a subfolder's first, so its guards are repeated here. The
+ * depth needs no cap: every level is a dirent charged to `PEEK_BUDGET`.
  */
 async function peekLevel(
   level: FsEntry[],
@@ -597,8 +453,7 @@ async function peekLevel(
   }
   for (const e of level) {
     if (found.length >= n || walk.budgetExhausted) return;
-    // Archives met on the way are skipped, never entered (Non-Goals): a
-    // preview must not pay a central-directory read per tile.
+    // Never entered: a preview must not pay a central-directory read per tile.
     if (e.kind !== "dir") continue;
     const real = await realpath(e.fsPath).catch(() => null);
     if (real === null || !within(realTop, real)) continue;
@@ -615,40 +470,11 @@ async function peekLevel(
 }
 
 /**
- * One level of an archive interior, from the archive's flat name list
- * (`archive-interior-sheets` D2). A "level" is the names directly under a
- * prefix: files with no further slash, and the distinct first segments of the
- * ones that have one.
- *
- * **Collected, then sorted, then charged** — in that order, and the order is the
- * point. `listFsDir` sorts a level by code point *before* it spends a step per
- * dirent, because a bound that cuts mid-scan otherwise keeps whatever the
- * source happened to list first; on the filesystem that is `readdir` order, and
- * here it is the central directory's, which is the order a zip was written in.
- * Charging while scanning made the sheet a function of that: the same hundred
- * models stored forwards previewed `000…003` and stored backwards previewed
- * `036…039`. Deterministic per archive either way, but not the sheet the
- * requirement defines, and two archives holding identical content in different
- * stored order would disagree.
- *
- * Ordering is code-point, not `sortEntries`' `localeCompare`, for the reason
- * `listFsDir` gives at its own sort: ICU collation is locale-dependent, so a
- * bound cutting under it cuts differently on two machines holding one library.
- *
- * The budget is charged **one step per distinct immediate child** (D4) — the
- * dirent analogue, and the only reading under which "the same entry bound as a
- * directory" means anything. Not `walkZip`'s rule, which charges every entry
- * under the prefix at every depth and would spend a hundred steps at a parent
- * on one subdirectory of a hundred models.
- *
- * Names beginning with `.` are skipped, as `listFsDir` skips them. A listing
- * still shows them — that is `listZipDir`'s business and unchanged — but a
- * sheet is a selection, and the archives in a real library carry `__MACOSX`
- * trees whose `._name.stl` resource forks are not models anyone wants rendered.
- *
- * No confinement or cycle guard: an entry name is data inside a file the
- * resolver already confined, and a name list is finite (D5). A nested archive
- * is skipped rather than descended into, as `listZipDir` skips it.
+ * One level of an archive interior (`archive-interior-sheets` D2). **Collected,
+ * then sorted, then charged**, by code point: charging while scanning cuts at
+ * whatever order the zip was written in. One step per distinct child (D4). Dot
+ * names are skipped though a listing shows them, and nothing is confined — an
+ * entry name is data inside an already-confined file (D5).
  */
 function peekArchiveLevel(
   names: readonly { name: string; size: number }[],
@@ -662,12 +488,9 @@ function peekArchiveLevel(
   const norm =
     prefix === "" ? "" : prefix.endsWith("/") ? prefix : `${prefix}/`;
   /**
-   * This level's distinct children, before the bound is consulted. A child that
-   * is both a file entry and a directory prefix — `foo.stl` beside
-   * `foo.stl/inner.stl`, which only a malformed archive holds — is taken as the
-   * directory: a listing offers both, but a sheet has to pick one thing to do
-   * with the name, and descending finds models where treating it as a leaf
-   * would show a file the archive also says is a folder.
+   * A name that is both a file entry and a directory prefix — only a malformed
+   * archive holds one — is taken as the directory: a sheet must pick, and
+   * descending finds models where treating it as a leaf shows a folder.
    */
   const children = new Map<string, { dir: boolean; size: number }>();
   for (const e of names) {
@@ -698,8 +521,7 @@ function peekArchiveLevel(
       dirs.push(child);
       continue;
     }
-    // Nested archives fall out here with everything that is not a model, the
-    // same way `listZipDir` declines to offer them (global D6).
+    // Nested archives fall out with everything that is not a model (D6).
     if (modelFormat(child) !== undefined)
       models.push({ name: child, size: held.size });
   }
@@ -711,9 +533,8 @@ function peekArchiveLevel(
       kind: "model",
       format: modelFormat(m.name),
       size: m.size,
-      // The containing archive's mtime, as `listZipDir` and `walkZip` emit
-      // (D11): thumbnails are keyed path+mtime, so any other value would make a
-      // sheet cell cache a second image beside the model tile's.
+      // The containing archive's mtime (D11): thumbnails are keyed path+mtime, so
+      // another value caches a second image beside the model tile's.
       mtime: zipMtime,
     });
   }
@@ -732,33 +553,18 @@ function peekArchiveLevel(
 }
 
 /**
- * What a peek learned that its answer cannot carry.
- *
- * Only the interior half fills it in: `archiveMtime` is what the sheet was
- * derived against, and the layer records it beside the cells so that an
- * **empty** interior sheet — which has no cell to disagree with the archive —
- * can still be told apart from a live one (`archive-interior-sheets` D9).
+ * What a peek learned that its answer cannot carry. The layer records
+ * `archiveMtime` beside the cells so an **empty** interior sheet, having no cell
+ * to disagree with the archive, can still be told from a live one (D9).
  */
 export interface PeekOut {
   archiveMtime?: number;
 }
 
 /**
- * The interior branch of `peek`: the archive is read once, through the layer
- * when there is one, and the level walk above picks the sheet.
- *
- * The refusals are the **listing's**, not a bare empty answer (D10). Before this
- * change every entry-half path answered `[]`, which hid four cases behind one
- * shrug; each is answered here as `listDir` answers it — including
- * `/somedir!/x`, where the filesystem half is not an archive at all, which is
- * decided **before** the empty-entry-half case below so that a malformed path
- * refuses rather than shrugging.
- *
- * One `stat`, not `requireArchive`'s plus its own: the same test on the same
- * answer, kept here because the interior needs the archive's `mtimeMs` anyway
- * and a second `stat` for it was pure duplication. The sentence it throws is
- * `requireArchive`'s, so a peek and a listing still refuse a non-archive in the
- * same words.
+ * The interior branch of `peek`. The refusals are the **listing's**, not a bare
+ * empty answer (D10), and in `requireArchive`'s own words — one `stat` rather
+ * than two, the interior needing the archive's `mtimeMs` anyway.
  */
 async function peekInArchive(
   fsPath: string,
@@ -770,46 +576,34 @@ async function peekInArchive(
 ): Promise<DirEntry[]> {
   const zipLibPath = libHalfOf(libPath);
   const s = await stat(fsPath).catch(() => null);
-  // A path that does not stat at all is left alone, exactly as `requireArchive`
-  // leaves it: that is the zip readers' own 404 below, and "not found" and "not
-  // an archive" are different answers.
+  // Left to the 404 below: "not found" and "not an archive" are different answers.
   if (s !== null && (!s.isFile() || !/\.zip$/i.test(fsPath))) {
     throw new ListingError(400, `not an archive: ${libPath}`);
   }
-  // An archive that is not there is the zip readers' 404, and it is decided
-  // *before* the empty-entry-half case below for that case's own reason: two
-  // spellings of one tile must not give two answers, and `/nope.zip` already
-  // 404s. Falling through would have answered `[]` — a shrug about a path the
-  // listing refuses.
+  // Before the empty-entry-half case below: `/nope.zip` already 404s, and two
+  // spellings of one tile must not give two answers.
   if (s === null) throw new ListingError(404, `cannot read zip: ${zipLibPath}`);
-  // An empty entry half is the archive's own tile by another spelling, and
-  // `/kit.zip` answers `[]` rather than refusing — two spellings of one tile
-  // must not give two answers. It must not fall through: a prefix of `''` would
-  // preview the whole archive, which is the thing the tile's own branch
-  // refuses.
+  // The archive's own tile by another spelling, which answers `[]`. Falling
+  // through would preview the whole archive, which that tile refuses to do.
   if (entry === "") return [];
   let zipEntries;
   try {
     zipEntries = await listZipEntries(fsPath, zips);
   } catch (err) {
-    // A corrupt archive — the library holds one zip64 that raises here — says
-    // so, as it does through every other reader. Anything else is this library
-    // entry failing to open and is named by its **library** path: the raw errno
-    // escaping was a 500 naming the operator's filesystem (`listZipDir`).
+    // A corrupt archive says so, as it does through every other reader. Anything
+    // else is this library entry failing to open and is named by its **library**
+    // path: a raw errno escaping is a 500 naming the operator's filesystem.
     if (err instanceof ZipError) throw err;
     throw new ListingError(404, `cannot read zip: ${zipLibPath}`);
   }
   const norm = entry.endsWith("/") ? entry.slice(0, -1) : entry;
-  // A prefix that is itself a file entry is not a directory, and a nested zip
-  // is the nested-zip case — `listZipDir`'s taxonomy, so a peek and a listing
-  // refuse the same path the same way.
+  // `listZipDir`'s taxonomy, so a peek and a listing refuse alike.
   const exactFile = zipEntries.find((e) => e.name === norm);
   if (exactFile !== undefined) {
     if (/\.zip$/i.test(exactFile.name))
       throw new VPathError("nested zips are unsupported");
     throw new ListingError(400, `not a directory: ${exactFile.name}`);
   }
-  // Narrowed by the `s === null` refusal above, so no fallback is needed here.
   const zipMtime = s.mtimeMs;
   if (out !== undefined) out.archiveMtime = zipMtime;
   const found: DirEntry[] = [];
@@ -822,29 +616,14 @@ async function peekInArchive(
     found,
     n,
   );
-  // A prefix that matched nothing leaves `found` empty and answers `[]` — an
-  // empty sheet, which is what a directory with nothing previewable answers
-  // everywhere else.
   return found;
 }
 
 /**
- * Up to `n` models found inside a directory — the contact sheet a folder tile
- * draws (D2). Its own request, never merged into a listing: a listing that
- * computed previews would pay one peek per subdirectory up front, on the cold
- * path, for folders the user may never scroll to (D1).
- *
- * Bounded and brief, so it carries **no cancellation token** and runs to
- * completion when the tile that asked has scrolled away — stated in the
- * requirement, so `search-cancellation`'s rule about abandoned traversals does
- * not reach it.
- *
- * A `walk` is passed down into `listFsDir` for `takeStep` alone: without one a
- * single wide folder reads and stats its whole level before the bound is
- * consulted, and the bound would say nothing about the case it exists for. The
- * walk's `models` and `dirs` stay empty — what a peek keeps is `found`, in the
- * order it found it, rather than the sorted-and-renamed collection `listFlat`
- * builds.
+ * The contact sheet a folder tile draws (D2), as its own request: a listing that
+ * computed previews would pay one per subdirectory on the cold path (D1). Brief
+ * enough to carry **no cancellation token**, and threaded a `walk` for `takeStep`
+ * alone, or a wide folder stats its whole level before the bound.
  */
 export async function peek(
   library: Library,
@@ -854,24 +633,19 @@ export async function peek(
   out?: PeekOut,
 ): Promise<DirEntry[]> {
   const { fsPath, entry } = await library.resolve(libPath);
-  // An archive's own tile is not previewed — that is the branch below, after
-  // the `stat` — but a directory *inside* one is (`archive-interior-sheets`
-  // D1). The refusal that used to stand here tested the path's shape while the
-  // cost it was written for is a listing **of** archives: by the time an
-  // interior tile exists, the request that emitted it has read this archive's
-  // entries already.
+  // An archive's own tile is not previewed — that is the branch below, after the
+  // `stat` — but a directory *inside* one is (`archive-interior-sheets` D1): by
+  // the time an interior tile exists, the request that emitted it has already
+  // read this archive's entries.
   if (entry !== undefined)
     return await peekInArchive(fsPath, libPath, entry, n, zips, out);
   const realTop = library.realTop();
   const s = await stat(fsPath).catch(() => null);
   if (s === null) throw new ListingError(404, `no such path: ${libPath}`);
   if (!s.isDirectory()) {
-    // Stat'd first, so a *directory* named `x.zip` is walked like any other —
-    // the same order `listDir` takes, and the reason it is navigable at all.
+    // Stat'd first, so a *directory* named `x.zip` is walked like any other.
     if (/\.zip$/i.test(fsPath)) return [];
-    // 400, not 404, on the distinction `requireArchive` draws: the path is
-    // there, it is simply not a thing that has an inside. A 404 here would
-    // claim a file the client can see in its own listing does not exist.
+    // 400, not 404: the path is there, it simply has no inside.
     throw new ListingError(400, `not a directory: ${libPath}`);
   }
   const walk: FlatWalk = {
@@ -881,17 +655,13 @@ export async function peek(
     dirs: [],
     budgetExhausted: false,
     capped: false,
-    // A peek is not a walk of the tree and is never snapshotted: it reads
-    // `listFsDir` directly rather than through `levelFor`, so nothing ever
-    // records into this and nothing ever reads it.
+    // Never read or written: a peek goes through `listFsDir`, not `levelFor`.
     dirMtimes: new Map(),
   };
-  // The root is visited before anything below it is, or a symlink pointing back
-  // at it re-enters the level the peek started from.
+  // Or a symlink pointing back at the root re-enters the level it started from.
   walk.visited.add(await realpath(fsPath).catch(() => fsPath));
   const found: FsEntry[] = [];
-  // Uncaught, unlike the recursion's: an unreadable *root* is the 404 `listDir`
-  // gives, while an unreadable subdirectory is skipped.
+  // Uncaught, unlike the recursion's: an unreadable *root* is a 404.
   const level = await listFsDir(fsPath, libHalfOf(libPath), realTop, walk);
   await peekLevel(level, realTop, walk, found, n);
   return wire(found);
@@ -908,35 +678,23 @@ async function walkFsLevel(
     if (e.kind === "model") {
       walk.models.push({ ...e, name: `${rel}${e.name}` });
     } else if (e.kind === "dir") {
-      // Confinement is decided **before** the push below, not at the visited
-      // check after it: the push is deliberately unguarded (see the alias
-      // reasoning), so a subdirectory leaving the library would otherwise still
-      // be emitted as a tile that the next request refuses. A real path that
-      // cannot be read is a confinement that cannot be established, and is
-      // skipped the same way.
+      // **Before** the unguarded push below, or a subdirectory leaving the library
+      // would still be emitted as a tile the next request refuses. A real path
+      // that cannot be read is a confinement that cannot be established.
       const real = await realpath(e.fsPath).catch(() => null);
       if (real === null || !within(realTop, real)) {
-        // Revalidation (§4.3): a directory the snapshot recorded whose real
-        // path can no longer even be established is the pass failing against a
-        // root that is *present* — the case D6 gives to the filesystem. It used
-        // to be the *only* way an unreadable root surfaced, since `chmod` does
-        // not move a directory's mtime; `levelFor`'s reuse branch now checks
-        // `access` directly, which reaches the cases this cannot — a
-        // models-only folder, and a root left executable but not readable.
+        // §4.3/D6: a recorded directory whose real path cannot be established is
+        // the pass failing against a present root. Catches what `levelFor`'s
+        // `access` probe cannot, and vice versa.
         if (real === null && walk.reuse?.has(e.path) === true) {
           throw new RevalidationError(`cannot reach directory: ${e.path}`);
         }
         continue;
       }
-      // Pushed before the visited check, and before descending: the spec's rule
-      // is every directory under the root whose own name matches, and a
-      // directory reached through a symlink alias is one. Deduping it here
-      // would make the *aliased* name unfindable, or — when the alias sorts
-      // first — make the real folder's name unfindable while the alias stands
-      // in for it. The visited set exists to bound the traversal, not to decide
-      // which names exist. Guarded on `rel !== ''` because the root's own level
-      // is `listFlat`'s containers, and pushing here too would return one
-      // folder as two identical tiles.
+      // Pushed before the visited check: a directory reached through an alias is
+      // still a directory whose name matches, and the visited set exists to bound
+      // the traversal, not to decide which names exist. `rel !== ''` because the
+      // root's own level is `listFlat`'s containers.
       const pushed = rel !== "" ? { ...e, name: `${rel}${e.name}` } : undefined;
       if (pushed !== undefined) walk.dirs.push(pushed);
       if (walk.visited.has(real)) continue;
@@ -945,28 +703,14 @@ async function walkFsLevel(
       try {
         sub = await levelFor(e.fsPath, e.path, realTop, walk, e.mtime, true);
       } catch (err) {
-        // A revalidation that cannot be completed is the one failure this catch
-        // must not swallow (§4.3): the snapshot recorded this directory, so its
-        // becoming unreadable contradicts the cache rather than being a folder
-        // the user simply cannot see.
+        // The one failure this catch must not swallow (§4.3): a recorded directory
+        // becoming unreadable contradicts the cache.
         if (err instanceof RevalidationError) throw err;
         continue; // unreadable subdirectory: skipped, only an unreadable root fails
       }
-      // The directory's **own** entry, refreshed from the stat `levelFor` just
-      // made (review finding 5, secondary half). On the revalidation path this
-      // entry came out of the parent's *reused* level and carries the mtime the
-      // snapshot recorded; the pass has since discovered a different one and
-      // re-read the directory on the strength of it. Writing it back is what
-      // keeps the saved snapshot internally consistent — the directory's
-      // recorded `dirs` mtime and its entry's `mtime` are the same fact, and a
-      // tile served from the snapshot would otherwise report a stamp the pass
-      // knew was wrong. Free: no extra syscall, `levelFor` already recorded it.
-      //
-      // Mutation in place is safe and deliberate — `reusedLevel` and
-      // `listFsDir` both mint fresh objects per call — and it is what carries
-      // the correction into `gatherFlat`'s `containers`, which is this same
-      // array filtered. On an ordinary walk `dirMtimes` holds the caller's own
-      // `e.mtime`, so nothing moves.
+      // This entry carries the snapshot's mtime while the pass has just found
+      // another, and the two are the same fact. Mutated in place, which is what
+      // carries the correction into `gatherFlat`'s `containers`.
       const fresh = walk.dirMtimes.get(e.path);
       if (fresh !== undefined && fresh !== e.mtime) {
         e.mtime = fresh;
@@ -974,8 +718,7 @@ async function walkFsLevel(
       }
       await walkFsLevel(sub, `${rel}${e.name}/`, walk, realTop);
     } else {
-      // The archive's filesystem path was confined when `listFsDir` emitted it,
-      // so enumerating its names needs no further test here.
+      // Confined when `listFsDir` emitted it; names inside need no test.
       if (rel !== "") walk.dirs.push({ ...e, name: `${rel}${e.name}` });
       await walkZip(e.fsPath, e.path, "", `${rel}${e.name}!/`, walk);
     }
@@ -983,13 +726,9 @@ async function walkFsLevel(
 }
 
 /**
- * Flatten one archive under `prefix`: every model beneath it at any depth,
- * plus the immediate directory names at that level. One central-directory read
- * serves both the container tiles and the models (D5).
- *
- * `root` selects the error contract: a walk rooted at the archive reports
- * failures the way `listDir` does, while a zip met partway through a
- * filesystem walk is skipped like an unreadable subdirectory.
+ * Every model under `prefix` at any depth plus that level's directory names, from
+ * one central-directory read (D5). `root` selects the error contract: rooted
+ * here, failures are `listDir`'s; met partway through a walk, the zip is skipped.
  */
 async function walkZip(
   zipFsPath: string,
@@ -1002,9 +741,7 @@ async function walkZip(
   let zipStat, zipEntries;
   try {
     zipStat = await stat(zipFsPath);
-    // The archive layer (D3), on both the walking and the revalidating path: an
-    // archive whose `{mtime, size}` has not moved is answered without being
-    // opened, which is the largest single measured win in this change.
+    // The archive layer (D3): an unmoved `{mtime, size}` is answered unopened.
     zipEntries = await listZipEntries(zipFsPath, walk.zips);
   } catch (err) {
     if (!root) return []; // unreadable/corrupt zip: skipped like an unreadable subdirectory
@@ -1024,10 +761,9 @@ async function walkZip(
     }
   }
   const dirs = new Set<string>();
-  // Every directory *path* below `norm`, not just this level's names: a folder
-  // three levels into an archive matches like one three levels into the tree,
-  // which is the depth-independence this rule exists for (D2). `dirs` above
-  // stays the immediate level, because that is what the container tiles are.
+  // Every directory *path* below `norm`, so a folder deep in an archive matches
+  // like one deep in the tree (D2); `dirs` stays the immediate level, which is
+  // what the container tiles are.
   const interior = new Set<string>();
   for (const e of zipEntries) {
     if (walk.budgetExhausted) break;
@@ -1039,12 +775,10 @@ async function walkZip(
     if (slash !== -1) dirs.add(rest.slice(0, slash));
     for (let i = slash; i !== -1; i = rest.indexOf("/", i + 1)) {
       const d = rest.slice(0, i);
-      // A root walk's immediate children are the containers path's job, exactly
-      // as `rel === ''` is on the filesystem side; everything deeper is ours.
+      // A root walk's immediate children are the containers path's job.
       if (!root || d.includes("/")) interior.add(d);
     }
-    // Only model extensions match — nested zip *file* entries fall out here,
-    // while models under a directory named *.zip match like any other.
+    // Nested zip entries fall out here; models under a directory named *.zip stay.
     const format = modelFormat(rest);
     if (format === undefined) continue;
     walk.models.push({
@@ -1077,50 +811,20 @@ async function walkZip(
 }
 
 /**
- * Positive-integer knob from the environment: `env.ts`'s one parser, which
- * carries the rule this file used to state for itself (floor **before** the
- * positivity test, never silently unbounded) and the history that argued for
- * having exactly one copy of it.
- *
- * Kept as a named local rather than calling `envPositiveInt` at each of the six
- * sites, for two reasons. Every one of those sites reads as a *limit* — the
- * budgets and the caps — and that is the word the surrounding prose uses. And
- * `flat.test.ts`'s "the walk collects without consulting the query" guard slices
- * this source between `async function walkFsLevel` and the text `function
- * envLimit`, so this declaration is a landmark something depends on: if it is
- * ever renamed or inlined, move that delimiter with it rather than letting the
- * slice run to the end of the file, where it matches the query predicates and
- * fails for a reason that has nothing to do with the walk.
+ * A landmark as well as a helper: `flat.test.ts` slices this source between
+ * `async function walkFsLevel` and the text `function envLimit`, so renaming or
+ * inlining this means moving that delimiter too.
  */
 function envLimit(name: string, fallback: number): number {
   return envPositiveInt(name, fallback);
 }
 
 /**
- * Flat listing: the root's immediate dir/zip entries as tiles (plus, when a
- * query is given, every matching container below them), then every model
- * recursively under it, named by root-relative path and ordered by file name
- * (basename, full relative path as tiebreak) — or by relative path when a query
- * is given, so each matching folder's contents stay contiguous (D3). Walk work is bounded by a
- * step budget; the response by a model cap. Either dropping models sets
- * `truncated` — the wire carries the OR of the two and not which one it was;
- * `walkFlat` below is where they are told apart.
- *
- * `query`, when non-blank, narrows the walked models to those whose whole
- * root-relative name contains it case-insensitively — the query matches
- * anywhere in the path below the root (D1) — and narrows containers, the
- * root's own children and every matching directory found below them alike, to
- * those whose *own* name contains it (D2). Both are applied before the caps, so
- * a cap bounds matches rather than raw walk output. Containers carry their own
- * bound, so neither kind can crowd out the other (D4).
- * A blank or whitespace-only query is treated as absent.
- *
- * Which step budget applies depends on that query: a queried walk runs on the
- * search budget, an unqueried one on the (smaller) browse budget — see the
- * `budget` assignment below for why they differ (D5). A truncated response
- * with *no* entries therefore always means budget exhaustion, never the cap:
- * the cap is applied after the query filter, so an empty result cannot trip
- * it. The client's "the search ran out" message depends on that.
+ * The root's containers as tiles, then every model beneath it, by file name — or
+ * by relative path under a query, keeping a folder's contents contiguous (D3). A
+ * query narrows models on their whole path (D1) and containers on their own names
+ * (D2), before the separate caps (D4). A truncated response with *no* entries
+ * therefore always means budget exhaustion, which the client's message relies on.
  */
 export async function listFlat(
   library: Library,
@@ -1133,13 +837,8 @@ export async function listFlat(
 }
 
 /**
- * What one traversal gathered, before any query filter or response cap touched
- * it — the three collections `walkFlat` composes an answer from, plus the
- * per-directory freshness state and whether the walk saw the whole tree.
- *
- * This is exactly what a snapshot stores, and the reason `q` and the search
- * options are absent from the cache key (D1): the walk gathers, the query
- * filters, and nothing below this line has ever seen the query.
+ * What one traversal gathered, before any filter or cap — and exactly what a
+ * snapshot stores, which is why the query is not in the cache key (D1).
  */
 interface Gathered {
   /** The root's own immediate dir/zip entries, bare-named and pre-ranked. */
@@ -1192,17 +891,15 @@ async function gatherFlat(
       walk.visited.add(await realpath(fsPath).catch(() => fsPath));
       await walkFsLevel(level, "", walk, realTop);
     } else if (/\.zip$/i.test(fsPath)) {
-      // A root that is an archive keeps no directory freshness state: its own
-      // `{mtime, size}` is the signal, and `walkZip`'s `stat` plus the archive
-      // layer check it on every pass without help from here.
+      // An archive root keeps no directory state: its `{mtime, size}` is the
+      // signal, and `walkZip` checks it on every pass.
       containers = await walkZip(fsPath, libHalf, "", "", walk, true);
     } else {
       throw new ListingError(400, `not a directory or zip: ${libPath}`);
     }
   } else {
-    // Inside an archive the containers are its immediate *directories*: a
-    // nested zip file is not enterable, so offering it as a tile would hand
-    // the user a link that 400s on click.
+    // Directories only: a nested zip is not enterable, so a tile for one would be
+    // a link that 400s on click.
     await requireArchive(fsPath, libPath);
     containers = await walkZip(fsPath, libHalf, entry, "", walk, true);
   }
@@ -1216,14 +913,9 @@ async function gatherFlat(
 }
 
 /**
- * A gathered walk as a snapshot stores it: one flat array, in the walk's **own
- * emission order**, containers first, then the deeper containers, then the
- * models. Nothing is re-sorted on the way in or on the way out — `partition`
- * hands the three collections back in the order they went, so a cached answer
- * and a walked one are entry-for-entry identical, ordering included. (Sorting
- * here would also be untestable: `readdir` order differs between Bun and Node,
- * so a fixture built to pin an order under vitest asserts nothing about the
- * server — see the testing notes in CLAUDE.md.)
+ * One flat array in the walk's **own emission order**, re-sorted neither way, so
+ * a cached answer and a walked one are entry-for-entry identical. Sorting here
+ * would also be untestable: `readdir` order differs between Bun and Node.
  */
 function snapshotEntries(
   g: Pick<Gathered, "containers" | "dirs" | "models">,
@@ -1242,21 +934,9 @@ function snapshotEntries(
 }
 
 /**
- * The inverse: a stored array back into the three collections, as **fresh**
- * `DirEntry` objects.
- *
- * Fresh is the delta's rule, not a nicety — `applyDisplayNames` mutates emitted
- * entries in place and never clears what it set, so an entry handed out twice
- * would carry the first request's override name into every later answer, across
- * a store removal or a library repoint. (`wire` copies again at the boundary,
- * and a `load` re-parses the file besides; three layers, because the failure is
- * silent and permanent.)
- *
- * The partition is by kind and by whether the stored name carries a `/`. A
- * root-level container is a bare dirent name or a first-level archive
- * directory, neither of which can contain a separator; everything the walk
- * pushed *below* the root level is named by its root-relative path and always
- * does.
+ * The inverse, as **fresh** objects: `applyDisplayNames` mutates emitted entries
+ * in place and never clears them. The partition is by kind and by whether the
+ * stored name carries a `/`, which only a below-root one does.
  */
 function partition(
   entries: readonly SnapshotEntry[],
@@ -1290,10 +970,9 @@ function levelIndex(snapshot: TreeSnapshot): Map<string, ReusedLevel> {
     else held.push(e);
   }
   const out = new Map<string, ReusedLevel>();
-  // Driven from `dirs`, so only a directory the walk actually *read* can be
-  // reused. An archive's interior entries group under keys like
-  // `/kit.zip!/arms` that no `readdir` ever produced, and are ignored here —
-  // archives are revalidated by their own identity, through the D3 layer.
+  // Driven from `dirs`, so only a directory the walk *read* can be reused: an
+  // archive's interior groups under keys no `readdir` produced, and archives are
+  // revalidated by their own identity through the D3 layer.
   for (const d of snapshot.dirs) {
     out.set(d.path, { mtime: d.mtime, children: byDir.get(d.path) ?? [] });
   }
@@ -1324,28 +1003,12 @@ function sameEntries(
 }
 
 /**
- * The incremental revalidation pass (§4.2, design D4): one `stat` per recorded
- * directory, a `readdir` only where the mtime moved, and the archive layer
- * answering every unchanged zip without opening it. **Never a background
- * re-walk** — that would reintroduce the cold cost this change exists to
- * remove, off the critical path where nobody can see it.
- *
- * Returns whether anything moved, and **which directories** it was that moved
- * (§6.1): a preview choice is derived from a directory's subtree, so the layer
- * above re-derives the changed directory's and each of its ancestors'. That
- * list is a by-product of the pass — `levelFor` has already stat'd every
- * recorded directory and knows which mtimes it found unchanged — so reporting it
- * costs a comparison rather than a second look.
- *
- * A directory the snapshot recorded and this pass did **not** reach is not in
- * the list, and needs not be: it is gone, and something removed it, which moved
- * its parent's mtime and put the parent in the list instead.
- *
- * Raises `RevalidationError` when the pass cannot be completed against a root
- * that is present — a recorded directory that has become unreadable, or a tree
- * that has outgrown the walk budget — and the caller then invalidates rather
- * than going on serving contradicted entries (§4.3, D6). A root with no
- * snapshot is nothing to revalidate, not a reason to walk one.
+ * The incremental pass (§4.2, D4): one `stat` per recorded directory, a `readdir`
+ * only where the mtime moved, and **never a background re-walk**. Reports which
+ * directories moved (§6.1); one it did not reach is absent and needs to be, since
+ * removing a directory moves its parent's mtime. Raises `RevalidationError` when
+ * it cannot complete against a root that is present, and the caller invalidates
+ * rather than serving contradicted entries (§4.3, D6).
  */
 export async function revalidateTree(
   library: Library,
@@ -1357,9 +1020,8 @@ export async function revalidateTree(
   const g = await gatherFlat(
     library,
     root,
-    // Not the browse budget: this pass is nobody's request, and a tree that a
-    // *search* could reach must stay revalidatable whatever kind of listing
-    // last cached it.
+    // Not the browse budget: a tree a *search* could reach must stay
+    // revalidatable whatever kind of listing last cached it.
     envLimit("MODEL_BROWSER_SEARCH_BUDGET", 200_000),
     store.archiveCache(),
     levelIndex(snapshot),
@@ -1368,8 +1030,7 @@ export async function revalidateTree(
     throw new RevalidationError(`revalidation did not finish: ${root}`);
   const entries = snapshotEntries(g);
   const changed = !sameEntries(snapshot.entries, entries);
-  // A directory whose mtime is not the one recorded — including one the
-  // snapshot never recorded at all, which is a folder that has just appeared.
+  // Including one never recorded, which is a folder that has just appeared.
   const before = new Map(snapshot.dirs.map((d) => [d.path, d.mtime]));
   const changedDirs = [...g.dirMtimes]
     .filter(([path, mtime]) => before.get(path) !== mtime)
@@ -1384,40 +1045,20 @@ export async function revalidateTree(
 }
 
 /**
- * Every model beneath a library path, with no response cap (§6.7, design D7's
- * enumeration note).
- *
- * **Uncapped is not unbounded.** `MODEL_BROWSER_FLAT_CAP` bounds a *listing* —
- * how many tiles an answer may carry — and this is not one: a scope cut to a cap
- * would silently be a different scope, and the caller is about to act on every
- * model in it. The walk's step *budget* still applies, because that bounds the
- * work rather than the answer; a traversal it stops is reported as incomplete
- * rather than refused, and nothing is cached for it (§4.1a).
- *
- * Three ways to answer, cheapest first:
- *
- * 1. A snapshot for this exact path — filter and hand back, no filesystem I/O.
- * 2. A snapshot for an **ancestor** root, which already holds this subtree: the
- *    common case, since the library tab enumerates the root that browsing has
- *    walked. Entries are re-named relative to the path asked about, so this
- *    answer is indistinguishable from a walk of it.
- * 3. No snapshot: walk it as a listing miss walks, on the search budget, and
- *    persist only a traversal that saw the whole tree.
+ * Every model beneath a library path, with no response cap (§6.7, D7). **Uncapped
+ * is not unbounded**: the *listing* cap would silently make this a different
+ * scope, and the caller is about to act on every model in it, while the walk's
+ * step budget still bounds the work. Answered from an exact snapshot, from an
+ * ancestor's (re-named relative to the path asked about), or by walking.
  */
 export async function enumerateModels(
   library: Library,
   libPath: string,
   store?: SnapshotStore,
   /**
-   * Called with the snapshot root that is about to answer this enumeration —
-   * `libPath` itself, or the nearest enclosing one — before anything is read
-   * out of it (round-2 finding 4b). `ListingCache.enumerate` passes the
-   * validation lifecycle here; a caller with no cache passes nothing and gets
-   * the pre-change behaviour.
-   *
-   * It may invalidate the snapshot it was told about, and this function is
-   * written so that it may: everything below re-loads from the store
-   * afterwards, so a root the callback dropped falls through to the walk.
+   * Called with the root about to answer, before anything is read out of it —
+   * `ListingCache.enumerate`'s validation lifecycle. It **may invalidate** that
+   * root: everything below re-loads, so a dropped one falls through to the walk.
    */
   validate?: (root: string) => Promise<unknown>,
 ): Promise<{ models: DirEntry[]; complete: boolean; fromSnapshot: boolean }> {
@@ -1434,26 +1075,14 @@ export async function enumerateModels(
         fromSnapshot: true,
       };
     }
-    // Longest first: the nearest enclosing root holds the fewest entries to
-    // filter, and every one of them holds this subtree identically.
+    // Longest first: every enclosing root holds this subtree identically, and the
+    // nearest holds the fewest entries to filter.
     const roots = (await store.roots())
       .filter((root) => encloses(root, libPath))
       .sort((a, b) => b.length - a.length);
-    // **The requested path is resolved before an ancestor's tree answers for
-    // it** (round-2 finding 4a). A path that is merely *spelled* under a cached
-    // root has never been resolved by anything: no walk created a snapshot for
-    // it, and filtering an ancestor's entries by a prefix nothing matches
-    // yields an empty set, which this used to answer 200 `{entries: [], complete:
-    // true}` — "that folder holds no models" about a folder that does not
-    // exist. The uncached branch 404s it through `gatherFlat`'s own up-front
-    // stat, and the route's docstring promises "the same distinctions for the
-    // same reasons"; this is that stat, paid once, only where an ancestor is
-    // about to answer.
-    //
-    // Not needed on the exact branch above: a snapshot keyed at `libPath` was
-    // written by a walk that resolved it, and a root that has since been deleted
-    // is what the validation pass invalidates (round-2 finding 1) — after which
-    // this falls through to the walk and 404s there.
+    // **Resolved before an ancestor's tree answers for it**: a path merely
+    // *spelled* under a cached root filters to an empty set, which would be a 200
+    // about a folder that does not exist. The exact branch needs no such stat.
     if (roots.length > 0) await requireEnumerable(library, libPath);
     for (const root of roots) {
       const snapshot = await store.load(root);
@@ -1468,28 +1097,16 @@ export async function enumerateModels(
   const g = await gatherFlat(
     library,
     libPath,
-    // The search budget, not the browse one: an enumeration is a deliberate
-    // action over a whole subtree, and the smaller budget is sized for the
-    // tiles one screen shows.
+    // The search budget: the browse one is sized for the tiles on one screen.
     envLimit("MODEL_BROWSER_SEARCH_BUDGET", 200_000),
     store?.archiveCache(),
   );
   const complete = !g.budgetExhausted;
   if (store !== undefined && complete) {
-    // **Best-effort, exactly as `walkFlat`'s request-path save is** (round-2
-    // finding 3; the sibling was corrected in round 1 and this copy was
-    // missed). This walk has already produced the enumeration the caller asked
-    // for; the save is an optimisation for the *next* request. A full disk, a
-    // read-only cache directory or a permission change would otherwise turn a
-    // perfectly good answer into a 500 — and into one carrying an errno and the
-    // cache's filesystem path in its body, which is a probe of the machine
-    // besides. The cost of swallowing it is one uncached walk, paid again next
-    // time.
-    //
-    // `revalidateTree`'s save still rejects, and deliberately: the pass's
-    // failure taxonomy distinguishes "the store could not be written" from "the
-    // filesystem contradicted the cache", and it can only do that if the first
-    // one reaches it. This is a request, not a pass.
+    // **Best-effort, as `walkFlat`'s request-path save is**: the answer is already
+    // produced, so a full disk must not turn it into a 500 naming the cache's
+    // path. `revalidateTree`'s save still rejects, its failure taxonomy needing
+    // to tell an unwritable store from a contradicted cache.
     await store
       .save({
         root: libPath,
@@ -1499,10 +1116,8 @@ export async function enumerateModels(
       })
       .catch(() => undefined);
   }
-  // Through the same filter as the two cached paths, though a fresh walk's
-  // models are all under the root already and already named that way: one rule,
-  // so the three answers cannot differ in their naming or in whether they hand
-  // out objects the walk still holds.
+  // Through the same filter as the cached paths, though a fresh walk needs none
+  // of it, so the three answers cannot differ in naming or in what they share.
   return {
     models: modelsUnder(g.models, libPath),
     complete,
@@ -1518,13 +1133,8 @@ function encloses(root: string, libPath: string): boolean {
 }
 
 /**
- * The snapshot root that would answer an enumeration of `libPath` — the exact
- * one where there is one, else the nearest enclosing, else null.
- *
- * `roots()` is the census of usable snapshots, so an exact root is simply the
- * longest of the enclosing ones. Deliberately does not `load` anything: it is
- * asked before the answer is read, to name the root whose freshness the caller
- * wants settled first.
+ * The root that would answer an enumeration of `libPath`: the longest enclosing
+ * one. Loads nothing — it is asked before the answer is read.
  */
 async function coveringRoot(
   store: SnapshotStore,
@@ -1537,20 +1147,16 @@ async function coveringRoot(
 }
 
 /**
- * `gatherFlat`'s own up-front checks on a path, and nothing else: does it
- * exist, and is it a thing that has an inside? Extracted so the cached
- * enumeration branch refuses exactly what a walk of the same path would refuse,
- * with the same status and the same sentence — the alternative is two answers to
- * one question, differing by whether an ancestor happened to be cached.
+ * `gatherFlat`'s own up-front checks, extracted so a cached enumeration refuses
+ * what a walk would refuse, in the same words. Otherwise one question has two
+ * answers, differing by whether an ancestor happened to be cached.
  */
 async function requireEnumerable(
   library: Library,
   libPath: string,
 ): Promise<void> {
   const { fsPath, entry } = await library.resolve(libPath);
-  // Inside an archive: the archive itself is what must be one, which is the
-  // same test `gatherFlat` makes on that branch. A prefix naming no entry is
-  // not a refusal there either — an empty archive directory is an empty answer.
+  // The archive is what must be one; a prefix naming no entry is an empty answer.
   if (entry !== undefined) return await requireArchive(fsPath, libPath);
   const s = await stat(fsPath).catch(() => null);
   if (s === null) throw new ListingError(404, `no such path: ${libPath}`);
@@ -1560,29 +1166,20 @@ async function requireEnumerable(
 }
 
 /**
- * The models of a gathered set that lie beneath `libPath`, each named the way a
- * walk rooted *there* would name it — by its path relative to that root.
- *
- * Re-naming is what makes a snapshot-served enumeration and a walked one the
- * same answer: a snapshot's names are relative to the root it was walked from,
- * which for an ancestor root is one level too high. Deriving the name from the
- * path is exact rather than approximate — that is precisely how the walk builds
- * it, on both the filesystem side (`${rel}${name}`) and the archive side
- * (`${namePrefix}${rest}`).
+ * Named as a walk rooted *there* would name them. An ancestor's snapshot names
+ * them one level too high, and deriving from the path is exact — it is how the
+ * walk builds the name on both the filesystem and the archive side.
  */
 function modelsUnder(models: readonly DirEntry[], libPath: string): DirEntry[] {
-  // Two separators, because a root can be an archive: everything inside
-  // `/kit/box.zip` is addressed `/kit/box.zip!/…`, and a `/` prefix would match
-  // none of it — the enumeration of an archive would come back empty, which is
-  // a wrong answer rather than a missing feature.
+  // Two separators, because a root can be an archive: a `/` prefix matches
+  // nothing inside `/kit/box.zip`, and that enumeration would come back empty.
   const prefixes = libPath === "/" ? ["/"] : [`${libPath}/`, `${libPath}!/`];
   const out: DirEntry[] = [];
   for (const m of models) {
     if (m.kind !== "model") continue;
     const prefix = prefixes.find((p) => m.path.startsWith(p));
     if (prefix === undefined) continue;
-    // A fresh object, never the stored one: emission annotates entries in place
-    // (the `applyDisplayNames` hazard the delta's copies rule names).
+    // Fresh, never the stored object: emission annotates entries in place.
     const copy: DirEntry = {
       name: m.path.slice(prefix.length),
       path: m.path,
@@ -1597,39 +1194,12 @@ function modelsUnder(models: readonly DirEntry[], libPath: string): DirEntry[] {
 }
 
 /**
- * What a flat listing *was*, beside the listing itself: whether the walk saw
- * the whole tree, and whether a response cap then shortened what it found.
- *
- * Two facts the wire deliberately does not carry — `DirListing.truncated` is
- * their OR, unchanged, because a client showing "the search ran out" has the
- * same thing to say either way. Inside the server they are not one fact:
- *
- * - `budgetExhausted` is a property of the **traversal**. What the walk holds is
- *   a prefix of the tree and the rest was never looked at.
- * - `capped` is a property of the **answer**. The tree may have been walked in
- *   full; only the reply was cut to the model cap or the folder cap.
- *
- * Exported, and not folded back into `listFlat`, for two callers. It is what
- * `flat.test.ts` drives to assert each flag on its own — through `listFlat` the
- * two are indistinguishable, both being `truncated: true` and nothing else. And
- * it is the seam `listing-tree-cache` needs: its 4.1a rule is that only a
- * **complete** traversal may be persisted (a partial tree stored as a whole one
- * is permanently wrong and indistinguishable from the real thing), which is a
- * question about the walk that `truncated` cannot answer — a 501-model folder
- * walked end to end would refuse to cache itself forever. Please do not inline
- * it as an unused indirection.
- *
- * With a `store` it is also §4.1's serving seam. A root that has a snapshot is
- * answered **from it** — no `readdir`, no `stat`, no archive opened — and one
- * that has not is walked and, if the walk saw the whole tree, persisted. The
- * snapshot is keyed by the root alone: `query` and `opts` filter over what it
- * holds exactly as they filter over a live walk, so one cached tree serves
- * every query and both settings of the folder-matching option (D1).
- *
- * `fromSnapshot` says which of the two happened. The caller above this one owns
- * what that means to the user — whether the answer is marked stale and whether
- * a revalidation pass starts — because that is a fact about the *process*, not
- * about this walk.
+ * `listFlat`, plus the two facts the wire folds into one `truncated`:
+ * `budgetExhausted` is about the **traversal**, `capped` about the **answer**.
+ * Exported because §4.1a persists only a complete traversal, which `truncated`
+ * cannot answer — please do not inline it as an unused indirection. With a
+ * `store` it is also §4.1's serving seam, keyed by the root alone, so one cached
+ * tree serves every query and both folder-matching settings (D1).
  */
 export async function walkFlat(
   library: Library,
@@ -1645,13 +1215,11 @@ export async function walkFlat(
 }> {
   const q = query?.trim().toLowerCase();
   const hasQuery = q !== undefined && q !== "";
-  // Default on: an absent parameter is the shipped predicate, so an old client
-  // and a hand-written URL both get what they got before the option existed.
+  // Default on, so an old client and a hand-written URL get the shipped predicate.
   const folderMatching = opts.folderMatching !== false;
-  // Confinement was settled when the snapshot was written: only a walk that
-  // resolved through the library can have created one, and the key is the
-  // library path it resolved. So a served snapshot needs no re-resolution, and
-  // that is the point — "touching no directory or archive" is the requirement.
+  // Confinement was settled when the snapshot was written — only a walk that
+  // resolved through the library can have made one — so serving it touches
+  // nothing, which is the requirement.
   const snapshot = store === undefined ? null : await store.load(libPath);
   const fromSnapshot = snapshot !== null;
   let gathered: Pick<Gathered, "containers" | "dirs" | "models">;
@@ -1662,10 +1230,8 @@ export async function walkFlat(
     const g = await gatherFlat(
       library,
       libPath,
-      // A search affords a far larger walk than a browse (D5): the flat view
-      // must render everything it walks as tiles, while a search discards
-      // non-matches and returns at most the cap — so its budget buys reach, not
-      // payload. 10× default; independently tunable.
+      // A search affords a far larger walk (D5): the flat view renders everything
+      // it walks, while a search discards non-matches, so its budget buys reach.
       hasQuery
         ? envLimit("MODEL_BROWSER_SEARCH_BUDGET", 200_000)
         : envLimit("MODEL_BROWSER_FLAT_BUDGET", 20000),
@@ -1673,26 +1239,14 @@ export async function walkFlat(
     );
     gathered = g;
     budgetExhausted = g.budgetExhausted;
-    // §4.1a: **only a complete traversal is persisted.** The test is
-    // `budgetExhausted`, never the wire's `truncated` — that is the OR of this
-    // flag and the response caps, and a folder walked end to end whose 501st
-    // model the cap dropped would otherwise refuse to cache itself forever. A
-    // walk that threw (a cancelled one, when that lands) never reaches this
-    // line, so nothing is written and the store's archive layer stays unflushed
-    // in memory, which is the same rule stated once.
+    // §4.1a: **only a complete traversal is persisted**, tested on
+    // `budgetExhausted` and never on the wire's `truncated`, which a response cap
+    // also sets. A walk that threw never reaches this line at all.
     if (store !== undefined && !budgetExhausted) {
-      // **Best-effort, on the request path** (review finding 3). This walk has
-      // already produced the listing the user asked for; the save is an
-      // optimisation for the *next* request. A full disk, a read-only cache
-      // directory or a permission change would otherwise turn a perfectly good
-      // listing into a 500 — and into one carrying an errno and the cache's
-      // filesystem path in its body, which is a probe of the machine besides.
-      // The cost of swallowing it is one uncached walk, paid again next time.
-      //
-      // Deliberately **not** the rule inside `revalidateTree`, whose own save
-      // must still reject: the pass's failure taxonomy distinguishes "the store
-      // could not be written" from "the filesystem contradicted the cache", and
-      // it can only do that if the first one reaches it.
+      // **Best-effort**: the listing is already produced, so a full disk must not
+      // turn it into a 500 naming the cache's path. `revalidateTree`'s save still
+      // rejects, its taxonomy needing to tell an unwritable store from a
+      // contradicted cache.
       await store
         .save({
           root: libPath,
@@ -1708,52 +1262,36 @@ export async function walkFlat(
   let capped = false;
 
   const cap = envLimit("MODEL_BROWSER_FLAT_CAP", 500);
-  // Filter before sorting, not after: a search walks up to its own budget
-  // (200k steps) but keeps only matches, and the comparator below runs
-  // `localeCompare` — collation over the whole walk to return a handful of
-  // rows. Discarding first is the same output (a sorted subset equals the
-  // sorted set filtered) for a fraction of the comparisons.
+  // Filter before sorting: a sorted subset equals the sorted set filtered, and
+  // the comparator below is `localeCompare` over everything a search walked.
   if (hasQuery) {
     containers = containers.filter((e) => matchesOwnName(e.name, q));
-    // The option narrows the *model* predicate from the whole relative path to
-    // the file's own name; container matching is the other option's business
-    // and is unaffected, so the two stay orthogonal.
+    // The option narrows the *model* predicate only; containers are unaffected.
     const modelMatches = folderMatching ? matchesQuery : matchesOwnName;
     models = models.filter((m) => modelMatches(m.name, q));
-    // Two predicates on purpose: a model matches anywhere in its path, a
-    // container only on its own name (D2).
     containers = [
       ...containers,
       ...gathered.dirs.filter((d) => matchesOwnName(d.name, q)),
     ];
-    // Containers normally arrive pre-ranked from `listFsDir` and are never
-    // re-sorted here; appending deeper matches to them makes that untrue, so a
-    // queried listing sorts the block explicitly. Same kind rank as everywhere
-    // else — dirs before zips — with the root-relative path as the tiebreak,
-    // which needs no special case for the root's own bare-named children,
-    // since a bare name is its own root-relative path (D3).
+    // Containers arrive pre-ranked and are not re-sorted, but appending deeper
+    // matches breaks that, so a queried listing sorts the block. The tiebreak is
+    // the root-relative path, which a bare name already is (D3).
     containers.sort(
       (a, b) =>
         kindRank(a.kind) - kindRank(b.kind) || a.name.localeCompare(b.name),
     );
-    // Containers get their own bound rather than sharing the model cap, so a
-    // fragment matching many folders cannot spend the models' budget (D4).
+    // Their own bound, so a fragment matching many folders cannot spend the
+    // models' (D4).
     const folderCap = envLimit("MODEL_BROWSER_FOLDER_CAP", 50);
     if (containers.length > folderCap) {
       capped = true;
       containers.length = folderCap;
     }
   }
-  // Not sortEntries: its model comparison is the full name, i.e. the relative
-  // path — flat ordering is by file name so same-named parts sit together (D2).
-  // A queried listing orders by that relative path instead, so each matching
-  // folder's contents stay contiguous rather than scattering among every
-  // same-named part in the tree — the sort key would otherwise be the one part
-  // of the name the user did not type (D3).
-  // Sorted on a copy: `partition` mints fresh entry objects, but the array
-  // holding them belongs to this call, and sorting a collection in place that
-  // some later caller might hand over twice is the kind of thing that is
-  // harmless right up until it is not.
+  // Not `sortEntries`, which orders models by their whole relative path: flat
+  // ordering is by file name, so same-named parts sit together (D2), while a
+  // queried listing does order by path, keeping each matching folder's contents
+  // contiguous (D3). On a copy, the array being the store's on a cached answer.
   models = [...models].sort(
     hasQuery
       ? (a, b) => a.name.localeCompare(b.name)
@@ -1769,19 +1307,15 @@ export async function walkFlat(
     path: libPath,
     entries: wire([...containers, ...models]),
   };
-  // The wire's `truncated` is the OR of the two, and is exactly what it was
-  // before they were told apart: "some models were dropped", whichever bound
-  // dropped them.
+  // The wire's `truncated` is the OR: "some models were dropped", whichever
+  // bound dropped them.
   if (budgetExhausted || capped) listing.truncated = true;
   return { listing, budgetExhausted, capped, fromSnapshot };
 }
 
 /**
- * Subdirectory completions for a partial library path (path-bar autocomplete).
- * In and out are library paths; a prefix that is not one, or that resolves
- * outside the library, completes to nothing rather than to a refusal — a path
- * bar is typed one character at a time, and most of those characters name
- * nothing yet.
+ * Path-bar autocomplete. Anything unresolvable completes to nothing rather than
+ * refusing: a path bar is typed one character at a time.
  */
 export async function complete(
   library: Library,
@@ -1806,12 +1340,8 @@ export async function complete(
     .filter(
       (d) =>
         d.isDirectory() &&
-        // Never a hidden entry, whatever was typed. A dot prefix used to be
-        // the one spelling that offered them (the marker excepted); it is not
-        // any more, because `resolve` now refuses a hidden component outright
-        // and a completion that offered one would be offering a path the next
-        // request cannot fetch. The marker is covered by the same rule, being
-        // dot-prefixed itself.
+        // `resolve` refuses a hidden component, so offering one would offer a path
+        // the next request cannot fetch.
         !d.name.startsWith(".") &&
         d.name.startsWith(base),
     )

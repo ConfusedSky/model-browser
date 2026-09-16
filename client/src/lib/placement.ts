@@ -1,29 +1,21 @@
 /**
- * Where the grid was left, and how to put it back (retrace-placement D1, D4, D5).
+ * Where the grid was left, and how to put it back (retrace-placement D1/D4/D5).
+ * An anchor tile and an offset rather than a scroll offset, so it degrades to
+ * "the same tile in the same place" when a resize moved the rows.
  *
- * A placement is an anchor tile and an offset, not a scroll offset: the first
- * tile whose box crosses the scrollport's top edge, and how far above that edge
- * its top sits. It reproduces the pixel position when nothing changed and
- * degrades to "the same tile in the same place" when a resize or a listing
- * change moved the rows.
- *
- * Three pure pieces and two DOM adapters. `measurePlacement` and
- * `resolvePlacement` know nothing about the DOM so the fallback chain can be
- * asserted cell by cell; `measureIn` and `applyIn` read and set the real
- * scroller and never throw — a placement is a convenience, and a failed one
- * must leave the app exactly where a fresh landing would (the top).
+ * The DOM adapters never throw: a placement is a convenience, and a failed one
+ * must leave the app where a fresh landing would.
  */
 
-/** The first tile crossing the scrollport's top edge and `tile.top − scrollport.top`
- *  (zero or negative while the tile is partly scrolled past; positive only when the
- *  listing is shorter than the scrollport and the first tile sits below a notice). */
+/** The first tile crossing the scrollport's top edge, and `tile.top` relative to
+ *  that edge — negative while the tile is partly scrolled past. */
 export interface Placement {
   anchor: string;
   offset: number;
 }
 
-/** What a navigation asks the landing to do. Raised by whichever navigation ran,
- *  resolved once against the listing that actually landed (D5). */
+/** Raised by whichever navigation ran, resolved once against the listing that
+ *  actually landed (D5). */
 export type PlacementRequest =
   | { kind: "top" }
   /** Back / Forward / dismiss: the entry's own remembered placement. */
@@ -42,14 +34,8 @@ export type Resolved =
 const TOP: Resolved = { kind: "top" };
 
 /**
- * D4's fallback chain. Presence in `entries` is the whole test — an anchor that
- * is a model survives a flat toggle, one that is a folder does not exist in flat
- * and falls through — so there is no flat comparison and no special case here.
- *
- *   up      anchor present → it at its offset; child present → child centred; else top
- *   entry   anchor present → it at its offset; else top
- *   reveal  path present → centred; else top
- *   top     top
+ * D4's fallback chain. Presence in `entries` is the whole test, so a flat toggle
+ * needs no special case: a folder anchor simply is not there and falls through.
  */
 export function resolvePlacement(
   request: PlacementRequest,
@@ -78,13 +64,9 @@ export function resolvePlacement(
 }
 
 /**
- * The first tile in document order whose bottom lies below the scrollport's top
- * edge is the anchor; its offset is `top − scrollportTop`. No tiles, or every
- * tile scrolled fully past (a listing that shrank under the scroller), is null.
- *
- * `tiles` is read lazily — the walk stops at the first crossing — so an adapter
- * can hand in objects whose `top`/`bottom` measure on access and pay for one rect
- * per tile passed, not one per tile in the listing (D1's cost argument).
+ * `tiles` is read lazily and the walk stops at the first crossing, so an adapter
+ * can hand in objects that measure on access and pay one rect per tile *passed*
+ * rather than one per tile in the listing (D1).
  */
 export function measurePlacement(
   scrollportTop: number,
@@ -99,15 +81,8 @@ export function measurePlacement(
 
 const TILE_ATTR = "data-entry-tile";
 
-/**
- * Every tile the grid drew, in document order. Not a selector on the path:
- * library paths carry spaces, quotes and `!/`, and a quoted attribute value with
- * `CSS.escape`'s backslash escapes is refused by happy-dom's selector parser
- * (`is not a valid selector`, probed 2026-09-09), so the suite could not exercise
- * a selector-based lookup with a realistic path. Exact attribute equality is the
- * same test `resolvePlacement` makes on `entries`, and the walk is the one
- * `measureIn` already does.
- */
+/** Not a selector on the path: happy-dom's selector parser refuses the escapes
+ *  a realistic library path needs, so the suite could not exercise one. */
 export function tilesIn(scroller: HTMLElement): HTMLElement[] {
   return Array.from(scroller.querySelectorAll<HTMLElement>(`[${TILE_ATTR}]`));
 }
@@ -121,7 +96,7 @@ export function findTile(
   );
 }
 
-/** `measurePlacement` over the scroller's tiles, rects read as the walk reaches them. */
+/** Rects are read as the walk reaches them. */
 export function measureIn(scroller: HTMLElement): Placement | null {
   try {
     const scrollportTop = scroller.getBoundingClientRect().top;
@@ -145,14 +120,10 @@ export function measureIn(scroller: HTMLElement): Placement | null {
 }
 
 /**
- * Set the scroller so the resolved tile sits where it should: for `anchor`, its
- * top `offset` px from the scrollport's top edge; for `center`, in the middle of
- * the scrollport. Instant, never smooth — the listing has only just appeared,
- * and a glide over sixty rows is a distraction rather than an orientation (the
- * reveal's own reasoning). `top` is `scrollTop = 0`.
- *
- * True when it placed; false when the tile is not in the grid or nothing could
- * be measured, so the caller may treat the landing as fresh. Never throws.
+ * Instant, never smooth: the listing has only just appeared, and a glide over
+ * it is a distraction rather than an orientation. False where the tile is not in
+ * the grid or nothing could be measured, so the caller treats the landing as
+ * fresh; never throws.
  */
 export function applyIn(scroller: HTMLElement, resolved: Resolved): boolean {
   try {

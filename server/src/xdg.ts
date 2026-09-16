@@ -1,11 +1,6 @@
 /**
- * XDG base-directory locations, shared by every module that reads a file the
- * user placed on this machine (`launch.json`, `config.json`, `mimeapps.list`).
- *
- * Node APIs only — the Hono app must run un-Bun'd (global D1).
- *
- * The `env` is a parameter rather than a read of `process.env`, so a test can
- * point the whole chain at a temp tree without mutating the process.
+ * XDG base-directory locations. `env` is a parameter, not a `process.env` read,
+ * so a test can point the whole chain at a temp tree.
  */
 
 import { homedir } from "node:os";
@@ -22,11 +17,8 @@ export function configHome(env: NodeJS.ProcessEnv): string {
 }
 
 /**
- * Data dirs in precedence order, **with the XDG defaults applied**. Reading
- * the variables literally is not equivalent: on the development machine
- * `XDG_DATA_HOME` is unset and `~/.local/share` is absent from
- * `XDG_DATA_DIRS` (verified), so the literal read misses the one directory
- * holding every entry that matters (L2).
+ * Data dirs in precedence order, **defaults applied**: a desktop commonly leaves
+ * `~/.local/share` out of both variables, and that is where the entries are (L2).
  */
 export function dataDirs(env: NodeJS.ProcessEnv): string[] {
   const dataHome = env.XDG_DATA_HOME;

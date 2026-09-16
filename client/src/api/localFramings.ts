@@ -24,87 +24,46 @@ import type {
 } from "./client";
 
 /**
- * A visitor's own framings, kept in their browser, on a deployment that refuses
- * thumbnail writes (`public-deployment` D6).
+ * A visitor's own framings, kept in their browser where the deployment refuses
+ * thumbnail writes (`public-deployment` D6). One store holding one precedence —
+ * this browser, then the server, then an orientation source, then the default —
+ * for the decorator below and `useThumbnails`' seed alike.
  *
- * The rule this module holds is the delta's precedence — this browser's stored
- * orientation, then the server's, then an orientation source, then the default
- * — and it holds it in **one** place for **two** arrival points: the decorator
- * below overlays a `getThumb` answer, and `useThumbnails`' listing-annotation
- * seed overlays an entry the listing already answered. One store, one rule.
- *
- * Nothing here may throw. `localStorage` is absent in some test environments and
- * refused in others (a private window, blocked site data), and a framing is a
- * convenience: a read that cannot happen reads as "nothing stored" and a write
- * that cannot happen is dropped, exactly as `lib/stored.ts` degrades.
+ * **Nothing here may throw.** `localStorage` is absent in some environments and
+ * refused in others, and a framing is a convenience: what cannot be read is
+ * "nothing stored" and what cannot be written is dropped.
  */
 
-/** Just the three calls used here, so a test can pass a plain object. */
+/** So a test can pass a plain object. */
 export type FramingStorage = Pick<
   Storage,
   "getItem" | "setItem" | "removeItem"
 >;
 
-/** One model's locally-held orientation. Never both-absent — that is `undefined`. */
+/** Never both-absent — that is `undefined`. */
 export interface LocalFraming {
   camera?: CameraState;
   axis?: OrbitAxis;
 }
 
-/** This store's own namespace in a shared `localStorage`. See `framingKey`. */
 export const PREFIX = "mb:framing:";
 
-/**
- * Whether a framing is kept in this browser at all.
- *
- * **Off** until issue #28 lands. The store honours a visitor's orientation in
- * the lightbox while the grid tile keeps the baked framing — `useThumbnails`'
- * seed overlays the tile's `camera`/`axis` but never its `url`, and no client
- * side pixel cache exists — so a stored framing reads as a split the visitor
- * can see rather than as their gesture being kept. Until the pixels can follow
- * the orientation, keep neither, and let the two surfaces agree on the
- * deployment's own framing.
- *
- * An orbit then lasts exactly as long as the tile does — `useThumbnails`'
- * reconciler drops a path's state when it leaves the listing, so going up a
- * folder and back is already enough to lose it, which is the very gesture #28
- * names. Shorter than "the session", and deliberately: this removes the split
- * rather than the visitor's disappointment.
- *
- * One flag, both directions. A read answers `undefined` and a write is
- * dropped, which are the states every caller already handles for a browser
- * that refuses storage, so nothing downstream changes shape. Entries a
- * visitor's browser already holds are not merely ignored — `sweepLocalFramings`
- * removes them at startup, so flipping this constant back cannot resurrect a
- * framing abandoned months earlier. Re-enabling is this constant, dropping that
- * sweep, and the pixel cache #28 asks for.
- */
+/** **Off** until issue #28: with no client-side pixel cache, a stored framing
+ *  turns the lightbox and its tile into a visible split rather than a gesture
+ *  kept. Re-enabling is this flag, the sweep below, and that cache. */
 const FRAMINGS_KEPT_LOCALLY = false;
 
-/**
- * The default library-id getter, module-level for the reason `useThumbnails`'
- * `NO_FEATURES` is: an inline `() => null` is a fresh function per call, and
- * this value lands in that hook's sweep dependency array.
- */
+/** Module-level because an inline `() => null` is a fresh function per call,
+ *  and this lands in a hook's dependency array. */
 export const NO_LIBRARY = (): string | null => null;
 
 /**
- * Where one library's framing for `path` is held: `mb:framing:<id>:<path>`.
+ * `mb:framing:<id>:<path>`. The id is in front because this store stands in for
+ * a cache keyed by it: an installation repointed between two libraries sharing
+ * relative paths would otherwise read one's framings onto the other's.
  *
- * The **library id** is in front of the path because the server's thumbnail
- * cache is keyed by it, and this store stands in for that cache. A personal
- * installation repointed between two libraries that share relative paths — the
- * same kit copied to a second drive, a backup mounted beside the original —
- * would otherwise read one library's framings onto the other's models. Moot on
- * a public deployment, which is one library per origin; real locally, which is
- * where the store is reached through a refused write (`putThumb` below).
- *
- * `null` — the library is not known yet — has **no key at all**: a framing
- * cannot be filed under a library that has not been named, so a read answers
- * `undefined` and a write is dropped. That window is acceptable because it
- * cannot hold a gesture: every path route answers 503 until the library is
- * `ready`, and `App` asks `/api/library` before any listing lands, so there is
- * no tile on screen to orbit before the id is here.
+ * An unknown library has **no key at all** — a window that cannot hold a
+ * gesture, since every path route 503s until the library is ready.
  */
 function framingKey(path: string, libraryId: string | null): string | null {
   return libraryId === null ? null : `${PREFIX}${libraryId}:${path}`;
@@ -116,7 +75,7 @@ function browserStorage(): Storage | null {
   try {
     return globalThis.localStorage ?? null;
   } catch {
-    // Accessing the property itself throws where site data is blocked.
+    // The property access itself throws where site data is blocked.
     return null;
   }
 }
@@ -138,24 +97,14 @@ function isAxis(value: unknown): value is OrbitAxis {
   return typeof value === "string" && AXES.includes(value);
 }
 
-/**
- * Whether this client keeps its framings rather than sending them.
- *
- * Only a **known** report declaring writes off (`public-deployment` D6, task
- * 4.2): an unresolved or failed report is `null` and keeps writing to the
- * server, because the feature-report capability is normative that not knowing
- * must never relocate where a user's data is stored.
- */
+/** Only a **known** report declaring writes off: not knowing must never
+ *  relocate where a user's data is stored (`public-deployment` D6). */
 export function keepsFramingsLocally(report: FeatureReport | null): boolean {
   return report !== null && report.thumbWrites === false;
 }
 
-/**
- * What this browser holds for `path`, validated. A malformed or hand-edited
- * value reads as nothing stored rather than propagating (`stored.ts`'s rule),
- * and a record holding neither half is `undefined` so callers have one absence
- * to test.
- */
+/** A malformed or hand-edited value reads as nothing stored, and a record
+ *  holding neither half is `undefined`, so callers test one absence. */
 export function readLocalFraming(
   path: string,
   storage: FramingStorage | null = browserStorage(),
@@ -189,15 +138,9 @@ export function readLocalFraming(
 }
 
 /**
- * Store what a write carried, in `ThumbSave`'s own three states: a value
- * **stores**, absence **keeps** what is held, and `null` **deletes** that half.
- *
- * The deletion is the half that matters. A discard (`camera: null`, from a tile
- * or the viewer giving a framing up) must not survive as a stale local
- * override, or the model would be stuck at an orientation the user has already
- * abandoned and no later server value could reach it. Once deleted the delta's
- * precedence resumes below this browser: the server's value, then an
- * orientation source, then the default.
+ * `ThumbSave`'s three states. The deletion is the half that matters: a discard
+ * that survived as a local override would stick the model at an orientation the
+ * user abandoned, where no later server value could reach it.
  */
 export function writeLocalFraming(
   path: string,
@@ -209,8 +152,8 @@ export function writeLocalFraming(
   if (storage === null) return;
   const key = framingKey(path, libraryId());
   if (key === null) return;
-  // Neither half named is not a write at all — pixels alone reach here on a
-  // refusing deployment, and there is nothing of them to keep.
+  // Pixels alone reach here on a refusing deployment, and none of them is
+  // ours to keep.
   if (save.camera === undefined && save.axis === undefined) return;
   const held = readLocalFraming(path, storage, libraryId);
   const next: LocalFraming = {
@@ -221,32 +164,21 @@ export function writeLocalFraming(
   try {
     if (next.camera === undefined && next.axis === undefined)
       storage.removeItem(key);
-    // `JSON.stringify` drops an `undefined` field, which is what "this half is
-    // not held" means on the way back in.
     else storage.setItem(key, JSON.stringify(next));
   } catch {
     // Storage refused the write — the framing is simply not kept.
   }
 }
 
-/** What a sweep needs beyond a read/write: the names it holds. */
 export type ListableStorage = Pick<Storage, "length" | "key" | "removeItem">;
 
 /**
- * Remove every framing this browser holds, for every library.
+ * Every framing, every library, once at startup while the flag above is off —
+ * so the disable does not become a cache of stale framings waiting for it to
+ * flip back. By prefix, since the id is unknown at startup.
  *
- * Only while `FRAMINGS_KEPT_LOCALLY` is off, and called once at startup
- * (`main.tsx`, beside the retired orbit-mode keys, which is the precedent this
- * follows). The gate above makes a held record unreachable; this makes it
- * absent, which is what keeps the disable from becoming a cache of stale
- * framings waiting for the constant to flip back. Nothing throws: storage may
- * be refused, and the keys are then simply not there to remove.
- *
- * The prefix is matched rather than the exact key because the library id is not
- * known at startup and a browser may hold several — `framingKey` puts the id
- * between the prefix and the path. Every name is collected before any is
- * removed: `Storage` is index-addressed and renumbers as it shrinks, so
- * removing inside the walk skips its neighbour.
+ * Names are collected before any is removed: `Storage` is index-addressed and
+ * renumbers as it shrinks, so removing inside the walk skips a neighbour.
  */
 export function sweepLocalFramings(
   storage: ListableStorage | null = browserStorage(),
@@ -268,21 +200,10 @@ export function sweepLocalFramings(
  * `ApiClient` with the thumbnail read and write routed through this browser
  * where the deployment refuses writes (D6).
  *
- * **Explicit delegates, not a prototype trick.** Every other method is a
- * one-liner onto `inner` so that a method added to `ApiClient` later fails to
- * compile here — its author then decides whether it needs the overlay, rather
- * than being delegated without anyone looking. The repo prefers the compiler to
- * say so over a silent fall-through (`createApp`'s `unreachable`, `StoredTab`'s
- * excluded tab). Delegates call `inner.x(...)`, never `this.x(...)`.
- *
- * Each takes `...args: Parameters<…>` rather than naming its parameters, and
- * that is load-bearing rather than terse: naming an optional parameter and
- * passing it on re-emits it as an explicit `undefined`, so a three-argument
- * call arrives at the inner client as four. That is invisible at runtime and
- * very visible to a spy — and the arity is deliberate in at least one caller,
- * `useThumbnails`' lookup, which omits the generation it does not know "rather
- * than a fourth argument spelling out its ignorance". A decorator may not
- * rewrite the call it forwards.
+ * **Explicit delegates**, so a method added to `ApiClient` later fails to
+ * compile here rather than being forwarded unconsidered — and each takes
+ * `...args: Parameters<…>`, because naming an optional parameter re-emits it as
+ * an explicit `undefined` and a three-argument call arrives as four.
  */
 class LocalFramingClient implements ApiClient {
   constructor(
@@ -292,11 +213,8 @@ class LocalFramingClient implements ApiClient {
     private readonly libraryId: () => string | null,
   ) {}
 
-  /**
-   * The lookup still happens — the pixels and the status are the server's
-   * business — and this browser's orientation is laid over the answer. A `miss`
-   * with a local camera is still a `miss`.
-   */
+  /** The lookup still happens; only the orientation is overlaid. A `miss` with
+   *  a local camera is still a `miss`. */
   async getThumb(
     ...args: Parameters<ApiClient["getThumb"]>
   ): Promise<ThumbResult> {
@@ -312,30 +230,13 @@ class LocalFramingClient implements ApiClient {
   }
 
   /**
-   * Kept here, sent nowhere.
+   * Kept here, sent nowhere: the pixels are dropped, and the labels describing
+   * pixels with them, for `withoutUnusableRender`'s reason. `dropped` and no
+   * `gen` is how a generate job reports work not done.
    *
-   * The pixels are dropped — the deployment's baked image is the one to show —
-   * and the three labels that describe pixels go with them, for the reason
-   * `withoutUnusableRender` drops them: `lighting`, `rig` and `posed` without a
-   * render would relabel a render that is not this one. `ifGen` is irrelevant
-   * to a store no other writer can reach.
-   *
-   * `dropped` and no `gen`, which is how `webp-thumbnails` already says "the
-   * orientation landed, the pixels did not": `renderEntryThumbnail` turns that
-   * into `skipped`, so a generate job on a refusing deployment reports work not
-   * done rather than a cache that filled. A write carrying neither orientation
-   * nor pixels is the same answer — nothing was written either way.
-   *
-   * **And where the route refuses what the report did not.** The gate above is
-   * unchanged — with the report on, or unknown, the write still goes to the
-   * server first, which is what *An unknown report does not move a user's
-   * orientations* requires. But a refusal that actually **arrives** is acted
-   * on: a route saying `refused: 'thumbWrites'` is at least as authoritative as
-   * the report, and it is the only word available when the report is in flight
-   * or its read failed. Without this the orientation is stored nowhere — App's
-   * orbit-release `persist` swallows the throw as best-effort, and the tile
-   * paths turn it into an errored tile or a failure toast. Any other failure,
-   * a refusal of any other field included, rethrows exactly as before.
+   * An unknown report still writes to the server first — not knowing must not
+   * move a user's orientations — but an arriving `refused: 'thumbWrites'` is
+   * acted on, being the only word available while the report is in flight.
    */
   async putThumb(save: ThumbSave): Promise<ThumbPutResult> {
     if (keepsFramingsLocally(this.report())) {
@@ -420,14 +321,8 @@ class LocalFramingClient implements ApiClient {
   }
 }
 
-/**
- * Wrap `inner` so thumbnail writes are kept in this browser wherever a known
- * report declares them off. The report is read through a getter, per call, so
- * one client identity survives the report resolving — `App` builds this once
- * and every consumer holds the same object. The library id arrives the same
- * way and for the same reason: it is unknown when this is built and known a
- * round trip later, and it decides the key (`framingKey`).
- */
+/** The report and the library id are getters, read per call, so one client
+ *  identity survives them resolving a round trip after this is built. */
 export function withLocalFramings(
   inner: ApiClient,
   features: () => FeatureReport | null,

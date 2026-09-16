@@ -1,71 +1,42 @@
-/** Where a tile stands relative to the viewport, as the grid reports it.
- *  Coarse on purpose: the queue is two jobs wide and cannot exploit finer
- *  resolution than "on screen, about to be, known to be neither". */
+/** Coarse on purpose: a two-wide queue cannot exploit finer resolution. */
 export type Band = "visible" | "near" | "far";
 
 interface Job {
   run: () => Promise<void>;
   cancelled: boolean;
   started: boolean;
-  /** The path this render is for, or undefined for keyless work — a render the
-   *  user pressed for, which belongs to no slot and is never re-ranked. */
+  /** Undefined for keyless work — a render the user pressed for, belonging to
+   *  no slot and never re-ranked. */
   key: string | undefined;
-  /** The band the pusher pinned, or undefined for the ordinary case where the
-   *  ranking decides. See `push`. */
+  /** Pinned by the pusher; undefined lets the ranking decide. See `push`. */
   band: Band | undefined;
 }
 
-/**
- * How a job's band orders it. Keyless work ranks with `visible`: it exists only
- * because the user pressed an on-screen control, and ranking it unreported
- * would put a press behind a screenful of sweep misses. `undefined` (a key no
- * report covers) sits *between* near and far — an unreported path may be
- * anywhere, while `far` is the one band known to be off screen, so far work is
- * taken last of all — and it *is* taken, when nothing nearer is pending: far
- * work is deferred, never discarded, which is how a listing left open drains
- * itself nearest-first (thumbnail-sweep-priority D4). Absent is never far: a
- * ranking that defaulted missing keys to far would push the world to the back
- * (D1).
- */
+/** Keyless work ranks `visible` — the user pressed something. An unreported key
+ *  sits *between* near and far, `far` being the one band known to be off
+ *  screen. Far work is deferred, never discarded (D1/D4). */
 const RANK: Record<Band, number> = { visible: 0, near: 1, far: 3 };
 const UNREPORTED = 2;
 
-/**
- * How long a far gate may hold far work before it is dispatched regardless
- * (`thumbnail-image-serving` D5). The gate exists so a lookup for a tile the
- * user can see never waits on a deferred tile's mesh read off the same disk;
- * the bound exists because a lookup has no abort and no timeout, so one
- * wedged on a contended disk would otherwise close the gate for the life of
- * the tab and silently revoke "a listing left open warms itself". Above the
- * worst lookup measured on the real library (3.7 s, 2026-09-02 profile);
- * tuned in task 6.2.
- */
+/** The gate keeps a visible tile's lookup off the same disk as a deferred
+ *  tile's mesh read; the bound exists because a lookup has no abort and no
+ *  timeout, so a wedged one would close the gate for the tab's life (D5). */
 export const FAR_GATE_MAX_MS = 5000;
 
 /**
- * Limited-concurrency thumbnail render queue. Suspends while an orbit overlay
- * or lightbox is active (the shared renderer may only serve one purpose at a
- * time) and resumes where it left off.
- *
- * Pending work is taken by rank, not arrival: the grid replaces the whole
- * ranking as the view scrolls (`setRanking`), and `pump` takes the best-ranked
- * pending job, ties keeping insertion order — so a queue with no ranking at
- * all behaves exactly as the FIFO it used to be (D1). A running job is never
- * interrupted by a re-ranking; only what runs *next* changes.
+ * Limited-concurrency thumbnail render queue, suspended while an overlay is up
+ * because the shared renderer serves one purpose at a time. Taken by rank, ties
+ * by insertion order, so with no ranking it is a plain FIFO (D1).
  */
 export class RenderQueue {
   private jobs: Job[] = [];
-  /** The jobs running now — a set, not a count, so their ranks can be asked. */
+  /** A set, not a count, so their ranks can be asked. */
   private running = new Set<Job>();
   private suspended = false;
   private resumeWaiters: (() => void)[] = [];
   private ranking: ReadonlyMap<string, Band> = new Map();
-  /**
-   * Whether far-ranked work may start (`thumbnail-image-serving` D5): null is
-   * no gate. Read at every take; when it reads closed, far jobs are skipped —
-   * for at most `FAR_GATE_MAX_MS`, timed from the first closed reading, after
-   * which they are taken regardless.
-   */
+  /** Read at every take; closed skips far jobs, for at most
+   *  `FAR_GATE_MAX_MS` from the first closed reading (D5). */
   private farGate: (() => boolean) | null = null;
   private gateClosedSince: number | null = null;
   private gateTimer: ReturnType<typeof setTimeout> | null = null;
@@ -73,12 +44,8 @@ export class RenderQueue {
 
   constructor(private concurrency = 2) {}
 
-  /**
-   * Live jobs ranked nearer than far — what a gate on another queue asks
-   * (D5): a far lookup is nobody's wait, so it must not hold far renders.
-   * Cancelled husks are spliced only as `take` meets them, so this walks
-   * `jobs` rather than reading its length.
-   */
+  /** What a gate on another queue asks (D5). Walks `jobs` rather than reading
+   *  its length: cancelled husks are spliced only as `take` meets them. */
   pendingNearerThanFar(): number {
     let n = 0;
     for (const job of this.running) if (this.rankOf(job) < RANK.far) n++;
@@ -90,23 +57,17 @@ export class RenderQueue {
   /** Install (or clear, with null) the gate far work is taken under. */
   setFarGate(open: (() => boolean) | null): void {
     this.farGate = open;
-    // No gate is nothing to hold for. A replaced gate keeps the clock the
-    // far job already has: re-installing one on a cadence under the bound
-    // would otherwise hold far work forever (fifth review, R8).
+    // No gate is nothing to hold for. A replaced gate keeps the clock the far
+    // job already has — resetting it would let a gate re-installed on a cadence
+    // shorter than the bound hold far work forever.
     if (open === null) this.releaseHold();
     else this.syncHold();
     this.pump();
   }
 
-  /**
-   * Far work is not being held right now: forget the bound's clock and the
-   * timer that would have re-pumped at its end. Called whenever a take passes
-   * without skipping a far job — the gate read open, or there was no far job
-   * to hold — so the clock measures a *contiguous* run of held far work. Left
-   * running across a gap (far work retired by a navigation, new far work
-   * pushed later), the clock would already have expired and the next far job
-   * would dispatch at once with a nearer lookup still pending (review R1).
-   */
+  /** Forget the bound's clock, so it measures a *contiguous* run of held far
+   *  work: left running across a gap, an already-expired clock dispatches the
+   *  next far job at once with a nearer lookup still pending. */
   private releaseHold(): void {
     this.gateClosedSince = null;
     if (this.gateTimer !== null) {
@@ -115,47 +76,23 @@ export class RenderQueue {
     }
   }
 
-  /**
-   * Called after every job finishes, **after** the decrement that may have
-   * emptied the queue — so a caller that pokes another queue's gate from here
-   * finds the gate already open (D5, the ordering F9 asked for). Null clears.
-   */
+  /** Called **after** the decrement that may have emptied the queue, so a
+   *  caller poking another queue's gate finds it already open (D5). */
   onSettle(fn: (() => void) | null): void {
     this.settleFn = fn;
   }
 
-  /** Re-pump: something outside this queue — another queue's settle — may
-   *  have opened the gate. Cheap when nothing changed. */
+  /** Something outside this queue may have opened the gate. */
   poke(): void {
-    // Only a take reads the gate, and a saturated queue takes nothing — so an
-    // open window between takes would otherwise go unobserved and the bound
-    // could span it (fifth review, R1). The hook pokes on every lookup
-    // settle, which is exactly when the gate may have opened: sample it here.
+    // Only a take reads the gate, and a saturated queue takes nothing, so an
+    // open window between takes would go unobserved and the bound could span it.
     if (this.farGate !== null && this.farGate()) this.releaseHold();
     this.pump();
   }
 
-  /**
-   * Queue a job, optionally keyed by the path it renders, and get back a
-   * cancel handle that **reports whether the job was still pending** — true
-   * exactly when the cancel prevented a run, and idempotent. Nothing in the
-   * app reads that answer today: the hook's `retire` releases a job's stale
-   * PNG unconditionally and `dropStale` is idempotent, so a started job that
-   * loses its fallback simply errors into the image it already shows. The
-   * answer is kept because it is the honest contract of a cancel, and pinned
-   * in `queue.test.ts`.
-   *
-   * `band` pins the job's rank instead of asking the ranking for it, and the
-   * pin is permanent: `setRanking` cannot move a pinned job, because the
-   * ranking is never consulted for one. It exists for bulk-job work
-   * (`bulk-thumbnail-jobs` 1.2), which must rank no better than deferred far
-   * work whatever the grid says about the same path — and the grid may well
-   * say `visible`, since a bulk job's key is an ordinary model path and its
-   * model may be on screen. Only the pusher knows the work is bulk; by the
-   * time a key reaches the ranking that fact is gone, so the pin is the one
-   * layer that can carry it. A key is still worth passing alongside: it is
-   * what a reader of the queue sees the job as being for.
-   */
+  /** `band` pins the rank permanently — the ranking is never consulted for a
+   *  pinned job. Bulk work needs that: its key is an ordinary model path the
+   *  grid may rank `visible`, and only the pusher knows it is bulk. */
   push(run: () => Promise<void>, key?: string, band?: Band): () => boolean {
     const job: Job = { run, cancelled: false, started: false, key, band };
     this.jobs.push(job);
@@ -163,35 +100,22 @@ export class RenderQueue {
     return () => {
       if (job.started || job.cancelled) return false;
       job.cancelled = true;
-      // The job set changed: a retired far job may have been the last live
-      // one, and a saturated queue has no take coming to notice (D5).
+      // A retired far job may have been the last live one.
       this.syncHold();
       return true;
     };
   }
 
-  /**
-   * Replace the ranking wholesale — the grid recomputes bands on scroll rather
-   * than moving keys one at a time (D1/D2). Keys absent from the map are
-   * unreported, never far.
-   */
+  /** Wholesale: the grid recomputes bands on scroll (D1/D2). An absent key is
+   *  unreported, never far. */
   setRanking(bands: ReadonlyMap<string, Band>): void {
     this.ranking = bands;
-    // The far set changed: the last far job may have been ranked nearer, with
-    // no take coming to notice under a saturated queue (D5).
     this.syncHold();
-    // A re-ranking changes what runs next; pumping here costs nothing when
-    // every slot is busy and lets a queue that emptied its runnable set
-    // re-check without waiting for a push or a finish.
     this.pump();
   }
 
-  /**
-   * Drop every pending job and the ranking. For tests: the lookup queue is
-   * module-level, so a pending lookup one cell leaves behind would otherwise
-   * be dispatched during the next cell. Running jobs finish on their own;
-   * their `alive()` checks already refuse a departed listing.
-   */
+  /** For tests: the lookup queue is module-level, so one cell's leftovers
+   *  would dispatch during the next. Running jobs finish on their own. */
   clear(): void {
     for (const job of this.jobs) job.cancelled = true;
     this.jobs = [];
@@ -213,36 +137,25 @@ export class RenderQueue {
     this.pump();
   }
 
-  /**
-   * Gate for in-flight jobs: suspend() cannot stop a job that already started,
-   * so jobs await this before each renderer-touching stage (parse, render).
-   */
+  /** `suspend()` cannot stop a started job, so jobs await this before each
+   *  renderer-touching stage. */
   whenResumed(): Promise<void> {
     if (!this.suspended) return Promise.resolve();
     return new Promise((resolve) => this.resumeWaiters.push(resolve));
   }
 
   private rankOf(job: Job): number {
-    // A pinned band is the pusher's own verdict and the ranking is not
-    // consulted at all — not even for a key it covers, which is the whole
-    // point: the grid's opinion of a bulk job's path is about the tile, not
-    // about the job.
+    // Not consulted even for a key it covers: the grid's opinion of a bulk
+    // job's path is about the tile, not the job.
     if (job.band !== undefined) return RANK[job.band];
     if (job.key === undefined) return RANK.visible;
     const band = this.ranking.get(job.key);
     return band === undefined ? UNREPORTED : RANK[band];
   }
 
-  /**
-   * What the gate says about far work right now. `open`: the gate reads open
-   * (or there is none) and the bound's clock is forgotten. `held`: closed and
-   * within the bound — the clock starts on the first such reading, with a
-   * timer to re-pump when it expires, since nothing else may happen to pump
-   * a queue holding only far work. `expired`: closed, but held for the whole
-   * bound already — far work is taken, and the clock is deliberately *kept*,
-   * so the whole backlog drains rather than one job per bound (second
-   * review, R7); the clock is forgotten again only when the gate reads open.
-   */
+  /** `held` arms a timer, since nothing else may pump a queue holding only far
+   *  work; `expired` **keeps** the clock, so the backlog drains rather than one
+   *  job per bound. */
   private farAllowed(): "open" | "held" | "expired" {
     if (this.farGate === null || this.farGate()) {
       this.releaseHold();
@@ -267,42 +180,18 @@ export class RenderQueue {
     return false;
   }
 
-  /**
-   * The one invariant the bound's clock keeps: **it runs only while a live
-   * far job is queued.** Called at every door through which the queued far
-   * set can shrink — a cancel, a re-ranking, a take after it has spliced its
-   * job out, `clear`, a replaced gate — because a saturated or suspended
-   * queue has no take coming to notice, and a clock that outlived its last
-   * far job let the next far job pushed dispatch at once under a closed
-   * gate. Three reviews found that hole through three doors (D9 R1, D11 R1,
-   * D12 R1–R2); one rule at every door is what closes it. Not a door: a
-   * finish (a running job is not queued, and the take that dispatched it
-   * already synced), the gate timer, and a take that found nothing (both
-   * built, found unfalsifiable — nothing shrinks the set there — and
-   * removed, fifth review R2). Cheap: a scan of the queue, skipped entirely
-   * while no clock is running.
-   */
+  /** **The clock runs only while a live far job is queued**, so this is called
+   *  at every door that set can shrink through: a clock outliving its last far
+   *  job lets the next one dispatch at once under a closed gate. */
   private syncHold(): void {
     if (this.gateClosedSince !== null && !this.hasLiveFar()) this.releaseHold();
   }
 
   /**
-   * The best-ranked pending job, ties by insertion order — `jobs` is kept in
-   * arrival order, so the first of the best rank is the oldest of them. Far
-   * work is skipped while the gate says so (D5).
-   *
-   * The gate is read once per take, on the first far job the scan meets —
-   * whether or not a nearer job has already won the take. Reading it only when
-   * far was the best so far made the bound's clock depend on arrival order:
-   * `[near, far]` never consulted the gate and reset the clock, `[far, near]`
-   * consulted it and kept it, for one and the same state (second review, R6).
-   * The clock measures "a far job is queued and the gate is closed", and is
-   * forgotten when a take finds no far job at all — which is why the scan
-   * always runs to the end, never breaking at a visible job: a scan cut
-   * short would leave the clock unread past a retired far job (third
-   * review, R1), and would also leave cancelled husks behind the visible
-   * job unspliced. The saturated case, where no take runs at all, is the
-   * gate timer's (`farAllowed`).
+   * The gate is read on the first far job the scan meets, won or not, or the
+   * clock would depend on arrival order — `[near, far]` never consulting it
+   * where `[far, near]` did. The scan runs to the end for that reason, and to
+   * splice husks behind the winner.
    */
   private take(): Job | undefined {
     let bestAt = -1;
@@ -311,9 +200,8 @@ export class RenderQueue {
     for (let i = 0; i < this.jobs.length; ) {
       const job = this.jobs[i]!;
       if (job.cancelled) {
-        // Dropped as the scan meets it, not left for every later take to
-        // rescan: a listing's lifetime of retirements would otherwise pile up
-        // hundreds of husks, each holding its run closure reachable.
+        // Dropped as the scan meets it: a listing's retirements otherwise pile
+        // up husks, each holding its run closure reachable.
         this.jobs.splice(i, 1);
         continue;
       }
@@ -334,8 +222,7 @@ export class RenderQueue {
     if (bestAt === -1) return undefined;
     const job = this.jobs[bestAt]!;
     this.jobs.splice(bestAt, 1);
-    // After the splice: the job taken may have been the last live far job
-    // (dispatched on an expired clock), and the clock must not outlive it.
+    // The job taken may have been the last live far job.
     this.syncHold();
     return job;
   }
@@ -348,9 +235,8 @@ export class RenderQueue {
       this.running.add(job);
       void job.run().finally(() => {
         this.running.delete(job);
-        // The settle callback runs after the decrement, so a gate read from it
-        // sees this job gone (D5/F9) — and before this queue's own pump, so a
-        // poke it makes lands on the other queue first.
+        // After the decrement, so a gate read from it sees this job gone, and
+        // before this queue's pump, so its poke lands on the other queue first.
         this.settleFn?.();
         this.pump();
       });

@@ -17,114 +17,65 @@ import {
   type Bounds,
 } from "./camera";
 
-/**
- * Thumbnail edge in pixels, and the quality WebP encodes them at.
- *
- * 256² WebP rather than the original 512² PNG because a first screen is
- * ~114 of these and their bytes dominate a cold visit: on the CC-BY corpus a
- * 512² PNG averages 87 KB, a 512² WebP at q0.8 10 KB, a 256² WebP at q0.8
- * **4 KB** — but those are `cwebp -q 80 -alpha_q 100` over downscaled 512s
- * (60 renders, docs/web-demo-notes.md 2026-09-05), not this line's own
- * encoder over a native 256² render, which is unmeasured. Alpha is meant to
- * stay lossless — the tile's silhouette is the edge a viewer reads — but that
- * is the encoder's default rather than something this call can ask for, and a
- * browser that cannot encode WebP falls back to PNG here silently.
- */
+/** Thumbnail edge and WebP quality, sized for a whole screen of tiles on a cold
+ *  visit. A browser that cannot encode WebP falls back to PNG silently. */
 export const THUMB_SIZE = 256;
 export const THUMB_QUALITY = 0.8;
 
-/**
- * Version of the pixel recipe thumbnails are rendered with — bumped whenever
- * rendered output changes for the same input (rig contents, materials, tone
- * mapping). Cached renders carrying another (or no) version are re-rendered.
- * 1 = the pre-rim rig (implicit), 2 = red/blue rim accents, 3 = key-light
- * shadows, 4 = contact floor at the tuned opacity (0.35 → 0.7),
- * 5 = screen-space ambient occlusion, 6 = STL normals from winding,
- * 7 = 256² WebP at q0.8, where 1–6 were 512² PNG — a size and an encoder
- * are pixel recipe as much as a light is, and every stored 512² PNG is a
- * different image from what this build now produces.
- */
+/** **Bump whenever rendered output changes for the same input** — rig,
+ *  materials, tone mapping, size, encoder — or old renders stay on screen
+ *  looking fresh. Entries at another version are re-rendered. */
 export const RIG_VERSION = 7;
 
-/**
- * The lighting label every render writes, beside `RIG_VERSION` because it is
- * the other recipe input the cache key does not carry. `LightingMode` is a
- * legacy label type with one producible value: the rig is fixed in camera
- * space and nothing chooses otherwise, so `'camera'` is all a client can write.
- * A cached entry labelled anything else was rendered by a build that still had
- * the retired spindle-aligned mode, and is stale (D2).
- */
+/** The other recipe input the cache key does not carry. One producible value —
+ *  the rig is fixed in camera space — so any other label is stale (D2). */
 export const THUMB_LIGHTING = "camera" satisfies LightingMode;
 
-/**
- * The app's single WebGL context (design D2/D3): one WebGLRenderer shared by
- * the thumbnail render queue (offscreen render target) and the orbit
- * overlay/lightbox (visible canvas).
- */
+/** **Exactly one `WebGLRenderer` app-wide** (D2/D3), shared by the thumbnail
+ *  queue and the orbit overlay. */
 let renderer: THREE.WebGLRenderer | null = null;
 
 export function getRenderer(): THREE.WebGLRenderer {
   if (renderer === null) {
-    // On dual-GPU machines, ask the browser for the discrete adapter — the
-    // AO + supersample chain is bandwidth-bound and iGPUs feel it first. A
-    // hint, not a guarantee (on Linux the browser's own GPU selection wins).
+    // A hint, not a guarantee: the AO chain is bandwidth-bound and iGPUs feel
+    // it first, but the browser's own GPU selection can win.
     renderer = new THREE.WebGLRenderer({
       antialias: true,
       alpha: true,
       powerPreference: "high-performance",
     });
     renderer.setClearColor(0x000000, 0);
-    // Shadow maps render identically into the visible canvas and the thumbnail
-    // render target, so the one shared renderer enables them once (D2).
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   }
   return renderer;
 }
 
-// Ambient-occlusion fit (D3), every constant in units of the staged model's
-// bounding-sphere radius or a pure exponent: GTAO's radius and thickness are
-// world-space, and models run from miniatures to busts, so a 5 mm print and a
-// 300 mm bust must get the same depth cue. Frozen in test/composer.test.ts.
-//
-// Tuned visually on the e2e fixtures (2026-08-14): strength 1 → 1.5 makes
-// crevices legible at thumbnail size; reach kept at 0.15 — it doubles as the
-// clip-box feather width, so widening it also widens the band where occlusion
-// can approach the silhouette (re-run the 3.1 edge gate after any change here).
-/** Occlusion reach: how far a neighbouring surface can still darken a pixel. */
+// Ambient-occlusion fit (D3), in units of the staged model's bounding-sphere
+// radius: GTAO's radius and thickness are world-space, and models run from
+// miniatures to busts. Frozen in test/composer.test.ts.
+/** Occlusion reach, which doubles as the clip-box feather width — widening it
+ *  widens the band where occlusion can reach the silhouette. */
 const AO_RADIUS_R = 0.15;
-/** Assumed depth behind a surface — past it a sample is a separate object, not
- *  an occluder. Wider than the reach, so thin printed walls don't leak light. */
+/** Assumed depth behind a surface; wider than the reach, so thin printed walls
+ *  do not leak light. */
 const AO_THICKNESS_R = 0.3;
-/** Strength: the shader raises the occlusion term to this power, so >1 darkens. */
 const AO_SCALE = 1.5;
-/** Falloff shape across the reach; 1 is linear. */
 const AO_DISTANCE_EXPONENT = 1;
-/** Horizon samples per pixel — quality against per-frame cost. */
 const AO_SAMPLES = 16;
 
 /**
- * A post-process chain on the shared renderer (D1): `RenderPass → GTAOPass →
- * OutputPass` over an explicitly constructed 4× MSAA target. Chains are
- * renderer-scoped and long-lived — one for the live view, one pinned at
- * `THUMB_SIZE`² for thumbnails — so opening an overlay or queueing one allocates
- * nothing, and neither chain is ever disposed.
+ * A post-process chain on the shared renderer (D1). Renderer-scoped and
+ * long-lived — one live, one pinned at `THUMB_SIZE`² — so opening an overlay
+ * allocates nothing, and neither chain is ever disposed.
  */
 export interface RenderChain {
-  /** The composer itself; after `render`, `readBuffer` holds the finished frame. */
   readonly composer: EffectComposer;
   /**
-   * Point every pass at this frame's scene/camera, fit the occlusion to the
-   * staged model, then run the chain. Both happen per render because the chain
-   * is shared: the previous caller left its own scene and its own fit behind.
-   *
-   * `ao` skips the GTAO pass for this render (composers skip disabled
-   * passes; RenderPass → OutputPass still swap the same way). Both paths pass
-   * the user's AO preference (viewer/aoToggle.ts): the live view reads it per
-   * frame, and `renderThumbnail` takes it as an argument, so a tile and the
-   * overlay that opens over it are drawn under the same recipe
-   * (`ao-as-recipe-dimension` D4). The default is the occluded recipe — the
-   * one every render was before occlusion became a key dimension.
+   * Re-point every pass and re-fit the occlusion, per render, because the chain
+   * is shared: the previous caller left its own scene and fit behind. `ao`
+   * disables the GTAO pass, which the composer then skips
+   * (`ao-as-recipe-dimension` D4).
    */
   render(
     scene: THREE.Scene,
@@ -134,10 +85,7 @@ export interface RenderChain {
   ): void;
 }
 
-/**
- * A chain plus the resize its owner needs. `setSize` stays off `RenderChain`:
- * only `getLiveChain` may resize, and only through its guard.
- */
+/** `setSize` stays off `RenderChain`: only `getLiveChain` may resize. */
 type SizedChain = RenderChain & {
   setSize: (width: number, height: number) => void;
 };
@@ -147,22 +95,19 @@ function makeChain(
   height: number,
   type: THREE.TextureDataType,
 ): SizedChain {
-  // EffectComposer's own default target is single-sample AND half-float:
-  // taking it would silently drop today's 4× MSAA, and half-float cannot be
-  // read back into a Uint8Array. Both targets are therefore built by hand.
+  // Built by hand: EffectComposer's default target is single-sample and
+  // half-float, which drops the MSAA and cannot be read into a Uint8Array.
   const target = new THREE.WebGLRenderTarget(width, height, {
     samples: 4,
     type,
     depthBuffer: true,
   });
   const composer = new EffectComposer(getRenderer(), target);
-  // Placeholders only: every render re-points both passes at the caller's.
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(40, 1);
   const scenePass = new RenderPass(scene, camera);
   const aoPass = new GTAOPass(scene, camera, width, height);
-  // OutputPass owns the linear→sRGB conversion for both paths (D2) — which is
-  // why the thumbnail readback no longer encodes anything by hand.
+  // OutputPass owns the linear→sRGB conversion for both paths (D2).
   const outputPass = new OutputPass();
   composer.addPass(scenePass);
   composer.addPass(aoPass);
@@ -172,21 +117,20 @@ function makeChain(
   return {
     composer,
     setSize(w, h) {
-      // ViewerSession sizes the canvas every frame; resizing composer targets
-      // every frame would reallocate constantly, so this is guarded.
+      // ViewerSession sizes the canvas every frame, and resizing a composer
+      // target reallocates it.
       if (w === sized.x && h === sized.y) return;
       sized.set(w, h);
       composer.setSize(w, h);
     },
     render(callerScene, callerCamera, bounds, ao = true) {
-      // The composer skips disabled passes; the swap chain is unchanged.
       aoPass.enabled = ao;
       scenePass.scene = callerScene;
       scenePass.camera = callerCamera;
       aoPass.scene = callerScene;
       aoPass.camera = callerCamera;
-      // `distanceFallOff` is deliberately absent: GTAOPass flags the shader for
-      // a rebuild whenever it is passed, which per frame would recompile forever.
+      // `distanceFallOff` is deliberately absent: passing it flags the shader
+      // for a rebuild, which per frame recompiles forever.
       aoPass.updateGtaoMaterial({
         radius: AO_RADIUS_R * bounds.radius,
         thickness: AO_THICKNESS_R * bounds.radius,
@@ -194,8 +138,8 @@ function makeChain(
         distanceExponent: AO_DISTANCE_EXPONENT,
         samples: AO_SAMPLES,
       });
-      // Occlusion fades out one reach beyond this box, so the contact floor
-      // and the empty background are left alone (D4).
+      // Occlusion fades one reach beyond this box, leaving the contact floor
+      // and the background alone (D4).
       aoPass.setSceneClipBox(bounds.box);
       composer.render();
     },
@@ -205,10 +149,7 @@ function makeChain(
 let liveChain: SizedChain | null = null;
 let thumbChain: RenderChain | null = null;
 
-/**
- * The live view's chain, sized to its host. Built on first use and then
- * resized only when the host dimensions actually change (D1).
- */
+/** Resized only when the host dimensions actually change (D1). */
 export function getLiveChain(width: number, height: number): RenderChain {
   if (liveChain === null)
     liveChain = makeChain(width, height, THREE.HalfFloatType);
@@ -216,14 +157,11 @@ export function getLiveChain(width: number, height: number): RenderChain {
   return liveChain;
 }
 
-/**
- * The thumbnail chain: fixed at `THUMB_SIZE`² and pinned to `UnsignedByteType`, because
- * `readRenderTargetPixels` into a `Uint8Array` needs an 8-bit target (D1).
- */
+/** Pinned to `UnsignedByteType`: `readRenderTargetPixels` into a `Uint8Array`
+ *  needs an 8-bit target (D1). */
 export function getThumbChain(): RenderChain {
   if (thumbChain === null) {
     const chain = makeChain(THUMB_SIZE, THUMB_SIZE, THREE.UnsignedByteType);
-    // Offscreen only — this chain never touches the visible canvas.
     chain.composer.renderToScreen = false;
     thumbChain = chain;
   }
@@ -232,21 +170,20 @@ export function getThumbChain(): RenderChain {
 
 export interface LitScene {
   scene: THREE.Scene;
-  /** The light rig. Orient via quaternion; identity = the historical world-fixed lighting. */
+  /** The light rig. Orient via quaternion; identity is world-fixed lighting. */
   rig: THREE.Group;
 }
 
-// Rig light name — the contract makeScene writes and stageModel reads (shadow
-// fit, casting policy). A constant, not a literal: a typo in a literal
-// silently drops the key out of the fit.
+// The contract `makeScene` writes and `stageModel` reads. A constant, not a
+// literal: a typo in a literal silently drops the key out of the fit.
 export const KEY_LIGHT = "key";
 
 export function makeScene(): LitScene {
   const scene = new THREE.Scene();
   const rig = new THREE.Group();
   rig.add(new THREE.HemisphereLight(0xffffff, 0x445566, 1.4));
-  // The only caster in the shipped recipe (D2): named so stageModel can fit
-  // its shadow camera without depending on child order.
+  // The only caster (D2), named so `stageModel` can fit its shadow camera
+  // without depending on child order.
   const key = new THREE.DirectionalLight(0xffffff, 1.6);
   key.name = KEY_LIGHT;
   key.position.set(1, 2, 1.5);
@@ -254,10 +191,8 @@ export function makeScene(): LitScene {
   const fill = new THREE.DirectionalLight(0xffffff, 0.5);
   fill.position.set(-1.5, -0.5, -1);
   rig.add(fill);
-  // Rim accents: rig-space −X/+X, slightly behind the subject — exact
-  // screen-left/right in camera mode, model-fixed in axis mode (D1). Blue
-  // carries more intensity: the hemisphere ground already tints the scene
-  // cool, so equal intensities read red-dominant.
+  // Blue carries more intensity because the hemisphere ground already tints
+  // the scene cool, so equal intensities read red-dominant.
   const rimRed = new THREE.DirectionalLight(0xff4444, 1.4);
   rimRed.position.set(-1.5, 0.3, -0.6);
   rig.add(rimRed);
@@ -268,26 +203,20 @@ export function makeScene(): LitScene {
   return { scene, rig };
 }
 
-// Shadow fit (D2), every constant a multiple of the staged model's
-// bounding-sphere radius: the rig is unitless and models run from miniatures
-// to busts, so each distance the shadow camera cares about scales with the
-// subject. Frozen in test/stageModel.test.ts — changing one changes pixels and
-// needs a RIG_VERSION bump.
-/** How far out a caster sits along its tuned direction. */
+// Shadow fit (D2), in radius units so the rig stays unitless. Frozen in
+// test/stageModel.test.ts — changing one changes pixels and needs a
+// `RIG_VERSION` bump.
 const CASTER_DISTANCE_R = 3;
-/** Ortho half-extent: the model sphere plus the floor area its shadow sweeps. */
+/** Ortho half-extent: the model sphere plus the floor its shadow sweeps. */
 const SHADOW_EXTENT_R = 2;
-/** Slack on near/far so a grazing light direction never clips the sphere. */
+/** Slack so a grazing light direction never clips the sphere. */
 const SHADOW_DEPTH_MARGIN_R = 0.5;
 /** Acne scales with world units — a constant bias speckles miniatures. */
 const SHADOW_NORMAL_BIAS_R = 0.02;
 const SHADOW_MAP_SIZE = 2048;
 
-/**
- * Aim a rig light's shadow camera at an origin-centered model of this radius.
- * `setLength` keeps the light's direction — and therefore the shading —
- * exactly as `makeScene` tuned it; only the shadow camera's placement moves.
- */
+/** `setLength` keeps the light's direction, and so the shading, exactly as
+ *  `makeScene` tuned it; only the shadow camera moves. */
 function fitShadow(light: THREE.DirectionalLight, radius: number): void {
   const distance = CASTER_DISTANCE_R * radius;
   const extent = SHADOW_EXTENT_R * radius;
@@ -300,41 +229,33 @@ function fitShadow(light: THREE.DirectionalLight, radius: number): void {
   cam.right = extent;
   cam.top = extent;
   cam.bottom = -extent;
-  // The light looks at its default target, the world origin, where staging put
-  // the model — so the sphere sits between these planes.
+  // The light looks at the world origin, where staging put the model.
   cam.near = distance - extent - margin;
   cam.far = distance + extent + margin;
   cam.updateProjectionMatrix();
 }
 
-// Contact-floor constants (D3), again in radius units so the floor scales with
-// the subject. Frozen in test/stageModel.test.ts — changing one changes pixels
-// and needs a RIG_VERSION bump.
-/** Shadow darkness where the model touches down; the floor is invisible elsewhere. */
+// Contact floor (D3), in radius units. Frozen in test/stageModel.test.ts —
+// changing one changes pixels and needs a `RIG_VERSION` bump.
 const FLOOR_OPACITY = 0.7;
-/** Sunk this far under the resting face — a flat print bed would z-fight otherwise. */
+/** Sunk under the resting face, or a flat print bed z-fights it. */
 const FLOOR_SINK_R = 0.002;
 /** Wide enough that a camera-mode shadow sweep stays on it. */
 const FLOOR_SIZE_R = 8;
 
-/** The floor's unit-plane geometry faces +z; this turns that normal onto the spindle. */
+/** The unit plane faces +z; this turns that normal onto the spindle. */
 const PLANE_NORMAL = new THREE.Vector3(0, 0, 1);
 
 export interface StagedModel {
-  /** Centered bounds: center is the origin, box translated by −rawCenter. */
+  /** Centered: the box translated by −rawCenter. */
   bounds: Bounds;
   pivot: THREE.Group;
-  /** Contact floor — a scene-level shadow catcher, not part of the model (D3). */
+  /** A scene-level shadow catcher, not part of the model (D3). */
   floor: THREE.Mesh<THREE.PlaneGeometry, THREE.ShadowMaterial>;
 }
 
-/**
- * Lay the contact floor perpendicular to the spindle, at the model's lowest
- * extent along it (D3): the box face minimizing `dot(p, s)`, sunk ε·radius
- * further so a flat-bottomed print doesn't z-fight it. Called once by
- * `stageModel` and again by `ViewerSession.setAxis` — the floor snaps to the
- * new spindle, it never tweens.
- */
+/** Lay the floor perpendicular to the spindle at the model's lowest extent
+ *  along it (D3). Re-called on an axis change: the floor snaps, never tweens. */
 export function placeFloor(
   floor: THREE.Mesh,
   bounds: Bounds,
@@ -342,7 +263,6 @@ export function placeFloor(
 ): void {
   const s = frameFor(axis).s;
   const { min, max } = bounds.box;
-  // min over the 8 corners of dot(p, s), one independent component at a time.
   const support = (c: number, lo: number, hi: number): number =>
     Math.min(c * lo, c * hi);
   const depth =
@@ -355,14 +275,11 @@ export function placeFloor(
 }
 
 /**
- * Put a model into a scene the one way every view uses (D4): parent it to a
- * fresh pivot group, measure its raw bounds, then shift the pivot by −center so
- * the model straddles the world origin (D1). Camera state is bounds-relative,
- * so the centering moves no pixels.
+ * The one way every view puts a model in a scene (D4): pivot, measure, shift by
+ * −center. Camera state is bounds-relative, so the centering moves no pixels.
  *
- * The contact floor joins the SCENE — never the rig (in 'camera' mode a
- * rig-parented floor would face the camera) and never the measured object,
- * which is why it is added after the measurement (D3).
+ * The floor joins the **scene** — a rig-parented one would face the camera, and
+ * a model-parented one would be measured (D3).
  */
 export function stageModel(
   lit: LitScene,
@@ -374,8 +291,7 @@ export function stageModel(
   pivot.add(object);
   const raw = boundsOf(object);
   pivot.position.copy(raw.center).negate();
-  // The key is the rig's only caster (D2): fit its shadow camera to this
-  // model's radius, found by name so the fit never depends on child order.
+  // By name, so the fit never depends on child order (D2).
   const key = lit.rig.getObjectByName(KEY_LIGHT);
   if (key instanceof THREE.DirectionalLight) {
     fitShadow(key, raw.radius);
@@ -386,7 +302,6 @@ export function stageModel(
     radius: raw.radius,
     box: raw.box.translate(pivot.position),
   };
-  // A unit plane placeFloor scales: re-placing it never rebuilds geometry.
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(1, 1),
     new THREE.ShadowMaterial({ opacity: FLOOR_OPACITY }),
@@ -397,10 +312,7 @@ export function stageModel(
   return { bounds, pivot, floor };
 }
 
-/**
- * Undo a stageModel borrow. three's `add` reparents, so a borrowed object goes
- * home with a plain add; one that had no parent is only detached.
- */
+/** three's `add` reparents, so a borrowed object goes home with a plain add. */
 export function unstage(
   object: THREE.Object3D,
   pivot: THREE.Group,
@@ -411,17 +323,10 @@ export function unstage(
 }
 
 /**
- * Render a model to a transparent `THUMB_SIZE`² canvas through the thumbnail
- * post-process chain on the shared renderer (never the visible canvas): the
- * lossless half of `renderThumbnail`, which is this followed by the WebP
- * encode. Arguments as `renderThumbnail`'s.
- *
- * Exported for the frame-ab harness (`scripts/frame-ab/`, `file-frame-spindle`
- * D6), which compares a fresh render against stored baselines pixel by pixel
- * and so reads the canvas back losslessly rather than decoding the q0.8 WebP
- * the app writes. One implementation: the same staging, chain, readback and
- * teardown serve both, and the one-`WebGLRenderer` rule holds because both go
- * through `getRenderer()` and `getThumbChain()`.
+ * The lossless half of `renderThumbnail`, exported for the frame-ab harness
+ * (`file-frame-spindle` D6), which compares renders pixel by pixel. One
+ * implementation for both, so both go through `getRenderer()` and the
+ * one-renderer rule holds.
  */
 export function renderThumbnailCanvas(
   object: THREE.Object3D,
@@ -432,15 +337,13 @@ export function renderThumbnailCanvas(
   const r = getRenderer();
   const lit = makeScene();
   const { scene, rig } = lit;
-  // Staging reparents — the object may belong to a live ViewerSession scene
-  // (it is LRU-shared), so its original parent must be restored after.
+  // Staging reparents, and the object is LRU-shared with a live session.
   const originalParent = object.parent;
   const { bounds, pivot, floor } = stageModel(lit, object, axis);
   const camera = new THREE.PerspectiveCamera(40, 1);
   applyState(camera, state, bounds, axis);
-  // The rig is fixed in the rest camera's frame, unconditionally — the same
-  // orientation the live view hands off at (D1). The contact floor stays in the
-  // spindle frame, laid by stageModel: that is geometry, not lighting.
+  // The rig is fixed in the camera's frame, the orientation the live view
+  // hands off at (D1); the floor stays in the spindle frame, being geometry.
   rig.quaternion.copy(camera.quaternion);
 
   const chain = getThumbChain();
@@ -448,9 +351,8 @@ export function renderThumbnailCanvas(
   const pixels = new Uint8Array(THUMB_SIZE * THUMB_SIZE * 4);
   try {
     chain.render(scene, camera, bounds, ao);
-    // `OutputPass` leaves `needsSwap` at the `Pass` default, so the composer
-    // swaps after it: the finished frame is in `readBuffer`, not writeBuffer
-    // (D1). Those pixels are already sRGB — OutputPass converted them (D2).
+    // The composer swaps after `OutputPass`, so the finished frame is in
+    // `readBuffer`, already sRGB (D1/D2).
     r.readRenderTargetPixels(
       chain.composer.readBuffer,
       0,
@@ -460,15 +362,12 @@ export function renderThumbnailCanvas(
       pixels,
     );
   } finally {
-    // The composer restores this itself, but not if a pass throws. The chain
-    // and its targets are renderer-scoped and long-lived — never disposed here.
+    // The composer restores this itself, but not if a pass throws.
     r.setRenderTarget(prevTarget);
     unstage(object, pivot, originalParent);
-    // This scene is per-call: any light that cast owns a shadow-map texture and
-    // the floor owns its geometry/material (D5). Disposing every directional
-    // light — not just today's caster — keeps this teardown independent of
-    // which lights stageModel happened to switch on. The model is LRU-shared —
-    // it is never disposed here.
+    // **Dispose what this call made**: shadow maps and the floor's
+    // geometry/material are VRAM (D5). Every directional light, so the teardown
+    // does not depend on which ones cast. The model is LRU-shared — never.
     for (const light of rig.children) {
       if (light instanceof THREE.DirectionalLight) light.dispose();
     }
@@ -476,7 +375,7 @@ export function renderThumbnailCanvas(
     floor.material.dispose();
   }
 
-  // GL readback is bottom-up; flip rows into ImageData.
+  // GL readback is bottom-up.
   const canvas = document.createElement("canvas");
   canvas.width = THUMB_SIZE;
   canvas.height = THUMB_SIZE;
@@ -492,17 +391,8 @@ export function renderThumbnailCanvas(
   return canvas;
 }
 
-/**
- * Render a model to a transparent `THUMB_SIZE`² WebP: `renderThumbnailCanvas`,
- * then the encode.
- *
- * `ao` is the occlusion recipe these pixels are drawn under — the caller's
- * reading of the AO preference, never read here: this function is called from
- * four sites and each one must file its pixels under the value it also sent to
- * the cache, so the read belongs to the caller that PUTs (D4/D4a). The default
- * is the occluded recipe, which is what every thumbnail was before occlusion
- * became a dimension of the key.
- */
+/** `ao` is the caller's reading of the preference, never read here: the pixels
+ *  and the cache slot must come from one reading (D4a). */
 export function renderThumbnail(
   object: THREE.Object3D,
   state: CameraState = DEFAULT_CAMERA,

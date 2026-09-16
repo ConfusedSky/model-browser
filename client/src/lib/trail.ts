@@ -1,28 +1,15 @@
 /**
- * The trail: a session mirror of the history stack (`retrace-placement` D2).
+ * A session mirror of the history stack (`retrace-placement` D2), because the
+ * browser hands a page only the **current** entry's state and ↑ must read the
+ * visit that led here. `commitUrl` stamps an index into every entry; this keeps
+ * one row per index.
  *
- * The browser hands a page the `state` of the **current** entry and nothing
- * else, and ↑ needs to read entries behind it — the visit that led here, which
- * D3 finds by walking back to the nearest entry whose listing is the parent. So
- * `commitUrl` stamps an index into every entry's state and this module keeps
- * one row per index: `{ idx, listing, placement }`, where `listing` is the view
- * minus its model serialized as `sameListing` compares (`listingKey`).
+ * A push at *i* drops every row at or above it, as the browser does to Forward,
+ * which is what keeps the walk off a branch the user left. `sessionStorage`,
+ * because it has history state's lifetime.
  *
- * A push at index *i* drops every row at or above *i* before appending, because
- * that is what the browser does to Forward on a push — the pruning is what
- * guarantees the walk never sees a branch the user left. A replace keeps the
- * row's placement only while its listing is unchanged: a `replaceState` that
- * re-names the entry is a different listing, and the old anchor would be wrong.
- *
- * `sessionStorage`, because it has history state's lifetime: a tab is a
- * session, state survives a reload and so does the mirror, a new tab starts
- * clean. One JSON array under `TRAIL_KEY`, capped by dropping the lowest indices.
- *
- * Nothing here may throw (`stored.ts`'s posture). Storage can be absent or
- * refused, and so can the property access itself; a read that cannot happen
- * reads as an empty trail, a write that cannot happen is dropped, and a
- * malformed value reads as empty. An index the trail does not know answers
- * `null`, which the caller lands as the top — fresh, never wrong.
+ * Nothing here may throw (`stored.ts`'s posture): anything unreadable reads as
+ * an empty trail, and an unknown index answers `null`, which lands as the top.
  */
 import { serializeView } from "./urlState";
 import { toUrlView, type View } from "../state/view";
@@ -34,13 +21,13 @@ export interface TrailRow {
   placement: Placement | null;
 }
 
-/** Just the three calls used here, so a test can pass a plain object. */
+/** Just what is used, so a test can pass a plain object. */
 export type TrailStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
 export const TRAIL_KEY = "mb:trail";
 export const TRAIL_CAP = 300;
 
-/** The entry's listing as `sameListing` compares it: the view minus its model. */
+/** The view minus its model, as `sameListing` compares it. */
 export function listingKey(view: View): string {
   return serializeView(toUrlView({ ...view, model: null }));
 }
@@ -91,7 +78,7 @@ function writeRows(storage: TrailStorage | null, rows: TrailRow[]): void {
   }
 }
 
-/** A new entry at `idx`: prune every row at or above it, append it with no placement. */
+/** Prunes every row at or above `idx` before appending. */
 export function trailPush(
   idx: number,
   listing: string,
@@ -102,8 +89,7 @@ export function trailPush(
   writeRows(storage, rows);
 }
 
-/** The entry at `idx` now names `listing` (a boot seed, a `replaceState`). Its
- *  placement survives only if the listing is unchanged. */
+/** The placement survives only while the listing is unchanged. */
 export function trailReplace(
   idx: number,
   listing: string,
@@ -120,7 +106,7 @@ export function trailReplace(
   );
 }
 
-/** File the entry's placement. An index the trail does not know is ignored, never invented. */
+/** An index the trail does not know is ignored, never invented. */
 export function trailRecord(
   idx: number,
   placement: Placement | null,
@@ -133,8 +119,8 @@ export function trailRecord(
   writeRows(storage, rows);
 }
 
-/** The entry's placement, `null` when the row is unknown or names another
- *  listing — a state-less entry reads as index 0, which is some other row. */
+/** `null` where the row is unknown or names another listing: a state-less entry
+ *  reads as index 0, which is some other row. */
 export function trailPlacement(
   idx: number,
   listing: string,
@@ -144,7 +130,7 @@ export function trailPlacement(
   return row !== undefined && row.listing === listing ? row.placement : null;
 }
 
-/** The nearest row below `fromIdx` whose listing is `listing` — the visit that led here (D3). */
+/** The visit that led here (D3). */
 export function trailWalkBack(
   fromIdx: number,
   listing: string,

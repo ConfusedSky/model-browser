@@ -1,12 +1,6 @@
 export type EntryKind = "dir" | "zip" | "model";
 
-/**
- * The three model formats the app reads. One definition for the wire
- * (`DirEntry.format`), the client's loader (`parseModel`) and the per-format
- * default spindle (`defaultAxisFor`, shared/frames.ts): the server assigns
- * `kind: 'model'` only through these same three extensions (`MODEL_EXT`,
- * server/src/listing.ts).
- */
+/** One definition for the wire, `parseModel`, `defaultAxisFor` and the server's `MODEL_EXT`. */
 export type ModelFormat = "stl" | "3mf" | "obj";
 
 export interface DirEntry {
@@ -19,44 +13,14 @@ export interface DirEntry {
   size: number;
   /** mtime (ms). For zip entries this is the containing zip's mtime. */
   mtime: number;
-  /**
-   * The name the library's override store holds for this exact path, when it
-   * holds one. Display only: tiles label themselves with it while `name` stays
-   * the title, the accessible name, and what find, deep search and the flat
-   * filter match (library-overrides D7). Absent for every entry the store does
-   * not name, and for every library that has no store.
-   */
+  /** The override store's name for this exact path. Display only — `name` stays the title and what search matches (library-overrides D7). */
   displayName?: string;
-  /**
-   * What the server's caches already knew about this entry when the listing was
-   * emitted (`listing-tree-cache` §6.3). All three are **additive and absent by
-   * default**: a lookup in a derived layer either hits or it does not, emission
-   * never waits on the semantic index or the filesystem for them, and a library
-   * with no layer content emits listings byte-identical to one from before this
-   * capability existed.
-   *
-   * Absent does not mean "no". It means "this server has not derived it", and
-   * the client asks for it exactly as it did before — the pose wave for `pose`,
-   * `/api/thumb` for `thumb`, `/api/peek` for `preview`.
-   */
+  /** What the server's caches already held when the listing was emitted; absent means not derived, not "none" (`listing-tree-cache`). */
   thumb?: ThumbInfo;
   /**
-   * The index's orientation for this model, when the pose layer holds an answer.
-   *
-   * Three states, not two (`listing-tree-cache` §6.9, round-3 review finding 6):
-   *
-   * - an `IndexPose` — the index holds this orientation;
-   * - **`null`** — the index was asked about this model and has no orientation
-   *   for it. A recorded answer, not a gap, and the client SHALL treat the model
-   *   as known-unposed rather than re-asking. Without this state a folder the
-   *   index has never embedded costs a pose wave on every landing forever: the
-   *   server knows the answer is "none" and had no way to say so;
-   * - **absent** — this server has not derived it. The client's wave is the fill,
-   *   exactly as before this capability existed.
-   *
-   * So the test for "has an orientation" is `pose != null`, and the test for
-   * "still unknown" is `pose === undefined`. A filter written as
-   * `pose === undefined` already reads a null as known, since `null !== undefined`.
+   * The index's orientation. Three states: a pose; `null`, a settled "the index
+   * holds none", which the client must not re-ask; absent, not yet derived, and
+   * the client's pose wave is the fill (`listing-tree-cache`).
    */
   pose?: IndexPose | null;
   /** Directories only: the contact sheet a peek already derived for this folder. */
@@ -64,41 +28,30 @@ export interface DirEntry {
 }
 
 /**
- * One render's cached state as a listing annotation carries it
- * (`thumbnail-image-serving` D2, adopted by `listing-tree-cache` 6.3 — one
- * shape, on a listing and on an enumeration alike).
- *
- * `state` is **derived at emission** from the sidecar's stored mtime for this
- * render against the entry's own mtime, never stored as a verdict: a file
- * edited since the last read would otherwise keep reading `hit`. The labels are
- * the ones the client's usability test compares — `RIG_VERSION` and
- * `POSE_VERSION` are client constants the server stores and echoes but never
- * interprets.
+ * One render's cached state on a listing or an enumeration
+ * (`thumbnail-image-serving` D2). `state` is derived at emission from the
+ * stored mtime against the entry's, never stored as a verdict; `rig` and
+ * `posed` are client constants the server echoes but never interprets.
  */
 export interface ThumbRenderInfo {
   state: ThumbStatus;
   lighting?: LightingMode;
   rig?: number;
   posed?: number;
-  /** The orientation the render was drawn under, where a source framed it —
-   *  see `ThumbSave.poseKey`. A posed render without it, or with a different
-   *  one, is stale — the lighting and rig labels' rule. */
+  /** The orientation this render was drawn under; a posed render missing it, or carrying another, is stale. */
   poseKey?: string;
 }
 
 /**
- * An entry's thumbnail state: the entry-level facts, then one block per
- * occlusion variant (the store keys renders that way).
- *
- * The one thing this cannot vouch for is that the PNG is still on disk — the
- * annotation is a memory lookup, and eviction removes pixels without asking it.
- * A reader that acts on `state: 'hit'` must still tolerate a `/api/thumb` answer
- * that disagrees; that fallback is `thumbnail-image-serving` D3's.
+ * An entry's thumbnail state: entry-level facts, then one block per occlusion
+ * variant. It cannot vouch that the image is still on disk — eviction removes
+ * pixels without asking it, so a `hit` must still tolerate a `/api/thumb`
+ * answer that disagrees (`thumbnail-image-serving` D3).
  */
 export interface ThumbInfo {
   /** The entry's write generation — the cache validator every read echoes. */
   gen: number;
-  /** A stored orientation exists: a camera **or** an axis (`bulk-thumbnail-jobs` M4). */
+  /** A stored orientation exists: a camera **or** an axis. */
   framed: boolean;
   camera?: CameraState;
   axis?: OrbitAxis;
@@ -107,12 +60,9 @@ export interface ThumbInfo {
 }
 
 /**
- * Every model beneath a library path, with the thumbnail facts a listing entry
- * carries (`listing-tree-cache` §6.7). An **enumeration, not a listing**: no
- * response cap applies, because a scope silently cut to a cap would be a
- * different scope. `complete` is false when the traversal that produced it
- * stopped against its work budget — the answer still carries what was found,
- * and a caller that knows its scope was cut can say so.
+ * Every model beneath a library path — an **enumeration, not a listing**, so no
+ * response cap applies: a scope silently cut to a cap would be a different
+ * scope. `complete` is false where the traversal hit its work budget.
  */
 export interface ModelsListing {
   path: string;
@@ -120,10 +70,7 @@ export interface ModelsListing {
   complete: boolean;
 }
 
-/**
- * What an explicit reload found (`listing-tree-cache` §6.6): how many cached
- * roots it re-checked, and whether any of them had moved on disk.
- */
+/** What an explicit reload found: cached roots re-checked, and whether any had moved on disk. */
 export interface ReloadResult {
   ok: true;
   roots: number;
@@ -136,74 +83,43 @@ export interface DirListing {
   /** Flat listings only: models were dropped by the return cap or walk budget. */
   truncated?: boolean;
   /**
-   * This answer came from a cached tree that this server process has not yet
-   * checked against the filesystem (`listing-tree-cache` §5.1). The entries are
-   * shown at once and a revalidation pass is already running; the client's job
-   * is to say so and to ask again, at which point the corrected listing arrives.
-   *
-   * **Absent means fresh-or-validated** — a listing produced by an actual walk
-   * carries no marker, and neither does one served from a snapshot the process
-   * has since revalidated. Never `false`: the field is additive, so an older
-   * client and a hand-written request see exactly what they saw before.
+   * Served from a cached tree not yet checked against the filesystem; a
+   * revalidation is already running and the client should ask again. Absent
+   * means fresh-or-validated, and it is never `false`.
    */
   stale?: true;
 }
 
-/**
- * Attribution for an entry, as the library's override store holds it. Every
- * field is optional: the corpus metadata this is generated from does not always
- * carry all six, and a partial credit is still a true one.
- */
+/** Attribution as the override store holds it. Every field is optional — a partial credit is still a true one. */
 export interface OverrideCredits {
   author?: string;
   authorUrl?: string;
   /** The license's label as the source page gives it — never normalised here. */
   license?: string;
-  /**
-   * The license deed's URI, version included
-   * (`https://creativecommons.org/licenses/by-nd/4.0/`). The URL is what
-   * carries the version; the app infers nothing from the label
-   * (`credits-completion` D3).
-   */
+  /** The license deed's URI, version included — the URL carries the version, never the label (`credits-completion` D3). */
   licenseUrl?: string;
-  /**
-   * What was done to the served copy, in the corpus's own words ("re-exported
-   * as STL and decimated for display"), drawn verbatim as the modification
-   * notice. **Absent means served unchanged**, and draws nothing
-   * (`credits-completion` D2).
-   */
+  /** What was done to the served copy, drawn verbatim. **Absent means served unchanged** (`credits-completion` D2). */
   modified?: string;
   sourceUrl?: string;
 }
 
 /**
- * What one key in `.model-browser/overrides.json` may hold (library-overrides
- * D1/D6). Unknown fields are preserved by writers and ignored by resolution, so
- * the format grows additively *within* `version: 1`.
+ * One key of `.model-browser/overrides.json` (library-overrides D1/D6). Unknown
+ * fields are preserved by writers and ignored by resolution, so the format
+ * grows additively within `version: 1`.
  */
 export interface OverrideEntry {
-  /** A display name for the thing at this exact key. Never inherited (D2/D7). */
+  /** Names the thing at this exact key. Never inherited (D2/D7). */
   name?: string;
   credits?: OverrideCredits;
-  /**
-   * Stored orientation, **reserved by name only**. Deliberately `unknown` and
-   * not `IndexPose`: the stored pose's concrete shape belongs to
-   * `pose-for-every-model`, and pinning the index's shape here would prejudge
-   * it. Reserving the name now is documentation of the file format's contract
-   * — nothing this change writes or reads depends on it (D6).
-   */
+  /** Reserved by name only — the stored pose's shape belongs to `pose-for-every-model`, and nothing here reads it (D6). */
   pose?: unknown;
 }
 
 /**
- * An entry's effective overrides — what `GET /api/overrides` answers, `{}` where
- * nothing resolves.
- *
- * The same field set as `OverrideEntry` by construction rather than by
- * coincidence: the resolution is a field-wise merge over the entry's ancestor
- * keys, so every field it can produce is a field some key held. Named
- * separately because the two are free to diverge — a stored-only field, or a
- * resolved-only one, changes exactly one of them.
+ * An entry's effective overrides — `GET /api/overrides`, `{}` where nothing
+ * resolves. Field-for-field `OverrideEntry` by construction, but named
+ * separately: a stored-only or resolved-only field changes one of them.
  */
 export interface ResolvedOverrides {
   name?: string;
@@ -212,17 +128,9 @@ export interface ResolvedOverrides {
 }
 
 /**
- * One kit as `GET /api/credits` lists it: a store key that holds credits of its
- * **own**, with the display name stored there when there is one
- * (`landing-page` D8).
- *
- * `credits` is required here where it is optional on `OverrideEntry`, because
- * the list is exactly the keys whose credits would be drawn — an entry with
- * nothing to show is not a line. `path` is the store's key, which is a library
- * path and never a location on the host.
- *
- * Deliberately not a resolution: a kit's own stored credits are what the
- * generator wrote, and a key that merely *inherits* them is not a kit.
+ * One kit as `GET /api/credits` lists it: a store key holding credits of its
+ * **own** — a key that merely inherits them is not a kit (`landing-page` D8).
+ * `path` is the store's key, a library path and never a host location.
  */
 export interface CreditedKit {
   path: string;
@@ -231,21 +139,17 @@ export interface CreditedKit {
 }
 
 /**
- * Orbit spindle axis: the model turns around this axis, camera up locked to
- * it. Sign is part of the value (six spindles). No default here: an
- * un-framed model turns about its format's up axis, `defaultAxisFor`
- * (shared/frames.ts).
+ * Orbit spindle axis: the model turns around it, camera up locked to it, sign
+ * included. No default here — an un-framed model turns about its format's up
+ * axis (`defaultAxisFor`).
  */
 export type OrbitAxis = "x" | "-x" | "y" | "-y" | "z" | "-z";
 
 /**
- * Bounds- and spindle-relative camera state: azimuth/elevation (radians)
- * measured in the model's spindle frame (its stored OrbitAxis), distance in
- * multiples of the bounding-sphere radius, target relative to the bounding-box
- * center in radius units. Never world coordinates. The `y` frame is the
- * historical world-Y one; an STL's default is now `z`, whose frame is that
- * same one turned with the geometry, so old STL cameras read unchanged
- * (file-frame-spindle D3).
+ * Bounds- and spindle-relative, never world coordinates: `az`/`el` in radians
+ * within the model's spindle frame, `distR` in bounding-sphere radii, `target`
+ * from the bounding-box centre in radii. An STL camera stored under the older
+ * `y` default reads unchanged under `z` (file-frame-spindle D3).
  */
 export interface CameraState {
   az: number;
@@ -256,132 +160,75 @@ export interface CameraState {
 
 /**
  * The one encoding a thumbnail is produced, stored and served in
- * (`webp-thumbnails`). Shared because three places must agree about it and a
- * disagreement is silent: the client asks `canvas.toBlob` for it, the client
- * refuses to upload a render that came back as anything else, and the image
- * route types the bytes with it.
+ * (`webp-thumbnails`). Shared because `canvas.toBlob`, the upload check and the
+ * image route must agree, and a disagreement is silent.
  */
 export const THUMB_MIME = "image/webp";
 
 /**
  * How far two `CameraState`s may differ per component and still be the same
- * orientation. Every component is unit-free in the same sense — `az`/`el` in
- * radians, `distR` in bounding-sphere radii, `target` in radii too — so one
- * tolerance covers all of them and the drift it absorbs is scale-independent.
- *
- * It exists because a camera survives a round trip that is not bit-exact: a
- * lightbox close re-captures the orientation through az/el → cartesian →
- * `asin`/`atan2` → az/el and PUTs the result whether or not the user moved
- * anything. Under value equality every close of an oriented model would read
- * as a moved camera and invalidate its sibling render (`ThumbCache.put`).
- * Measured over that round trip (y-frame, bounds pivoted to the origin, 200k
- * random states at each of radius 0.01, 1 and 137; the fourth reviewer's
- * re-run, 2026-08-28): `DEFAULT_CAMERA` drifts by 1.1e-16 and the maximum
- * per-component drift is 7.1e-15 — five orders below this constant.
- *
- * That measurement is a probe, not a quotation: `client/test/camera.test.ts`
- * re-runs the sweep and asserts the maximum drift stays far below this value.
- * The probe (`client/test/camera.test.ts`, "camera round-trip drift") is the
- * figure to trust — it re-runs on every suite: seeded, 200k states at each of
- * radius 0.01, 1 and 137, max per-component drift **2.1538e-14** (AOD-B's run,
- * 2026-08-31; the 7.1e-15 above was an earlier sweep through `statePosition`
- * with a narrower target distribution — same order, same conclusion). The
- * constant keeps ~4.6e4× headroom over the measured maximum.
+ * orientation — one tolerance for all of them, since every component is
+ * unit-free. A lightbox close re-captures through az/el → cartesian → az/el and
+ * PUTs the result whether or not the user moved anything; under value equality
+ * that would invalidate the sibling render every time. The camera round-trip
+ * test asserts the headroom.
  */
 export const CAMERA_EPSILON = 1e-9;
 
 export type ThumbStatus = "hit" | "stale" | "miss";
 
 /**
- * The lighting label a thumbnail carries — a legacy label type with one
- * producible value.
- *
- * `remove-axis-lighting` retired the spindle-aligned rig: every render writes
- * `'camera'` and the server refuses a PUT declaring anything else. `'axis'`
- * stays in the union because entries written before that change must remain
- * readable and echoed — the cache stores and echoes the label without
- * interpreting it, and a stored `'axis'` is how a client knows those pixels
- * are stale. It is never written anew.
+ * Every render writes `'camera'` and the server refuses a PUT saying otherwise.
+ * `'axis'` is never written anew; it stays readable so a client can see those
+ * pixels are stale (`remove-axis-lighting`).
  */
 export type LightingMode = "axis" | "camera";
 
 /**
- * The answer for **one** render of an entry — the occluded one, or the
- * unoccluded sibling, whichever the request named (`ao`). `status`, `png` and
- * the recipe labels below all describe that render. `camera` and `axis` are
- * the entry's own, shared by both renders, so they come back whichever render
- * was asked for and whatever its status is.
+ * One render of an entry — whichever `ao` named. `status`, `png` and the recipe
+ * labels describe that render; `camera` and `axis` are the entry's own. `png`
+ * is a wire name that outlived its format: the bytes are `THUMB_MIME`.
  */
 export interface ThumbGetResponse {
   status: ThumbStatus;
   camera?: CameraState;
-  /**
-   * Stored spindle axis, absent when none is stored — which is not the same as
-   * 'y'. A caller defaults it; a caller that needs to know whether the user has
-   * chosen an orientation reads the absence.
-   */
+  /** Stored spindle axis; absent is not `'y'` but "the user has chosen none". */
   axis?: OrbitAxis;
-  /** Lighting mode the PNG was rendered with; absent on pre-lighting entries. */
+  /** Absent on entries stored before the label existed. */
   lighting?: LightingMode;
-  /** Pixel-recipe (rig) version the PNG was rendered with; absent on pre-rim entries. */
+  /** Pixel-recipe version; absent on entries stored before the label existed. */
   rig?: number;
   /**
-   * Which pose recipe the PNG was rendered under, absent when it was rendered
-   * without one. A version rather than a flag for the same reason `rig` is:
-   * the pose is an input to the pixels that the cache key does not carry, and
-   * the mapping from the index's coordinates to the scene's can change — it
-   * did once already, and every posed thumbnail rendered under the old one was
-   * wrong while looking perfectly fresh.
+   * Which pose recipe framed the render, absent when none did. A version, not a
+   * flag: the pose is an input to the pixels that the cache key does not carry,
+   * and its mapping can change, leaving a wrong render looking fresh.
    */
   posed?: number;
-  /**
-   * The orientation the PNG was drawn under, where a pose framed it — the
-   * pose's *value* beside `posed`'s version (`pose-rerender` D2). Absent on
-   * renders labelled before the key existed, which the client re-renders once
-   * — a posed render with no key is stale like one with no rig label.
-   */
+  /** The pose's *value* beside `posed`'s version — a posed render without it is stale (`pose-rerender` D2). */
   poseKey?: string;
-  /** base64 PNG, present when status === 'hit' — unless the request asked
-   *  `pixels=off`, which is a read of the labels and the orientation alone. */
+  /** base64 `THUMB_MIME` bytes when status === 'hit', unless the request asked `pixels=off`. */
   png?: string;
   /**
-   * The entry's write generation — a counter the server moves on **every**
-   * write to the entry, whichever render or field carried it, and never
-   * regresses (`immutable-thumbnail-serving` D1). Together with the request's
-   * `path`, `mtime` and `ao` it fully names the response bytes, which is what
-   * lets a read that already knows it be answered `immutable`.
-   *
-   * Entry-level, like `camera` and `axis` and for the same reason: it is the
-   * entry that is written, not one of its two renders, so both renders of a
-   * path always report the same number.
-   *
-   * The server sets it on every answer, a miss included (0 for an entry that
-   * does not exist). Optional only so that entries and clients from before
-   * this change stay readable — absence reads as 0.
+   * The entry's write generation: moved on **every** write to the entry and
+   * never regressing, so `path`+`mtime`+`ao`+`gen` fully names the response
+   * bytes and a repeat read can be answered `immutable`
+   * (`immutable-thumbnail-serving` D1). Entry-level, so both renders report the
+   * same number; 0 for an entry that does not exist, and absence reads as 0.
    */
   gen?: number;
 }
 
-/**
- * What `PUT /api/thumb` answers. `gen` is the entry's generation **after** this
- * write, so the client that wrote can key its next read from it without a
- * round trip to find out what it just caused.
- */
+/** `gen` is the generation **after** this write, so the writer can key its next read without a round trip. */
 export interface ThumbPutResponse {
   ok: true;
   gen: number;
 }
 
 /**
- * What `PUT /api/thumb` answers when it **refuses** a conditional write
- * (`bulk-thumbnail-jobs` D4): 412, and nothing written. A shape of its own so
- * the refusal is distinguishable from the 400 a malformed field gets — a bulk
- * job counts a refusal as a skipped entry and carries on, while a malformed
- * request is its own bug and must not be counted as one.
- *
- * `gen` is the entry's **current** generation, not the one the writer named, so
- * a caller that wants to retry can re-key from the refusal itself rather than
- * reading the entry back.
+ * A refused conditional write: 412, nothing written (`bulk-thumbnail-jobs` D4).
+ * Its own shape, so a bulk job counts it as a skip rather than confusing it
+ * with the 400 a malformed field gets. `gen` is the entry's **current**
+ * generation, so a retry can re-key from the refusal.
  */
 export interface ThumbPutRefused {
   error: string;
@@ -392,93 +239,52 @@ export interface ThumbPutRequest {
   path: string;
   mtime: number;
   /**
-   * Three states, exactly as `camera` below has three: base64 pixels
-   * **replace** this render's bytes, absence **keeps** whatever is stored, and
-   * `null` **deletes** the entry's cached renders — both occlusion variants'
-   * pixels and recipe labels (`bulk-thumbnail-jobs` D3).
-   *
-   * The deletion is what a bulk reset writes: the renders were drawn under an
-   * orientation the same write gives up, so they go with it, and whatever next
-   * looks at the model draws it afresh. It governs the pixels only — the
-   * entry's stored orientation is this write's own `camera`/`axis` fields, on
-   * their own three-state rule, never the deletion's business.
+   * Three states: base64 `THUMB_MIME` pixels **replace** this render's bytes,
+   * absence **keeps** them, `null` **deletes** both variants' pixels and recipe
+   * labels (`bulk-thumbnail-jobs` D3). Pixels only — the stored orientation is
+   * `camera`/`axis`'s business.
    */
   png?: string | null;
   /**
-   * Three states, not two: a value **sets** the camera, absence **keeps**
-   * whatever was stored, and `null` **discards** it. Silence has to go on
-   * meaning keep — every PNG write omits it — so giving an orientation up
-   * needed a word of its own rather than a written default, which is an
-   * orientation of the user's and suppresses any index that would supply one
-   * (entry-context-menu D7).
+   * Three states: a value **sets**, absence **keeps**, `null` **discards**.
+   * Silence must go on meaning keep, since every pixel write omits it, so
+   * giving an orientation up needs a word of its own (entry-context-menu D7).
    */
   camera?: CameraState | null;
-  /** Set / keep / discard, exactly as `camera` — the axis is discarded with it
-   *  when a source can supply both, since angles measured about one axis do not
-   *  describe a view about another. */
+  /** Set / keep / discard as `camera` — discarded with it, since angles about one axis do not describe a view about another. */
   axis?: OrbitAxis | null;
   lighting?: LightingMode;
   rig?: number;
-  /** Pose recipe version the PNG was rendered under; absent when unposed. */
+  /** Pose recipe version the render was drawn under; absent when unposed. */
   posed?: number;
   /**
-   * What the pixels depended on when a pose framed them, and nothing else
-   * (`pose-rerender` D2): `poseKeyOf` over the camera and axis the pose
-   * resolved to — `${axis}:${az}:${el}` at four decimals — not the pose's raw
-   * fields, so two opinions that derive the same view do not re-render, and
-   * not its `source` or `confidence`, which touch no pixel. Stored and echoed
-   * by the server like `posed`; a posed render that lacks it, or carries a
-   * different one, is stale — the same rule as a missing lighting or rig
-   * label — so every render labelled before the key existed is re-rendered
-   * once and gains one. Absent when unposed.
+   * `poseKeyOf` over the camera and axis the pose resolved to — what the pixels
+   * depended on, so two opinions deriving the same view do not re-render
+   * (`pose-rerender` D2). A posed render lacking it, or carrying another, is
+   * stale.
    */
   poseKey?: string;
-  /**
-   * Which render these pixels and labels are: `true` — or absent — the
-   * occluded one, `false` the unoccluded sibling. Absent means occluded
-   * because that is what every PUT was before renders were keyed by
-   * occlusion: an old client never rendered an unoccluded thumbnail, so it
-   * can only ever have meant this one.
-   */
+  /** `true` or absent the occluded render, `false` the unoccluded sibling — absent is occluded, all an older client could have meant. */
   ao?: boolean;
   /**
-   * The generation the writer last saw, which makes this write **conditional**:
-   * when it is given and is no longer the entry's current generation, the
-   * server refuses the write, changes nothing, and answers `ThumbPutRefused`
-   * (412). Absent is an unconditional write, which is every ordinary one.
-   *
-   * It exists for a bulk job's mid-job skip (`bulk-thumbnail-jobs` D4). A job
-   * snapshots each entry's generation when it derives its work list; an entry
-   * the user has orbited or re-rendered since is then skipped rather than
-   * overwritten, and a fresh orbit is never lost to a reset that was queued
-   * before it. Decided server-side rather than by a client-side
-   * read-then-write, which would leave the whole round trip open as a window.
-   *
-   * A missing entry's current generation is 0, so `ifGen: 0` reads as "only if
-   * nothing has ever been written here".
+   * Makes the write **conditional**: given and no longer current, the server
+   * changes nothing and answers `ThumbPutRefused`. It is a bulk job's mid-job
+   * skip — the job snapshots generations up front, so an entry orbited since is
+   * left alone (`bulk-thumbnail-jobs` D4). `ifGen: 0` means "only if nothing
+   * was ever written here".
    */
   ifGen?: number;
 }
 
 /**
- * What a semantic result set is, beside the entries themselves. Counts are the
- * index's claims about itself, never about the folder: `indexed` is what it
- * holds, `scanned` is what the last classify run walked and still found present
- * when the index loaded, so it tracks the folder loosely and can shift.
+ * What a result set is beside its entries. The counts are the index's claims
+ * about itself, not about the folder: `scanned` tracks it only loosely.
  */
 export interface SemanticScope {
   /**
-   * Where the query was judged, as a **library path** — never the index's own
-   * spelling of it, which is a filesystem path on the machine the index runs
-   * on. Mapped on the way out by every deployment alike (`scopeLibPath`),
-   * because a host location is not a viewer's to be told (`feature-report`) and
-   * a library path is the only kind that reaches this wire (`library-root`).
-   *
-   * `null` where there is no library path to give: the index reported no scope,
-   * or the one it reported resolves outside the library — an unscoped query
-   * comes back scoped to the collection root, which may sit above or beside the
-   * library top. A scope the viewer cannot browse to is reported as absent
-   * rather than named.
+   * Where the query was judged, as a **library path** — the index's own
+   * spelling is a filesystem path and never reaches a viewer. `null` where
+   * there is none to give: no scope reported, or one outside the library.
    */
   path: string | null;
   status: "indexed" | "partial" | "unindexed";
@@ -488,10 +294,7 @@ export interface SemanticScope {
   covers: string[];
 }
 
-/**
- * An orientation the semantic index supplies for a model: which way is up, and
- * the angles its front view was rendered from.
- */
+/** An orientation the index supplies: which way is up, and the angles its front view was rendered from. */
 export interface IndexPose {
   up: [number, number, number];
   /** The model-space direction the index's azimuth 0 is measured from. */
@@ -502,20 +305,11 @@ export interface IndexPose {
 }
 
 /**
- * What the index scored a result at — its two numbers, under the index's own
- * names rather than the labels a tile draws them with (`k`/`sim`, `z`).
- *
- * Both are the index's values verbatim. Nothing here is rescaled, normalised or
- * banded: the index's thresholds — `WEAK_Z = 2.0` above all — are stated against
- * these numbers, so a figure derived on this side could not be checked against
- * anything the index says about itself (confidence-scores-on-tiles D2/D4).
- *
- * `score` is comparable only *within* one result set, and the two scoring routes
- * produce measurably different distributions (model-to-model cosines run
- * 0.85–0.99 where text-query cosines run ~0.1). Which route produced a set is
- * therefore not recorded here — it is a fact about the view, read off the
- * subject it asked under (D3) — but any surface drawing `score` must name the
- * scale beside it.
+ * The index's two numbers, verbatim: nothing is rescaled or banded here, since
+ * the index's thresholds are stated against these (confidence-scores-on-tiles
+ * D2/D4). `score` is comparable only within one result set, and the two scoring
+ * routes run on visibly different scales, so any surface drawing it must name
+ * the scale beside it (D3).
  */
 export interface IndexScore {
   /** Pooled cosine similarity, under whichever pooling the request asked for. */
@@ -530,48 +324,24 @@ export interface SemanticTuning {
   raw?: boolean;
   /** How a model's per-view scores reduce to one. */
   pool?: "mean" | "max" | "softmax";
-  /**
-   * How many results. Composes with `minScore` rather than competing with it:
-   * the floor filters and this caps what survived, so both may be present and
-   * absent means *this bound is not in force* — never "unset". Clamped to
-   * `MAX_RESULT_COUNT` by every reader that accepts one from a user.
-   */
+  /** Caps what survived `minScore`; the two compose. Absent means this bound is not in force, never "unset". */
   top?: number;
   /** Everything at or above this score, capped by `top` where one is set. */
   minScore?: number;
 }
 
 /**
- * The largest count this app will send or store. It matches the index's
- * `QueryRequest.cap` *default* of 500 — `cap` is a per-request field the index
- * accepts from 1 to 10000 and this app never sends one, so 500 is what it gets.
- * A count above it names a result set the index would truncate anyway.
- *
- * Pinned to a default we rely on rather than to a fixed ceiling, which is worth
- * saying so it does not rot silently if this app ever starts sending `cap`.
+ * The largest count this app will send or store — the index's `cap` *default*,
+ * which is what it gets since this app never sends one. Pinned to that default
+ * rather than to a ceiling, so it does not rot silently if that changes.
  */
 export const MAX_RESULT_COUNT = 500;
 
 /**
- * The longest phrase a meaning query may carry, refused at the route before any
- * index call is made — a coarse guard against a pasted paragraph, not a
- * restatement of the index's own limit.
- *
- * This doc used to say the index 500s past roughly 600 *characters* and resets
- * the connection doing it, which `askIndex` could not tell from a service that
- * was not running, so one long phrase made the feature read as absent to
- * everyone. Measured 2026-09-08 and none of that holds. The index's limit is a
- * **token** budget — about 64 SigLIP2 tokens, so 100 CJK characters fail while
- * 120 bytes of ASCII words pass, and no character count describes it. The 500
- * is a proper HTTP response with no connection reset, and availability stays
- * `ready` across it, so the probe is unaffected and nothing leaks to other
- * requests.
- *
- * So this bound is not load-bearing for correctness and cannot be made precise
- * here: the precise one belongs to the index, which is being fixed to answer a
- * 4xx naming the token budget (ConfusedSky/mini-classify#5). 500 characters is
- * kept as what it is — well under any plausible token budget for ordinary
- * prose, and enough to stop a paragraph from becoming an index round trip.
+ * A coarse guard against a pasted paragraph, refused at the route. It cannot
+ * restate the index's own limit, which is a **token** budget no character count
+ * describes, and it is not load-bearing: an over-budget phrase gets a plain 500
+ * and availability stays `ready` (ConfusedSky/mini-classify#5).
  */
 export const SEARCH_TEXT_MAX = 500;
 
@@ -581,15 +351,9 @@ export interface SemanticListing {
   /** Orientation per tile path, where the index has one. Advisory (D5). */
   poses: Record<string, IndexPose>;
   /**
-   * What the index scored each tile at, keyed as `poses` is — by the **library
-   * path** the entry carries, so "no entry" and "no score" are one fact and a
-   * hit that no longer stats falls out of both at once
-   * (confidence-scores-on-tiles D1). It said "resolved path" until
-   * `library-root` made a library path the only kind that reaches this wire.
-   *
-   * Optional on the wire, and the migration rests on it: an older server that
-   * does not send it leaves a newer client rendering no badges rather than
-   * failing, which is what makes this field additive.
+   * Keyed by library path as `poses` is, so "no entry" and "no score" are one
+   * fact (confidence-scores-on-tiles D1). Optional: an older server sends none
+   * and a newer client draws no badges.
    */
   scores?: Record<string, IndexScore>;
   scope: SemanticScope;
@@ -598,35 +362,20 @@ export interface SemanticListing {
   /** The index's own ceiling stopped it returning what was asked for. */
   capped: boolean;
   /**
-   * How many models cleared the floor *before* a count cut them — the size of
-   * the set the count sampled from, so a view showing 60 can say "of 875"
-   * (floor-and-count-compose D9). Distinct from `capped`, which is the index's
-   * ceiling: three bounds, each reporting its own act rather than borrowing
-   * another's bit.
-   *
-   * Optional on the wire for the reason `scores` is: an index or server that
-   * does not report it leaves a newer client saying nothing extra rather than
-   * failing. Never derived client-side — what arrives has already been cut, so
-   * counting the tiles would just restate the count.
+   * How many cleared the floor *before* a count cut them, so a view can say "N
+   * of M" (floor-and-count-compose D9) — distinct from `capped`, the index's
+   * ceiling. Optional, and never derived client-side: what arrives has already
+   * been cut.
    */
   matched?: number;
 }
 
 /**
- * A model's nearest neighbours (entry-context-menu D4). Deliberately not a
- * `SemanticListing` with fields left blank: everything a meaning answer carries
- * beyond the tiles describes a *phrase's* result — the scope a query was judged
- * within, whether it stood out, whether a bound bit — and none of it is a fact
- * about a model's neighbours. The index reports no `weak` here at all (measured:
- * model-to-model cosines run 0.85–0.99 where text-query cosines run ~0.1).
- *
- * Per-tile strength is the exception, and used to be listed above as a third
- * thing there was nothing to say about. It is carried now
- * (confidence-scores-on-tiles): a neighbour set has no `weak` flag *at all*, so
- * withholding the numbers left the ranking as literally everything a reader had
- * here. The measurement that kept them out is unchanged and is why the cosine is
- * labelled `sim` rather than `k` on this route — the two scales are named, not
- * reconciled.
+ * A model's nearest neighbours (entry-context-menu D4). Not a `SemanticListing`
+ * with fields left blank: everything one carries beyond the tiles describes a
+ * *phrase's* result. The index reports no `weak` here, which is why per-tile
+ * strength is carried — without it the ranking is all a reader has. Neighbour
+ * cosines run on their own scale, hence `sim` rather than `k`.
  */
 export interface SimilarListing {
   /** The collection the neighbours were drawn from — the whole of it (D4). */
@@ -634,78 +383,40 @@ export interface SimilarListing {
   entries: DirEntry[];
   /** Orientation per tile path, where the index has one. Advisory (D5). */
   poses: Record<string, IndexPose>;
-  /** What the index scored each neighbour at, keyed as `poses` is (D1). The
-   *  anchor below is absent from it: the index excludes the query model from its
-   *  own ranking rather than scoring it. Optional for the same reason it is on a
-   *  meaning answer — an older server simply sends no badges. */
+  /** Keyed as `poses` is (D1); the anchor is absent from it, since the index excludes the query model from its own ranking. */
   scores?: Record<string, IndexScore>;
   /**
-   * The model the neighbours were computed from, so the question can be shown
-   * beside its answer. A field of its own rather than the head of `entries`,
-   * because it is not one of them: the index excludes the query model from its
-   * own ranking by design, and anything counting the tiles — "nothing similar",
-   * the omitted-entries notice — must count the neighbours alone.
-   *
-   * Absent when the model no longer stats: it can be deleted after it was
-   * embedded, and its neighbours are still an answer without it.
+   * The model the neighbours were computed from — its own field because it is
+   * not one of them, so anything counting tiles counts neighbours alone. Absent
+   * when the model no longer stats.
    */
   anchor?: DirEntry;
 }
 
 /**
- * The index's orientations for one plain listing's models — the same fact a
- * search hit carries as a rider on `SemanticListing.poses` and `SimilarListing.
- * poses`, supplied for a whole directory instead of for a result set
- * (`pose-for-every-model` D2). Poses reach a searching client on its hits;
- * this is how they reach a *browsing* one, so the same model is oriented the
- * same way on a meaning grid and on the listing it lives in.
- *
- * Keyed by library path, like every `poses` map in this file. Three states per
- * asked path, the same three a listing entry's `pose` has (`pose-rerender`
- * D5): a pose; `null`, a **settled absence** — the index answered and holds
- * none, or is known not to be there (absent, wedged, its volume gone), so a
- * render drawn under an orientation is stale and the tile redraws at the
- * default, what the live view opens at; and a **missing key**, unsettled —
- * the index is warming or the ask went unanswered, and nobody knows yet, so a
- * render stands. The GET form (`?path=`) still answers the positive map only.
- * An index that cannot be asked never fails the request — the listing itself
- * never depends on it.
- *
- * Its own request, never a field on `DirListing`: a listing must cost nothing
- * when the index is down, and a pose arriving as a second wave is what the
- * thumbnail sweep's reconciler is built for (D3).
+ * The index's orientations for a whole directory's models, so a browsing client
+ * orients a model the way a searching one does (`pose-for-every-model` D2).
+ * Keyed by library path, three states per asked path as `DirEntry.pose` has: a
+ * pose; `null`, a settled absence, so a render drawn under an orientation is
+ * stale; a missing key, unsettled, so that render stands (`pose-rerender` D5).
+ * Its own request, never a field on `DirListing` — a listing must cost nothing
+ * when the index is down (D3).
  */
 export interface PosesResponse {
   poses: Record<string, IndexPose | null>;
 }
 
 /**
- * The most paths one `/poses` batch may carry — the wire bound the server
- * refuses past, and the chunk size both sides split larger sets at. One
- * declaration for both workspaces (`CAMERA_EPSILON` precedent): the client
- * chunked at its own copy of this number until a review flagged the drift
- * hazard (`pose-for-every-model` §4 F4).
+ * The most paths one `/poses` batch may carry — the bound the server refuses
+ * past and the size both sides chunk at, declared once so they cannot differ.
  */
 export const POSES_MAX = 1024;
 
 /**
- * What a client asks for poses about when naming the directory will not do:
- * the **landed entries' own paths**, so the supply above reaches the listings
- * that are not one directory's contents.
- *
- * A flat listing draws models from every folder beneath the browsed one and a
- * name search draws them from wherever they matched, so `?path=<dir>` would
- * answer for the handful that happen to sit at the top and leave the rest
- * unposed — the tiles on screen are the question, not the folder they were
- * gathered from. Sending exactly what landed also keeps the answer joinable by
- * construction: every key comes back under a path the client already has a tile
- * for.
- *
- * Library paths, like every path on this wire. A path this library will not
- * resolve is dropped from the answer rather than failing the request — the same
- * silence a pose gets for a model the index has never seen, because a listing
- * may never be made to fail by the index. At most `POSES_MAX` per request (the
- * index's own bound on the call); a longer listing asks more than once.
+ * The **landed entries' own paths**, for the listings that are not one
+ * directory's contents: a flat listing or a name search gathers models from
+ * everywhere, so `?path=<dir>` would leave most of them unposed. Library paths;
+ * one this library will not resolve is dropped rather than failing the request.
  */
 export interface PosesRequest {
   paths: string[];
@@ -721,13 +432,7 @@ export type IndexState =
 
 export interface IndexAvailability {
   state: IndexState;
-  /**
-   * The collection the index covers, as a **library path** (library-root D6);
-   * absent when the index answered but covers a location outside the library,
-   * which `detail` then names. The index keeps its own absolute root — it is
-   * another process with its own view of the volume — and only the server sees
-   * it.
-   */
+  /** As a **library path**; absent where the index covers a location outside the library, which `detail` then names (library-root D6). */
   collectionRoot?: string;
   /** Extensions the index can hold — read, never assumed (semantic-search D3). */
   covers?: string[];
@@ -742,21 +447,19 @@ export interface ApiError {
 
 /** One launchable application, as the platform registry names it. */
 export interface AppRef {
-  /** Desktop-file id (with its `.desktop` suffix), e.g. `lycheeslicer.desktop`. */
+  /** Desktop-file id, suffix included (`lycheeslicer.desktop`). */
   id: string;
   /** Human-readable name from the entry itself — ids never render (app-launch L2). */
   name: string;
 }
 
-/** A model type's registry entry: the default is its own source and need not
- *  appear among the associations (app-launch spec). */
+/** A model type's registry entry: the default need not appear among the associations. */
 export interface TypeApps {
   default: AppRef | null;
   associated: AppRef[];
 }
 
-/** `GET /api/apps` — fetched once per session, refetched after an open-with
- *  completes; never probed when a menu opens (open-in-slicer L5). */
+/** `GET /api/apps` — fetched once per session, refetched after an open-with; never probed when a menu opens (open-in-slicer L5). */
 export interface AppsReport {
   /** Whether a chooser command is configured server-side — gates "Open with…". */
   chooser: boolean;
@@ -765,80 +468,47 @@ export interface AppsReport {
 }
 
 /**
- * `GET /api/features` — what this server accepts and offers, as named
- * capability fields and never as a mode name (feature-report D1): the client
- * cannot branch on a deployment kind it never learns.
- *
- * Constructed once at server start and answerable in every library state. It is
- * **advisory** — it shapes what the client offers, and is never the enforcement
- * of anything: refusing a write stays the route's own job, owned by whichever
- * change turns the field off. Each future field lands with the change that owns
- * making it false.
+ * `GET /api/features` — named capability fields, never a mode name, so the
+ * client cannot branch on a deployment kind (feature-report D1). Built once at
+ * start, answerable in every library state, and **advisory**: refusing a write
+ * stays the route's own job.
  */
 export interface FeatureReport {
   /** Whether `PUT /api/thumb` is accepted. */
   thumbWrites: boolean;
-  /**
-   * Whether the platform launcher is offered — all three launcher routes
-   * (`/api/open`, `/api/open-with`, `/api/apps`), each of which runs a command
-   * on the machine the server sits on.
-   */
+  /** Whether the launcher routes are offered — each runs a command on the machine the server sits on. */
   appLaunch: boolean;
-  /**
-   * Whether the chat side-panel tab is offered. Its default is **off**: the tab
-   * is a placeholder with no backend, and an unfinished surface belongs neither
-   * in a shipped desktop build nor on a public link. It stays declarable, so
-   * the day chat gains a backend the default flips (public-deployment D4).
-   */
+  /** Whether the chat side-panel tab is offered. Default **off**: it is a placeholder with no backend (public-deployment D4). */
   chatTab: boolean;
   /**
-   * Whether the machine the server runs on is the viewer's concern — governing
-   * whether any route or surface may name a location on that machine (the
-   * library's top, the configured root, an enclosed library's location, a
-   * dependency's cache directory) or offer a remedy only an operator can
-   * perform (start a service, mount a volume, re-run a tool). Library paths are
-   * not such locations and are unaffected (public-deployment D11).
+   * Whether the server's machine is the viewer's concern: whether anything may
+   * name a location on it, or offer a remedy only an operator can perform.
+   * Library paths are not such locations (public-deployment D11).
    */
   hostDetails: boolean;
   /**
-   * Whether maintenance operations against the library are offered — the ones
-   * that act on the server's own derived state rather than answering a question
-   * about the library: dropping or revalidating caches, resetting stored
-   * framings in bulk. Bulk work that *fills* the thumbnail cache is governed by
-   * `thumbWrites` instead, since with those writes refused it would render and
-   * discard (public-deployment D4).
+   * Whether maintenance against the library is offered — dropping caches,
+   * resetting framings in bulk. Bulk work that *fills* the thumbnail cache is
+   * `thumbWrites`' instead, since it would otherwise render and discard
+   * (public-deployment D4).
    */
   maintenance: boolean;
   /**
-   * Whether the visitor introduction is offered — the banner over the grid, its
-   * example queries and surprise action, the header's About affordance, the
-   * placeholder examples and the meaning-mode start (`visitor-intro`).
-   *
-   * Its default is **off**: the introduction speaks to a visitor who does not
-   * know what the app is, and a personal installation has none. Almost all of
-   * it is an offer the client draws or withholds, like `chatTab` — no `/api`
-   * route is gated on this field. The one thing the server itself withholds is
-   * the introduction's own document: with this off, the static handler answers
-   * `/about.html` with a 404 rather than serving it out of the build, because a
-   * deployment declares the introduction in its configuration and the build
-   * carrying the file is not a declaration. It names a *surface*, never a
-   * deployment kind: a deployment that wants the introduction declares this
-   * field, and nothing infers it from `hostDetails` or `thumbWrites`
+   * Whether the visitor introduction is offered — the banner, its chips, the
+   * About affordance, the meaning-mode start (`visitor-intro`). Default **off**:
+   * a personal installation has no visitor. No `/api` route is gated on it; the
+   * one thing the server itself withholds is `/about.html`, 404 rather than
+   * served out of the build, since carrying the file is not a declaration
    * (`landing-page` D1).
    */
   intro: boolean;
 }
 
 /**
- * A route's answer where its deployment declares the capability off
- * (`feature-report`): **not a fault**. 403, the same status a stranger's request
- * gets from the guard, with a body naming the field that was declared off — so a
- * client can tell "this deployment does not offer that" from "that went wrong"
- * without inferring it from the status code alone (public-deployment D5).
- *
- * Every route that carries one refuses *first*, before parsing a body, resolving
- * a path or taking any other step, so a refused request does no work and reveals
- * nothing about the library it declined to act on.
+ * A capability declared off is **not a fault**: 403 with a body naming the
+ * field, so a client can tell it from something going wrong (public-deployment
+ * D5). Every route carrying one refuses *first*, before parsing a body or
+ * resolving a path, so it reveals nothing about the library.
  */
 export interface Refused {
   error: string;
@@ -846,104 +516,63 @@ export interface Refused {
 }
 
 /**
- * The deployment's own configuration file — `config.json` under the XDG config
- * home, location overridable by `MODEL_BROWSER_CONFIG` — which describes *this
- * deployment*: which library it opens, which capabilities it offers, which
- * origins it answers, and where it listens (public-deployment D1).
+ * The deployment's own `config.json` (XDG config home, overridable by
+ * `MODEL_BROWSER_CONFIG`): which library it opens, which capabilities it
+ * offers, which origins it answers, where it listens (public-deployment D1).
  *
- * One file rather than several, because these keys describe the same deployment
- * `root` already describes and must be coherent with it; a separate file is for
- * a different *authoring* concern, which is what keeps `launch.json` separate.
- *
- * Parsing is **strict**, and there is no free-text key: an unknown key at
- * either level, or a wrong type anywhere, is a startup failure rather than a
- * silently ignored line. A typo that was quietly dropped would leave the server
- * running under a security posture nobody authored, which is the whole reason
- * the file fails loudly (D2). Missing keys mean the built-in defaults, which are
- * the maintained configuration rather than "everything on".
+ * Parsing is **strict** — an unknown key or a wrong type anywhere is a startup
+ * failure, since a quietly dropped typo would leave the server under a security
+ * posture nobody authored (D2). Missing keys mean the built-in defaults.
  */
 export interface DeploymentConfig {
-  /**
-   * The library root — where the app opens inside the marked tree. Overridden
-   * by a non-empty `MODEL_BROWSER_ROOT`, which overrides *this key alone* and
-   * no longer suppresses the rest of the file (D2).
-   */
+  /** Overridden by a non-empty `MODEL_BROWSER_ROOT`, which overrides *this key alone* (D2). */
   root?: string;
   /**
-   * The origins this deployment answers, e.g. `https://models.masamaeda.com`.
-   * A **list**, since one deployment may answer more than one name; each entry
-   * is `scheme://host[:port]` with no path. Loopback is allowed besides,
-   * whatever is configured, so a health check from the machine itself is never
-   * refused by the deployment it is checking (D3/D8).
+   * `scheme://host[:port]`, no path. A list, since one deployment may answer
+   * more than one name. Loopback is allowed besides, whatever is configured
+   * (D3/D8).
    */
   origins?: string[];
-  /** Where the server listens. Defaults to `127.0.0.1:3177`, as today. */
+  /** Where the server listens. Defaults to `127.0.0.1:3177`. */
   listen?: { host?: string; port?: number };
-  /**
-   * Capability overrides, merged over the built-in defaults. An unknown field
-   * here is a parse failure: a misspelled capability that read as "unset" would
-   * silently offer the surface it was written to withhold.
-   */
+  /** Merged over the built-in defaults. An unknown field is a parse failure: a misspelled capability would offer the surface it was written to withhold. */
   features?: Partial<FeatureReport>;
 }
 
 /**
- * What the server knows about the library (library-root D4). `ready` is the
- * only state in which a path route answers; the others are states the UI
- * renders rather than faults — `missing` names the root because mounting it is
- * the remedy, `nested` names the enclosed library because pointing the root at
- * it is.
+ * `ready` is the only state in which a path route answers; the rest are states
+ * the UI renders rather than faults (library-root D4).
  */
 export type LibraryState =
   | {
       state: "ready";
-      /** The library's identity: its marker's id, or a hash when `unmarked`. */
+      /** The marker's id, or a hash of the top when `unmarked`. */
       id: string;
       /**
-       * The **filesystem** path of the library's top — the marker's own
-       * directory, resolved. The client joins a library path onto it to expand
-       * one into a filesystem path for copy/paste.
-       *
-       * **Absent where the deployment declares the host not the viewer's
-       * concern** (`hostDetails`, public-deployment D11): it names a machine the
-       * viewer cannot reach, so nothing is sent for a surface to compose a
-       * filesystem path from, and a copied path is the library path itself.
+       * The **filesystem** path of the library's top, which the client joins a
+       * library path onto for copy/paste. Absent under `hostDetails`, naming a
+       * machine the viewer cannot reach (public-deployment D11).
        */
       top?: string;
-      /**
-       * The configured root as a **library path**: `/` when the root is the
-       * top, `/sub/dir` when it is a folder inside the library. Where the app
-       * opens is a viewpoint inside the library, not a namespace (D1).
-       */
+      /** The configured root as a **library path**: `/` at the top, `/sub/dir` inside. A viewpoint, not a namespace (D1). */
       root: string;
-      /**
-       * Present only when no marker could be written (a read-only volume) and
-       * the id fell back to a hash of the top: the library's location is its
-       * identity again, so a remount is a different library.
-       */
+      /** No marker could be written, so the id is a hash of the top: a remount is a different library. */
       unmarked?: true;
     }
   | { state: "unconfigured" }
   | {
       state: "missing";
-      /**
-       * The configured root's filesystem path, verbatim, so the UI can name it —
-       * absent under `hostDetails`, since mounting a volume is an operator's
-       * remedy and the state alone is what a viewer can be told (D11).
-       */
+      /** The configured root, verbatim; absent under `hostDetails`, since mounting a volume is an operator's remedy (D11). */
       root?: string;
     }
   | {
       state: "nested";
-      /** The configured root's filesystem path, verbatim; absent under
-       *  `hostDetails`, like `missing.root`. */
+      /** The configured root, verbatim; absent under `hostDetails`. */
       root?: string;
       /**
-       * The **filesystem** path of a library top found *beneath* the root.
-       * Claiming the root would have written a marker enclosing this one and
-       * orphaned its cache, cameras included, so nothing was written and the
-       * root serves nothing until it is repointed at this path or inside it
-       * (D1/R1). Absent under `hostDetails`, like the two roots above.
+       * A library top found *beneath* the root. Claiming it would have written
+       * an enclosing marker and orphaned its cache, so nothing was written and
+       * the root serves nothing until repointed (D1/R1).
        */
       library?: string;
     };

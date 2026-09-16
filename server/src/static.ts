@@ -1,25 +1,9 @@
 /**
- * Serving the built client alongside the API, so a deployment is one process
- * rather than a static host beside an application server (public-deployment
- * D8).
- *
- * Node APIs only, and **no Hono routes**: serving files is adapter-specific, so
- * it is wired in the runtime entry point rather than mounted on the app, which
- * must keep running on Node unchanged for the Electron seam (global D1). What
- * lives here is the part that has behaviour worth testing — the path rules, the
- * cache headers, and the one composition rule `index.ts` wires.
- *
- * **Nothing here compresses.** Deliberate (D8): the transfer cost is real and
- * already owned — `demo-infrastructure` puts `encode zstd gzip` in the Caddyfile
- * that fronts the deployment this is for — and making it a rule here would bind
- * every loopback install, where the transfer is free, to a deployment shape
- * nobody is building. What this module owes is the caching rule below, which a
- * proxy cannot supply for it.
- *
- * Serving the client is never required: with no built client, `index.ts` skips
- * this module entirely and the API answers exactly as before, so the local
- * development loop — where Vite serves the client — does not start depending
- * on a build.
+ * Serving the built client alongside the API (public-deployment D8): path rules,
+ * cache headers, and the composition `index.ts` wires. **No Hono routes** —
+ * serving files is adapter-specific and the app must stay Node-portable (D1).
+ * **Nothing here compresses**: the proxy in front of a public deployment owns
+ * that, and a loopback install pays nothing for the transfer.
  */
 
 import { readFile, stat } from "node:fs/promises";
@@ -27,30 +11,16 @@ import { posix, resolve as resolvePath, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
- * The API's prefix is **reserved**: a request under it that names no route is a
- * missing route, and must never fall through to the client's entry document, or
- * a client's bad request comes back as an HTML body with a 200 and the bug is
- * invisible (D8).
- *
- * `/api` itself is reserved for the same reason it reads as reserved: it is the
- * prefix, not a document.
+ * The API prefix is **reserved**, case-insensitively: a request under it that
+ * names no route must 404 rather than fall through to the entry document, or a
+ * bad request comes back as HTML with a 200 and the bug is invisible (D8).
  */
 export function isApiRequest(pathname: string): boolean {
-  // Compared lowercased: a URL path is case-sensitive to a file server, but the
-  // reservation is about which *handler* answers, and `/API/dir` reaching the
-  // client's entry document with a 200 is the invisible bug this rule exists to
-  // prevent. A build emits no such name, so nothing is shadowed by the wider
-  // rule.
   const p = pathname.toLowerCase();
   return p === "/api" || p.startsWith("/api/");
 }
 
-/**
- * The whole composition, as one function so it is testable rather than being
- * three lines of the entry point nobody can reach. API first and API only under
- * its prefix; anything else is the client's, and falls back to the app when
- * there is no client to serve.
- */
+/** One function so the composition is testable rather than entry-point lines. */
 export async function route(
   req: Request,
   api: (req: Request) => Response | Promise<Response>,
@@ -61,11 +31,7 @@ export async function route(
   return (await client(req)) ?? (await api(req));
 }
 
-/**
- * Where the built client is: `client/dist` beside the server package, or
- * wherever `MODEL_BROWSER_CLIENT` says. A parameter rather than a read of
- * `process.env` so a test can point it at a temp tree, like `xdg.ts`.
- */
+/** `client/dist`, or `MODEL_BROWSER_CLIENT`. `env` is a parameter, as in `xdg.ts`. */
 export function clientDist(env: NodeJS.ProcessEnv): string {
   const override = env.MODEL_BROWSER_CLIENT;
   if (override !== undefined && override !== "") return override;
@@ -101,34 +67,18 @@ function extensionOf(path: string): string {
 }
 
 /**
- * A year, and `immutable`: the build's assets are content-hashed, so a changed
- * file is a changed name and a visitor far from the origin fetches each one
- * once. The entry document is `no-cache` — revalidated every visit — because it
- * is the one file whose name does not change and the only thing that names the
- * new build's assets.
+ * Assets are content-hashed, so a changed file is a changed name. The entry
+ * document is the one name that does not change, and names the new assets.
  */
 const IMMUTABLE = "public, max-age=31536000, immutable";
 const REVALIDATE = "no-cache";
 
 /**
- * Serves `distDir`, or `null` when there is nothing there to serve.
+ * Serves `distDir`, or `null` when there is nothing to serve. A path matching no
+ * file gets the entry document, so a cold deep link resolves in the client.
  *
- * Rules, all four of them:
- * - the requested path resolves under `distDir`, and anything naming its way
- *   out of it is refused — a `..` that survives URL normalisation arrived
- *   percent-encoded, and is a traversal attempt rather than a filename;
- * - a file that exists is served with its own content type;
- * - anything under `/assets/` is `immutable` for a year, the entry document is
- *   `no-cache`;
- * - a request matching no file is answered with the entry document, so a deep
- *   link opened cold resolves in the client rather than 404-ing at the server.
- *
- * And one gate: `/about.html` is the visitor introduction's own document
- * (`landing-page` D2 — everything the banner has no room for), so a deployment
- * whose `intro` capability is off withholds it with a 404. The build still
- * carries the file; a deployment declares the introduction in its
- * configuration, not by what it ships. The gate is decided on the **resolved**
- * candidate, for the reason given at `aboutPath`.
+ * One gate: `/about.html` is the introduction's document (`landing-page` D2), so
+ * a deployment with `intro` off withholds it — the build ships it either way.
  */
 export function createStaticHandler(
   distDir: string,
@@ -137,20 +87,9 @@ export function createStaticHandler(
   const root = resolvePath(distDir);
   const indexPath = resolvePath(root, "index.html");
   /**
-   * The withheld document, as the path the `stat` below would open — because
-   * the gate has to refuse **every spelling that reaches the file**, and a
-   * comparison against the request's own string refuses only the spelling it
-   * was written with. `resolvePath` drops a trailing slash and a `.` segment,
-   * so `/about.html/`, `/about.html/.`, `/about.html/./` and the encoded
-   * `/about.html%2F` all name this file while none of them equals
-   * `"/about.html"`; before this was keyed on the resolved candidate the demo
-   * served the withheld page under all four, on the live box (200, 484 bytes).
-   * Deciding on the same value the read uses is what makes the two agree by
-   * construction rather than by enumerating spellings.
-   *
-   * Compared exactly, case included: on the case-sensitive filesystems this is
-   * deployed to, `/About.html` names no file and is the entry document's, like
-   * any other unmatched path.
+   * The resolved path, because the gate must refuse **every spelling that
+   * reaches the file** — `/about.html/`, `/about.html/.` and `/about.html%2F`
+   * all name it and none equals `"/about.html"`. Case-sensitive, like the disk.
    */
   const aboutPath = resolvePath(root, "about.html");
 
@@ -163,10 +102,7 @@ export function createStaticHandler(
     } catch {
       return null;
     }
-    // A view over the buffer, never a copy of it: `new Uint8Array(buf)` copies
-    // every byte of a bundle this handler has just read, per request, for
-    // nothing — a `Buffer` is already a `Uint8Array`, and what `Response` needs
-    // is a view of those bytes.
+    // A view, never a copy: `new Uint8Array(buf)` re-copies the bundle per request.
     const bytes = await readFile(file);
     return new Response(
       new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength),
@@ -188,28 +124,20 @@ export function createStaticHandler(
     } catch {
       return new Response("bad request", { status: 400 });
     }
-    // A `..` reaching here survived URL normalisation, which means it arrived
-    // percent-encoded — a traversal attempt rather than a filename. Refused
-    // outright rather than normalised away, so what is refused is legible;
-    // `posix.normalize` would silently rewrite `/../../etc/passwd` to
-    // `/etc/passwd` and serve whatever that names inside the build. A NUL goes
-    // the same way: `node:fs` throws on one, and a thrown path is a 500 saying
-    // something about this machine.
+    // A `..` here survived URL normalisation, so it arrived percent-encoded: a
+    // traversal attempt, refused rather than normalised away. A NUL likewise —
+    // `node:fs` throws on one, and the 500 would name this machine.
     const parts = decoded.split("/");
     if (parts.includes("..") || decoded.includes("\0")) {
       return new Response("forbidden", { status: 403 });
     }
     const normalized = posix.normalize(decoded);
     const candidate = resolvePath(root, `.${normalized}`);
-    // Belt and braces: whatever the rules above let through must still land
-    // under the build, and this is the one check a later rule cannot weaken by
-    // accident.
+    // Belt and braces, and the one check a later rule cannot weaken by accident.
     if (candidate !== root && !candidate.startsWith(root + sep)) {
       return new Response("forbidden", { status: 403 });
     }
-    // After the confinement check and before any read, so the withheld
-    // document is refused on the file it names rather than on how it was
-    // spelled.
+    // On the resolved candidate, never on how the request spelled it.
     if (!intro && candidate === aboutPath) {
       return new Response("not found", { status: 404 });
     }
@@ -220,8 +148,6 @@ export function createStaticHandler(
       );
       if (file !== null) return file;
     }
-    // No file of that name: the client's entry document, so the client resolves
-    // the location itself.
     return send(indexPath, REVALIDATE);
   };
 }

@@ -145,38 +145,18 @@ import ViewerLayer, { type ViewerState } from "./viewer/ViewerLayer";
 import { aoEnabled, setAoEnabled } from "./viewer/aoToggle";
 import type { ViewerSession } from "./viewer/session";
 
-/**
- * How long a typed tuning value waits before it becomes a query. Long enough
- * that a number typed digit by digit is one search rather than four, short
- * enough that a finished value still feels like it ran on its own.
- */
+/** Long enough that a number typed digit by digit is one search, not four. */
 const TUNING_DEBOUNCE_MS = 300;
 
-/**
- * How long a revealed entry stays marked. Matches the `reveal-mark` animation
- * in `index.css`, which does the fading: this is only when the class comes off,
- * so a second reveal of the same entry replays it.
- */
+/** Must match the `reveal-mark` animation in `index.css`, which fades it. */
 const MARK_MS = 1800;
 
-/**
- * How long after the last scroll event the current entry's placement is filed
- * into the trail (retrace-placement D2). A trailing timer rather than
- * per-frame coalescing: a fling emits a scroll event per frame, and the trail
- * wants where the user *settled*, not sixty rows it passed on the way.
- */
+/** A fling emits an event per frame, and the trail wants where they stopped. */
 const RECORD_SETTLE_MS = 150;
 
-/**
- * What the next settled landing does with the scroller (retrace-placement
- * D5). `raisedWith` is the answer on screen when the request was raised, by
- * its id: a restore that asks the same question *patches* — the reducer mints
- * a new result object but keeps `id` (and `entries`) — so an unchanged id at
- * the settled moment means nothing landed and nothing may be applied, which is
- * what keeps a lightbox close from moving the grid. A landing always carries a
- * new id — and a failure carries none, so a retrace whose own listing fails
- * reads as a patch and is dropped the same way.
- */
+/** `raisedWith` is the answer on screen at raise time: a restore asking the
+ *  same question patches — new object, same `id` — so an unchanged id once
+ *  things settle means nothing landed and nothing may be applied (D5). */
 interface PendingPlacement {
   request: PlacementRequest;
   raisedWith: Result | null;
@@ -184,40 +164,19 @@ interface PendingPlacement {
 
 const TOP_REQUEST: PlacementRequest = { kind: "top" };
 
-/** How long a command's brief report stays on the path bar's transient line. */
 const ACTION_TEXT_MS = 2500;
 
-/**
- * Stable empties for "nothing has landed yet". `useThumbnails` no longer resets
- * every thumb on an `entries` identity change — it reconciles the new array
- * against the per-entry work it already holds, keeping what is displayed — but
- * that reconciliation still runs, so a fresh `[]` per render would walk it on
- * every keystroke for an answer that never changes.
- */
+/** The sweep and the wave re-run on these identities, so a fresh literal per
+ *  render would walk the grid on every keystroke. */
 const NO_ENTRIES: DirEntry[] = [];
-/** Nothing to ask the index about — the same stability rule as `NO_ENTRIES`,
- *  for the wave effect's dependency rather than for the sweep's. */
 const NO_PATHS: string[] = [];
 const NO_POSES: Record<string, IndexPose | null> = {};
 const NO_SCORES: Record<string, IndexScore> = {};
-/**
- * No folder has been previewed yet. One module-level map rather than a fresh
- * one per clear, so clearing an already-empty map is a `useState` bail-out
- * instead of a render — and, because it is shared, **never written to**: every
- * landing builds a new Map rather than mutating what it was handed.
- */
+/** Shared, so **never written to**: every landing builds a new Map. */
 const NO_PREVIEWS: ReadonlyMap<string, DirEntry[]> = new Map();
-/** A folder with nothing to preview — an empty peek, or one that failed. One
- *  array for both, so a tile that draws the icon draws it from a stable value. */
 const NO_PREVIEW: DirEntry[] = [];
 
-/**
- * Per-listing memo of the previews a listing carried inline (path → cells).
- * Keyed on the listing array's own identity in a WeakMap, so a large flat
- * listing is scanned once per landing rather than once per folder tile
- * crossing the park boundary (288f55a's review), and a superseded listing's
- * map goes with it.
- */
+/** Keyed on the listing's identity, so it is scanned once per landing. */
 const carriedPreviews = new WeakMap<DirEntry[], Map<string, DirEntry[]>>();
 function carriedPreviewsFor(entries: DirEntry[]): Map<string, DirEntry[]> {
   let map = carriedPreviews.get(entries);
@@ -229,116 +188,54 @@ function carriedPreviewsFor(entries: DirEntry[]): Map<string, DirEntry[]> {
   }
   return map;
 }
-/** "Nothing is deferred", as a subject, so the banner branches on one union
- *  rather than on a null *and* a kind. */
 const NO_SUBJECT: Subject = { kind: "none" };
 
-/** Nothing withheld. One module-level list rather than a fresh `[]` per raised
- *  menu, and a name for what an empty exclusion list means. */
 const NO_EXCLUDES: readonly MenuItemId[] = [];
 
-/**
- * What the surface the menu was raised on withholds (D6's margin, 6.8).
- *
- * **The lightbox is the only surface that withholds anything.** A tile offers
- * the whole table, and so does the orbit overlay — which is a transient layer
- * over a tile rather than a view the user opened, so as far as the menu is
- * concerned it *is* that tile. `LIGHTBOX_MENU_EXCLUDES` carries the reasoning
- * for every id on the list, and why none of it reaches the overlay.
- */
+/** Only the lightbox withholds: the orbit overlay is the tile it covers. */
 function menuExcludes(
   surface: "tile" | "orbit" | "lightbox",
 ): readonly MenuItemId[] {
   return surface === "lightbox" ? LIGHTBOX_MENU_EXCLUDES : NO_EXCLUDES;
 }
 
-/**
- * A model named for a person rather than for the path bar. A similarity view's
- * subject is a vpath — `/run/media/…/Kits/Baal/hero.stl` — and the results
- * label is a single truncating line, so spelling the whole thing there pushes
- * out the part that says what the view is. The full path is still in the URL,
- * which is where an identity belongs.
- */
 function baseName(path: string): string {
   return path.slice(path.lastIndexOf("/") + 1);
 }
 
-/**
- * The two ways a model can fail to be a similarity subject, and they are two
- * sentences because only one of them is fixable (D4/4.5).
- *
- * *Not yet embedded* is a 404 from the index: it walked the collection and this
- * model was not in the cache. Running the classifier over it fixes that, so the
- * sentence says so.
- *
- * *Inside an archive* is knowable here without asking anything —
- * `classify_stls.py` walks real `.stl` files on disk and archives are unpacked
- * before classification, so a `zip!/` vpath is never a key on either side. The
- * menu does not offer the action there (D6), but a shared or hand-edited
- * `?similar=…!/…` link reaches the fetch layer, and it must not spend a request
- * to be told something the path already says — nor borrow the other sentence,
- * which would promise that indexing again would help.
- */
+/** Two sentences because only one failure is fixable (D4/4.5): an archive
+ *  resident is never a key on either side, so it must not borrow the other's
+ *  promise that indexing again would help. */
 const NOT_EMBEDDED =
   "This model has not been indexed yet, so the index knows no neighbours for it — run the classifier over it and try again.";
-/**
- * …and the same fact for a viewer who cannot act on it. Running the classifier
- * is an operator's act on the machine the server sits on, so a deployment
- * declaring that machine none of the viewer's concern states the outcome and
- * stops there (`public-deployment` D11, and `semantic-search`'s *A viewer is
- * not told to run the classifier*).
- *
- * Not a truncation of the sentence above: "not indexed **yet**" and "try
- * again" both promise a repair, and a promise nobody on this side can keep is
- * worse than no explanation. What is left is the fact itself.
- */
+/** The same fact for a viewer who cannot run the classifier
+ *  (`public-deployment` D11). Not a truncation: "yet" and "try again" promise a
+ *  repair nobody on this side can keep. */
 const NOT_EMBEDDED_VISITOR =
   "This model is not in the index, so it has no neighbours yet.";
-/**
- * Which of the two a report chooses. Only a **known** report declaring the host
- * not the viewer's concern takes the visitor form; unknown and failed reads
- * keep the sentence this app has always shown, which is the behaviour half of
- * feature-report's unknown-report rule (a default holds until a known report
- * says otherwise).
- */
+/** Only a **known** report takes the visitor form (feature-report). */
 function notEmbeddedMessage(features: FeatureReport | null): string {
   return features?.hostDetails === false ? NOT_EMBEDDED_VISITOR : NOT_EMBEDDED;
 }
 const OUTSIDE_CORPUS =
   "Models inside an archive are outside what the index covers, so it can find nothing similar to this one.";
 
-/**
- * The options a view runs under.
- *
- * When the URL names a committed search, an absent option means the
- * **default** — never this profile's stored preference. Omitting defaults
- * keeps an ordinary search URL byte-identical to what it was before options
- * existed (D4), but that only reproduces the sender's view if the recipient
- * reads the omission the same way the sender wrote it. Reading it as "my
- * preference" would hand two people different results from one link, and would
- * make Back restore a past view under present settings — which is the same bug
- * wearing a different hat.
- *
- * With no committed search in the URL there is no view to reproduce, so the
- * stored preferences govern: they are what this profile's next fresh search
- * uses.
- */
+/** Under a committed search an absent option means the **default**, never this
+ *  profile's preference (D4), or one link hands two people different results.
+ *  With nothing committed there is no view to reproduce. */
 function optionsOf(view: UrlView): Prefs {
   if (view.q === undefined || view.q === "") return ownPrefs();
   return {
     folderMatching: view.folderMatching ?? true,
     kinds: view.kinds ?? "both",
     mode: view.mode ?? "name",
-    // Absent means the default here too — a tuned link that omitted a field
-    // must not pick up the reader's setting for it. Not a spread: the bounds
-    // read by presence, and a spread would re-add the one the link left out
-    // (`resolveTuning`, design D4).
+    // Not a spread: the bounds are read by presence, and a spread re-adds the
+    // field the link deliberately left out (D4).
     tuning: resolveTuning(view.tuning),
   };
 }
 
-/** This profile's own four options, read where a transition needs them and
- *  carried on the action — never read inside the reducer, which must stay pure
+/** Carried on the action, never read inside the reducer, which must stay pure
  *  under StrictMode (design R2). */
 function ownPrefs(): Prefs {
   return {
@@ -349,30 +246,15 @@ function ownPrefs(): Prefs {
   };
 }
 
-/**
- * A parsed URL, resolved into a whole `View`: every option present, no
- * absences left to interpret downstream. This is the only place an absence is
- * read, and `optionsOf` is the rule it reads by.
- */
 function resolveView(url: UrlView): View {
   return {
-    // Always a string, and `/` when the URL named none: the library's top is
-    // the default view (design D2/D7), so there is no absence left to read and
-    // no last-path to fall back on. What a previous session was looking at is
-    // still recorded (`pushRecent`) and is no longer where the app opens.
     path: url.path,
     flat: url.flat,
-    // Where the URL's deliberate leniency is resolved (D4): the parameter that
-    // names a subject is the more specific one, so a hand-edited link carrying
-    // both `similar` and `q` is the similarity view, and the stray `q` is read
-    // by nothing.
+    // `similar` is the more specific parameter, so a link carrying both is the
+    // similarity view (D4).
     subject:
       url.similar !== undefined
-        ? // The parser reports every param it recognises; the *resolver* is
-          // where a subject claims the ones it reads. `k` absent is the
-          // default, the same absence `toUrlView` writes; `pool` absent is the
-          // index's own, which is not any of the three named values.
-          {
+        ? {
             kind: "similar",
             model: url.similar,
             k: url.k ?? SIMILAR_K,
@@ -386,36 +268,12 @@ function resolveView(url: UrlView): View {
   };
 }
 
-/**
- * What the header says while the library cannot be browsed (library R4).
- *
- * `missing` names the configured root because mounting it is the remedy and it
- * takes seconds; `unconfigured` names the two places a root is set, because
- * there is nothing to mount and the fix is a line of configuration; `nested`
- * names the library the root would have swallowed, because pointing at that
- * path is the remedy. All are *states*, not failures — hence one line in the
- * header's existing slot and an empty grid, rather than an error surface of
- * their own (design D4/D7).
- *
- * A deployment may withhold those locations (`hostDetails`, `public-deployment`
- * D11), and then the state itself is the whole sentence: mounting a volume and
- * repointing a root are an operator's remedies, so a viewer who can perform
- * neither is told *what* rather than *where*. For `missing` and `nested` the
- * `undefined` is the server's omission, not a value the client failed to read.
- *
- * `unconfigured` has no such field to omit: its whole sentence is a remedy, and
- * an environment variable and a config file are locations on the operator's
- * machine as surely as a path is. So this one is chosen from the report, the
- * way `notEmbeddedMessage` chooses — and on the same rule: only a **known**
- * report declaring `hostDetails` off takes the visitor form, since unknown and
- * failed reads keep what this app has always shown.
- */
+/** States, not failures (library R4): one line in the header's slot, no error
+ *  surface of their own. A deployment may withhold the locations each names as
+ *  the remedy (`hostDetails`, D11), and that `undefined` is the server's
+ *  omission, not a failed read. */
 const LIBRARY_UNCONFIGURED =
   "No library configured — set MODEL_BROWSER_ROOT or root in config.json";
-/**
- * Not a truncation: the operator's sentence names two places to write a root,
- * and a visitor can write neither. What is left is the state itself.
- */
 const LIBRARY_UNCONFIGURED_VISITOR = "No library is configured.";
 const libraryUnconfiguredText = (features: FeatureReport | null): string =>
   features?.hostDetails === false
@@ -430,18 +288,10 @@ const libraryNestedText = (library: string | undefined): string =>
     ? "The root contains another library."
     : `This root contains a library at ${library}. Point the root at it, or at a folder inside it.`;
 
-/**
- * The library states that mean "the library is why this failed" — the ones a
- * path route 503s with. `ready` is not among them: it is the state in which a
- * route answers rather than faults.
- *
- * Exhaustive over `LibraryState` by construction, so a variant added to that
- * union is a type error here until someone says which side of the line it
- * falls on. The set exists because `HttpError.state` is the `state` field of
- * *any* failure body: an index route 503s with the index's state in the same
- * field, and matching on the field's mere presence would send those to
- * `library()` too.
- */
+/** Exhaustive over `LibraryState` by construction, so a new variant is a type
+ *  error until someone picks a side — and needed at all because
+ *  `HttpError.state` carries *any* failure body's state, the index's 503
+ *  included. */
 const LIBRARY_STATES: ReadonlySet<string> = new Set(
   Object.entries({
     ready: false,
@@ -453,11 +303,8 @@ const LIBRARY_STATES: ReadonlySet<string> = new Set(
     .map(([state]) => state),
 );
 
-/**
- * The mesh LRU's loader: bytes through the one client, the 3MF placeholder on
- * the way past, then the parse. `placeholderRef` is read at call time, so the
- * loader can be built before `useThumbnails` hands over `setPlaceholder`.
- */
+/** `placeholderRef` is read at call time, so the loader can be built before
+ *  `useThumbnails` hands over `setPlaceholder`. */
 function meshLoader(
   api: Pick<ApiClient, "fetchModel">,
   placeholderRef: { current: (path: string, url: string) => void },
@@ -476,38 +323,19 @@ function meshLoader(
 }
 
 export default function App() {
-  /**
-   * The feature report as a *stable getter*, for the two consumers that must
-   * read it without depending on it (`public-deployment` D6).
-   *
-   * `features` below is state, and both readers here are built once: the client
-   * identity must survive the report resolving, and the thumbnail sweep's
-   * dependency array must not churn — an unstable getter there would re-run the
-   * sweep on every render, which is the failure the `ao` parameter's own note
-   * describes. A ref written where `setFeatures` is called gives both readers
-   * the current value through one identity.
-   */
+  /** A stable getter for the two consumers that must read the report without
+   *  depending on it (D6): the client identity has to survive it resolving,
+   *  and the sweep's dependency array must not churn. */
   const featuresRef = useRef<FeatureReport | null>(null);
   const readFeatures = useCallback(() => featuresRef.current, []);
-  /**
-   * The library's id, read the same way and written beside `libraryRef` below.
-   *
-   * It keys the local-framing store (`framingKey`), which stands in for a
-   * server cache that is itself per library id: without it one installation
-   * repointed between two libraries sharing relative paths would read one's
-   * framings onto the other's models. `null` in every state but `ready`,
-   * including before `/api/library` has answered — a framing is filed under no
-   * library until there is one to name.
-   */
+  /** It keys the local-framing store, without which one installation repointed
+   *  between two libraries sharing relative paths would read one's framings
+   *  onto the other's models. */
   const libraryIdRef = useRef<string | null>(null);
   const readLibraryId = useCallback(() => libraryIdRef.current, []);
-  /**
-   * Decorated once, at construction, and the decorator asks the getter per
-   * call: on a deployment declaring thumbnail writes off, a framing is kept in
-   * this browser instead of sent, and a lookup's answer is overlaid with what
-   * is kept (D6). The six existing `putThumb` call sites are untouched — the
-   * seam is here, so the precedence rule lives in one place rather than six.
-   */
+  /** Where thumbnail writes are off, the decorator keeps a framing in this
+   *  browser and overlays it on a lookup's answer (D6) — one seam rather than
+   *  that rule at every `putThumb` call site. */
   const api = useMemo(
     () =>
       withLocalFramings(
@@ -529,20 +357,12 @@ export default function App() {
     [api],
   );
 
-  // The search/view state, whole (design R1): the question asserted, the one in
-  // flight, the phase, the answer, the failure, the index, the drafts. Boot
-  // view (url-navigation D4, library D2/D7): the URL alone names it — a `path`
-  // it carries, and the library's top when it carries none. Where the last
-  // session ended is recorded (`pushRecent`) and read only by the path bar's
-  // recents; it is never a boot source. The first landing seeds the URL via
-  // replaceState.
+  // The search/view state, whole (design R1). The URL alone names the boot
+  // view; the last session's path is recents only, never a boot source.
   const [state, rawDispatch] = useReducer(reducer, undefined, () =>
     initialState(resolveView(parseUrl())),
   );
   const dispatch = useCallback((action: Action): void => {
-    // The nested state's answer to twenty greppable cells: every transition, in
-    // order, by name. Dev only, and off under the test runner, where it would
-    // bury the assertions it is meant to explain.
     if (import.meta.env.DEV && import.meta.env.MODE !== "test") {
       // eslint-disable-next-line no-console
       console.debug("[view]", action.type, action);
@@ -550,66 +370,30 @@ export default function App() {
     rawDispatch(action);
   }, []);
 
-  /**
-   * What the URL owes the view once React has reduced this action — set only
-   * by dispatches that own the URL (design R3): the landings, the transitions
-   * that assert without asking, and the lightbox open. Never by model-close or
-   * model-drop, whose window overlaps an async teardown (bridge 4), and never
-   * by a recorded-but-unrun tuning value, which would mint a history entry per
-   * keystroke.
-   */
+  /** Set only by dispatches that own the URL (design R3) — never by model-close
+   *  or model-drop, whose window overlaps an async teardown (bridge 4), nor by
+   *  an unrun tuning record, which would mint an entry per keystroke. */
   const urlIntent = useRef<{ replace?: boolean; state?: unknown } | null>(null);
-  /** The view as of the last time the projection looked — updated on any pass
-   *  that wrote, and on an intentless pass only where the address bar already
-   *  agrees (see the effect). The URL can run ahead of the view (the
-   *  browser rewinds it on Back while the restoration is still in flight), so
-   *  "did this dispatch advance the view" is asked of what the view was, never
-   *  of what the address bar currently says. Tracking only the writes made this
-   *  go stale the other way: a Back that *patched* the view, or a bridge-4 URL
-   *  rewrite, moved the URL without a projection, and re-asserting the last
-   *  view we happened to have written then read as a no-op. */
+  /** The URL can run ahead of the view — the browser rewinds it on Back while
+   *  the restoration is still in flight — so "did this dispatch advance the
+   *  view" is asked of the view, never of the address bar. */
   const projectedRef = useRef<string | null>(null);
 
-  /**
-   * The grid's scroller — `<main>` — which `Grid`'s observers root at and the
-   * trail measures against. A `RefObject`, never its `.current`, so its identity
-   * is stable in the observer effect's deps and its population (during commit,
-   * before passive effects) is never waited on (sweep-priority D2).
-   */
+  /** A `RefObject`, never its `.current`: the identity has to be stable in the
+   *  observer effect's deps, and population happens during commit (D2). */
   const mainRef = useRef<HTMLElement>(null);
-  /**
-   * The header's search box, held only so focus has somewhere to land when a
-   * control beside it unmounts under the keyboard (`landing-page` D3): the
-   * banner's ✕ removes the element that has focus, and a browser answers that
-   * by dropping to `<body>`, which strands a keyboard reader at the top of the
-   * document. The box is the one thing the banner was inviting them to use.
-   *
-   * Not the find control's input, which Ctrl/Cmd-F opens and which mounts with
-   * its own focus — that is a different input, summoned and dismissed, and it
-   * does not exist while the banner is up.
-   */
+  /** Focus has to land somewhere when the banner's ✕ unmounts the focused
+   *  element, or the browser drops it to `<body>` (`landing-page` D3). */
   const searchInputRef = useRef<HTMLInputElement>(null);
-  /**
-   * Whether the grid on screen is *not* the current entry's answer — a listing
-   * in flight, or the skeleton standing in for one — read at record time
-   * through a ref so the scroll listener below can be attached once. Set
-   * during render (the `listingRef` pattern) because the record has to see the
-   * value the last commit painted, not the one an effect will get to.
-   */
+  /** Set during render, because the record has to see what the last commit
+   *  painted. */
   const busyRef = useRef(false);
   const recordTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
-  /**
-   * File the current entry's placement now (retrace-placement D2). The
-   * trailing timer records a scroll settle; this is the same record taken at
-   * the moment the user acts — a tile click, ↑, a dismissal, a search — while
-   * the grid they are leaving is still on screen and `historyIndex()` is still
-   * its entry's. Called from `commit` (every user commit that owns the URL) and
-   * the action host's `dispatch` (find-similar), so no leave goes unfiled
-   * within the timer's window. Skipped while busy: a skeleton has no tiles, and
-   * a grid that is not this entry's answer must not be filed as its place.
-   */
+  /** The scroll timer's record, taken as the user acts instead — while the grid
+   *  is still on screen and `historyIndex()` still its entry's (D2). Skipped
+   *  while busy: another entry's grid is not this one's place. */
   const recordNow = useCallback((): void => {
     clearTimeout(recordTimerRef.current);
     recordTimerRef.current = undefined;
@@ -636,236 +420,99 @@ export default function App() {
       action: Action,
       opts: { replace?: boolean; state?: unknown } = {},
     ): void => {
-      // The leaving grid's place, filed before the view moves on (D2's flush).
-      // A placement still pending is not touched here: whether this commit
-      // supersedes it is the placement effect's call, by the question it
-      // asks (retrace-placement D5). With nothing pending, the landing goes
-      // to the top: a tile click, a typed path, a search and a deep link
-      // arrive, they do not retrace.
+      // Filed before the view moves on (D2's flush); whether this supersedes a
+      // pending placement is the placement effect's call.
       recordNow();
       urlIntent.current = opts;
       dispatch(action);
     },
     [dispatch, recordNow],
   );
-  /**
-   * The state as of the last render, for callbacks whose identity must not
-   * follow it: the placement a navigation raises names the answer on screen at
-   * that moment (`PendingPlacement.raisedWith`), and the callbacks raising it
-   * (`onPop`, `leaveSubject`, the action host) are subscribed or memoised once.
-   */
+  /** For callbacks whose identity must not follow the state: `onPop`,
+   *  `leaveSubject` and the action host are memoised once and still raise
+   *  placements against the answer on screen now. */
   const stateRef = useRef(state);
   stateRef.current = state;
 
-  // Three pieces of text, one job each — they shared two controls until
-  // find-in-listing separated them.
-  //
-  // `drafts.queryText` (in the reducer, because submit reads it) is what is
-  // typed in the search input. `view.q` is the last *committed* search; the
-  // input keeps its text after submitting, so refining a query is editing
-  // rather than retyping. `findText` narrows the rendered entries with zero
-  // requests and is typed in the find control, which the user summons — it
-  // stays component-local because the reducer never reads it (design R8), and
-  // it starts empty in every state, including one restored from a URL, because
-  // a filter is ephemeral view state and nothing in a URL describes one.
+  // The draft lives in the reducer because submit reads it; this filter does
+  // not (design R8), and starts empty even on a restore, because nothing in a
+  // URL describes one.
   const [findText, setFindText] = useState("");
   const [findOpen, setFindOpen] = useState(false);
   const [findFocus, setFindFocus] = useState(0);
-  // Read by the window-level Ctrl-F listener, which subscribes once and would
-  // otherwise close over the viewer state as it was at mount.
+  // The window-level listeners below subscribe once, so everything they read
+  // reaches them through a ref rather than a closure.
   const viewerRef = useRef<ViewerState | null>(null);
   const findOpenRef = useRef(false);
   findOpenRef.current = findOpen;
 
-  /**
-   * The entry menu, what it was raised on, and which surface raised it.
-   * Ephemeral by construction — no view field, no URL — and **not a viewer**:
-   * it never sets `viewer`, which is what the render-queue suspension keys off
-   * (2.4), so raising or dismissing it starts and cancels no thumbnail work.
-   *
-   * `surface` is not derivable from `viewer`: an orbit overlay covers one tile
-   * and leaves the rest of the grid right-clickable, so "a viewer is mounted"
-   * and "this menu was raised on it" are different facts.
-   *
-   * The two viewer surfaces are told apart (6.8) because only one of them
-   * filters: `'lightbox'` is a view the user opened and holds, `'orbit'` is an
-   * overlay that lingers over a tile for a moment and offers what that tile
-   * offers. See `LIGHTBOX_MENU_EXCLUDES`.
-   */
+  /** **Not a viewer**: it never sets `viewer`, which the render-queue
+   *  suspension keys off (2.4). `surface` is not derivable from `viewer`
+   *  either — an orbit overlay leaves the rest of the grid right-clickable. */
   const [menu, setMenu] = useState<{
     entry: DirEntry;
     el: HTMLElement | null;
     x: number;
     y: number;
     surface: "tile" | "orbit" | "lightbox";
-    /** The lightbox's live framing view, read at choose time — present only
-     *  when the menu was raised on the lightbox, whose session Reset framing
-     *  must move (the orbit overlay keeps the queued body: it is the tile as
-     *  far as the menu is concerned, 6.8). */
+    /** Present only on the lightbox's menu, whose live session Reset framing
+     *  must move; the orbit overlay keeps the tile's queued body (6.8). */
     live?: () => LiveFramingView | null;
   } | null>(null);
   const menuRef = useRef<typeof menu>(null);
   menuRef.current = menu;
-  /** Read by the window-level Escape listener, which subscribes once and would
-   *  otherwise close over the menu as it was at mount. */
   const menuOpenRef = useRef(false);
   menuOpenRef.current = menu !== null;
 
-  /** Same reason: the Alt+ArrowUp listener subscribes once and must call the
-   *  current `goUp`, which closes over the live `target`. */
   const goUpRef = useRef<() => void>(() => {});
 
-  /**
-   * The library's state (library R4), the app's one new concept (design D7).
-   * App-level state deliberately, never a `View` field: it is a fact about the
-   * *server*, not about the view a URL names, so it belongs in neither the URL,
-   * the history, nor the reducer.
-   *
-   * `null` is "not asked yet", which is not the same as any of the states: the
-   * boot listing goes out beside the probe, so treating the unknown as blocked
-   * would blank the grid for a round trip on every healthy start.
-   */
+  /** A fact about the *server*, never a `View` field (library R4), so it
+   *  reaches neither the URL, the history, nor the reducer. `null` is "not
+   *  asked yet" and must not read as blocked: the boot listing is already
+   *  out. */
   const [libraryState, setLibraryState] = useState<LibraryState | null>(null);
-  /**
-   * Re-read it. Stable, so the callbacks that re-probe do not rebuild for it.
-   *
-   * A rejection is swallowed: `/api/library` is the one route that answers in
-   * every state, so a failure here is the server being unreachable, which the
-   * request that provoked this is already reporting in the header. Overwriting
-   * that with a second sentence about the same outage says nothing new.
-   */
+  /** A rejection is swallowed: `/api/library` answers in every state, so this
+   *  is the outage the provoking request already reports. */
   const probeLibrary = useCallback((): void => {
     void api.library().then(setLibraryState, () => {});
   }, [api]);
   useEffect(() => probeLibrary(), [probeLibrary]);
-  /**
-   * Read by the re-probe conditions without making them depend on the value —
-   * `navigate` is `actionHost`'s, and rebuilding the host on every library
-   * answer would churn every memoized surface that holds it.
-   */
+  /** Read by the re-probe conditions without rebuilding the action host. */
   const libraryRef = useRef<LibraryState | null>(null);
   libraryRef.current = libraryState;
-  /**
-   * The ready library's id, named rather than written straight into the ref:
-   * the local-framing overlay effect below depends on it, and a value only ever
-   * assigned to a ref is one no effect can wait for.
-   */
   const libraryId = libraryState?.state === "ready" ? libraryState.id : null;
   libraryIdRef.current = libraryId;
 
   /**
-   * A command's brief report, shown on the path bar's transient line (task
-   * 1.1a). Component-local, and an override at this one call site rather than a
-   * new reducer failure kind: `state.failure` belongs to a *question* — it
-   * carries the view it was asked for and is cleared by the next answer — and a
-   * clipboard refusal belongs to no question. It is also not a third surface:
-   * this is the app's one place for transient text, told what tone to draw.
-   */
-  /**
-   * The platform's applications for the model types this app handles, and
-   * whether a chooser is configured — one reading per session (open-in-slicer
-   * L5), held here so the menu's open-in group and *Open with…* are decided
-   * from state and never from a probe fired when a menu opens (D6/2.5).
-   *
-   * Component-local, like `actionText` and `findText` and for their reason: the
-   * reducer holds what the *search machine* reads, and nothing in it reads a
-   * launcher registry. `null` until the first answer lands, and again if the
-   * read fails — which the actions read as "no applications, no chooser", so
-   * they are absent rather than present and inert.
-   */
-  /**
-   * What this server accepts and offers — the one place surfaces read the
-   * feature report from (feature-report D3). Component-local for `apps`'
-   * reason: nothing in the search machine reads a capability report.
-   *
-   * `null` is **not known**: still in flight, or the read failed. The two are
-   * deliberately not distinguished, because consumers treat them the same —
-   * and the rule that makes that safe is D3's offer/behavior split, which any
-   * consumer added here must follow:
-   *
-   * - An **offer** (a tab, a menu entry, a button) is withheld unless a known
-   *   report declares its capability on. Withheld while unknown, so nothing
-   *   renders and then vanishes a round trip later, and withheld on a failed
-   *   read, so nothing opens on error.
-   * - A **behavior** with an existing default keeps that default until a known
-   *   report *explicitly* declares its capability off. Not knowing must never
-   *   silently change what an action does or where data is stored — a
-   *   transient failure may not relocate a user's data.
-   *
-   * The report is advisory either way: refusing a capability is the server's
-   * job, and a client that ignored this would lose UX, never gain access.
+   * `null` is **not known** — in flight or a failed read, deliberately not
+   * distinguished — and D3's split is what any new consumer must follow: an
+   * **offer** is withheld unless a known report declares its capability on, a
+   * **behavior** keeps its default until one declares it off, so a transient
+   * failure can never relocate a user's data.
    */
   const [features, setFeatures] = useState<FeatureReport | null>(null);
-  /**
-   * Whether this browser has dismissed the visitor introduction
-   * (`landing-page` D7). Read once into component state — the `SidePanel`
-   * `collapsed` pattern — rather than into a module closure, so a test's
-   * `localStorage.clear()` between cells actually resets it.
-   *
-   * A write that fails leaves this `true` anyway: the banner is gone for the
-   * page's lifetime and back on the next load, which is the spec's answer for
-   * storage that cannot be written — never an error.
-   */
+  /** Component state rather than a module closure, so a test's
+   *  `localStorage.clear()` resets it. A failed write still leaves this
+   *  `true` — gone for this page, back on the next load, never an error. */
   const [introDismissed, setIntroDismissed] = useState(() =>
     introDismissedStore.read(),
   );
-  /** The starting mode fires once per page. Once this is set the rule never
-   *  runs again, whatever the report or the index do afterwards. */
   const introModeApplied = useRef(false);
-  /**
-   * The library tab's "Reset N framings", moved by the user's own hand: the
-   * running sum of how many models became or stopped being resettable through
-   * a persisted orbit, a chosen axis, or a framing given up from a tile or the
-   * viewer. The tab adds the change since its last derivation to the number it
-   * derived (`bulk-thumbnail-jobs` D5) — never re-deriving on a hand change,
-   * which on the real library is 7.8 MB and sixteen index requests per orbit
-   * (measured 2026-09-02, Masa's objection). The full derivation stays the
-   * truth at the moments it already runs, so any drift heals there.
-   *
-   * The before-state comes from the site's own lookup where it made one, else
-   * from the tile's *ready* state — which is why every caller signals before
-   * it updates the map — and from nothing else: a listing's annotation was
-   * tried as a third source and can be stale in both directions once anything
-   * has written the entry this session (the review's finding). The pose is the
-   * landed answer's, the same one the derivation would resolve against. Both
-   * through refs so this callback, and every host and persist that closes
-   * over it, stay stable.
-   */
+  /** How many models the user's hand made or unmade resettable since the tab
+   *  last derived (D5). An adjustment, because a re-derivation costs a library
+   *  walk per orbit; the full one still runs where it did, so drift heals. */
   const [handDelta, setHandDelta] = useState(0);
-  /**
-   * How many times the tab's numbers went stale by more than a hand's ±1 — the
-   * trigger for a *re-derivation*, which `libraryJobs` hands the panel as
-   * `recountKey`. Two moments move it. A job settled having written something:
-   * not every phase, since a launch passes through `deriving` and `confirming`
-   * before it writes, and a reset cancelled at its confirmation wrote nothing,
-   * so recounting on phase alone re-derived the library twice per press of the
-   * very button whose count it was refreshing (Masa, 2026-09-02); and not on
-   * the phase at all, since Cancel sets `cancelled` while the in-flight entry
-   * may still land, so a write a cancel could not recall was missed by a phase
-   * transition (the review's finding). `settled` is the runner's word for "the
-   * loop is over and the counters are final", and `wrote` for what it actually
-   * wrote. And a hand change whose before-state this session could not judge
-   * (`noteFramingChanged`): an orbit released on a tile still loading, after
-   * the caches were emptied, wrote a camera the count then said nothing about
-   * until a job ended or the tab was reopened (Masa, 2026-09-11).
-   */
+  /** The re-derivation trigger, for drift a ±1 cannot carry. Off `settled` and
+   *  `wrote`, never a phase: a launch passes through `deriving` before it
+   *  writes, and Cancel fires while the in-flight entry may still land. */
   const [jobsEnded, setJobsEnded] = useState(0);
   const thumbsRef = useRef<Map<string, ThumbState>>(new Map());
   const noteFramingChanged = useCallback(
     (path: string, write: FramingWrite, known?: StoredFraming) => {
-      // The before-state, from the most authoritative reading available: the
-      // site's own lookup; else the tile's *ready* state (a loading or errored
-      // tile carries no framing at all, and reading it as "unframed" made an
-      // orbit on a framed model count +1 — one review's finding); else nothing
-      // is known here, and the server is asked instead — every caller signals
-      // after its PUT has landed, so a re-derivation now reads the write. Not
-      // the listing's annotation: after a reset's own refetch, or a failed
-      // render, it still names a camera the server no longer holds, and a
-      // wrong ±1 clamps the button (the next review's finding). Not silence
-      // either: an orbit released before the tile's thumbnail landed stored a
-      // camera the count did not move for (Masa, 2026-09-11). The hand path
-      // stays the rule for a known before-state — a re-derivation is what it
-      // was written to avoid.
+      // The site's own lookup, else the tile's *ready* state, else a
+      // re-derivation: a loading tile carries no framing, and reading that as
+      // "unframed" miscounts. Never the listing's annotation, which can name a
+      // camera the server no longer holds.
       const recount = (): void => setJobsEnded((n) => n + 1);
       const shown = thumbsRef.current.get(path);
       const before: StoredFraming | undefined =
@@ -879,8 +526,6 @@ export default function App() {
           write.camera === null ? undefined : (write.camera ?? before.camera),
         axis: write.axis === null ? undefined : (write.axis ?? before.axis),
       };
-      // No index opinion needed (`pose-rerender` D7): a camera or an axis is
-      // a framing, and a reset gives up both.
       const delta =
         (resettable(after.camera, after.axis) ? 1 : 0) -
         (resettable(before.camera, before.axis) ? 1 : 0);
@@ -889,7 +534,12 @@ export default function App() {
     [],
   );
 
+  /** One reading per session (L5), so the menu's open-in group is decided from
+   *  state and never from a probe fired when a menu opens (2.5). A failed read
+   *  is `null`: the actions are absent rather than present and inert. */
   const [apps, setApps] = useState<AppsReport | null>(null);
+  /** Not a reducer failure kind: `state.failure` belongs to a *question* and is
+   *  cleared by the next answer, and a clipboard refusal belongs to none. */
   const [actionText, setActionText] = useState<{
     text: string;
     tone: "ok" | "error";
@@ -906,22 +556,9 @@ export default function App() {
       ACTION_TEXT_MS,
     );
   }, []);
-  /**
-   * The same sentence, sent to the lightbox instead of the path bar. The
-   * lightbox covers that bar (`fixed inset-0 z-lightbox`, 70% scrim), so a line
-   * raised from its panel or its menu is otherwise dimmed and corner-parked away
-   * from the affordance that raised it. Where the sentence lands is
-   * per-surface; the sentence itself is not, so both paths still spell it from
-   * `entryActions`.
-   *
-   * **Toned, like the header's own line, since 2026-09-01.** It carried failures
-   * only while a launch was the sole thing routed here — success there is silent
-   * by design. *Copy path* is not silent: it must confirm briefly (entry-actions
-   * R1), and raised from the lightbox's menu that confirmation went to the bar
-   * under the scrim, so the one action on this surface that owes the user a word
-   * gave none. A confirmation painted in the failure colour would be the other
-   * half of the same bug, hence the tone rather than a second cell.
-   */
+  /** The same sentence, sent to the lightbox instead of the path bar it covers.
+   *  Toned, because *Copy path* must confirm briefly (entry-actions R1) and a
+   *  confirmation in the failure colour is the other half of that bug. */
   const [viewerNote, setViewerNote] = useState<{
     text: string;
     tone: "ok" | "error";
@@ -941,16 +578,9 @@ export default function App() {
     },
     [],
   );
-  /**
-   * A sentence, put where the user is actually looking — the one routing rule
-   * for everything a shared command says, in either tone.
-   *
-   * Read off `viewerRef`, not the state: the action host is memoized and
-   * `viewer` changes on every open and close, so depending on the value here
-   * would rebuild the host for a reason that has nothing to do with what it
-   * holds. Only the lightbox reroutes — an orbit overlay covers one tile, not
-   * the bar, and the sentence under it is perfectly readable.
-   */
+  /** Off `viewerRef`, not the state, or the memoized action host rebuilds on
+   *  every viewer open. Only the lightbox reroutes: an orbit overlay covers one
+   *  tile, not the bar. */
   const sayWhereLooking = useCallback(
     (text: string, tone: "ok" | "error"): void => {
       if (viewerRef.current?.mode === "lightbox") sayInViewer(text, tone);
@@ -959,23 +589,13 @@ export default function App() {
     [say, sayInViewer],
   );
 
-  /**
-   * The placement the next settled landing applies (retrace-placement D5), and
-   * the entry a reveal located. Component-local, like `findText` and for the
-   * same reason — the reducer never reads a highlight or a scroll position — so
-   * neither reaches the URL, history, or a reload. One pending thing, not two:
-   * the reveal is the `reveal` case of the request, so it and a Back cannot
-   * both be waiting on the same landing.
-   */
+  /** Component-local like `findText`, so neither a scroll position nor a
+   *  highlight reaches the URL or a reload. One pending thing, not two: a
+   *  reveal is a case of the request, so it and a Back cannot both wait. */
   const [pendingPlacement, setPendingPlacement] =
     useState<PendingPlacement | null>(null);
-  /** The id of the one question the pending request rides — the first in
-   *  flight after the raise — so the placement effect can tell a different
-   *  question (which supersedes it) from a patch of the same one. */
   const pendingQuestionRef = useRef<number | null>(null);
   const [marked, setMarked] = useState<string | null>(null);
-  /** Raise a placement for the landing the caller is about to cause, naming
-   *  the answer on screen now so a landing can be told from a patch. */
   const raisePlacement = useCallback((request: PlacementRequest): void => {
     pendingQuestionRef.current = null;
     setPendingPlacement({
@@ -988,172 +608,78 @@ export default function App() {
   );
   useEffect(() => () => clearTimeout(markTimerRef.current), []);
 
-  // The tuning re-run waiting to become a query. An effect handle, not state:
-  // nothing renders it.
   const tuningTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
-  // The view a debounced tuning re-run was scheduled for. The re-run belongs to
-  // it, and the effect below drops the timer the moment it stops being the
-  // question on screen.
+  /** The view a debounced re-run belongs to; the effect below drops the timer
+   *  the moment that stops being the question on screen. */
   const tuningForRef = useRef<View | null>(null);
   useEffect(() => () => clearTimeout(tuningTimerRef.current), []);
   const [viewer, setViewer] = useState<ViewerState | null>(null);
-  // A sentence raised in the viewer belongs to the model that was open when it
-  // happened. Drop it on close and on a swap, or a reopen inside the 2.5s
-  // window would greet the next model with the last one's line.
   useEffect(() => {
     clearTimeout(viewerNoteTimerRef.current);
     setViewerNote(null);
   }, [viewer?.entry.path]);
-  // AO preference pill state (persisted per browser profile, aoToggle.ts).
   const [ao, setAoState] = useState(aoEnabled);
   const trackerRef = useRef(new GestureTracker());
 
-  // Set when the next lightbox open comes from history or a deep link. The
-  // provenance bridge for the projection (R7 bridge 1 / R2): `history.state`
-  // cannot live in a reducer, so which entry a model open writes — a new one
-  // carrying the marker, or the browser's own — is carried here from the
-  // dispatch site to the effect that writes it. Not a leftover: deleting it
-  // makes a restored lightbox mint an entry the user never asked for.
+  // `history.state` cannot live in a reducer, so whether a model open writes a
+  // new entry or the browser's own travels here (R7 bridge 1). Without it a
+  // restored lightbox mints an entry nobody asked for.
   const suppressViewerPushRef = useRef(false);
-  // Increment to ask ViewerLayer to run its persisting close (url-navigation
-  // D3: App cannot run the teardown — the session is private to ViewerLayer).
   const [closeSignal, setCloseSignal] = useState(0);
-  // The model this session was opened for, once the view named it. Bridge 3:
-  // the overlay leads `view.model` by one transition, so "the model left the
-  // view" is only meaningful after it arrived.
+  // Bridge 3: the overlay leads `view.model` by one transition, so "the model
+  // left the view" is only meaningful after it arrived.
   const namedModelRef = useRef<string | null>(null);
 
-  // What the render reads — the answered view for the grid and the notices,
-  // the live one for the controls (design R1's corollary).
   const target = dest(state);
   const live = controls(state);
   const label = labelInputs(state);
-  // The committed *phrase*, where a phrase is what is being rendered — the
-  // side panel's "Results for …", the label, the "nothing matched" sentences.
-  // A similarity subject has none, and names a model instead: the two are read
-  // separately rather than flattened to one string, because every place below
-  // has a different sentence for each and a blank is not one of them.
   const liveQuery = live.subject.kind === "query" ? live.subject.text : null;
-  // The similarity view's own parameters, for the panel block that sets them.
-  // Read off the LIVE subject, like every other control (selectors' third
-  // case): a spinner that showed the answered view's count would snap back
-  // between the press and the answer.
+  // Off the LIVE subject, or a spinner snaps back between press and answer.
   const liveSimilar = live.subject.kind === "similar" ? live.subject : null;
   const labelQuery = label.subject.kind === "query" ? label.subject.text : null;
   const labelModel =
     label.subject.kind === "similar" ? label.subject.model : null;
   const scope = state.result?.scope ?? null;
   const truncated = state.result?.truncated === true;
-  /**
-   * The answer on screen came from a tree the server had not checked against
-   * the filesystem yet (listing-tree-cache §5.1/§5.2). Read off the ANSWER like
-   * `truncated` beside it, never off what is in flight: the line belongs to the
-   * listing being shown, so it stays up when a follow-up comes back marked
-   * again and there is nothing further to ask.
-   */
+  // Off the ANSWER, not what is in flight: the line belongs to the listing on
+  // screen (listing-tree-cache §5.1).
   const refreshing = state.result?.stale === true;
   const entries = state.result?.entries ?? NO_ENTRIES;
-  /**
-   * The index's orientations for the LISTING on screen — the answer's own
-   * where it had any, else the second wave's (pose-for-every-model D3).
-   *
-   * In that order and not merged: only a meaning or similarity answer carries
-   * riding poses, and only a plain listing gets a wave, so the two are never
-   * both populated. **A stored reference in every branch** — a landing's map,
-   * the slot the wave filled, or the `NO_POSES` constant — because the
-   * thumbnail sweep re-runs on this value's identity: an object built here per
-   * render would walk the whole grid on every keystroke.
-   *
-   * Preview models are the one set this misses (they never land, so no wave
-   * ever asks about them) — `poses` below folds their own wave in.
-   */
+  /** A stored reference in every branch, because the sweep re-runs on this
+   *  identity. Preview models are the set it misses — they never land, so no
+   *  wave asks about them — and `poses` below folds their own in. */
   const listingPoses = state.result?.poses ?? state.listingPoses ?? NO_POSES;
-  // What the index scored each tile at, and which scale those numbers are on.
-  // The scale is read off the answer's own question — `label` is the view this
-  // result answers — so a tile can only ever be labelled as the thing that
-  // asked for it (D3), and a listing nobody scored yields `null` and draws
-  // nothing.
+  // The scale is the answer's own question, so a tile can only be labelled as
+  // the thing that asked for it (D3).
   const scores = state.result?.scores ?? NO_SCORES;
   const scoreScale = scaleOf(label.subject, label.meaning);
-  // The model a similarity answer was computed from. It is never counted with
-  // the neighbours — `entries` above is what every count and every "nothing
-  // similar" sentence reads — and it is folded in at the render layer alone.
   const anchor = state.result?.anchor;
-  /**
-   * The only way to obtain a result's score. The anchor guard lives here rather
-   * than beside each caller, which is the difference between a convention and a
-   * constraint: a surface cannot reach past this to the raw map, so a new one
-   * inherits the rule by having no alternative. It was two call sites, spelled
-   * two ways, and the panel simply forgot its copy — found by review, not by
-   * either of the two people who had read the code.
-   *
-   * **Returns the map's own object, never a constructed one.** `Tile`'s memo
-   * compares `score` by identity, so an accessor that built `{score, z}` per
-   * call would hand every tile a fresh object on each render and silently undo
-   * the memoisation the per-tile-value shape exists for (D6) — a performance
-   * regression with no failing test to catch it. The accessor form invites that
-   * mistake in a way the raw map did not.
-   *
-   * `anchor?.path` rather than `anchor` because the path is all the closure
-   * reads — a dependency should name what is used. It buys nothing today, and
-   * saying so is the point: `anchor` and `scores` change identity together (only
-   * `landing` replaces either, and it replaces both; `patch` spreads the result
-   * and preserves both), so the narrower dep can never be the thing that spares
-   * a rebuild. It is precision, not an optimisation, and a later reader should
-   * not treat it as load-bearing.
-   */
+  /** The only way to obtain a score, so the anchor guard cannot be forgotten.
+   *  **Returns the map's own object, never a constructed one**: `Tile`'s memo
+   *  compares `score` by identity, and `{score, z}` per call undoes it (D6). */
   const scoreFor = useCallback(
     (path: string): IndexScore | undefined =>
       path === anchor?.path ? undefined : scores[path],
     [scores, anchor?.path],
   );
-  /**
-   * What each folder tile on screen previews: the models a peek found inside
-   * it, keyed by the folder's path (folder-contact-sheets D1). Rendered — the
-   * sheet is drawn from it — so it is state, not a ref.
-   *
-   * A path is in the map exactly once its peek has answered, **including when
-   * it answered with nothing and when it failed**, both of which store the
-   * empty list: the tile then draws its icon and the failure is not retried
-   * within this listing, which is what "requested once per listing" and "the
-   * rest of the grid is unaffected" mean together.
-   */
+  /** A path is in the map once its peek has answered, **nothing and failures
+   *  included** — both store the empty list, so the tile draws its icon and
+   *  nothing is retried within this listing (folder-contact-sheets D1). */
   const [previews, setPreviews] =
     useState<ReadonlyMap<string, DirEntry[]>>(NO_PREVIEWS);
-  /**
-   * Peeks that have been asked for and have not answered. A ref and not state
-   * because nothing renders it: a tile that is in flight has no map entry, so
-   * it is already drawing its icon, and re-rendering the grid as each request
-   * departs would buy a repaint per folder for no visible change.
-   */
+  /** A ref, not state: a tile in flight already draws its icon, so nothing
+   *  renders this. */
   const inFlightPeeks = useRef<Set<string>>(new Set());
-  /**
-   * The two values `requestPeek` must read at the moment it runs rather than at
-   * the moment it was built — the same trick `placeholderRef` uses above, and
-   * for the same reason: the callback is handed to `Grid` by identity, so it
-   * cannot close over this render's map or this render's listing.
-   */
   const previewsRef = useRef(previews);
   previewsRef.current = previews;
   const listingRef = useRef(entries);
   listingRef.current = entries;
-  /**
-   * One listing, one set of previews (D1) — reset **during the render that
-   * first sees the new listing**, not in an effect. The grid's observers
-   * report every tile the moment they are rebuilt, and that report can reach
-   * `requestPeek` in the window between an effect's `setPreviews(NO_PREVIEWS)`
-   * and the re-render that would refresh `previewsRef`: the guard then reads
-   * the *previous* listing's map, and when that listing shared this one's
-   * folders — a Flat toggle does — every report returns as "already
-   * answered", nothing is marked, the clear lands on top, and no sheet is
-   * drawn until the next landing (Masa's flat-toggle report, reproduced
-   * 2026-09-03 with the event order logged). Resetting here closes the
-   * window: the ref and the state move together, before anything is
-   * committed for an observer to report on. The same pattern
-   * `ViewerLayer`'s `prevViewerRef` uses to re-arm per viewer.
-   */
+  /** Reset **during the render that first sees the new listing**, not in an
+   *  effect: an observer report can reach `requestPeek` between an effect's
+   *  `setPreviews` and the re-render that refreshes `previewsRef`, and where
+   *  the listings share folders every report then reads as already answered. */
   const previewsListingRef = useRef(entries);
   if (previewsListingRef.current !== entries) {
     previewsListingRef.current = entries;
@@ -1161,33 +687,21 @@ export default function App() {
     previewsRef.current = NO_PREVIEWS;
     setPreviews(NO_PREVIEWS);
   }
-  /**
-   * Ask for one folder's preview, at most once per listing.
-   *
-   * No abort and no retry: the request is bounded server-side, so an abandoned
-   * one costs less than the machinery to stop it (`peek`'s docstring), and a
-   * failure is recorded as "nothing to preview" rather than surfaced — a folder
-   * tile that could not be peeked is a tile with an icon, not an error the user
-   * is asked to do something about.
-   */
+  /** At most once per listing. No abort and no retry: the request is bounded
+   *  server-side, and a failure is filed as "nothing to preview". */
   const requestPeek = useCallback(
     (path: string) => {
       if (previewsRef.current.has(path) || inFlightPeeks.current.has(path))
         return;
       inFlightPeeks.current.add(path);
-      // The listing this answer will belong to, captured before the await. A
-      // peek outlives the tile that asked for it by design, so it can land
-      // after the grid has moved on — and an answer about the folder the user
-      // has left must not become an entry in the map the new listing is drawn
-      // from.
+      // Captured before the await: a peek outlives the tile that asked for it,
+      // and an answer about a folder the user has left must not enter the new
+      // listing's map.
       const asked = listingRef.current;
       const land = (found: DirEntry[]): void => {
         // Generation first, delete second: the marker is keyed by path alone,
-        // and a listing change may have re-issued this folder's peek — a
-        // superseded answer deleting the marker would strip the successor's
-        // once-per-listing guard while it is still in flight. The superseded
-        // request's own marker is already gone (the clearing effect wiped the
-        // set), so returning early leaks nothing.
+        // so a superseded answer deleting it would strip the successor's
+        // once-per-listing guard while that one is still in flight.
         if (listingRef.current !== asked) return;
         inFlightPeeks.current.delete(path);
         setPreviews((prev) => {
@@ -1196,22 +710,13 @@ export default function App() {
           return next;
         });
       };
-      // The listing may already carry this folder's choice — the derived
-      // annotation `listing-tree-cache` 6.3 emits from the server's preview
-      // layer (6.8). Landing it here is the whole of the saved round trip:
-      // same map, same once-per-listing discipline, same downstream rendering,
-      // and the delta's "a revisit is one request" scenario made literal. An
-      // entry the layer had nothing for carries no field and asks exactly as
-      // before — absence changes nothing, per the annotation requirement.
+      // The listing may already carry this folder's choice, inline from the
+      // server's preview layer (listing-tree-cache 6.3/6.8).
       const carried = carriedPreviewsFor(asked).get(path);
       if (carried !== undefined) {
-        // Landed inline rather than through `land`: the generation check is
-        // trivially true (nothing awaited), and `land`'s marker delete would
-        // open a re-entry window — `previewsRef` lags a render behind this
-        // set, so a second observer report in the same batch would pass both
-        // guards and land again (288f55a's review). The marker stays; the
-        // per-listing clearing effect is what resets it, exactly as it resets
-        // everything else here.
+        // Not through `land`, whose marker delete would open a re-entry window:
+        // `previewsRef` lags a render behind this set, so a second observer
+        // report in the same batch would pass both guards and land again.
         setPreviews((prev) => {
           const next = new Map(prev);
           next.set(path, carried);
@@ -1223,32 +728,14 @@ export default function App() {
     },
     [api],
   );
-  /**
-   * One listing, one set of previews (D1). A tile scrolled away and back inside
-   * the same listing reuses what the map holds and asks for nothing.
-   *
-   * Keyed on `entries` and deliberately **not** on `state.result`: `patch`
-   * (state/reducer.ts) spreads the result on every fetchless view change — a
-   * kind option, a lightbox opening — while preserving `entries` identity, so
-   * keying on the result would throw away every landed sheet and re-issue every
-   * peek each time the user opened a model. `entries` is replaced wholesale by
-   * a landing and only by a landing (R5), which is exactly "a different listing
-   * is on screen" — navigation and search landings alike — and it is the same
-   * identity `useThumbnails` reconciles on.
-   */
+  /** Keyed on `entries` and **not** on `state.result`, which `patch` respreads
+   *  on every fetchless view change: keying on the result would re-issue every
+   *  peek each time a model was opened (D1). */
   useEffect(() => {
-    // The previews map and the in-flight markers reset during render (above);
-    // the pose bookkeeping below is not read by any observer report, so an
-    // effect is early enough for it.
     askedPreviewPoses.current.clear();
-    // Pruned, not reset: a preview model that survives into the new listing
-    // (walking into the folder is the common case) must not see its pose go
-    // P → undefined → P — the sweep retires and restarts the pipeline on each
-    // transition, two extra lookups per carried-over model and, if the posed
-    // render is still in flight, an unposed render plus a visible angle flip
-    // on exactly the tiles the wave exists to fix (review round five,
-    // measured). Paths that left drop; paths that stay keep their pose until
-    // the listing wave confirms the same value, which merges to no change.
+    // Pruned, not reset: a pose going P → undefined → P retires and restarts
+    // that model's pipeline — an unposed render and a visible angle flip on
+    // exactly the tiles the wave exists to fix.
     setPreviewPoses((prev) => {
       if (prev === NO_POSES) return prev;
       const kept: Record<string, IndexPose | null> = {};
@@ -1260,9 +747,6 @@ export default function App() {
           count++;
         }
       }
-      // Identity-preserving when nothing was dropped, so the sweep comment's
-      // "rebuilds only when a wave actually answers" stays literally true —
-      // a listing change that keeps every pose keeps the object too.
       return count === 0
         ? NO_POSES
         : count === Object.keys(prev).length
@@ -1270,18 +754,9 @@ export default function App() {
           : kept;
     });
   }, [entries]);
-  /**
-   * The previews' own pose wave. The listing wave asks about what LANDED, and
-   * preview models never land — so a sheet cell whose cached thumbnail predates
-   * the index's orientation kept its stale angle until the user walked into the
-   * folder and the model landed for real (Masa's report, 2026-09-01). Asked
-   * once per preview path per listing (the ref, cleared with the map above),
-   * merged into `poses` below, and the sweep's by-value pose comparison does
-   * the rest — only the paths whose orientation actually changed re-evaluate.
-   *
-   * Same failure-is-silence and staleness rules as the peek itself: no abort,
-   * and an answer for a listing the user has left is dropped by the token.
-   */
+  /** Their own wave, because the listing wave asks about what LANDED and
+   *  preview models never land: without it a sheet cell keeps a stale angle
+   *  until the user walks into the folder. Failure is silence. */
   const [previewPoses, setPreviewPoses] =
     useState<Record<string, IndexPose | null>>(NO_POSES);
   const askedPreviewPoses = useRef<Set<string>>(new Set());
@@ -1290,16 +765,9 @@ export default function App() {
     const want: string[] = [];
     for (const found of previews.values()) {
       for (const e of found) {
-        // A sheet cell whose entry arrived with its orientation is not asked
-        // about (listing-tree-cache §6.4): `carriedPoses` already feeds it to
-        // the sweep. Checked before the asked-set is marked, so the entry is
-        // simply never a question rather than a question recorded as answered.
-        //
-        // `!== undefined` covers the explicit `null` too, and that is the
-        // point rather than an accident (§6.9, round-3 finding 6): `null` is
-        // the server saying it asked the index and there is no orientation, so
-        // the cell is *known* unposed and asking again would buy nothing. The
-        // test is already right; it has a cell so it stays right.
+        // An entry that arrived with its orientation is never a question
+        // (listing-tree-cache §6.4). `!== undefined` covers the explicit `null`
+        // deliberately: that is the index settled as holding none.
         if (
           e.kind !== "model" ||
           e.pose !== undefined ||
@@ -1316,33 +784,17 @@ export default function App() {
     void api.semanticPosesFor(want).then(
       (res) => {
         if (listingRef.current !== asked) return;
-        // An empty answer merges nothing and must not churn `poses` identity —
-        // a sweep walk per silent index reply would be paid by every landing.
-        // Empty now means *unsettled* — the index warming, the ask unanswered
-        // (`pose-rerender` D5) — so a no-op is also the right reading. An
-        // answer that carries `null`s is not empty: those are settled
-        // absences, filed like poses, and they are what redraws a posed cell
-        // at the default.
+        // Empty means *unsettled* — a warming index — so it merges nothing
+        // rather than churn `poses` identity. An answer carrying `null`s is not
+        // empty: those are settled absences and redraw a posed cell.
         if (Object.keys(res.poses).length === 0) return;
         setPreviewPoses((prev) => ({ ...prev, ...res.poses }));
       },
       () => {},
     );
   }, [previews, libraryState?.state, api]);
-  // The anchor needs a thumbnail like any tile, so it goes to useThumbnails —
-  // memoized because that effect reconciles its per-entry state against
-  // `entries` on any identity change (D2), and a fresh array per render would
-  // pay that walk on every keystroke. The walk is all it would cost now: since
-  // `ao-refreshes-thumbnails` a re-run keeps every surviving tile's image and
-  // touches only what arrived or left.
-  //
-  // Preview models are appended to that same list rather than given a pipeline
-  // of their own (folder-contact-sheets D3): a sheet cell is an ordinary
-  // thumbnail, so it shares the cache entry, the queue, the LRU and the recipe
-  // with the tile the same model has elsewhere. Deduplicated by path — in a
-  // flat listing a previewed model is often also a tile, and the anchor counts
-  // as present too — so the shared model is looked up once and both images are
-  // drawn from the one entry.
+  // Sheet cells share the tiles' pipeline (folder-contact-sheets D3) and are
+  // deduplicated by path, since a previewed model is often a tile as well.
   const thumbEntries = useMemo(() => {
     const base = anchor === undefined ? entries : [anchor, ...entries];
     if (previews.size === 0) return base;
@@ -1355,51 +807,25 @@ export default function App() {
         extra.push(entry);
       }
     }
-    // Identity preserved when a peek added nothing new, which spares the grid
-    // even the reconcile walk for a sheet drawn entirely from tiles it already
-    // has.
     return extra.length === 0 ? base : [...base, ...extra];
   }, [entries, anchor, previews]);
-  /**
-   * The orientations the *listing itself* carried (listing-tree-cache §6.3):
-   * the server's pose layer already held them, so it attached them at emission
-   * and neither wave asks about them (§6.4).
-   *
-   * Read off `thumbEntries` rather than off `entries`, because that is the set
-   * the sweep draws — tiles, a similarity anchor, and the models inside folder
-   * contact sheets, all of which are annotated the same way by the same layer.
-   * One shape reaches the sweep either way: a pose is a pose whether the server
-   * volunteered it or a wave went and asked.
-   *
-   * `NO_POSES` when nothing carried one, which is every library whose server
-   * has no layer content — so the identity discipline below is untouched for
-   * them, and `poses` stays the very reference it was before this existed.
-   */
+  /** The orientations the listing carried inline (§6.3), so neither wave asks.
+   *  Off `thumbEntries` rather than `entries`, because that is the set the
+   *  sweep draws — anchor and sheet cells included. */
   const carriedPoses = useMemo(() => {
     let found: Record<string, IndexPose | null> | null = null;
     for (const e of thumbEntries) {
-      // Both states the server can settle are filed (`pose-rerender` D5): an
-      // orientation, and the explicit `null` that says it asked and the index
-      // holds none (listing-tree-cache §6.9). The sweep reads the `null` as
-      // "a render drawn under an orientation is stale — redraw at the
-      // default", the viewer as "open at the default"; only absence — the
-      // server has not derived one — stays out, and that is what the wave
-      // below asks about.
+      // Both settled states are filed, `null` included: only absence is left
+      // for the wave below.
       if (e.pose === undefined) continue;
       found ??= {};
       found[e.path] = e.pose;
     }
     return found ?? NO_POSES;
   }, [thumbEntries]);
-  /**
-   * What the thumbnail sweep reads: the poses the listing carried, the
-   * previews' wave, and the listing's own wave — in that precedence, an asked
-   * answer winning a shared path over an emitted one. Identity discipline
-   * holds — with nothing carried and no preview poses this IS `listingPoses`
-   * (same reference), and when the merge does rebuild, the sweep compares each
-   * entry's pose by value (`ao-refreshes-thumbnails` 2.1), so an unchanged path
-   * re-evaluates nothing.
-   */
+  /** Carried, previewed, then asked, an asked answer winning a shared path.
+   *  With nothing carried and no preview poses this IS `listingPoses`, which is
+   *  the identity the sweep re-runs on. */
   const poses = useMemo(
     () =>
       carriedPoses === NO_POSES && previewPoses === NO_POSES
@@ -1407,60 +833,36 @@ export default function App() {
         : { ...carriedPoses, ...previewPoses, ...listingPoses },
     [listingPoses, previewPoses, carriedPoses],
   );
-  // The subject a deferral is holding — a phrase or a model, and the banner
-  // says a different sentence for each. Read off `view` rather than the answer,
-  // like the projection: while a stand-in listing is on screen the *answer* is
-  // about the folder, and the banner's whole job is to explain the question
-  // that answer is not about.
+  // Off `view`, not the answer: with a stand-in listing on screen the answer is
+  // about the folder, and this explains the question it is not about.
   const deferredSubject =
     state.phase !== "idle" ? state.view.subject : NO_SUBJECT;
-  // Whether there is anything to dismiss, asked of the question the app stands
-  // behind rather than the one it has answered (selectors' third case). That is
-  // what makes ONE control serve both a landed result and a deferral, whose
-  // stand-in answer is about the folder and would report nothing committed —
-  // and a second copy in the banner is exactly the two-that-resemble-each-other
-  // D9 exists to refuse.
+  // Of the question the app stands behind, not the one it answered, so ONE
+  // control serves a landed result and a deferral alike (D9).
   const dismissable = live.subject.kind !== "none";
   const error = state.failure?.message ?? null;
-  /**
-   * The library's top, filesystem-side, or null while it is not `ready` —
-   * `expandLibraryPath`'s first argument wherever a path leaves the app.
-   *
-   * Null **also** where the deployment withholds it (`hostDetails`, D11): the
-   * top is then absent from a `ready` state, and `expandLibraryPath` already
-   * answers null by handing the library path over as it stands. So copy-path
-   * and the lightbox's file details show `/Kit/x.stl` rather than composing a
-   * filesystem path naming a machine the viewer cannot reach — through the same
-   * one expansion, with no second rule for either surface (task 4.6).
-   */
+  /** `expandLibraryPath`'s first argument wherever a path leaves the app. Null
+   *  also where the deployment withholds it (`hostDetails`, D11), which that
+   *  function answers by handing the library path over unexpanded. */
   const libraryTop =
     libraryState?.state === "ready" ? (libraryState.top ?? null) : null;
-  /**
-   * The one sentence a not-`ready` library gets, or null. Non-null is also what
-   * "there is nothing to browse" means below: a library that is unconfigured or
-   * unmounted has no listing to show, no folder to call empty, and nothing on
-   * its way — so the grid, the skeleton and the landing line are all withheld
-   * and the message stands alone (library R4).
-   *
-   * `null` state — not asked yet — reads as unblocked on purpose: the boot
-   * listing is already in flight beside the probe, and blanking the grid until
-   * the probe answers would cost every healthy start a flash of nothing.
-   */
+  /** Non-null is also what "there is nothing to browse" means below: grid,
+   *  skeleton and landing line are withheld and this stands alone (library R4).
+   *  Not-asked-yet reads as unblocked, or every healthy start flashes empty. */
   const libraryMessage: string | null =
     libraryState === null || libraryState.state === "ready"
       ? null
       : libraryState.state === "unconfigured"
-        ? // The state cell, not `readFeatures()`: this is a render, and a value
-          // read through the getter would not re-render the header when the
-          // report resolves.
+        ? // The state cell, not `readFeatures()`: a value read through the
+          // getter would not re-render the header when the report resolves.
           libraryUnconfiguredText(features)
         : libraryState.state === "nested"
           ? libraryNestedText(libraryState.library)
           : libraryMissingText(libraryState.root);
 
   const showSkeleton = useDelayedFlag(busy(state), SKELETON_DELAY_MS);
-  // `busy` and not `inflight !== null`: a stale listing's follow-up keeps the
-  // answered grid on screen while it runs, and the user's place in it is real.
+  // `busy`, not `inflight !== null`: a follow-up keeps the answered grid up,
+  // and the user's place in it is real.
   busyRef.current = busy(state) || showSkeleton;
   const {
     thumbs,
@@ -1476,79 +878,35 @@ export default function App() {
     api,
     lru,
     queue,
-    // The pill's own state, not a second read of `aoToggle`'s store: this is
-    // what makes a press (or, after `adaptive-ao-default`, an automatic
-    // decision) re-run the sweep over the grid already on screen.
+    // The pill's state, not `aoToggle`'s store: this is what re-runs the sweep
+    // over the grid on screen.
     ao,
     poses,
-    // The listing's own array, not `thumbEntries`: the band ranking resets
-    // per listing, and a landed peek must not count as one (review F1).
+    // Not `thumbEntries`: a landed peek is not a new listing.
     entries,
-    // The same getter the decorated client reads, so the local-framing rule is
-    // one rule at both arrival points (D6).
+    // The client's own getters, so local framing is one rule (D6).
     readFeatures,
-    // And the same library, so both arrival points key a framing alike.
     readLibraryId,
   );
   placeholderRef.current = setPlaceholder;
 
-  /**
-   * The one moment the sweep cannot cover (review F4): a report that resolves
-   * to writes-off *after* a listing has already drawn its tiles.
-   *
-   * The sweep applies the overlay where a tile is seeded, and the decorator
-   * applies it to a lookup's answer — but neither runs again for a tile that
-   * has already landed, and nothing orders the report against the first
-   * listing. Measured, the report lands first on ten loads out of ten; nothing
-   * *makes* it, and a failed read's retry lands on a later navigation, at which
-   * point the tiles on screen carry the deployment's framing rather than this
-   * browser's until the user leaves and comes back.
-   *
-   * Deliberately not a re-run of the sweep: the pixels are the server's and
-   * nothing has questioned them, so a restart would spend lookups and renders
-   * to arrive at the same picture. `applyLocalFramings` moves the framing and
-   * touches nothing else.
-   *
-   * A plain effect rather than a latch, because the overlay is idempotent and
-   * `features` resolves once per session — the report effect above stops
-   * asking the moment it is non-null.
-   *
-   * **And the library id is the second thing it waits for.** The three boot
-   * requests race, and a listing that lands before `/api/library` seeds its
-   * tiles while `framingKey` has no id to file a framing under, so the store
-   * reads as empty and a returning visitor's kept framings are missing from
-   * the first grid until the next navigation. So the effect fires when the
-   * *last* of report and id arrives, and again only if the id changes — a
-   * repointed root — which the overlay's idempotence makes free.
-   */
+  /** The moment the sweep cannot cover: a report — or the library id — landing
+   *  *after* a listing drew its tiles, which leaves a returning visitor's kept
+   *  framings off the first grid. Not a re-run of the sweep: the pixels are the
+   *  server's and nothing has questioned them. */
   useEffect(() => {
     if (features?.thumbWrites === false && libraryId !== null)
       applyLocalFramings();
   }, [features, libraryId, applyLocalFramings]);
 
-  // Mirrored after commit, not during render: a render React discards must not
-  // leave the delta reading state that never landed.
+  // After commit, not during render: a discarded render must not leave
+  // `noteFramingChanged` reading state that never landed.
   useEffect(() => {
     thumbsRef.current = thumbs;
   }, [thumbs]);
-  /**
-   * The one bulk-job runner for this app (`bulk-thumbnail-jobs` D2). One
-   * instance, built once: it *is* the "one job at a time" rule — a second
-   * instance would be a second job, whatever the chip said.
-   *
-   * Every dependency is referentially stable across renders, which is what
-   * keeps that promise: `api`, `queue` and `lru` are App's own memos, and
-   * `setThumb`/`refetch` are `useCallback([], …)` in `useThumbnails`.
-   *
-   * `ao` is `aoToggle`'s module reader, **not** the `ao` state cell one screen
-   * up — and the difference is deliberate rather than incidental. The two hold
-   * the same value; the state cell exists to re-run the sweep over the grid on
-   * screen when it changes. A job derives once at launch and reads the
-   * preference in force at that moment (`JobDeps.ao`), which is the same
-   * reading the per-model commands take. Closing over the cell would rebuild
-   * the runner on every press of the pill — discarding the running job's state
-   * with it.
-   */
+  /** Built once, because this instance *is* the "one job at a time" rule (D2) —
+   *  hence stable dependencies, and `ao` from the module rather than the state
+   *  cell, which would rebuild the runner on every press of the pill. */
   const jobs = useMemo(
     () => new BulkJobs({ api, lru, queue, setThumb, refetch, ao: aoEnabled }),
     [api, lru, queue, setThumb, refetch],
@@ -1556,23 +914,13 @@ export default function App() {
   const job = useBulkJobState(jobs);
 
   /**
-   * The one URL writer (design R3): serialize the asserted view and commit it.
-   *
-   * Two conditions, and both are the fence. A URL-owning dispatch must have
-   * left an intent behind — a wholesale write on every state change would
-   * `replaceState` over an entry the user already Backed off, since lightbox
-   * teardown is asynchronous (PERSIST_HOLD_MS, ViewerLayer.tsx) and the view
-   * disagrees with what is mounted for its whole duration (R7). And that
-   * dispatch must have actually asserted something: most controls *ask* rather
-   * than assert, and pushing the unadvanced view then is not a no-op after a
-   * Back — the browser has already rewound the URL, so it would push the view
-   * the user just left back on top of history.
-   *
-   * A `replace` is exempt from the second condition, and only a `replace`. The
-   * boot seed asserts nothing — the view was resolved before any dispatch — yet
-   * it is exactly the write that has to land, and `commitUrl` already declines
-   * a replace the address bar makes redundant. It is the *push* of an
-   * unadvanced view that mints the entry nobody asked for.
+   * The one URL writer (design R3), behind two conditions that are the fence.
+   * An intent, because a wholesale write would `replaceState` over an entry the
+   * user already Backed off — lightbox teardown is asynchronous, and the view
+   * disagrees with what is mounted throughout (R7). And an advance, because
+   * pushing an unadvanced view after a Back puts back the view they just left.
+   * Only a `replace` is exempt from the second: the boot seed asserts nothing
+   * and still has to land.
    */
   useEffect(() => {
     const intent = urlIntent.current;
@@ -1581,30 +929,17 @@ export default function App() {
     const advanced = url !== projectedRef.current;
     if (intent === null) {
       // An intentless pass may only *absorb* a view the address bar already
-      // agrees with. That still covers what this ref exists for — a Back that
-      // patched the view, or a URL rewritten out from under it, both of which
-      // leave the view matching the bar once the dust settles — while refusing
-      // to absorb a view this app recorded and deliberately did not project.
-      //
-      // The debounced tuning re-run is exactly that: `setTuning` records a
-      // keystroke with `run: false` precisely so it does *not* mint a history
-      // entry per character, then commits for real when the typing stops.
-      // Absorbing the record made the commit read as unadvanced, so it declined
-      // to write and a typed count or floor never reached the URL at all —
-      // the grid re-ran under a bound the link then failed to carry.
+      // agrees with. Absorbing a `run: false` tuning record would make its real
+      // commit read as unadvanced, and the typed bound never reach the URL.
       if (url === window.location.search) projectedRef.current = url;
       return;
     }
     projectedRef.current = url;
     if (!advanced && intent.replace !== true) return;
-    // The trail mirrors what was written (retrace-placement D2): a push prunes
-    // Forward and opens the new entry's row; a replace re-names the entry's
-    // row. A declined write on a replace pass is the boot seed — the URL
-    // already named the view (a deep link, a harness mount) and `history.state`
-    // stays null, so `historyIndex()` answers 0 and the row is keyed off that,
-    // never off a state that was written. `trailReplace` keeps the row's
-    // placement when the listing is unchanged, which a Back that lands on an
-    // already-rewound URL relies on.
+    // A declined write on a replace pass is the boot seed, where
+    // `history.state` stays null and `historyIndex()` answers 0.
+    // `trailReplace` keeps the row's placement when the listing is unchanged,
+    // which a Back onto an already-rewound URL relies on.
     const key = listingKey(state.view);
     const { idx, wrote } = commitUrl(toUrlView(state.view), intent);
     if (wrote === "push") trailPush(idx, key);
@@ -1612,14 +947,10 @@ export default function App() {
       trailReplace(idx, key);
   }, [state]);
 
-  /**
-   * The fetch layer: `pendingRequest` names the call, the response is tagged
-   * with the asking event and the question as asked, and the reducer decides
-   * whether it still belongs (R2). Superseded requests are aborted — listings
-   * too, not only meaning queries: a flat walk nobody waits for otherwise runs
-   * to completion on the server. The abort is also what tells a late response
-   * to say nothing at all, so a stale answer never reaches the URL.
-   */
+  /** Every response is tagged with the asking event, and the reducer decides
+   *  whether it still belongs (R2). Listings are aborted too, not only meaning
+   *  queries: a flat walk nobody waits for otherwise runs to completion on the
+   *  server, and the abort is what silences a late answer. */
   const request = pendingRequest(state);
   const requestId = request?.id ?? null;
   const requestSource = state.inflight?.source ?? "user";
@@ -1630,25 +961,10 @@ export default function App() {
     const land = (landed: Landed): void => {
       if (controller.signal.aborted) return;
       pushRecent(request.path);
-      // The view is real now — record it (url-navigation D1/D2). A restoration
-      // replaces (back must not mint forward-erasing entries); a user
-      // navigation pushes.
-      //
-      // A similarity view the user asked for *from inside the app* marks the
-      // entry it pushes, through the projection's existing `state` channel —
-      // the `LIGHTBOX_ENTRY` pattern, for the same reason (D9): the mark says
-      // this entry has the view it was raised from behind it, so dismissing can
-      // go back to that view rather than re-asking the folder's listing.
-      // Restored and deep-linked landings must not gain it and cannot: this is
-      // gated on `user`, and a restore onto an entry that already carries the
-      // marker writes nothing at all, since the browser has already rewound the
-      // URL and `commitUrl` declines the redundant write, marker included.
-      //
-      // The depth counts from the entry being pushed *from*, read here because
-      // here is where that entry is still current: one deeper than whatever the
-      // current entry is, so a re-tune and a chained find-similar both stack,
-      // and a landing from anywhere else starts at 1. The dismissal goes back
-      // that many hops, leaving the excursion whole rather than one step of it.
+      // A restoration replaces, because back must not mint forward-erasing
+      // entries (D1/D2). An in-app similarity landing marks the entry it pushes
+      // (D9), so dismissing returns to the view it was raised from; the depth
+      // is read here because here that entry is still current.
       urlIntent.current = {
         replace: requestSource === "restore",
         ...(request.kind === "similar" && requestSource === "user"
@@ -1659,13 +975,9 @@ export default function App() {
     };
     const fail = (err: unknown): void => {
       if (controller.signal.aborted) return;
-      // A 503 naming one of the *library's* states says the library is why
-      // this failed, not the path (library R4). Re-read the state so the header
-      // names it — and so `missing` can name the configured root, which the
-      // error body carries but `HttpError` deliberately does not: one place
-      // knows both. Matched against `LIBRARY_STATES` rather than on the field
-      // being present at all, because an index route puts the *index's* state
-      // in that same field: a wedged index is not news about the library.
+      // A 503 naming a *library* state says the library is why this failed,
+      // not the path (R4) — and `missing` can then name the root `HttpError`
+      // drops. Matched against the set, because an index 503 uses that field.
       if (
         err instanceof HttpError &&
         err.state !== undefined &&
@@ -1681,27 +993,17 @@ export default function App() {
       });
     };
     if (request.kind === "similar") {
-      // Knowable without asking, so it is not asked: an archive-resident model
-      // has no embedding and never will. This fails the question rather than
-      // spending a round trip that would come back 404 and be reported as the
-      // fixable kind.
       if (request.model.includes("!/")) {
         dispatch({ type: "failure", id, forView, message: OUTSIDE_CORPUS });
         return () => controller.abort();
       }
-      // `pool` is passed through as the subject holds it — `undefined` where
-      // nothing set one, which the client drops from the body so the index's
-      // own default applies (4.2's rule, now that something on screen can set
-      // it).
+      // `undefined` is dropped from the body, so the index's default applies.
       void api
         .similar(request.model, request.k, request.pool, controller.signal)
         .then(
-          // Similarity order is the index's; the client sorts nothing. No scope,
-          // no `weak`, no `capped`: the index publishes none of them for
-          // neighbours, and a landing that invented them would give the label
-          // meaning-query residue to render (4.7).
-          // The anchor rides along beside the entries, never among them: it is the
-          // question, and the neighbours are the answer (D4's addition).
+          // No scope, `weak` or `capped`: the index publishes none for
+          // neighbours, and inventing them gives the label meaning-query
+          // residue (4.7). The anchor rides beside the entries, never among.
           (res) =>
             land({
               entries: res.entries,
@@ -1711,24 +1013,22 @@ export default function App() {
             }),
           (err: unknown) => {
             const notEmbedded = err instanceof HttpError && err.status === 404;
-            // A 404 means the index *answered* — about this model, not about
-            // itself. Re-probing availability over it would flash the "index is
-            // not there" affordance across a perfectly healthy index, so the
-            // re-probe is kept for the failures that really are availability's.
+            // A 404 means the index *answered*, about this model rather than
+            // itself: re-probing would flash "index is not there" across a
+            // healthy one.
             if (!controller.signal.aborted && !notEmbedded) {
               void api.indexAvailability({ fresh: true }).then(
                 (availability) => dispatch({ type: "index", availability }),
                 () => {},
               );
             }
-            // The status is the contract (`ApiClient.similar`), so the sentence is
-            // chosen from it rather than from the index's own words, which name a
-            // cache the user has never heard of.
+            // The status is the contract (`ApiClient.similar`), so the sentence
+            // comes from it rather than from the index's own words, which name
+            // a cache the user has never heard of.
             if (notEmbedded) {
               if (!controller.signal.aborted) {
-                // Through the getter, not the state: this effect's deps are
-                // `[requestId]` alone, and a report landing must not re-ask the
-                // index (see `readFeatures`).
+                // Through the getter: these deps are `[requestId]` alone, and
+                // a report landing must not re-ask the index.
                 dispatch({
                   type: "failure",
                   id,
@@ -1764,8 +1064,6 @@ export default function App() {
               scores: res.scores,
             }),
           (err: unknown) => {
-            // A 503 carries the index's own state; re-read it so the affordance
-            // and the message agree about what is wrong.
             if (!controller.signal.aborted) {
               void api.indexAvailability({ fresh: true }).then(
                 (availability) => dispatch({ type: "index", availability }),
@@ -1777,9 +1075,7 @@ export default function App() {
         );
     } else {
       void api
-        // `folderMatching` is sent only when off, so an ordinary request is
-        // identical to what it was before the option existed — absence means
-        // the default at every layer: this call, the query string, and the URL.
+        // Sent only when off: absence is the default at every layer.
         .listDir(
           request.path,
           {
@@ -1790,10 +1086,8 @@ export default function App() {
           controller.signal,
         )
         .then(
-          // `stale` rides the landing so the answer carries its own freshness
-          // (listing-tree-cache §5.1): the affordance and the one follow-up
-          // below both read it off the result, which is what keys them to a
-          // listing rather than to a moment.
+          // `stale` rides the landing, keying the affordance and the follow-up
+          // to a listing rather than a moment.
           (res) =>
             land({
               entries: res.entries,
@@ -1808,43 +1102,11 @@ export default function App() {
   }, [requestId]);
 
   /**
-   * The second wave: a landed listing's poses, asked for by path once the
-   * listing is on screen (pose-for-every-model D3).
-   *
-   * Its own request and not part of the listing's, so the listing stays
-   * index-independent — the capability's *the index's absence costs the listing
-   * nothing* — and a meaning or similarity answer is skipped entirely because
-   * its hits carried their poses (`landedListing` is null for those).
-   *
-   * **It asks about the models the landing put on screen, not about a
-   * directory.** All three listing shapes fire it — plain, flat, name search —
-   * and only the first has a grid that a directory's direct children describe:
-   * a flat listing of the library root shows models from subfolders, a name
-   * search shows matches from a whole subtree, and asking about the directory
-   * answered about whatever files sit directly in it — none of which are on
-   * screen — while saying nothing about the ones that are.
-   *
-   * The paths come off `result.entries` — the landing's own array — and
-   * deliberately not off `byKind`, which is a *view* over that landing: the
-   * kinds filter moves on a click with no landing behind it, so keying the wave
-   * on it would re-ask the index every time the user narrowed a name search.
-   * The entries it hides cost a map key each and no render at all.
-   *
-   * Keyed on the landing's asking-event id and those paths, so it fires exactly
-   * once per landing that landed a model: setting the slot changes neither, so
-   * there is no retry either way. An index answering `{}` is not even filed —
-   * see the guard below. A listing of
-   * folders alone asks nothing — there is nothing to ask about. The library's
-   * readiness is a dependency rather than a bare guard, because a boot listing
-   * can land before the probe answers — the wave then goes out when the library
-   * is known rather than never — and it is read as a boolean so a re-probe that
-   * changed nothing cannot re-fire it.
-   *
-   * **Failure is silence.** No abort either: the answer is dropped on arrival
-   * by the landing it names (the reducer's `listingPoses`), which is the one
-   * place that knows which listing is on screen, and an abort here would be a
-   * second, weaker copy of that rule — one that has to be re-armed at exactly
-   * the moment the first already decides correctly.
+   * The second wave (pose-for-every-model D3), its own request so the listing
+   * stays index-independent. It asks about the models **on screen**, not a
+   * directory's children, and off `result.entries` rather than `byKind`, which
+   * the kinds filter moves with no landing behind it. Failure is silence, and
+   * no abort: the reducer drops an answer the listing outran.
    */
   const wave = landedListing(state);
   const waveId = wave?.id ?? null;
@@ -1854,22 +1116,9 @@ export default function App() {
       waveEntries === null
         ? NO_PATHS
         : waveEntries
-            // Only what the listing did NOT carry (listing-tree-cache §6.4).
-            // An entry the server's pose layer already knew about arrives with
-            // `pose` attached at emission, and `carriedPoses` above hands it
-            // straight to the sweep — asking again would spend a round trip to
-            // be told what the landing already said. Everything else about the
-            // wave is unchanged: background, chunked, silent on failure. A
-            // listing where the layer knew every model asks nothing at all,
-            // which is the shrink D7 describes; where it knew none, this is the
-            // set it always was.
-            //
-            // `=== undefined` and not a truth test, deliberately (§6.9,
-            // round-3 finding 6): an entry carrying `pose: null` is one the
-            // server asked the index about and the index had no orientation
-            // for, so it is settled and drops out of the wave here. That is
-            // what keeps a never-embedded folder from costing a wave on every
-            // landing for as long as the app is open.
+            // Only what the listing did not carry (§6.4). `=== undefined` and
+            // not a truth test: `pose: null` is settled, and dropping it here
+            // keeps a never-embedded folder from costing a wave per landing.
             .filter((e) => e.kind === "model" && e.pose === undefined)
             .map((e) => e.path),
     [waveEntries],
@@ -1879,54 +1128,19 @@ export default function App() {
     if (waveId === null || wavePaths.length === 0 || !libraryReady) return;
     void api.semanticPosesFor(wavePaths).then(
       (res) => {
-        // Filed whole, `null`s included (`pose-rerender` D5): `null` is the
-        // index settled as holding no orientation, which is what makes a
-        // posed render stale, so an answer that says only that is still an
-        // answer. The guard that skipped an empty map to save a reconcile
-        // walk went with it — an empty answer now means an unsettled index
-        // (warming, or unanswered), the walk it costs issues nothing (the
-        // by-value compare finds every pose unchanged), and a guard here
-        // would be a second copy of a rule the preview wave keeps only
-        // because its merge is a true no-op.
+        // Filed whole, `null`s included (`pose-rerender` D5): a settled absence
+        // is what makes a posed render stale, so an answer of only those is
+        // still an answer.
         dispatch({ type: "listingPoses", id: waveId, poses: res.poses });
       },
       () => {},
     );
   }, [waveId, wavePaths, libraryReady, api, dispatch]);
 
-  /**
-   * The one follow-up a stale-marked listing asks for (listing-tree-cache
-   * §5.2, design D5).
-   *
-   * The server answered from a cached tree it has not checked yet; it is
-   * checking now, and the corrected listing is available from an ordinary
-   * second request. No new transport, because there is none to add — the Hono
-   * app must run on Node unchanged (architecture D1) — so this is `listDir`
-   * again, through the same fetch layer, landing through the same `accepts`
-   * guard. A navigation started in between simply wins.
-   *
-   * **Exactly once per landed stale answer**, and the dependency is what
-   * enforces it: `staleId` is the answering event's own id, so it changes only
-   * when a *different* answer lands. The reducer refuses a second one anyway
-   * (`revalidate`'s `followUp` clause), which is what keeps a server that goes
-   * on answering marked — a failed pass, a root still unvalidated past the
-   * revalidation TTL — from being asked in a loop. When the follow-up is itself
-   * stale the affordance stays up and nothing more is asked; the next request
-   * the user drives tries again.
-   *
-   * A failed follow-up is not retried either, and for the same reason: nothing
-   * about `staleId` changed, so this does not re-run. Silence is the right
-   * outcome — the listing on screen is the one the user asked for, and it is
-   * the server's own marker saying it may be behind.
-   *
-   * **Silence including the header error**, which this comment used to promise
-   * and the reducer did not deliver (round-2 finding 2): a rejected follow-up
-   * reached the ordinary `failure` action and painted a banner over a perfectly
-   * good grid, reporting the app's own background housekeeping as the user's
-   * navigation having failed. The `failure` case now checks `inflight.followUp`
-   * and clears the request without setting one; 'Refreshing…' stays, because it
-   * was indeed not refreshed.
-   */
+  /** Exactly once per stale answer, keyed on the answering event's id, or a
+   *  server that goes on answering marked is asked in a loop (§5.2). A failure
+   *  raises no header error either: background housekeeping must not paint a
+   *  banner over a good grid. */
   const staleId =
     state.result !== null &&
     state.result.stale &&
@@ -1940,22 +1154,13 @@ export default function App() {
 
   const navigate = useCallback(
     (path: string) => {
-      // Navigation is itself the request that clears search state (D2/D3) — no
-      // extra fetch needed to drop a filter or a committed query, and the
-      // filter is the caller's to clear because the reducer never reads it.
+      // The filter and the mark are the caller's to clear, because the reducer
+      // never reads either (D2/D3). A pending placement is not: reveal and ↑
+      // raise theirs *after* this, for the arrival rather than the departure.
       setFindText("");
       setFindOpen(false);
-      // The reveal mark is ephemeral in the same sense (3.5) and dropped here;
-      // a pending placement is not — the placement effect drops one when the
-      // question it rides is superseded. Reveal and ↑ raise their placement
-      // *after* calling this, deliberately: it belongs to the arrival this
-      // navigation causes, not to the view being left.
       setMarked(null);
-      // A volume mounted after the server started is picked up by the next
-      // navigation rather than by a reload (library R4): the state is asked
-      // again on the way out, so pressing ↑ or retyping the path is enough.
-      // Only while it is not `ready` — a healthy library is not re-asked on
-      // every click.
+      // So a volume mounted later needs a navigation, not a reload (R4).
       const lib = libraryRef.current;
       if (lib !== null && lib.state !== "ready") probeLibrary();
       commit({ type: "navigate", path, prefs: ownPrefs() });
@@ -1964,56 +1169,31 @@ export default function App() {
   );
 
   function toggleFlat(): void {
-    // Deep results are flat-shaped regardless of the toggle; pressing it issues
-    // an ordinary request that supersedes the search, so the query stops being
-    // committed. Targeted at `dest` — the newest place the user asked for — so
-    // untoggling mid-navigation follows the user rather than snapping back.
+    // An ordinary request, so it supersedes a committed search. Targeted at
+    // `dest`, so untoggling mid-navigation follows the user rather than
+    // snapping back.
     commit({ type: "toggleFlat" });
   }
 
   /**
-   * Leave the committed subject — **the** dismissal, whichever affordance asked
-   * for it (D9). One function with the branch inside it; two call sites, zero
-   * copies.
-   *
-   * The branch is provenance, and it is the whole of what this adds: a
-   * similarity view entered from inside the app sits on an entry we pushed and
-   * marked, so going back restores the view it was raised from *whole* — a
-   * query search with its options, a listing with its place — rather than
-   * re-asking the location's listing and throwing that answer away. On a cold
-   * link there is nothing of this app's behind the entry, so back would leave
-   * the app; the reducer path clears to the listing instead.
-   *
-   * How far back is the marker's depth, not one hop. Every in-app similar
-   * landing pushes a marked entry — tuning `k` or the pool is a different
-   * question, and Back must reach the neighbours actually shown — so an
-   * excursion is a *run* of marked entries. Going back one landed on the
-   * intermediate tuning step, which is not a view the user asked to return to;
-   * going back the depth leaves the whole excursion in one press, tuning steps
-   * and chains alike. Back still walks the steps individually.
-   *
-   * And a query view is untouched by all of this: its entry is never marked, so
-   * `otherwise` is what runs — exactly as before.
+   * **The** dismissal, whichever affordance asked for it (D9). The branch is
+   * provenance: an in-app similarity view sits on an entry we marked, so back
+   * restores the view it came from, while a cold link has nothing behind it and
+   * clears to the listing. By the marker's depth, since every re-tune pushes
+   * another marked entry.
    */
   const leaveSubject = useCallback(
     (otherwise: Action): void => {
       if (isSimilarEntry()) {
-        // The leaving grid's place, filed while the index is still this
-        // entry's — `go` moves it asynchronously, and `onPop` reads the entry
-        // it lands on.
+        // Filed while the index is still this entry's: `go` moves it
+        // asynchronously, and `onPop` reads the entry it lands on.
         recordNow();
-        // popstate does the rest: the restoration is one dispatch of the
-        // previous URL resolved whole, which is the machinery that already
-        // exists for Back (url-navigation D2).
         window.history.go(-similarDepth());
         return;
       }
-      // A query's dismissal is a push, not a pop, so it cannot read the entry
-      // it lands on; it retraces the way ↑ does (retrace-placement D3): the
-      // trail is walked back to the nearest entry whose listing is the one the
-      // clear lands on — the anchor path, no subject, the current flat state —
-      // which is the visit the search was raised from. `entry`, not `up`: there
-      // is no folder the user came out of, so no child to centre.
+      // A query's dismissal is a push, not a pop, so it cannot read the entry it
+      // lands on and retraces the way ↑ does (retrace-placement D3). `entry`,
+      // not `up`: no folder was left, so there is no child to centre.
       const base = liveView(stateRef.current);
       const key = listingKey({
         ...base,
@@ -2030,16 +1210,10 @@ export default function App() {
   );
 
   function handleQueryTextChange(value: string): void {
-    // Emptying the input while a subject is committed is how it is left: it
-    // drops the subject, cancels any deferral, and re-issues the ordinary
-    // listing (file-search's "Clearing a committed query" rule, now one rule
-    // for both kinds of subject — D9). That cancel asserts the view at
-    // dispatch, so it owns the URL; ordinary typing owns nothing.
-    //
-    // Through the one dismissal, so erasing stale text under an in-app
-    // similarity view returns where the ✕ returns. Left as its own commit, the
-    // tidying gesture and the control would be two exits again — which is the
-    // resemblance D9 refuses, in the one place D9 already had to argue about.
+    // Emptying the input while a subject is committed is how it is left (D9),
+    // and it goes through the one dismissal so erasing stale text under an
+    // in-app similarity view returns where the ✕ returns. Ordinary typing
+    // asserts nothing and owns no URL.
     if (value.trim() === "" && live.subject.kind !== "none") {
       leaveSubject({ type: "queryText", text: value });
       return;
@@ -2047,98 +1221,60 @@ export default function App() {
     dispatch({ type: "queryText", text: value });
   }
 
-  /**
-   * Run the deferred phrase as a name search. Offered rather than done for the
-   * user: substituting the corpus is only honest when it was asked for, and
-   * this is the asking. Being a user action, it may rename the view.
-   */
+  /** Substituting the corpus is only honest when it was asked for. */
   function runDeferredByName(): void {
     if (state.phase === "idle") return;
     commit({ type: "deferredToName" });
   }
 
-  /** Open the find control, or focus it if it is already open. */
   function openFind(): void {
     setFindOpen(true);
     setFindFocus((n) => n + 1);
   }
 
-  /** Dismissing clears the filter: a closed control must never leave the grid
-   *  silently narrowed. */
+  /** A closed control must never leave the grid silently narrowed. */
   function closeFind(): void {
     setFindOpen(false);
     setFindText("");
   }
 
-  /**
-   * Folder matching decides what the *server* returns, so changing it with a
-   * query committed re-issues that query — the `toggleFlat` precedent:
-   * re-request, land, commit (D3). Operating a control is also the only thing
-   * that writes to storage (D2): a restore or a link never does.
-   */
+  /** Decides what the *server* returns, so a committed query is re-issued (D3).
+   *  Operating a control is also the only thing that writes to storage — a
+   *  restore or a link never does (D2). */
   function setFolderMatching(on: boolean): void {
     setFolderMatchingEnabled(on);
     commit({ type: "setFolderMatching", on });
   }
 
-  /**
-   * The mode decides which corpus a submit consults, so changing it with a
-   * query committed re-runs that query there — search by name, find nothing,
-   * flip, and the same words go to the index without being retyped (D2). One
-   * function decides which corpus that is, shared with submit (R6), so the flip
-   * defers exactly where a submit would rather than substituting a name search.
-   */
+  /** Re-runs a committed query against the other corpus (D2), through the
+   *  decision submit shares (R6), so the flip defers where a submit would. */
   function setMode(next: SearchMode): void {
     setSearchMode(next);
     commit({ type: "setMode", mode: next });
   }
 
-  /**
-   * Run a phrase the introduction supplied — an example query's chip, or the
-   * surprise action (`landing-page` D4). `setSearchMode` and not
-   * `applySessionSearchMode`: clicking a chip *is* the visitor choosing meaning
-   * mode, so it persists exactly as the mode radio does, and the starting-mode
-   * rule that leaves the key unset has nothing to do with it.
-   *
-   * `commit` and not `dispatch`, so the search owns the URL and enters history
-   * as any submitted one does — which is what makes Back from a chip's results
-   * return to the view it was clicked from.
-   *
-   * Where the phrase *runs* is the reducer's business and not this one's: the
-   * transition commits it at the library's top, which is the location
-   * `introSearchable` gates on and the only one the index is known to cover.
-   */
+  /** `setSearchMode` and not `applySessionSearchMode`, because clicking a chip
+   *  *is* the visitor choosing meaning mode; `commit` and not `dispatch`, so
+   *  Back from the results returns to the view it was clicked from (D4). */
   function runQuery(text: string): void {
     setSearchMode("meaning");
     commit({ type: "runQuery", text, mode: "meaning" });
   }
 
-  /**
-   * Tuning shapes what the index returns, so changing it with a meaning query
-   * committed re-runs that query — the same rule the mode and folder matching
-   * follow. Trying a parameter is the point, and a setting that only applied to
-   * the *next* search would make trying it a two-step.
-   */
+  /** Re-runs a committed meaning query, like the mode and folder matching: a
+   *  setting that only applied to the *next* search makes trying it a
+   *  two-step. */
   function setTuning(next: Tuning, opts: { defer?: boolean } = {}): void {
     setSearchTuning(next);
-    // Whatever a previous change scheduled is superseded by this one, whether
-    // this one waits or runs now.
     clearTimeout(tuningTimerRef.current);
     tuningForRef.current = null;
-    // A click on a toggle is the finished value already, and waiting for it
-    // would only make the control feel broken.
     if (opts.defer !== true) {
       commit({ type: "setTuning", tuning: next, run: true });
       return;
     }
-    // A typed number arrives one keystroke at a time and every intermediate
-    // value is a whole query the index would have to answer — so it is recorded
-    // now and run later. Recorded only: projecting it would mint a history
-    // entry per keystroke (R3's fence).
+    // Recorded, not committed: every intermediate digit is a whole query, and
+    // projecting one would mint a history entry per keystroke (R3's fence).
     dispatch({ type: "setTuning", tuning: next, run: false });
-    // The re-run belongs to the view that scheduled it, which is the live view
-    // with this value already applied. The effect below drops the timer as soon
-    // as that stops being the question on screen.
     tuningForRef.current = { ...liveView(state), tuning: next };
     tuningTimerRef.current = setTimeout(() => {
       tuningForRef.current = null;
@@ -2146,15 +1282,9 @@ export default function App() {
     }, TUNING_DEBOUNCE_MS);
   }
 
-  /**
-   * A scheduled tuning re-run belongs to the view that scheduled it. Fired
-   * against another one it would be the newest request, so latest-wins would
-   * hand it the grid and the URL, dragging the user back to the view they just
-   * left. `sameListing` is the test — the whole question minus the model, since
-   * which model is open says nothing about which entries the view contains — so
-   * a navigation, another search, or a popstate restoring different tuning drops
-   * it, while an unrelated landing or a lightbox open leaves it armed.
-   */
+  /** Fired against another view the re-run would be the newest request, and
+   *  latest-wins would drag the user back to the view they just left.
+   *  `sameListing` is the test: the whole question minus the model. */
   useEffect(() => {
     const scheduled = tuningForRef.current;
     if (scheduled === null || sameListing(liveView(state), scheduled)) return;
@@ -2162,24 +1292,10 @@ export default function App() {
     clearTimeout(tuningTimerRef.current);
   }, [state]);
 
-  /**
-   * The similarity view's parameters — how many neighbours, and how the index
-   * pools a model's views. Both re-ask, for the reason the mode and folder
-   * matching re-ask a committed query: trying a parameter is the point, and a
-   * setting that only applied to the *next* find-similar would make trying it a
-   * two-step.
-   *
-   * No debounce here and no record-only phase, unlike `setTuning`: the count is
-   * typed digit by digit, so the panel holds the draft and only calls this with
-   * a finished value. `commit` rather than `dispatch` because a deferred
-   * re-parameterisation asserts its view at dispatch and owes the URL that
-   * assertion; a landed one is written by its landing, as every ask is.
-   *
-   * Nothing is written to storage. These are not sticky preferences: they
-   * belong to the view they were set on, they travel in its URL, and the next
-   * find-similar starts from the defaults again — deliberately, since a count
-   * that was right for one model's neighbourhood says nothing about another's.
-   */
+  /** Both re-ask, as a committed query does, and no debounce: the panel holds
+   *  the draft. Nothing is written to storage — these belong to the view they
+   *  were set on, since a count right for one neighbourhood says nothing about
+   *  another's. */
   const setSimilarTuning = useCallback(
     (k: number, pool?: Tuning["pool"]): void => {
       commit({ type: "similarTuning", k, pool });
@@ -2187,48 +1303,35 @@ export default function App() {
     [commit],
   );
 
-  /** The kind option only selects among entries already returned — no request,
-   *  but the URL names the view and this changed which entries it shows. */
   function setKinds(next: SearchKinds): void {
     setSearchKinds(next);
     commit({ type: "setKinds", kinds: next });
   }
 
   function submitSearch(): void {
-    // A blank/whitespace-only submit is not a search (D1) — nothing to commit,
-    // and nothing for the URL to own.
     if (state.drafts.queryText.trim() === "") return;
     commit({ type: "submit" });
   }
 
-  // Boot (url-navigation D4): one restore of the view the URL resolved to —
-  // `/` when it named no path (library D2/D7), never a stored last path. It
-  // lands as a restoration, so the resolved view is seeded via replaceState —
-  // pushed entries start with the user's first real navigation.
-  // A meaning link fetches nothing here: the corpus decision reads the
-  // availability probe from state, and until it answers the answer is `wait` —
-  // rendering the ordinary listing meanwhile would flatten the whole volume for
-  // tiles the meaning results are about to replace.
+  // A restoration, so the view is seeded via replaceState and pushed entries
+  // start with the first real navigation (D4). A meaning link fetches nothing
+  // until the probe answers: the listing meanwhile would flatten the volume for
+  // tiles the results are about to replace.
   useEffect(() => {
     dispatch({ type: "restore", view: state.view });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // The shared renderer serves one purpose at a time: suspend the thumbnail
-  // queue while an orbit overlay or lightbox is active. Keyed off `viewer` —
-  // what is mounted — never off `view.model`, which is what the URL names and
-  // disagrees with it for the whole teardown (R7).
+  // One renderer, one purpose at a time (D2/D3). Keyed off `viewer` — what is
+  // mounted — never off `view.model`, which disagrees with it for the whole
+  // teardown (R7).
   useEffect(() => {
     if (viewer !== null) queue.suspend();
     else queue.resume();
   }, [viewer, queue]);
 
-  // Re-read availability on mount and whenever a listing lands: the index is a
-  // separate service that may start after this app did, and a warming one must
-  // become usable without a reload. No timer of its own — these are the
-  // interactions the app already makes (3.8). The reducer keeps the reading by
-  // identity when nothing about it changed, so a 2s poll that says the same
-  // thing re-renders nothing.
+  // A separate service that may start after this app did, so it is re-read on
+  // the interactions the app already makes rather than on a timer (3.8).
   useEffect(() => {
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -2237,10 +1340,8 @@ export default function App() {
         (s) => {
           if (!alive) return;
           dispatch({ type: "index", availability: s });
-          // Warming is the one state that must re-check without being asked:
-          // "the interactions the app already makes" is an empty set while a
-          // user waits for SigLIP, because nothing they do changes the path.
-          // The server's own per-state TTL makes this cheap.
+          // The one state that must re-check unasked: nothing the user does
+          // moves it along.
           if (s.state === "warming") timer = setTimeout(read, 2000);
         },
         () => {
@@ -2256,38 +1357,22 @@ export default function App() {
     };
   }, [api, dispatch, state.view.path]);
 
-  /**
-   * Read the feature report, on the availability effect's trigger above and
-   * for its reason: mount, then again on each **navigation** *until it
-   * resolves*, so a server that answers late becomes fully usable without a
-   * reload (feature-report D3). The view path is the key, exactly as it is
-   * above — a re-list at the same path (a flat toggle, a find filter) is not a
-   * navigation and asks nothing. No timer of its own, and no poll: unlike a
-   * warming index, a report that failed has no state of its own to watch, so
-   * the interactions the app already makes are the whole schedule.
-   *
-   * One effect rather than a mount effect plus a navigation effect: `features`
-   * starts `null`, so this already fires at mount, and a second effect would
-   * only duplicate that first request. Once it resolves the guard makes every
-   * later navigation free, and a failed read leaves the state at `null` —
-   * which is not a re-render, so nothing retries until the next navigation.
-   */
+  /** Mount, then each navigation *until it resolves*, so a server that answers
+   *  late becomes usable without a reload (feature-report D3). A failed read
+   *  leaves `null`, which is not a re-render, so nothing retries. */
   useEffect(() => {
     if (features !== null) return;
     let alive = true;
     void api.features().then(
       (report) => {
         if (!alive) return;
-        // The ref beside the state, written in the same act: the decorated
-        // `ApiClient` and the thumbnail sweep read the report through
-        // `readFeatures` rather than through this state, because both are built
-        // once and must not be rebuilt when it resolves (D6).
+        // The client and the sweep read through `readFeatures`, and must not
+        // be rebuilt when this resolves (D6).
         featuresRef.current = report;
         setFeatures(report);
       },
       () => {
-        // Deliberately nothing: `null` already means "not known", and the next
-        // navigation asks again. Withholding on a failed read is the point (D3).
+        // Deliberately nothing: withholding on a failed read is the point (D3).
       },
     );
     return () => {
@@ -2296,41 +1381,12 @@ export default function App() {
   }, [api, features, state.view.path]);
 
   /**
-   * The introduction's starting mode (`landing-page` D5), applied once per page
-   * on the first render where every condition holds at the same time: a known
-   * report declaring the introduction offered, an index that can actually
-   * answer **where this view stands**, no stored choice, no mode in the URL this
-   * view is under, and nothing committed.
-   *
-   * Every clause earns its place. The index, because meaning mode is not
-   * selectable while the index cannot answer (`semantic-search`) and a start is
-   * a selection — so this cannot fire and then sit in a mode that refuses. The
-   * *live* path and not the library's top: the mode it puts in force governs
-   * whatever the visitor landed on, so a deep link into an archive interior —
-   * which the index covers nowhere (`indexCovers`) — would otherwise start in a
-   * mode whose first typed phrase the server answers 400. The rule simply has
-   * not fired yet there, and fires on the first landing that is covered.
-   * Nothing committed, because `'setMode'` re-asks a committed query: a report
-   * or an index arriving after the visitor already searched by name would
-   * otherwise re-run their search against the index behind them.
-   *
-   * The URL is read *live*, not captured at mount, because the clause is about
-   * one view and not about the page: a URL that carries `mode` governs its own
-   * view (D5), and a mount-time flag went on governing every view after it — a
-   * shared chip link (`?q=…&mode=meaning`) left the visitor who backed out of
-   * it to the top in the stored default with the banner up, which is the entry
-   * path this rule exists for. Leaving the view is what lets it lapse: the
-   * projection rewrites the address bar for the view that landed, and a `mode`
-   * is written only under a committed query (`serializeView`), so the param
-   * survives exactly as long as the view it belongs to.
-   *
-   * `applySessionSearchMode` **and** the dispatch, because they answer
-   * different questions: the closure is what `ownPrefs()` re-seeds from on
-   * every folder click, and the view is what this screen reads. The store is
-   * left alone — a browser that never chose keeps following the deployment.
-   * `dispatch` and not `commit`, matching what the action does here: with
-   * nothing committed `'setMode'` is a fetchless patch, and the projection
-   * writes what it patched.
+   * The introduction's starting mode, once per page (`landing-page` D5). The
+   * *live* path, because a deep link into an archive interior would otherwise
+   * start in a mode the server answers 400; nothing committed, because
+   * `'setMode'` re-asks a committed query; the URL read live, because the
+   * clause is about one view. The store is left alone, so a browser that never
+   * chose keeps following the deployment.
    */
   useEffect(() => {
     if (introModeApplied.current) return;
@@ -2344,14 +1400,9 @@ export default function App() {
     dispatch({ type: "setMode", mode: "meaning" });
   }, [dispatch, features, state]);
 
-  /**
-   * Read the platform registry into the session's held report — the whole of
-   * the app's I/O for the launch actions, in one place.
-   *
-   * A failed read is `null` and not a retained stale answer: the report decides
-   * whether actions are *offered*, and offering a launch into an application
-   * the registry no longer reports is worse than offering none.
-   */
+  /** A failed read is `null`, not a retained stale answer: offering a launch
+   *  into an application the registry no longer reports is worse than offering
+   *  none. */
   const refreshApps = useCallback((): void => {
     void api.apps().then(
       (report) => setApps(report),
@@ -2359,32 +1410,18 @@ export default function App() {
     );
   }, [api]);
 
-  // Once per session, and that is the whole schedule (L5) — the deliberate
-  // difference from the index reading above, which re-reads on every landing
-  // because a service that starts late must become usable without a reload.
-  // The registry has one other moment when it can change under us, and it is
-  // not a landing: a chooser the user just used. *Open with…*'s own body asks
-  // for the re-read then (`refreshApps` on the host), so this effect stays a
-  // mount effect rather than growing a dependency that would re-read on every
-  // navigation for nothing.
+  // Once per session (L5): the registry's other moment of change is a chooser,
+  // and *Open with…* asks for that re-read itself.
   useEffect(() => {
     refreshApps();
   }, [refreshApps]);
 
-  // Ctrl-F / Cmd-F takes the browser's find, deliberately: the app's own is the
-  // better one on this content — it matches the full relative path a tile is
-  // only labeled by, it knows when it has hidden everything, and it does not
-  // stop at the tiles the browser happens to have painted.
+  // Taken from the browser deliberately: the app's own find matches the full
+  // relative path a tile is only labeled by, and does not stop at the tiles the
+  // browser has painted.
   useEffect(() => {
     function onKey(e: KeyboardEvent): void {
-      // Escape dismisses the find control from anywhere, not only from inside
-      // its own input: the user opens it, clicks a tile, and Escape is what
-      // they reach for. Not while a viewer is up — the lightbox owns Escape
-      // then, and closing a control behind it is not what was asked.
-      // Nor while an entry menu is raised, for the same reason and by the same
-      // test (2.3): the menu is the thing on top, its own window listener closes
-      // it, and this one stands down so one Escape does not dismiss both. With
-      // no menu up the ref is false and find's Escape is untouched.
+      // From anywhere, but not while a viewer or a menu owns Escape (2.3).
       if (
         e.key === "Escape" &&
         findOpenRef.current &&
@@ -2394,23 +1431,15 @@ export default function App() {
         closeFind();
         return;
       }
-      // Not while the user is typing somewhere else for their own reasons —
-      // Ctrl-F inside a query or a path is a surprise, not a shortcut, and
-      // Alt+ArrowUp must stand down while any input holds the keyboard.
       // The event's own target, not `document.activeElement`: for a real
       // keydown they are the same element, and the target is the one the
-      // keystroke actually belongs to.
+      // keystroke belongs to.
       const el =
         e.target instanceof HTMLElement ? e.target : document.activeElement;
       const typing =
         el instanceof HTMLInputElement ||
         el instanceof HTMLTextAreaElement ||
         (el instanceof HTMLElement && el.isContentEditable);
-      // Alt+ArrowUp ascends one level, the same as the header's ↑ button —
-      // and stands down under the same three conditions Escape does: while the
-      // user is typing (path bar, search, find), while a viewer owns the
-      // keyboard, and while an entry menu is raised. `goUp` is the top guard
-      // itself (no-op at the library top).
       if (
         e.key === "ArrowUp" &&
         e.altKey &&
@@ -2425,10 +1454,6 @@ export default function App() {
       }
       if (e.key !== "f" || !(e.ctrlKey || e.metaKey) || e.altKey) return;
       if (typing && el.closest("[data-find-bar]") === null) return;
-      // Not while a viewer owns the keyboard. The lightbox traps focus, and
-      // opening a find control behind it would pull focus out of the trap into
-      // a box the user cannot see — and the orbit overlay has no listing to
-      // narrow either. Filtering is about the grid; both of these cover it.
       if (viewerRef.current !== null) return;
       e.preventDefault();
       openFind();
@@ -2442,8 +1467,6 @@ export default function App() {
 
   viewerRef.current = viewer;
 
-  /** Enter lightbox mode from history/deep-link restore — no tile element, and
-   *  the entry it sits on is the browser's, not one to mint. */
   const openRestoredLightbox = useCallback((entry: DirEntry) => {
     suppressViewerPushRef.current = true;
     const size = Math.min(window.innerWidth, window.innerHeight) / 4;
@@ -2460,32 +1483,17 @@ export default function App() {
     });
   }, []);
 
-  // History is one dispatch (url-navigation D2): the parsed URL, resolved into
-  // a whole view, restored as a whole. It needs no live mirror of the state to
-  // decide what changed — the reducer compares, and a history entry that
-  // differs only in which model is open patches that field instead of
-  // re-requesting a listing it already has. Subscribed once, for the same
-  // reason.
+  // One dispatch of the whole resolved view (D2), so this needs no mirror of
+  // the state and subscribes once: the reducer compares, and an entry differing
+  // only in which model is open patches.
   useEffect(() => {
     function onPop(): void {
       const v = parseUrl();
-      // No path guard: a URL naming none names the library's top (design D2),
-      // which is a view like any other, so popping back to a bare URL restores
-      // the root instead of being ignored.
-      // The input shows the restored query; the filter is not part of the view
-      // a URL names, so it starts empty here as everywhere else.
       setFindText("");
       setFindOpen(false);
-      // Nor is the reveal mark: going back to a folder an entry was revealed in
-      // lists it with nothing marked (3.5).
       setMarked(null);
-      // The browser has already moved, so `history.state` — and the index —
-      // are the restored entry's: a settle timer still pending belongs to the
-      // entry just left and must not file under this one, and the placement
-      // to land is this entry's own row (retrace-placement D2/D4). Unknown
-      // index, unknown row, or a row for a different listing (a state-less
-      // entry reads as index 0, which is some other entry's row): null, which
-      // resolves to the top.
+      // The browser has already moved, so a settle timer still pending belongs
+      // to the entry just left and must not file under this one (D2/D4).
       clearTimeout(recordTimerRef.current);
       recordTimerRef.current = undefined;
       const view = resolveView(v);
@@ -2499,7 +1507,7 @@ export default function App() {
     return () => window.removeEventListener("popstate", onPop);
   }, [dispatch, raisePlacement]);
 
-  // A `model` the view names but nothing has mounted yet (url-navigation D3):
+  // A `model` the view names but nothing has mounted (url-navigation D3):
   // honored once its entry is in a landed listing, dropped silently after a
   // successful listing that lacks it.
   useEffect(() => {
@@ -2518,9 +1526,8 @@ export default function App() {
       openRestoredLightbox(entry);
       return;
     }
-    // Bridge 4 (R7): the drop rewrites that one field of the live URL rather
-    // than projecting a view, because the projection's fence keeps model
-    // transitions off the wholesale writer.
+    // Bridge 4 (R7): the drop rewrites that one field of the live URL, because
+    // the projection's fence keeps model transitions off the wholesale writer.
     const url = parseUrl();
     if (url.model !== undefined)
       commitUrl({ ...url, model: undefined }, { replace: true });
@@ -2536,47 +1543,11 @@ export default function App() {
   ]);
 
   /**
-   * Place the grid on arrival (retrace-placement D5) — the honor-or-drop
-   * pattern the effect above follows, for the scroller: hold the request, act
-   * only on a settled answer, resolve it against the listing that landed
-   * (`resolvePlacement` is D4's whole fallback chain), apply it once, clear it.
-   * A layout effect so the placed position is what paints, not the top and
-   * then a jump.
-   *
-   * Once per landing, by the answer's id. A restore that asked the same
-   * question patched instead — same id, nothing landed — so a request raised
-   * for it is dropped and nothing is applied: closing the lightbox leaves the
-   * grid exactly where it was. A stale listing's follow-up lands a new id but
-   * is not applied either: the user was placed when the first answer landed
-   * and may have moved since; re-placing them would fight that (D5's "applied
-   * once"). And with no request at all, the landing is an arrival and goes to
-   * the top — explicitly, so a fast landing with no skeleton does not keep the
-   * old scroller's clamped offset.
-   *
-   * "Settled" includes the skeleton being down. The skeleton is a delayed flag
-   * that clears in a passive effect, so on the commit a slow listing lands
-   * the answer is settled but `<main>` still renders the skeleton and no tile
-   * exists to place against; consuming the id there would lose the place on
-   * the very landing this exists for (a re-fetch slower than
-   * `SKELETON_DELAY_MS`). The effect waits — the id is untouched — and runs
-   * again on the commit that mounts the grid, where the placement and the
-   * reveal's mark both take.
-   *
-   * A request rides exactly one question: the first in flight after it was
-   * raised (`pendingQuestionRef`; every raiser raises in the same batch as
-   * its dispatch). A different question in flight supersedes it — the user
-   * committed a search, a path, a similarity view while the retrace was in
-   * flight — and that landing is an arrival, at the top. A patch leaves it
-   * alone: a kind flip, a tuning commit outside a query, a model opened
-   * during the flight change no question, so the place still lands. A
-   * failure is not an arm of its own: `ask` keeps a standing failure, so
-   * dropping on any failure lost a retrace raised after a failed navigation;
-   * and a retrace's own failure leaves the raised answer on screen, which the
-   * patch check below drops.
-   *
-   * The reveal is the `reveal` case: a located entry is centred and marked; a
-   * revealed entry that has since been moved or deleted leaves the folder
-   * presented normally, with no error and nothing marked.
+   * Place the grid on arrival, once per landing, by the answer's id (D5).
+   * "Settled" includes the skeleton being down, since it clears in a passive
+   * effect and on that commit there is no tile to place against. A request
+   * rides one question, the first in flight after it was raised: another
+   * supersedes it, a patch does not.
    */
   const appliedRef = useRef<number | null>(null);
   useLayoutEffect(() => {
@@ -2593,9 +1564,8 @@ export default function App() {
         return;
       }
     }
-    // `busy`, not `inflight !== null`: a stale answer's follow-up must not
-    // hold the apply, or the answer lands under the skeleton, the follow-up
-    // takes its place in flight, and its own landing is the arm below.
+    // `busy`, not `inflight !== null`: a stale answer's follow-up must not hold
+    // the apply, or the place lands on the follow-up instead.
     if (result === null || busy(state) || showSkeleton) return;
     if (
       pendingPlacement !== null &&
@@ -2617,8 +1587,6 @@ export default function App() {
     if (pendingPlacement !== null) setPendingPlacement(null);
     if (request.kind !== "reveal" || resolved.kind !== "center") return;
     setMarked(request.path);
-    // The fade is the animation's (index.css); this only decides when the class
-    // comes off, so revealing the same entry twice replays it.
     clearTimeout(markTimerRef.current);
     markTimerRef.current = setTimeout(() => setMarked(null), MARK_MS);
   }, [
@@ -2629,9 +1597,8 @@ export default function App() {
     showSkeleton,
   ]);
 
-  // The lightbox history push hooks the transition INTO 'lightbox' mode, not
-  // openLightbox — that function is the keyboard entrance only; the pointer
-  // route promotes the orbit overlay in place (url-navigation D3).
+  // Hooked to the transition INTO 'lightbox', not `openLightbox`, which is the
+  // keyboard entrance only: the pointer route promotes the overlay in place.
   const prevModeRef = useRef<"orbit" | "lightbox" | null>(null);
   useEffect(() => {
     const mode = viewer?.mode ?? null;
@@ -2639,9 +1606,8 @@ export default function App() {
     prevModeRef.current = mode;
     if (mode !== "lightbox" || prev === "lightbox" || viewer === null) return;
     if (suppressViewerPushRef.current) {
-      // Restored from history or a deep link: preserve whatever state this
-      // entry already carries — a forward-restored lightbox is sitting on the
-      // entry we originally pushed, marker included.
+      // Preserve the state this entry carries: a forward-restored lightbox
+      // sits on the entry we pushed.
       suppressViewerPushRef.current = false;
       commit(
         { type: "modelOpen", path: viewer.entry.path },
@@ -2658,11 +1624,9 @@ export default function App() {
     }
   }, [viewer, commit]);
 
-  // The model left the view while a session is open — browser-back, or a close
-  // that dropped the param — so ask ViewerLayer for its persisting close
-  // (bridge 2: the teardown is private to it). Only once the view had named it:
-  // the overlay is promoted a transition before the dispatch that names it, and
-  // signalling in that window would close the lightbox as it opened.
+  // Only once the view had named it: the overlay is promoted a transition
+  // before that dispatch, and signalling in between would close the lightbox as
+  // it opened (bridge 2).
   useEffect(() => {
     if (viewer?.mode !== "lightbox") {
       namedModelRef.current = null;
@@ -2677,11 +1641,9 @@ export default function App() {
     setCloseSignal((n) => n + 1);
   }, [viewer, state.view.model]);
 
-  // In-app close affordances route here (url-navigation D3): a lightbox whose
-  // entry we pushed closes through history so ✕ and browser-back are one
-  // path; a deep-linked one has nothing behind it — back would leave the app —
-  // so its param drops via replaceState and the view drops it too, which is
-  // what the watcher above turns into the teardown.
+  // A lightbox whose entry we pushed closes through history, so ✕ and back are
+  // one path; a deep-linked one has nothing behind it, so its param drops via
+  // replaceState (D3).
   const onViewerCloseIntent = useCallback(() => {
     if (isLightboxEntry()) {
       window.history.back();
@@ -2693,24 +1655,13 @@ export default function App() {
     dispatch({ type: "modelClose" });
   }, [dispatch]);
 
-  // Pure view state over the landed entries — never reaches useThumbnails,
-  // whose effect resets the whole thumb map to `loading` on any `entries`
-  // identity change (D2). Matches each entry's full `name`, which in flat/deep
-  // views is its relative path, not the shortened tile label.
-  // Trimmed once and used everywhere the filter is read: whitespace-only text
-  // is no filter (the same rule a submitted query follows), and a trailing
-  // space mid-word must not blank a grid full of names that contain spaces.
+  // Matches the full `name`, which in flat views is a relative path rather than
+  // the tile's label. Trimmed, because a trailing space must not blank a grid
+  // of names with spaces in them.
   const needle = findText.trim().toLowerCase();
-  // Two layers over the same listing: the kind option (a committed view
-  // setting, in the URL) and the live name filter (ephemeral). Both are view
-  // state over what the server returned — neither issues a request. Kept as a
-  // pair because an empty grid has to name the one that emptied it, and the
-  // kind restriction runs first: if it left nothing, the filter never had a
-  // chance to hide anything.
-  // Narrower than the selector's argument on purpose: `byKind` reads the
-  // landed answer and nothing else, and re-running it on every state change
-  // would mint a fresh array — which `filteredListing` and then the grid
-  // compare on, re-rendering every tile for an availability tick.
+  // Kind first, then the filter, so an empty grid can name what emptied it. The
+  // dep is deliberately narrower than the selector's argument: a fresh array
+  // per state change would re-render every tile for an availability tick.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const kept = useMemo(() => byKind(state), [state.result]);
   const filteredListing = useMemo(
@@ -2720,31 +1671,23 @@ export default function App() {
         : kept.filter((e) => e.name.toLowerCase().includes(needle)),
     [kept, needle],
   );
-  // The anchor is prepended here and nowhere earlier: it is shown, never
-  // counted. It is also **exempt from the find filter** — the filter narrows
-  // the answer, and the reference is what the answer is about, so hiding it
-  // would leave a grid of neighbours with nothing to say what they are near.
-  // The kind option needs no exemption: `byKind` already passes a similarity
-  // result through untouched, since that view reads no kind restriction.
+  // Prepended here and nowhere earlier, so it is shown and never counted —
+  // **exempt from the find filter** too, or the neighbours have nothing to say
+  // what they are near.
   const shownEntries = useMemo(
     () =>
       anchor === undefined ? filteredListing : [anchor, ...filteredListing],
     [anchor, filteredListing],
   );
-  /**
-   * The models the lightbox steps among (lightbox-sibling-stepping D1): the
-   * shown listing narrowed to `kind === 'model'`, in the grid's order. Derived
-   * from `shownEntries` — not the raw listing — so a find filter or a similarity
-   * anchor is honoured, and interleaved dirs/zips are skipped rather than opened.
-   */
+  /** Off `shownEntries`, so stepping honours a find filter and skips folders
+   *  (lightbox-sibling-stepping D1). */
   const modelSiblings = useMemo(
     () => shownEntries.filter((e) => e.kind === "model"),
     [shownEntries],
   );
-  // The neighbours the lightbox can step to (D1/D2). At `sibIdx === -1` — the
-  // open model is no longer in the shown list (a background revalidation can do
-  // this) — BOTH are null: stepping goes inert rather than teleporting to the
-  // list's first entry. `null` at each end, so the affordance there disables.
+  // At `sibIdx === -1` — the open model is no longer shown, which a background
+  // revalidation can do — BOTH are null: stepping goes inert rather than
+  // teleporting to the list's first entry.
   const sibIdx =
     viewer !== null
       ? modelSiblings.findIndex((e) => e.path === viewer.entry.path)
@@ -2755,35 +1698,17 @@ export default function App() {
       ? (modelSiblings[sibIdx + 1] ?? null)
       : null;
   /**
-   * `Grid`'s band report with App's own knowledge merged in (sweep-priority
-   * D3/2.5): a model the kind option or the find filter hid has a slot but no
-   * tile, so no observer can report it — unmerged it stays unreported, ranked
-   * *above* far, and the sweep keeps reading entries the user just filtered
-   * away. Two rules, each load-bearing:
-   *
-   * - the hidden set is `entries` minus `filteredListing` — the tiles a
-   *   restriction actually hid (the anchor is prepended separately and so
-   *   exempt; kind-hidden tiles deliberately included): a hidden model by its
-   *   path, a hidden folder by its preview cells' paths. Never "`thumbEntries`
-   *   minus `shownEntries`": that difference contains every folder-preview
-   *   model by construction, and marking those far would defer the sheet
-   *   cells of a folder on screen behind everything.
-   * - the merge never overwrites a band the report carries — the per-path max
-   *   at this layer. A hidden tile can simultaneously be a visible folder's
-   *   preview cell, and the folder's registration must win.
-   *
-   * Read through per-render refs (the `requestPeek` idiom) so `Grid`'s
-   * observer effect sees one stable identity; built on the lists themselves it
-   * would churn per find-filter keystroke and per landed peek. Clearing the
-   * filter re-runs the observer effect via `shownEntries`, and the fresh
-   * merged reports re-rank what is back on or near the screen.
+   * A hidden model has a slot but no tile, so no observer reports it and the
+   * sweep goes on reading what the user filtered away (D3). The hidden set is
+   * `entries` minus `filteredListing`, never `thumbEntries` minus
+   * `shownEntries`, which holds every preview model by construction; and a
+   * reported band is never overwritten, since a hidden tile can also be a
+   * visible folder's preview cell.
    */
   const filteredRef = useRef(filteredListing);
   filteredRef.current = filteredListing;
   const reportBands = useCallback(
     (bands: ReadonlyMap<string, Band>) => {
-      // Unfiltered — `filteredListing` *is* `entries` — is the common case,
-      // and a 500-entry Set per batch would be a guaranteed no-op there.
       if (filteredRef.current === listingRef.current) {
         setBands(bands);
         return;
@@ -2799,9 +1724,6 @@ export default function App() {
       for (const e of listingRef.current) {
         if (shown.has(e.path)) continue;
         if (e.kind === "model") hide(e.path);
-        // A hidden folder's preview cells have no tile either; left
-        // unreported they would rank above genuinely far work — reads and
-        // renders for content the user just filtered away.
         else if (e.kind === "dir")
           for (const cell of previews.get(e.path) ?? []) hide(cell.path);
       }
@@ -2809,34 +1731,22 @@ export default function App() {
     },
     [setBands],
   );
-  // A kind restriction can empty the grid too, and it is a different sentence:
-  // the results are there, this view is not showing them. It is decided first
-  // and from `kept`, so the message names the control that actually hid the
-  // entries rather than the one that happened to run last.
   const kindHidesAll = entries.length > 0 && kept.length === 0;
   const filterHidesAll =
     needle !== "" && kept.length > 0 && filteredListing.length === 0;
-  // Gated on the subject, not on a phrase: an empty *similarity* result is an
-  // answer that found nothing, exactly as an empty search is, and reading a
-  // query string here left it falling through to Grid's bare "Nothing to show
-  // here" as though the folder were empty (4.6b).
+  // On the subject, not a phrase: an empty *similarity* result is an answer
+  // that found nothing, and no query string says so (4.6b).
   const searchHasNoMatches =
     label.subject.kind !== "none" && entries.length === 0;
 
-  /**
-   * The overlay replaces the thumbnail image, not the whole tile: same pixels,
-   * same square aspect as the PNG (seamless handoff), and the label row below
-   * stays visible. Falls back to the centered square of the content area when
-   * no <img> has rendered yet.
-   */
+  /** The image's box, not the tile's: same pixels, same square aspect, which is
+   *  what makes the handoff seamless. */
   const overlayRectFor = useCallback((el: HTMLElement): Box => {
     const img = el.querySelector("img");
     if (img !== null) {
       const r = img.getBoundingClientRect();
-      // An `<img>` reporting no box is one whose lazily fetched image has not
-      // arrived and whose declared box the layout has not given it (a test
-      // DOM, a tile mid-layout): fall through to the content square rather
-      // than open the overlay at 0×0 (`thumbnail-image-serving` D3).
+      // An `<img>` reporting no box has not been given one yet, and the
+      // overlay must not open at 0×0.
       if (r.width > 0 && r.height > 0)
         return { left: r.left, top: r.top, width: r.width, height: r.height };
     }
@@ -2844,9 +1754,8 @@ export default function App() {
     return fitSquareBox(content.getBoundingClientRect());
   }, []);
 
-  // The tile handlers are held by identity rather than rebuilt each render:
-  // they are what a memoized tile compares on, and a fresh function per
-  // keystroke in the search box would re-render every tile in the grid.
+  // A memoized tile compares on these, so a fresh function per keystroke would
+  // re-render the whole grid.
   const onModelPointerDown = useCallback(
     (e: React.PointerEvent, entry: DirEntry, el: HTMLElement): void => {
       if (e.button !== 0) return;
@@ -2885,18 +1794,13 @@ export default function App() {
   );
 
   /**
-   * What the shared commands act through (entry-actions R1). App supplies the
-   * app-shaped halves — the one navigate, the one dispatch, the ephemeral mark,
-   * tile activation, and somewhere to put a sentence — and the module owns what
-   * each command does with them.
+   * What the shared commands act through: App supplies the app-shaped halves
+   * and `entryActions` owns what each command does with them (R1).
    */
   const actionHost = useMemo<ActionHost>(
     () => ({
       navigate,
-      // Find-similar lands a new entry through this, not `commit`, so the
-      // leaving grid's place is filed here as it is there (D2's flush). It
-      // asks a new question, which is what supersedes a placement still
-      // pending: the neighbours arrive at the top.
+      // Not `commit`, so the leaving grid's place is filed here too (D2).
       dispatch: (action) => {
         recordNow();
         dispatch(action);
@@ -2907,40 +1811,23 @@ export default function App() {
           enterEntry(entry);
           return;
         }
-        // Every surface offering *open* raises it from a tile, so there is
-        // always an element for the lightbox to grow out of.
         if (el !== null) openLightbox(entry, el);
       },
-      // Both halves of the host's feedback take the same route, and that is the
-      // fix: the routing used to sit on `report` alone, so a *Copy path* chosen
-      // from the lightbox's menu confirmed under the scrim — dimmed, in the far
-      // corner, behind the very dialog the user was looking at — which is a
-      // command that owes a brief confirmation (entry-actions R1) silently not
-      // giving one. The panel's own copy pill was never affected: it has its own
-      // "copied" and never reaches this host.
+      // Both halves route alike: a confirmation owed briefly (R1) must not
+      // land under the lightbox's scrim.
       confirm: () => sayWhereLooking("Path copied.", "ok"),
       report: (message) => sayWhereLooking(message, "error"),
       poses,
-      // The one filesystem path the client holds, for the one command that puts
-      // a path somewhere else (library R2). A string, not the client: no command
-      // gets to ask `/api/library` itself.
+      // A string, not the client: no command asks `/api/library` (library R2).
       libraryTop,
-      // The thumbnail half: the one cache client, the mesh LRU the grid loads
-      // through, the one render queue, and `useThumbnails`' own setter. Handed
-      // over rather than reimplemented — App has no business resolving an
-      // orientation, and the module has no business constructing any of these.
       api,
       lru,
       queue,
       setThumb,
       discardThumbFraming,
-      // The launch half: App holds the session's report, so App is who can read
-      // it again. The *when* belongs to the command — see `openEntryWith`.
       refreshApps,
-      // The bulk half. The runner answers `'busy'` when a job is already alive
-      // — and un-dismisses its chip on the way out, which is D2's substantive
-      // answer to a second press — so all that is left here is the sentence,
-      // routed to wherever the user is looking like every other one.
+      // The runner un-dismisses its chip on the way out, which is D2's
+      // substantive answer to a second press.
       launchJob: (operation, scope) => {
         if (jobs.launch(operation, scope) === "busy") say(JOB_BUSY, "error");
       },
@@ -2978,16 +1865,8 @@ export default function App() {
     },
     [],
   );
-  /**
-   * The same menu, raised on the live view of the model instead of its tile —
-   * which is a different *surface*, not a different menu (D6's margin).
-   *
-   * Which viewer surface comes from `viewerRef` rather than from the caller:
-   * the mode is this component's own fact, and `ViewerLayer` reporting it back
-   * would be a second copy of something App already holds. Read from the ref so
-   * this callback stays stable — it is a prop on the layer that would otherwise
-   * change on every mode flip.
-   */
+  /** A different *surface*, not a different menu (D6) — read from `viewerRef`,
+   *  so this stays stable as a prop. */
   const onViewerEntryMenu = useCallback(
     (
       entry: DirEntry,
@@ -2997,9 +1876,7 @@ export default function App() {
     ): void => {
       const surface =
         viewerRef.current?.mode === "lightbox" ? "lightbox" : "orbit";
-      // The live view rides only the lightbox's menu: there Reset framing must
-      // run the live body (the panel's), while the orbit overlay deliberately
-      // keeps the tile's queued body (6.8).
+      // Only the lightbox's menu: the overlay keeps the tile's body (6.8).
       setMenu({
         entry,
         el,
@@ -3011,7 +1888,6 @@ export default function App() {
     },
     [],
   );
-  /** Dismissal returns focus to the tile the menu was raised on. */
   const closeMenu = useCallback((): void => {
     menuRef.current?.el?.focus();
     setMenu(null);
@@ -3019,16 +1895,12 @@ export default function App() {
   const onChooseCommand = useCallback(
     (command: EntryCommand): void => {
       const raised = menuRef.current;
-      // Closed first: choosing is a dismissal, and a command that navigates
-      // would otherwise leave the menu hanging over a listing it no longer
-      // belongs to.
       closeMenu();
       if (raised === null) return;
-      // Reset framing on the lightbox's menu runs the LIVE body, exactly as
-      // the panel's press does — the generic body would queue a render behind
-      // the suspension the viewer holds and lose to the closing persist
-      // (resetFramingLive's doc). The live view was handed over at raise time
-      // and is read now, so a reframe between raise and choose is not stale.
+      // The LIVE body: the generic one would queue a render behind the viewer's
+      // suspension and lose to the closing persist (`resetFramingLive`). Read
+      // now rather than at raise time, so a reframe between the two is not
+      // stale.
       if (command.id === "resetFraming" && raised.live !== undefined) {
         resetFramingLive(raised.entry, actionHost, raised.live());
         return;
@@ -3037,18 +1909,9 @@ export default function App() {
     },
     [closeMenu, actionHost],
   );
-  /**
-   * The menu's orbit-axis group (6.7): the spindle this model is stored about,
-   * or `null` where the group is not offered — a container, or the lightbox,
-   * which carries the live picker instead. The orbit overlay carries no picker
-   * and gets the group, exactly as the tile under it does (6.8).
-   *
-   * Read from the thumbs map, which is what the tile drew and what the lightbox
-   * would open at; a model that has never been given one is marked at the
-   * default rather than at nothing, because that is the spindle it is framed
-   * about. An orbit drag moves the camera and never the axis, so an overlay's
-   * pending persist cannot make this mark wrong while it is in flight.
-   */
+  /** The spindle this model is stored about (6.7), or `null` where the group is
+   *  not offered. From the thumbs map, which is what the tile drew; a model
+   *  never given one is marked at the default it is framed about. */
   const menuAxis = useMemo<OrbitAxis | null>(() => {
     if (
       menu === null ||
@@ -3060,9 +1923,8 @@ export default function App() {
       defaultAxisFor(formatOfEntry(menu.entry))
     );
   }, [menu, thumbs]);
-  /** An axis chosen from the menu: the shared body, through the one host. The
-   *  spindle already in force goes with it — re-choosing it is a no-op, and that
-   *  rule belongs to the command rather than to this surface. */
+  /** The spindle in force rides along: re-choosing is a no-op, and that rule
+   *  belongs to the command. */
   const onChooseAxis = useCallback(
     (axis: OrbitAxis): void => {
       const raised = menuRef.current;
@@ -3073,19 +1935,9 @@ export default function App() {
     },
     [closeMenu, actionHost, menuAxis],
   );
-  /**
-   * The menu's open-in group (L3): the applications the platform associates
-   * with this model's type, default first, or `null` where the row is not
-   * offered — a container, a type with no applications, a report that has not
-   * landed, or a surface that withholds it (none of the three menu surfaces
-   * does; since the 4.3 reversal the lightbox's panel offers it too, through
-   * `panelOpenIn` below).
-   *
-   * `null` rather than `[]` for an empty answer: a caption with no pills under
-   * it is an affordance that does nothing, and this menu's rule is absence.
-   *
-   * Read from `apps`, which is state — raising this menu fires no request.
-   */
+  /** The applications for this model's type, default first (L3). `null` rather
+   *  than `[]` for an empty answer: a caption with no pills under it is an
+   *  affordance that does nothing. From `apps`, so raising fires no request. */
   const menuOpenIn = useMemo(() => {
     if (menu === null) return null;
     const list = openInApps(
@@ -3095,8 +1947,6 @@ export default function App() {
     );
     return list.length === 0 ? null : list;
   }, [menu, state.index, apps, features]);
-  /** A pill pressed: the shared body, through the one host — a launch and
-   *  nothing else, so unlike an axis pick there is no current value to hand it. */
   const onChooseApp = useCallback(
     (appId: string): void => {
       const raised = menuRef.current;
@@ -3105,9 +1955,6 @@ export default function App() {
     },
     [closeMenu, actionHost],
   );
-  // D6's table, asked once per raised menu — never a probe when a menu opens
-  // (2.5), for either cell it reads: `state.index` is the reducer's own, and
-  // `apps` is the session's one reading of the registry (L5).
   const menuCommands = useMemo(
     () =>
       menu === null
@@ -3120,13 +1967,9 @@ export default function App() {
     [menu, state.index, apps, features],
   );
 
-  /**
-   * The same table again, for the lightbox panel's own affordances (6.6) — a
-   * third surface asking the one question, with its own exclusion list. Not the
-   * menu's list: *reset framing* is withheld from the menu and offered here,
-   * because only the panel's press carries the live-session semantics that make
-   * it honest (`LIGHTBOX_PANEL_EXCLUDES` says why).
-   */
+  /** The same table under the panel's own exclusions (6.6): *reset framing* is
+   *  withheld from the menu and offered here, because only the panel's press
+   *  carries the live-session semantics that make it honest. */
   const panelCommands = useMemo(
     () =>
       viewer === null
@@ -3138,14 +1981,6 @@ export default function App() {
           ),
     [viewer, state.index, apps, features],
   );
-  /**
-   * The panel's open-in row (L10, reversed 2026-08-25): the same question the
-   * menu asks, through the same body, under the panel's own exclusion list —
-   * which no longer withholds it. `null` rather than `[]` for an empty answer,
-   * the menu's rule: a caption with no pills under it is an affordance that
-   * does nothing. Read from `apps`, which is state — opening the lightbox
-   * fires no registry request.
-   */
   const panelOpenIn = useMemo(() => {
     if (viewer === null) return null;
     const list = openInApps(
@@ -3155,9 +1990,6 @@ export default function App() {
     );
     return list.length === 0 ? null : list;
   }, [viewer, state.index, apps, features]);
-  /** A panel pill pressed: the shared launch body through the one host — a
-   *  launch and nothing else, exactly as the menu's press (the entry read from
-   *  `viewerRef` the way `onViewerCommand` reads it, so the callback is stable). */
   const onPanelChooseApp = useCallback(
     (appId: string): void => {
       const entry = viewerRef.current?.entry;
@@ -3166,15 +1998,8 @@ export default function App() {
     },
     [actionHost],
   );
-  /**
-   * A panel affordance pressed: the shared body, through the one host — the
-   * panel holds no command of its own, exactly as the menu does not.
-   *
-   * *Reset framing* is the one that takes the live view with it. Its body is a
-   * different one from the menu's (`resetFramingLive` rather than the queued
-   * render), which is the whole reason this surface may offer a command the
-   * menu withholds.
-   */
+  /** *Reset framing* takes the live view with it, and that different body is
+   *  the whole reason this surface may offer a command the menu withholds. */
   const onViewerCommand = useCallback(
     (id: CommandId, live: LiveFramingView | null): void => {
       const entry = viewerRef.current?.entry;
@@ -3188,37 +2013,18 @@ export default function App() {
     [actionHost],
   );
 
-  /**
-   * The whole-library scope (D8): the **app's root**, which is the viewpoint
-   * this app opens at and therefore what "the library" means on screen — not
-   * the library's top, which the root may sit below. `null` until the library
-   * is ready, because there is no path to enumerate before then.
-   *
-   * The label is the one string the chip's scope phrasing keys off
-   * (`JobChip`'s `scopePhrase`), so it is spelled here and nowhere else.
-   */
-  /**
-   * Whole-library scope is the app's root — `LibraryState.root`, the viewpoint
-   * the app opens at, which is what "the library" means on screen (D8). Memoized
-   * on the primitive, not the state object: the library is re-probed, and a
-   * scope that changed identity per probe would recount the library each time.
-   */
+  /** The app's **root**, which is what "the library" means on screen (D8).
+   *  Memoized on the primitive: the library is re-probed, and a scope changing
+   *  identity per probe would recount it each time. */
   const rootPath = libraryState?.state === "ready" ? libraryState.root : null;
   const rootScope = useMemo(
     () => (rootPath === null ? null : { path: rootPath, label: "the library" }),
     [rootPath],
   );
-  /**
-   * The library tab's seam, and why its two closures are keyed on so little.
-   * The panel recounts whenever `count` changes identity — that is its
-   * contract, and the right one, since a new scope is a new count — so the
-   * closure must be rebuilt only when the scope or the runner is. `launch`
-   * reaches the host through a ref for the same reason: `actionHost` is
-   * rebuilt on every pose landing, and a `launch` keyed on it would have made
-   * every landing re-enumerate the whole library. `recountKey` is the one
-   * trigger for a *re-derivation*: when the numbers went stale by more than a
-   * hand's ±1, which `resetAdjust` carries instead (`jobsEnded` names the moments).
-   */
+  /** The panel recounts whenever `count` changes identity, so both closures are
+   *  keyed on as little as possible and `launch` reaches the host through a
+   *  ref: `actionHost` is rebuilt on every pose landing, and a `launch` keyed on
+   *  it would re-enumerate the library each time. */
   const actionHostRef = useRef(actionHost);
   actionHostRef.current = actionHost;
   const countLibrary = useCallback(
@@ -3234,11 +2040,8 @@ export default function App() {
     },
     [rootScope],
   );
-  // A job settled having written something moves `jobsEnded` (its doc, beside
-  // `noteFramingChanged`, says why on `settled` and `wrote` and nothing else).
-  // Keyed on the run, never the state object: every patch — a Dismiss after
-  // the job settled included — builds a new object carrying the same
-  // `settled`/`wrote`, and keyed on identity the × re-derived the library.
+  // Keyed on the run, never the state object: every patch carries the same
+  // `settled`/`wrote`, so identity would re-derive the library per press.
   const settledRunRef = useRef<number | null>(null);
   useEffect(() => {
     if (job === null || !job.settled || settledRunRef.current === job.runId)
@@ -3246,18 +2049,10 @@ export default function App() {
     settledRunRef.current = job.runId;
     if (job.wrote > 0) setJobsEnded((n) => n + 1);
   }, [job]);
-  /**
-   * The library tab, or `null` when there is none to offer. `maintenance` is
-   * the field: the tab's every occupant acts on the server's derived state for
-   * every viewer at once (`public-deployment` D4), which closes the interim
-   * `bulk-thumbnail-jobs` declared in its own task 5.1 when it gated these on
-   * `thumbWrites` before this field existed.
-   *
-   * `maintenance` alone rather than both fields: reset is a maintenance
-   * operation whatever a deployment does with thumbnail writes, so a
-   * write-refusing deployment that offers maintenance still has a tab. An
-   * unknown report withholds it, as any gated offer.
-   */
+  /** `maintenance` is the field, because the tab's every occupant acts on the
+   *  server's derived state for every viewer at once (`public-deployment` D4) —
+   *  and it alone, since reset is maintenance whatever a deployment does with
+   *  thumbnail writes. */
   const libraryJobs = useMemo(
     () =>
       features?.maintenance === true && rootScope !== null
@@ -3281,30 +2076,14 @@ export default function App() {
   goUpRef.current = goUp;
 
   function goUp(): void {
-    // Ascend from `dest`, not the committed path (D3): pressing ↑ twice during
-    // a slow listing must reach the grandparent, not re-request the same parent.
-    //
-    // The ascent itself is `containingFolder` and nothing else. This used to
-    // carry its own copy — the same four branches and the same `!/` grammar,
-    // character for character — which is two readings of one rule and the way
-    // the two would come to disagree about the same archive.
-    //
-    // `containingFolder` answers `'/'` for the library's top, where ↑ has
-    // nowhere to go; comparing against `target` is what keeps that from
-    // becoming a re-request of the listing already on screen (the control is
-    // also disabled there, so this is the second of two guards, not the only
-    // one).
+    // From `dest`, not the committed path (D3): ↑ twice during a slow listing
+    // must reach the grandparent.
     const parent = containingFolder(target);
     if (parent === target) return;
-    // Where the parent was when the user went into this folder (retrace-
-    // placement D3): the trail is walked back from the current entry to the
-    // nearest row whose listing is the parent's — the visit that led here, not
-    // the parent's latest visit on some other branch. The key names the flat
-    // state the parent will actually land in (`navigate` keeps the live
-    // toggle), so a parent visited nested and left flat has no row under this
-    // key, and D4's fall-through runs: the child tile centred where it exists,
-    // else the top. Raised after `navigate`, in the same batch, so the
-    // request rides the parent's question.
+    // Where the parent was when the user went *into* this folder, not its
+    // latest visit on another branch (D3). The key names the flat state it will
+    // land in, so a parent visited nested and left flat has no row. Raised
+    // after `navigate`, in the same batch, so it rides the parent's question.
     const parentKey = listingKey({
       ...liveView(state),
       path: parent,
@@ -3324,24 +2103,16 @@ export default function App() {
       const entry = viewer?.entry;
       if (entry === undefined) return;
       try {
-        // Capture before the await: a rapid axis change mid-snapshot must not
-        // pair this PNG with newer values in one PUT. The occlusion preference
-        // is captured here for the same reason and one worse: two independent
-        // readings would let a toggle between them file occluded pixels under
-        // the unoccluded slot with matching labels — a wrong-recipe hit that
-        // nothing invalidates, because both readings looked correct where they
-        // stood (D4a). One value renders and files.
-        //
-        // The store, not the pill's React state of the same name above: the
-        // store is what every other render path reads, and `persist` must not
-        // be the one site whose recipe comes from a re-render's snapshot of it.
+        // Captured before the await, all three: a toggle mid-snapshot would
+        // file occluded pixels under the unoccluded slot with matching labels,
+        // a wrong-recipe hit nothing invalidates (D4a). The `ao` store, not the
+        // pill's state, which is this render's snapshot of it.
         const { state, axis } = session;
         const ao = aoEnabled();
         const png = await session.snapshot(ao);
         const url = URL.createObjectURL(png);
-        // Decode before applying, so when this promise resolves the tile's
-        // <img> swap cannot paint a half-decoded frame — the orbit overlay
-        // holds its dismissal on that guarantee.
+        // The orbit overlay holds its dismissal on this promise, and the
+        // tile's <img> swap must not paint a half-decoded frame.
         const decode = createImageBitmap(png).then(
           (bitmap) => bitmap.close(),
           () => {
@@ -3356,33 +2127,22 @@ export default function App() {
             path: entry.path,
             mtime: entry.mtime,
             png,
-            // Every caller is a decision of the user's — an orbit release, an
-            // axis change, or a close after one (`pose-rerender` D4) — so the
-            // camera and axis always ride with the pixels, and no `posed`
-            // label does: a view the user framed depends on no pose. The
-            // untouched close that once persisted pixels only, labelled posed
-            // and keyless, writes nothing now (D6).
+            // Every caller is a decision of the user's, so camera and axis
+            // ride with the pixels and no `posed` label does (D4).
             camera: state,
             axis,
             lighting: THUMB_LIGHTING,
             rig: RIG_VERSION,
-            // The captured reading, not a second one — see above.
             ao,
           }),
         ]);
-        // A persisted orbit is the user framing a model by hand — the library
-        // tab's reset count has to know (D5). Before the map is updated: that
-        // is where the before-state is.
+        // Before the map is updated, because that is where the before-state is.
         noteFramingChanged(entry.path, { camera: state, axis });
         setThumb(entry.path, {
           status: "ready",
           url,
           camera: state,
           axis,
-          // The write this pass just made moved the entry's generation; handing
-          // the echo over is what keeps the tile's next fetch cacheable instead
-          // of demoting it to a revalidation (setThumb adopts absence as
-          // "unknown, re-learn").
           gen: written.gen,
         });
       } catch {
@@ -3395,9 +2155,6 @@ export default function App() {
   function closeViewer(): void {
     const origin = viewer?.originEl;
     setViewer(null);
-    // Safety net for dismissals that bypass the history routes (e.g. a mesh
-    // load failure): never leave a dangling model param on a closed viewer.
-    // Bridge 4 again — the live URL is patched, never projected.
     const v = parseUrl();
     if (v.model !== undefined)
       commitUrl({ ...v, model: undefined }, { replace: true });
@@ -3406,19 +2163,10 @@ export default function App() {
   }
 
   /**
-   * Step the open lightbox to a sibling model (lightbox-sibling-stepping D3/D4).
-   * Refuses unless a lightbox is still up — a step whose persist lost its race to
-   * a close (D3) must write no `modelOpen`, or the re-open effect would resurrect
-   * the lightbox over the listing the user backed onto.
-   *
-   * `setViewer` runs BEFORE `commit`, deliberately: the close-watcher fires when
-   * `state.view.model !== viewer.entry.path`, and its `namedModelRef` guard stays
-   * true across the swap only if the entry moves first — so even a split render
-   * cannot read the step as the model leaving the view. `commit` replaces the
-   * current history entry (no new entry; back still closes the lightbox) and
-   * carries `history.state` forward to preserve the LIGHTBOX_ENTRY marker.
-   * `originEl` follows to the shown model's own tile so a later close returns
-   * focus there, not to the tile the lightbox first opened from.
+   * Refuses unless a lightbox is still up: a step whose persist lost its race to
+   * a close must write no `modelOpen`, or the re-open effect resurrects it over
+   * the listing the user backed onto (D3). `setViewer` runs BEFORE `commit`, so
+   * no split render can read the step as the model leaving the view.
    */
   const navigateSibling = useCallback(
     (entry: DirEntry): void => {
@@ -3436,14 +2184,9 @@ export default function App() {
     [commit],
   );
 
-  /**
-   * One line, always present, so the grid starts at the same height in every
-   * state — including the skeleton, whose tiles used to sit 56px above where
-   * the real ones would land. What the view *is* reads on the left, what was
-   * left out on the right: the first is the answer to "what am I looking at",
-   * the second a caveat about it, and giving them opposite ends stops a long
-   * query pushing the caveat off screen.
-   */
+  /** Always present, so the grid starts at the same height in every state, the
+   *  skeleton included. Opposite ends, so a long query cannot push the caveat
+   *  off screen. */
   const noticeBar = (
     labelText: string,
     caveat: string,
@@ -3453,8 +2196,7 @@ export default function App() {
     <div className="flex h-8 shrink-0 items-baseline justify-between gap-4 px-4 pt-3 text-xs">
       <div className="flex min-w-0 items-baseline gap-2">
         {/* The find control is otherwise Ctrl-F-or-nothing, which is invisible
-            to anyone who does not try it — a regression against a filter that
-            used to be a box on screen. */}
+            to anyone who does not try it. */}
         {narrow && !findOpen && (
           <button
             type="button"
@@ -3466,24 +2208,15 @@ export default function App() {
           </button>
         )}
         <p className="min-w-0 truncate text-zinc-400">{labelText}</p>
-        {/* The way out of a committed view, and the ONLY one on screen (D9).
-            Beside the label because that is where the view says what it is
-            about, so what it is about and how to stop being about it sit
-            together. It dispatches the one transition emptying the input
-            delegates to — the same act, not a second implementation of it —
-            and it is rendered for a model exactly as for a phrase, which is
-            the whole reason a similarity view is leaveable at all: there is no
-            text in the input for it to empty.
-
-            Where it goes is `leaveSubject`'s to decide, not this button's: an
-            in-app similarity view returns to the view it came from, everything
-            else clears to the listing as before (D9's provenance branch). */}
+        {/* The ONLY way out of a committed view on screen (D9), and the same
+            transition emptying the input delegates to. Rendered for a model as
+            for a phrase — which is the whole reason a similarity view is
+            leaveable at all, since there is no text to empty. */}
         {dismissable && (
           <button
             type="button"
             onClick={() => leaveSubject({ type: "clearSubject" })}
-            // One sentence for both destinations, because the button cannot
-            // honestly promise either: where it lands is the entry's
+            // One sentence for both destinations: where it lands is the entry's
             // provenance, and reading `history.state` during a render would
             // read it one render stale.
             title="Stop showing this and go back to browsing"
@@ -3492,12 +2225,8 @@ export default function App() {
             ✕ Dismiss
           </button>
         )}
-        {/* The whole of §5.2's affordance: the cached listing is already
-            rendered beside it, and this says the server is checking that tree
-            against the disk. Deliberately not a panel, an overlay or a spinner
-            — it is the same weight as the caveat opposite, in the one region
-            that already carries what-is-true-about-this-listing.
-            Copy and placement are not frozen (the tune-then-freeze rule). */}
+        {/* The whole of §5.2's affordance: not a panel, an overlay or a
+            spinner, but the same weight as the caveat opposite. */}
         {stale && (
           <p aria-live="polite" className="shrink-0 text-zinc-500">
             Refreshing…
@@ -3508,13 +2237,9 @@ export default function App() {
     </div>
   );
 
-  // A similarity view says what it is about too, and says it in terms of the
-  // model rather than of a phrase it does not have — the blank this used to
-  // render was the label failing to describe a view that is perfectly
-  // describable. The `weak`/`capped` clauses are deliberately NOT repeated
-  // here: they are meaning-query residue, the index publishes neither for
-  // neighbours, and rendering them off `false` would tell the reader something
-  // was measured and came out negative (4.7). Order carries strength (D10).
+  // No `weak`/`capped` clauses here: the index publishes neither for
+  // neighbours, and rendering them off `false` would report a measurement that
+  // came out negative (4.7).
   const similarLabel =
     labelModel !== null && !searchHasNoMatches
       ? `Models similar to "${baseName(labelModel)}", from across the collection.`
@@ -3522,26 +2247,18 @@ export default function App() {
   const resultsLabel =
     labelQuery !== null && !searchHasNoMatches
       ? `${label.meaning ? "Meaning matches" : "Search results"} for "${labelQuery}".${
-          // The set is weak, not the results: these are the best the index
-          // found and none of them stood out (D10 — no per-result numbers).
+          // The set is weak, not the results (D10 — no per-result numbers).
           label.weak ? " Nothing stood out — these are the closest." : ""
         }${
-          // Not the ranking's horizon (there is always an N+1th) but the
-          // index's own ceiling, met by a bound the user set (D2).
+          // Not the ranking's horizon but the index's own ceiling (D2).
           label.capped
             ? " The index returned fewer than asked for — its cap."
             : ""
         }${
-          // What the user's own count cut from, which is a different act from
-          // the index's ceiling above and says so in different words (D9).
-          // Gated on *both* bounds being in force, not merely on the numbers
-          // differing — `capping` carries why, in both directions: floorless,
-          // `matched` is everything scored rather than a floor set, and
-          // countless, the short set is the index's cap saying so twice.
-          // Beyond that: only when the index reported `matched` and it
-          // exceeds what is shown — equal means the count cut nothing, absent
-          // means the index did not say — and never counted from the tiles,
-          // which are the cut set itself.
+          // A different act from the ceiling above, in different words (D9).
+          // Gated on *both* bounds being in force rather than on the numbers
+          // differing: floorless, `matched` is everything scored, and countless
+          // the short set is the cap saying so twice.
           label.capping &&
           label.matched !== undefined &&
           label.matched > label.shown
@@ -3549,20 +2266,12 @@ export default function App() {
             : ""
         }`
       : similarLabel;
-  // Counted over `kept`, not the whole listing: the kind option is part of the
-  // view's identity — in the URL, in history, shareable — so a notice that
-  // counted entries the option is hiding would describe a view nobody is
-  // looking at. (The live filter is the opposite case and still does not enter
-  // here: it is ephemeral, so the notice keeps describing the listing beneath
-  // it.) Suppressed when the restriction leaves nothing, since `kindHidesAll`
-  // already says what happened and "showing 0 folders" adds only noise.
+  // Over `kept`: the kind option is part of the view's identity, the live
+  // filter is not.
   const shownModels = kept.filter((e) => e.kind === "model").length;
   const shownFolders = kept.length - shownModels;
-  // The kind option restricts search results only — `byKind` leaves a plain
-  // listing alone — so the notice counts it the same way. Reading the stored
-  // preference here regardless left the sentence with no parts at all under
-  // `kinds=folders` with nothing committed ("Showing ; some entries were
-  // omitted."), while the grid was in fact showing the models it denied.
+  // `byKind` leaves a plain listing alone, so the notice counts the same way
+  // rather than describing a restriction the grid is not under.
   const counted = noticeKinds(state);
   const shownParts = [
     counted !== "folders" ? `${shownModels} models` : "",
@@ -3574,24 +2283,16 @@ export default function App() {
     truncated && !searchHasNoMatches && !kindHidesAll
       ? `Showing ${shownParts.join(" and ")}; some entries were omitted.`
       : "";
-  // The three ways a grid ends up with nothing in it, each with its own
-  // sentence. A value rather than a ternary chain inside the JSX because the
-  // sentence no longer *replaces* the grid unconditionally: a similarity view's
-  // anchor is still drawn above it, so the two are rendered independently.
+  // A value and not a ternary in the JSX, because this does not *replace* the
+  // grid: a similarity anchor is still drawn above it.
   const emptyNotice = searchHasNoMatches ? (
-    // An empty similarity answer is its own sentence, said in terms of the
-    // model it was derived from. It is decided first because every branch below
-    // is about a *phrase*: without it an empty similarity result rendered
-    // `Nothing matched ""` — or, before the subject reached this gate at all,
-    // fell through to Grid's bare "Nothing to show here" as though the folder
-    // were empty.
     labelModel !== null ? (
       <p className="mt-16 text-center text-sm text-zinc-600">
         Nothing in the collection is similar to "{baseName(labelModel)}" — the
         index holds no neighbours for it.
       </p>
-    ) : // An empty truncated search never finished: claiming "no match"
-    // would be false — the walk ran out before covering the tree (D5).
+    ) : // A truncated search never finished, so "no match" would be false: the
+    // walk ran out before covering the tree (D5).
     truncated ? (
       <p className="mt-16 text-center text-sm text-zinc-600">
         Nothing matched "{labelQuery}" in the part of the tree the search could
@@ -3599,9 +2300,7 @@ export default function App() {
         deeper folder.
       </p>
     ) : scope !== null ? (
-      // Three outcomes, not one empty grid: nothing matched, nothing here is
-      // indexed, or what is here is outside the corpus. Only the second is
-      // fixed by indexing again (4.1).
+      // Three outcomes, and only "nothing indexed" is fixed by indexing (4.1).
       <p className="mt-16 text-center text-sm text-zinc-600">
         {scope.status === "unindexed"
           ? `Nothing here has been indexed yet — meaning search covers ${scope.covers.join(", ")} files outside archives.`
@@ -3628,63 +2327,35 @@ export default function App() {
     </p>
   ) : null;
 
-  /**
-   * The header's one transient line, in one of two tones — a command reporting
-   * that it did something, or a failure — so a brief report never needs a
-   * surface of its own.
-   *
-   * A command's line outranks the view's failure while it is up, in either
-   * tone: it is the newer news, it is about the thing the user just did, and
-   * entry-actions requires a copy that succeeds to confirm *briefly* — where
-   * an error-first rule swallowed that confirmation outright rather than
-   * delaying it, for as long as the path bar had a failure standing. Nothing
-   * is lost by the yield: `say` clears its line after ACTION_TEXT_MS, and the
-   * view's own error is what the line falls back to.
-   */
+  /** A command's line outranks the view's failure while it is up, in either
+   *  tone: a copy that succeeds owes a *brief* confirmation (entry-actions R1),
+   *  which an error-first rule would swallow for as long as a failure stood. */
   const headerMessage: { text: string; tone: "ok" | "error" } | null =
     actionText ??
-    // Above the view's own failure, because it explains it: while the library
-    // is unconfigured or unmounted every path route answers 503, and the
-    // route's sentence describes the symptom where this one names the cause and
-    // the remedy (library R4). A command's line still outranks both, unchanged
-    // — it is the newer news, and `say` clears it on its own.
+    // Above the view's own failure, because it explains it: every path route
+    // 503s while the library is unmounted, and the route's sentence describes
+    // the symptom where this one names the cause (library R4).
     (libraryMessage !== null
       ? { text: libraryMessage, tone: "error" }
       : error !== null
         ? { text: error, tone: "error" }
         : null);
 
-  /**
-   * The visitor introduction (`landing-page` D3). `features?.intro === true` and
-   * nothing looser: an unknown report, a failed read and a report declaring it
-   * off all withhold, as every gated surface is withheld.
-   */
+  /** `=== true` and nothing looser: unknown, failed and off all withhold, as
+   *  every gated offer is withheld (`landing-page` D3). */
   const introOffered = features?.intro === true;
-  /** Whether a meaning search would run at the library's top — what the banner's
-   *  chips and the header's surprise action are gated on. The top and not the
-   *  current path: that is where an introduction-supplied phrase is committed
-   *  (the reducer's `'runQuery'`), so the gate and the search ask about one
-   *  location, and the header's action stays offered where the banner's was. */
+  /** The top and not the current path, because that is where an
+   *  introduction-supplied phrase is committed. */
   const introSearchable = meaningRunnableAt(state.index, "/");
-  /**
-   * The banner is the library's top with nothing committed — the top's shortest
-   * URL (`url-navigation`) — so a deep link into a folder or a search lands on
-   * what it names. The *committed* view, not the live one: a banner that
-   * vanished the instant a chip was clicked, before its results arrived, would
-   * be a flicker.
-   */
+  /** The *committed* view, not the live one: a banner that vanished the instant
+   *  a chip was clicked, before its results arrived, would be a flicker. */
   const atTop =
     state.view.path === "/" &&
     state.view.subject.kind === "none" &&
     !state.view.flat;
   const bannerDrawn = introOffered && !introDismissed && atTop;
-  /**
-   * The example in the search box, for a visitor the banner no longer reaches
-   * (D6). Withheld while the banner is drawn — it is already showing the same
-   * phrases — and while anything would make the typed example fail to find what
-   * it names: name mode, an index that cannot answer *here*, or a draft the
-   * placeholder is not visible behind anyway.
-   */
+  /** For a visitor the banner no longer reaches (D6), and withheld wherever the
+   *  example as typed would fail to find what it names. */
   const placeholderExample = useCyclingPlaceholder(
     EXAMPLE_QUERIES,
     introOffered &&
@@ -3694,21 +2365,9 @@ export default function App() {
       state.drafts.queryText === "",
   );
 
-  /**
-   * Dismissal records the choice and hides the banner. The write first, the
-   * state whatever the write did: `stored` never throws, and a browser that
-   * refuses storage still gets the banner gone for this page's lifetime.
-   *
-   * Then focus, because the element that had it is about to be unmounted and a
-   * browser drops that focus to `<body>` — the next Tab would restart at the
-   * top of the document and a screen reader would lose its place. It moves
-   * *before* React commits the removal (updates in an event handler are flushed
-   * after it returns), so nothing is focused inside the disappearing banner by
-   * the time it goes. The search box and not the surprise action beside it: the
-   * banner's offer was "describe what you are looking for", and the box is
-   * where that is done — the action is only withheld anyway wherever a meaning
-   * search cannot run.
-   */
+  /** Focus moves *before* React commits the removal — updates in an event
+   *  handler are flushed after it returns — so nothing is focused inside the
+   *  disappearing banner by the time it goes and dropped to `<body>`. */
   function dismissIntro(): void {
     introDismissedStore.write(true);
     setIntroDismissed(true);
@@ -3717,17 +2376,10 @@ export default function App() {
 
   return (
     <div className="flex h-screen flex-col bg-zinc-950 text-zinc-100">
-      {/* A block header around a flex row, so the transient line below can grow
-          the header without touching the row. Drawn inside the row (it used to
-          be PathBar's) it made that one item taller than the controls beside
-          it, and `items-center` slid all of them down by half of it while the
-          path input stayed put.
-
-          `z-chrome` (index.css) is what the layer is for: the path bar's
-          suggestion list hangs down over the grid, and a tile's score badges
-          sit above the list's own `z-20`, so they painted straight through the
-          recents. Lifting the header rather than the list puts any later
-          popover in this row over the grid too. */}
+      {/* A block around the row, so the transient line can grow the header
+          without pushing the controls out of line with the path input.
+          `z-chrome` is for the suggestion list, which hangs over a grid whose
+          score badges outrank its own `z-20`. */}
       <header className="relative z-chrome border-b border-zinc-800 p-3">
         <div className="flex items-center gap-2">
           <button
@@ -3776,13 +2428,8 @@ export default function App() {
           >
             Flat
           </button>
-          {/* What the banner offered, after it is gone (`landing-page` D3): the
-              header is the one chrome that never scrolls, so About stays one
-              click away for the whole visit. Drawn whenever the introduction is
-              offered, dismissed or not — the banner's own links are the same
-              addresses, and a reader who has not dismissed it loses nothing by
-              seeing both. The surprise action joins it only where a meaning
-              search would actually run, as on the banner. */}
+          {/* What the banner offered, after it is gone: the header never
+              scrolls (`landing-page` D3). */}
           {introOffered && (
             <a
               href={ABOUT_URL}
@@ -3811,11 +2458,9 @@ export default function App() {
           </p>
         )}
       </header>
-      {/* Between the header and the row, which is to say **outside** `<main>`
-          (D3): the strip spans the side panel too, it does not scroll with the
-          grid, and — the part a cell asserts — the grid's height is the same
-          whether the listing is in flight or rendered, because the banner is
-          not in the branch that swaps them. */}
+      {/* **Outside** `<main>` (D3), so the strip spans the side panel, does not
+          scroll with the grid, and leaves the grid's height the same whether
+          the listing is in flight or rendered. */}
       {bannerDrawn && (
         <IntroBanner
           queries={EXAMPLE_QUERIES}
@@ -3825,25 +2470,21 @@ export default function App() {
         />
       )}
       <div className="flex min-h-0 flex-1">
-        {/* `scrollbar-gutter: stable` keeps the gutter reserved whether or not
-            this scrolls. Without it a listing that fits and one that does not
-            differ by the scrollbar's ~15px, which is enough to drop the grid's
-            auto-fill from 7 columns to 6 and resize every tile by ~29px. */}
+        {/* Without the stable gutter, a listing that fits and one that does not
+            differ by the scrollbar's width — enough to change the auto-fill
+            column count and resize every tile. */}
         <main
           ref={mainRef}
           className="min-w-0 flex-1 overflow-auto [scrollbar-gutter:stable]"
           aria-busy={(libraryMessage === null && showSkeleton) || undefined}
         >
-          {/* Nothing at all while the library is not there (library R4). Not a
-              skeleton, which promises a listing that is not coming; not an
-              "empty folder", which is a claim about a folder nobody could open.
-              The header's line above is the whole answer, and the region under
-              it stays empty so it is the only thing to read. */}
+          {/* Nothing at all while the library is not there (R4): not a
+              skeleton, which promises a listing that is not coming, nor an
+              "empty folder", which is a claim nobody could check. */}
           {libraryMessage !== null ? null : showSkeleton ? (
-            // The old tiles are stale navigation targets while a slower listing
-            // is fetched — unmounting the grid is what makes them unclickable.
-            // The notice line is rendered empty rather than omitted, so the
-            // skeleton's tiles sit where the real ones will.
+            // Unmounting the grid is what makes the old tiles unclickable. The
+            // notice line is rendered empty rather than omitted, so these tiles
+            // sit where the real ones will.
             <>
               {findOpen && (
                 <FindBar
@@ -3880,11 +2521,6 @@ export default function App() {
               )}
               {deferredSubject.kind !== "none" && (
                 <p className="px-4 pt-1 text-xs text-amber-400">
-                  {/* The banner names the subject it is waiting on, and for a
-                      similarity view that is a model rather than a phrase.
-                      Deriving this from a query string showed no banner at all
-                      for a deferred similarity link — the one state whose whole
-                      purpose is to explain itself, explaining nothing. */}
                   {deferredSubject.kind === "query" ? (
                     <>
                       This view is a meaning search for &ldquo;
@@ -3901,19 +2537,13 @@ export default function App() {
                     ? "still starting up"
                     : "not answering"}
                   . Showing this folder meanwhile —{" "}
-                  {/* Only the warming state is polled (the availability effect
-                      re-reads on a path change and every 2s while warming), so
-                      promising an absent index will be noticed the moment it
-                      returns would be a promise nothing keeps. */}
+                  {/* Only warming is polled, so promising that an absent index
+                      will be noticed on return is a promise nothing keeps. */}
                   {state.index?.state === "warming"
                     ? "it runs as soon as the index answers."
                     : "it runs if the index comes back, and searching again will look for it."}{" "}
-                  {/* Offered only for a phrase: substituting the name corpus
-                      needs something to type at it, and a model is not text
-                      (4.6a). A deferred similarity view's only offer is the
-                      dismiss, which is the one control in the line below — a
-                      second copy of it here would be the two-that-resemble-
-                      each-other D9 refuses. */}
+                  {/* Only for a phrase: substituting the name corpus needs
+                      something to type at it, and a model is not text (4.6a). */}
                   {deferredSubject.kind === "query" && (
                     <button
                       type="button"
@@ -3931,10 +2561,8 @@ export default function App() {
                 entries.length > 0,
                 refreshing,
               )}
-              {/* The grid is replaced by a sentence only when there is nothing
-                  left to show. A similarity view's subject is something: it
-                  stays on screen above its own "nothing similar", which is the
-                  one thing that sentence is about. */}
+              {/* An anchor is something to show, so it stays above its own
+                  "nothing similar". */}
               {emptyNotice === null || anchor !== undefined ? (
                 <Grid
                   entries={shownEntries}
@@ -3959,10 +2587,9 @@ export default function App() {
             </>
           )}
         </main>
-        {/* The report goes down whole, not as a pair of booleans derived here:
-            the panel gates its chat tab on one field and its index sentence on
-            another, and two props would put the same unknown-is-null rule in
-            two places (`public-deployment` D7/D9). */}
+        {/* Whole, not as booleans derived here: the panel gates two things on
+            two fields, and two props would put the unknown-is-null rule in two
+            places (`public-deployment` D7/D9). */}
         <SidePanel
           query={liveQuery}
           similar={liveSimilar}
@@ -3982,11 +2609,8 @@ export default function App() {
           onMode={setMode}
         />
       </div>
-      {/* The running job, outside the body row so it outlives every listing the
-          user navigates through (D2). One chip whichever launcher started it;
-          `dismissed` hides it without cancelling anything, and the runner keeps
-          the last job's state readable after it ends because the chip is what
-          reports the outcome. */}
+      {/* Outside the body row, so it outlives every listing navigated through
+          (D2). `dismissed` hides it without cancelling anything. */}
       {job !== null && !job.dismissed && (
         <JobChip
           state={job}
@@ -3996,13 +2620,7 @@ export default function App() {
           viewOpen={viewer !== null}
         />
       )}
-      {/* Corner pill: the SHIPPED ssao preference. The experimental picker it
-          was built around is gone with the retired spindle-aligned rig — one
-          orientation leaves nothing to choose — and the container outlived it. */}
       <div className="fixed bottom-3 left-3 z-50 flex items-center gap-1 rounded-full border border-zinc-700 bg-zinc-900/90 p-1 text-xs">
-        {/* Ambient occlusion on/off — a per-profile performance preference the
-            live view and thumbnails both follow, so handoff is seamless either
-            way (ao-as-recipe-dimension) */}
         <button
           type="button"
           aria-pressed={ao}
@@ -4018,11 +2636,8 @@ export default function App() {
           ssao
         </button>
       </div>
-      {/* D6's table, whole: three items on a container, five on a model, and a
-          sixth when the index is answering for the collection it sits in — less
-          whatever the raising surface withholds, plus the orbit-axis group on a
-          model tile. Which ones an entry offers, and which a surface declines,
-          both live in `entryActions`, never here. */}
+      {/* Which items an entry offers, and which a surface declines, both live
+          in `entryActions`, never here (D6). */}
       {menu !== null && menuCommands.length > 0 && (
         <EntryMenu
           x={menu.x}
@@ -4049,13 +2664,7 @@ export default function App() {
           camera={thumbs.get(viewer.entry.path)?.camera}
           axis={thumbs.get(viewer.entry.path)?.axis}
           pose={poses[viewer.entry.path]}
-          // Looked up the way `pose` is, and paired with the scale that names
-          // it — the panel reports what the tile reported, from the same two
-          // sources (D7).
-          //
-          // Through `scoreFor`, which is where the anchor guard lives: the panel
-          // gets it by construction rather than by remembering, which is how it
-          // came to be missing here in the first place.
+          // Through `scoreFor`, so the panel reports what the tile did (D7).
           score={scoreFor(viewer.entry.path)}
           scoreScale={scoreScale}
           ao={ao}
@@ -4070,10 +2679,9 @@ export default function App() {
           onDismiss={closeViewer}
           onPersist={persist}
           onLoadError={() =>
-            // Non-revoking, like the hook's own catches (third review FND-2):
-            // a failed mesh load produced no replacement, so the tile keeps the
-            // thumbnail it was showing behind the error state instead of having
-            // it displaced and revoked.
+            // Non-revoking, like the hook's own catches: a failed load
+            // produced no replacement, so the tile keeps the thumbnail it was
+            // showing.
             setThumb(viewer.entry.path, {
               status: "error",
               url: thumbs.get(viewer.entry.path)?.url,

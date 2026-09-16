@@ -1,15 +1,9 @@
 /**
- * The library's override store: per-entry display names, credits and poses,
- * kept in one file beside the library marker (D1).
- *
- * `<library>/.model-browser/overrides.json`, keyed by canonical library path.
- * Directory keys cover their subtree by longest prefix, merged **per field**,
- * so a kit's credits reach every model under it while a file key carrying only
- * a pose keeps them (D2). `name` is the one field that does not inherit.
- *
- * Node APIs only — the Hono app must run un-Bun'd (global D1). The only writer
- * in the tree today is `scripts/gen-overrides.ts`, which uses `writeOverrides`
- * from here so there is exactly one atomic-write implementation (D5).
+ * `<library>/.model-browser/overrides.json` (D1): display names, credits and
+ * poses, keyed by canonical library path. Directory keys cover their subtree by
+ * longest prefix, merged **per field**, and `name` alone does not inherit (D2).
+ * Every writer goes through `writeOverrides` here, so there is one atomic
+ * write (D5).
  */
 
 import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
@@ -28,12 +22,8 @@ import { joinVPath, parseVPath } from "./vpath";
 export const STORE_FILE = "overrides.json";
 
 /**
- * The one format version this build reads. A file carrying anything else is
- * reported and treated as empty rather than guessed at: additive evolution
- * happens *within* version 1 (unknown fields are preserved by writers and
- * ignored by resolution), so a bump is a deliberate break, and an older reader
- * silently dropping a corpus's credits is exactly the CC-BY compliance hole the
- * report exists to close (D1).
+ * Additive evolution happens *within* a version — unknown fields are preserved
+ * and ignored — so a bump is a deliberate break, reported rather than guessed at.
  */
 const VERSION = 1;
 
@@ -50,11 +40,7 @@ export interface OverridesFile {
   [field: string]: unknown;
 }
 
-/**
- * Where a load's complaints go. Injected so a test can collect them; the
- * default prints, which is what puts a malformed-store report beside the
- * `library <id> at <top>` startup line when `index.ts` loads eagerly (D1).
- */
+/** Injected so a test can collect them; the default prints beside the startup lines. */
 export type Report = (message: string) => void;
 
 const defaultReport: Report = (message) => {
@@ -62,19 +48,9 @@ const defaultReport: Report = (message) => {
 };
 
 /**
- * The store spelling of a key read from the file, or why it has none.
- *
- * `canonicalLibPath` normalises only the filesystem half and drops its trailing
- * slash, so `/kit/` — the natural hand-edit spelling for a directory — becomes
- * `/kit` here rather than silently matching nothing (D2). The entry half is
- * opaque to it, so two archive-side spellings are handled on top:
- *
- * - a trailing slash is stripped, because zip listings commonly spell a
- *   directory entry `parts/` and an unstripped `/kit/a.zip!/parts/` would never
- *   match the walk's `/kit/a.zip!/parts`;
- * - an *empty* entry half (`…!/`) is refused outright. The archive file's own
- *   path is the one key for the archive and its interior root, so a second
- *   zip-root spelling could only ever disagree with it.
+ * `canonicalLibPath` normalises the filesystem half only, so the archive side is
+ * handled here: a trailing slash is stripped, `parts/` being how a zip spells a
+ * directory, and an empty entry half is refused — that key is the archive's path.
  */
 function storeKey(raw: string): { key: string } | { error: string } {
   let canonical: string;
@@ -96,13 +72,8 @@ function storeKey(raw: string): { key: string } | { error: string } {
 }
 
 /**
- * The store at `top`, or an empty one.
- *
- * Absent is empty and **silent** — most libraries have no store and owe none.
- * Unparseable, structurally wrong, or carrying an unknown version is empty and
- * *reported*: a broken store must not take the library down (browsing owes it
- * nothing) but must not be silent either, because its one consumer surface —
- * credits quietly absent — is where a swallowed error would hide forever (D1).
+ * Absent is empty and **silent**; broken is empty and *reported* (D1) — it must
+ * not take the library down, but credits quietly absent hide forever.
  */
 export async function loadOverrides(
   top: string,
@@ -158,13 +129,9 @@ export async function loadOverrides(
       );
       continue;
     }
-    // Fields the app will render are validated to be strings, and a bad one is
-    // dropped and reported while the rest of the entry is kept — the format
-    // anticipates hand and third-party writers (D6), and an object where a
-    // string belongs would otherwise ride `displayName` onto the wire and be
-    // handed to React as a child, unmounting the grid. Dropping the field, not
-    // the entry, is the loader's usual posture: a broken piece must not take
-    // the rest of a kit's metadata with it, and must not be silent either (D1).
+    // Hand-written files are expected (D6), and an object where a string belongs
+    // would ride onto the wire and unmount the grid as a React child. The bad
+    // *field* is dropped and reported, never the entry.
     const entry = { ...(value as OverrideEntry) };
     if (entry.name !== undefined && typeof entry.name !== "string") {
       report(
@@ -183,14 +150,9 @@ export async function loadOverrides(
         );
         delete entry.credits;
       } else {
-        // An allow-list, not a deny-list: what the app resolves and serves is
-        // exactly the six string fields, built fresh — so an unknown or
-        // wrong-typed field in a hand-written store never rides the wire,
-        // where the next renderer to iterate it would hand it to React as a
-        // child. Unknown fields still live on DISK untouched (the generator
-        // reads raw JSON); they just do not resolve — which is what lets a
-        // store written for a newer build ship under an older one
-        // (`credits-completion` D1/D6).
+        // An allow-list: nothing unknown rides the wire, while unknown fields stay
+        // on DISK untouched, which is what lets a newer store ship under an older
+        // build (`credits-completion` D1/D6).
         const held = entry.credits as Record<string, unknown>;
         const clean: Record<string, string> = {};
         for (const field of [
@@ -212,32 +174,16 @@ export async function loadOverrides(
         entry.credits = clean;
       }
     }
-    // Two spellings that canonicalise to one key are one key, and the last one
-    // read wins. Deliberately unreported: nothing is lost that the file did not
-    // already say twice, and a line about it would be noise on every load.
+    // Two spellings of one key: last read wins, unreported.
     store.set(spelled.key, entry);
   }
   return store;
 }
 
 /**
- * Every key that can speak for `libPath`, root first and the entry's own key
- * last — the **parse-then-walk** list (D2).
- *
- * Not `libPath.split('/')`: a virtual path splits on the first `!/` (the
- * grammar `parseVPath` implements), so splitting `/kit/a.zip!/parts/x.stl` on
- * slashes yields the segment `a.zip!` and would never produce the key
- * `/kit/a.zip` — the archive's own key, and the one a kit's credits are written
- * on. So the halves are parsed apart first: the root, then each directory of
- * the filesystem half ending at the half itself (which *is* the archive file's
- * path when there is an entry half), then each interior directory of the entry
- * half, ending at the full key.
- *
- * Boundaries are structural rather than string prefixes — the list is built by
- * joining segments — so `/kit` can never be an ancestor of `/kit2/y.stl`.
- *
- * A lookup whose entry half is empty (the `…!/` zip-root spelling) ends at the
- * archive file's path, which is what makes it resolve exactly as that path does.
+ * Every key that can speak for `libPath`, root first (D2). **Parse, then walk**:
+ * splitting on `/` alone yields `a.zip!` and never `/kit/a.zip`, which is where a
+ * kit's credits are written. Segment-joined, so `/kit` never encloses `/kit2`.
  */
 function ancestorKeys(libPath: string): string[] {
   const { fsPath, entry } = parseVPath(libPath);
@@ -259,23 +205,9 @@ function ancestorKeys(libPath: string): string[] {
 }
 
 /**
- * An entry's effective overrides.
- *
- * `name` does not inherit (D2/D7). It resolves from the **last** ancestor key
- * rather than from `libPath` itself, and the distinction is load-bearing:
- * a zip-root lookup's last ancestor is the archive file's own path, so it
- * inherits that key's name the way the requirement's "resolves exactly as the
- * archive file's own path does" demands — while `store.get(libPath)` would find
- * nothing, since `…!/` is a key spelling the loader forbids and no key could
- * ever be written in it. A trailing-slash lookup lands on the same key its
- * directory does for the same reason.
- *
- * Inherited, a kit's name would label the kit tile *and* all thirty models
- * beneath it identically — the generator writes one `name` per kit directory.
- *
- * Throws `VPathError` on a nested-zip lookup (`a.zip!/b.zip!/…`), like every
- * path API here; unreachable through the routes, which run `canonicalLibPath`
- * first and 400 on the same error.
+ * `name` does not inherit (D2/D7), or a kit's name would label every model under
+ * it, and resolves from the **last ancestor key**: `…!/` and trailing-slash
+ * lookups are spellings no key can be written in.
  */
 export function resolveOverrides(
   store: OverrideStore,
@@ -283,15 +215,9 @@ export function resolveOverrides(
 ): ResolvedOverrides {
   const keys = ancestorKeys(libPath);
   const resolved: ResolvedOverrides = {};
-  // The inheriting fields, assigned one by one rather than through a loop over
-  // a field list: `credits` inherits because attribution genuinely covers
-  // everything under the key it was written on, and `pose` so that a
-  // directory-level default is expressible. Each is merged **whole**, nearest
-  // key winning that field independently of the others (D2) — which is what
-  // lets the generator (directory keys) and a later pose writer (file keys)
-  // compose without either knowing the other exists. A field the file carries
-  // that is not named here is preserved on disk by writers and ignored here;
-  // that is what makes additive evolution need no version bump.
+  // Each field merged **whole**, nearest key winning it independently of the
+  // others (D2), so a generator writing directory keys and a pose writer writing
+  // file keys compose without knowing about each other.
   for (const key of keys) {
     const entry = store.get(key);
     if (entry === undefined) continue;
@@ -304,31 +230,16 @@ export function resolveOverrides(
 }
 
 /**
- * Every key of the store that holds credits of its **own**, in the store's key
- * order — what `GET /api/credits` answers, and what the About page's credits
- * list is drawn from (`landing-page` D8).
- *
- * No resolution and no inheritance, unlike `resolveOverrides` above: a kit's own
- * stored credits are what the generator wrote, and a key that merely inherits
- * them is a model inside a kit rather than a kit. Listing the inheritors would
- * repeat one attribution once per model in the corpus.
- *
- * The filter is `renderableCredits` — the lightbox's own "would this draw"
- * rule, imported from `shared/` rather than restated — so the list and the
- * panel agree on what counts as credited, and a `{}` the loader produced when
- * every field was wrong-typed is skipped by both.
- *
- * Insertion order is the file's order, which the loader preserves: the answer
- * is stable across requests without sorting, and the order is the corpus's own.
+ * Keys holding credits of their **own** (`landing-page` D8). No inheritance, or
+ * one attribution repeats per model; `renderableCredits` is the lightbox's own
+ * filter, so the list and the panel agree on what counts as credited.
  */
 export function listCredits(store: OverrideStore): CreditedKit[] {
   const listed: CreditedKit[] = [];
   for (const [path, entry] of store) {
     const credits = renderableCredits(entry.credits);
     if (credits === null) continue;
-    // `name` only when the key stores one: an `undefined` written into the
-    // object would ride the wire as a key `JSON.stringify` drops anyway, and
-    // the type says the field is absent rather than empty.
+    // Absent rather than `undefined`, so the type says what the wire does.
     listed.push(
       entry.name === undefined
         ? { path, credits }
@@ -338,10 +249,7 @@ export function listCredits(store: OverrideStore): CreditedKit[] {
   return listed;
 }
 
-/**
- * The stored display name for an exact library path — a Map get, no I/O and no
- * prefix walk, which is what makes it affordable per listing entry (D7).
- */
+/** A Map get: no I/O and no prefix walk, so it is affordable per entry (D7). */
 export function displayNameOf(
   store: OverrideStore,
   libPath: string,
@@ -350,19 +258,9 @@ export function displayNameOf(
 }
 
 /**
- * Attach stored display names to a listing, in place, at the point the listing
- * becomes wire bytes (D7).
- *
- * The seam is here rather than inside `listing.ts` because a listing leaves
- * that module by five paths and only three of them run through `wire` — the two
- * `listZipDir` branches of `listDir` return their entries directly — so one
- * pass over the emitted array is what covers browse, flat/deep search, peek and
- * archive interiors alike, without threading a lookup through three exported
- * signatures.
- *
- * **Exact key, never the prefix resolution**: a kit's name labels the kit's own
- * tile and nothing beneath it. An empty store touches nothing, so a library
- * without one emits byte-identical listings.
+ * Names attached in place, where a listing becomes wire bytes (D7) — not inside
+ * `listing.ts`, since not every listing leaves it through `wire`. **Exact key,
+ * never the prefix resolution**: a kit's name labels its own tile only.
  */
 export function applyDisplayNames(
   entries: DirEntry[],
@@ -372,30 +270,17 @@ export function applyDisplayNames(
   for (const entry of entries) {
     const name = displayNameOf(store, entry.path);
     if (name !== undefined) entry.displayName = name;
-    // A dir entry may carry its contact sheet inline (`listing-tree-cache`
-    // 6.3's preview annotation), and those cells are model tiles the client
-    // labels exactly like the models beside their folder — `displayName ??
-    // name`, library-overrides D7. The layer records pre-naming copies on
-    // purpose ("never how they were labelled on one request"), so the naming
-    // pass is this one, here, or a carried sheet shows the raw filename where
-    // a fresh `/api/peek` answer shows the stored name (288f55a's review).
+    // An inline contact sheet (`listing-tree-cache` 6.3) holds model tiles the
+    // client labels like any other (D7), and the preview layer stores them
+    // pre-naming, so this pass is the only thing that names them.
     if (entry.preview !== undefined) applyDisplayNames(entry.preview, store);
   }
 }
 
 /**
- * Replace the store at `top` atomically and durably: write a temp file beside
- * it, fsync it, then rename over the target. A torn write can never replace a
- * valid store with half of one — a reader sees the old file or the new one.
- *
- * The temp file is dot-prefixed and lives in `MARKER_DIR`, which is invisible
- * to listings twice over. It is removed if anything fails, so a failed write
- * leaves the directory as it found it.
- *
- * The directory fsync afterwards is what makes the *rename* durable rather than
- * just the bytes; it is best-effort because not every filesystem this library
- * can live on (exFAT, notably) supports it, and a store that survives to the
- * page cache is the same store either way.
+ * Temp file, fsync, rename, so a reader sees the old store or the new one. The
+ * directory fsync is what makes the *rename* durable, and is best-effort:
+ * exFAT does not support it.
  */
 export async function writeOverrides(
   top: string,
@@ -404,8 +289,7 @@ export async function writeOverrides(
   const dir = join(top, MARKER_DIR);
   await mkdir(dir, { recursive: true });
   const target = join(dir, STORE_FILE);
-  // pid + ms alone can collide (two writes in one tick of one process); the
-  // random suffix cannot, and a stray loser is dot-prefixed and cleaned below.
+  // pid + ms collide within one tick; the random suffix is what does not.
   const temp = join(
     dir,
     `.${STORE_FILE}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`,
@@ -432,37 +316,16 @@ export async function writeOverrides(
 
 /** Holds the store for whichever library is currently resolved. */
 export interface OverrideHolder {
-  /**
-   * The store for the library as it stands right now — empty while the library
-   * is not ready, loaded once per resolved library otherwise.
-   */
+  /** Empty while the library is not ready; loaded once per resolved library. */
   store(): Promise<OverrideStore>;
 }
 
 /**
- * The store's lifetime: per **resolved library**, never per process (D1).
- *
- * A library can be `unconfigured` or `missing` at start and resolve `ready`
- * later, and its identity can change mid-process — so a store cached per
- * process would keep serving library A's credits for library B's paths, and
- * displayed attribution is a CC-BY license term, which makes that a compliance
- * defect rather than staleness.
- *
- * The mechanism is a **compare, not a hook**: `Library` exposes no event on
- * settling (its six members are `state`, `refresh`, `realTop`, `id`, `resolve`
- * and `libPathOf`), and adding one would mean editing `library.ts`. So the
- * holder keeps `{identity, store}` and compares it against `state()`'s ready
- * answer, reloading on mismatch. That costs one extra `stat` on a settled
- * library — ~1.7 µs warm, per `library.ts`'s own measurement — beside the one
- * the gate middleware already paid for the same request.
- *
- * Single-flighted for the reason `Library.state()` is: the client's boot hits
- * the server with a dozen requests at once, and without it each would load the
- * file and print the same complaint about it.
- *
- * Within one resolution the file is read exactly once — the same
- * restart-after-editing rule `launch.json` has, which the generator's output
- * reminds the user of.
+ * Per **resolved library**, never per process (D1): identity can change
+ * mid-process, and serving one library's credits for another's paths is a CC-BY
+ * defect rather than staleness. A **compare, not a hook** — `Library` fires no
+ * event on settling — and single-flighted, since a client's boot arrives as a
+ * dozen concurrent requests. One read per resolution; restart after editing.
  */
 export function createOverrideHolder(
   library: Library,
@@ -474,10 +337,7 @@ export function createOverrideHolder(
   async function current(): Promise<OverrideStore> {
     const state = await library.state();
     if (state.state !== "ready") return EMPTY;
-    // The top off `realTop()` rather than off the state: the state's own `top`
-    // is optional on the wire, since a deployment may withhold it (D11), while
-    // the library this holder is built over always knows it — and `realTop()`
-    // is that same value, already narrowed to a ready library.
+    // `realTop()`, not the state's `top`, which a deployment may withhold (D11).
     const top = library.realTop();
     if (held !== undefined && held.id === state.id && held.top === top)
       return held.store;

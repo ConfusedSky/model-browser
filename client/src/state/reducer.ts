@@ -1,31 +1,10 @@
 /**
- * The search/view state, as one pure reducer (design R1–R6).
+ * The search/view state, as one pure reducer (R1–R6). Three cells hold three
+ * different questions: `view` is asserted, `inflight` was asked, `result` was
+ * answered — and "fetching" is not a phase, it is `inflight !== null`.
  *
- * The shape says what each cell is *for*, so no transition has to remember a
- * list of fields to reset, compare, restore or serialize — the lists are where
- * every one of the ten findings lived:
- *
- * - `view`     the question the app currently asserts. The URL projects it.
- * - `inflight` the question last *asked*, with the id that identifies the
- *              asking event and where it came from. Optimism lives here and
- *              nowhere else, so a failure is "clear it" rather than a revert.
- * - `phase`    `deferred` is a question — a meaning phrase or a model's
- *              neighbours — held for an index that cannot answer yet.
- *              "fetching" is not a phase — it is `inflight !== null`,
- *              and a deferral can have a stand-in fetch in flight.
- * - `result`   the question that was *answered*, carrying its own residue. It
- *              is replaced wholesale, never spread (R5).
- * - `failure`  the same, for the answer that did not come.
- * - `index`    availability as state, so the corpus decision cannot read a
- *              stale closure.
- * - `drafts`   only text the reducer itself reads.
- *
- * `view` is asserted at dispatch for transitions that cannot fail (setKinds,
- * the deferred submit, model open/close) and at landing for those that can
- * (any fetch). That one sentence is why the grid, filters and notices read
- * `result.forView` while only the URL projection and the deferred banner read
- * `view` — and why a stand-in listing under a deferred meaning search is a
- * legitimate steady state rather than a disagreement.
+ * `view` is asserted at dispatch where a transition cannot fail and at landing
+ * where it can, which is why the render reads `result.forView`.
  */
 import type {
   DirEntry,
@@ -45,17 +24,12 @@ import {
   type View,
 } from "./view";
 
-/** Where a transition came from. It rides the action, lands on the result, and
- *  is what push-vs-replace, the lightbox history marker and localStorage writes
- *  derive from — never a shared "restoring" flag (R2). */
+/** Where a transition came from — what push-vs-replace and the history marker
+ *  derive from, never a shared "restoring" flag (R2). */
 export type Source = "user" | "restore";
 
 export interface Inflight {
-  /**
-   * The question as ASKED. Never patched: acceptance compares a response's
-   * `forView` against this, so a fetchless change mid-flight cannot make the
-   * answer to this very question look like an answer to a different one.
-   */
+  /** The question as ASKED. Never patched — `accepts` compares against it. */
   asked: View;
   /**
    * The question this request will ASSERT when it lands. A fetchless view
@@ -63,92 +37,49 @@ export interface Inflight {
    * landing cannot revert it.
    */
   view: View;
-  /** The asking event. `requestRef` moved into state (R2). */
+  /** The asking event — identity in state rather than in a ref (R2). */
   id: number;
   source: Source;
   /** A listing standing in for a deferred meaning query: it renders, but it
    *  does not rename the view. */
   standIn?: true;
-  /**
-   * The one follow-up a stale-marked listing asks for (`listing-tree-cache`
-   * §5.2). An ordinary request in every other respect — no new transport (the
-   * Hono app must run on Node unchanged, architecture D1) — and it lands
-   * through the same `accepts` guard, so a navigation started over it wins.
-   *
-   * What the flag buys is that it renders nothing of its own: `busy` skips it,
-   * so the cached listing already on screen stays there instead of being
-   * replaced by the skeleton for the length of the server's revalidation pass
-   * (~5.6s cold). "Present cached results immediately" is the requirement; a
-   * skeleton over them is the opposite of it.
-   */
+  /** The one follow-up a stale-marked listing asks for (`listing-tree-cache`
+   *  §5.2). Ordinary in every respect but one: `busy` skips it, so the cached
+   *  listing stays on screen instead of a skeleton. */
   followUp?: true;
 }
 
-/** What landed. The semantic residue is optional because only a meaning answer has it. */
+/** What landed; the semantic residue is optional because only a scored answer
+ *  has it, and a landing replaces the result wholesale (R5). */
 export interface Landed {
   entries: DirEntry[];
   truncated?: boolean;
-  /**
-   * The server answered from a cached tree it has not yet checked against the
-   * filesystem (`DirListing.stale`, `listing-tree-cache` §5.1). Absent means
-   * fresh-or-validated; it is never `false` on the wire.
-   */
+  /** Answered from a tree not yet checked against the filesystem
+   *  (`listing-tree-cache` §5.1); never `false` on the wire. */
   stale?: boolean;
   scope?: SemanticScope;
   weak?: boolean;
   capped?: boolean;
-  /** How many cleared the floor before the count cut them, where the index
-   *  reports it (D9). Absent from a plain listing and from an older index. */
+  /** How many cleared the floor before the count cut them (D9). */
   matched?: number;
   poses?: Record<string, IndexPose | null>;
-  /**
-   * What the index scored each tile at, keyed by path as `poses` is. Optional
-   * for the same reason the rest of this residue is: only a scored answer has
-   * it, and a landing replaces the whole result (R5), so a plain listing simply
-   * arrives without one rather than having to clear the last one.
-   */
   scores?: Record<string, IndexScore>;
-  /**
-   * A similarity answer's subject: the model its neighbours were computed from,
-   * which the index excludes from them by design. Beside `entries` rather than
-   * among them, and it stays that way all the way to the render — the grid
-   * shows it first, and everything that *counts* (the empty-result sentence,
-   * the omitted notice) counts `entries` alone.
-   *
-   * No reducer logic of its own: a `landing` replaces the whole result (R5), so
-   * an answer that carries no anchor simply has none.
-   */
+  /** A similarity answer's subject, which the index excludes from its own
+   *  neighbours. Beside `entries` and never among them, so everything that
+   *  counts — the empty sentence, the omitted notice — counts `entries`. */
   anchor?: DirEntry;
 }
 
 export interface Result extends Landed {
-  /** The question this answers — what the grid, the filters and the notices read. */
   forView: View;
   source: Source;
   truncated: boolean;
-  /** Normalised from the wire's `stale?: true` — the affordance reads it. */
   stale: boolean;
-  /**
-   * This answer IS the follow-up §5.2 asked for, which is the whole once-guard:
-   * a follow-up that comes back stale again — the pass failed, or the root is
-   * still unvalidated after the TTL window (design D5's corrections paragraph)
-   * — shows the affordance and asks nothing more. The next user-driven request
-   * tries again.
-   *
-   * It lives on the *answer* rather than in a ref because that is what keys it
-   * to a listing: a landing replaces the result wholesale (R5), so navigating
-   * away and back gets its own single follow-up, where a boolean held beside
-   * the state would have survived the navigation and suppressed it.
-   */
+  /** The whole once-guard: a follow-up that comes back stale asks nothing
+   *  more. On the answer, so navigating away and back earns a fresh one. */
   followUp?: true;
-  /**
-   * The asking event this answers — `Inflight.id`, kept past the landing that
-   * cleared the request. `accepts` can compare a *response* against the
-   * question in flight; a second wave about an answer already on screen has no
-   * request left to compare against, so the answer carries its own identity
-   * instead (pose-for-every-model D3). Monotonic per ask, so two landings never
-   * share one and a wave cannot be taken for the wrong listing's.
-   */
+  /** Kept past the landing that cleared `inflight`, which a second wave has
+   *  nothing left to compare against (D3). Monotonic. */
   id: number;
 }
 
@@ -157,14 +88,9 @@ export interface Failure {
   message: string;
 }
 
-/**
- * `idle`, or a question the index cannot answer yet — holding
- * its own provenance, because that is the only place left to keep it. Every
- * other question carries its source on `inflight`, but a deferral in the `wait`
- * window has asked for nothing at all, and when the index finally answers, the
- * fire is that original asking resumed: a restored one must replace the entry
- * the link already sits on, not push a second one over it (R2).
- */
+/** A question held for an index that cannot answer yet. It carries its own
+ *  provenance because a `wait`-window deferral has no `inflight` to keep it
+ *  on, and the eventual fire is that asking resumed (R2). */
 export type Phase = "idle" | { deferred: Source };
 
 export interface SearchState {
@@ -175,45 +101,22 @@ export interface SearchState {
   failure: Failure | null;
   index: IndexAvailability | null;
   drafts: { queryText: string };
-  /**
-   * The poses a *plain* listing's second wave supplied (pose-for-every-model
-   * D3), or null where none has landed for the answer on screen.
-   *
-   * Beside `result` rather than inside it, because it is not part of the answer
-   * the server gave: `result` is replaced wholesale and never spread (R5), and
-   * a meaning landing's own riding poses live on it. `App` reads the two in
-   * precedence order — the answer's own first — so this slot only ever speaks
-   * for a listing that arrived without any.
-   *
-   * Cleared by every landing, which is the moment `entries` are replaced (R5):
-   * a map keyed by the paths of a listing the user has left must not apply to
-   * the next one's. Not cleared at `navigate`, deliberately — the old listing
-   * is still on screen until its successor lands, and dropping its poses there
-   * would un-pose every tile of a grid that is about to be replaced anyway.
-   */
+  /** Beside `result` because the server did not send them, and cleared by every
+   *  landing rather than at `navigate`: the old listing is still on screen
+   *  until its successor lands (D3). */
   listingPoses: Record<string, IndexPose | null> | null;
   /** Monotonic asking-event counter. */
   lastId: number;
 }
 
 export type Action =
-  /** Enter a directory: the request that clears the search, the filter and the
-   *  link's options in one — all four re-seeded from this profile's own. */
+  /** Clears the search, the filter and the link's options in one. */
   | { type: "navigate"; path: string; prefs: Prefs }
   /** Commit `drafts.queryText`. The corpus decides what that means. */
   | { type: "submit" }
-  /**
-   * Run a phrase the app supplied rather than one the user typed — the
-   * introduction's example queries and its surprise action (`landing-page` D4).
-   * One transition, because "set the draft, then submit" is two dispatches
-   * across a render and would need a pending ref and an effect to join them.
-   * The mode travels with it for the same reason: a chip is a meaning search,
-   * and a `setMode` dispatched beside a `submit` would be a second transition.
-   *
-   * It carries no location, because it has only one: the library's top, whatever
-   * view it was dispatched from. The introduction offers these phrases on a gate
-   * asked at the top, so that is where they have to run.
-   */
+  /** Run a phrase the app supplied (`landing-page` D4). One transition, mode
+   *  and all, because "set the draft then submit" is two dispatches across a
+   *  render. It carries no location: it runs at the library's top. */
   | { type: "runQuery"; text: string; mode: SearchMode }
   | { type: "toggleFlat" }
   | { type: "setMode"; mode: SearchMode }
@@ -224,26 +127,15 @@ export type Action =
   | { type: "setFolderMatching"; on: boolean }
   /** Typing in the search input. Emptying it is how a committed subject is left. */
   | { type: "queryText"; text: string }
-  /** Show the neighbours of a model: a similarity subject over the location the
-   *  user is standing in. The corpus decides what that means, exactly as it does
-   *  for a phrase — including deferring it while the index warms (D4). */
+  /** Neighbours of a model, anchored where the user stands. Routed through the
+   *  corpus decision, so it defers while the index warms exactly as a phrase
+   *  does (D4). */
   | { type: "similar"; model: string }
-  /**
-   * Re-shape the similarity view on screen: how many neighbours, and how the
-   * index pools a model's per-view scores. The whole parameter set, never a
-   * delta — an omitted `pool` is the index's own default, which is a value the
-   * action can assert rather than a field it forgot.
-   *
-   * No record-only phase, unlike `setTuning`: a parameter here is one number
-   * and one three-way choice, and the debounce that keeps a typed number from
-   * becoming four questions lives in the control that types it. So this
-   * transition always asks — there is nothing to record.
-   */
+  /** The whole parameter set, never a delta: an omitted `pool` asserts the
+   *  index's own default. Always asks — the debounce lives in the control, so
+   *  there is no record-only phase as `setTuning` has. */
   | { type: "similarTuning"; k: number; pool?: Tuning["pool"] }
-  /** Leave whatever subject is committed — a phrase or a model — and re-ask the
-   *  location's ordinary listing (D9). One transition for both kinds, which is
-   *  what makes "the same dismissal" one implementation rather than two that
-   *  resemble each other. */
+  /** Leave whatever subject is committed, phrase or model, by one rule (D9). */
   | { type: "clearSubject" }
   /** The deferred banner's offer: run the held phrase against the name corpus. */
   | { type: "deferredToName" }
@@ -252,29 +144,21 @@ export type Action =
   | { type: "landing"; id: number; forView: View; landed: Landed }
   | { type: "failure"; id: number; forView: View; message: string }
   | { type: "index"; availability: IndexAvailability }
-  /** A user opened a lightbox. A *restored* one needs no action: its view came
-   *  with the model already named, which is what tells the projection the
-   *  entry is the browser's rather than one to mint (R3/R7). */
+  /** A user opened a lightbox; a *restored* one needs no action, its view
+   *  already names the model (R3/R7). */
   | { type: "modelOpen"; path: string }
   | { type: "modelClose" }
   /** A landed listing does not contain the model the URL named (R7's bridge 4). */
   | { type: "modelDrop" }
-  /**
-   * The poses a plain listing's second wave answered with (pose-for-every-model
-   * D3). `id` is the landing this wave was fired for — `Result.id` — and is
-   * what drops one that answers about a view the user has left.
-   */
+  /** `id` is the `Result.id` this wave was fired for, which drops one that
+   *  answers about a view the user has left. */
   | {
       type: "listingPoses";
       id: number;
       poses: Record<string, IndexPose | null>;
     }
-  /**
-   * Ask the answer on screen again, because it said it was stale
-   * (`listing-tree-cache` §5.2). `id` is the answer it is for — `Result.id`,
-   * the `listingPoses` rule — so a dispatch about a listing the user has left
-   * does nothing.
-   */
+  /** Ask the answer on screen again because it said it was stale
+   *  (`listing-tree-cache` §5.2). `id` as `listingPoses` uses it. */
   | { type: "revalidate"; id: number };
 
 export function initialState(
@@ -296,26 +180,17 @@ export function initialState(
   };
 }
 
-/**
- * The question the app currently stands behind: the one in flight if there is
- * one, else the one it asserts. This is what a control acts on — `dest` is
- * this rule read for `path` (R1), and every other option follows it for the
- * same reason: a search submitted mid-navigation follows the user.
- *
- * A stand-in is skipped, because it is not the question: while a meaning query
- * is deferred, the request in flight is the placeholder listing and the
- * question is still the deferred search.
- */
+/** In flight if there is one, else asserted, so a search submitted
+ *  mid-navigation follows the user (R1). A stand-in is skipped: the placeholder
+ *  is not the question, the deferred search still is. */
 export function liveView(state: SearchState): View {
   return state.inflight !== null && state.inflight.standIn !== true
     ? state.inflight.view
     : state.view;
 }
 
-/** Ask `view`, from `source`. The asked view and the assert view start equal;
- *  only fetchless patches part them. `kind` carries the two flags that say what
- *  a request is *for* — a stand-in, a stale listing's follow-up — spread rather
- *  than taken as positional booleans, which two of them would make unreadable. */
+/** Ask `view`. Asked and assert start equal; only fetchless patches part
+ *  them. */
 function ask(
   state: SearchState,
   view: View,
@@ -331,18 +206,11 @@ function ask(
 }
 
 /**
- * A view change that asks nothing: asserted at dispatch, and patched into the
- * request in flight too so its landing cannot revert it. Never `path`/`subject`
- * — those change what was asked, which is a new request by definition.
- *
- * It reaches the *answer* as well, for the same reason the landing takes the
- * patched view rather than the asked one: a fetchless change belongs to the
- * answer it stands beside. The render reads `result.forView` (R1's corollary),
- * so a patch that stopped at `view` left the kind control inert — the URL said
- * `kinds=models` while the grid went on showing the folders — and left
- * `stoodIn` claiming a stand-in after every lightbox open. Only `forView` is
- * replaced: R5's wholesale rule is about `entries` identity, which useThumbnails
- * resets on, and this spread preserves it.
+ * A view change that asks nothing, patched into the request in flight and the
+ * answer on screen as well as `view` — never `path`/`subject`, which are a new
+ * request. It **must** reach `result.forView`, the thing the render reads, or
+ * the kind control goes inert and `stoodIn` claims a stand-in after every
+ * lightbox open. `entries` identity survives the spread (R5).
  */
 function patch(state: SearchState, fields: Partial<View>): SearchState {
   return {
@@ -359,14 +227,8 @@ function patch(state: SearchState, fields: Partial<View>): SearchState {
   };
 }
 
-/**
- * The deferral's exit (R6): the phase ends and the held question stops being
- * asserted — it clears the *subject*, whichever kind it is, so the banner goes
- * and the URL stops naming a search, or a model's neighbours, that nobody is
- * waiting for. Every cancel path — navigating, emptying the input, searching by
- * name, dismissing — goes through here, which is why there is no path that
- * leaves a dead deferral behind to fire later.
- */
+/** The deferral's exit (R6): the phase ends and the subject is cleared. Every
+ *  cancel path goes through here, so no dead deferral is left to fire. */
 function endDeferral(state: SearchState): SearchState {
   if (state.phase === "idle") return state;
   return {
@@ -385,9 +247,8 @@ function defer(
   source: Source,
   probed: boolean,
 ): SearchState {
-  // The failure goes with the question that earned it: a deferral is a fresh
-  // question, and leaving the old message standing would make `busy` read a
-  // stale error as this deferral's own answer.
+  // The failure goes with the question that earned it, or `busy` reads a stale
+  // error as this deferral's own answer.
   const held: SearchState = {
     ...state,
     phase: { deferred: source },
@@ -404,10 +265,8 @@ export function stoodIn(state: SearchState): boolean {
   return state.result !== null && !sameView(state.result.forView, state.view);
 }
 
-/** Whether a response belongs to the question in flight: the asking event and
- *  the question as asked must BOTH match (R2). Value equality alone would
- *  invert latest-wins for an identical re-submission — the stale answer would
- *  be taken, clearing `inflight`, and the fresh one rejected. */
+/** The asking event and the question as asked must BOTH match (R2): value
+ *  equality alone inverts latest-wins for an identical re-submission. */
 function accepts(
   state: SearchState,
   id: number,
@@ -419,12 +278,8 @@ function accepts(
   return f !== null && f.id === id && sameView(forView, f.asked);
 }
 
-/**
- * Whether two availability reads say the same thing, down to `elapsed` — the
- * side panel counts the wait out loud. The warming poll asks every 2s and each
- * answer is a fresh object; without this the state changes identity on a probe
- * that changed nothing, and the whole app re-renders for it.
- */
+/** Down to `elapsed`, which the side panel counts out loud. Each poll answer
+ *  is a fresh object, so without this the whole app re-renders per probe. */
 export function sameAvailability(
   a: IndexAvailability | null,
   b: IndexAvailability,
@@ -457,20 +312,9 @@ function askCommitted(
   }
 }
 
-/**
- * Commit whatever the draft holds, of whichever corpus owns it — the whole of
- * `'submit'`, and the tail of `'runQuery'` (`landing-page` D4). A shared
- * function rather than a copied body: the blank guard and the subject it builds
- * are one rule, and a chip must reach the grid, the URL and history by exactly
- * the path a typed submit does or the two would drift.
- *
- * `base` is the view the phrase is committed over, and it defaults to the live
- * one — which is the rule a *typed* submit follows (R1: a search submitted
- * mid-navigation follows the user). `'runQuery'` passes a base of its own
- * because an introduction-supplied phrase is not a search of where the visitor
- * is standing; the parameter is what keeps that the only difference between the
- * two, rather than a second copy of the subject rule.
- */
+/** `'submit'` whole and `'runQuery'`'s tail, so a chip reaches the grid, the
+ *  URL and history by the typed submit's own path (`landing-page` D4). The
+ *  `base` override is the only difference between the two. */
 function commitDraft(
   state: SearchState,
   base: View = liveView(state),
@@ -486,17 +330,8 @@ function commitDraft(
   return askCommitted(state, view, "user");
 }
 
-/**
- * Leave the committed subject (D9): it becomes `none`, any deferral ends on the
- * way through, and the location's ordinary listing is re-asked — asserted at
- * landing like any other fetch.
- *
- * ONE rule for both kinds of subject, and one implementation for both ways of
- * invoking it: the dismiss control dispatches `clearSubject`, and emptying the
- * search input delegates here rather than keeping a copy of the rule. Before
- * the subject existed those were necessarily different code, because the only
- * exit was emptying an input a similarity view has nothing in.
- */
+/** Leave the committed subject (D9) — one rule for a phrase and a model, and
+ *  one implementation for the dismiss control and the emptied input. */
 function leaveSubject(state: SearchState): SearchState {
   const base = liveView(state);
   if (base.subject.kind === "none") return state;
@@ -510,11 +345,8 @@ function leaveSubject(state: SearchState): SearchState {
 export function reducer(state: SearchState, action: Action): SearchState {
   switch (action.type) {
     case "navigate": {
-      // Navigation is itself the request that clears the search state — and
-      // the options with it: a link's options governed the view it named, so
-      // once the user leaves it their own preferences are in force again. All
-      // four, from the action: restoring two of them is how a link's mode and
-      // tuning outlived the view they belonged to.
+      // A link's options governed the view it named, so leaving it puts the
+      // profile's own back in force. All four come from the action.
       const view: View = {
         ...action.prefs,
         path: action.path,
@@ -533,57 +365,31 @@ export function reducer(state: SearchState, action: Action): SearchState {
       return commitDraft(state);
 
     case "runQuery": {
-      // The draft first — the input holds the phrase after the click, exactly
-      // as it holds a typed one after Enter — then the mode as `'setMode'`
-      // asserts it (a fetchless patch: nothing is committed yet for it to
-      // re-ask), then the ordinary commit. `patch` reaches the answer on screen
-      // too, so the listing the chip was clicked over does not go on claiming
-      // the old mode while the URL names the new one.
+      // Draft, then mode as a fetchless patch, then the ordinary commit. The
+      // patch reaches the answer on screen too, so the listing the chip was
+      // clicked over stops claiming the old mode.
       const held = patch(
         { ...state, drafts: { ...state.drafts, queryText: action.text } },
         { mode: action.mode },
       );
-      // At the library's **top**, wherever the visitor was standing. The
-      // introduction offers its phrases on one gate — `meaningRunnableAt` at
-      // `/` — and the deploy-time check proves them with no path at all, so the
-      // search they run has to be that search: committed at the current path
-      // instead, a chip clicked inside an archive sends the index a location it
-      // does not cover and earns a 400, and one clicked while a folder
-      // navigation was in flight silently searched the folder. Not `patch`,
-      // which refuses `path` by design — a different location is a different
-      // request, which is exactly what this is.
-      //
-      // `flat` off with it: the top the phrase runs at is the banner's own view
-      // (the shortest URL, `atTop` in App), so leaving the results lands back on
-      // it rather than on a flattened library nobody asked to walk. A deep
-      // result is flat-shaped whatever the toggle says (`requestOf`), so the
-      // grid this commits is unchanged either way. An open lightbox closes
-      // through `commitDraft`'s `model: null`, as it does under a typed submit.
+      // At the library's **top**, wherever the visitor was standing: the gate
+      // that offers these phrases is asked at `/`, so committing at the current
+      // path would send the index a location it may not cover. `flat` off with
+      // it, so leaving the results lands back on the banner's own view.
       const top: View = { ...liveView(held), path: "/", flat: false };
       return commitDraft(held, top);
     }
 
     case "similar": {
-      // A model's neighbours, anchored at the location the user is standing in
-      // — the anchor is what the dismissal returns to, and what tells two
-      // similarity views of one model apart (`requestOf`). Routed through the
-      // one corpus decision, so it defers and waits exactly as meaning does,
-      // and the deferral holds its own provenance.
-      // The parameters start at their defaults: `SIMILAR_K` neighbours, and no
-      // pool at all — absence being the index's own, which is what an
-      // untouched view asks for.
+      // The anchor is what the dismissal returns to, and what tells two
+      // similarity views of one model apart (`requestOf`).
       const view: View = {
         ...liveView(state),
         subject: { kind: "similar", model: action.model, k: SIMILAR_K },
         model: null,
       };
-      // The draft goes with it, as it does on a `navigate`. Text left in the
-      // input under a similarity view is a trap: it relates to nothing on
-      // screen, and erasing it — the natural gesture for a stale box — runs the
-      // shared leave-subject rule and destroys the view. Cleared here, the input
-      // says what is true (nothing textual is committed), and typing then
-      // erasing still dismisses by that one rule, so the delegation keeps a
-      // user-visible instance rather than becoming unreachable.
+      // The draft goes with it: text left in the box relates to nothing on
+      // screen, and erasing it — the natural gesture — destroys the view.
       return askCommitted(
         { ...state, drafts: { ...state.drafts, queryText: "" } },
         view,
@@ -593,15 +399,11 @@ export function reducer(state: SearchState, action: Action): SearchState {
 
     case "similarTuning": {
       const base = liveView(state);
-      // Only a similarity view has these to change. Under any other subject
-      // the control is not on screen, and asserting a parameter set onto a
-      // subject that reads none would put a `k` in the URL of a view that
-      // cannot use it — the mode's own mistake, in a different slot.
+      // Asserting these onto a subject that reads none would put a `k` in the
+      // URL of a view that cannot use it.
       if (base.subject.kind !== "similar") return state;
-      // A different parameter is a different question, so this re-asks by the
-      // one corpus decision — deferring while the index warms exactly as a
-      // fresh find-similar would, rather than firing at an index that cannot
-      // answer.
+      // A different parameter is a different question, so it re-asks through
+      // the corpus decision and defers while the index warms.
       const view: View = {
         ...base,
         subject: { ...base.subject, k: action.k, pool: action.pool },
@@ -628,11 +430,8 @@ export function reducer(state: SearchState, action: Action): SearchState {
 
     case "setMode": {
       const base = liveView(state);
-      // The mode is the corpus a typed *phrase* goes to, so it re-asks only
-      // when a phrase is what the view is about. With nothing committed it is
-      // the next search's; under a similarity subject it is the next search's
-      // too — that view neither reads the mode nor names it in its URL, so
-      // re-asking would spend a request on a question that did not change.
+      // The mode is the corpus a typed *phrase* goes to, so anything else is
+      // the next search's setting and re-asking would change no question.
       if (base.subject.kind !== "query")
         return patch(state, { mode: action.mode });
       return askCommitted(
@@ -646,9 +445,8 @@ export function reducer(state: SearchState, action: Action): SearchState {
       const recorded = patch(state, { tuning: action.tuning });
       if (!action.run) return recorded;
       const base = liveView(recorded);
-      // Only a runnable meaning query re-runs. A tuning change never defers:
-      // it shapes a query the index is already answering, and holding it would
-      // turn a slider into a search nobody asked for.
+      // A tuning change never defers: it shapes a query the index is already
+      // answering, and holding it turns a slider into a search nobody asked for.
       if (
         base.subject.kind !== "query" ||
         corpusOf(base, recorded.index) !== "meaning"
@@ -664,9 +462,8 @@ export function reducer(state: SearchState, action: Action): SearchState {
 
     case "setFolderMatching": {
       const base = liveView(state);
-      // It decides which entries the *name corpus* returns, so a committed
-      // query re-runs. A similarity view neither sends it nor names it, so it
-      // records like a plain listing's does — the next search's setting.
+      // It decides what the *name corpus* returns; anywhere else it records as
+      // the next search's setting.
       if (base.subject.kind !== "query")
         return patch(state, { folderMatching: action.on });
       return askCommitted(
@@ -682,18 +479,13 @@ export function reducer(state: SearchState, action: Action): SearchState {
         drafts: { ...state.drafts, queryText: action.text },
       };
       if (action.text.trim() !== "") return typed;
-      // Emptying the input is how a committed subject is left — delegated to
-      // the one rule (D9) rather than kept as a second copy of it, so the
-      // dismiss control and this path cannot drift apart.
+      // Delegated, not a second copy of the rule (D9).
       return leaveSubject(typed);
     }
 
     case "deferredToName": {
-      // Offered rather than done for the user: substituting the corpus is only
-      // honest when it was asked for, and the banner's button is the asking.
-      // Only a phrase can be offered — a deferred similarity view has no text
-      // to run against the name corpus, so its banner's only offer is the
-      // dismiss.
+      // Substituting the corpus is honest only when it was asked for. Only a
+      // phrase can be: a deferred similarity view has no text to run.
       const subject = state.view.subject;
       if (state.phase === "idle" || subject.kind !== "query") return state;
       return ask(
@@ -705,17 +497,10 @@ export function reducer(state: SearchState, action: Action): SearchState {
 
     case "restore": {
       const v = action.view;
-      // A history entry that asks the same question is not a different
-      // listing: patch its request-irrelevant fields and keep the answer we
-      // already have, or the one already on its way. Every field below is one
-      // `requestOf` does not read — a difference that mattered would have
-      // changed the request and failed the compare — and patching them is what
-      // keeps the asserted view in lockstep with the URL the browser restored.
-      // `patch` forwards them to `result.forView` too, which is what re-filters
-      // the grid without asking anything. (`path`/`subject` stay out by patch's
-      // own rule; under `sameQuestion` they cannot differ in a way the request
-      // sees — which for a similarity view is why its anchor is in the request
-      // at all, since patching `path` is exactly what this branch cannot do.)
+      // Same question, so keep the answer and patch the fields `requestOf`
+      // does not read — anything that mattered would have failed the compare.
+      // `path`/`subject` stay out by `patch`'s rule, which is why a similarity
+      // view's anchor is in its request at all.
       if (
         (state.result !== null || state.inflight !== null) &&
         sameQuestion(v, liveView(state))
@@ -729,19 +514,14 @@ export function reducer(state: SearchState, action: Action): SearchState {
             folderMatching: v.folderMatching,
             tuning: v.tuning,
           }),
-          // The failure belonged to some other question — this branch runs only
-          // when the answer already on screen, or already on its way, is this
-          // view's own. Leaving it standing left a dead message in the path bar
-          // for the rest of the session: land /a, follow a link that fails, come
-          // back, and the grid is right while the error still accuses it. Only
-          // this branch clears it; `patch` must not, or a lightbox open would
-          // wipe the report of the failure it was opened in spite of.
+          // The failure belonged to some other question, and would otherwise
+          // accuse a correct grid. Only this branch clears it — `patch` must
+          // not, or a lightbox open wipes the failure it was opened over.
           failure: null,
         };
       }
-      // The input shows the restored query — and nothing, for a subject that is
-      // not one. The filter is not part of the view a URL names, so it is the
-      // caller's to clear.
+      // The filter is not part of the view a URL names, so it is the caller's
+      // to clear.
       const seeded: SearchState = {
         ...state,
         drafts: {
@@ -757,18 +537,15 @@ export function reducer(state: SearchState, action: Action): SearchState {
       const f = state.inflight;
       const result: Result = {
         // The patched assert-view, never the action's `forView`: a fetchless
-        // change made while this request was in flight belongs to the answer
-        // it lands with.
+        // change made in flight belongs to the answer it lands with.
         forView: f.view,
         source: f.source,
         id: f.id,
         entries: action.landed.entries,
         truncated: action.landed.truncated === true,
-        // Normalised here for the same reason `truncated` is: the wire omits
-        // the field rather than sending `false`, and the render reads a
-        // boolean. The follow-up marker comes off the REQUEST, not the answer —
-        // the server has no idea which of its answers is a second ask — and is
-        // what stops a stale follow-up asking a third time.
+        // The wire omits these rather than sending `false`. The follow-up
+        // marker comes off the REQUEST — the server cannot know which of its
+        // answers is a second ask — and is what stops a third.
         stale: action.landed.stale === true,
         ...(f.followUp === true ? { followUp: true as const } : {}),
         scope: action.landed.scope,
@@ -780,8 +557,7 @@ export function reducer(state: SearchState, action: Action): SearchState {
         anchor: action.landed.anchor,
       };
       // A stand-in renders without renaming the view: the URL still names the
-      // meaning search, the deferral still waits, and the grid shows the
-      // location's own contents meanwhile.
+      // search and the deferral still waits.
       if (f.standIn === true) {
         return {
           ...state,
@@ -791,9 +567,8 @@ export function reducer(state: SearchState, action: Action): SearchState {
           listingPoses: null,
         };
       }
-      // `phase` is deliberately untouched: leaving a deferral is the job of the
-      // transition that asked something else, and a landing that quietly tidied
-      // the phase would hide a cancel path that forgot to.
+      // `phase` is deliberately untouched: a landing that tidied it would hide
+      // a cancel path that forgot to.
       return {
         ...state,
         view: f.view,
@@ -806,26 +581,12 @@ export function reducer(state: SearchState, action: Action): SearchState {
 
     case "failure": {
       if (!accepts(state, action.id, action.forView)) return state;
-      // **A follow-up that fails says nothing** (`listing-tree-cache` §5.2,
-      // round-2 finding 2). The request that failed asked for nothing the user
-      // asked for: the listing it was going to correct is on screen, complete
-      // and rendered, and the only thing lost is a correction the user never
-      // knew was coming. Painting the header error over that would report a
-      // failure of the app's own background housekeeping as a failure of the
-      // navigation the user made — and, worse, would do it while the entries
-      // that failure did not touch are still sitting there.
-      //
-      // So: clear the request, keep the result and its `stale` flag, set no
-      // failure. 'Refreshing…' stays up, which is the truthful line — the
-      // listing was *not* refreshed. Nothing is retried: `staleId` is the
-      // answering event's id and no answer landed, so the effect that dispatches
-      // `revalidate` does not re-run. The effect's own contract comment already
-      // said this was the outcome ("a failed follow-up is not retried either …
-      // silence is the right outcome"); it was true of the retry and false of
-      // the banner.
+      // **A follow-up that fails says nothing** (`listing-tree-cache` §5.2):
+      // nobody asked for it, and the listing it was going to correct is on
+      // screen and complete. 'Refreshing…' stays up, which is truthful. Nothing
+      // retries — no answer landed, so the `revalidate` effect does not re-run.
       if (state.inflight.followUp === true) return { ...state, inflight: null };
-      // Keep the view, clear the optimism, say what went wrong. There is no
-      // revert to get wrong: nothing advanced.
+      // No revert to get wrong: nothing advanced.
       return {
         ...state,
         inflight: null,
@@ -841,11 +602,8 @@ export function reducer(state: SearchState, action: Action): SearchState {
         return known;
       const source = known.phase.deferred;
       if (action.availability.state === "ready") {
-        // The link finally doing what it named. It runs for the view that
-        // deferred it and only that one — every other path out of the phase
-        // cancels it, so there is no stale deferral left to fire. Under the
-        // deferral's own provenance: this is the asking event resumed, so a
-        // restored one still replaces rather than pushing.
+        // The asking event resumed, under the deferral's own provenance, so a
+        // restored one still replaces its history entry rather than pushing.
         return ask({ ...known, phase: "idle" }, known.view, source);
       }
       // Cannot answer yet: stand in with the location's own contents, once.
@@ -863,26 +621,18 @@ export function reducer(state: SearchState, action: Action): SearchState {
       return patch(state, { model: null });
 
     case "listingPoses": {
-      // The wave belongs to the answer that fired it, and to no other: `id` is
-      // the asking event the landing recorded, so a wave that comes back about
-      // a view the user has left finds a different one and says nothing. The
-      // same rule `accepts` applies to a response, asked of the answer rather
-      // than of the request, because by now there is no request left (D3).
-      //
-      // The map is stored by reference and never rebuilt here: the sweep that
-      // reads it re-runs on its identity, and a copy per action would walk the
-      // whole grid for a value that did not change.
+      // `accepts`' rule asked of the answer rather than the request, because
+      // by now there is no request left (D3). Stored by reference: the sweep
+      // re-runs on its identity, so a copy per action rewalks the grid.
       if (state.result === null || state.result.id !== action.id) return state;
       return { ...state, listingPoses: action.poses };
     }
 
     case "revalidate": {
       const r = state.result;
-      // The answer this is about must still be the one on screen, it must have
-      // said it was stale, and it must not itself be the follow-up — that last
-      // clause is the whole of "one follow-up per landed stale answer". Without
-      // it a server that keeps answering marked (a failed pass, a root still
-      // unvalidated past the TTL) would be asked forever.
+      // The last clause is the whole of "one follow-up per landed stale
+      // answer": without it, a server that keeps answering marked is asked
+      // forever.
       if (
         r === null ||
         r.id !== action.id ||
@@ -890,15 +640,11 @@ export function reducer(state: SearchState, action: Action): SearchState {
         r.followUp === true
       )
         return state;
-      // Never over a request the user is already waiting on. The effect that
-      // dispatches this runs after the landing commits, which is exactly when a
-      // click may have already asked for somewhere else — and re-asking the old
-      // view here would throw that navigation away.
+      // Never over a request the user is already waiting on: this dispatches
+      // after the landing commits, when a click may have asked for elsewhere.
       if (state.inflight !== null) return state;
-      // Asked as the answer on screen was asked, including its stand-in-ness:
-      // a placeholder listing under a deferred search is marked stale like any
-      // other, and re-asking it without the flag would let the follow-up's
-      // landing rename the view and silently end the deferral.
+      // Including its stand-in-ness: re-asking a placeholder without the flag
+      // lets the follow-up's landing rename the view and end the deferral.
       return ask(state, r.forView, r.source, {
         followUp: true,
         ...(stoodIn(state) ? { standIn: true as const } : {}),

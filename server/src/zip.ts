@@ -15,9 +15,9 @@ export interface ZipEntry {
 }
 
 /**
- * What identifies an archive for caching purposes (`listing-tree-cache` D3):
- * its modification time and its size. A zip's central directory is immutable
- * while those are — rewriting an archive necessarily rewrites its tail.
+ * What identifies an archive for caching (`listing-tree-cache` D3): rewriting a
+ * zip necessarily rewrites its tail, so an unmoved mtime and size mean an
+ * unchanged central directory.
  */
 export interface ArchiveId {
   /** `mtimeMs` of the archive file. */
@@ -27,14 +27,8 @@ export interface ArchiveId {
 }
 
 /**
- * The archive-directory cache `listZipEntries` consults, declared **here** as a
- * structural interface rather than imported from the module that implements it.
- * That direction is deliberate: `snapshot.ts` knows about zips, `zip.ts` knows
- * nothing about cache directories, library identity or eviction, so this file
- * stays a zip parser and the persistence story stays in one place.
- *
- * Asynchronous on both halves because the implementation backs onto a file it
- * loads lazily; an in-memory hit still costs only a microtask.
+ * Structural, not imported from `snapshot.ts`, so this file stays a zip parser
+ * that knows nothing about caches. Async because the implementation is.
  */
 export interface ZipDirCache {
   /** The archive's entries as of `id`, or undefined if it holds another version. */
@@ -65,20 +59,9 @@ async function readAt(
 }
 
 /**
- * List a zip's entries by reading only the central directory — nothing is
- * decompressed and nothing is written to disk.
- *
- * With a `cache`, an archive whose `{mtime, size}` is unchanged since it was
- * last read is answered from it and **never opened** (D3) — the largest single
- * measured win in `listing-tree-cache`, ~6.7 s across 409 archives on the
- * spinning volume, because a central directory lives at the file's tail and no
- * OS-level caching keeps those seeks warm.
- *
- * The identity comes from `stat`, not from an open handle, and that is the
- * requirement rather than a tidy-up: the size used to be read by opening the
- * file and calling `fstat`, which would open every archive on the cache-hit
- * path too and make "an unchanged archive is not opened" unmeetable by
- * construction. `stat` supplies the mtime half of the key at the same time.
+ * The central directory only — nothing is decompressed. A cached archive is
+ * **never opened** (D3), which is why the identity comes from `stat` and not
+ * from an open handle's `fstat`.
  */
 export async function listZipEntries(
   zipPath: string,
@@ -149,10 +132,7 @@ async function readCentralDirectory(
   return entries;
 }
 
-/**
- * Decompress a single entry on demand. Reads only the entry's local header and
- * compressed bytes; nothing is persisted.
- */
+/** Reads only the entry's local header and compressed bytes. */
 export async function extractEntry(
   zipPath: string,
   entryName: string,

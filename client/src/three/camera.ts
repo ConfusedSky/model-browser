@@ -7,7 +7,7 @@ export { defaultAxisFor } from "../../../shared/frames";
 export interface Bounds {
   center: THREE.Vector3;
   radius: number;
-  /** The measured box — translated alongside the model when it is staged (D1). */
+  /** Translated alongside the model when it is staged (D1). */
   box: THREE.Box3;
 }
 
@@ -31,15 +31,9 @@ export interface SpindleFrame {
   b: THREE.Vector3;
 }
 
-/**
- * Turntable frame per spindle axis, in the model file's own coordinates:
- * `s` is the spindle (yaw axis, also camera up); (a, b) span the yaw plane,
- * chosen with a×b = −s so a rightward drag spins the same visual direction
- * under every spindle. The table is `FILE_FRAMES` (shared/frames.ts) lifted
- * into `Vector3`s — the derivation from the pre-bake scene table lives there,
- * not here. The 'y' frame is unchanged from that scene table, so an OBJ at the
- * default reads exactly as it always did.
- */
+/** In the file's own coordinates: `s` is the spindle and camera up, and (a, b)
+ *  span the yaw plane with a×b = −s, so a rightward drag spins the same visual
+ *  direction under every spindle. `FILE_FRAMES` lifted into `Vector3`s. */
 const FRAMES: Record<OrbitAxis, SpindleFrame> = lift(FILE_FRAMES);
 
 function lift(
@@ -63,7 +57,6 @@ export function frameFor(axis: OrbitAxis): SpindleFrame {
   return FRAMES[axis];
 }
 
-/** Unit view direction (target → camera) for spindle-relative az/el. */
 function stateDirection(
   state: CameraState,
   frame: SpindleFrame,
@@ -74,7 +67,6 @@ function stateDirection(
     .addScaledVector(frame.s, Math.sin(state.el));
 }
 
-/** World-space position for a bounds- and spindle-relative state. */
 export function statePosition(
   state: CameraState,
   bounds: Bounds,
@@ -106,7 +98,7 @@ export function applyState(
   camera.updateProjectionMatrix();
 }
 
-/** Bounds- and spindle-relative state from a world-space position + target. */
+/** The inverse of `statePosition`. */
 export function captureState(
   position: THREE.Vector3,
   target: THREE.Vector3,

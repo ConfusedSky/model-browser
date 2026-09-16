@@ -1,31 +1,11 @@
 /**
- * The deployment's configuration file: one file describing this deployment —
- * its library, its capabilities, its origins, its address (public-deployment
- * D1/D2).
+ * One file describing this deployment — library, capabilities, origins, address
+ * (public-deployment D1/D2). Read **once**, at start, by `index.ts`.
  *
- * Node APIs only — the Hono app must run un-Bun'd (global D1).
- *
- * Read **once**, at server start, by `index.ts`. Nothing here is re-read: the
- * library keeps re-asking the *filesystem* while it is unsettled, so a volume
- * mounted after start still needs no restart, but the file gets exactly one
- * moment at which it can be found malformed — which is what makes "a malformed
- * file stops the server" mean anything.
- *
- * Three outcomes, and the distinction between the first two is the point:
- *
- * - **Absent** → `{}`, silently. Running with no configuration is the ordinary
- *   case.
- * - **Present but unreadable, unparseable or invalid** → `ConfigError`, naming
- *   the file and the reason, and the server does not start. The file was
- *   authored; a misread one may have been the one carrying the origin and the
- *   capabilities, so falling back to the defaults would serve under a posture
- *   nobody chose. Unreadable-for-permissions is treated as malformed rather
- *   than absent for exactly that reason.
- * - **Valid** → the parsed configuration.
- *
- * Validation is strict at both levels, and there is no free-text key. An
- * unknown key is a failure, not a line to skip: a typo silently ignored is the
- * same disease the loud failure exists to cure.
+ * Absent is silently `{}`. Anything else unusable — unparseable, invalid, or
+ * unreadable for permissions — stops the server, because a file that was
+ * authored may be the one carrying the origins and the capabilities. Unknown
+ * keys are refused for the same reason: a typo must not be a silent posture.
  */
 
 import { readFile } from "node:fs/promises";
@@ -34,10 +14,7 @@ import type { DeploymentConfig, FeatureReport } from "../../shared/types";
 import { DEFAULT_FEATURES } from "./app";
 import { configHome, home } from "./xdg";
 
-/**
- * A configuration file that was authored and cannot be used. Its message names
- * the file, because "the configuration is bad" without a path is a search.
- */
+/** Its message names the file: "the configuration is bad" is otherwise a search. */
 export class ConfigError extends Error {
   constructor(message: string) {
     super(message);
@@ -45,7 +22,6 @@ export class ConfigError extends Error {
   }
 }
 
-/** Which file: the explicit one, else `config.json` under the XDG config home. */
 export function configPath(env: NodeJS.ProcessEnv): string {
   const explicit = env.MODEL_BROWSER_CONFIG;
   return explicit !== undefined && explicit !== ""
@@ -53,16 +29,10 @@ export function configPath(env: NodeJS.ProcessEnv): string {
     : join(configHome(env), "model-browser", "config.json");
 }
 
-/**
- * The capability names the file may carry, taken from the default set itself
- * rather than re-listed here — a field added to `FeatureReport` is then
- * declarable the moment it has a default, and can never be refused by a parser
- * that was not updated with it.
- */
+/** From the default set, so a new `FeatureReport` field cannot be refused here. */
 const FEATURE_KEYS = Object.keys(DEFAULT_FEATURES) as (keyof FeatureReport)[];
 
 const TOP_LEVEL_KEYS = ["root", "origins", "listen", "features"];
-/** The addresses the guard admits whatever is configured (`guard.ts`). */
 const LOOPBACK_HOSTS = ["127.0.0.1", "::1", "localhost"];
 const LISTEN_KEYS = ["host", "port"];
 
@@ -70,7 +40,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** The unknown-key rule, spelt once for the three objects that have one. */
 function rejectUnknown(
   where: string,
   value: Record<string, unknown>,
@@ -86,10 +55,8 @@ function rejectUnknown(
 }
 
 /**
- * `scheme://host[:port]`, and nothing else — no path, no query, no fragment, no
- * credentials. An origin carrying a path is not an origin, and comparing one
- * against an `Origin` header would never match, so it is refused where it is
- * written rather than silently never matching at runtime.
+ * `scheme://host[:port]` and nothing else: an origin carrying a path would never
+ * match an `Origin` header, so it is refused where it is written.
  */
 function checkOrigin(raw: string): void {
   const bad = (why: string): never => {
@@ -107,14 +74,12 @@ function checkOrigin(raw: string): void {
     bad("scheme must be http or https");
   if (url.username !== "" || url.password !== "") bad("carries credentials");
   if (url.search !== "" || url.hash !== "") bad("carries a query or fragment");
-  // `new URL('https://h')` normalises the path to `/`, so a bare origin and one
-  // written with a trailing slash both land here; only the latter has the
-  // slash in the string it was written as, and a trailing slash is a path.
+  // `new URL` normalises the path to `/`, so the raw string is what tells a bare
+  // origin from one written with a trailing slash — and a trailing slash is a path.
   if (url.pathname !== "/" || raw.endsWith("/")) bad("carries a path");
   if (url.hostname === "") bad("names no host");
 }
 
-/** Everything the file may say, checked before any of it is believed. */
 function validate(parsed: unknown): DeploymentConfig {
   if (!isRecord(parsed))
     throw new ConfigError("the file must contain a JSON object");
@@ -183,12 +148,8 @@ function validate(parsed: unknown): DeploymentConfig {
     config.features = features;
   }
 
-  // A deployment that binds past loopback and names no origin answers nobody:
-  // the guard admits loopback and the configured origins, so every request
-  // arriving at the public address is refused for its `Host` — a box that
-  // starts clean and 403s every visitor, with nothing anywhere saying why.
-  // Caught here, at start, where the operator is still watching, and by the
-  // same rule that makes a malformed file stop the server.
+  // Binding past loopback with no origin answers nobody: the guard would refuse
+  // every public request for its `Host`, cleanly and with nothing saying why.
   const host = config.listen?.host;
   if (
     host !== undefined &&
@@ -204,28 +165,16 @@ function validate(parsed: unknown): DeploymentConfig {
 }
 
 /**
- * A `root` written with a leading `~/` names the running user's home, which is
- * how it is written in a config file by hand and what the shell would have done
- * to it on a command line. Exactly that prefix: `~user/…` is another user's
- * home, which needs a passwd lookup this app does not do, and a bare `~` is a
- * directory whose name is a tilde — both are left as written, so a path that is
- * not expanded is not silently pointed somewhere else either.
- *
- * `MODEL_BROWSER_ROOT` is **not** expanded: it comes from an environment, where
- * the shell already did this, and expanding a second time would rewrite a real
- * path that happens to begin with a tilde.
+ * `~/` only: `~user/…` needs a passwd lookup and a bare `~` is a directory name.
+ * `MODEL_BROWSER_ROOT` is not expanded — the shell already did it.
  */
 function expandRoot(root: string, env: NodeJS.ProcessEnv): string {
   return root.startsWith("~/") ? join(home(env), root.slice(2)) : root;
 }
 
 /**
- * The configuration this process runs on.
- *
- * `MODEL_BROWSER_ROOT` overrides the `root` key **in the returned value**, so
- * every consumer reads one resolved root rather than each re-applying the
- * precedence — and, unlike before, it no longer returns before the file is
- * read: it overrides that one key and nothing else (D2).
+ * `MODEL_BROWSER_ROOT` overrides the `root` key **in the returned value** and
+ * nothing else, so every consumer reads one resolved root (D2).
  */
 export async function loadConfig(
   env: NodeJS.ProcessEnv,

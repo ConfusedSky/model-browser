@@ -12,15 +12,9 @@ export function formatOf(path: string): ModelFormat | null {
   return m ? (m[1]!.toLowerCase() as ModelFormat) : null;
 }
 
-/**
- * A model entry's format, from the wire field when the listing carried it and
- * from the path otherwise. Throws, never defaults, when neither classifies:
- * the server assigns `kind: 'model'` only through the same three extensions
- * `formatOf` matches (`MODEL_EXT`, server/src/listing.ts), so a model entry
- * with an unclassifiable path is a programming error on the wire, and a silent
- * default would be exactly the hidden convention `file-frame-spindle` removed
- * (D2).
- */
+/** **Throws, never defaults**: the server assigns `kind: 'model'` through the
+ *  same three extensions, so an unclassifiable model entry is a programming
+ *  error on the wire and a default would hide it (D2). */
 export function formatOfEntry(entry: DirEntry): ModelFormat {
   const format = entry.format ?? formatOf(entry.path);
   if (format === null) throw new Error(`not a model: ${entry.path}`);
@@ -35,10 +29,8 @@ function makeMaterial(): THREE.MeshStandardMaterial {
   });
 }
 
-/**
- * Every mesh both casts and receives, so a model self-shadows under the key
- * light (D2) and takes its own shadow on the contact floor.
- */
+/** So a model self-shadows under the key light and takes its own shadow on the
+ *  contact floor (D2). */
 function withShadows<T extends THREE.Object3D>(object: T): T {
   object.traverse((o) => {
     if (o instanceof THREE.Mesh) {
@@ -49,26 +41,18 @@ function withShadows<T extends THREE.Object3D>(object: T): T {
   return object;
 }
 
-/**
- * Parse model bytes into an Object3D with consistent materials.
- *
- * Models render in their file's own coordinates: no rotation is applied to
- * any format here. A model stands upright because its spindle defaults to its
- * format's up convention (`defaultAxisFor`, shared/frames.ts) — STL and 3MF
- * are Z-up (print bed; 3MF by specification) and get `z`, OBJ is Y-up and gets
- * `y`. The 3MF loader applies no rotation either (an earlier comment here
- * claimed it did; `3MFLoader.js` in node_modules rotates nothing).
- */
+/** **No rotation is applied to any format here**: models render in their file's
+ *  own coordinates, and a model stands upright because its spindle defaults to
+ *  its format's up convention (`defaultAxisFor`, shared/frames.ts). */
 export function parseModel(
   bytes: ArrayBuffer,
   format: ModelFormat,
 ): THREE.Object3D {
   if (format === "stl") {
     const geometry = new STLLoader().parse(bytes);
-    // Stored STL facet normals are exporter-asserted and redundant with the
-    // triangle winding, which the spec makes authoritative — and files exist
-    // whose normal field is zeroed, stale, or rotated into another up-axis
-    // convention than the vertices. Shade from winding, always (D1).
+    // **Shade from winding, always** (D1): the spec makes it authoritative,
+    // and files exist whose normal field is zeroed, stale, or rotated into
+    // another up-axis convention than the vertices.
     geometry.deleteAttribute("normal");
     geometry.computeVertexNormals();
     return withShadows(new THREE.Mesh(geometry, makeMaterial()));
@@ -87,7 +71,7 @@ export function parseModel(
   return withShadows(group);
 }
 
-/** Byte size of all geometry attribute arrays — the LRU accounting unit. */
+/** The LRU's accounting unit. */
 export function geometryBytes(object: THREE.Object3D): number {
   let bytes = 0;
   object.traverse((o) => {
@@ -102,11 +86,8 @@ export function geometryBytes(object: THREE.Object3D): number {
   return bytes;
 }
 
-/**
- * Dispose all geometries and materials. Must be called on LRU eviction:
- * three.js tracks GPU buffers in a WeakMap, so dropping the reference frees
- * heap but leaks VRAM.
- */
+/** **Must be called on LRU eviction**: three.js tracks GPU buffers in a
+ *  WeakMap, so dropping the reference frees heap but leaks VRAM. */
 export function disposeModel(object: THREE.Object3D): void {
   object.traverse((o) => {
     if (o instanceof THREE.Mesh) {

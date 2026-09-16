@@ -1,24 +1,19 @@
 /**
- * The About page — everything the banner has no room for (`landing-page` D2).
- * A document, not a view: one `<main>` column of sections with fixed `id`s, so
- * `/about.html#credits` lands where a link to it points.
+ * Everything the banner has no room for (`landing-page` D2) — a document, not a
+ * view: sections with fixed `id`s, so `/about.html#credits` lands where a link
+ * points.
  *
- * **Imports nothing from `viewer/`, `three/` or `App`** — one import would drag
- * three.js into a bundle whose job is to draw a list of names (D8).
- *
- * Each section's comment names where its claims can be checked (D10). Claims
- * here have been wrong while their citation was right, so check the subject,
- * not the citation. No accuracy figure, and no location on the host.
+ * **Imports nothing from `viewer/`, `three/` or `App`**: one import drags
+ * three.js into a bundle whose job is to draw a list of names (D8). Claims here
+ * have been wrong while their citation was right — check the subject (D10).
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { CreditedKit } from "../../../shared/types";
 import type { ApiClient } from "../api/client";
 import { CREDIT_LINK_CLASS, hostLabel } from "../lib/credits";
 
-/** The repository this is built from — public, `ConfusedSky/model-browser`. */
 const SOURCE_URL = "https://github.com/ConfusedSky/model-browser";
 
-/** A section's heading, with the `id` a link from elsewhere aims at. */
 function Section({
   id,
   title,
@@ -36,7 +31,6 @@ function Section({
   );
 }
 
-/** One link out of the page. External, so the same rules the credit links use. */
 function Out({
   href,
   children,
@@ -57,26 +51,25 @@ function Out({
   );
 }
 
-/** Bring the URL's fragment into view, answering the scroll position it left
- *  the reader at — `null` where nothing was scrolled. */
+/** Answers the scroll position it left the reader at, `null` if it scrolled
+ *  nothing. */
 function scrollToFragment(): number | null {
   const id = window.location.hash.slice(1);
   if (id === "") return null;
   const target = document.getElementById(id);
   if (target === null) return null;
   target.scrollIntoView();
-  // `scrollIntoView` with no argument scrolls instantly, so this is already the
-  // position it produced rather than the one it started from.
+  // `scrollIntoView` with no argument is instant, so this is the position it
+  // produced.
   return window.scrollY;
 }
 
 export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
   // React renders the sections after the browser has already looked for the
-  // fragment, so `#credits` opened cold landed at the top. Scrolled twice:
+  // fragment, so `#credits` opened cold lands at the top. Scrolled twice:
   // after mount, and again once the credits list gives the page its height.
   const [creditsSettled, setCreditsSettled] = useState(false);
-  // Where the first scroll left the reader, `null` while none has happened.
-  // Both gate the second: a reader who has since scrolled away must not be
+  // Gates the second scroll: a reader who has since scrolled away must not be
   // yanked back.
   const landedAt = useRef<number | null>(null);
   useEffect(() => {
@@ -89,9 +82,8 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
     landedAt.current = scrollToFragment();
   }, [creditsSettled]);
   return (
-    // The app's root grounds itself on its own top-level element; this
-    // document has none, and without a ground of its own it rendered light text
-    // on white.
+    // The app's root grounds itself on its own top-level element; this document
+    // has none, so without a ground of its own it draws light text on white.
     <main className="min-h-screen bg-zinc-950 text-zinc-200">
       <div className="mx-auto max-w-3xl p-6">
         {/* The way back, and the repository opposite it. */}
@@ -447,22 +439,20 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
   );
 }
 
-/** What the credits section is showing right now. */
 type CreditsState =
   | { kind: "loading" }
   | { kind: "failed" }
   | { kind: "ready"; kits: readonly CreditedKit[] };
 
-/** Every credited kit the store holds, from the data the lightbox draws one
- *  kit's credits from, so the two cannot disagree. Ignore-on-stale rather than
- *  an abort: nothing runs server-side to stop. */
+/** From the data the lightbox draws one kit's credits from, so the two cannot
+ *  disagree. Ignore-on-stale: nothing runs server-side to stop. */
 export function CreditsList({
   api,
   onSettled,
 }: {
   api: ApiClient;
-  /** Called once the read has answered either way — the page re-does its
-   *  fragment scroll then, because the list is what gives the section height. */
+  /** The page re-does its fragment scroll then: the list is what gives the
+   *  section its height. */
   onSettled?: () => void;
 }): ReactNode {
   const [state, setState] = useState<CreditsState>({ kind: "loading" });
@@ -483,18 +473,16 @@ export function CreditsList({
     return () => {
       ignore = true;
     };
-    // `onSettled` is a fresh arrow each render of the page; re-reading on it
-    // would re-issue the request every render, which is the ignore-on-stale
-    // idiom's one hazard.
+    // `onSettled` is a fresh arrow each render, and re-reading on it would
+    // re-issue the request every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api]);
 
   if (state.kind === "loading") return <p>Loading…</p>;
-  // Said plainly rather than shown as a failed request: a reader who came here
-  // for the attribution needs to know the list is missing, not why.
+  // A reader who came for the attribution needs to know the list is missing,
+  // not why.
   if (state.kind === "failed") return <p>The credits could not be loaded.</p>;
-  // A deployment with no override store is the ordinary desktop case, and an
-  // empty `<ul>` would read as a bug — the requirement is to say so.
+  // The ordinary desktop case, where an empty `<ul>` would read as a bug.
   if (state.kits.length === 0) return <p>The store holds no credits.</p>;
   return (
     <ul className="space-y-2 text-sm">
@@ -505,18 +493,16 @@ export function CreditsList({
   );
 }
 
-/** The last segment of a library path — the kit's own folder name, which is
- *  what a kit with no stored display name is called on its tile. */
+/** What a kit with no stored display name is called on its tile. */
 function lastSegment(path: string): string {
   const parts = path.split("/").filter((p) => p !== "");
   return parts[parts.length - 1] ?? path;
 }
 
 /**
- * A stored URL fit to be an `href`, or `undefined` where it is not. Not a
- * boundary — this is operator data — but React renders a `javascript:` URL as a
- * live link and only warns. *Parsed* rather than prefix-matched: the parser
- * strips leading whitespace and control characters before deciding the scheme.
+ * Not a boundary — this is operator data — but React renders a `javascript:`
+ * URL as a live link and only warns. *Parsed* rather than prefix-matched: the
+ * parser strips leading whitespace and control characters first.
  */
 function safeHref(url: string | undefined): string | undefined {
   if (url === undefined) return undefined;
@@ -528,12 +514,11 @@ function safeHref(url: string | undefined): string | undefined {
   }
 }
 
-/** One kit's line — the lightbox panel's fields and order
- *  (`credits-completion` D4), as a line because a page of them is a list. */
+/** The lightbox panel's fields and order (`credits-completion` D4). */
 function CreditLine({ kit }: { kit: CreditedKit }): ReactNode {
   const { credits } = kit;
-  // Decided once: a field whose URL this page will not follow is drawn as a
-  // field with no URL, a shape the row already has.
+  // A field whose URL this page will not follow draws as one with no URL, a
+  // shape the row already has.
   const authorHref = safeHref(credits.authorUrl);
   const licenseHref = safeHref(credits.licenseUrl);
   const sourceHref = safeHref(credits.sourceUrl);
@@ -594,10 +579,9 @@ function CreditLine({ kit }: { kit: CreditedKit }): ReactNode {
               {hostLabel(sourceHref)}
             </a>
           ) : (
-            // The stored string verbatim, not `hostLabel` of it: a refused URL
-            // is usually one with no host to label — `javascript:…` parses
-            // perfectly well and has an empty `host` — and a row that showed
-            // nothing would hide the very field a reader came here to check.
+            // Verbatim, not `hostLabel` of it: a refused URL usually has no
+            // host to label, and a row showing nothing would hide the field a
+            // reader came to check.
             credits.sourceUrl
           )}
         </span>

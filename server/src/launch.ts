@@ -1,13 +1,7 @@
 /**
- * Platform launch operations (open-in-slicer L2/L6/L7/L8/L9).
- *
- * Node APIs only — the Hono app must run un-Bun'd (global D1), so spawning is
- * `node:child_process` and temp files are `node:fs`/`node:os`.
- *
- * Four operations, each replaceable by an argv template from local config:
- * `default(mime)`, `associations(mime)`, `launch(appId, file)`, `chooser(file)`.
- * Templates are argv **arrays** handed to `spawn` — never a shell string — so
- * no value, a file name included, is ever interpreted by one.
+ * Platform launch operations (open-in-slicer L2/L6–L9), each replaceable by a
+ * template from local config. Templates are argv **arrays**, never shell
+ * strings, so no file name is ever interpreted by one.
  */
 
 import { spawn } from "node:child_process";
@@ -36,11 +30,7 @@ import { extractEntry } from "./zip";
 /** A launch or chooser command that failed or could not be spawned. */
 export class LaunchError extends Error {}
 
-/**
- * The mimes this server handles, derived from the listing's own format
- * detector (L6) rather than a second extension table — the two cannot drift,
- * because `modelFormat` is also what makes an entry `kind === 'model'`.
- */
+/** From `modelFormat` (L6), not a second extension table, so the two cannot drift. */
 const MIME_BY_FORMAT = {
   stl: "model/stl",
   "3mf": "model/3mf",
@@ -65,26 +55,14 @@ export interface SpawnResult {
   stderr: string;
 }
 
-/**
- * Spawn options. Deliberately has **no `signal`**: the chooser spans a human
- * decision (L9) and a dropped request must never kill it, so there is no abort
- * to wire in the first place. Absence here is the structural guarantee.
- */
+/** **No `signal`**, structurally: a dropped request must not kill a chooser (L9). */
 export interface SpawnOptions {
   /** Own process group, so neither a request nor a `bun --hot` reload reaps it. */
   detached?: boolean;
   /**
-   * Pipe and read the child's **stdout**. **Only the two query operations set
-   * it**, because only they read what the command printed. A launch or a
-   * chooser leaves it off, and that is what bounds the request: a piped
-   * write-end is inherited by every descendant, so `close` — which waits for
-   * EOF on the pipes, not for the child — would not fire until the *launched
-   * application* quit.
-   *
-   * Off does not mean output is discarded. `stderr` is collected either way,
-   * into a file rather than a pipe when this is off (`stderrSink`), so a failed
-   * launch or chooser can still say why without any descendant holding the
-   * request open. `stdout` is what is genuinely dropped.
+   * **Only the two query operations set it**: a piped write-end is inherited by
+   * every descendant, so a launch with this on would not resolve until the
+   * application quit. `stderr` is collected either way (`stderrSink`).
    */
   capture?: boolean;
 }
@@ -96,34 +74,13 @@ export type ExecFn = (
   opts: SpawnOptions,
 ) => Promise<SpawnResult>;
 
-/**
- * `spawn`, not `execFile`: `detached` is what puts a chooser in its own process
- * group (L9) and `@types/node` does not admit it on `execFile`'s options. What
- * ends the request is `capture`, not `detached` — see SpawnOptions.
- * The guarantee that matters is unchanged — an argv array, never a shell
- * string, so nothing is ever word-split or metacharacter-interpreted.
- */
 /** Most of a reason fits in a line; this is a guard, not a budget. */
 const STDERR_LIMIT = 8192;
 
 /**
- * An anonymous file to collect a non-capturing command's stderr in.
- *
- * A *file* rather than a pipe, and that is the whole point. Piping stderr would
- * reintroduce the hang this module already fixed once — `close` waits for EOF
- * on a pipe, and every descendant inherits the write-end — and closing the read
- * end early to dodge that is worse than the hang: measured here, a descendant
- * that writes to stderr after the parent destroys its end takes SIGPIPE and
- * dies, which for a *launcher* means killing the application it just started.
- * A file has neither failure mode: nothing waits on it, descendants may write
- * to it for as long as they live, and the reason is there to read at exit.
- *
- * Unlinked at once, so there is no name to clean up on any path — the fd is the
- * only handle, and the space returns when the last descendant exits. That is a
- * POSIX assumption (`docs/platform-surface.md`). A bare file rather than
- * `mkdtemp` plus a file inside it, because the directory is not unlinkable the
- * same way and would outlive every launch as empty litter in the temp dir;
- * `wx+` is what makes the name ours without one.
+ * A *file*, not a pipe: a pipe hangs the request until the launched application
+ * quits, and closing its read end early SIGPIPEs that application. Unlinked at
+ * once, a POSIX assumption (`docs/platform-surface.md`).
  */
 function stderrSink(): number {
   const path = join(tmpdir(), `mb-launch-${randomUUID()}`);
@@ -133,11 +90,9 @@ function stderrSink(): number {
 }
 
 /**
- * What the sink caught, capped to the **tail**. A reason is the last thing a
- * command prints, not the first: a child that chatters through startup and then
- * fails would, read from the front, hand back the chatter and drop the very
- * line this whole mechanism exists to deliver. An explicit `position` leaves the
- * fd's own offset alone, which matters because that offset belongs to the child.
+ * The **tail**: a reason is the last thing a command prints, and a chatty child
+ * would otherwise hand back its startup noise. The explicit `position` leaves
+ * the fd's own offset alone — it belongs to the child.
  */
 function readSink(fd: number): string {
   try {
@@ -148,11 +103,8 @@ function readSink(fd: number): string {
     readSync(fd, buf, 0, size, total - size);
     const text = buf.toString("utf8");
     if (total <= size) return text;
-    // Say so when the head was dropped, so a truncated reason cannot read as a
-    // command that only said this much — and drop the mojibake the cut can
-    // leave: slicing at a byte offset can land inside a multibyte character,
-    // whose orphaned bytes decode to U+FFFD apiece right where the ellipsis
-    // already says something is missing.
+    // Marked, so a truncated reason cannot read as the whole of it. The strip is
+    // for the cut landing inside a multibyte character, which decodes to U+FFFD.
     return `…${text.replace(/^\uFFFD+/, "")}`;
   } catch {
     // A reason is a nicety; failing to read one must never fail the request.
@@ -166,12 +118,17 @@ function readSink(fd: number): string {
   }
 }
 
+/**
+ * `spawn`, not `execFile`: `detached` is what puts a chooser in its own process
+ * group (L9) and `@types/node` does not admit it on `execFile`'s options. Either
+ * way it is an argv array and never a shell string, so nothing is word-split or
+ * metacharacter-interpreted. What ends the request is `capture` — see
+ * `SpawnOptions`.
+ */
 const nodeExec: ExecFn = (file, args, opts) =>
   new Promise((resolve, reject) => {
     const capture = opts.capture === true;
-    // Non-capturing commands still get their stderr collected — it is the only
-    // place a failed launch or chooser says *why* — but into a file, never a
-    // pipe. See `stderrSink`.
+    // Still collected, but into a file — see `stderrSink`.
     const sink = capture ? null : stderrSink();
     let child;
     try {
@@ -195,8 +152,7 @@ const nodeExec: ExecFn = (file, args, opts) =>
     child.stderr?.on("data", (d: string) => {
       stderr += d;
     });
-    // `error` is unspawnable (ENOENT, EACCES) — not a result. A close with a
-    // null code is a signal death, which is also not a result.
+    // Neither an unspawnable command nor a signal death is a result.
     child.once("error", (err) => {
       if (sink !== null) closeSync(sink);
       reject(err);
@@ -262,11 +218,7 @@ export function loadLaunchConfig(
   return config;
 }
 
-/**
- * Placeholder substitution, **per element**. A value is replaced inside the
- * string it appears in and is never split, quoted, or shell-interpreted, so a
- * file name full of metacharacters arrives as exactly one argv entry.
- */
+/** **Per element**, never split or quoted: a file name is one argv entry. */
 function fill(argv: readonly string[], vars: Record<string, string>): string[] {
   return argv.map((el) =>
     el.replace(/\{(mime|appId|file)\}/g, (m, k: string) => vars[k] ?? m),
@@ -286,10 +238,7 @@ interface DesktopEntry {
   isApplication: boolean;
 }
 
-/**
- * Parse the `[Desktop Entry]` section only. `Name` takes the first *plain*
- * occurrence: `Name[de]` is a localization, not the name this server renders.
- */
+/** `[Desktop Entry]` only, and the first *plain* `Name`: `Name[de]` is a localization. */
 function parseEntry(text: string, id: string): DesktopEntry {
   const entry: DesktopEntry = {
     id,
@@ -333,18 +282,9 @@ function parseEntry(text: string, id: string): DesktopEntry {
 const MAX_DEPTH = 8;
 
 /**
- * Scan every `applications/` dir for desktop entries, earlier data dir winning
- * an id collision (a user entry shadows the package's).
- *
- * The traversal **stats through symlinks, files and directories both**, rather
- * than trusting `withFileTypes` bits: every dotfiles-deployed entry on this
- * machine is a top-level *file* symlink for which `dirent.isFile()` is false
- * (verified: `lycheeslicer.desktop`, `photon-workshop.desktop`), so a naive
- * dirent filter skips exactly the entries the feature exists for (L2).
- *
- * `mimeinfo.cache` is never consulted: it is a build artifact, and nothing
- * reruns `update-desktop-database` for hand-placed entries, so a new
- * `MimeType=` stays invisible in it indefinitely.
+ * Every `applications/` dir, earlier winning an id collision. **Stats rather than
+ * trusting `withFileTypes`**, a deployed entry often being a symlink (L2), and
+ * never `mimeinfo.cache`, which nothing rebuilds for a hand-placed entry.
  */
 function scanEntries(env: NodeJS.ProcessEnv): Map<string, DesktopEntry> {
   const found = new Map<string, DesktopEntry>();
@@ -398,11 +338,9 @@ function scanEntries(env: NodeJS.ProcessEnv): Map<string, DesktopEntry> {
 }
 
 /**
- * Candidate relative paths for a desktop-file id, in lookup order: the literal
- * id first (`photon-workshop.desktop` has a dash that is not a separator),
- * then **cumulative** left-to-right dash→`/` substitutions. Cumulative because
- * the live subdirectoried example needs three at once —
- * `wine-Programs-App-App.desktop` → `wine/Programs/App/App.desktop`.
+ * A dash in an id may or may not be a separator, so: the literal id, then
+ * **cumulative** left-to-right dash→`/` substitutions
+ * (`wine-Programs-App-App.desktop` needs three at once).
  */
 function* idCandidates(id: string): Generator<string> {
   yield id;
@@ -454,13 +392,9 @@ function mimeappsFiles(env: NodeJS.ProcessEnv): string[] {
 }
 
 /**
- * Section-aware read of the mimeapps chain. `[Default Applications]` and
- * `[Added Associations]` associate; `[Removed Associations]` **excludes** — an
- * app the user explicitly removed must not get a pill (L2).
- *
- * The first location to mention an id decides it, so a removal in
- * `~/.config` beats an addition in `/usr/share`. Within one file removals are
- * read first, so an explicit removal also wins a self-contradicting file.
+ * `[Removed Associations]` **excludes** (L2). The first location to mention an
+ * id decides it, and within one file removals are read first, so an explicit
+ * removal beats an addition either way.
  */
 function mimeappsDecisions(
   env: NodeJS.ProcessEnv,
@@ -498,11 +432,7 @@ function mimeappsDecisions(
 // The registry reader
 // ---------------------------------------------------------------------------
 
-/**
- * One read of the platform registry. Built per request (L5: no memoization
- * across requests, since the chooser may rewrite the registry mid-session) and
- * shared across the handled mimes within that request.
- */
+/** Per request, never memoized (L5): a chooser may rewrite the registry. */
 interface Reader {
   name(id: string): string;
   associations(mime: string): AppRef[];
@@ -515,8 +445,7 @@ function createReader(env: NodeJS.ProcessEnv): Reader {
   const lookup = (id: string): DesktopEntry | undefined => {
     const hit = entries().get(id);
     if (hit !== undefined) return hit;
-    // Not scanned (past the depth cap, an unreadable dir, or an id naming a
-    // file we never walked): probe the filesystem for it directly.
+    // Past the depth cap, or in a dir the scan could not read: probe for it.
     if (id.includes("/") || id.includes("\\") || id.includes(".."))
       return undefined;
     for (const dir of dataDirs(env)) {
@@ -535,8 +464,7 @@ function createReader(env: NodeJS.ProcessEnv): Reader {
   };
 
   return {
-    // An unresolvable id renders as itself rather than vanishing: an app the
-    // registry names is reported even when its entry cannot be found.
+    // An unresolvable id renders as itself rather than vanishing.
     name: (id) => lookup(id)?.name ?? id,
 
     associations(mime) {
@@ -555,9 +483,8 @@ function createReader(env: NodeJS.ProcessEnv): Reader {
         if (removed.has(id) || seen.has(id)) continue;
         seen.add(id);
         const entry = lookup(id);
-        // The NoDisplay/Hidden filter is load-bearing, not cosmetic: for
-        // model/stl it removes the `0FileVersion` wine shim and the f3d plugin
-        // whose Name=F3D would otherwise duplicate the default's pill.
+        // Load-bearing, not cosmetic: wine shims and viewer plugins declare the
+        // mime and are not applications a user picks.
         if (entry !== undefined && (entry.hidden || !entry.isApplication))
           continue;
         out.push({ id, name: entry?.name ?? id });
@@ -587,14 +514,9 @@ function parseQueryLines(stdout: string): { id: string; name?: string }[] {
 let stagingCounter = 0;
 
 /**
- * Per-server-run temp store for zip entries. Named from the **full virtual
- * path**, never the basename: `a.zip!/part.stl` and `b.zip!/part.stl` must not
- * share a file, or the second launch overwrites bytes the first app may still
- * be reading — the exact hazard this exists to avoid (L7).
- *
- * `root` is the directory its per-run `mkdtemp` is created inside — defaults
- * to the OS tmpdir, unchanged from before this parameter existed. Tests pass
- * their own swept root so `createApp` never litters the real tmpdir (4.5).
+ * Per-run temp store, named from the **full virtual path** (L7): on the basename,
+ * two archives' `part.stl` would share a file, and the second launch would
+ * overwrite bytes the first application is still reading.
  */
 export class ZipTempStore {
   private dir: string | undefined;
@@ -615,10 +537,8 @@ export class ZipTempStore {
     const hash = createHash("sha256").update(vpath).digest("hex").slice(0, 16);
     const target = join(dir, hash + extname(entry));
     const bytes = await extractEntry(zipPath, entry);
-    // Staging + rename, never truncate in place: a rename swaps the *name*, so
-    // an application still reading from the previous launch keeps the inode it
-    // opened, with the content it opened. Nothing is deleted while the server
-    // runs; the OS reclaims the dir.
+    // Rename, never truncate in place: an application still reading from the
+    // previous launch keeps the inode it opened.
     const staging = `${target}.${process.pid}-${stagingCounter++}.part`;
     writeFileSync(staging, bytes);
     renameSync(staging, target);
@@ -677,8 +597,7 @@ export function createLauncher(opts: LauncherOptions = {}): Launcher {
   ): Promise<AppRef | null> {
     if (config.default !== undefined) {
       const argv = fill(config.default, { mime });
-      // Same policy as the builtin below: a failing query is "no default" for
-      // this one mime, never an error that sinks the whole report.
+      // A failing query is "no default" for this mime, never a failed report.
       let stdout: string;
       try {
         ({ stdout } = await run(argv, { capture: true }, "the default query"));
@@ -689,8 +608,7 @@ export function createLauncher(opts: LauncherOptions = {}): Launcher {
       if (first === undefined) return null;
       return { id: first.id, name: first.name ?? reader.name(first.id) };
     }
-    // One machine-readable line; a missing or failing xdg-mime is "no default",
-    // not an error that should sink the whole report.
+    // A missing or failing xdg-mime is "no default", not a failed report.
     let out: SpawnResult;
     try {
       out = await exec("xdg-mime", ["query", "default", mime], {
@@ -737,8 +655,7 @@ export function createLauncher(opts: LauncherOptions = {}): Launcher {
       const types: Record<string, TypeApps> = {};
       for (const mime of HANDLED_MIMES) {
         const def = await queryDefault(mime, reader);
-        // The default is reported separately, so the associations are the
-        // *further* ones the spec asks for.
+        // Reported separately, so these are the *further* apps.
         const associated = (await queryAssociations(mime, reader)).filter(
           (a) => a.id !== def?.id,
         );
@@ -758,9 +675,8 @@ export function createLauncher(opts: LauncherOptions = {}): Launcher {
     async chooser(file) {
       if (config.chooser === undefined)
         throw new LaunchError("no chooser is configured");
-      // `detached` and no signal: the chooser blocks on a human decision, and a
-      // dropped request or a hot reload must not kill it — a dismissed chooser
-      // and a killed one can never read the same (L9).
+      // `detached`, and no signal: the chooser blocks on a human decision, and a
+      // dismissed one must never read like a killed one (L9).
       await run(
         fill(config.chooser, { file }),
         { detached: true },

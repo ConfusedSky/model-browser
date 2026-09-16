@@ -1,38 +1,18 @@
 /**
- * What a central-directory read costs, and what the archive layer saves.
- *
- * The measurement `archive-interior-sheets` rests on, kept runnable rather than
- * quoted: `folder-contact-sheets` justified never previewing zip tiles with
- * 6.7 s of archive-tail seeks across the library, and that figure did not
- * reproduce here. Rather than argue with it, re-run this.
+ * What a central-directory read costs, and what the archive layer saves — the
+ * measurement `archive-interior-sheets` rests on, kept runnable rather than
+ * quoted.
  *
  *   bun scripts/zip-tail-cost.ts <library root>
  *
- * Reads every `*.zip` under the root three times: cold (page cache dropped per
- * file with `POSIX_FADV_DONTNEED`, which needs no root), then through an
- * in-memory layer of the shape `SnapshotStore.archiveCache()` returns, then
- * with no layer against a now-warm page cache. The three rows are the whole
- * argument — the layer's value is the gap between the first and the second, and
- * the third is how much of that the kernel was already doing for free.
+ * Every `*.zip` under the root, read three times: cold, then through an
+ * in-memory layer, then with no layer against a now-warm page cache. The
+ * layer's value is the gap between the first two rows; the third is how much of
+ * that the kernel was doing for free. Run under **Bun**, so the reader is the
+ * one the server uses.
  *
- * Run under **Bun**, against the real module: the server is Bun and the reader
- * is the one it uses.
- *
- * Recorded on 2026-09-09, /run/media/masa/STLLibrary (139 GB, WD SN740 NVMe
- * behind a USB bridge, ext4):
- *
- *   453 archives, 13,168 entries, 1 refused (zip64)
- *   cold, no layer      246 ms   (median 0.48, p90 0.77, p99 1.51, max 2.0 ms)
- *   with the layer        7 ms
- *   no layer, warm       67 ms
- *
- * Run to run the cold row moves a few percent and the warm row rather more;
- * what is stable is the shape — cold is ~4x warm, and the layer is ~10x warm
- * again.
- *
- * A spindle is the case that figure is missing: 453 tail seeks at ~10 ms is
- * ~4.5 s, which is where 6.7 s plausibly came from. Re-run there before
- * concluding anything about hardware this was not measured on.
+ * The rows depend entirely on the hardware the library sits on — re-run on the
+ * target before concluding anything from a figure measured elsewhere.
  */
 
 import { readdir } from "node:fs/promises";
@@ -64,17 +44,13 @@ async function archives(dir: string): Promise<string[]> {
 
 /**
  * Drop each file's clean pages, so the next read is a real one.
- *
- * `POSIX_FADV_DONTNEED` rather than `/proc/sys/vm/drop_caches`: it needs no
- * root, and it drops exactly these files instead of the whole system's cache.
- * Verify with `fincore <file>` — zero resident pages is what makes the cold row
- * cold.
+ * `POSIX_FADV_DONTNEED` rather than `drop_caches`: it needs no root and drops
+ * only these files. `fincore <file>` verifies it.
  */
 async function dropCache(paths: readonly string[]): Promise<void> {
-  // Neither Node nor Bun exposes `posix_fadvise`, so this borrows Python's —
-  // the same call, in the one runtime on hand that binds it. Without it the
-  // "cold" row is whatever the page cache happened to be holding, and the pass
-  // says so rather than quietly reporting a warm number as cold.
+  // Neither Node nor Bun binds `posix_fadvise`, so this borrows Python's.
+  // Without it the "cold" row is whatever the page cache held, and the pass
+  // says so rather than reporting a warm number as cold.
   const script = [
     "import os,sys",
     'for p in sys.stdin.read().split("\\n"):',

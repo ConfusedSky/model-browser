@@ -7,23 +7,10 @@
  * usage: bun run scripts/bake-demo.ts --root <corpus top> --cache <scratch cache dir> --index-cache <the index's cache dir>
  *          [--port 3199] [--client <scratch build dir>] [--ship <user@host> --ship-dir </srv/cache/<box id>>] [--origin <https://url>]
  *
- * Node APIs only in the core below, though the driver may use Bun: the core is
- * exported and exercised by `server/test/bakeDemo.test.ts`, whose tsconfig
- * types are Node's, exactly as `gen-overrides.ts` is by `genOverrides.test.ts`.
- * It runs under `bun run` unchanged.
- *
- * The core is what a run must agree on and what a cell can pin without a
- * browser: `verifyBake` (D1 step 7 — the store, whole, on disk), `auditUnposed`
- * (step 8's judgement over an answer the driver fetched), `manifestFor` and
- * `writeManifest` (step 9, D2 — the shape and the one serialisation the check
- * on the box reads line by line), `indexFingerprint` (the two hashes D6 pins
- * the redeploy to) and `rsyncCommand` (D4). The driver — the scratch build,
- * the child server, the two headless passes, the pose fetch, the check and the
- * ship — is the other half of this file.
- *
- * The recipe (`RIG_VERSION`, `THUMB_LIGHTING`, `THUMB_SIZE`, `POSE_VERSION`) is
- * the driver's to import from the client modules; the core takes it as a value
- * so the server suite, which cannot resolve `three`, can exercise it.
+ * **Node APIs only**: the core below is exercised by
+ * `server/test/bakeDemo.test.ts`, whose tsconfig types are Node's. The driver
+ * imports the recipe constants from the client modules; the core takes the
+ * recipe as a value, so a suite that cannot resolve `three` can exercise it.
  */
 
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
@@ -90,19 +77,14 @@ export interface VerifyResult {
   unposed: number;
   /** The unposed models' paths — what `auditUnposed` judges against the index. */
   unlabelled: string[];
-  /**
-   * Why the manifest must not be written, or `null` when the store passes. Any
-   * miss refuses; so does a posed count of zero, which is the unposed
-   * corpus-wide bake by another road (D1 step 7).
-   */
+  /** Why the manifest must not be written, or `null`. Any miss refuses, and so does a posed count of zero (D1 step 7). */
   refusal: string | null;
 }
 
 /**
- * A sidecar as it lies on disk — the fields `verifyBake` reads, typed loosely
- * because the file is read raw. The real shape is `ThumbCache`'s `Meta` (not
- * exported); the cells write their fixture through `ThumbCache.put`, so a drift
- * between the two fails every cell rather than passing one.
+ * A sidecar as it lies on disk, typed loosely because the file is read raw. The
+ * real shape is `ThumbCache`'s unexported `Meta`; cells write their fixture
+ * through `ThumbCache.put`, so a drift fails them rather than passing one.
  */
 interface SidecarLabels {
   mtime?: unknown;
@@ -129,11 +111,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-/**
- * One render's labels against the recipe. `name` is `ao` for the top-level set
- * (the occluded render) and `noao` for the sibling's, so a reason says which
- * render it is about. Answers whether the set carries `posed`.
- */
+/** One render's labels against the recipe; `name` prefixes each reason. Answers whether the set carries `posed`. */
 function checkLabels(
   name: string,
   labels: SidecarLabels,
@@ -165,17 +143,9 @@ function checkLabels(
 
 /**
  * D1 step 7: the store on disk, whole, against the enumeration and the recipe.
- * For every model the sidecar at `<cacheDir>/<libraryId>/<sha256(path)>.json`
- * exists; both renders exist; the top-level and the `noao` labels each carry
- * the model's `mtime`, the recipe's `lighting` and `rig`; where a label set
- * carries `posed` it equals the recipe's `poseVersion` and `poseKey` is
- * present. Every miss is listed with all its reasons — a hand fixing a store
- * wants the whole list, not the first failure.
- *
- * A model is *posed* when both label sets carry `posed` and *unposed* when
- * neither does; one render posed beside an unposed sibling is a miss — the two
- * were drawn under different orientations, which is the very state `put`'s
- * unowned-pose rule invalidates.
+ * Every miss carries all its reasons — a hand fixing a store wants the list,
+ * not the first failure. A model counts as *posed* only when both label sets
+ * do; one posed beside an unposed sibling means two different orientations.
  */
 export async function verifyBake(
   cacheDir: string,
@@ -198,14 +168,9 @@ export async function verifyBake(
     if (await exists(join(dir, `${key}.noao.webp`))) renders.noao++;
     else reasons.push(`no ${key}.noao.webp`);
 
-    // `JSON.parse` succeeding is not "parsed as a sidecar": it can hand back
-    // something that is not an object at all (a sidecar file whose contents
-    // are literally `null`, or any other JSON scalar/array), which is not a
-    // shape `checkLabels` can be trusted with. The catch below tracks parse
-    // failure; `isRecord` here tracks shape failure — kept separate so each
-    // gets its own reason — and `sidecar` is assigned only once both have
-    // passed, so `sidecar !== null` means "parsed, and an object", never
-    // reaching `checkLabels("noao", …)` with a non-object either.
+    // `JSON.parse` succeeding is not "parsed as a sidecar" — it hands back a
+    // scalar or an array just as happily. Parse failure and shape failure get
+    // their own reasons, and `sidecar !== null` means both passed.
     let sidecar: Sidecar | null = null;
     try {
       const raw: unknown = JSON.parse(
@@ -218,11 +183,8 @@ export async function verifyBake(
     }
     if (sidecar !== null) {
       const aoPosed = checkLabels("ao", sidecar, model, recipe, reasons);
-      // Mirrors the top-level parse above: absent (`undefined`, the key
-      // never written) gets its own reason, and present-but-not-an-object
-      // (`"noao": 5`, or JSON `null`) gets a different one — collapsing the
-      // two made a malformed `noao` read as a missing one, telling the
-      // operator a key is absent when it is present and wrong.
+      // Absent and present-but-not-an-object get different reasons: collapsed,
+      // they tell the operator a key is missing when it is present and wrong.
       let noao: SidecarLabels | undefined;
       let noaoPosed = false;
       if (sidecar.noao === undefined) reasons.push("noao: no labels");
@@ -234,12 +196,9 @@ export async function verifyBake(
       }
       if (aoPosed !== noaoPosed) reasons.push("posed on one render only");
       else if (aoPosed && noao !== undefined) {
-        // Both renders posed: they must have been drawn under the same
-        // orientation. A scratch cache reused across sessions (`bake`'s
-        // `mkdir(args.cache, {recursive: true})` never empties it) can carry
-        // an ao render orbited in one session beside a noao render from
-        // another — `put`'s unowned-entry pose rule does not catch it,
-        // because a `camera` label exempts it.
+        // A scratch cache is never emptied between runs, so it can hold an ao
+        // render orbited in one session beside a noao render from another —
+        // `put`'s unowned-entry pose rule exempts anything camera-labelled.
         if (sidecar.poseKey !== noao.poseKey)
           reasons.push(
             `poseKey differs: ao ${String(sidecar.poseKey)}, noao ${String(noao.poseKey)}`,
@@ -269,13 +228,10 @@ export interface UnposedAudit {
 }
 
 /**
- * D1 step 8's judgement over `/api/semantic/poses`' merged answer for the
- * unlabelled paths: each must come back **present and `null`** — a settled
- * absence. Presence is `Object.hasOwn`, never `answer[p] == null`: the route
- * files an unsettled path by leaving it *out* of the map and a settled absence
- * by filing `null`, and reading the two alike is exactly the `??`/`!==`
- * confusion `enumerate`'s comment warns about — it would pass a bake whose pose
- * wave silently failed.
+ * D1 step 8: every unlabelled path must come back **present and `null`**, a
+ * settled absence. Presence is `Object.hasOwn`, never `answer[p] == null` — the
+ * route files unsettled by omission, and conflating the two would pass a bake
+ * whose pose wave silently failed.
  */
 export function auditUnposed(
   unlabelled: string[],
@@ -350,19 +306,15 @@ function rateOf(pass: PassFigures): number {
 }
 
 /**
- * D2's shape from what the run learned. The names are pinned there:
- * `recipe.poseVersion` (never a key named `posed` — the sidecar's label is the
- * same number, but a manifest key that collides with `posedModels` was the
- * misread waiting to happen), `posedModels`/`unposedModels`, and the two hashes
- * under `index.poseCacheSha256`/`index.runParamsSha256` — never `sha256`, since
- * two `"sha256"` lines under two parents would each match a line-oriented read
- * twice. `index.models` is the index's `n_models`, not the enumeration's
- * `models`; on this corpus they differ (2,976 against 3,121).
+ * D2's shape. `deploy/demo/check-bake.sh` reads the file line by line, which is
+ * why the keys are spelled as they are: no `posed` beside `posedModels`, and no
+ * two `sha256` lines under different parents. `index.models` is the index's
+ * `n_models`, not the enumeration's `models` — the two differ.
  */
 export function manifestFor(input: ManifestInput): BakeManifest {
   const { ao, noao } = input.passes;
-  // `commit` before `dirty`, as D2's sample shows — the sample is what an
-  // operator diffs a real bake.json against, so the writer's order is its order.
+  // `commit` before `dirty`, as D2's sample shows — an operator diffs a real
+  // bake.json against it.
   const client: BakeManifest["client"] =
     input.client.commit !== undefined
       ? { commit: input.client.commit, dirty: input.client.dirty }
@@ -464,15 +416,11 @@ function contentsOf(dir: string): string {
 }
 
 /**
- * D4's flags and paths — shared between `rsyncCommand`'s printed string and
- * `rsyncArgv`'s spawn form, so the two cannot drift the way a hand-edited
- * pair would: minus `snapshots/` (the box's own tree snapshot), trailing
- * slashes on both source and destination so the contents land in the target
- * rather than a directory of the local id's name under it, and **no
- * `--delete`**: nothing on the box is removed by a ship, a stale sidecar is
- * overwritten by key. `boxDir` is the box's `/srv/cache/<box id>`, an id that
- * differs from the local one and is read from the box's startup line, never
- * assumed.
+ * D4's flags and paths, shared by the printed string and the spawn form so the
+ * two cannot drift: minus the box's own `snapshots/`, trailing slashes so the
+ * contents land in the target rather than under a directory named for the local
+ * id, and **no `--delete`** — a stale sidecar is overwritten by key. `boxDir`'s
+ * id differs from the local one and is read from the box's startup line.
  */
 function rsyncPieces(
   localCache: string,
@@ -498,11 +446,9 @@ export function rsyncCommand(
 }
 
 /**
- * D4, as an argv array for `spawn` rather than `sh -c` (Fix 5): a `--cache`,
- * `--ship` or `--ship-dir` carrying a space or a shell metacharacter reaches
- * `rsync` as one argument each instead of being re-split or executed by a
- * shell. Shares `rsyncPieces` with `rsyncCommand` so the flags and paths
- * cannot say two different things.
+ * D4, as an argv array for `spawn` rather than `sh -c`: a `--cache`, `--ship`
+ * or `--ship-dir` carrying a space or a shell metacharacter reaches `rsync` as
+ * one argument each instead of being re-split or executed by a shell.
  */
 export function rsyncArgv(
   localCache: string,
@@ -528,14 +474,13 @@ export function sshRestartArgv(host: string): string[] {
 
 // ─── The driver ──────────────────────────────────────────────────────────────
 //
-// D1 steps 1–6 and 8–11, around the core above. Node APIs only here too, though
-// the design allows Bun: the server suite's `tsc` reaches this file through
-// `bakeDemo.test.ts`, and there are no Bun types in this repo to check a
-// `Bun.spawn` against — `node:child_process` runs under `bun run` unchanged.
-// Two things are loaded by a non-literal dynamic `import()` so that program
-// never follows them: the client's recipe constants (`renderer.ts` imports
-// `three`, which the server workspace cannot resolve — design Context) and
-// Playwright (found, never installed — `playwright-found.mjs`).
+// D1 steps 1–6 and 8–11, around the core above. Node APIs only here too: the
+// server suite's `tsc` reaches this file through `bakeDemo.test.ts` and there
+// are no Bun types in this repo to check a `Bun.spawn` against. Two things are
+// loaded by a non-literal dynamic `import()` so that `tsc` never follows them:
+// the client's recipe constants (`renderer.ts` imports `three`, which the
+// server workspace cannot resolve) and Playwright (found, never installed —
+// `playwright-found.mjs`).
 
 export interface BakeArgs {
   root: string;
@@ -567,30 +512,14 @@ const FLAGS = [
 type Flag = (typeof FLAGS)[number];
 
 /**
- * `gen-overrides.ts`'s shape: every flag takes a value, an unknown flag is
- * rejected by name rather than collected — a misspelled `--index-cache` that
- * silently defaulted is how a wrong run would look clean — and the three
- * required flags are required. `--ship` needs `--ship-dir` (the rsync has no
- * target without it); `--ship-dir` alone only fills in the printed command.
- *
- * `--origin` must be an absolute `http:`/`https:` URL and is stored
- * normalized to `new URL(...).origin` — scheme, host and port only, never a
- * path or a trailing slash — so the address-bar copy-paste form
- * (`https://models.masamaeda.com/`) and a URL carrying a path component both
- * resolve to the same hit-check target rather than the one Hono 404s on
- * (a trailing slash already in `origin`, concatenated as `${origin}/api/…`,
- * reads `//api/…`). It needs no `--ship`: it also retargets the no-`--ship`
- * printed template (`shipInstructions`), which otherwise has no way to name
- * a box other than the demo's. `--ship` itself needs a derivable origin:
- * when its host is a bare IPv4/IPv6 literal (no certificate answers for one)
- * and `--origin` was not given either, the run refuses here, before any work
- * happens — a ship whose task 4.2 cannot run must never leave the argv
- * stage, since `ship()` failing open there once meant the store shipped, the
- * box restarted, and the process exited 0 with the hit check silently
- * skipped. The origin format check runs before that derivability check:
- * `originFromShip` trusts an explicit `--origin` outright, so a malformed
- * one must already be refused by the time it could otherwise be accepted as
- * task 4.2's target.
+ * `gen-overrides.ts`'s shape: an unknown flag is rejected by name rather than
+ * collected, since a misspelled `--index-cache` that silently defaulted is how
+ * a wrong run looks clean. `--ship` needs `--ship-dir`, and a *derivable*
+ * origin — a bare IPv4/IPv6 host with no `--origin` is refused here, before any
+ * work happens, because a run that ships bytes must never exit 0 with its hit
+ * check skipped. `--origin` is normalized to `new URL(...).origin`, so a
+ * pasted trailing slash does not become the `//api/…` Hono 404s on, and that
+ * format check runs first, since `originFromShip` trusts it outright.
  */
 export function parseArgs(argv: string[]): BakeArgs {
   const values: Partial<Record<Flag, string>> = {};
@@ -638,14 +567,11 @@ export function parseArgs(argv: string[]): BakeArgs {
       `--ship ${values.ship} names ${host === "" ? "no host" : `the host ${host}`}, which no https origin can be derived from — pass --origin <https://url> naming task 4.2's hit-check target\n${USAGE}`,
     );
   }
-  // Absolute against `process.cwd()` here, once — everything downstream
-  // (`writeManifest`, `realpath`, `indexFingerprint`, step 10's
-  // `check-bake.sh` run under `cwd: repo`) reads these paths as given, so a
-  // relative one resolved against the bake's own cwd stayed relative all the
-  // way to a `run()` under a different cwd, reading `<repo>/…` instead.
-  // `ship-dir` is deliberately absent from this list: it names a path on the
-  // *box*, not this machine, and resolving it against this machine's cwd
-  // silently turned a relative `--ship-dir` into a local path used as the
+  // Absolute against `process.cwd()` here, once: everything downstream reads
+  // these paths as given, and step 10 runs `check-bake.sh` under `cwd: repo`,
+  // where a still-relative path would resolve somewhere else entirely.
+  // `ship-dir` is deliberately absent — it names a path on the *box*, and
+  // resolving it here would turn a relative one into a local path used as the
   // remote rsync destination.
   return {
     root: resolve(root),
@@ -659,7 +585,7 @@ export function parseArgs(argv: string[]): BakeArgs {
   };
 }
 
-/** The bake instance's `/api/semantic/status` is re-read until it stops saying `warming` (~16 s of SigLIP; the app itself calls it wedged at 180 s). */
+/** How long the bake instance's `/api/semantic/status` may keep saying `warming` — the app's own wedged threshold. */
 const WARMING_DEADLINE_MS = 180_000;
 /** How long `/api/library` may refuse connections while the child starts. */
 const START_DEADLINE_MS = 60_000;
@@ -668,26 +594,12 @@ export const POLL_MS = 2_000;
 /** A chip whose sentence has not changed for this long is a stuck pass (D1 step 6's "bounded time"). */
 const STALL_MS = 5 * 60_000;
 /**
- * Non-progressing launches per pass before the count that stuck is refused:
- * the first, and one relaunch. A launch that *did* progress (its count fell
- * below the **best** — lowest — count any launch this pass has seen, not
- * merely the launch immediately before it) resets this — a stalled-and-
- * cancelled launch must not spend the budget a later, productive relaunch
- * needs (D1 step 6's "a pass whose count stops falling for a bounded time is
- * relaunched once"). Comparing only to the previous launch let an
- * oscillating count (100, 99, 100, 99, …) reset the budget forever, since
- * each dip below its immediate predecessor counted as progress though the
- * count was never actually falling — `MAX_TOTAL_LAUNCHES` below is the bound
- * that still catches a sequence like that.
+ * Non-progressing launches per pass before the stuck count is refused (D1 step
+ * 6). Progress is measured against the **best** count any launch has seen, not
+ * the previous one, so an oscillating count cannot re-arm the budget forever.
  */
 const MAX_LAUNCHES = 2;
-/**
- * A hard ceiling on launches a pass may make at all, independent of whether
- * `MAX_LAUNCHES` ever sees a stuck best — the backstop for any sequence
- * `MAX_LAUNCHES` does not bound (an oscillating count is already caught by
- * the best-tracking above once a value repeats, but this is the one bound
- * that holds regardless of the sequence's shape).
- */
+/** A hard ceiling on launches per pass — the backstop that holds whatever shape the sequence of counts takes. */
 const MAX_TOTAL_LAUNCHES = 200;
 /** The default index base — `semantic.ts`'s `DEFAULT_BASE`, read from the same variable. */
 const DEFAULT_INDEX = "http://127.0.0.1:8077";
@@ -696,34 +608,20 @@ export const RESTART_COMMAND =
   "cd /opt/model-browser && docker compose -f deploy/demo/compose.yaml restart app";
 /** How long the shipped app may still be booting, after `restart app`, before the first hit check. */
 export const SHIP_READY_DEADLINE_MS = 60_000;
-/** Per-attempt bound on the readiness probe itself — `SHIP_READY_DEADLINE_MS` is only checked between attempts, so one black-holed connect (Linux's ~130s default) could otherwise overrun it. */
+/** Per-attempt bound on the readiness probe — `SHIP_READY_DEADLINE_MS` is only checked between attempts, so one black-holed connect could otherwise overrun it. */
 export const SHIP_READY_PROBE_TIMEOUT_MS = 5_000;
 
-/**
- * The host portion of a `--ship user@host` (or bare `host`) argument —
- * split at the rightmost `@`, the one `ssh`/`rsync` themselves would use (a
- * user portion that itself contains one, `user@host@weird`, must still split
- * at the last). The one place that split happens: `originFromShip` and
- * `parseArgs`' refusal message both read a `--ship`'s host through this, so
- * neither can name a different host than the other actually used.
- */
+/** The host of `--ship`, split at the rightmost `@` as `ssh` does. The only place that split happens. */
 export function hostOfShip(ship: string): string {
   const at = ship.lastIndexOf("@");
   return at === -1 ? ship : ship.slice(at + 1);
 }
 
 /**
- * Task 4.2's hit-check origin, resolved in this order: `--origin` when given
- * (the operator names the box's public host directly, and it wins even over
- * a name `--ship` would otherwise derive one from); else `https://<host>`
- * derived from `--ship`'s `user@host` (or bare `host`) when that host is a
- * *name*; else `null` — no origin can be derived, so hit-checking is refused
- * rather than defaulting to production, which would silently verify the
- * wrong box's store whenever `--ship` names any IP address (the demo box
- * itself is reached as `root@157.90.25.110` for `ssh`/`rsync` but serves the
- * demo at `models.masamaeda.com` — no certificate answers for the bare
- * address, and neither a bare IPv4 nor an IPv6 literal names anything a
- * `https://` origin could mean).
+ * Task 4.2's hit-check origin: `--origin`, else `https://<host>` from `--ship`
+ * when that host is a *name*, else `null`. Never a default — a box is routinely
+ * reached by address while serving under another name, so defaulting would
+ * silently hit-check some other box's store.
  */
 export function originFromShip(
   ship: string,
@@ -775,13 +673,9 @@ async function postPoses(
 }
 
 /**
- * D1 step 8's fetch: `paths` to the bake instance's `POST /api/semantic/poses`
- * in batches of at most `POSES_MAX` — the wire bound the route refuses past,
- * imported and never restated — and the answers merged into one map. A batch
- * that fails is retried once, then the failure names it. Judged afterwards by
- * `auditUnposed`; also the wave `confirmNothingLeft` primes the pose layer
- * with. Separate from the browser and the server so a cell can drive it with
- * a fake `fetch`.
+ * D1 step 8's fetch, in batches of at most `POSES_MAX` — the wire bound,
+ * imported and never restated. A failed batch is retried once, then named. Also
+ * the wave `confirmNothingLeft` primes the pose layer with.
  */
 export async function fetchPoses(
   base: string,
@@ -800,13 +694,10 @@ export async function fetchPoses(
 }
 
 /**
- * D1 step 4's compare between what the index's `/status` reports as
- * `cache_dir` — the string it was started with, `str(args.cache_dir)` — and
- * the realpath of `--index-cache`: an absolute report must equal the realpath,
- * a relative one (`embed-cache-test`, relative to the checkout's cwd) must
- * equal its basename. `normalize` so `./embed-cache-test/` reads as
- * `embed-cache-test`; nothing looser, since the fingerprint is taken from
- * `--index-cache` and this is what ties it to the index that framed the renders.
+ * D1 step 4: the index reports `cache_dir` as the string it was started with,
+ * so an absolute one must equal `--index-cache`'s realpath and a relative one
+ * its basename. Nothing looser — this is what ties the fingerprint to the index
+ * that framed the renders.
  */
 export function indexCacheDirMatches(
   reported: string,
@@ -860,7 +751,7 @@ async function loadRecipe(repo: string): Promise<ManifestRecipe> {
   };
 }
 
-/** `run`'s shape, injectable the way `FetchLike` is — `ship()`'s seam onto the rsync/restart (Fix 1). */
+/** `run`'s shape, injectable the way `FetchLike` is — `ship()`'s seam onto the rsync/restart. */
 export type RunLike = (cmd: string, args: string[], cwd: string) => void;
 
 function run(cmd: string, args: string[], cwd: string): void {
@@ -911,10 +802,9 @@ interface ChildServer {
 }
 
 /**
- * The bake's own server (D1 step 3): `bun run server/src/index.ts` with the
- * scratch config, cache and client build, `MODEL_BROWSER_ROOT` unset so the
- * file's `root` is the root. Its output is relayed line by line under a
- * prefix — the `library <id> at <top>` startup line is the one to read.
+ * The bake's own server (D1 step 3), with the scratch config, cache and client
+ * build and `MODEL_BROWSER_ROOT` unset so the file's `root` wins. Its output is
+ * relayed under a prefix; `library <id> at <top>` is the line to read.
  */
 function startServer(
   repo: string,
@@ -1160,8 +1050,8 @@ async function launchChromium(): Promise<PwBrowser> {
     );
   }
   const { chromium } = (await import(modulePath)) as { chromium: PwChromium };
-  // The 2026-09-14 driver's flags: SwiftShader through ANGLE, and the third
-  // because that launch needed it to admit an unaccelerated WebGL context.
+  // SwiftShader through ANGLE; the third flag is what makes Chromium admit an
+  // unaccelerated WebGL context at all.
   return chromium.launch({
     headless: true,
     executablePath: chrome,
@@ -1188,9 +1078,8 @@ const GENERATE = /^Generate (\d+) missing thumbnails$/;
 
 /**
  * Opens the `library` tab — via another tab first when it is already open,
- * since the count re-derives on open — and reads the button's count once it
- * has stopped `Counting…`. `Count failed` refuses: a scope that cannot be
- * enumerated cannot be baked.
+ * since the count re-derives on open — and reads the button's count. A scope
+ * that cannot be enumerated cannot be baked, so `Count failed` refuses.
  */
 async function openLibraryTabAndCount(page: PwPage): Promise<number> {
   const tabs = page.locator('[role="tab"]');
@@ -1231,10 +1120,8 @@ async function openLibraryTabAndCount(page: PwPage): Promise<number> {
 }
 
 /**
- * The chip (`JobChip`, `role="status"`) with no Cancel button — `BulkJobs.run`'s
- * last patch sets `phase: 'done'` and `settled: true` together, and Cancel is
- * offered exactly in the three live phases. No chip at all is not settled: it
- * is a job that has not been launched.
+ * The chip with no Cancel button: Cancel is offered in exactly the three live
+ * phases. No chip at all is not settled — it is a job never launched.
  */
 async function chipSettled(page: PwPage): Promise<boolean> {
   const chip = page.locator('[role="status"]').first();
@@ -1282,17 +1169,11 @@ async function waitSettled(
 }
 
 /**
- * The stopping rule's last clause. D1 step 6 asks for a *relaunch* settling
- * at `Generated 0 of 0 in the library`, because a launch runs the pose wave a
- * count does not (`BulkJobs.enumerate`'s `needsPose`). The button is
- * `disabled` at a count of zero (SidePanel's `libraryOps.map`), so that press
- * cannot be made in the DOM; this is its equivalent, and the difference between
- * a launch's derivation and a count's is exactly the wave: both judge with
- * `entry.pose` where the enumeration carries one (`annotate` in app.ts fills
- * it from the pose layer), and `POST /api/semantic/poses` records what it
- * answers into that layer (`layers.recordPoses`). So: enumerate, ask the route
- * for every model still `pose === undefined` — the wave, made by hand — and
- * count again. A zero then is what a relaunch's `Generated 0 of 0` would be.
+ * The stopping rule's last clause. D1 step 6 wants a *relaunch* settling at
+ * `Generated 0 of 0`, because a launch runs the pose wave a count does not —
+ * but the button is `disabled` at zero, so that press cannot be made in the
+ * DOM. This is its equivalent: enumerate, ask `/api/semantic/poses` for every
+ * model still `pose === undefined`, and count again.
  */
 async function confirmNothingLeft(page: PwPage, base: string): Promise<number> {
   const { entries } = await enumerateModels(base);
@@ -1326,20 +1207,11 @@ export const INITIAL_LAUNCH_BUDGET: LaunchBudget = {
 };
 
 /**
- * D1 step 6's launch-budget decision for one candidate launch at count `n`,
- * pulled out of `runPass` as a pure function so it can be celled without a
- * Playwright page. `launches` bounds a *stuck* count: it resets whenever `n`
- * betters `budget.best` — the lowest count *any* launch this pass has seen —
- * not merely the launch immediately before it, so an oscillating count
- * (100, 99, 100, 99, …) cannot re-arm the budget forever the way comparing
- * only to the previous launch did (that count never stops "progressing" by
- * the old rule, since 99 is always below the 100 that preceded it). `total`
- * is the hard ceiling that bounds a pass's launches at all, independent of
- * progress — the backstop for a sequence `launches` alone does not catch (a
- * flat count trips `launches` first; the oscillating one above is in fact
- * already caught once a value repeats, since a repeat is never `< best`, but
- * `total` is the bound that holds regardless of the sequence's shape).
- * Returns the refusal reason, or the budget to carry into the next launch.
+ * D1 step 6's launch-budget decision for a candidate launch at count `n`, pure
+ * so it can be celled without a Playwright page. `launches` bounds a *stuck*
+ * count and resets only when `n` betters `budget.best`, so an oscillating count
+ * makes no progress; `total` holds whatever the sequence's shape. Returns the
+ * refusal reason, or the budget for the next launch.
  */
 export function shouldRefuse(
   n: number,
@@ -1362,11 +1234,9 @@ export function shouldRefuse(
 
 /**
  * One *Generate* pass under the pill's current state (D1 step 6). A pass ends
- * only when the chip has settled, the button reads `Generate 0 missing
- * thumbnails`, and `confirmNothingLeft` still reads zero — never on the count
- * alone, which reads zero while the last entries are in flight. A stalled
- * launch is cancelled and relaunched once, then refused with the count that
- * stuck (`shouldRefuse`).
+ * only when the chip has settled, the count reads zero, and
+ * `confirmNothingLeft` agrees — never on the count alone, which reads zero
+ * while the last entries are still in flight.
  */
 async function runPass(
   page: PwPage,
@@ -1464,24 +1334,12 @@ async function generateBoth(
 }
 
 /**
- * Polls `${origin}/api/library` for `state: "ready"`, bounded: `docker
- * compose … restart app` returns before the container is actually serving.
- * Not `/api/features` (also UNGATED, in `createApp`'s sense, and cheaper):
- * it answers 200 as soon as Hono binds, *before* the library has resolved,
- * while `/api/thumb` stays gated and 503s with a state envelope until then —
- * so polling `/api/features` could return while the box was still walking
- * for its marker, and the first hit check then threw `GET … answered 503`
- * on a store that had already landed. `/api/library` answers `ready` only
- * once the walk itself has settled. Each attempt carries its own timeout
- * (`SHIP_READY_PROBE_TIMEOUT_MS`): `SHIP_READY_DEADLINE_MS` is otherwise
- * only checked *between* attempts, so one black-holed connect (Linux's
- * ~130s default) could overrun the whole deadline on a single try.
- *
- * `fetchFn` is a `FetchLike`, the way `fetchPoses` takes one, so a cell can
- * drive this without a network; `deadlineMs`/`pollMs`/`probeTimeoutMs`
- * default to the real constants and exist so a cell can shrink all three
- * rather than waiting out a real 60s deadline to prove a non-ready answer
- * keeps polling instead of resolving early.
+ * Polls for `state: "ready"`, bounded: `docker compose … restart app` returns
+ * before the container is serving. Not `/api/features`, ungated and cheaper
+ * though it is — it answers as soon as Hono binds, *before* the library has
+ * resolved, so a hit check launched off it meets a gated `/api/thumb` still
+ * 503ing. Each attempt carries its own timeout, since the deadline is checked
+ * only *between* attempts.
  */
 export async function waitForShipReady(
   origin: string,
@@ -1558,14 +1416,9 @@ function hitCheckCommands(models: BakeModel[], origin: string): string[] {
 }
 
 /**
- * `bake()`'s origin decision (Fix 3), pulled out as a pure function so a cell
- * can pin it without running a bake: `--origin` when given, or `https://` +
- * the host `--ship` names when that host is derivable; a caller that built
- * `BakeArgs` by hand — skipping `parseArgs`' own refusal for a `--ship` this
- * cannot resolve an origin for — is refused here too, ahead of the rsync
- * `ship()` would otherwise run, rather than shipping bytes and restarting the
- * box before finding out. No `--ship` yields `--origin` when given, else the
- * `<origin>` print placeholder `shipInstructions` reads.
+ * `bake()`'s origin decision, pure so a cell can pin it. A caller that built
+ * `BakeArgs` by hand, skipping `parseArgs`' refusal, is refused here too —
+ * ahead of the rsync, not after shipping bytes and restarting the box.
  */
 export function resolveShipOrigin(args: BakeArgs): string {
   if (args.ship === undefined) return args.origin ?? "<origin>";
@@ -1578,16 +1431,9 @@ export function resolveShipOrigin(args: BakeArgs): string {
 }
 
 /**
- * `bake()`'s box-directory decision (Fix 4), mirroring `resolveShipOrigin`:
- * `--ship-dir` when given; a `--ship` with no `--ship-dir` refuses here
- * rather than falling back to a placeholder that would otherwise reach a real
- * rsync target (`root@box:/srv/cache/<box id>/`, accidentally harmless only
- * because a shell reads `<box` as a redirection). `parseArgs` already refuses
- * `--ship` without `--ship-dir`, so this is the same belt-and-braces this
- * file already keeps for a hand-built `BakeArgs`. No `--ship` yields
- * `--ship-dir` when given, else the placeholder `shipInstructions` prints —
- * unused by `ship()` on that branch, since `shipInstructions` resolves its
- * own placeholder from `args` directly.
+ * `bake()`'s box-directory decision, mirroring `resolveShipOrigin`: a `--ship`
+ * without `--ship-dir` refuses rather than letting a placeholder reach a real
+ * rsync target. Belt and braces for a hand-built `BakeArgs`.
  */
 export function resolveShipBoxDir(args: BakeArgs): string {
   if (args.ship === undefined) return args.shipDir ?? "/srv/cache/<box id>";
@@ -1598,14 +1444,7 @@ export function resolveShipBoxDir(args: BakeArgs): string {
   return args.shipDir;
 }
 
-/**
- * The printed "how to ship" template (no `--ship`): the rsync, the restart,
- * task 4.2's hit-check commands and the example-query check, against
- * `origin` — `bake()` resolves that to `--origin`'s value when given, else
- * the `<origin>` placeholder, before this is ever called. Pulled out of
- * `ship()` as a pure function so a cell can pin what it prints without a
- * network or a shell.
- */
+/** The printed "how to ship" template (no `--ship`), against an origin the caller has already resolved. */
 export function shipInstructions(
   args: BakeArgs,
   libraryId: string,
@@ -1626,21 +1465,10 @@ export function shipInstructions(
 }
 
 /**
- * `landing-page` D9 from `verifyShip`: every chip the introduction offers
- * must answer on the origin this run just restarted. The corpus moves under
- * the queries, so a re-bake is exactly when a chip dies, and a visitor's
- * first click on an empty grid is the worst first impression the demo can
- * make. Runs after the hit checks, as part of "task 4.2 ran and the box is
- * good" — it rejects through the same path `verifyShip`'s readiness wait
- * does, for the same reason: a run that shipped bytes must not exit 0 with a
- * dead chip behind it.
- *
- * The core of `scripts/check-example-queries.ts` is imported rather than
- * spawned as `bun run scripts/check-example-queries.ts <origin>`: the same
- * six requests, with no dependency on the cwd a ship happens to run from,
- * and the counts still printed. `checkExampleQueries` already takes a
- * `FetchLike` (`fetch` by default), so it is cellable through the same seam
- * as the rest of `verifyShip` without touching that file.
+ * `landing-page` D9: a re-bake is exactly when a chip dies, so every one the
+ * introduction offers must answer on the origin this run just restarted — and
+ * this rejects rather than warning. `check-example-queries.ts`'s core is
+ * imported, not spawned, so it does not depend on the cwd a ship runs from.
  */
 async function shipExampleQueries(
   origin: string,
@@ -1651,8 +1479,7 @@ async function shipExampleQueries(
     EXAMPLE_QUERIES,
     fetchFn,
   );
-  // Always, pass or fail: the counts are the headroom a dead chip had to cross,
-  // and they are the sweep `shared/exampleQueries.ts` cites.
+  // Always, pass or fail: the counts are the surviving chips' headroom.
   for (const { text, entries } of counts)
     log(`example query: ${String(entries).padStart(3)}  ${text}`);
   if (dead.length === 0 && failed.length === 0) {
@@ -1669,23 +1496,12 @@ async function shipExampleQueries(
 }
 
 /**
- * `ship()`'s post-restart sequence (task 4.2 and landing-page D9): wait for
- * the box to answer ready, confirm the box that answered is the one this run
- * shipped to, hit-check its first three models, then confirm every example
- * query the introduction offers still answers. Exported — with an injected
- * `FetchLike`, the way `fetchPoses`/`waitForShipReady` already take one — so
- * a cell can drive it without a network: a box that never answers ready
- * rejects (`waitForShipReady`'s own error), a ready box whose `/api/library`
- * `id` disagrees with `shippedId` rejects naming both (Fix 2 — nothing else
- * ties `--origin` to `--ship`, so an origin pointed at a *different* box
- * would otherwise hit-check that box's store and exit 0 on it), a ready,
- * right-box whose hit checks then disagree also rejects (`hitCheck`'s, every
- * failure collected rather than only the first — a hand fixing a store wants
- * the whole list), and a clean box with a dead or failed example query
- * rejects too (`shipExampleQueries`'s). None of the four may resolve — bytes
- * have already shipped and the box has already restarted by the time this
- * runs, so returning normally here would mean task 4.2 (or D9) silently
- * never happened.
+ * `ship()`'s post-restart sequence: wait for ready, confirm the box that
+ * answered is the one this run shipped to, hit-check its first three models,
+ * then confirm the introduction's example queries still answer (task 4.2,
+ * landing-page D9). None of the four may resolve on failure — bytes have
+ * shipped and the box has restarted, so returning normally would mean task 4.2
+ * silently never happened.
  */
 export async function verifyShip(
   origin: string,
@@ -1711,13 +1527,9 @@ export async function verifyShip(
     for (const c of hitCheckCommands(three, origin)) console.log(`  ${c}`);
     throw err;
   }
-  // Fix 2: `--origin` and `--ship`/`--ship-dir` are independent flags — an
-  // operator who ships to one box (`--ship-dir /srv/cache/newid`) but names
-  // another's public origin would otherwise hit-check *that* box's store and
-  // exit 0, the exact miscarriage the hardcoded default was deleted to
-  // prevent. `id` survives `hostDetails: false` (only `top` is withheld —
-  // `viewerState` in server/src/app.ts), so it is read straight off the same
-  // ready answer `waitForShipReady` just settled on.
+  // `--origin` and `--ship-dir` are independent, so an operator who ships to
+  // one box but names another's origin would otherwise hit-check *that* box and
+  // exit 0. `id` survives `hostDetails: false`, where only `top` is withheld.
   const state = await getJson<LibraryState>(`${origin}/api/library`, fetchFn);
   if (state.state !== "ready" || state.id !== shippedId) {
     throw new Error(
@@ -1742,19 +1554,11 @@ export async function verifyShip(
 
 /**
  * D1 step 11 / D5: the rsync, the restart and task 4.2's hit checks — run
- * behind `--ship`, printed (via `shipInstructions`) without it. `origin` and
- * `boxDir` are resolved by the caller (`bake()`, via `resolveShipOrigin` and
- * `resolveShipBoxDir`), once, before any of this runs — never derived or
- * defaulted in here — so a caller that cannot resolve either refuses before a
- * single byte ships, not after the rsync and the restart that used to sit
- * ahead of the same check.
- *
- * Exported, with `runCmd`/`fetchFn` injected (Fix 1): the invariant this
- * whole file serves — a run that ships bytes and restarts the box must never
- * exit 0 without `verifyShip` having run against that box — has its
- * production call site right here, and a cell can now pin that a stubbed
- * `--ship` run rejects when `verifyShip` does, with the rsync and the restart
- * already recorded by the stub beforehand.
+ * behind `--ship`, printed without it. `origin` and `boxDir` are resolved by
+ * the caller, never derived here, so a caller that cannot resolve either
+ * refuses before a byte ships. `runCmd`/`fetchFn` are injected because the
+ * invariant this file serves — ship bytes, and `verifyShip` runs or the process
+ * fails — has its production call site right here.
  */
 export async function ship(
   args: BakeArgs,
@@ -1934,13 +1738,10 @@ export async function bake(args: BakeArgs): Promise<void> {
   run("sh", ["deploy/demo/check-bake.sh", file, args.indexCache], repo);
   log("check-bake.sh passed");
 
-  // 11. The ship, or its commands. `origin` and `boxDir` are resolved here,
-  // once, before any shipping happens (`resolveShipOrigin`/
-  // `resolveShipBoxDir`) — `bake` is exported, so a caller that built
-  // `BakeArgs` by hand, skipping `parseArgs`' own refusals for a `--ship`
-  // this cannot resolve an origin or a box directory for, is refused here
-  // too, ahead of the rsync a few lines down, rather than shipping bytes and
-  // restarting the box before finding out.
+  // 11. The ship, or its commands. Both are resolved here, once, before any
+  // shipping happens: `bake` is exported, so a caller that built `BakeArgs` by
+  // hand and skipped `parseArgs`' refusals is still refused ahead of the rsync
+  // rather than after it.
   const origin = resolveShipOrigin(args);
   const boxDir = resolveShipBoxDir(args);
   await ship(args, libraryId, models, recipe, origin, boxDir);

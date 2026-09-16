@@ -8,17 +8,15 @@ interface Props {
   onNavigate: (path: string) => void;
 }
 
-/** The input and its suggestions, and nothing taller: the transient line that
- *  reports a path failure or a command's result is the header's (App.tsx), one
- *  row below. Drawn here it would grow this flex item past the controls beside
- *  it, which is what the row's alignment then had to work around. */
+/** The input and its suggestions, and nothing taller: a transient line drawn
+ *  here grows this flex item past the controls beside it, so the header owns
+ *  that row instead. */
 export default function PathBar({ path, api, onNavigate }: Props) {
   const [value, setValue] = useState(path);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [open, setOpen] = useState(false);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** The blur's dismissal delay — see `onBlur`. Held for the same reason the
-   *  debounce is: a timer this component owns is a timer it has to take with it. */
+  /** Held for the debounce's reason: a timer this component starts, it cancels. */
   const blurDismiss = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editing = useRef(false);
 
@@ -26,21 +24,11 @@ export default function PathBar({ path, api, onNavigate }: Props) {
     if (!editing.current) setValue(path);
   }, [path]);
 
-  // A keystroke buys 150ms of waiting, and the bar is in the header for as long
-  // as the app, so what ends it inside that window is the app's own teardown —
-  // an HMR swap, a test unmounting its root. Left to fire, the callback
-  // completes for a component nobody renders, against an `api` whose owner is
-  // gone: the `.catch` below guards a *rejected* promise, so a call that
-  // returns nothing throws `.then` of undefined right here, where nothing
-  // catches it (pathBarDebounce.test.tsx).
-  //
-  // The blur's timer goes with it. It got missed when the debounce's cleanup
-  // landed, and it is the same shape of thing: a 150ms window this component
-  // opened, which the teardown has to close. Its own callback is only a
-  // `setOpen`, so what it leaves behind is a scheduled write into a component
-  // nobody renders and a handle held past its owner — not the debounce's crash,
-  // but the rule is "every timer this component starts, it also cancels", and a
-  // rule with an exception in it is not one anybody can apply.
+  // The bar lives as long as the app, so what unmounts it inside a debounce
+  // window is a teardown — an HMR swap, a test releasing its root. Left to
+  // fire, the callback runs against an `api` whose owner is gone: the `.catch`
+  // below guards a *rejected* promise, not a call that returns nothing, which
+  // throws `.then` of undefined right here where nothing catches it.
   useEffect(
     () => () => {
       if (debounce.current !== null) clearTimeout(debounce.current);
@@ -82,16 +70,14 @@ export default function PathBar({ path, api, onNavigate }: Props) {
         onFocus={() => {
           editing.current = true;
           setOpen(true);
-          // Focus always offers recents (spec: focusing the bar lists recent
-          // directories) — the input holds the current path, which would
-          // otherwise make recents unreachable. Editing switches to completions.
+          // The input holds the current path, so without this recents would be
+          // unreachable. Editing switches to completions.
           setSuggestions(getRecents().filter((r) => r !== path));
         }}
         onBlur={() => {
           editing.current = false;
-          // Delay so suggestion mousedown wins over blur. Kept, so the unmount
-          // above can cancel it — and so a refocus-and-blur inside the window
-          // leaves one pending timer rather than two.
+          // So a suggestion's mousedown wins over blur. Kept so the unmount
+          // above can cancel it, and so a refocus leaves one timer, not two.
           if (blurDismiss.current !== null) clearTimeout(blurDismiss.current);
           blurDismiss.current = setTimeout(() => setOpen(false), 150);
         }}

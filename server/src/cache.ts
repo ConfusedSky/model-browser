@@ -26,78 +26,44 @@ import { envPositiveInt } from "./env";
 import { type Library, LibraryError } from "./library";
 import { VPathError, joinVPath, parseVPath } from "./vpath";
 
-/**
- * Everything a sidecar records about *one* render's pixels. Both renders of an
- * entry carry the same four fields; only where they are written differs (D1).
- */
+/** What a sidecar records about *one* render's pixels (D1). */
 interface RenderLabels {
-  /** mtime the PNG was rendered against; undefined when only camera is stored. */
+  /** mtime rendered against; undefined when only a camera is stored. */
   mtime?: number;
-  /** Lighting mode the PNG was rendered with; stored and echoed, never interpreted. */
+  /** Stored and echoed, never interpreted. */
   lighting?: LightingMode;
-  /** Pixel-recipe (rig) version the PNG was rendered with; stored and echoed, never interpreted. */
+  /** Pixel-recipe version; stored and echoed, never interpreted. */
   rig?: number;
-  /** Pose recipe version the PNG was rendered under; same contract as `rig`. */
+  /** Pose recipe version; same contract as `rig`. */
   posed?: number;
-  /** The orientation the PNG was drawn under, where a pose framed it; same
-   *  contract as `rig` — stored, echoed, never interpreted (`pose-rerender` D2). */
+  /** The orientation a posed render was drawn under (`pose-rerender` D2). */
   poseKey?: string;
 }
 
 /**
- * One entry, up to two renders (`ao-as-recipe-dimension` D1). The occluded
- * render keeps the shape every sidecar has always had — its labels at the top
- * level, its pixels in `<key>.webp` — because it is the render every existing
- * cache already holds, and making it a member of a symmetric map would have
- * cost a migration of every one of them. The unoccluded render is named for
- * what it lacks: `<key>.noao.webp`, labels under `noao`. A sidecar written
- * before this change simply has no `noao`, which is exactly what "no
- * unoccluded render is cached" means.
- *
- * `camera` and `axis` sit outside both: the orientation belongs to the model,
- * not to a recipe, and both renders are always drawn under it.
+ * One entry, up to two renders (`ao-as-recipe-dimension` D1). The shape is
+ * asymmetric so that every already-written sidecar stays valid. `camera` and
+ * `axis` sit outside both: each render is drawn under them.
  */
 interface Meta extends RenderLabels {
   path: string;
   camera?: CameraState;
-  /**
-   * Orbit spindle axis; undefined means no stored axis. What the entry is then
-   * rendered about is the caller's — the format's default — not this store's.
-   */
+  /** Undefined means no stored axis; the default is then the caller's. */
   axis?: OrbitAxis;
   /** The unoccluded sibling's labels; absent when it is not cached. */
   noao?: RenderLabels;
   /**
-   * Write generation (`immutable-thumbnail-serving` D1) — the cache validator
-   * every read echoes and every write moves.
-   *
-   * It sits here, beside `path`/`camera`/`axis`, and **not** in either render's
-   * `RenderLabels`, because it is a fact about the *entry*. `put` invalidates
-   * the *sibling* render in three separate cases — `supersedes` deletes its PNG
-   * outright, and both `moved` and the unowned-pose rule run `clearRecipe` over
-   * its labels — so a write aimed at one render routinely changes what the
-   * other one answers. A per-render counter would leave the invalidated
-   * sibling's URL unchanged while its bytes changed underneath, which under
-   * `immutable` pins them. One counter for both renders is the conservative
-   * direction: a write to one variant churns the other's cached URL once, which
-   * costs a revalidation and can never serve stale pixels.
-   *
-   * Absent on every sidecar written before this change, which reads as 0.
-   * `allocateGen` is the only thing that produces a value for it.
+   * Write generation (`immutable-thumbnail-serving` D1), one for the **entry**
+   * rather than per render: a write routinely invalidates the sibling, whose URL
+   * would otherwise stand while its bytes changed — pinned by `immutable`.
    */
   gen?: number;
 }
 
 /**
- * The merge for a three-state field: a value **sets** it, silence **keeps**
- * what was there, `null` **discards** it. Silence cannot mean discard — every
- * PNG write omits both orientation fields — and a written default is not a
- * discard either: it is an orientation of the user's own, and it suppresses the
- * index that would otherwise frame the model well (entry-context-menu D7).
- *
- * A function rather than two inline ternaries because `put` now applies it
- * twice: once in its ordinary merge, once on the deletion branch, which governs
- * the orientation by the same rule (`bulk-thumbnail-jobs` D3).
+ * Set / keep / discard. Silence cannot mean discard, because every pixel write
+ * omits the orientation fields, and a written default is not a discard either:
+ * it is the user's own orientation, and it suppresses the index's (D7).
  */
 function merged<T>(
   next: T | null | undefined,
@@ -107,17 +73,9 @@ function merged<T>(
 }
 
 /**
- * Is this write moving the shared orientation, rather than re-stating it?
- *
- * Absence keeps and cannot move anything. A `null` discards, which moves the
- * orientation only if there was one to discard. A value that arrives where the
- * entry held none is a change by definition — there is nothing to compare it
- * against, and design D2 takes the once-per-model cost of that deliberately.
- *
- * Otherwise it is a tolerance, not equality: `persist` re-captures and re-sends
- * the camera on every lightbox close, through a round trip that is not
- * bit-exact, so equality would read every close of an oriented model as a move
- * (see `CAMERA_EPSILON` for the measurement).
+ * Moving the shared orientation, rather than re-stating it. A tolerance and not
+ * equality, because the camera round-trips on every lightbox close and is not
+ * bit-exact; D2 accepts the once-per-model cost of a first value counting.
  */
 function cameraMoved(
   next: CameraState | null | undefined,
@@ -147,22 +105,17 @@ function axisMoved(
 }
 
 /**
- * Invalidation (D2): the render's recipe labels go, its `mtime` and its pixels
- * stay. Clearing the `mtime` instead would make it answer `stale`, which
- * carries no pixels — and the tile would blank until its replacement rendered.
- * Kept as a hit whose labels fail the client's recipe check, it is shown at the
- * old orientation for exactly as long as it takes to draw the new one.
+ * Invalidation (D2): labels go, `mtime` and pixels stay, so the tile shows the
+ * old orientation while the new one draws. Clearing the `mtime` would answer
+ * `stale`, which carries no pixels, and the tile would blank.
  */
 function clearRecipe(labels: RenderLabels): RenderLabels {
   return { mtime: labels.mtime };
 }
 
 /**
- * The four label fields and nothing else. The occluded render's live at the top
- * level of a `Meta` beside `path`, `camera` and `axis`, so reading them as a
- * `RenderLabels` has to *pick* rather than alias: the sibling's copy is written
- * back into `noao`, and spreading a whole `Meta` in there would file the
- * entry's path and camera inside its own sidecar.
+ * Picked, never aliased: the occluded labels share a `Meta` with `path` and
+ * `camera`, and spreading that into `noao` files the entry inside itself.
  */
 function renderLabels(from: RenderLabels | null | undefined): RenderLabels {
   if (from === null || from === undefined) return {};
@@ -186,19 +139,9 @@ function hasLabels(labels: RenderLabels): boolean {
 }
 
 /**
- * Is this render a hit, a stale one, or absent — the one predicate, extracted so
- * the read path and the listing annotation cannot drift apart
- * (`listing-tree-cache` §6.2, `thumbnail-image-serving` D2).
- *
- * Staleness is the render's stored `mtime` against the model's own. An entry
- * holding **only** an axis is still a miss, as it was before renders split: an
- * axis is not something to re-render from, while a camera is.
- *
- * `get` applies one more test this cannot — whether the PNG is actually on disk
- * — and downgrades a hit to `stale` when it is not. The annotation is a memory
- * lookup with no file to stat, so `hit` there means "the sidecar says these
- * pixels were rendered against this mtime"; `thumbnail-image-serving` D3 owns
- * the fallback for the case they have since been evicted.
+ * One predicate, so the read path and the listing annotation cannot drift (§6.2,
+ * `thumbnail-image-serving` D2/D3). An entry holding only an axis is a miss: an
+ * axis is not something to re-render from, a camera is.
  */
 function statusFor(
   labels: RenderLabels,
@@ -209,12 +152,7 @@ function statusFor(
   return camera !== undefined || labels.mtime !== undefined ? "stale" : "miss";
 }
 
-/**
- * One entry's cached state as a listing carries it, derived from the sidecar
- * this process last read or wrote. `null` is a sidecar that was looked for and
- * was not there — a true fact, and a useful one: nothing is cached for this
- * model, and a reader can skip asking.
- */
+/** `null` is a sidecar looked for and not found: nothing is cached here. */
 function infoFor(meta: Meta | null, mtime: number): ThumbInfo {
   if (meta === null) {
     return {
@@ -226,16 +164,15 @@ function infoFor(meta: Meta | null, mtime: number): ThumbInfo {
   }
   const info: ThumbInfo = {
     gen: meta.gen ?? 0,
-    // The definition `bulk-thumbnail-jobs`' reset derivation shares (its review
-    // M4): a stored orientation is a camera **or** an axis.
+    // A stored orientation is a camera **or** an axis — `bulk-thumbnail-jobs`'
+    // reset derivation shares this definition.
     framed: meta.camera !== undefined || meta.axis !== undefined,
     ao: renderInfo(meta, meta.camera, mtime),
     noao: renderInfo(renderLabels(meta.noao), meta.camera, mtime),
   };
   if (meta.camera !== undefined) info.camera = meta.camera;
-  // Undefined is information here for the same reason it is in `get`: "nothing
-  // stored" and "stored as y" are different facts, and defaulting made a model
-  // framed at an index-supplied pose report an axis it never had.
+  // Undefined is information, as in `get`: "nothing stored" and "stored as y"
+  // are different facts, and a posed model stores no axis.
   if (meta.axis !== undefined) info.axis = meta.axis;
   return info;
 }
@@ -253,51 +190,15 @@ function renderInfo(
   return out;
 }
 
-/**
- * The last write generation handed out, process-wide. Module-level rather than
- * per-cache so that two `ThumbCache` instances over one directory — which is
- * what the test suite builds, and what any future second reader would be —
- * cannot issue the same number.
- */
+/** Module-level, so two `ThumbCache`es over one directory cannot collide. */
 let lastGen = 0;
 
 /**
- * Allocate the generation a write will land under (D1) — strictly increasing,
- * never repeated.
- *
- * Allocated **here, not from the sidecar `put` just read**, and that is the
- * whole point. `put` is an unserialized read-modify-write (see its own note):
- * two concurrent puts for one path each merge against the same `prev`. A
- * generation derived from what they read — `prev.gen + 1` — is therefore issued
- * *twice*, for two different sets of bytes, and under `immutable` that is the
- * one failure with no recovery path: the loser's PUT echoed a number that is
- * also the winner's, so the stale-generation tier never fires, and a browser
- * that fetched at that number serves the loser's pixels for a year.
- *
- * Allocating outside the merge gives the two writes different numbers. The last
- * writer's sidecar still wins — that race is unchanged and still accepted — but
- * the loser's number is simply never current, so it is never granted
- * `immutable` and its next read re-keys against the winner's.
- *
- * Three floors, each covering what the others cannot:
- *
- * - `Date.now()` — so a generation never regresses across an entry's eviction
- *   and re-creation, or across a process restart, where no in-memory counter
- *   survives to say what was already issued.
- * - `lastGen + 1` — carries it past a tie when two writes land inside one
- *   millisecond, which wall-clock alone cannot separate. This is also the term
- *   that closes the race above: it is read and updated in one synchronous step,
- *   so the second of two interleaved puts cannot see the first's value.
- * - `prev + 1` — the entry's own stored generation, for the case neither clock
- *   term covers: a `prev` written by some *other* process's clock, which a
- *   cache directory copied between machines or a clock skew can put ahead of
- *   both `Date.now()` and this process's `lastGen`. Without it a write would
- *   issue a number below the entry's own stored one — a per-entry regression,
- *   which is the exact failure the generation exists to prevent.
- *
- * Reading `prev` here does not reintroduce the duplicate-issue race, because
- * `lastGen` still participates: two puts that merged against the same sidecar
- * pass the same `prev`, but the second still clears the first's `lastGen`.
+ * Strictly increasing (D1), and **never derived from the sidecar `put` just
+ * read**: two concurrent puts merge against one `prev`, so `prev.gen + 1` issues
+ * a number for two sets of bytes and `immutable` pins the loser's. Three floors —
+ * `Date.now()` across eviction and restart, `lastGen + 1` within a millisecond
+ * and between those two puts, `prev + 1` for a sidecar under another clock.
  */
 function allocateGen(prev: number | undefined): number {
   lastGen = Math.max(Date.now(), lastGen + 1, (prev ?? 0) + 1);
@@ -305,12 +206,8 @@ function allocateGen(prev: number | undefined): number {
 }
 
 /**
- * A conditional write (`put`'s `ifGen`) whose named generation is no longer the
- * entry's — `bulk-thumbnail-jobs` D4. **Nothing was written**: the sidecar is
- * untouched, no PNG moved, and no generation was allocated.
- *
- * `gen` is the entry's current generation, so a caller can re-key from the
- * throw itself rather than reading the entry back to find out what it lost to.
+ * A conditional write that lost (`bulk-thumbnail-jobs` D4). **Nothing was
+ * written**, and `gen` is the current one, so a caller can re-key from the throw.
  */
 export class StaleWriteError extends Error {
   constructor(readonly gen: number) {
@@ -319,35 +216,19 @@ export class StaleWriteError extends Error {
 }
 
 const DEFAULT_CAP = 2 * 1024 ** 3;
-/** PNG writes between automatic maintenance runs (D4: "after writes crossing a threshold"). */
+/** Writes between automatic maintenance runs (D4). */
 const MAINTAIN_EVERY = 32;
 
-/**
- * The size cap from the environment — `env.ts`'s one parser, which owns the
- * rule: a non-finite, fractional or non-positive value falls back to the
- * default. `Number('2GB')` is NaN, `total <= NaN` is false, and a NaN cap
- * therefore evicted every PNG in the cache on every sweep — a malformed knob
- * doing the opposite of what it spells.
- *
- * This copy is why `env.ts` exists at all: it floored *after* the positivity
- * test, so `MODEL_BROWSER_CACHE_CAP=0.5` gave a cap of 0 and swept the whole
- * pixel store on every write — the same bug the other two copies had, fixed in
- * them and missed here (`listing-tree-cache` round-2 finding 9).
- */
+/** The size cap from the environment, through `env.ts`'s one validated parser. */
 function envCap(): number {
   return envPositiveInt("MODEL_BROWSER_CACHE_CAP", DEFAULT_CAP);
 }
 
 /**
- * Server-side `{png, cameraState}` store, filed under a hash of the library
- * path (paths contain `/`, `!`, spaces). PNG keyed by path+mtime; camera by
- * path only.
- *
- * Given a library, entries live in a directory of that library's own —
- * `<dir>/<id>/` — so a remount keeps the cache and two libraries with the same
- * layout cannot share an entry (library-root D5). The pre-library flat layout
- * is migrated into it once per process, and whatever is left there is swept for
- * existence but counts toward no cap.
+ * Pixels and camera state, filed under a hash of the library path. Pixels keyed
+ * by path+mtime, camera by path alone. Entries live under `<dir>/<id>/`, so a
+ * remount keeps the cache and two libraries cannot share one (library-root D5);
+ * the flat layout that predates that is migrated in once per process.
  */
 export class ThumbCache {
   private writesSinceMaintain = 0;
@@ -355,25 +236,9 @@ export class ThumbCache {
   /** The legacy scan is a once-per-process event (D5), not once per sweep. */
   private migrated = false;
   /**
-   * What this process has learned about each entry, by library path
-   * (`listing-tree-cache` §6.2): the sidecar as it was last read or written, or
-   * `null` for one that was looked for and was not there.
-   *
-   * Maintained on this cache's **own** reads and writes and on its sweep —
-   * every path through `readMeta`/`writeMeta` is one of those — so a listing
-   * costs a `Map` get per entry and never a directory scan. That is the whole
-   * point: the annotation must be affordable on a grid of hundreds of tiles.
-   *
-   * Consequently it knows only about entries this process has touched, and an
-   * entry it has not is simply absent from a listing's annotation rather than
-   * reported as a miss. The startup `maintain()` sweep already reads every
-   * sidecar in the library's directory, so a server that has swept knows the
-   * lot without a scan of its own.
-   *
-   * Unbounded, deliberately: one small record per entry the cache has seen
-   * (~200 bytes; the measured 18,705-entry library is a few MB), against a
-   * 2 GB pixel budget beside it. Entries the sweep deletes are dropped here too,
-   * so it cannot outgrow the store it describes.
+   * What this process has learned about each entry (§6.2), so an annotation costs
+   * a `Map` get and never a scan. An entry it has not touched is absent from the
+   * annotation rather than a miss; the startup sweep is what usually fills this.
    */
   private readonly facts = new Map<string, Meta | null>();
 
@@ -382,11 +247,7 @@ export class ThumbCache {
       join(homedir(), ".cache", "model-browser"),
     readonly sizeCap: number = envCap(),
     readonly maintainEvery: number = MAINTAIN_EVERY,
-    /**
-     * Omitting the library is test- and legacy-only: entries then live flat in
-     * `dir`, keyed by whatever string the caller passes — which is exactly the
-     * shape `migrate` below reads. Production always passes one.
-     */
+    /** Omitting it is test- and legacy-only: entries then live flat, as `migrate` reads. */
     private readonly library?: Library,
   ) {}
 
@@ -395,10 +256,8 @@ export class ThumbCache {
   }
 
   /**
-   * Where this library's entries live. Awaiting the state is what makes the id
-   * readable — `id()` throws until the library has been evaluated once — and it
-   * keeps the read lazy, so the cache can be constructed before the volume has
-   * been looked at at all.
+   * Awaited because `id()` throws until the library has been evaluated once, and
+   * lazily, so the cache can be built before the volume is looked at.
    */
   private async entryDir(): Promise<string> {
     if (this.library === undefined) return this.dir;
@@ -410,22 +269,15 @@ export class ThumbCache {
     return join(dir, `${key}.json`);
   }
 
-  /** The occluded render's file is the historical one; the sibling is suffixed. */
+  /** The occluded render keeps the unsuffixed name. */
   private renderFile(dir: string, key: string, ao = true): string {
     return join(dir, ao ? `${key}.webp` : `${key}.noao.webp`);
   }
 
   /**
-   * Renders in an encoding this app no longer produces — PNG, before
-   * `webp-thumbnails`. `renderFile` cannot name them any more, which is exactly
-   * why they must be named here: what the store cannot name it cannot measure,
-   * cannot evict, and does not remove when the model itself is deleted, so an
-   * orphan outlives the thing it depicts.
-   *
-   * They are deleted wherever they are met rather than carried along, because
-   * a format change is a pixel change and so always arrives with a
-   * `RIG_VERSION` bump: pixels under a superseded encoding are stale
-   * everywhere, and no site could serve them even if it kept them.
+   * Renders in an encoding this app no longer produces: what the store cannot name
+   * it cannot evict or delete with the model. Deleted rather than carried, a
+   * format change coming with a `RIG_VERSION` bump.
    */
   private supersededFiles(dir: string, key: string, ao?: boolean): string[] {
     const both: readonly boolean[] = ao === undefined ? [true, false] : [ao];
@@ -441,11 +293,7 @@ export class ThumbCache {
       await rm(f, { force: true });
   }
 
-  /**
-   * `protected` rather than `private` so a test can observe the two reads the
-   * size-cap pass makes of one sidecar (snapshot, then re-read) and interpose a
-   * `put` between them; nothing in production subclasses this.
-   */
+  /** `protected` only so a test can interpose a `put` between the sweep's two reads. */
   protected async readMeta(dir: string, key: string): Promise<Meta | null> {
     try {
       return JSON.parse(
@@ -459,29 +307,19 @@ export class ThumbCache {
   private async writeMeta(dir: string, key: string, meta: Meta): Promise<void> {
     await mkdir(dir, { recursive: true });
     await writeFile(this.metaFile(dir, key), JSON.stringify(meta));
-    // Every write path in this class lands here — `put`, the size cap's
-    // write-back, the migration — so recording at this one point is what makes
-    // the index track the store by construction rather than by an enumeration
-    // of call sites that a later writer could fall out of.
+    // Every write path lands here, so the index tracks the store by construction
+    // rather than by an enumeration of call sites.
     this.remember(meta.path, meta);
   }
 
-  /**
-   * What the index now knows about one entry. A copy, because the caller's
-   * object goes on to be JSON'd, spread and re-merged: sharing it would let a
-   * later merge mutate what a listing is about to report.
-   */
+  /** A copy: the caller's object is spread and re-merged after this. */
   private remember(path: string, meta: Meta | null): void {
     this.facts.set(path, meta === null ? null : { ...meta });
   }
 
   /**
-   * This entry's cached state for a listing to carry (§6.2/§6.3), or undefined
-   * when this process has learned nothing about the path.
-   *
-   * A `Map` get and a pure derivation: **no I/O**, so emission never waits on
-   * the filesystem, and undefined is "not known here", never "not cached" — the
-   * client asks `/api/thumb` for those exactly as it did before.
+   * For a listing to carry (§6.2/§6.3). **No I/O**, so emission never waits, and
+   * undefined is "not known here", never "not cached".
    */
   annotate(path: string, mtime: number): ThumbInfo | undefined {
     const meta = this.facts.get(path);
@@ -490,14 +328,9 @@ export class ThumbCache {
   }
 
   /**
-   * Read one render of an entry. `ao` names which — the occluded render by
-   * default, which is what every caller meant before renders were keyed by
-   * occlusion and what every pre-existing entry holds.
-   *
-   * The status is that render's alone: its pixels, its labels, its `mtime`.
-   * The camera and axis are the entry's and come back on every status, because
-   * a client told `stale` or `miss` for one render still has to draw it at the
-   * orientation the other one is already drawn at.
+   * One render, `ao` naming which. The status is that render's alone; the camera
+   * and axis are the entry's and ride every status, since a client told `miss`
+   * still has to draw at the orientation the other render is drawn at.
    */
   async get(
     path: string,
@@ -506,27 +339,18 @@ export class ThumbCache {
     pixels = true,
   ): Promise<ThumbGetResponse> {
     const { body, png } = await this.read(path, mtime, ao);
-    // `pixels` false drops the render from the answer, and drops it *here*
-    // rather than skipping the read: the file is what decides `hit` against
-    // `stale`, and a `stat` is not the same question as a read — a mode-000
-    // file or a directory at the render's path answers a `stat` and throws on
-    // `readFile`, so the lean lookup would promise a `hit` whose pixels the
-    // reading lookup cannot get (review). One verdict for both callers is
-    // worth the read; the weight this saves is the base64 and the wire, not
-    // the page cache.
+    // Dropped here rather than by skipping the read: the file is what decides
+    // `hit` against `stale`, and a `stat` is not the same question — a mode-000
+    // file stats fine and throws on `readFile`.
     return png === undefined || !pixels
       ? body
       : { ...body, png: png.toString("base64") };
   }
 
   /**
-   * One render's pixels, for the image route (`thumbnail-image-serving` D1):
-   * the entry's generation, and the PNG bytes exactly when the render is a hit
-   * with its file on disk. Anything else — miss, stale, a hit whose PNG the
-   * size cap has since taken — is `png: undefined`, and the route answers
-   * not-found; the JSON route is what says *why*. The same read as `get`, so
-   * the two cannot disagree about what a hit is, and the same LRU bump (D7):
-   * a cold-browser view of the image counts as a read.
+   * The image route's read (`thumbnail-image-serving` D1): bytes only for a hit
+   * whose file is there, `undefined` otherwise, and the JSON route says why. The
+   * same read as `get`, so the two cannot disagree, LRU bump included (D7).
    */
   async image(
     path: string,
@@ -546,33 +370,20 @@ export class ThumbCache {
     const dir = await this.entryDir();
     const key = this.key(path);
     const meta = await this.readMeta(dir, key);
-    // Both answers are facts worth keeping (§6.2): the sidecar, or that there
-    // is none. A read is where this cache learns about an entry it has not
-    // written, which is most of them after a restart.
+    // Both answers are facts worth keeping (§6.2), and a read is how this cache
+    // learns about an entry it did not write — most of them, after a restart.
     this.remember(path, meta);
-    // An entry that does not exist has answered nothing, so it has issued no
-    // generation: 0. The number still rides along, because the caller's cache
-    // policy is decided from it uniformly and a miss is `no-store` anyway.
+    // Nothing was ever written here, so no generation was issued: 0.
     if (meta === null) return { body: { status: "miss", gen: 0 } };
     const gen = meta.gen ?? 0;
     const labels: RenderLabels = (ao ? meta : meta.noao) ?? {};
-    // Not defaulted here: the *absence* of a stored axis is information a
-    // client needs. Defaulting it to 'y' made "nothing stored" indistinguishable
-    // from "stored as y", so a model whose thumbnail was rendered at an
-    // index-supplied pose (which deliberately stores no axis) reported `y`, and
-    // the viewer abandoned the pose the moment it opened. Every caller already
-    // applies its own default.
+    // Never defaulted: a posed model deliberately stores no axis, and defaulting
+    // would report one it never had and lose the pose on open.
     const axis = meta.axis;
     const lighting = labels.lighting;
     const rig = labels.rig;
     const posed = labels.posed;
     const poseKey = labels.poseKey;
-    // Per render, but with the entry's camera: this render was written before,
-    // or the model has an orientation stored, and either way the client has
-    // something to re-render from. An axis alone is not enough — an entry
-    // holding only an axis is still a miss, as it was before renders split.
-    // The predicate is `statusFor`, shared with the listing annotation so the
-    // two can never come to disagree about what a cached render is.
     const status = statusFor(labels, meta.camera, mtime);
     if (status !== "hit") {
       return {
@@ -605,11 +416,9 @@ export class ThumbCache {
         },
       };
     }
-    // LRU clock for size-cap eviction is the png file's mtime. Bumping it via
-    // utimes (instead of rewriting the meta json) keeps reads race-free
-    // against the sweep: it cannot resurrect a removed entry and cannot be
-    // caught mid-write by the sweep's meta parse. Each render carries its own
-    // clock, so reading one never defends the other from the cap (D3).
+    // The LRU clock is the pixel file's mtime, bumped via `utimes` rather than by
+    // rewriting the sidecar: that cannot resurrect a swept entry or be caught
+    // mid-write. Per render, so reading one never defends the other (D3).
     const now = new Date();
     await utimes(this.renderFile(dir, key, ao), now, now).catch(() => {});
     return {
@@ -628,36 +437,15 @@ export class ThumbCache {
   }
 
   /**
-   * Write one render of an entry — `opts.ao` names which, occluded by default.
-   * The pixels and labels land on that render; the camera and axis are the
-   * entry's and are written whichever render carried them.
+   * Write one render; the camera and axis are the entry's, whichever carried them.
+   * A write that *moves* the shared orientation invalidates the render it did not
+   * draw (D2) — both, when it carries no pixels — while a pixels-only write
+   * touches the sibling never, save under the unowned-pose rule below.
    *
-   * Because the orientation is shared and both renders are always drawn under
-   * it, a write that *moves* it leaves the render it did not draw at an angle
-   * the entry no longer claims — so that render is invalidated (D2), and both
-   * are when the write carries no pixels: there is then no drawn render, and no
-   * labels of its own to apply either, so any this PUT declared go with the
-   * rest. A write carrying only pixels and labels touches the other render
-   * never — which is what makes toggling the preference back a lookup — save
-   * for the one exception the unowned-pose rule below states: an entry holding
-   * no orientation has no shared angle for both renders to be drawn under, so
-   * the applied-pose record takes that role and a difference in it is a move.
-   *
-   * Returns the entry's generation after the write. This is the **only** place
-   * a generation is issued: every write path the app has — either render's
-   * pixels, a camera set or discarded, an axis set or discarded — arrives here,
-   * so bumping unconditionally at one point is what makes "any change to what a
-   * thumbnail URL would answer moves the generation" true by construction
-   * rather than by an enumeration that a later write path could fall out of
-   * (D1). A put that happens to change nothing observable still bumps; the cost
-   * is one revalidation, and the alternative — deciding per field whether this
-   * write mattered — is the shape that pins stale pixels the day it is wrong.
-   *
-   * Two options belong to a bulk job rather than to an ordinary write, and each
-   * is documented at the branch that reads it: `png: null` **deletes** the
-   * entry's renders (`bulk-thumbnail-jobs` D3), and `ifGen` makes the write
-   * conditional — it **throws `StaleWriteError`**, having written nothing, when
-   * the entry has moved past the generation the caller named (D4).
+   * Bumps the generation **unconditionally**, this being the only place one is
+   * issued: deciding per field whether a write mattered is what pins stale pixels
+   * the day it is wrong (D1). `png: null` deletes and `ifGen` makes the write
+   * conditional; each is documented at its branch.
    */
   async put(
     path: string,
@@ -677,63 +465,24 @@ export class ThumbCache {
     const dir = await this.entryDir();
     const key = this.key(path);
     const ao = opts.ao ?? true;
-    // Read-modify-write with awaits between the read and the write: two
-    // concurrent puts for one path (one per render, plausible around a toggle
-    // plus a command) can each merge against the same `prev`, and the loser's
-    // sidecar half lands from a stale read. Accepted, and unclosable without
-    // locking — but the cost is worse than one wrong-labelled render (third
-    // review, 2026-08-31): the stale merge can revert the winner's camera to
-    // a self-consistent pre-move state nothing re-renders, and can resurrect
-    // sibling labels a camera move had just cleared, pairing the winner's
-    // new-angle PNG with the old camera as a fresh-looking hit. Only a later
-    // camera write heals those. The window is one request round-trip wide and
-    // needs a toggle racing a close on one model; recorded, not defended.
+    // Read-modify-write with awaits in between, so two concurrent puts merge
+    // against the same `prev` and the loser's half lands from a stale read. That
+    // can revert a camera or resurrect labels a move just cleared, and only a
+    // later camera write heals it. Accepted: closing it needs locking.
     const prev = await this.readMeta(dir, key);
 
-    // The precondition, first and before anything is merged, allocated or
-    // written (`bulk-thumbnail-jobs` D4): a writer that named a generation the
-    // entry has since moved past is refused outright. This path writes
-    // *nothing* — the sidecar's bytes are unchanged, no PNG is touched, no
-    // generation is allocated, and the maintenance counter does not move — so a
-    // refusal costs the entry exactly one read. A missing entry has issued no
-    // generation, which is 0, so `ifGen: 0` asks for "only if nothing has ever
-    // been written here".
-    //
-    // Honest about its reach: this narrows the window to `put`'s own
-    // unserialized read-modify-write — the span between this `readMeta` and the
-    // `writeMeta` below, which the note above already records as accepted — and
-    // does not close it. Two writes can still both pass their precondition
-    // against the same `prev` and the last one still wins. Closing it needs
-    // locking, and the point here is only to keep a job from overwriting a
-    // write it can see, not to serialize the store.
+    // Before anything is merged, allocated or written (`bulk-thumbnail-jobs` D4),
+    // so a refusal costs one read and changes nothing. `ifGen: 0` asks for "only
+    // if nothing has ever been written here". It narrows the window above rather
+    // than closing it: a job must not overwrite a write it can see.
     if (opts.ifGen !== undefined && opts.ifGen !== (prev?.gen ?? 0)) {
       throw new StaleWriteError(prev?.gen ?? 0);
     }
 
-    // Deletion (`bulk-thumbnail-jobs` D3) — a branch of its own, deliberately,
-    // never a `null` threaded through the `opts.png !== undefined` tests below.
-    // Every one of those would read `null` as pixels: it would adopt this
-    // write's mtime, label a render that has no bytes, and can trip
-    // `supersedes` into taking the sibling's PNG; `get` would then answer
-    // `stale` for an entry that holds nothing at all.
-    //
-    // Both renders go together, because both were drawn under the orientation
-    // the same write is giving up. What survives is the sidecar, emptied of
-    // every label — so `hasLabels` is false and `noao` is omitted exactly as on
-    // an entry that never had one — carrying whatever orientation this write's
-    // own `camera`/`axis` fields leave, on the same keep/set/discard rule as any
-    // other write. No mtime is adopted: nothing was rendered here.
-    //
-    // None of the sibling-invalidation rules below reach this branch, and there
-    // is nothing for them to do: `supersedes`, `moved` and the unowned-pose rule
-    // exist to stop a render being served at an angle the entry no longer
-    // claims, and after this there are no labels left to invalidate.
-    //
-    // The generation moves as it does on every write — the number stays
-    // monotonic across the emptying, so a browser holding the deleted pixels
-    // re-keys rather than serving them — and `writesSinceMaintain` does not:
-    // maintenance keeps the store under its cap, and this write put nothing in
-    // it.
+    // Deletion (`bulk-thumbnail-jobs` D3), a branch of its own: every
+    // `opts.png !== undefined` test below would read `null` as pixels. Both
+    // renders go, both having been drawn under the orientation this write gives
+    // up, and the generation moves so a browser re-keys rather than serving them.
     if (opts.png === null) {
       await rm(this.renderFile(dir, key, true), { force: true });
       await rm(this.renderFile(dir, key, false), { force: true });
@@ -753,8 +502,7 @@ export class ThumbCache {
 
     let mine: RenderLabels = {
       mtime: opts.png !== undefined ? opts.mtime : prevMine.mtime,
-      // Like mtime, lighting and rig describe the pixels: a PUT replacing the
-      // PNG without declaring them must not keep old labels on new pixels.
+      // These describe the pixels: new pixels must not keep old labels.
       lighting:
         opts.png !== undefined
           ? opts.lighting
@@ -769,11 +517,9 @@ export class ThumbCache {
     };
     let theirs: RenderLabels = prevTheirs;
 
-    // The model itself changed under both renders, so the sibling's pixels are
-    // of a file that is gone. Strictly newer, not merely different: an equal
-    // mtime is the ordinary case of drawing the second render of the same file,
-    // and a written mtime *older* than the sibling's makes this write the stale
-    // one — deleting the sibling's newer pixels then would be backwards.
+    // The model changed under both renders, so the sibling's pixels are of a file
+    // that is gone. Strictly newer: an equal mtime is the second render of the
+    // same file, and an older one makes *this* write the stale one.
     const supersedes =
       opts.png !== undefined &&
       theirs.mtime !== undefined &&
@@ -788,46 +534,22 @@ export class ThumbCache {
       if (opts.png === undefined) mine = clearRecipe(mine);
     }
 
-    // Three states per field — set / keep / discard; the rule itself lives in
-    // `merged`, which the deletion branch above applies to the same two fields.
     const camera = merged(opts.camera, prev?.camera);
     const axis = merged(opts.axis, prev?.axis);
 
-    // An entry left *unowned* by this write's own merge — no camera and no axis
-    // — has no stored orientation for both renders to be drawn under. Each is
-    // instead drawn at "the pose if one was applied, else the default", so the
-    // applied-pose record is what says which of those two a render shows: the
-    // written render's is `opts.posed` (absent = unposed), the sibling's is its
-    // stored `posed`, and a difference between them is a difference in the
-    // orientation actually drawn — the same fact `cameraMoved` detects for an
-    // owned entry. The sibling's pixels are then at an angle this entry no
-    // longer draws, so it is invalidated exactly as `moved` invalidates it.
-    // An owned entry is exempt: both its renders are drawn under the stored
-    // orientation and `posed` merely rides along. `supersedes` and `moved` run
-    // first and win — they have already emptied the sibling's labels.
-    //
-    // Found live 2026-08-31: 24 pairs in the real cache whose occluded render
-    // had been drawn under an index pose from a meaning search (`posed: 2`)
-    // while the unoccluded sibling was later drawn unposed by a plain-listing
-    // sweep — a pixels-only PUT, which by design "touches the other render
-    // never". The labels recorded the difference and nothing acted on it.
-    //
-    // The ping-pong this admits is bounded and accepted: a posed PUT beside an
-    // unposed sibling invalidates it, the sibling's later unposed re-render
-    // invalidates back once, and it converges as soon as two consecutive PUTs
-    // agree on the pose.
+    // An entry with no camera and no axis has no shared orientation, so each
+    // render is drawn at "the applied pose, else the default" and a difference in
+    // that record is the move `cameraMoved` detects for an owned entry. The
+    // ping-pong it admits converges once two consecutive writes agree.
     if (
       opts.png !== undefined &&
       !supersedes &&
       !moved &&
       camera === undefined &&
       axis === undefined &&
-      // The key beside the version (`pose-rerender` D2): two renders drawn
-      // under the same mapping but different opinions differ in orientation
-      // exactly as a posed and an unposed pair do. A render carrying no key
-      // beside one that does is read as different too — the keyless one was
-      // labelled before the key existed and nothing says what it was drawn
-      // under — which is one invalidation per pre-key sibling, once.
+      // The key beside the version (`pose-rerender` D2): same mapping, different
+      // opinion is still a different orientation, and a missing key says nothing
+      // about what was drawn, so it counts as different too.
       (mine.posed !== theirs.posed || mine.poseKey !== theirs.poseKey)
     ) {
       theirs = clearRecipe(theirs);
@@ -835,8 +557,7 @@ export class ThumbCache {
 
     const occluded = ao ? mine : theirs;
     const unoccluded = ao ? theirs : mine;
-    // `prev` is a floor here, never the source: see `allocateGen`. Two puts
-    // that merged against the same sidecar must not land under one number.
+    // `prev` is a floor, never the source — see `allocateGen`.
     const gen = allocateGen(prev?.gen);
     const meta: Meta = {
       path,
@@ -844,17 +565,13 @@ export class ThumbCache {
       camera,
       axis,
       gen,
-      // Omitted rather than written empty, so an entry that has never held an
-      // unoccluded render keeps exactly the sidecar shape it had before this
-      // change — the whole of the "no migration" claim (D1).
+      // Omitted rather than empty, which is what "no migration" rests on (D1).
       noao: hasLabels(unoccluded) ? unoccluded : undefined,
     };
     if (opts.png !== undefined) {
       await mkdir(dir, { recursive: true });
-      // Superseded-mtime pixels are inherently replaced: one render per key.
       await writeFile(this.renderFile(dir, key, ao), opts.png);
-      // These new bytes are this render, so anything it was stored as before
-      // this app changed encoding is now duplicate weight.
+      // These bytes are this render, so any older encoding of it is duplicate.
       await this.rmSuperseded(dir, key, ao);
     }
     if (supersedes) {
@@ -885,26 +602,15 @@ export class ThumbCache {
   }
 
   /**
-   * Sweep + size cap over this library's directory. Existence is tested
-   * against the containing zip for virtual paths. The sweep removes whole
-   * entries (camera included); the size cap deletes only least-recently-read
-   * PNGs and spares camera state.
-   *
-   * Under a library it also carries the once-per-process migration of the
-   * pre-library flat directory and that directory's own existence sweep, and
-   * the whole run is skipped unless the library is `ready`: an unmounted
+   * Sweep + size cap. The sweep removes whole entries, the cap only pixels, so a
+   * camera survives eviction. Skipped unless the library is `ready`: an unmounted
    * volume is not a deleted library.
    */
   async maintain(): Promise<void> {
     if (this.library !== undefined) {
       if ((await this.library.state()).state !== "ready") return;
-      // Belt and braces, and redundant since library-root 1.7: `state()` now
-      // stats the top itself, so a volume unplugged mid-session already answers
-      // `missing` above. Kept because of what it guards — a `ready` read
-      // against an absent top makes every `resolve` land on a path that no
-      // longer stats, and a single sweep then takes the whole library's cache,
-      // cameras included. The stat costs microseconds once per sweep; being
-      // wrong here costs the cameras.
+      // Belt and braces over `state()`: a `ready` read against an absent top would
+      // fail every `resolve`, and one sweep then takes the whole cache.
       if ((await stat(this.library.realTop()).catch(() => null)) === null)
         return;
       if (!this.migrated) {
@@ -920,19 +626,13 @@ export class ThumbCache {
     } catch {
       return;
     }
-    // Renders left by an encoding this app no longer produces, taken from the
-    // listing this pass already holds rather than by blind removes per entry:
-    // once a cache is clean this costs nothing, where two `rm(force)` calls per
-    // sidecar would cost two syscalls per entry forever. Reading the *names*
-    // also reaches an orphan whose sidecar is gone, which a per-sidecar loop
-    // never visits — and that is the shape an interrupted upgrade leaves.
+    // From the listing this pass already holds, so a clean cache costs nothing
+    // and an orphan whose sidecar is gone is still reached.
     const superseded = files.filter((f) => f.endsWith(".png"));
     for (const f of superseded) await rm(join(dir, f), { force: true });
 
-    // One row per *render*, not per entry (D3): the two renders of a model are
-    // independent LRU candidates, so an unoccluded render nobody has looked at
-    // since is evicted while the occluded one read this morning stays. The
-    // existence sweep is still per entry — one model, one existence.
+    // One row per *render* (D3): independent LRU candidates. The existence sweep
+    // stays per entry — one model, one existence.
     const metas: {
       key: string;
       ao: boolean;
@@ -945,15 +645,9 @@ export class ThumbCache {
       const key = f.slice(0, -".json".length);
       const meta = await this.readMeta(dir, key);
       if (meta === null) continue;
-      // A `*.json` here need not be a sidecar `put` wrote — this change puts
-      // `bake/bake.json` beside them, and a hand inspecting the id directory
-      // can copy it up a level (`cp bake/bake.json .`). That parses fine and
-      // carries no `path`, so `sourceExists` below would throw out of
-      // `library.resolve(undefined)` and abort the sweep for every sidecar
-      // listed after it. Skip it here, before it can join `metas` for the
-      // cap pass either. `sweepLegacy`/`migrate` need no equivalent: their
-      // `parseVPathSafe(undefined)` already answers null, so the file is
-      // just removed — the flat pre-library directory's rule, not this one's.
+      // A `*.json` here need not be a sidecar: the bake manifest lives under this
+      // directory and can be copied up a level by hand. It parses and carries no
+      // `path`, which would throw out of `sourceExists` and abort the whole sweep.
       if (typeof meta.path !== "string") {
         console.warn(
           `maintain: ${this.metaFile(dir, key)} has no path, skipping`,
@@ -965,15 +659,12 @@ export class ThumbCache {
         await rm(this.renderFile(dir, key, true), { force: true });
         await rm(this.renderFile(dir, key, false), { force: true });
         await this.rmSuperseded(dir, key);
-        // The entry is gone, so the index must not go on describing it (§6.2).
-        // Dropped rather than remembered as `null`: the model itself no longer
-        // exists, so no listing can ever ask about this path again.
+        // Dropped rather than remembered as `null`: no listing can ask again (§6.2).
         this.facts.delete(meta.path);
         continue;
       }
-      // The sweep already has every sidecar in its hand, so this is where a
-      // freshly started server learns the whole library's thumbnail state
-      // without a scan of its own — `index.ts` runs `maintain()` at startup.
+      // Where a freshly started server learns the whole library's state, the
+      // startup sweep having every sidecar in hand already.
       this.remember(meta.path, meta);
       for (const ao of [true, false]) {
         const pngStat = await stat(this.renderFile(dir, key, ao)).catch(
@@ -996,20 +687,10 @@ export class ThumbCache {
     for (const m of metas) {
       if (total <= this.sizeCap) break;
       if (m.pngSize === 0) continue;
-      // A `put` can land between the snapshot above and this eviction: writing
-      // the snapshot back would delete its fresh PNG and revert its camera. The
-      // invariant this eviction needs is that the snapshot's LRU facts about
-      // *this PNG* are still current — not that the model's mtime is unchanged.
-      // The common re-render leaves that mtime alone: an orbit persist, a rig,
-      // lighting or pose bump writes new pixels for a model that did not change,
-      // so `put` stores the same `mtime` it stored before. So re-read the
-      // sidecar (a vanished entry is not ours to evict) and then stat the PNG:
-      // gone, or an `mtimeMs` or `size` other than the snapshot measured, means
-      // some write or read-bump landed since — the ordering that elected this
-      // victim and the byte count that would be subtracted are both stale.
-      // Leave it alone and count nothing against the cap. Otherwise the size is
-      // the verified one, and evicting from the re-read lets a camera written
-      // meanwhile survive.
+      // A `put` can land between the snapshot above and this eviction, so re-read
+      // and re-stat: a moved `mtimeMs` or `size` means the ordering that elected
+      // this victim and the bytes to subtract are both stale. Evicting from the
+      // re-read is what lets a camera written meanwhile survive.
       const fresh = await this.readMeta(dir, m.key);
       if (fresh === null) continue;
       const png = await stat(this.renderFile(dir, m.key, m.ao)).catch(
@@ -1017,28 +698,12 @@ export class ThumbCache {
       );
       if (png === null || png.mtimeMs !== m.lastRead || png.size !== m.pngSize)
         continue;
-      // The window that remains is accepted, and unclosable without locking: a
-      // `put` landing after that stat still loses its PNG below, and a camera it
-      // wrote is overwritten by the one the re-read carries. That includes a
-      // put for the *sibling* render in the same window — the write-back below
-      // carries the whole re-read sidecar, so the sibling's fresh labels are
-      // reverted to the re-read's copy alongside; one re-render heals it.
+      // A `put` landing after that stat still loses its pixels, and its labels —
+      // the sibling's included — revert to the re-read. One re-render heals it.
       await rm(this.renderFile(dir, m.key, m.ao), { force: true });
-      // Only this render's `mtime`, and only this render's: the labels stay and
-      // ride the stale read — they say what recipe the evicted pixels were
-      // under, which is what the client asks a stale answer for — and the other
-      // render is untouched, cap candidate on its own clock or not.
-      //
-      // The generation rides through on the spread and is deliberately **not**
-      // bumped (D1). Eviction reclaims space; it does not change what the
-      // evicted pixels were of. A browser still holding this entry at its
-      // current generation holds bytes that are correct for this path, mtime
-      // and recipe, and serving them from its own cache is better than the
-      // `stale` answer it would get here — which would cost a re-render of a
-      // picture that has not changed. What must never happen is the generation
-      // *regressing*, and the spread is what guarantees it: drop `...fresh` for
-      // a hand-built object and a re-render would re-issue numbers this path
-      // has already answered under.
+      // Only this render's `mtime`: the labels ride the stale read, saying what
+      // recipe the evicted pixels were under. The generation comes through on the
+      // spread, deliberately **not** bumped and never allowed to regress (D1).
       await this.writeMeta(
         dir,
         m.key,
@@ -1053,12 +718,7 @@ export class ThumbCache {
     }
   }
 
-  /**
-   * Does the entry's recorded source still exist? Under a library the recorded
-   * path is a library path, so the question is put to the library: a path it
-   * refuses cannot exist in this tree at all, and one it resolves is tested on
-   * the filesystem — for a virtual path, on the containing zip.
-   */
+  /** A path the library refuses cannot exist in this tree; the rest are stat'd. */
   private async sourceExists(path: string): Promise<boolean> {
     if (this.library === undefined) {
       const source = parseVPathSafe(path);
@@ -1076,19 +736,9 @@ export class ThumbCache {
   }
 
   /**
-   * The flat directory the migration leaves behind holds entries recorded by
-   * absolute filesystem path — another library's, or nobody's. Nothing else
-   * reads it any more (`maintain` reads `<dir>/<id>/`), so it gets an existence
-   * sweep of its own at each run; its entries count toward no library's cap.
-   *
-   * These entries belong to *other* libraries, and the sweep gets the same
-   * protection this library's own does: an absent file is only a deleted file
-   * when its containing directory is there to say so. A missing file whose
-   * whole directory is gone is the shape of an unmounted volume — the case the
-   * spec names ("an unmounted volume is not a deleted library") and the one
-   * D5 leaves "for another library to claim" — so it is left alone. Stat'ing
-   * the file alone could not tell the two apart, and took the cameras of every
-   * library that happened not to be plugged in.
+   * The flat directory holds other libraries' entries and counts toward no cap. An
+   * absent file is only a deletion when its directory is there to say so, or it is
+   * an unmounted volume (D5) whose cameras this would take.
    */
   private async sweepLegacy(): Promise<void> {
     let files;
@@ -1102,13 +752,11 @@ export class ThumbCache {
       const key = f.slice(0, -".json".length);
       const meta = await this.readMeta(this.dir, key);
       if (meta === null) continue;
-      // A path that does not parse names no file in any library — nobody will
-      // claim it and nothing else reads it — so it goes without a test.
+      // An unparseable path names no file in any library.
       const source = parseVPathSafe(meta.path);
       if (source !== null) {
         if ((await stat(source).catch(() => null)) !== null) continue;
-        // The file is not there. Only its containing directory can say whether
-        // that is a deletion or a volume that is not mounted.
+        // Only the containing directory can say deletion from unmounted volume.
         if ((await stat(dirname(source)).catch(() => null)) === null) continue;
       }
       await rm(this.metaFile(this.dir, key), { force: true });
@@ -1119,17 +767,10 @@ export class ThumbCache {
   }
 
   /**
-   * Re-key the pre-library flat directory into this library's own (D5). Only
-   * `<dir>/*.json` is scanned — never a `<dir>/<id>/` subdirectory — and only
-   * entries whose recorded filesystem path resolves under the library's real
-   * top are claimed. The rest are some other library's to claim, and stay put.
-   *
-   * The order is the one the design fixes against interruption: the PNG moves
-   * (by `rename`, which preserves the mtime that is the LRU clock), then the
-   * new sidecar is written, then the old sidecar is removed. An interruption
-   * therefore leaves pixels under the new key with a stale old sidecar, never a
-   * sidecar without its pixels — so a legacy sidecar whose PNG has already gone
-   * is re-keyed anyway: the camera is the half that cannot be regenerated.
+   * Re-key the flat directory into this library's own (D5). **Pixels, then the new
+   * sidecar, then the old one**, so an interruption leaves pixels with a stale
+   * sidecar and never the reverse; one whose pixels are gone is re-keyed anyway,
+   * the camera being the half that cannot be regenerated.
    */
   async migrate(): Promise<{ moved: number; left: number }> {
     const library = this.library;
@@ -1149,8 +790,7 @@ export class ThumbCache {
       const key = f.slice(0, -".json".length);
       const meta = await this.readMeta(this.dir, key);
       if (meta === null) continue;
-      // The entry half is an opaque archive name; only the filesystem half is a
-      // path in this tree, and it is the only half that is re-rooted.
+      // Only the filesystem half is a path in this tree, so only it is re-rooted.
       let parsed;
       try {
         parsed = parseVPath(meta.path);
@@ -1162,7 +802,7 @@ export class ThumbCache {
       try {
         real = await realpath(parsed.fsPath);
       } catch {
-        // Gone. Leave it for the legacy sweep, which is what removes it.
+        // Gone: the legacy sweep is what removes it.
         left++;
         continue;
       }
@@ -1176,21 +816,16 @@ export class ThumbCache {
       const newKey = this.key(libPath);
       await mkdir(target, { recursive: true });
       if ((await this.readMeta(target, newKey)) !== null) {
-        // Already claimed — by an earlier run, or by an alias of this path that
-        // resolves to the same file. The old pair is a duplicate: drop it, PNG
-        // included, so the flat directory keeps no pixels that no sidecar
-        // describes and the legacy sweep would never reach.
+        // Already claimed, by an earlier run or by an alias of this path. The old
+        // pair is a duplicate, and pixels no sidecar describes are unreachable.
         await rm(this.metaFile(this.dir, key), { force: true });
         await rm(this.renderFile(this.dir, key, true), { force: true });
         await rm(this.renderFile(this.dir, key, false), { force: true });
         await this.rmSuperseded(this.dir, key);
         continue;
       }
-      // Every file of the key moves, sibling included. A flat entry cannot
-      // *have* an unoccluded render — that file is born after this change,
-      // under a per-library key — so the second rename always misses; it is
-      // here so the migration can never be the thing that drops one, rather
-      // than because anything is expected to be found.
+      // The second rename always misses — a flat entry cannot have an unoccluded
+      // render — and is here so the migration can never be what drops one.
       await rename(
         this.renderFile(this.dir, key, true),
         this.renderFile(target, newKey, true),
@@ -1199,18 +834,12 @@ export class ThumbCache {
         this.renderFile(this.dir, key, false),
         this.renderFile(target, newKey, false),
       ).catch(() => {});
-      // A flat entry's pixels may still be in the superseded encoding, and the
-      // renames above cannot name those. They are not carried across: the
-      // recipe bump that accompanied the encoding change already made them
-      // unserveable, so moving them would re-file garbage under a new key. The
-      // sidecar — camera and axis, the part migration exists to keep — moves
-      // below; the pixels are re-rendered on the visit that finds them.
+      // Pixels in the superseded encoding are dropped, not carried: the recipe
+      // bump already made them unserveable. The sidecar's camera is what this
+      // migration exists to keep.
       await this.rmSuperseded(this.dir, key);
-      // Re-keying, not writing: the pixels and every label are the ones that
-      // were already there, so the generation comes across on the spread
-      // unbumped along with them. A legacy entry carries none at all, which
-      // reads as 0 and is correct — nothing has ever cached a generation for a
-      // path under its new library key.
+      // Re-keying, not writing: the generation comes across unbumped, and a legacy
+      // entry carrying none reads as 0, which is right for an unseen key.
       await this.writeMeta(target, newKey, { ...meta, path: libPath });
       await rm(this.metaFile(this.dir, key), { force: true });
       moved++;

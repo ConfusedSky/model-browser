@@ -1,24 +1,17 @@
 /**
- * Generate a library's override store from the corpus metadata
- * (`metadata/miniatures.json`) — the demo's Creative Commons credits, and each
- * kit's real title (library-overrides D5).
+ * Generate a library's override store from the corpus metadata — the demo's
+ * Creative Commons credits, and each kit's real title (library-overrides D5).
  *
  *   bun run scripts/gen-overrides.ts --top <library-top> --metadata <file> [--kits <dir>]
  *
- * Node APIs only, though scripts here may use Bun: the core below is exported
- * and exercised by `server/test/genOverrides.test.ts`, whose tsconfig types are
- * Node's. It runs under `bun run` unchanged.
+ * Node APIs only: the core below is exercised by
+ * `server/test/genOverrides.test.ts`, whose tsconfig types are Node's.
  *
- * The kit folders and the library top are two different things, so both are
- * taken. The corpus lays kits out as `<root>/miniatures/<variant>/<stem>/`, so
- * "`/` + stem" is a valid key only when the library top *is* the variant
- * directory; every key is `/` plus the top-relative path of `<kitsDir>/<stem>`.
- * A kit directory outside the top is refused before anything is written —
- * outside, `relative()` yields `..`-keys that normalise into plausible wrong
- * spellings rather than errors.
- *
- * Only top-level `stem` values name kit folders. The nested `files[].stem`
- * entries are file stems, and there are 2,801 of them.
+ * The kit folders and the library top are different things, so both are taken:
+ * every key is `/` plus the top-relative path of `<kitsDir>/<stem>`. A kit
+ * directory outside the top is refused before anything is written, since
+ * `relative()` yields `..`-keys that normalise into plausible wrong spellings
+ * rather than errors. Only top-level `stem` values name kit folders.
  */
 
 import { readFile, stat } from "node:fs/promises";
@@ -66,13 +59,7 @@ export interface GenerateResult {
   escaped: string[];
   /** Stems whose key another stem already wrote this run — reported, keyed once. */
   duplicated: string[];
-  /**
-   * Written keys whose credits carry a license URL, and those carrying a
-   * modified phrase (D5). The corpus and the app agree on `license_url` and
-   * `modified` by convention, not by a shared type, so a rename on either side
-   * would otherwise produce a store that is silently thinner; two zeros here
-   * are the check.
-   */
+  /** The corpus and the app agree on these two metadata names by convention, not by a shared type, so two zeros here are how a rename shows up (D5). */
   withLicenseUrl: number;
   withModified: number;
   /** The store that was written. */
@@ -83,12 +70,7 @@ function str(value: unknown): string | undefined {
   return typeof value === "string" && value !== "" ? value : undefined;
 }
 
-/**
- * The six attribution fields, or undefined when the kit carries none of them.
- * A field that is absent or not a string yields no credit field: a kit without
- * `modified` is one served unchanged, and nothing else in the metadata is read
- * to infer otherwise (D2).
- */
+/** The attribution fields, or undefined when the kit carries none. A kit without `modified` is one served unchanged, and nothing else is read to infer otherwise (D2). */
 function creditsOf(kit: Kit): OverrideCredits | undefined {
   const credits: OverrideCredits = {};
   const author = str(kit.author);
@@ -107,19 +89,9 @@ function creditsOf(kit: Kit): OverrideCredits | undefined {
 }
 
 /**
- * The existing store, read as **raw JSON** rather than through
- * `loadOverrides`.
- *
- * Deliberate, and the two readers have opposite jobs: the loader's is to
- * protect resolution, so it drops keys it cannot spell and empties a file whose
- * version it does not know — and merging through it would delete exactly the
- * data this generator is required to preserve. The generator's job is to
- * replace the fields it owns and keep everything else, so it must see the file
- * as written.
- *
- * A file that is present but unusable is **refused**, never overwritten: a
- * store this build cannot merge into is a store whose contents it would destroy
- * by rewriting. Absent is simply a fresh store.
+ * The existing store as **raw JSON**, not through `loadOverrides`: the loader
+ * drops what it cannot spell, which would delete the very data this generator
+ * must preserve. A present but unusable file is **refused**, never overwritten.
  */
 async function readStore(top: string): Promise<OverridesFile> {
   const path = join(top, MARKER_DIR, STORE_FILE);
@@ -161,14 +133,7 @@ async function readStore(top: string): Promise<OverridesFile> {
   return file;
 }
 
-/**
- * `join` preserves a stem's trailing separator — `join('/lib', './')` is
- * `'/lib/'` — and `'/lib/'.startsWith('/lib/')` is true, so an unnormalised
- * path slips both the `=== kitsDir` test and the prefix test (review round
- * four: the root key survived two rounds of guards this way). The joined
- * per-stem path goes through here before the predicate judges it; `kitsDir`
- * itself arrives normalised from `resolve`.
- */
+/** `join` preserves a stem's trailing separator, which slips both the `=== kitsDir` test and the prefix test below. */
 function trimSep(p: string): string {
   let out = p;
   while (out.length > 1 && out.endsWith(sep)) out = out.slice(0, -1);
@@ -176,12 +141,9 @@ function trimSep(p: string): string {
 }
 
 /**
- * Textual containment: is `dir` the top, or beneath it? Not a `realpath`
- * test — the check has to hold for a directory that does not exist yet, and
- * `resolve` is what collapses the `..` this refuses. `top + sep` alone would
- * double the separator when the top IS the filesystem root, refusing every
- * legitimate directory under it — which is why this is its own function with
- * its own test (a root-topped library cannot be fixtured end to end).
+ * Textual containment, not a `realpath` test: it must hold for a directory that
+ * does not exist yet. `top + sep` alone doubles the separator when the top IS
+ * the filesystem root, refusing every directory under it.
  */
 export function underTop(top: string, dir: string): boolean {
   const prefix = top.endsWith(sep) ? top : top + sep;
@@ -215,9 +177,8 @@ export async function generateOverrides(
   let written = 0;
   let withLicenseUrl = 0;
   let withModified = 0;
-  // Tallies per value, reported so the licence mix and the phrase split are a
-  // line of the run rather than a figure retyped into prose: a change on the
-  // corpus side shows up as a diff of the report.
+  // Tallies per value, so a change on the corpus side shows up as a diff of the
+  // run's report rather than a figure retyped into prose.
   const byLicenseUrl = new Map<string, number>();
   const byModified = new Map<string, number>();
 
@@ -231,34 +192,26 @@ export async function generateOverrides(
       if (!missing.includes(stem)) missing.push(stem);
       continue;
     }
-    // The containment check above guards the kit *directory*; a stem carrying
-    // `..` escapes through `join` per key (an absolute stem does NOT — POSIX
-    // `join` treats it as relative). The invariant is that a stem names a kit
-    // STRICTLY UNDER the kit directory: anything else — the top itself (whose
-    // key's credits would inherit to every model in the library: false
-    // attribution at maximum blast radius), the kits dir, or any directory
-    // above or beside it — is refused. Found by review twice over: the first
-    // guard tested `rel` shapes and missed the `.`/`..`-onto-the-top case that
-    // the old `rel === '' ? '/' : …` ternary quietly minted the root key for;
-    // testing containment under kitsDir subsumes every shape. Escapes are
-    // their own list and report line — filing them under `missing` printed
-    // "no directory for stem" about directories that exist.
+    // The check above guards the kit *directory*; a `..` stem still escapes
+    // through `join` per key. A stem must name a kit STRICTLY UNDER it — the
+    // top is refused too, since credits keyed there inherit to every model in
+    // the library. Escapes are their own list: under `missing` they would print
+    // "no directory" about directories that exist.
     if (dir === kitsDir || !underTop(kitsDir, dir)) {
       if (!escaped.includes(stem)) escaped.push(stem);
       continue;
     }
     const rel = relative(top, dir);
     const key = `/${rel.split(sep).join("/")}`;
-    // A duplicate stem in the metadata is one key, counted once — the reported
-    // count is what the credits-page gate consumes, and it must mean keys. (A
-    // key already in the FILE is fine — that is what a rerun looks like.)
+    // A duplicate stem is one key, counted once: the reported count gates the
+    // credits page and must mean keys. A key already in the FILE is a rerun.
     if (seen.has(key)) {
       if (!duplicated.includes(stem)) duplicated.push(stem);
       continue;
     }
     seen.add(key);
-    // Merge, never replace: a `pose` written by later tooling, and any field or
-    // key this generator does not own, survives a rerun.
+    // Merge, never replace: any field or key this generator does not own
+    // survives a rerun.
     const entry: OverrideEntry = { ...file.entries[key] };
     const name = str(kit.name);
     if (name === undefined) delete entry.name;
@@ -309,8 +262,8 @@ export async function generateOverrides(
     report(`  duplicate stem, keyed once: ${stem}`);
   if (duplicated.length > 0)
     report(`${duplicated.length} stems duplicated keys and were keyed once`);
-  // The same rule every config file here has. The store is read once per
-  // resolved library, so a running server keeps answering from what it loaded.
+  // The store is read once per resolved library, so a running server keeps
+  // answering from what it loaded — the same rule every config file here has.
   report(
     "the server reads this file once per resolved library — restart it to pick this up",
   );
@@ -339,9 +292,8 @@ function parseArgs(argv: string[]): GenerateOptions {
       throw new Error(USAGE);
     }
     const name = flag.slice(2);
-    // Rejected, not collected: a misspelled --kit would otherwise be swallowed
-    // and the kit directory would silently default to the top — wrong keys
-    // with a clean exit.
+    // Rejected, not collected: a misspelled --kit would silently default the
+    // kit directory to the top — wrong keys with a clean exit.
     if (name !== "top" && name !== "metadata" && name !== "kits") {
       throw new Error(`unknown flag ${flag}\n${USAGE}`);
     }
@@ -353,9 +305,8 @@ function parseArgs(argv: string[]): GenerateOptions {
   return { top, metadata, kitsDir: values.kits };
 }
 
-// Run only when invoked directly, so the core above can be imported by the
-// suite. `import.meta.main` would be shorter but is not in the Node types this
-// workspace typechecks against.
+// Run only when invoked directly, so the core can be imported by the suite.
+// `import.meta.main` is shorter but absent from this workspace's Node types.
 if (
   process.argv[1] !== undefined &&
   import.meta.url === pathToFileURL(process.argv[1]).href
