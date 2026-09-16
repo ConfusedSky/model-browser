@@ -99,8 +99,13 @@
       shipping and skipping the verification (third-pass review, 2026-09-15). Verify:
       without the flag the printed rsync names both ids and excludes `snapshots/`; the
       flag's path is exercised in 4.1
-      **Code landed 2026-09-15** (`4e037db`): `--ship`/`--ship-dir` run the rsync, the
-      restart and 4.2's hit checks; without the flag the three commands print. **Verified 2026-09-15**: the
+      **Code landed 2026-09-15**, over four commits rather than one: `4e037db` first, then
+      `db935a3`, `339e3aa` and `552499a` as three review passes took the ship path apart.
+      As it stands, `--ship`/`--ship-dir` run the rsync and the restart, then
+      `verifyShip` waits for `/api/library` to read `ready`, hit-checks three models on
+      both variants and runs the introduction's example queries; without the flag the
+      commands print. `--origin` names the hit-check target and is required when
+      `--ship`'s host is a bare IP. **Verified 2026-09-15**: the
       print path ran at the end of every bake — the rsync names both ids and excludes
       `snapshots/`, followed by the ssh restart and nine `curl` lines. **Still open**: the
       `--ship` path itself. 4.1 was shipped by running those printed commands by hand,

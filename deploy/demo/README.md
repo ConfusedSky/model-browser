@@ -414,8 +414,14 @@ nothing but the container engine — by `scripts/bake-demo.ts`
 ```sh
 bun run scripts/bake-demo.ts --root <corpus top> --cache <scratch cache dir> \
   --index-cache <the index's cache dir> [--port 3199] [--client <scratch build dir>] \
-  [--ship <user@host> --ship-dir /srv/cache/<box id> [--origin <https://url>]]
+  [--ship <user@host> --ship-dir </srv/cache/<box id>> [--origin <https://url>]]
 ```
+
+**`--origin` is required whenever `--ship`'s host is a bare IP**, which the box's
+is: no https origin follows from an address, and a hardcoded default would verify
+a ship to one box against another box's store. The run refuses at argv rather than
+shipping the bytes and leaving task 4.2 undone, so the demo's ship line is
+`--ship root@<ip> --ship-dir /srv/cache/<id> --origin https://models.masamaeda.com`.
 
 For the demo `--root` is `~/Documents/tests/test-models/miniatures/decimated` (the
 tree the box serves, §3.2), `--cache` a scratch directory that is not
@@ -429,8 +435,12 @@ twice — once per occlusion pill state, each pass settled and then re-counted w
 the poses primed, at zero, before the pill is toggled — verifies every sidecar and
 both renders on disk
 against the enumeration, audits every unposed render against the index, writes
-the manifest, runs the check below on it, and prints the ship commands (or runs
-them under `--ship`). Its server is killed on every exit path, so a `Ctrl-C`
+the manifest, runs the check below on it, and prints the ship commands (or, under
+`--ship`, runs them and then verifies: it waits for the box to answer
+`/api/library` as `ready`, hit-checks three models on both variants, and checks
+every example query the introduction offers — any of which failing ends the run
+non-zero, because a run that shipped bytes must not exit 0 with its verification
+undone). Its server is killed on every exit path, so a `Ctrl-C`
 leaves the scratch port free; the dev instance on 3177 is untouched throughout.
 
 **The index precondition.** The index must be running with its collection root at
