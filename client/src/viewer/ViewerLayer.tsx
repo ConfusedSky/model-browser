@@ -359,7 +359,16 @@ export default function ViewerLayer({
       camera !== undefined
         ? Promise.resolve({ camera, axis: axis ?? fallbackAxis })
         : api
-            .getThumb(viewer.entry.path, viewer.entry.mtime)
+            // The orientation only: this open wants the saved camera and axis,
+            // and the pixels it would otherwise be handed are bytes nothing
+            // here reads (and an object URL nothing here revoked).
+            .getThumb(
+              viewer.entry.path,
+              viewer.entry.mtime,
+              true,
+              undefined,
+              false,
+            )
             .then((r) => {
               const posed =
                 r.camera === undefined &&

@@ -587,7 +587,16 @@ export async function renderEntryThumbnail(
   // already in it. It also decides which render's LRU clock the lookup
   // bumps — the one about to be rewritten, not its sibling.
   const ao = aoEnabled();
-  const cached = await deps.api.getThumb(entry.path, entry.mtime, ao);
+  // The orientation and the verdict, without the render: this read is about
+  // what is stored, never about the old pixels, which are about to be drawn
+  // again anyway.
+  const cached = await deps.api.getThumb(
+    entry.path,
+    entry.mtime,
+    ao,
+    undefined,
+    false,
+  );
 
   // The job derived this entry from a listing annotation — a memory read on
   // the server, taken before the job's turn came round, and an entry can go
@@ -601,7 +610,6 @@ export async function renderEntryThumbnail(
   if (
     opts.skipIfCurrent === true &&
     !discardFraming &&
-    cached.pngUrl !== undefined &&
     isCurrentRender(
       {
         state: cached.status,
@@ -615,12 +623,8 @@ export async function renderEntryThumbnail(
       opts.pose,
     )
   ) {
-    URL.revokeObjectURL(cached.pngUrl);
     return "current";
   }
-  // A hit mints an object URL; this read wanted the orientation, not the
-  // old pixels.
-  if (cached.pngUrl !== undefined) URL.revokeObjectURL(cached.pngUrl);
 
   // The index's orientation for this model, for the re-render branch — the
   // discard branch reads it through `framingAfterDiscard`, which is where

@@ -2293,8 +2293,31 @@ export function createApp(
   app.get("/api/thumb", async (c) => {
     const key = thumbKeyOf(c);
     if (key instanceof Response) return key;
+    // Whether the answer carries the render's bytes. Most readers of this
+    // route want the orientation and the staleness verdict, not the pixels —
+    // the lightbox resolving a saved camera, a re-render deciding whether it
+    // has anything to do — and the pixels are the whole payload. Measured over
+    // this machine's cache, 415 renders (`find ~/.cache/model-browser -name
+    // "*.webp" -printf "%s\n"`): 5,938 bytes median, 17,284 max, so 7.9 KB
+    // median of base64 against a few hundred bytes of labels. Absent is `on`, so a
+    // client that does not know about this parameter reads exactly what it
+    // always read; `off` is a different URL, so the two answers can never
+    // share a cache entry.
+    const pixelsParam = c.req.query("pixels");
+    if (
+      pixelsParam !== undefined &&
+      pixelsParam !== "on" &&
+      pixelsParam !== "off"
+    ) {
+      return c.json({ error: `invalid pixels: ${pixelsParam}` }, 400);
+    }
     await library.resolve(key.libPath);
-    const body = await cache.get(key.libPath, key.mtime, key.ao);
+    const body = await cache.get(
+      key.libPath,
+      key.mtime,
+      key.ao,
+      pixelsParam !== "off",
+    );
 
     // A response that is not a hit is never cacheable, in any tier
     // (`immutable-thumbnail-serving` D3). A cached miss outlives the render

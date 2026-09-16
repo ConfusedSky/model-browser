@@ -499,9 +499,24 @@ export class ThumbCache {
    * a client told `stale` or `miss` for one render still has to draw it at the
    * orientation the other one is already drawn at.
    */
-  async get(path: string, mtime: number, ao = true): Promise<ThumbGetResponse> {
+  async get(
+    path: string,
+    mtime: number,
+    ao = true,
+    pixels = true,
+  ): Promise<ThumbGetResponse> {
     const { body, png } = await this.read(path, mtime, ao);
-    return png === undefined ? body : { ...body, png: png.toString("base64") };
+    // `pixels` false drops the render from the answer, and drops it *here*
+    // rather than skipping the read: the file is what decides `hit` against
+    // `stale`, and a `stat` is not the same question as a read — a mode-000
+    // file or a directory at the render's path answers a `stat` and throws on
+    // `readFile`, so the lean lookup would promise a `hit` whose pixels the
+    // reading lookup cannot get (review). One verdict for both callers is
+    // worth the read; the weight this saves is the base64 and the wire, not
+    // the page cache.
+    return png === undefined || !pixels
+      ? body
+      : { ...body, png: png.toString("base64") };
   }
 
   /**

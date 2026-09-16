@@ -370,6 +370,43 @@ describe("HttpApiClient contract", () => {
     ]);
   });
 
+  // Same rule as `ao` and `gen`, for the saving it exists for: the parameter
+  // is the only thing standing between a lookup that wants the orientation and
+  // ~8 KB of base64 render it throws away. The server ignores a parameter it
+  // does not know, so a misspelt one is green everywhere except here.
+  it("getThumb asks for no pixels only when told to, and drops the render from the answer", async () => {
+    const fetchFn = vi.fn(() =>
+      Promise.resolve(jsonResponse({ status: "hit", png: "cG5n" })),
+    );
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch);
+
+    const lean = await api.getThumb("/m.stl", 42, true, undefined, false);
+    expect(fetchFn).toHaveBeenCalledWith(
+      `/api/thumb?path=${encodeURIComponent("/m.stl")}&mtime=42&pixels=off`,
+    );
+    // Last of the three, and the answer carries no object URL to leak — a
+    // pixel-less body is what the caller asked for.
+    await api.getThumb("/m.stl", 42, false, 7, false);
+    expect(fetchFn).toHaveBeenLastCalledWith(
+      `/api/thumb?path=${encodeURIComponent("/m.stl")}&mtime=42&ao=off&gen=7&pixels=off`,
+    );
+
+    // Explicitly on, and defaulted on: neither may add a parameter.
+    await api.getThumb("/m.stl", 42, true, undefined, true);
+    await api.getThumb("/m.stl", 42);
+    const urls = fetchFn.mock.calls.slice(2).map((c) => (c as unknown[])[0]);
+    expect(urls).toEqual([
+      `/api/thumb?path=${encodeURIComponent("/m.stl")}&mtime=42`,
+      `/api/thumb?path=${encodeURIComponent("/m.stl")}&mtime=42`,
+    ]);
+
+    // The fixture answers with a `png` whatever is asked, so this pins the
+    // client's own side: a lean call mints nothing even when the wire carries
+    // pixels, and a normal one still does.
+    expect(lean.pngUrl).toBeUndefined();
+    expect((await api.getThumb("/m.stl", 42)).pngUrl).toBeDefined();
+  });
+
   it("getThumb carries the generation the server reported", async () => {
     const fetchFn = vi
       .fn()

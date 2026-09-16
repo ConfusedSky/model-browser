@@ -146,6 +146,18 @@ describe("an untouched close writes nothing", () => {
     getThumb.mockResolvedValue({ ...HIT, camera: STORED, axis: "y" });
     await open();
     const shown = tileImage();
+    // The open wants the orientation, never the render: it reads `camera` and
+    // `axis` off this answer and would drop the pixels — and the object URL
+    // minted for them — on the floor. `pixels=false` is the fifth argument,
+    // and it is what separates this call from the tile lookups that share the
+    // mock: those take the render and show it.
+    expect(getThumb).toHaveBeenCalledWith(
+      HERO,
+      expect.any(Number),
+      true,
+      undefined,
+      false,
+    );
     putThumb.mockClear();
 
     await escape();

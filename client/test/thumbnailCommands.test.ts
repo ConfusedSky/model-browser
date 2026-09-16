@@ -477,8 +477,16 @@ describe("both commands", () => {
     run("reRenderThumbnail", h.host);
     await flush();
     // The lookup names the render it is about to rewrite, so its LRU clock is
-    // the one bumped and its answer is the one the PUT replaces.
-    expect(h.getThumb).toHaveBeenCalledWith(HERO.path, HERO.mtime, true);
+    // the one bumped and its answer is the one the PUT replaces — and it asks
+    // for that answer without the render's bytes, which this command would
+    // only throw away.
+    expect(h.getThumb).toHaveBeenCalledWith(
+      HERO.path,
+      HERO.mtime,
+      true,
+      undefined,
+      false,
+    );
     expect(renderThumbnail).toHaveBeenCalledWith(MESH, CAM, "-x", true);
   });
 
@@ -783,11 +791,13 @@ describe("the core the generate job runs directly", () => {
 
   it("answers current for an entry already drawn — no mesh, no render, no write", async () => {
     const revoke = vi.spyOn(URL, "revokeObjectURL");
+    // No `pngUrl`: this lookup asks `pixels=off`, so a hit carries the labels
+    // and nothing to revoke. The verdict rides on the status, never on whether
+    // pixels came back with it.
     const current = {
       status: "hit",
       lighting: THUMB_LIGHTING,
       rig: RIG_VERSION,
-      pngUrl: "blob:cached",
     };
     const h = harness(current);
 
@@ -802,8 +812,17 @@ describe("the core the generate job runs directly", () => {
     expect(h.acquire).not.toHaveBeenCalled();
     expect(renderThumbnail).not.toHaveBeenCalled();
     expect(h.putThumb).not.toHaveBeenCalled();
-    // The lookup minted a URL for pixels this call did not want.
-    expect(revoke).toHaveBeenCalledWith("blob:cached");
+    // The lookup that produced this verdict asked for no pixels — which is
+    // why there is no object URL to revoke, and why `not.toHaveBeenCalled` is
+    // a statement rather than a tautology.
+    expect(h.getThumb).toHaveBeenCalledWith(
+      HERO.path,
+      HERO.mtime,
+      true,
+      undefined,
+      false,
+    );
+    expect(revoke).not.toHaveBeenCalled();
 
     // Opt-in, and only the job opts in: the same lookup without the flag is the
     // re-render the user pressed for.

@@ -425,6 +425,61 @@ describe("ThumbCache maintenance", () => {
     expect(res.rig).toBe(2);
   });
 
+  it("answers without the render when the caller asks for no pixels, and still calls a vanished file stale", async () => {
+    // `pixels=false` is a lookup for the labels and the orientation alone. The
+    // verdict must not soften: the same missing file that makes a reading
+    // caller `stale` makes this one `stale` too, because a caller told `hit`
+    // would point an `<img>` at bytes that are not there.
+    const cache = tempCache();
+    const fx = makeFixtures();
+    cleanups.push(fx.dir);
+    const path = join(fx.dir, "loose.stl");
+    await cache.put(path, {
+      mtime: 1,
+      png: Buffer.from("png"),
+      camera: CAM,
+      axis: "z",
+      rig: 2,
+    });
+
+    const lean = await cache.get(path, 1, true, false);
+    expect(lean.status).toBe("hit");
+    expect(lean.png).toBeUndefined();
+    expect(lean.camera).toEqual(CAM);
+    expect(lean.axis).toBe("z");
+    expect(lean.rig).toBe(2);
+    // The render is untouched — the next reader still gets the pixels.
+    expect((await cache.get(path, 1)).png).toBe(
+      Buffer.from("png").toString("base64"),
+    );
+
+    for (const f of readdirSync(cache.dir))
+      if (f.endsWith(".webp")) unlinkSync(join(cache.dir, f));
+    const gone = await cache.get(path, 1, true, false);
+    expect(gone.status).toBe("stale");
+    expect(gone.rig).toBe(2);
+  });
+
+  it("bumps the render's LRU clock on a pixel-less read, as a reading lookup does", async () => {
+    // The clock is what the size cap evicts by (D7), and a lookup is a read of
+    // the entry whether or not the caller took the bytes with it — a tile that
+    // only ever resolves its orientation must not be the one the cap drops.
+    const cache = tempCache();
+    const fx = makeFixtures();
+    cleanups.push(fx.dir);
+    const path = join(fx.dir, "loose.stl");
+    await cache.put(path, { mtime: 1, png: Buffer.from("png"), camera: CAM });
+    const render = readdirSync(cache.dir).find((f) => f.endsWith(".webp"))!;
+    const before = new Date(Date.now() - 60_000);
+    utimesSync(join(cache.dir, render), before, before);
+
+    await cache.get(path, 1, true, false);
+
+    expect(statSync(join(cache.dir, render)).mtimeMs).toBeGreaterThan(
+      before.getTime(),
+    );
+  });
+
   it("round-trips the pose key like the rig: kept across partial puts, echoed on stale reads, cleared on unlabeled png puts", async () => {
     // `pose-rerender` D3: the key is a label of the pixels, with the same
     // contract as `rig` — stored and echoed, never interpreted, and gone when

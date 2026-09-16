@@ -555,6 +555,40 @@ describe("thumbnail cache API", () => {
     expect(body.camera).toEqual(camera);
   });
 
+  it("serves the answer without the render when `pixels=off`, and still revalidates", async () => {
+    // The pixels are the whole weight of this answer (~7.5 KB of base64
+    // against a few hundred bytes of labels), and the readers that only want
+    // the orientation or the staleness verdict — a lightbox resolving a saved
+    // camera, a re-render deciding whether it has anything to do — were paying
+    // it on every call.
+    const res = await get(
+      `/api/thumb?path=${encodeURIComponent(path)}&mtime=111&pixels=off`,
+    );
+    const body = (await res.json()) as ThumbGetResponse;
+    expect(body.status).toBe("hit");
+    expect(body.png).toBeUndefined();
+    expect(body.camera).toEqual(camera);
+
+    // A hit is a hit whatever it carries, so the same tiers apply — and `off`
+    // is its own URL, so its 304 can never hand a pixel-less body to a caller
+    // that asked for pixels.
+    const etag = res.headers.get("etag");
+    expect(etag).not.toBeNull();
+    const again = await app.request(
+      `/api/thumb?path=${encodeURIComponent(path)}&mtime=111&pixels=off`,
+      { headers: { ...LOOPBACK, "if-none-match": etag! } },
+    );
+    expect(again.status).toBe(304);
+  });
+
+  it("rejects a `pixels` query that is neither on nor off", async () => {
+    const res = await get(
+      `/api/thumb?path=${encodeURIComponent(path)}&mtime=111&pixels=maybe`,
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "invalid pixels: maybe" });
+  });
+
   it("stale on mtime change, camera still served (keyed by path only)", async () => {
     const res = await get(
       `/api/thumb?path=${encodeURIComponent(path)}&mtime=222`,

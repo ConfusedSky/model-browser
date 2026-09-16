@@ -300,11 +300,19 @@ export interface ApiClient {
    * and one that is no longer current comes back uncacheable with the current
    * number so the caller re-keys (D2).
    */
+  /**
+   * `pixels` false asks for the answer without the render: the caller gets the
+   * camera, the axis, the labels and the status, and no `pngUrl` at all. For
+   * the readers that only ever wanted the orientation or the verdict — the
+   * base64 render is the whole weight of this answer, and a caller that does
+   * not use it also has no object URL to revoke.
+   */
   getThumb(
     path: string,
     mtime: number,
     ao?: boolean,
     gen?: number,
+    pixels?: boolean,
   ): Promise<ThumbResult>;
   /**
    * The URL at which the server answers the same render as `image/webp` bytes
@@ -657,6 +665,7 @@ export class HttpApiClient implements ApiClient {
     mtime: number,
     ao = true,
     gen?: number,
+    pixels = true,
   ): Promise<ThumbResult> {
     // Appended only when off: absent already means the occluded render, so an
     // occlusion-on request is byte-identical to every request this client sent
@@ -666,7 +675,7 @@ export class HttpApiClient implements ApiClient {
     // caller has one, so a client that has learned nothing yet sends exactly
     // the bytes it sent before this change and rides the validator tier.
     const res = await this.fetchFn(
-      `/api/thumb?path=${encodeURIComponent(path)}&mtime=${mtime}${ao ? "" : "&ao=off"}${gen !== undefined ? `&gen=${gen}` : ""}`,
+      `/api/thumb?path=${encodeURIComponent(path)}&mtime=${mtime}${ao ? "" : "&ao=off"}${gen !== undefined ? `&gen=${gen}` : ""}${pixels ? "" : "&pixels=off"}`,
     );
     const body = await jsonOrThrow<ThumbGetResponse>(res);
     return {
@@ -678,7 +687,16 @@ export class HttpApiClient implements ApiClient {
       posed: body.posed,
       poseKey: body.poseKey,
       gen: body.gen,
-      pngUrl: body.png !== undefined ? base64ToBlobUrl(body.png) : undefined,
+      // Minted only for a caller that asked for pixels. The server omits them
+      // under `pixels=off`, so this guard is for the case that guard cannot
+      // cover: an older server, or one behind a cache that answers the lean
+      // URL with a full body. A caller that did not ask has nowhere to revoke
+      // an object URL from, and that is exactly the leak this parameter
+      // exists to close.
+      pngUrl:
+        pixels && body.png !== undefined
+          ? base64ToBlobUrl(body.png)
+          : undefined,
     };
   }
 
