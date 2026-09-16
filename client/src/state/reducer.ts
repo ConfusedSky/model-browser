@@ -209,6 +209,10 @@ export type Action =
    * across a render and would need a pending ref and an effect to join them.
    * The mode travels with it for the same reason: a chip is a meaning search,
    * and a `setMode` dispatched beside a `submit` would be a second transition.
+   *
+   * It carries no location, because it has only one: the library's top, whatever
+   * view it was dispatched from. The introduction offers these phrases on a gate
+   * asked at the top, so that is where they have to run.
    */
   | { type: "runQuery"; text: string; mode: SearchMode }
   | { type: "toggleFlat" }
@@ -459,13 +463,23 @@ function askCommitted(
  * function rather than a copied body: the blank guard and the subject it builds
  * are one rule, and a chip must reach the grid, the URL and history by exactly
  * the path a typed submit does or the two would drift.
+ *
+ * `base` is the view the phrase is committed over, and it defaults to the live
+ * one — which is the rule a *typed* submit follows (R1: a search submitted
+ * mid-navigation follows the user). `'runQuery'` passes a base of its own
+ * because an introduction-supplied phrase is not a search of where the visitor
+ * is standing; the parameter is what keeps that the only difference between the
+ * two, rather than a second copy of the subject rule.
  */
-function commitDraft(state: SearchState): SearchState {
+function commitDraft(
+  state: SearchState,
+  base: View = liveView(state),
+): SearchState {
   const q = state.drafts.queryText.trim();
   // A blank or whitespace-only submit is not a search — nothing to commit.
   if (q === "") return state;
   const view: View = {
-    ...liveView(state),
+    ...base,
     subject: { kind: "query", text: q },
     model: null,
   };
@@ -518,19 +532,36 @@ export function reducer(state: SearchState, action: Action): SearchState {
     case "submit":
       return commitDraft(state);
 
-    case "runQuery":
+    case "runQuery": {
       // The draft first — the input holds the phrase after the click, exactly
       // as it holds a typed one after Enter — then the mode as `'setMode'`
       // asserts it (a fetchless patch: nothing is committed yet for it to
       // re-ask), then the ordinary commit. `patch` reaches the answer on screen
       // too, so the listing the chip was clicked over does not go on claiming
       // the old mode while the URL names the new one.
-      return commitDraft(
-        patch(
-          { ...state, drafts: { ...state.drafts, queryText: action.text } },
-          { mode: action.mode },
-        ),
+      const held = patch(
+        { ...state, drafts: { ...state.drafts, queryText: action.text } },
+        { mode: action.mode },
       );
+      // At the library's **top**, wherever the visitor was standing. The
+      // introduction offers its phrases on one gate — `meaningRunnableAt` at
+      // `/` — and the deploy-time check proves them with no path at all, so the
+      // search they run has to be that search: committed at the current path
+      // instead, a chip clicked inside an archive sends the index a location it
+      // does not cover and earns a 400, and one clicked while a folder
+      // navigation was in flight silently searched the folder. Not `patch`,
+      // which refuses `path` by design — a different location is a different
+      // request, which is exactly what this is.
+      //
+      // `flat` off with it: the top the phrase runs at is the banner's own view
+      // (the shortest URL, `atTop` in App), so leaving the results lands back on
+      // it rather than on a flattened library nobody asked to walk. A deep
+      // result is flat-shaped whatever the toggle says (`requestOf`), so the
+      // grid this commits is unchanged either way. An open lightbox closes
+      // through `commitDraft`'s `model: null`, as it does under a typed submit.
+      const top: View = { ...liveView(held), path: "/", flat: false };
+      return commitDraft(held, top);
+    }
 
     case "similar": {
       // A model's neighbours, anchored at the location the user is standing in

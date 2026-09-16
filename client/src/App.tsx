@@ -578,6 +578,18 @@ export default function App() {
    */
   const mainRef = useRef<HTMLElement>(null);
   /**
+   * The header's search box, held only so focus has somewhere to land when a
+   * control beside it unmounts under the keyboard (`landing-page` D3): the
+   * banner's ✕ removes the element that has focus, and a browser answers that
+   * by dropping to `<body>`, which strands a keyboard reader at the top of the
+   * document. The box is the one thing the banner was inviting them to use.
+   *
+   * Not the find control's input, which Ctrl/Cmd-F opens and which mounts with
+   * its own focus — that is a different input, summoned and dismissed, and it
+   * does not exist while the banner is up.
+   */
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  /**
    * Whether the grid on screen is *not* the current entry's answer — a listing
    * in flight, or the skeleton standing in for one — read at record time
    * through a ref so the scroll listener below can be attached once. Set
@@ -793,13 +805,6 @@ export default function App() {
   const [introDismissed, setIntroDismissed] = useState(() =>
     introDismissedStore.read(),
   );
-  /**
-   * Whether the boot URL named a mode. Captured at mount, because the starting
-   * mode rule must not read it again after the first navigation has rewritten
-   * the address bar: a URL that carries `mode` governs its own view, and only
-   * a URL that named none leaves a start to make (D5).
-   */
-  const bootHadModeRef = useRef(parseUrl().mode !== undefined);
   /** The starting mode fires once per page. Once this is set the rule never
    *  runs again, whatever the report or the index do afterwards. */
   const introModeApplied = useRef(false);
@@ -2093,7 +2098,11 @@ export default function App() {
    *
    * `commit` and not `dispatch`, so the search owns the URL and enters history
    * as any submitted one does — which is what makes Back from a chip's results
-   * return to the top the visitor clicked from.
+   * return to the view it was clicked from.
+   *
+   * Where the phrase *runs* is the reducer's business and not this one's: the
+   * transition commits it at the library's top, which is the location
+   * `introSearchable` gates on and the only one the index is known to cover.
    */
   function runQuery(text: string): void {
     setSearchMode("meaning");
@@ -2286,15 +2295,30 @@ export default function App() {
    * The introduction's starting mode (`landing-page` D5), applied once per page
    * on the first render where every condition holds at the same time: a known
    * report declaring the introduction offered, an index that can actually
-   * answer at the library's top, no stored choice, no mode in the boot URL, and
-   * nothing committed.
+   * answer **where this view stands**, no stored choice, no mode in the URL this
+   * view is under, and nothing committed.
    *
    * Every clause earns its place. The index, because meaning mode is not
    * selectable while the index cannot answer (`semantic-search`) and a start is
-   * a selection — so this cannot fire and then sit in a mode that refuses.
+   * a selection — so this cannot fire and then sit in a mode that refuses. The
+   * *live* path and not the library's top: the mode it puts in force governs
+   * whatever the visitor landed on, so a deep link into an archive interior —
+   * which the index covers nowhere (`indexCovers`) — would otherwise start in a
+   * mode whose first typed phrase the server answers 400. The rule simply has
+   * not fired yet there, and fires on the first landing that is covered.
    * Nothing committed, because `'setMode'` re-asks a committed query: a report
    * or an index arriving after the visitor already searched by name would
    * otherwise re-run their search against the index behind them.
+   *
+   * The URL is read *live*, not captured at mount, because the clause is about
+   * one view and not about the page: a URL that carries `mode` governs its own
+   * view (D5), and a mount-time flag went on governing every view after it — a
+   * shared chip link (`?q=…&mode=meaning`) left the visitor who backed out of
+   * it to the top in the stored default with the banner up, which is the entry
+   * path this rule exists for. Leaving the view is what lets it lapse: the
+   * projection rewrites the address bar for the view that landed, and a `mode`
+   * is written only under a committed query (`serializeView`), so the param
+   * survives exactly as long as the view it belongs to.
    *
    * `applySessionSearchMode` **and** the dispatch, because they answer
    * different questions: the closure is what `ownPrefs()` re-seeds from on
@@ -2307,9 +2331,10 @@ export default function App() {
   useEffect(() => {
     if (introModeApplied.current) return;
     if (features?.intro !== true) return;
-    if (!meaningRunnableAt(state.index, "/")) return;
-    if (hasStoredSearchMode() || bootHadModeRef.current) return;
-    if (liveView(state).subject.kind !== "none") return;
+    const live = liveView(state);
+    if (!meaningRunnableAt(state.index, live.path)) return;
+    if (hasStoredSearchMode() || parseUrl().mode !== undefined) return;
+    if (live.subject.kind !== "none") return;
     introModeApplied.current = true;
     applySessionSearchMode("meaning");
     dispatch({ type: "setMode", mode: "meaning" });
@@ -3613,7 +3638,9 @@ export default function App() {
   const introOffered = features?.intro === true;
   /** Whether a meaning search would run at the library's top — what the banner's
    *  chips and the header's surprise action are gated on. The top and not the
-   *  current path: that is where a chip's search runs. */
+   *  current path: that is where an introduction-supplied phrase is committed
+   *  (the reducer's `'runQuery'`), so the gate and the search ask about one
+   *  location, and the header's action stays offered where the banner's was. */
   const introSearchable = meaningRunnableAt(state.index, "/");
   /**
    * The banner is the library's top with nothing committed — the top's shortest
@@ -3643,12 +3670,25 @@ export default function App() {
       state.drafts.queryText === "",
   );
 
-  /** Dismissal records the choice and hides the banner. The write first, the
-   *  state whatever the write did: `stored` never throws, and a browser that
-   *  refuses storage still gets the banner gone for this page's lifetime. */
+  /**
+   * Dismissal records the choice and hides the banner. The write first, the
+   * state whatever the write did: `stored` never throws, and a browser that
+   * refuses storage still gets the banner gone for this page's lifetime.
+   *
+   * Then focus, because the element that had it is about to be unmounted and a
+   * browser drops that focus to `<body>` — the next Tab would restart at the
+   * top of the document and a screen reader would lose its place. It moves
+   * *before* React commits the removal (updates in an event handler are flushed
+   * after it returns), so nothing is focused inside the disappearing banner by
+   * the time it goes. The search box and not the surprise action beside it: the
+   * banner's offer was "describe what you are looking for", and the box is
+   * where that is done — the action is only withheld anyway wherever a meaning
+   * search cannot run.
+   */
   function dismissIntro(): void {
     introDismissedStore.write(true);
     setIntroDismissed(true);
+    searchInputRef.current?.focus();
   }
 
   return (
@@ -3677,6 +3717,7 @@ export default function App() {
           </button>
           <PathBar path={target} api={api} onNavigate={navigate} />
           <input
+            ref={searchInputRef}
             value={state.drafts.queryText}
             onChange={(e) => handleQueryTextChange(e.target.value)}
             onKeyDown={(e) => {

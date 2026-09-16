@@ -49,6 +49,12 @@ const FOLDER: DirListing = {
   path: "/Kit",
   entries: [modelEntry("/Kit/a.stl")],
 };
+/** An archive interior: covered by no index, whatever its collection root
+ *  (`indexCovers` refuses any path containing `!/`). */
+const ZIP: DirListing = {
+  path: "/Kit/a.zip!/",
+  entries: [modelEntry("/Kit/a.zip!/lid.stl")],
+};
 const MEANING: SemanticListing = {
   path: "/",
   entries: [modelEntry("/Kit/a.stl")],
@@ -132,6 +138,26 @@ describe("a browser that has chosen nothing", () => {
     expect(localStorage.getItem(MODE_KEY)).toBeNull();
   });
 
+  it("leaves the mode alone where the index cannot answer the landing path", async () => {
+    // The mode the rule puts in force governs the view the visitor landed on,
+    // so the index has to be asked about *that* path: a deep link into an
+    // archive interior started in meaning mode, and the first phrase typed
+    // there was answered 400 by a server that indexes no archive.
+    features.mockResolvedValue(INTRO);
+    indexAvailability.mockResolvedValue(READY);
+    await mountAppAtCurrentUrl("/?path=%2FKit%2Fa.zip!%2F", ZIP);
+    await settle();
+
+    await submit("a dragon");
+    expect(semanticSearch).not.toHaveBeenCalled();
+    expect(listDir).toHaveBeenCalledWith(
+      "/Kit/a.zip!/",
+      expect.objectContaining({ q: "a dragon" }),
+      expect.any(AbortSignal),
+    );
+    expect(localStorage.getItem(MODE_KEY)).toBeNull();
+  });
+
   it("stays in name mode while the index cannot answer", async () => {
     features.mockResolvedValue(INTRO);
     indexAvailability.mockResolvedValue({ state: "absent" });
@@ -174,6 +200,50 @@ describe("what the start never overrides", () => {
       expect.objectContaining({ q: "widget" }),
       expect.any(AbortSignal),
     );
+    expect(localStorage.getItem(MODE_KEY)).toBeNull();
+  });
+
+  it("obeys a URL that names a mode with nothing committed", async () => {
+    // The only case the URL clause ever decides: with a query committed the
+    // nothing-committed guard has already returned, so this — `?mode=name` at
+    // the top — is what the clause is for, and what deleting it would break.
+    features.mockResolvedValue(INTRO);
+    indexAvailability.mockResolvedValue(READY);
+    await mountAppAtCurrentUrl("/?mode=name", TOP);
+    await settle();
+
+    await submit("a dragon");
+    expect(semanticSearch).not.toHaveBeenCalled();
+    expect(listDir).toHaveBeenCalledWith(
+      "/",
+      expect.objectContaining({ q: "a dragon" }),
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("lets that clause lapse once the view the URL named is left", async () => {
+    // A shared chip link, then Back to the top — the entry path the rule exists
+    // for. The URL governs *its own view* (D5) and not the page: read once at
+    // mount, the clause outlived the view, and the visitor who backed out of a
+    // shared search landed at the top in the stored default, banner up, with a
+    // typed phrase going to the name corpus.
+    features.mockResolvedValue(INTRO);
+    indexAvailability.mockResolvedValue(READY);
+    await mountAppAtCurrentUrl("/?q=a+dragon&mode=meaning", TOP);
+    await settle();
+    expect(semanticSearch).toHaveBeenCalledOnce();
+
+    // Play the browser's Back (the harness's rule: happy-dom's own history is
+    // not driven through `history.back` in this suite).
+    listDir.mockResolvedValue(TOP);
+    await act(async () => {
+      window.history.replaceState(null, "", "/");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await settle();
+
+    await submit("a wizard casting a spell");
+    expect(semanticSearch).toHaveBeenCalledTimes(2);
     expect(localStorage.getItem(MODE_KEY)).toBeNull();
   });
 

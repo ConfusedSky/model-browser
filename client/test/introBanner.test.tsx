@@ -25,6 +25,7 @@ import {
   searchInput,
   semanticSearch,
   settle,
+  tiles,
   unmountApp,
   wait,
 } from "./appHarness";
@@ -44,6 +45,12 @@ const TOP: DirListing = { path: "/", entries: [dirEntry("/Kit")] };
 const FOLDER: DirListing = {
   path: "/Kit",
   entries: [modelEntry("/Kit/a.stl")],
+};
+/** An archive interior — the one location the index covers nowhere, whatever
+ *  its collection root (`indexCovers` refuses any path containing `!/`). */
+const ZIP: DirListing = {
+  path: "/Kit/a.zip!/",
+  entries: [modelEntry("/Kit/a.zip!/lid.stl")],
 };
 const MEANING: SemanticListing = {
   path: "/",
@@ -151,6 +158,32 @@ describe("the banner at the library top", () => {
     expect(headerAbout()).not.toBeNull();
   });
 
+  it("is absent on a flat URL at the top — a deep link lands on what it names", async () => {
+    // The third clause of `atTop`, and the one with no other cell: the top with
+    // the flat toggle on is a view someone asked for, and dropping a banner
+    // over it is the same intrusion as dropping one over a folder.
+    features.mockResolvedValue(INTRO);
+    indexAvailability.mockResolvedValue(READY);
+    await mountAppAtCurrentUrl("/?flat=1", TOP);
+    await settle();
+    expect(banner()).toBeNull();
+    expect(headerAbout()).not.toBeNull();
+  });
+
+  it("is absent when the report could not be read at all", async () => {
+    // The *failed* read, not the unresolved one above: `features` stays `null`
+    // either way, but only this cell proves the rejection is handled rather
+    // than thrown — a surface gated on a report is withheld when the report is
+    // unknown, however it became unknown (`feature-report`).
+    features.mockRejectedValue(new Error("network"));
+    indexAvailability.mockResolvedValue(READY);
+    await mountAppAtCurrentUrl("/", TOP);
+    await settle();
+    expect(banner()).toBeNull();
+    expect(headerAbout()).toBeNull();
+    expect(headerSurprise()).toBeUndefined();
+  });
+
   it("is absent on a query URL", async () => {
     features.mockResolvedValue(INTRO);
     indexAvailability.mockResolvedValue(READY);
@@ -247,8 +280,72 @@ describe("a chip is a submitted meaning search", () => {
 
     // The seam is `pickExample`'s `random` parameter; App passes `Math.random`,
     // so pinning that pins the choice to one named query.
-    vi.spyOn(Math, "random").mockReturnValue(0);
+    //
+    // Restored in the same cell, and that is not tidiness: there is no
+    // `restoreMocks` in this workspace's vitest config, so a spy left standing
+    // makes `Math.random()` answer 0 for every cell after this one in the file.
+    const random = vi.spyOn(Math, "random").mockReturnValue(0);
     await click(buttonNamed("Surprise me")!);
+    await settle();
+    random.mockRestore();
+    // Asserted on the global rather than on a result, because that is what the
+    // leak is: every cell below this one ran with `Math.random() === 0` — a
+    // suite-wide condition no assertion of theirs could have shown.
+    expect(vi.isMockFunction(Math.random)).toBe(false);
+
+    expect(semanticSearch).toHaveBeenCalledWith(
+      EXAMPLE_QUERIES[0],
+      "/",
+      expect.anything(),
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("runs at the library's top from inside an archive, which the index covers nowhere", async () => {
+    // The header's action is offered here — its gate asks about `/`, not about
+    // where the visitor stands — so the search behind it has to be the search
+    // that gate describes. Committed at this path instead, the index answers
+    // 400 `path is outside the indexed collection`, which nothing on this side
+    // pre-empts the way find-similar's `OUTSIDE_CORPUS` does.
+    features.mockResolvedValue(INTRO);
+    indexAvailability.mockResolvedValue(READY);
+    semanticSearch.mockResolvedValue(MEANING);
+    await mountAppAtCurrentUrl("/?path=%2FKit%2Fa.zip!%2F", ZIP);
+    await settle();
+
+    const random = vi.spyOn(Math, "random").mockReturnValue(0);
+    await click(headerSurprise()!);
+    await settle();
+    random.mockRestore();
+
+    expect(semanticSearch).toHaveBeenCalledWith(
+      EXAMPLE_QUERIES[0],
+      "/",
+      expect.anything(),
+      expect.any(AbortSignal),
+    );
+    // And the URL names the view that ran: the top, with no path left over from
+    // the archive it was clicked in.
+    expect(window.location.search).not.toContain("path=");
+  });
+
+  it("runs a chip at the top with a folder navigation still in flight", async () => {
+    // The same defect from the other end: the banner is drawn off the
+    // *committed* view, so its chips are still there during a navigation, and a
+    // commit built from the live view would quietly search the folder the
+    // visitor is on the way into.
+    features.mockResolvedValue(INTRO);
+    indexAvailability.mockResolvedValue(READY);
+    semanticSearch.mockResolvedValue(MEANING);
+    await mountAppAtCurrentUrl("/", TOP);
+    await settle();
+
+    const held = deferred<DirListing>();
+    listDir.mockReturnValue(held.promise);
+    await click(tiles()[0]!);
+    expect(banner()).not.toBeNull();
+
+    await click(chips()[0]!);
     await settle();
 
     expect(semanticSearch).toHaveBeenCalledWith(
@@ -257,6 +354,10 @@ describe("a chip is a submitted meaning search", () => {
       expect.anything(),
       expect.any(AbortSignal),
     );
+    // The abandoned listing lands on a request nobody is waiting for; released
+    // here so the promise does not outlive the cell.
+    await act(async () => held.resolve(FOLDER));
+    await settle();
   });
 });
 
@@ -274,6 +375,24 @@ describe("dismissal", () => {
     // A later visit in the same browser: the flag is what a remount reads.
     await unmountAndRemount();
     expect(banner()).toBeNull();
+  });
+
+  it("moves focus to the search box, which the ✕ it unmounts had", async () => {
+    // The ✕ is removed from the document by its own click, and a browser
+    // answers that by dropping focus to `<body>`: the next Tab restarts at the
+    // top of the document and a screen reader loses its place. The box is where
+    // the banner's offer is taken up, so that is where focus goes.
+    features.mockResolvedValue(INTRO);
+    indexAvailability.mockResolvedValue(READY);
+    await mountAppAtCurrentUrl("/", TOP);
+    await settle();
+
+    dismissButton()!.focus();
+    expect(document.activeElement).toBe(dismissButton());
+    await click(dismissButton()!);
+
+    expect(banner()).toBeNull();
+    expect(document.activeElement).toBe(searchInput());
   });
 
   it("leaves the banner dismissed for the page even when the write fails", async () => {

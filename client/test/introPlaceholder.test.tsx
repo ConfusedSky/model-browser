@@ -119,6 +119,31 @@ describe("the cycling example", () => {
     expect(placeholder()).toBe(ORDINARY);
   });
 
+  it("stops the interval on inactivity rather than merely ignoring its ticks", async () => {
+    // The hook's cleanup, asserted through the one thing a *stopped* interval
+    // and an *ignored* one differ in: where the cycle resumes. An interval left
+    // running behind a hidden placeholder goes on advancing the counter (and
+    // re-rendering App once a period for nothing, which is what the cleanup is
+    // there to prevent — the same cleanup React runs on unmount), so the phrase
+    // that comes back after the box is emptied is not the one it left on.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    alreadyDismissed();
+    features.mockResolvedValue(INTRO);
+    indexAvailability.mockResolvedValue(READY);
+    await mountAppAtCurrentUrl("/", TOP);
+    await settle();
+    expect(placeholder()).toBe(EXAMPLE_QUERIES[0]);
+
+    await type(searchInput(), "dra");
+    expect(placeholder()).toBe(ORDINARY);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2 * PLACEHOLDER_PERIOD_MS + 100);
+    });
+
+    await type(searchInput(), "");
+    expect(placeholder()).toBe(EXAMPLE_QUERIES[0]);
+  });
+
   it("stops for a draft, as for any input holding text", async () => {
     alreadyDismissed();
     features.mockResolvedValue(INTRO);

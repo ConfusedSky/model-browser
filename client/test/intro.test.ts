@@ -8,7 +8,7 @@
 // flag round-trips through real storage, that `pickExample` is a uniform index
 // over the list it is handed, and that `runQuery` reaches a committed meaning
 // view in ONE transition, which is the whole reason the action exists.
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { IndexAvailability } from "../../shared/types";
 import {
   ABOUT_URL,
@@ -17,7 +17,7 @@ import {
   pickExample,
   SOURCE_URL,
 } from "../src/lib/intro";
-import { TUNING_DEFAULTS } from "../src/lib/searchOptions";
+import { hasStoredSearchMode, TUNING_DEFAULTS } from "../src/lib/searchOptions";
 import { initialState, reducer, type SearchState } from "../src/state/reducer";
 import { pendingRequest } from "../src/state/selectors";
 import type { Prefs, View } from "../src/state/view";
@@ -59,6 +59,38 @@ describe("the dismissal flag", () => {
   });
 });
 
+describe("hasStoredSearchMode", () => {
+  // The starting-mode rule's first guard (D5, task 4.2): it decides whether a
+  // browser has ever chosen, and it runs inside an effect on every landing, so
+  // "never throws" is a behaviour and not a remark. A profile with storage
+  // refused is exactly the browser the demo meets — third-party cookies blocked,
+  // private mode — and an exception here would take the render down.
+  beforeEach(() => localStorage.clear());
+
+  it("is false before anything chose, and true after a choice is recorded", () => {
+    expect(hasStoredSearchMode()).toBe(false);
+    localStorage.setItem("model-browser:search-mode", "name");
+    expect(hasStoredSearchMode()).toBe(true);
+  });
+
+  it("answers false rather than throwing where storage refuses the read", () => {
+    // The instance and not `Storage.prototype`: happy-dom's `localStorage`
+    // carries its own `getItem`, so a prototype spy is shadowed and the cell
+    // asserts nothing — which is how the same cell written that way survived
+    // the try/catch being deleted.
+    const getItem = vi.spyOn(localStorage, "getItem").mockImplementation(() => {
+      throw new Error("SecurityError");
+    });
+    try {
+      // False and not true: a browser that cannot be asked has not chosen, so
+      // the deployment's start applies — the same reading an unset key gets.
+      expect(hasStoredSearchMode()).toBe(false);
+    } finally {
+      getItem.mockRestore();
+    }
+  });
+});
+
 describe("pickExample", () => {
   const QUERIES = ["a", "b", "c"] as const;
 
@@ -97,6 +129,36 @@ describe("the chip's transition", () => {
       kind: "query",
       text: "a dragon",
     });
+  });
+
+  it("commits at the library's top, whatever view it was dispatched from", () => {
+    // The gate the chip is offered behind asks about `/` (`introSearchable`)
+    // and the deploy-time check proves the phrases with no path at all, so this
+    // is where the search has to land: committed at the path the visitor was
+    // standing in, a phrase run from an archive interior is a location the
+    // index does not cover, and the server answers it 400.
+    const inZip = initialState(
+      view({ path: "/Kit/a.zip!/", flat: true }),
+      READY,
+    );
+    const s = reducer(inZip, {
+      type: "runQuery",
+      text: "a dragon",
+      mode: "meaning",
+    });
+    expect(pendingRequest(s)?.forView.path).toBe("/");
+    // The toggle goes with the location: the top this lands on is the banner's
+    // own view, so leaving the results does not walk the whole library.
+    expect(pendingRequest(s)?.forView.flat).toBe(false);
+  });
+
+  it("closes an open lightbox, as a typed submit does", () => {
+    const s = reducer(initialState(view({ model: "/Kit/a.stl" }), READY), {
+      type: "runQuery",
+      text: "a dragon",
+      mode: "meaning",
+    });
+    expect(pendingRequest(s)?.forView.model).toBeNull();
   });
 
   it("defers exactly as a typed meaning submit does while the index warms", () => {
