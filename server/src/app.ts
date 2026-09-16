@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { relative, resolve as resolvePath } from "node:path";
@@ -46,6 +47,7 @@ import {
 import { ListingCache } from "./listingCache";
 import {
   type OverrideHolder,
+  type OverrideStore,
   applyDisplayNames,
   createOverrideHolder,
   listCredits,
@@ -1447,13 +1449,59 @@ export function createApp(
    * only once the library is ready.
    *
    * **No capability gate.** The store is library data, like `/api/overrides` —
-   * and displayed attribution is a licence term rather than an offer. The
-   * `intro` field gates no route at all (D1): it is what the *client* reads to
-   * decide whether to draw the page that asks this.
+   * and displayed attribution is a licence term rather than an offer. `intro`
+   * gates no `/api` route (D1); what it does withhold is the About *document*
+   * itself, which the static handler answers with a 404 when the capability is
+   * off. So a deployment with the introduction off still answers this route:
+   * attribution is owed whether or not a page is drawn over it, and the client
+   * is what decides to draw one.
+   *
+   * **Revalidated, on the tiers `thumbHitTiers` establishes below**: `no-cache`
+   * plus a strong `ETag`, exact match only, and a 304 with no body when the
+   * reader already has these bytes. This is the whole corpus's attribution in
+   * one answer — 170,560 bytes over 444 credited kits on the demo, reported
+   * 2026-09-15 and re-readable with `curl -s <origin>/api/credits | wc -c`
+   * rather than measured here — served to every About-page visit, while the
+   * store behind it changes only when a regenerated `overrides.json` is
+   * deployed and the app restarted (the store is read once per resolved
+   * library). Not
+   * `immutable`, and no freshness lifetime: there is no generation in the URL
+   * to re-key on the way `/api/thumb` has, so a cached answer must be checked
+   * rather than trusted, and the check is a conditional GET that costs the
+   * headers.
+   *
+   * The tag is over the **answer's bytes**, not the store's identity, so it is
+   * stable across a restart that re-reads the same file — which is the case
+   * that matters, since a redeploy restarts the app and a visitor's cache
+   * should survive one where the credits did not change.
    */
+  let creditsAnswer:
+    | { store: OverrideStore; json: string; etag: string }
+    | undefined;
+
   app.get("/api/credits", async (c) => {
     await library.resolve("/");
-    return c.json(listCredits(await overrides.store()));
+    const store = await overrides.store();
+    // Serialised once per resolved store rather than per request. The holder
+    // hands back the same Map until the library's identity changes (it reloads
+    // on mismatch, never in place), so object identity is exactly the
+    // "could this answer have changed" question — and the `[]` of a library
+    // with no store is the holder's one shared empty Map, which is the same
+    // answer for every such library anyway.
+    if (creditsAnswer?.store !== store) {
+      const json = JSON.stringify(listCredits(store));
+      const digest = createHash("sha256").update(json).digest("hex");
+      creditsAnswer = { store, json, etag: `"${digest.slice(0, 32)}"` };
+    }
+    c.header("Cache-Control", "no-cache");
+    c.header("ETag", creditsAnswer.etag);
+    if (c.req.header("if-none-match") === creditsAnswer.etag)
+      return c.body(null, 304);
+    // The held string rather than `c.json`, which would re-encode the list the
+    // tag was taken over — and the two must be the same bytes or the validator
+    // is not one.
+    c.header("Content-Type", "application/json");
+    return c.body(creditsAnswer.json);
   });
 
   /**

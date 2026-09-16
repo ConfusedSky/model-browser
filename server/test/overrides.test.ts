@@ -713,6 +713,53 @@ describe("GET /api/credits", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual([]);
   });
+
+  it("revalidates: a strong tag over the answer, and a 304 for a reader holding it", async () => {
+    // The whole corpus's attribution in one answer — 170,560 bytes for the
+    // demo's 444 credited kits, re-served on every About-page visit of a store
+    // that changes only when a regenerated file is deployed. So the tiers
+    // `/api/thumb` established: `no-cache` and a strong validator, and an
+    // unchanged store costs the headers instead of the list.
+    const libTop = fixtureLibrary();
+    storeAt(libTop, v1({ "/kit": { name: "The Kit", credits: CREDITS } }));
+    const app = appOn(libTop);
+    const first = await app.request("/api/credits", { headers: LOOPBACK });
+    expect(first.status).toBe(200);
+    const etag = first.headers.get("etag");
+    expect(first.headers.get("cache-control")).toBe("no-cache");
+    // Strong: no `W/` prefix, and quoted — a weak tag would let a cache reuse
+    // an answer this route never says is equivalent to another.
+    expect(etag).toMatch(/^"[0-9a-f]{32}"$/);
+    const body = await first.json();
+
+    const revalidated = await app.request("/api/credits", {
+      headers: { ...LOOPBACK, "if-none-match": etag! },
+    });
+    expect(revalidated.status).toBe(304);
+    expect(revalidated.headers.get("etag")).toBe(etag);
+    expect(await revalidated.text()).toBe("");
+
+    // A tag that is not this answer's gets the answer, not a 304 — which is
+    // what would break if the tag were a constant, or compared loosely.
+    const stale = await app.request("/api/credits", {
+      headers: { ...LOOPBACK, "if-none-match": '"0000"' },
+    });
+    expect(stale.status).toBe(200);
+    expect(await stale.json()).toEqual(body);
+
+    // And the tag is over the bytes: a different store is a different tag, so
+    // a reader holding the first one is served rather than told it is current.
+    const other = fixtureLibrary();
+    storeAt(other, v1({ "/kit2": { credits: { modified: MODIFIED } } }));
+    const second = await appOn(other).request("/api/credits", {
+      headers: { ...LOOPBACK, "if-none-match": etag! },
+    });
+    expect(second.status).toBe(200);
+    expect(second.headers.get("etag")).not.toBe(etag);
+    expect(await second.json()).toEqual([
+      { path: "/kit2", credits: { modified: MODIFIED } },
+    ]);
+  });
 });
 
 describe("display names ride the listing", () => {

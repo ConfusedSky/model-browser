@@ -283,7 +283,20 @@ describe("a declared-off capability is refused at its route", () => {
     // withheld or refused, so a refusal that fired unconditionally would fail
     // here rather than passing everywhere.
     const app = appWith({});
-    expect(await reported(app)).toEqual(DEFAULT_FEATURES);
+    // Spelt out rather than compared to `DEFAULT_FEATURES`: the report is
+    // *built* from that constant, so `toEqual(DEFAULT_FEATURES)` compares it to
+    // itself and a field dropped, renamed or added passes here unremarked —
+    // which is how `landing-page` 1.1's claim that this cell "gains the field"
+    // was false for `intro` (`landing-page` 7.5). A literal is the only form
+    // that makes the wire shape a decision the suite holds.
+    expect(await reported(app)).toEqual({
+      thumbWrites: true,
+      appLaunch: true,
+      chatTab: false,
+      hostDetails: true,
+      maintenance: true,
+      intro: false,
+    });
 
     const state = (await (
       await get(app, "/api/library")
