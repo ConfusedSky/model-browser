@@ -149,8 +149,12 @@ describe("the banner at the library top", () => {
     expect(flow!.querySelector("span")!.textContent).toContain(
       "Browse a library of 3D-printable miniatures",
     );
+    expect(chips().length).toBeGreaterThan(0);
     for (const chip of chips()) expect(chip.parentElement).toBe(flow);
     expect(flow!.contains(dismissButton())).toBe(false);
+    // After the flow, not before it: order is what puts the control at the end
+    // of the strip once the chips have taken their rows.
+    expect(flow!.nextElementSibling).toBe(dismissButton());
   });
 
   it("is absent on the report a server with no configuration answers", async () => {

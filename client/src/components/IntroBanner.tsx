@@ -5,7 +5,12 @@
  *
  * Sentence and chips share one wrapping row so a chip may sit on the sentence's
  * own line; the dismiss control is that row's sibling, not its last item, so it
- * cannot be carried onto a line of its own by the chips ahead of it.
+ * cannot be carried onto a line of its own by the chips ahead of it. That costs
+ * the row two utilities that read as one: `flex-1` is what fills the width the
+ * dismiss control does not take, pinning it to the right edge, and `min-w-0`
+ * lets the row shrink under its longest chip rather than push past the strip.
+ * `min-h-7` is the dismiss control's own height, so a row of bare text still
+ * centres against it.
  */
 
 /** Never glued to a `${`: Tailwind's scanner reads source text, so a computed
@@ -39,7 +44,7 @@ export default function IntroBanner({
     >
       <div
         data-intro-flow
-        className="flex min-w-0 flex-1 flex-wrap items-center gap-2"
+        className="flex min-h-7 min-w-0 flex-1 flex-wrap items-center gap-2"
       >
         <span>{meaningRunnable ? SENTENCE_WITH_SEARCH : SENTENCE_PLAIN}</span>
         {meaningRunnable &&
