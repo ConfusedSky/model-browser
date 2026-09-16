@@ -290,8 +290,8 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
               you do writes anything back to the server.
             </li>
             <li>
-              A model you turn is remembered in this browser alone, where the
-              desktop app would save the framing for everyone.
+              A model you turn stays turned while you are looking at it and no
+              longer, where the desktop app would save the framing for everyone.
             </li>
             <li>
               Nothing here names the machine this runs on, so an explanation
@@ -363,9 +363,14 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
 
         {/* source: client/src/lib/stored.ts and the `model-browser:` preference
           keys read through it (`lib/intro.ts`, `viewer/aoToggle.ts`,
-          `lib/searchOptions.ts`), plus `api/localFramings.ts`, where a framing
-          goes on a deployment that refuses thumbnail writes; client/index.html
-          and this page, neither of which loads a third-party script.
+          `lib/searchOptions.ts`); client/index.html and this page, neither of
+          which loads a third-party script.
+
+          A framing is the claim that moved: `api/localFramings.ts` is where one
+          would go on a deployment that refuses thumbnail writes, and its
+          `FRAMINGS_KEPT_LOCALLY` is off until issue #28 lands, so nothing is
+          written and nothing is read back. Both paragraphs above say so, and
+          both have to move again when that constant does.
 
           The search options are called out because they are not local:
           `HttpApiClient.semanticSearch` posts `{ text, path, ...tuning }` and
@@ -376,11 +381,12 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
         <Section id="privacy" title="Privacy">
           <p className="mb-2">
             There are no accounts and nothing to sign in to, and no analytics
-            script runs on these pages. Whether you dismissed the introduction,
-            the ambient-occlusion setting and how you have turned each model are
-            kept in this browser&rsquo;s own storage; the server holds none of
-            them for you, and clearing this site&rsquo;s data is the whole of
-            forgetting them.
+            script runs on these pages. Whether you dismissed the introduction
+            and the ambient-occlusion setting are kept in this browser&rsquo;s
+            own storage; the server holds neither for you, and clearing this
+            site&rsquo;s data is the whole of forgetting them. How you have
+            turned a model is kept nowhere at all &mdash; not here, not on the
+            server.
           </p>
           <p>
             Your search options are the exception, and they are one by design:

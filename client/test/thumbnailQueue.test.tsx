@@ -3219,7 +3219,38 @@ describe("a kept framing wins over the one the listing carried", () => {
     localStorage.clear();
   });
 
-  it("overrides the listing entry’s own camera and axis, still with no lookup", async () => {
+  // **The store is off** until issue #28 lands (`FRAMINGS_KEPT_LOCALLY` in
+  // `api/localFramings.ts`). The cells that assert a kept framing reaches a
+  // tile are skipped rather than deleted — they describe the seeding rule
+  // re-enabling has to satisfy — and this one states what holds meanwhile.
+  it("keeps nothing while the store is off, so the listing's framing stands", async () => {
+    // Seeded raw, not through `writeLocalFraming`: a write keeps nothing now, so
+    // seeding through one would pin the write gate twice and the seed's read
+    // gate not at all. This is also the shape of the case that actually exists
+    // in the wild — a browser holding records from before the disable.
+    localStorage.setItem(
+      `mb:framing:lib-a:${PATH}`,
+      JSON.stringify({ camera: KEPT, axis: "-x" }),
+    );
+    const api = fakeApi();
+    await render(
+      <Harness
+        entries={annotated()}
+        api={api}
+        lru={fakeLru()}
+        queue={new RenderQueue(2)}
+        features={() => OFF}
+        libraryId={LIB}
+      />,
+    );
+    await settle();
+
+    expect(api.getThumb).not.toHaveBeenCalled();
+    expect(lastThumbs.get(PATH)!.camera).toEqual(CAMERA);
+    expect(lastThumbs.get(PATH)!.axis).toBe("z");
+  });
+
+  it.skip("overrides the listing entry’s own camera and axis, still with no lookup", async () => {
     writeLocalFraming(PATH, { camera: KEPT, axis: "-x" }, undefined, LIB);
     const api = fakeApi();
     await render(
@@ -3243,7 +3274,9 @@ describe("a kept framing wins over the one the listing carried", () => {
     expect(lastThumbs.get(PATH)!.axis).toBe("-x");
   });
 
-  it("does not, while the report is unknown", async () => {
+  // Vacuous while the store is off — the seed keeps nothing, so the absence
+  // this asserts is the disable's and not the rule's.
+  it.skip("does not, while the report is unknown", async () => {
     // 4.2: not knowing must never relocate where a user's orientations live —
     // and that cuts both ways. A browser carrying framings from some other
     // deployment must not silently re-frame a server that never refused a write.
@@ -3265,7 +3298,9 @@ describe("a kept framing wins over the one the listing carried", () => {
     expect(lastThumbs.get(PATH)!.axis).toBe("z");
   });
 
-  it("does not, where the framing was kept for another library", async () => {
+  // Vacuous while the store is off — the seed keeps nothing, so the absence
+  // this asserts is the disable's and not the rule's.
+  it.skip("does not, where the framing was kept for another library", async () => {
     // The seeding point's half of the third pass's key fix (2026-09-08): the
     // same relative path in a second library — a backup drive holding the same
     // kit — is a different model, and the framing kept for one must not frame
@@ -3294,7 +3329,7 @@ describe("a kept framing wins over the one the listing carried", () => {
     expect(lastThumbs.get(PATH)!.axis).toBe("z");
   });
 
-  it("reaches an unframed entry through the lookup, where a held pose refuses the seed", async () => {
+  it.skip("reaches an unframed entry through the lookup, where a held pose refuses the seed", async () => {
     // The consequence of overlaying the seed's *state* and not feeding the
     // overlay to `usable`: this entry carries no orientation, so a held pose
     // makes the annotation stale and the tile falls to the lookup — where the
@@ -3353,7 +3388,7 @@ describe("a kept framing wins over the one the listing carried", () => {
   const applyAfterReport = (): Promise<void> =>
     act(async () => lastApplyLocalFramings!());
 
-  it("reaches a tile the listing seeded before the report landed", async () => {
+  it.skip("reaches a tile the listing seeded before the report landed", async () => {
     writeLocalFraming(PATH, { camera: KEPT, axis: "-x" }, undefined, LIB);
     const api = fakeApi();
     // The report is unknown while the listing draws, and resolves to
@@ -3386,7 +3421,7 @@ describe("a kept framing wins over the one the listing carried", () => {
     expect(api.putThumb).not.toHaveBeenCalled();
   });
 
-  it("reaches a tile the listing seeded before the library id landed", async () => {
+  it.skip("reaches a tile the listing seeded before the library id landed", async () => {
     // The other half of that race, and the one the report cannot rescue on its
     // own: `/api/library` can land *last* of the three boot requests, and a
     // tile seeded while the id is unknown gets no overlay however loudly the
@@ -3423,7 +3458,7 @@ describe("a kept framing wins over the one the listing carried", () => {
     expect(api.putThumb).not.toHaveBeenCalled();
   });
 
-  it("reaches a tile the lookup answered before the report landed", async () => {
+  it.skip("reaches a tile the lookup answered before the report landed", async () => {
     // The second arrival point, and the one a re-run of the sweep would charge
     // a fresh lookup for: this tile carries no annotation the sweep can seed
     // from, so its framing came back through `getThumb` — before the decorator

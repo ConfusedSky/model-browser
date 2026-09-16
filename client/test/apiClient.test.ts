@@ -8,6 +8,7 @@ import {
 } from "../src/api/client";
 import {
   readLocalFraming,
+  sweepLocalFramings,
   withLocalFramings,
   type FramingStorage,
 } from "../src/api/localFramings";
@@ -730,6 +731,77 @@ describe("HttpApiClient contract", () => {
   });
 });
 
+/**
+ * The startup sweep that goes with the disable (`FRAMINGS_KEPT_LOCALLY`, #28).
+ *
+ * A gated read makes a held framing unreachable; only this makes it absent. It
+ * is what keeps a browser that orbited before the disable from having its
+ * abandoned framings restored the day the constant flips back.
+ */
+describe("sweepLocalFramings", () => {
+  /** A `Storage` a sweep can walk: the names, not just get/set/remove. */
+  function listable(entries: Record<string, string>) {
+    const raw = new Map(Object.entries(entries));
+    return {
+      raw,
+      get length() {
+        return raw.size;
+      },
+      key: (i: number) => [...raw.keys()][i] ?? null,
+      removeItem: (k: string) => {
+        raw.delete(k);
+      },
+    };
+  }
+
+  it("removes every library's framings and nothing else", () => {
+    const store = listable({
+      "mb:framing:lib-a:/m.stl": "{}",
+      "mb:framing:lib-a:/kit/n.stl": "{}",
+      "mb:framing:lib-b:/m.stl": "{}",
+      "model-browser:intro": "dismissed",
+      "mb:recents": "[]",
+    });
+
+    sweepLocalFramings(store);
+
+    // Every framing, under either library — the id sits between the prefix and
+    // the path, so the prefix is the only thing a startup sweep can match.
+    expect([...store.raw.keys()]).toEqual([
+      "model-browser:intro",
+      "mb:recents",
+    ]);
+  });
+
+  it("removes a neighbour rather than skipping it", () => {
+    // `Storage` is index-addressed and renumbers as it shrinks: removing inside
+    // the walk steps over the entry that slid into the freed index. Three in a
+    // row, so a walk-and-remove leaves the middle one behind.
+    const store = listable({
+      "mb:framing:lib-a:/a.stl": "{}",
+      "mb:framing:lib-a:/b.stl": "{}",
+      "mb:framing:lib-a:/c.stl": "{}",
+    });
+
+    sweepLocalFramings(store);
+
+    expect(store.raw.size).toBe(0);
+  });
+
+  it("is silent where there is no storage, and where it throws", () => {
+    expect(() => sweepLocalFramings(null)).not.toThrow();
+    expect(() =>
+      sweepLocalFramings({
+        get length(): number {
+          throw new Error("site data blocked");
+        },
+        key: () => null,
+        removeItem: () => {},
+      }),
+    ).not.toThrow();
+  });
+});
+
 // The local-framing decorator (`public-deployment` D6, tasks 4.1/4.2/0.3).
 //
 // Storage is injected per cell rather than shared through a global
@@ -738,6 +810,12 @@ describe("HttpApiClient contract", () => {
 // `HttpApiClient` over a spy `fetchFn`, so "sends nothing" is asserted at the
 // network and not merely at a mock's method.
 describe("withLocalFramings", () => {
+  // **The store is off** until issue #28 lands (`FRAMINGS_KEPT_LOCALLY` in
+  // `api/localFramings.ts`): a kept orientation reaches the lightbox while the
+  // grid tile keeps the deployment's baked pixels, so the cells that assert a
+  // framing is *kept* are skipped rather than deleted — they are what
+  // re-enabling has to satisfy, and the live cell below states what holds
+  // meanwhile. Every cell asserting nothing is kept still runs, unchanged.
   const OFF: FeatureReport = {
     thumbWrites: false,
     appLaunch: true,
@@ -795,7 +873,55 @@ describe("withLocalFramings", () => {
     };
   }
 
-  it("keeps an orbit release in this browser, sends nothing, and reports the pixels as not stored", async () => {
+  it("keeps nothing at all while the store is off, and still answers dropped", async () => {
+    // The two halves of the disable at the decorator: a write reaches storage
+    // and leaves nothing there, and a read lays nothing over the server's
+    // answer. The account of the write is unchanged — `dropped`, no generation
+    // — so `renderEntryThumbnail` still reports a render not made.
+    const fetchFn = vi.fn(() =>
+      Promise.resolve(jsonResponse({ ok: true, gen: 5 })),
+    );
+    const store = memStorage();
+    const api = withLocalFramings(
+      new HttpApiClient(fetchFn as unknown as typeof fetch),
+      () => OFF,
+      store,
+      LIB,
+    );
+
+    expect(await api.putThumb(orbitRelease())).toEqual({ dropped: true });
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(store.raw.size).toBe(0);
+
+    // And a record a visitor's browser already holds from before the disable is
+    // ignored, not half-applied: the server's framing stands.
+    const server = {
+      az: 9,
+      el: 9,
+      distR: 9,
+      target: [1, 1, 1] as [number, number, number],
+    };
+    store.raw.set(
+      "mb:framing:lib-a:/m.stl",
+      JSON.stringify({ camera: CAM, axis: "-z" }),
+    );
+    const read = vi.fn(() =>
+      Promise.resolve(
+        jsonResponse({ status: "hit", camera: server, axis: "y", gen: 5 }),
+      ),
+    );
+    const reader = withLocalFramings(
+      new HttpApiClient(read as unknown as typeof fetch),
+      () => OFF,
+      store,
+      LIB,
+    );
+    const answer = await reader.getThumb("/m.stl", 42);
+    expect(answer.camera).toEqual(server);
+    expect(answer.axis).toBe("y");
+  });
+
+  it.skip("keeps an orbit release in this browser, sends nothing, and reports the pixels as not stored", async () => {
     // A `fetchFn` that would *succeed* if it were reached, deliberately: a bare
     // `vi.fn()` returning undefined makes a forwarding decorator crash instead
     // of fail, and a crash is a weaker statement than "the request was made".
@@ -851,7 +977,7 @@ describe("withLocalFramings", () => {
     expect(store.raw.size).toBe(0);
   });
 
-  it("prefers this browser's framing over the one the server holds", async () => {
+  it.skip("prefers this browser's framing over the one the server holds", async () => {
     const store = memStorage();
     const server = {
       az: 9,
@@ -884,7 +1010,7 @@ describe("withLocalFramings", () => {
     expect(read.gen).toBe(4);
   });
 
-  it("a discard deletes the local half, and the next read shows the server's", async () => {
+  it.skip("a discard deletes the local half, and the next read shows the server's", async () => {
     const store = memStorage();
     const server = {
       az: 9,
@@ -924,7 +1050,7 @@ describe("withLocalFramings", () => {
     expect(store.raw.size).toBe(0);
   });
 
-  it("one browser's framing is nobody else's", async () => {
+  it.skip("one browser's framing is nobody else's", async () => {
     const first = memStorage();
     const second = memStorage();
     const fetchFn = vi.fn(() =>
@@ -957,7 +1083,7 @@ describe("withLocalFramings", () => {
   // library id. One browser on one origin can still see two libraries: a
   // personal installation repointed between a drive and its backup, where the
   // same kit sits at the same relative path in both.
-  it("does not read another library's framing for the same path", async () => {
+  it.skip("does not read another library's framing for the same path", async () => {
     const store = memStorage();
     const fetchFn = vi.fn(() =>
       Promise.resolve(jsonResponse({ status: "miss", axis: "y" })),
@@ -997,7 +1123,8 @@ describe("withLocalFramings", () => {
   // window nothing should reach. What matters is that reaching it files
   // nothing under a library that has not been named, rather than under a bare
   // path the next library would then read.
-  it("keeps nothing while the library is unknown, and still answers dropped", async () => {
+  // Vacuous while the store is off — the gate returns before `framingKey`, so the null-library rule is asserted by nothing.
+  it.skip("keeps nothing while the library is unknown, and still answers dropped", async () => {
     const store = memStorage();
     const fetchFn = vi.fn(() =>
       Promise.resolve(jsonResponse({ ok: true, gen: 5 })),
@@ -1068,7 +1195,7 @@ describe("withLocalFramings", () => {
 
   // The report resolves *after* the client is built (App holds one identity for
   // the session), so the gate has to be read per call and not at construction.
-  it("reads the report per call, not at construction", async () => {
+  it.skip("reads the report per call, not at construction", async () => {
     const store = memStorage();
     const fetchFn = vi.fn(() =>
       Promise.resolve(jsonResponse({ ok: true, gen: 5 })),
@@ -1106,7 +1233,12 @@ describe("withLocalFramings", () => {
       403,
     );
 
-  it("keeps a framing the route refused, even with the report unknown", async () => {
+  it("swallows a refusal the route made, even with the report unknown", async () => {
+    // Live through the disable, and it has to be: this is the only cell over
+    // `putThumb`'s catch branch, and that branch still runs in production
+    // wherever the report is in flight or its read failed. Delete the branch so
+    // the `HttpError` rethrows and this cell is the one that says so — what
+    // moved is the last assertion, from "kept" to "kept nowhere".
     const fetchFn = vi.fn(() => Promise.resolve(refusalResponse()));
     const store = memStorage();
     const api = withLocalFramings(
@@ -1122,12 +1254,11 @@ describe("withLocalFramings", () => {
     // asked first, which is what the unknown-report rule requires.
     expect(fetchFn).toHaveBeenCalledTimes(1);
     // And the refusal is acted on rather than thrown: the same account the
-    // gated path gives, so no caller can tell which arrival point kept it.
+    // gated path gives, so no caller can tell which arrival point answered.
     expect(written).toEqual({ dropped: true });
-    expect(readLocalFraming("/m.stl", store, LIB)).toEqual({
-      camera: CAM,
-      axis: "-z",
-    });
+    // Nothing kept, because the store is off (#28). With it on this is the
+    // orientation `orbitRelease` carried.
+    expect(store.raw.size).toBe(0);
   });
 
   it("rethrows a refusal of some other capability, keeping nothing", async () => {
@@ -1175,7 +1306,8 @@ describe("withLocalFramings", () => {
     }
   });
 
-  it("reads a hand-edited or malformed record as nothing stored", () => {
+  // Vacuous while the store is off — the gate returns before `JSON.parse`, so `isCamera`/`isAxis` are asserted by nothing.
+  it.skip("reads a hand-edited or malformed record as nothing stored", () => {
     const store = memStorage();
     store.raw.set("mb:framing:lib-a:/m.stl", "not json");
     expect(readLocalFraming("/m.stl", store, LIB)).toBeUndefined();

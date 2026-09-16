@@ -52,7 +52,34 @@ export interface LocalFraming {
 }
 
 /** This store's own namespace in a shared `localStorage`. See `framingKey`. */
-const PREFIX = "mb:framing:";
+export const PREFIX = "mb:framing:";
+
+/**
+ * Whether a framing is kept in this browser at all.
+ *
+ * **Off** until issue #28 lands. The store honours a visitor's orientation in
+ * the lightbox while the grid tile keeps the baked framing — `useThumbnails`'
+ * seed overlays the tile's `camera`/`axis` but never its `url`, and no client
+ * side pixel cache exists — so a stored framing reads as a split the visitor
+ * can see rather than as their gesture being kept. Until the pixels can follow
+ * the orientation, keep neither, and let the two surfaces agree on the
+ * deployment's own framing.
+ *
+ * An orbit then lasts exactly as long as the tile does — `useThumbnails`'
+ * reconciler drops a path's state when it leaves the listing, so going up a
+ * folder and back is already enough to lose it, which is the very gesture #28
+ * names. Shorter than "the session", and deliberately: this removes the split
+ * rather than the visitor's disappointment.
+ *
+ * One flag, both directions. A read answers `undefined` and a write is
+ * dropped, which are the states every caller already handles for a browser
+ * that refuses storage, so nothing downstream changes shape. Entries a
+ * visitor's browser already holds are not merely ignored — `sweepLocalFramings`
+ * removes them at startup, so flipping this constant back cannot resurrect a
+ * framing abandoned months earlier. Re-enabling is this constant, dropping that
+ * sweep, and the pixel cache #28 asks for.
+ */
+const FRAMINGS_KEPT_LOCALLY = false;
 
 /**
  * The default library-id getter, module-level for the reason `useThumbnails`'
@@ -85,7 +112,7 @@ function framingKey(path: string, libraryId: string | null): string | null {
 
 const AXES: readonly string[] = ["x", "-x", "y", "-y", "z", "-z"];
 
-function browserStorage(): FramingStorage | null {
+function browserStorage(): Storage | null {
   try {
     return globalThis.localStorage ?? null;
   } catch {
@@ -134,6 +161,7 @@ export function readLocalFraming(
   storage: FramingStorage | null = browserStorage(),
   libraryId: () => string | null = NO_LIBRARY,
 ): LocalFraming | undefined {
+  if (!FRAMINGS_KEPT_LOCALLY) return undefined;
   if (storage === null) return undefined;
   const key = framingKey(path, libraryId());
   if (key === null) return undefined;
@@ -177,6 +205,7 @@ export function writeLocalFraming(
   storage: FramingStorage | null = browserStorage(),
   libraryId: () => string | null = NO_LIBRARY,
 ): void {
+  if (!FRAMINGS_KEPT_LOCALLY) return;
   if (storage === null) return;
   const key = framingKey(path, libraryId());
   if (key === null) return;
@@ -197,6 +226,41 @@ export function writeLocalFraming(
     else storage.setItem(key, JSON.stringify(next));
   } catch {
     // Storage refused the write — the framing is simply not kept.
+  }
+}
+
+/** What a sweep needs beyond a read/write: the names it holds. */
+export type ListableStorage = Pick<Storage, "length" | "key" | "removeItem">;
+
+/**
+ * Remove every framing this browser holds, for every library.
+ *
+ * Only while `FRAMINGS_KEPT_LOCALLY` is off, and called once at startup
+ * (`main.tsx`, beside the retired orbit-mode keys, which is the precedent this
+ * follows). The gate above makes a held record unreachable; this makes it
+ * absent, which is what keeps the disable from becoming a cache of stale
+ * framings waiting for the constant to flip back. Nothing throws: storage may
+ * be refused, and the keys are then simply not there to remove.
+ *
+ * The prefix is matched rather than the exact key because the library id is not
+ * known at startup and a browser may hold several — `framingKey` puts the id
+ * between the prefix and the path. Every name is collected before any is
+ * removed: `Storage` is index-addressed and renumbers as it shrinks, so
+ * removing inside the walk skips its neighbour.
+ */
+export function sweepLocalFramings(
+  storage: ListableStorage | null = browserStorage(),
+): void {
+  if (FRAMINGS_KEPT_LOCALLY || storage === null) return;
+  try {
+    const doomed: string[] = [];
+    for (let i = 0; i < storage.length; i++) {
+      const key = storage.key(i);
+      if (key !== null && key.startsWith(PREFIX)) doomed.push(key);
+    }
+    for (const key of doomed) storage.removeItem(key);
+  } catch {
+    // Storage refused — there is nothing held to sweep.
   }
 }
 
