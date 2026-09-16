@@ -266,15 +266,20 @@ docker compose -f deploy/demo/compose.yaml logs app | grep -E 'client at|library
 Two things to look at in that second line. The path must be
 `/library/miniatures/decimated` — the index reports the same absolute path as
 its collection root, and if the two disagree the index silently covers nothing.
-And the `<id>` is the box's own, minted under the decimated root on its first
-start there, and this line is where it is read — never assumed: §7's rsync
-targets `/srv/cache/<id>/` and §6's check reads the manifest under it. It must
-**not** be an id from this machine (`5358d071-…` is this machine's `clustered-hq`
-marker; the bake's own local id under `decimated` is read from `/api/library`):
-a different id is the proof that the marker was written on the box, as D4
-intends, rather than copied in with the models. Nor is it
-`54c0a4e9-d05b-4a53-8aad-e37a8b384422` any more — that was the `clustered-hq`
-era's box id, and its directory under `/srv/cache` is left behind.
+And the `<id>` is the box's own, and this line is where it is read — never
+assumed: §7's rsync targets `/srv/cache/<id>/` and §6's check reads the manifest
+under it. It must **not** be an id from this machine (`5358d071-…` is this
+machine's `clustered-hq` marker; the bake's own local id under `decimated` is read
+from `/api/library`): a different id is the proof that the marker was written on
+the box, as D4 intends, rather than copied in with the models.
+
+As of the decimated cutover it is still
+`54c0a4e9-d05b-4a53-8aad-e37a8b384422` — **the box did not mint a new one**. The
+marker records only `{id, version}` and no root, so the box's own `library.json`
+travelled with the corpus to the new root and the identity survived the move,
+which is why the 2026-09-15 bake shipped into that existing directory. Read the
+line rather than reasoning about it: an id is only wrong here if it is *this
+machine's*.
 
 **Every example query still answers**, from the **developer machine** rather than
 the box — the box has no Bun outside the container, and the guard admits a POST

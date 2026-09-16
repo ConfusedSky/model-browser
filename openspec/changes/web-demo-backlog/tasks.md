@@ -87,8 +87,9 @@
       Carries the print warning: downloads are decimated display copies, print from the
       source — at the Download action itself, not only on the About page (notes item 4)
 - [x] 1.7 the corpus bake — preview paths attached to dir entries (the decided shape);
-      rides `listing-tree-cache` and `bulk-thumbnail-jobs`. **Done 2026-09-15 as
-      `corpus-bake`**: `scripts/bake-demo.ts` builds the shipping client, owns its own
+      rides `listing-tree-cache` and `bulk-thumbnail-jobs`. The preview paths themselves
+      came with `listing-tree-cache` (`DirEntry.preview`, `/api/peek`), not with the bake.
+      **The warming is done, 2026-09-15, as `corpus-bake`**: `scripts/bake-demo.ts` builds the shipping client, owns its own
       server, drives both occlusion passes headless, verifies every sidecar on disk,
       audits every unposed render against the index and writes `bake/bake.json`;
       `deploy/demo/check-bake.sh` pins the redeploy and the rollback to that manifest's

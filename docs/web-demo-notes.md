@@ -446,8 +446,8 @@ own origin"; only its body hardcodes loopback.
    locally, switching keeps the
    other variant (instant switch-back, LRU-bounded); on the demo, bake both
    AO variants (the deployment change's sweep runs once per preference) — **done
-   2026-09-15, `corpus-bake`: 6,244 renders, 34.0 MB apparent on disk, a good deal under
-   the projection below because the store is WebP, not PNG** — at one lighting mode (~270 MB each at the observed ~120 KB/PNG;
+   2026-09-15, `corpus-bake`: 6,244 renders, 33.3 MB shipped, a good deal under the
+   projection below because the store is WebP, not PNG** — at one lighting mode (~270 MB each at the observed ~120 KB/PNG;
    1,705 cached here = 205 MB). Keyed-by-recipe would also allow the lighting
    menu to stay visible on the demo if all four variants were baked (~1.1 GB)
    — moot if item 9 removes the lighting pill. Hard ordering: after

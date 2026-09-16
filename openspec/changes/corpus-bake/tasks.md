@@ -104,13 +104,20 @@
       deliberately — re-running the bake under `--ship` would have rewritten the manifest
       with a second run's near-zero `rate`/`elapsed` and destroyed the measured figures
       3.2 exists to record. **Done 2026-09-15, on exactly that occasion.** The
-      corpus gained `/Ghoul_3466743/Ghoul.stl` and the operator re-indexed and uploaded it,
-      so the re-bake was incremental with nothing to render, and the manifest's `rate` and
+      corpus gained `/Ghoul_3466743/Ghoul.stl` and the operator uploaded it, so the
+      re-bake was incremental with nothing to render, and the manifest's `rate` and
       `elapsed` were worth nothing to keep — 3.2 and D-cost hold the measured figures.
       `--ship root@157.90.25.110 --ship-dir /srv/cache/54c0a4e9-d05b-4a53-8aad-e37a8b384422`
       ran the rsync, the `restart app` and all six hit checks (three models × two variants,
       each `hit` with `rig 7`, `posed 2`, a `poseKey`, `image/webp` and the immutable
-      header) in 25 s, unattended. **Follow-up 9.x, added by `landing-page`, is unblocked
+      header) in 25 s, unattended. **The flag ran three times that evening**, and only
+      the last run's manifest is the one on disk: the first (`logs/rebake.log`, 15:43)
+      shipped with nothing to render; the second (`logs/rebake2.log`, 15:57) **refused** —
+      `verifyBake: 1 of 3122 models fail verification`, `miss /Ghoul_3466743/Ghoul.stl: …
+      posed on one render only` — and correctly did **not** ship; the third
+      (`logs/rebake3.log`, 15:58) rendered the model under its new pose, verified at 2,977
+      posed / 145 unposed and shipped. The refusal is the interesting one: the guard doing
+      its job on a pose that became known between two passes. **Follow-up 9.x, added by `landing-page`, is unblocked
       by this.**
 - [x] 1.6 The pose audit (D1 step 8), after both passes and `verifyBake`: every
       unlabelled path POSTed to the bake instance's `/api/semantic/poses` in batches of at
@@ -230,7 +237,7 @@
       442 s, 8.6 and 7.0 renders/s, zero failures, 3,121 sidecars / 6,242 WebP / 32.3 MB
       of images, 33 MB with sidecars by bytes, 56 MB by `du`; 2,976 posed and keyed per
       variant, 145 settled-null unlabelled — asked of `/poses` directly, all `null`; the
-      baked directory is kept at `~/.cache/model-browser-bake/2026-09-14/cache/<local id>/`, with the ad-hoc driver (`bake.mjs`, `dryrun.mjs`), its config and its log beside it, until the script's own run reproduces it and ships; the driver is the script's precedent, not its shape)* The dry run of the same day for scale: 15 renders at 9.6/s off and
+      baked directory was kept at `~/.cache/model-browser-bake/2026-09-14/cache/<local id>/`, with the ad-hoc driver (`bake.mjs`, `dryrun.mjs`), its config and its log beside it, until the script's own run reproduced it and shipped — **deleted 2026-09-15 at the operator's instruction, once the decimated bake was verified on the box**, so every figure in this parenthesis is now relayed with no artifact behind it; the driver was the script's precedent, not its shape)* The dry run of the same day for scale: 15 renders at 9.6/s off and
       9.2/s on, every sidecar `rig: 7`, `posed: 2`, `poseKey` present. **What must
       reproduce is structural, not the rate**: 3,121 sidecars, 6,242 WebP, both passes
       settled at a primed count of zero, every sidecar `rig: 7` and `lighting: camera`, 2,976
@@ -243,8 +250,13 @@
       **Run 2026-09-15, this machine, 796 s wall.** Enumeration **3,122 models — not
       3,121**: the tree holds 3,122 `*.stl` under `-name` and `-iname` alike, and the
       sidecar set matches the disk exactly in both directions (zero on either side of a
-      set difference). The 3,121 the 2026-09-14 `clustered-hq` run reported is one short
-      of its own tree and should be read as that run's figure, not the corpus's.
+      set difference). **Retracted 2026-09-15, having been wrong when written**: this line
+      said the 2026-09-14 run's 3,121 was "one short of its own tree". It was not. The
+      extra model is `/Ghoul_3466743/Ghoul.stl`, whose `clustered-hq` copy is dated
+      2026-09-15 13:42:42, a day *after* that run — so the tree held 3,121 then and the
+      count was exact. The corpus grew to 3,122 on 2026-09-15; both counts are right for
+      their own day. `cf2a327` promoted the wrong reading to a headline; this is the
+      correction.
       One of the 3,122, `/Ghoul_3466743/Ghoul.stl`, was added to every tree today at
       13:42 — it has no `pose-cache.json` entry, which is exactly why the unposed count
       moved 145 → 146.
@@ -281,7 +293,10 @@
       the restart, and that the container's log after the restart carries no `maintain`
       warning (1.7's guard found no stranger)
       **Shipped 2026-09-15.** `rsync -az --exclude 'snapshots/'`: **9,367 regular files**
-      (3,122 sidecars + 6,244 renders + the manifest), **33,300,403 bytes**, 8 s.
+      (3,122 sidecars + 6,244 renders + the manifest), **33,300,403 bytes**, 8 s — as `rsync --stats`
+      reported that run; the same 9,367-file set sums to 33,301,171 bytes today, the
+      manifest having been rewritten by the later ships, so this figure is that run's
+      reading and is not re-derivable from the tree now.
       **The box did not mint a new id** — contrary to the plan's decision, its own
       marker travelled with the corpus cutover, so the startup line still reads `library
       54c0a4e9-d05b-4a53-8aad-e37a8b384422 at /library/miniatures/decimated` and the ship
@@ -294,10 +309,14 @@
       `/Ghoul_3466743/Ghoul.stl`, which the box's corpus does not have (it was added
       locally after the corpus ship). `sourceExists` doing its job, and incidentally the
       proof that the sweep ran to completion. `snapshots/` was excluded by the ship; the
-      box rewrote its own snapshot at startup (same name, same 742,314 bytes, new mtime).
+      box rewrote its own snapshot at startup (same name, new mtime; 742,314 bytes, read on
+      the box over ssh and not re-derivable from this tree — the local snapshot is 744,957
+      bytes, a different library's).
       **Re-shipped 2026-09-15** after the operator added `/Ghoul_3466743/Ghoul.stl` to the
       corpus and to the index. This is D6's third trigger arriving for real: `pose-cache.json`
-      moved (`46405ea1…` → `7a0f032a…`) while `run-params.json` did not, so the manifest's
+      moved (`46405ea1…` → `7a0f032a…`, and again to `11e01515…` twelve minutes later when the
+      operator re-embedded the kit — the manifest pins that third hash) while
+      `run-params.json` did not, so the manifest's
       fingerprint went stale and the next redeploy would have been refused. Checked before
       shipping the index: **one entry added, none removed, and zero shared entries whose
       `8v-e20-ev2` front moved** — so no existing render went stale, and the re-bake had
@@ -305,8 +324,23 @@
       re-bake under `--ship`. The box now holds **3,122 sidecars and 6,244 renders**, its
       own `check-bake.sh … /srv/index` exits 0 (only the non-fatal `commit:` line prints),
       and `/Ghoul_3466743/Ghoul.stl` answers `hit` on both variants with the file's mtime
-      matching the sidecar's. It carries no `posed`/`poseKey`: it has no pose-cache entry,
-      so it is one of the 146 settled absences the audit passed, not a re-render.
+      matching the sidecar's. It carried no `posed`/`poseKey` at that point — it had no pose-cache
+      entry, so it was one of the 146 settled absences the audit passed, not a re-render.
+      **That is no longer true, corrected 2026-09-15**: the operator re-embedded the kit,
+      `pose-cache.json` gained `Ghoul_3466743/Ghoul.stl|1789504905|178854534`, and the
+      index's `/status` went to `n_models: 2977`. Its renders then had to be re-drawn
+      under the new `poseKey`; the store now reads **2,977 posed and 145 unposed**, and
+      the model answers `posed: 2` with `poseKey -y:4.7124:0.3491`. See the third ship,
+      below.
+      **Third ship, same evening.** After the re-embed the store was re-baked once more.
+      The first attempt **refused**: the noao pass had already judged the model current,
+      the ao pass then re-drew it under the new pose, and that write cleared the `noao`
+      block's recipe labels — `posed on one render only`. The re-run rendered both
+      variants, verified clean and shipped under `--ship`. A pose that becomes known
+      mid-run costs two bake runs, and the refusal in between is correct, not a defect.
+      The box now holds 3,122 sidecars and 6,244 renders, its own `check-bake.sh …
+      /srv/index` exits 0, and `/srv/index/pose-cache.json` is `11e01515…`, matching the
+      manifest.
 - [x] 4.2 Hit checks on the live host, for three models including
       `/Player_Character_Pack_03_3750572/CatfolkRogue.stl` with its recorded mtime:
       `GET /api/thumb?path=<model>&mtime=<mtime>` and the same with `&ao=off` appended

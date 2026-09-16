@@ -51,7 +51,10 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
 - Semantic search needs a second server, not started by `bun run dev` (its collection root
   must lie inside the library, or the index covers nothing):
   `cd <mini-classify checkout> && .venv/bin/python serve_api.py [<collection root>] --cache-dir <cache> [--no-volume] --port 8077`
-  — the positional root overrides the one recorded in the cache's `run-params.json`
+  — the positional root overrides the one recorded in the cache's `run-params.json` when
+  the two are *siblings*, as `decimated` and `deduplicated` are (`identity.resolve_root`
+  answers "mismatch" and, for a read-only tool, takes the root you asked for); a path
+  *under* the recorded root keeps that anchor and merely narrows the scope
   (the demo corpus was embedded from `miniatures/deduplicated`; serving it for
   `decimated`, as the box does since 2026-09-15, needs the positional root, and `--no-volume`
   serves poses from the records without reading files — the root is a string prefix

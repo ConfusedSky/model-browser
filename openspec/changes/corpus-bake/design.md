@@ -119,8 +119,9 @@ file before relying on it):
   row as the row's identity, `row_of` matches a caller's path lexically and `pose_of`
   looks up the identity it was handed, so no model file is ever stat'd and the answers
   do not depend on the bytes under the root. That is why the corpus could move from
-  `clustered-hq` to `decimated` without re-embedding: the same 2,976 of 3,121 paths
-  answer a pose and the same 145 answer a settled `null`, because that split is a
+  `clustered-hq` to `decimated` without re-embedding: the same 2,976 paths answer a pose — 2,976 of
+  the cache's own 3,319 entries, not of the corpus's file count — and the rest answer a
+  settled `null`, because that split is a
   property of which entries have an `.npy` under these run parameters. `/status` will
   report `n_models: 2976` and `collection_root` as the positional root.
 - **A cache hit is a `blob:` URL too.** `ApiClient.getThumb` mints `pngUrl` from the
@@ -316,8 +317,10 @@ The run, in order; each step's failure stops the run with the server killed:
 The library id the bake instance writes locally differs from the box's, and **neither
 is known in advance**. `decimated/` carries no `.model-browser/` at all, so the bake
 mints a marker there on its first start; `5358d071-…` is `clustered-hq`'s id and is not
-it. The box mints its own under the decimated root the same way (`54c0a4e9-…` was the
-clustered-hq era's, and its `/srv/cache` directory is left behind holding `snapshots/`).
+it. The box, as it turned out, did **not** mint a new one: its marker records only
+`{id, version}`, so `library.json` travelled with the corpus to the decimated root and
+`54c0a4e9-…` survived (observed 2026-09-15 on the startup line; the plan had expected a
+fresh id and was wrong).
 The script reads the local id from `/api/library` and never assumes it; the box's is
 read from its startup line, `library <id> at /library/miniatures/decimated` (task 4.1).
 
@@ -498,17 +501,22 @@ that path annotates `hit` and goes to the immutable image route. With a restart,
 `index.ts` runs `cache.maintain()` at startup, which `remember`s every sidecar in the id
 directory, so the first listing **after that sweep has completed** annotates every tile
 `hit` and the first screen is the image route from the first visit — the whole point of
-the bake. The sweep is `void`ed, not awaited: the app serves while it walks the 3,121
+the bake. The sweep is `void`ed, not awaited: the app serves while it walks the 3,122
 sidecars, and a listing served in that window annotates only what the walk has reached
 (the rest fall to the lookup, once). Task 4.3 measures after it is done.
 
 So the ship step restarts the app — `docker compose -f deploy/demo/compose.yaml restart
 app`, not `up --build`, since nothing in the image changed. The startup sweep also
 walks the shipped sidecars through `sourceExists`, resolving each `path` through the
-box's library: the relative paths are identical on both machines, so nothing is
-removed; the size cap (`DEFAULT_CAP`, 2 GB) is two orders of magnitude above the store
-(32.3 MB of images, 33 MB with sidecars by byte count, 56 MB as `du` counts 9,363 small
-files in 4 KiB blocks — measured on the scratch cache, 2026-09-15).
+box's library: a sidecar whose path does not resolve there **is** removed, which the
+first live ship demonstrated — the box lacked `/Ghoul_3466743/Ghoul.stl` (added locally
+after the corpus went over), so the sweep took that one entry and its two renders,
+3,122 → 3,121 sidecars. The paths agree for everything the two machines share, so the
+rest survives; "nothing is removed" was the claim before the ship and it was too strong.
+The size cap (`DEFAULT_CAP`, 2 GB) is two orders of magnitude above the store — 32.3 MB
+of images and 33 MB with sidecars for the 2026-09-14 clustered-hq store, 56 MB as `du`
+counted its 9,363 files in 4 KiB blocks; the shipped decimated store is 9,367 files and
+57 MB by `du` (D-cost).
 
 ### D4: What ships, and what does not
 
@@ -519,8 +527,10 @@ Three things, said in full:
   tomorrow means whatever else the store files under its id, since the command is an
   exclusion, not a list — rsynced **into the box's id directory**, whose name differs
   and which each side minted for itself: the local one is read from `/api/library`, the
-  box's from its startup line (the `54c0a4e9-…`/`5358d071-…` pair was the clustered-hq
-  era's and neither survives the move). The command is
+  box's from its startup line (`5358d071-…` is this machine's `clustered-hq` marker
+  and plays no part; `54c0a4e9-…` is the box's, and it **did** survive the move to
+  `decimated` — the marker records no root, so the box's own `library.json` travelled with
+  the corpus and the id held, which is the directory both 2026-09-15 ships landed in). The command is
   `rsync -az --info=progress2 --exclude 'snapshots/' <local cache>/<local id>/
   <user@host>:<box cache>/<box id>/` — trailing slashes on both, no `--delete`
   (nothing on the box is removed by a ship; a stale sidecar is overwritten by key).
@@ -590,9 +600,12 @@ thumbnails` at its start — 3,121 less the dry run's 19).
 
 **Superseded, 2026-09-15.** The corpus moved to `miniatures/decimated` (`8cb6683`) and
 that tree's files carry 2026-09-14 mtimes, so every sidecar above reads `stale` against
-the shipping corpus and the store cannot ship. It is kept at
+the shipping corpus and the store cannot ship. It **was** kept at
 `~/.cache/model-browser-bake/2026-09-14/`, with the ad-hoc driver, its config and its
-log, as the driver's precedent and the cost scale only. What carries over is structural:
+log — and was **deleted on 2026-09-15** at the operator's instruction once the decimated
+bake had shipped and been verified. So every figure in this block is now a relayed
+reading with no artifact behind it: it stands as the cost scale, and nothing in this tree
+can reproduce it. What carries over is structural:
 3,121 models and 6,242 renders (the two trees hold the same 3,121 relative paths), and
 2,976 posed with 145 settled-null per variant — that split is the index's property, not
 the tree's, since `--no-volume` answers from the cache's records and never reads a model
@@ -605,10 +618,14 @@ these.
 796 s wall on this machine, headless SwiftShader Chromium, a scratch instance on 3199
 rooted at `decimated` with writes on, the index at 8077 on `embed-cache-test` rooted at
 `decimated` with `--no-volume` (`n_models: 2976`). **3,122 models** enumerated — the
-corpus holds 3,122 `*.stl`, and the 3,121 above is the 2026-09-14 run's own count, one
-short of its own tree. Pass 1 (noao) 3,122 renders in 355 s = 8.8/s; pass 2 (ao) 3,120 in
-437 s = 7.1/s; zero non-200 PUTs. On disk: 3,122 sidecars, 6,244 WebP, 34.0 MB apparent,
-57 MB by `du`; `rig` ∈ {7}, `lighting` ∈ {camera}, **2,976 posed with a `poseKey` on both
+corpus holds 3,122 `*.stl`, and the 3,121 above is the 2026-09-14 run's own count,
+**exact for the tree it ran against** — a correction: this sentence first claimed that
+count was "one short of its own tree", which was wrong. The extra model,
+`/Ghoul_3466743/Ghoul.stl`, is dated 2026-09-15 13:42 in every tree, a day after that
+run. Both counts are right for their own day. Pass 1 (noao) 3,122 renders in 355 s = 8.8/s; pass 2 (ao) 3,120 in
+437 s = 7.1/s; zero non-200 PUTs. On disk: 3,122 sidecars, 6,244 WebP, 57 MB by `du`;
+34.0 MB apparent **including the box-bound `snapshots/` the ship excludes** — the
+9,367 files that actually shipped are 33.3 MB; `rig` ∈ {7}, `lighting` ∈ {camera}, **2,976 posed with a `poseKey` on both
 renders, 146 unposed and every one present-and-`null` from the index** — step 8's audit
 passed by the script rather than by hand. `check-bake.sh` passed; the ship moved 9,367
 files and 33,300,403 bytes in 8 s. The rate is below the clustered-hq run's because
