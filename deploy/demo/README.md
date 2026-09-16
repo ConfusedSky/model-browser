@@ -355,7 +355,10 @@ recipe pin (§7): it compares the checkout's `RIG_VERSION` and `POSE_VERSION` wi
 the ones the shipped store was rendered under, and the SHA-256 of
 `/srv/index/pose-cache.json` and `run-params.json` with the ones the bake hashed,
 and exits non-zero on any disagreement. The `&&` is the refusal: the build does
-not start and the running stack keeps serving — nothing is half-deployed. What to
+not start and the running stack keeps serving — nothing is half-deployed. Give it
+the index directory: called without one it prints `index: not checked, no index
+directory given` and checks only the two version constants, which is a weaker gate
+than the line above promises. What to
 do about it is a re-bake (§7) from the checkout you meant to deploy, shipped
 before the `up` is retried. There is no override flag; leaving the check off the
 line is the shell history's record that a build whose every tile re-renders on

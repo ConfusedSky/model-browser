@@ -426,9 +426,13 @@ TypeScript program there. It:
   rather than comparing against nothing or against the wrong line. No `jq` on the box;
 - when an index directory is given (on the box, `/srv/index`), hashes
   `<dir>/pose-cache.json` and `<dir>/run-params.json` and compares each with its
-  manifest line; a missing file is a disagreement, not a skip;
-- exits 0 silently when all agree, else prints each disagreement as `rig: checkout 8,
+  manifest line; a missing file is a disagreement, not a skip. When the argument is
+  **absent or empty** the fingerprint is not checked, and the script says so —
+  `index: not checked, no index directory given`, on an exit-0 path — so an omission
+  cannot be mistaken for an agreement;
+- exits 0 when all agree, else prints each disagreement as `rig: checkout 8,
   bake 7` and exits 1; a missing manifest is exit 1 with `no bake manifest at <path>`.
+  Two lines print without refusing: the `commit:` line above, and the index notice.
 
 **What "refuses" means for `docker compose up --build`:** the README's §6 line becomes
 `git pull && sh deploy/demo/check-bake.sh /srv/cache/<id>/bake/bake.json /srv/index
