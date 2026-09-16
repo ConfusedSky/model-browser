@@ -12,9 +12,10 @@ import { describe, expect, it, vi } from "vitest";
 import {
   type BakeModel,
   type FetchLike,
+  type LaunchBudget,
   type ManifestInput,
   type ManifestRecipe,
-  DEMO_ORIGIN,
+  INITIAL_LAUNCH_BUDGET,
   auditUnposed,
   fetchPoses,
   indexCacheDirMatches,
@@ -24,6 +25,7 @@ import {
   originFromShip,
   parseArgs,
   rsyncCommand,
+  shouldRefuse,
   sidecarKey,
   verifyBake,
   writeManifest,
@@ -293,7 +295,7 @@ describe("verifyBake", () => {
     expect(r.unlabelled).toEqual(["/kit/c.stl"]);
   });
 
-  it("lists a noao label that is null rather than throwing", async () => {
+  it("lists a noao label that is null as malformed, not missing", async () => {
     const s = await completeStore();
     const key = sidecarKey("/kit/b.stl");
     const file = join(s.dir, `${key}.json`);
@@ -305,8 +307,31 @@ describe("verifyBake", () => {
     writeFileSync(file, JSON.stringify(sidecar));
     const r = await verifyBake(s.cacheDir, s.id, MODELS, RECIPE);
     expect(r.misses.map((m) => m.path)).toEqual(["/kit/b.stl"]);
+    // `null` is present, not absent — mirrors the top-level sidecar parse:
+    // present-but-not-an-object gets its own reason, distinct from "no
+    // labels" (the key never written at all).
     expect(missFor(r.misses, "/kit/b.stl")!.reasons).toEqual([
-      "noao: no labels",
+      "noao: labels are not an object",
+      "posed on one render only",
+    ]);
+  });
+
+  it("lists a noao label that is a number as malformed, not missing", async () => {
+    const s = await completeStore();
+    const key = sidecarKey("/kit/b.stl");
+    const file = join(s.dir, `${key}.json`);
+    const sidecar = JSON.parse(readFileSync(file, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    sidecar.noao = 5;
+    writeFileSync(file, JSON.stringify(sidecar));
+    const r = await verifyBake(s.cacheDir, s.id, MODELS, RECIPE);
+    expect(r.misses.map((m) => m.path)).toEqual(["/kit/b.stl"]);
+    // Before the fix this collapsed to "noao: no labels" — telling the
+    // operator a key was missing when it was present and wrong.
+    expect(missFor(r.misses, "/kit/b.stl")!.reasons).toEqual([
+      "noao: labels are not an object",
       "posed on one render only",
     ]);
   });
@@ -630,6 +655,7 @@ describe("parseArgs", () => {
       client: undefined,
       ship: undefined,
       shipDir: undefined,
+      origin: undefined,
     });
     expect(
       parseArgs([
@@ -648,7 +674,7 @@ describe("parseArgs", () => {
     );
   });
 
-  it("resolves root/cache/index-cache/client/ship-dir to absolute paths, against process.cwd()", () => {
+  it("resolves root/cache/index-cache/client to absolute paths, against process.cwd()", () => {
     const args = parseArgs([
       "--root",
       "corpus",
@@ -668,12 +694,48 @@ describe("parseArgs", () => {
     }
     expect(args.client).toBeDefined();
     expect(isAbsolute(args.client!)).toBe(true);
-    expect(args.shipDir).toBeDefined();
-    expect(isAbsolute(args.shipDir!)).toBe(true);
     // `--ship` names a host for ssh/rsync, not a local path — left as typed.
     expect(args.ship).toBe("root@box");
     // Already-absolute input is unaffected (existing behaviour, re-pinned).
     expect(parseArgs(required).root).toBe("/corpus");
+  });
+
+  it("leaves --ship-dir exactly as typed — it names a path on the box, not this machine", () => {
+    // A relative --ship-dir resolved against this machine's cwd silently
+    // became a *local* path used as the remote rsync destination
+    // (`root@box:/home/.../srv/cache/box-id/` instead of
+    // `root@box:srv/cache/box-id/`), which `rsyncCommand` then shipped to.
+    const args = parseArgs([
+      ...required,
+      "--ship",
+      "root@box",
+      "--ship-dir",
+      "srv/cache/box-id",
+    ]);
+    expect(args.shipDir).toBe("srv/cache/box-id");
+    expect(
+      rsyncCommand(args.cache, "local-id", args.ship!, args.shipDir!),
+    ).toBe(
+      `rsync -az --info=progress2 --exclude 'snapshots/' ${args.cache}/local-id/ root@box:srv/cache/box-id/`,
+    );
+    // An already-absolute --ship-dir is unaffected either way.
+    const absolute = parseArgs([
+      ...required,
+      "--ship",
+      "root@box",
+      "--ship-dir",
+      "/srv/cache/box-id",
+    ]);
+    expect(absolute.shipDir).toBe("/srv/cache/box-id");
+  });
+
+  it("accepts --origin, passed through unresolved (a URL, not a path)", () => {
+    const args = parseArgs([
+      ...required,
+      "--origin",
+      "https://staging.example.com",
+    ]);
+    expect(args.origin).toBe("https://staging.example.com");
   });
 });
 
@@ -687,12 +749,80 @@ describe("originFromShip", () => {
     );
   });
 
-  it("keeps DEMO_ORIGIN when the ship host is a bare IPv4 address", () => {
+  it("splits at the rightmost @ — a user portion that itself carries one", () => {
+    // indexOf would have split "user@host@weird" at the first @, deriving
+    // https://host@weird instead of the host after every @ — the one
+    // ssh/rsync themselves would use.
+    expect(originFromShip("user@host@weird")).toBe("https://weird");
+  });
+
+  it("refuses to derive an origin from a bare IPv4 address", () => {
     // The demo box is reached as root@157.90.25.110 for ssh/rsync but serves
     // the demo at models.masamaeda.com — deriving an origin from the IP
-    // would reach a host with no certificate for that name.
-    expect(originFromShip("root@157.90.25.110")).toBe(DEMO_ORIGIN);
-    expect(originFromShip("157.90.25.110")).toBe(DEMO_ORIGIN);
+    // would reach a host with no certificate for that name, and silently
+    // verifying against DEMO_ORIGIN would hit-check *production* for a ship
+    // to any other IPv4 box (root@192.168.1.10, root@127.0.0.1, …).
+    expect(originFromShip("root@157.90.25.110")).toBeNull();
+    expect(originFromShip("157.90.25.110")).toBeNull();
+  });
+
+  it("refuses to derive an origin from a bare IPv6 literal too", () => {
+    expect(originFromShip("root@::1")).toBeNull();
+    expect(originFromShip("root@[2001:db8::1]")).toBeNull();
+  });
+
+  it("an explicit origin wins outright, even over a derivable name", () => {
+    expect(
+      originFromShip("models.masamaeda.com", "https://staging.example.com"),
+    ).toBe("https://staging.example.com");
+    expect(
+      originFromShip("root@157.90.25.110", "https://staging.example.com"),
+    ).toBe("https://staging.example.com");
+  });
+});
+
+/**
+ * `runPass`'s launch-budget decision (D1 step 6), pulled out as `shouldRefuse`
+ * so it can be celled without a Playwright page. Feeds a sequence of `Generate
+ * N missing thumbnails` counts through it from a fresh budget and reports
+ * either the refusal reason it hit, or that the whole sequence launched clean.
+ */
+describe("shouldRefuse (runPass's launch budget)", () => {
+  function drive(counts: number[]): {
+    refusal: string | null;
+    launches: number;
+  } {
+    let budget: LaunchBudget = INITIAL_LAUNCH_BUDGET;
+    for (const n of counts) {
+      const decision = shouldRefuse(n, budget);
+      if (decision.refuse !== null)
+        return { refusal: decision.refuse, launches: budget.total };
+      budget = decision.budget;
+    }
+    return { refusal: null, launches: budget.total };
+  }
+
+  it("a monotone-descending count never refuses", () => {
+    const counts = Array.from({ length: 120 }, (_, i) => 120 - i);
+    expect(drive(counts)).toEqual({ refusal: null, launches: counts.length });
+  });
+
+  it("an oscillating count (100, 99, 100, 99, …) refuses — db935a3's regression", () => {
+    // The count that fell below the *previous* launch, not the best ever
+    // seen, counted as progress under db935a3: every dip to 99 reset the
+    // budget, so this sequence launched forever. Run it out to 200 to prove
+    // it terminates well short of that (it refuses on the 4th launch).
+    const counts = Array.from({ length: 200 }, (_, i) =>
+      i % 2 === 0 ? 100 : 99,
+    );
+    const result = drive(counts);
+    expect(result.refusal).toMatch(/the count stuck at 99 after 2 launches/);
+    expect(result.launches).toBeLessThan(10);
+  });
+
+  it("a flat count (5, 5, 5, …) refuses after MAX_LAUNCHES", () => {
+    const result = drive([5, 5, 5, 5]);
+    expect(result.refusal).toMatch(/the count stuck at 5 after 2 launches/);
   });
 });
 

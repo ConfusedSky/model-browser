@@ -217,10 +217,20 @@ export async function verifyBake(
     }
     if (sidecar !== null) {
       const aoPosed = checkLabels("ao", sidecar, model, recipe, reasons);
-      const noao = isRecord(sidecar.noao) ? sidecar.noao : undefined;
+      // Mirrors the top-level parse above: absent (`undefined`, the key
+      // never written) gets its own reason, and present-but-not-an-object
+      // (`"noao": 5`, or JSON `null`) gets a different one — collapsing the
+      // two made a malformed `noao` read as a missing one, telling the
+      // operator a key is absent when it is present and wrong.
+      let noao: SidecarLabels | undefined;
       let noaoPosed = false;
-      if (noao === undefined) reasons.push("noao: no labels");
-      else noaoPosed = checkLabels("noao", noao, model, recipe, reasons);
+      if (sidecar.noao === undefined) reasons.push("noao: no labels");
+      else if (!isRecord(sidecar.noao))
+        reasons.push("noao: labels are not an object");
+      else {
+        noao = sidecar.noao;
+        noaoPosed = checkLabels("noao", noao, model, recipe, reasons);
+      }
       if (aoPosed !== noaoPosed) reasons.push("posed on one render only");
       else if (aoPosed && noao !== undefined) {
         // Both renders posed: they must have been drawn under the same
@@ -489,11 +499,14 @@ export interface BakeArgs {
   /** The scratch client build; a fresh temp directory when absent. Never `client/dist` (CLAUDE.md). */
   client?: string;
   ship?: string;
+  /** A **remote** path on the box — never resolved against this machine's cwd (`originFromShip`, `rsyncCommand`'s `boxDir`). */
   shipDir?: string;
+  /** Task 4.2's hit-check origin, overriding `originFromShip`'s derivation from `--ship`. */
+  origin?: string;
 }
 
 export const USAGE = `usage: bun run scripts/bake-demo.ts --root <corpus top> --cache <scratch cache dir> --index-cache <the index's cache dir>
-         [--port 3199] [--client <scratch build dir>] [--ship <user@host> --ship-dir </srv/cache/<box id>>]`;
+         [--port 3199] [--client <scratch build dir>] [--ship <user@host> --ship-dir </srv/cache/<box id>> [--origin <https://url>]]`;
 
 const FLAGS = [
   "root",
@@ -503,6 +516,7 @@ const FLAGS = [
   "client",
   "ship",
   "ship-dir",
+  "origin",
 ] as const;
 type Flag = (typeof FLAGS)[number];
 
@@ -540,6 +554,10 @@ export function parseArgs(argv: string[]): BakeArgs {
   // `check-bake.sh` run under `cwd: repo`) reads these paths as given, so a
   // relative one resolved against the bake's own cwd stayed relative all the
   // way to a `run()` under a different cwd, reading `<repo>/…` instead.
+  // `ship-dir` is deliberately absent from this list: it names a path on the
+  // *box*, not this machine, and resolving it against this machine's cwd
+  // silently turned a relative `--ship-dir` into a local path used as the
+  // remote rsync destination.
   return {
     root: resolve(root),
     cache: resolve(cache),
@@ -547,10 +565,8 @@ export function parseArgs(argv: string[]): BakeArgs {
     port,
     client: values.client === undefined ? undefined : resolve(values.client),
     ship: values.ship,
-    shipDir:
-      values["ship-dir"] === undefined
-        ? undefined
-        : resolve(values["ship-dir"]),
+    shipDir: values["ship-dir"],
+    origin: values.origin,
   };
 }
 
@@ -565,34 +581,62 @@ const STALL_MS = 5 * 60_000;
 /**
  * Non-progressing launches per pass before the count that stuck is refused:
  * the first, and one relaunch. A launch that *did* progress (its count fell
- * below the launch before it) resets this — a stalled-and-cancelled launch
- * must not spend the budget a later, productive relaunch needs (D1 step 6's
- * "a pass whose count stops falling for a bounded time is relaunched once").
+ * below the **best** — lowest — count any launch this pass has seen, not
+ * merely the launch immediately before it) resets this — a stalled-and-
+ * cancelled launch must not spend the budget a later, productive relaunch
+ * needs (D1 step 6's "a pass whose count stops falling for a bounded time is
+ * relaunched once"). Comparing only to the previous launch let an
+ * oscillating count (100, 99, 100, 99, …) reset the budget forever, since
+ * each dip below its immediate predecessor counted as progress though the
+ * count was never actually falling — `MAX_TOTAL_LAUNCHES` below is the bound
+ * that still catches a sequence like that.
  */
 const MAX_LAUNCHES = 2;
+/**
+ * A hard ceiling on launches a pass may make at all, independent of whether
+ * `MAX_LAUNCHES` ever sees a stuck best — the backstop for any sequence
+ * `MAX_LAUNCHES` does not bound (an oscillating count is already caught by
+ * the best-tracking above once a value repeats, but this is the one bound
+ * that holds regardless of the sequence's shape).
+ */
+const MAX_TOTAL_LAUNCHES = 200;
 /** The default index base — `semantic.ts`'s `DEFAULT_BASE`, read from the same variable. */
 const DEFAULT_INDEX = "http://127.0.0.1:8077";
-/** Where the shipped store is verified (task 4.2), absent a usable origin from `--ship`. */
+/** Printed in the no-`--ship` template only — there is no `--ship` host to derive anything from yet. */
 export const DEMO_ORIGIN = "https://models.masamaeda.com";
 /** The restart after a ship (D3: for the startup sweep's memo, not for correctness). */
 export const RESTART_COMMAND =
   "cd /opt/model-browser && docker compose -f deploy/demo/compose.yaml restart app";
 /** How long the shipped app may still be booting, after `restart app`, before the first hit check. */
 const SHIP_READY_DEADLINE_MS = 60_000;
+/** Per-attempt bound on the readiness probe itself — `SHIP_READY_DEADLINE_MS` is only checked between attempts, so one black-holed connect (Linux's ~130s default) could otherwise overrun it. */
+const SHIP_READY_PROBE_TIMEOUT_MS = 5_000;
 
 /**
- * The origin task 4.2's hit checks reach: `https://<host>` from `--ship`'s
- * `user@host` (or bare `host`), unless that host gives no usable origin — a
- * bare IPv4 address, which a TLS certificate for the demo's domain will not
- * answer for (the box is reached as `root@157.90.25.110` for `ssh`/`rsync`
- * but serves the demo at `models.masamaeda.com`) — in which case `DEMO_ORIGIN`
- * is kept.
+ * Task 4.2's hit-check origin, resolved in this order: `--origin` when given
+ * (the operator names the box's public host directly, and it wins even over
+ * a name `--ship` would otherwise derive one from); else `https://<host>`
+ * derived from `--ship`'s `user@host` (or bare `host`) when that host is a
+ * *name*; else `null` — no origin can be derived, so hit-checking is refused
+ * rather than defaulting to production (`DEMO_ORIGIN`), which would silently
+ * verify the wrong box's store whenever `--ship` names any IP address (the
+ * demo box itself is reached as `root@157.90.25.110` for `ssh`/`rsync` but
+ * serves the demo at `models.masamaeda.com` — no certificate answers for the
+ * bare address, and neither a bare IPv4 nor an IPv6 literal names anything a
+ * `https://` origin could mean). `lastIndexOf` for the `@`, not `indexOf`:
+ * a user portion that itself contains one (`user@host@weird`) must split at
+ * the rightmost `@`, the one `ssh`/`rsync` themselves would use.
  */
-export function originFromShip(ship: string): string {
-  const at = ship.indexOf("@");
+export function originFromShip(
+  ship: string,
+  explicitOrigin?: string,
+): string | null {
+  if (explicitOrigin !== undefined) return explicitOrigin;
+  const at = ship.lastIndexOf("@");
   const host = at === -1 ? ship : ship.slice(at + 1);
   const isIPv4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
-  return host === "" || isIPv4 ? DEMO_ORIGIN : `https://${host}`;
+  const isIPv6 = host.includes(":");
+  return host === "" || isIPv4 || isIPv6 ? null : `https://${host}`;
 }
 
 export type FetchLike = (
@@ -1164,13 +1208,65 @@ async function confirmNothingLeft(page: PwPage, base: string): Promise<number> {
   return openLibraryTabAndCount(page);
 }
 
+/** `runPass`'s launch-budget state — see `shouldRefuse`. */
+export interface LaunchBudget {
+  /** The lowest count any launch this pass has seen; `null` before the first. */
+  best: number | null;
+  /** Non-progressing launches since `best` last improved. */
+  launches: number;
+  /** Every launch this pass has made, regardless of progress — `MAX_TOTAL_LAUNCHES`' count. */
+  total: number;
+}
+
+/** The budget a pass starts with, before its first launch. */
+export const INITIAL_LAUNCH_BUDGET: LaunchBudget = {
+  best: null,
+  launches: 0,
+  total: 0,
+};
+
+/**
+ * D1 step 6's launch-budget decision for one candidate launch at count `n`,
+ * pulled out of `runPass` as a pure function so it can be celled without a
+ * Playwright page. `launches` bounds a *stuck* count: it resets whenever `n`
+ * betters `budget.best` — the lowest count *any* launch this pass has seen —
+ * not merely the launch immediately before it, so an oscillating count
+ * (100, 99, 100, 99, …) cannot re-arm the budget forever the way comparing
+ * only to the previous launch did (that count never stops "progressing" by
+ * the old rule, since 99 is always below the 100 that preceded it). `total`
+ * is the hard ceiling that bounds a pass's launches at all, independent of
+ * progress — the backstop for a sequence `launches` alone does not catch (a
+ * flat count trips `launches` first; the oscillating one above is in fact
+ * already caught once a value repeats, since a repeat is never `< best`, but
+ * `total` is the bound that holds regardless of the sequence's shape).
+ * Returns the refusal reason, or the budget to carry into the next launch.
+ */
+export function shouldRefuse(
+  n: number,
+  budget: LaunchBudget,
+): { refuse: string } | { refuse: null; budget: LaunchBudget } {
+  const progressed = budget.best === null || n < budget.best;
+  const best = progressed ? n : budget.best;
+  const launches = progressed ? 0 : budget.launches;
+  if (launches >= MAX_LAUNCHES)
+    return { refuse: `the count stuck at ${n} after ${launches} launches` };
+  if (budget.total >= MAX_TOTAL_LAUNCHES)
+    return {
+      refuse: `hit the hard ceiling of ${MAX_TOTAL_LAUNCHES} launches without settling`,
+    };
+  return {
+    refuse: null,
+    budget: { best, launches: launches + 1, total: budget.total + 1 },
+  };
+}
+
 /**
  * One *Generate* pass under the pill's current state (D1 step 6). A pass ends
  * only when the chip has settled, the button reads `Generate 0 missing
  * thumbnails`, and `confirmNothingLeft` still reads zero — never on the count
  * alone, which reads zero while the last entries are in flight. A stalled
  * launch is cancelled and relaunched once, then refused with the count that
- * stuck.
+ * stuck (`shouldRefuse`).
  */
 async function runPass(
   page: PwPage,
@@ -1180,13 +1276,7 @@ async function runPass(
 ): Promise<PassFigures> {
   const t0 = Date.now();
   const before = puts.ok;
-  let launches = 0;
-  // The count at the last launch — `null` before the first one. A launch
-  // whose count is strictly below it made progress, and resets `launches`:
-  // the budget bounds a *stuck* count, not every launch a pass ever makes
-  // (a stall-and-cancel must not spend the budget a later, productive
-  // relaunch — e.g. the pose-wave's remainder — then needs).
-  let lastLaunchCount: number | null = null;
+  let budget = INITIAL_LAUNCH_BUDGET;
   for (;;) {
     let n = await openLibraryTabAndCount(page);
     if (
@@ -1206,14 +1296,11 @@ async function runPass(
       if (n === 0) break;
       log(label, `the pose wave found ${n} more`);
     }
-    if (lastLaunchCount !== null && n < lastLaunchCount) launches = 0;
-    if (launches >= MAX_LAUNCHES)
-      throw new Error(
-        `${label}: the count stuck at ${n} after ${launches} launches`,
-      );
-    launches++;
-    lastLaunchCount = n;
-    log(label, `launch ${launches}: Generate ${n} missing thumbnails`);
+    const decision = shouldRefuse(n, budget);
+    if (decision.refuse !== null)
+      throw new Error(`${label}: ${decision.refuse}`);
+    budget = decision.budget;
+    log(label, `launch ${budget.launches}: Generate ${n} missing thumbnails`);
     await page.locator("button", { hasText: GENERATE }).first().click();
     const outcome = await waitSettled(page, label);
     if (outcome === "stalled") {
@@ -1277,21 +1364,32 @@ async function generateBoth(
 }
 
 /**
- * Polls `${origin}/api/features` — a cheap, unauthenticated route — until it
- * answers OK, bounded: `docker compose … restart app` returns before the
- * container is actually serving, and the first hit check landing on a still-
- * booting app threw a 502 *after* the rsync had already landed the store.
+ * Polls `${origin}/api/library` for `state: "ready"`, bounded: `docker
+ * compose … restart app` returns before the container is actually serving.
+ * Not `/api/features` (also UNGATED, in `createApp`'s sense, and cheaper):
+ * it answers 200 as soon as Hono binds, *before* the library has resolved,
+ * while `/api/thumb` stays gated and 503s with a state envelope until then —
+ * so polling `/api/features` could return while the box was still walking
+ * for its marker, and the first hit check then threw `GET … answered 503`
+ * on a store that had already landed. `/api/library` answers `ready` only
+ * once the walk itself has settled. Each attempt carries its own timeout
+ * (`SHIP_READY_PROBE_TIMEOUT_MS`): `SHIP_READY_DEADLINE_MS` is otherwise
+ * only checked *between* attempts, so one black-holed connect (Linux's
+ * ~130s default) could overrun the whole deadline on a single try.
  */
 async function waitForShipReady(origin: string): Promise<void> {
   const deadline = Date.now() + SHIP_READY_DEADLINE_MS;
   for (;;) {
-    const ok = await fetch(`${origin}/api/features`)
-      .then((r) => r.ok)
-      .catch(() => false);
-    if (ok) return;
+    const state = await fetch(`${origin}/api/library`, {
+      signal: AbortSignal.timeout(SHIP_READY_PROBE_TIMEOUT_MS),
+    })
+      .then((r) => (r.ok ? (r.json() as Promise<LibraryState>) : null))
+      .then((s) => s?.state ?? null)
+      .catch(() => null);
+    if (state === "ready") return;
     if (Date.now() >= deadline)
       throw new Error(
-        `${origin}/api/features did not answer within ${SHIP_READY_DEADLINE_MS / 1000}s of the restart`,
+        `${origin}/api/library did not answer ready within ${SHIP_READY_DEADLINE_MS / 1000}s of the restart`,
       );
     await sleep(POLL_MS);
   }
@@ -1334,13 +1432,13 @@ async function hitCheck(
   return `${label}: hit, rig ${info.rig}, ${info.posed !== undefined ? `posed ${info.posed} (${info.poseKey})` : "unposed"}, ${type}, ${cacheControl}`;
 }
 
-function hitCheckCommands(models: BakeModel[]): string[] {
+function hitCheckCommands(models: BakeModel[], origin: string): string[] {
   return models.flatMap((m) => {
     const q = `path=${encodeURIComponent(m.path)}&mtime=${m.mtime}`;
     return [
-      `curl -s '${DEMO_ORIGIN}/api/thumb?${q}'`,
-      `curl -s '${DEMO_ORIGIN}/api/thumb?${q}&ao=off'`,
-      `curl -sI '${DEMO_ORIGIN}/api/thumb/image?${q}&gen=<gen from the lookup>'`,
+      `curl -s '${origin}/api/thumb?${q}'`,
+      `curl -s '${origin}/api/thumb?${q}&ao=off'`,
+      `curl -sI '${origin}/api/thumb/image?${q}&gen=<gen from the lookup>'`,
     ];
   });
 }
@@ -1363,14 +1461,30 @@ async function ship(
     );
     console.log(`  ${rsync}`);
     console.log(`  ${restart}`);
-    for (const c of hitCheckCommands(three)) console.log(`  ${c}`);
+    for (const c of hitCheckCommands(three, DEMO_ORIGIN)) console.log(`  ${c}`);
     return;
   }
   run("sh", ["-c", rsync], process.cwd());
   run("sh", ["-c", restart], process.cwd());
-  const origin = originFromShip(host);
-  log(`waiting for ${origin} to answer /api/features after the restart`);
-  await waitForShipReady(origin);
+  const origin = originFromShip(host, args.origin);
+  if (origin === null) {
+    console.log(
+      `\nthe store shipped and the container restarted, but task 4.2's origin could not be derived from --ship ${host} (a bare IP names no certificate) — pass --origin <https://url> to hit-check automatically. Finish task 4.2 by hand:`,
+    );
+    for (const c of hitCheckCommands(three, "<origin — pass --origin>"))
+      console.log(`  ${c}`);
+    return;
+  }
+  log(`waiting for ${origin} to answer /api/library after the restart`);
+  try {
+    await waitForShipReady(origin);
+  } catch (err) {
+    console.log(
+      `\nthe store shipped and the container restarted, but ${err instanceof Error ? err.message : String(err)} — finish task 4.2 by hand:`,
+    );
+    for (const c of hitCheckCommands(three, origin)) console.log(`  ${c}`);
+    return;
+  }
   for (const m of three)
     for (const ao of [true, false])
       log("hit check:", await hitCheck(m, ao, recipe, origin));
