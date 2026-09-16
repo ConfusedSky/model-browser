@@ -39,7 +39,7 @@ import {
 } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { basename, isAbsolute, join, normalize } from "node:path";
+import { basename, isAbsolute, join, normalize, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { SNAPSHOT_DIR } from "../server/src/snapshot";
 import {
@@ -123,6 +123,11 @@ async function exists(file: string): Promise<boolean> {
   return (await stat(file).catch(() => null)) !== null;
 }
 
+/** A plain JSON object — excludes `null` and arrays, which `typeof` alone would not. */
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
 /**
  * One render's labels against the recipe. `name` is `ao` for the top-level set
  * (the occluded render) and `noao` for the sibling's, so a reason says which
@@ -192,23 +197,44 @@ export async function verifyBake(
     if (await exists(join(dir, `${key}.noao.webp`))) renders.noao++;
     else reasons.push(`no ${key}.noao.webp`);
 
+    // `JSON.parse` succeeding is not "parsed as a sidecar": it can hand back
+    // something that is not an object at all (a sidecar file whose contents
+    // are literally `null`, or any other JSON scalar/array), which is not a
+    // shape `checkLabels` can be trusted with. The catch below tracks parse
+    // failure; `isRecord` here tracks shape failure — kept separate so each
+    // gets its own reason — and `sidecar` is assigned only once both have
+    // passed, so `sidecar !== null` means "parsed, and an object", never
+    // reaching `checkLabels("noao", …)` with a non-object either.
     let sidecar: Sidecar | null = null;
     try {
-      sidecar = JSON.parse(
+      const raw: unknown = JSON.parse(
         await readFile(join(dir, `${key}.json`), "utf8"),
-      ) as Sidecar;
+      );
+      if (isRecord(raw)) sidecar = raw as Sidecar;
+      else reasons.push(`sidecar ${key}.json is not an object`);
     } catch {
       reasons.push(`no sidecar ${key}.json`);
     }
     if (sidecar !== null) {
       const aoPosed = checkLabels("ao", sidecar, model, recipe, reasons);
+      const noao = isRecord(sidecar.noao) ? sidecar.noao : undefined;
       let noaoPosed = false;
-      if (sidecar.noao === undefined) reasons.push("noao: no labels");
-      else
-        noaoPosed = checkLabels("noao", sidecar.noao, model, recipe, reasons);
+      if (noao === undefined) reasons.push("noao: no labels");
+      else noaoPosed = checkLabels("noao", noao, model, recipe, reasons);
       if (aoPosed !== noaoPosed) reasons.push("posed on one render only");
-      else if (aoPosed) posed++;
-      else {
+      else if (aoPosed && noao !== undefined) {
+        // Both renders posed: they must have been drawn under the same
+        // orientation. A scratch cache reused across sessions (`bake`'s
+        // `mkdir(args.cache, {recursive: true})` never empties it) can carry
+        // an ao render orbited in one session beside a noao render from
+        // another — `put`'s unowned-entry pose rule does not catch it,
+        // because a `camera` label exempts it.
+        if (sidecar.poseKey !== noao.poseKey)
+          reasons.push(
+            `poseKey differs: ao ${String(sidecar.poseKey)}, noao ${String(noao.poseKey)}`,
+          );
+        posed++;
+      } else {
         unposed++;
         unlabelled.push(model.path);
       }
@@ -509,14 +535,22 @@ export function parseArgs(argv: string[]): BakeArgs {
     throw new Error(`--port must be a port number, got ${values.port}`);
   if (values.ship !== undefined && values["ship-dir"] === undefined)
     throw new Error(`--ship needs --ship-dir\n${USAGE}`);
+  // Absolute against `process.cwd()` here, once — everything downstream
+  // (`writeManifest`, `realpath`, `indexFingerprint`, step 10's
+  // `check-bake.sh` run under `cwd: repo`) reads these paths as given, so a
+  // relative one resolved against the bake's own cwd stayed relative all the
+  // way to a `run()` under a different cwd, reading `<repo>/…` instead.
   return {
-    root,
-    cache,
-    indexCache,
+    root: resolve(root),
+    cache: resolve(cache),
+    indexCache: resolve(indexCache),
     port,
-    client: values.client,
+    client: values.client === undefined ? undefined : resolve(values.client),
     ship: values.ship,
-    shipDir: values["ship-dir"],
+    shipDir:
+      values["ship-dir"] === undefined
+        ? undefined
+        : resolve(values["ship-dir"]),
   };
 }
 
@@ -528,15 +562,38 @@ const START_DEADLINE_MS = 60_000;
 const POLL_MS = 2_000;
 /** A chip whose sentence has not changed for this long is a stuck pass (D1 step 6's "bounded time"). */
 const STALL_MS = 5 * 60_000;
-/** Launches per pass before the count that stuck is refused: the first, and one relaunch. */
+/**
+ * Non-progressing launches per pass before the count that stuck is refused:
+ * the first, and one relaunch. A launch that *did* progress (its count fell
+ * below the launch before it) resets this — a stalled-and-cancelled launch
+ * must not spend the budget a later, productive relaunch needs (D1 step 6's
+ * "a pass whose count stops falling for a bounded time is relaunched once").
+ */
 const MAX_LAUNCHES = 2;
 /** The default index base — `semantic.ts`'s `DEFAULT_BASE`, read from the same variable. */
 const DEFAULT_INDEX = "http://127.0.0.1:8077";
-/** Where the shipped store is verified (task 4.2). */
+/** Where the shipped store is verified (task 4.2), absent a usable origin from `--ship`. */
 export const DEMO_ORIGIN = "https://models.masamaeda.com";
 /** The restart after a ship (D3: for the startup sweep's memo, not for correctness). */
 export const RESTART_COMMAND =
   "cd /opt/model-browser && docker compose -f deploy/demo/compose.yaml restart app";
+/** How long the shipped app may still be booting, after `restart app`, before the first hit check. */
+const SHIP_READY_DEADLINE_MS = 60_000;
+
+/**
+ * The origin task 4.2's hit checks reach: `https://<host>` from `--ship`'s
+ * `user@host` (or bare `host`), unless that host gives no usable origin — a
+ * bare IPv4 address, which a TLS certificate for the demo's domain will not
+ * answer for (the box is reached as `root@157.90.25.110` for `ssh`/`rsync`
+ * but serves the demo at `models.masamaeda.com`) — in which case `DEMO_ORIGIN`
+ * is kept.
+ */
+export function originFromShip(ship: string): string {
+  const at = ship.indexOf("@");
+  const host = at === -1 ? ship : ship.slice(at + 1);
+  const isIPv4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
+  return host === "" || isIPv4 ? DEMO_ORIGIN : `https://${host}`;
+}
 
 export type FetchLike = (
   input: string,
@@ -549,10 +606,6 @@ function log(...parts: unknown[]): void {
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
 
 async function getJson<T>(url: string, fetchFn: FetchLike = fetch): Promise<T> {
   const res = await fetchFn(url);
@@ -1128,6 +1181,12 @@ async function runPass(
   const t0 = Date.now();
   const before = puts.ok;
   let launches = 0;
+  // The count at the last launch — `null` before the first one. A launch
+  // whose count is strictly below it made progress, and resets `launches`:
+  // the budget bounds a *stuck* count, not every launch a pass ever makes
+  // (a stall-and-cancel must not spend the budget a later, productive
+  // relaunch — e.g. the pose-wave's remainder — then needs).
+  let lastLaunchCount: number | null = null;
   for (;;) {
     let n = await openLibraryTabAndCount(page);
     if (
@@ -1147,11 +1206,13 @@ async function runPass(
       if (n === 0) break;
       log(label, `the pose wave found ${n} more`);
     }
+    if (lastLaunchCount !== null && n < lastLaunchCount) launches = 0;
     if (launches >= MAX_LAUNCHES)
       throw new Error(
         `${label}: the count stuck at ${n} after ${launches} launches`,
       );
     launches++;
+    lastLaunchCount = n;
     log(label, `launch ${launches}: Generate ${n} missing thumbnails`);
     await page.locator("button", { hasText: GENERATE }).first().click();
     const outcome = await waitSettled(page, label);
@@ -1215,15 +1276,37 @@ async function generateBoth(
   }
 }
 
+/**
+ * Polls `${origin}/api/features` — a cheap, unauthenticated route — until it
+ * answers OK, bounded: `docker compose … restart app` returns before the
+ * container is actually serving, and the first hit check landing on a still-
+ * booting app threw a 502 *after* the rsync had already landed the store.
+ */
+async function waitForShipReady(origin: string): Promise<void> {
+  const deadline = Date.now() + SHIP_READY_DEADLINE_MS;
+  for (;;) {
+    const ok = await fetch(`${origin}/api/features`)
+      .then((r) => r.ok)
+      .catch(() => false);
+    if (ok) return;
+    if (Date.now() >= deadline)
+      throw new Error(
+        `${origin}/api/features did not answer within ${SHIP_READY_DEADLINE_MS / 1000}s of the restart`,
+      );
+    await sleep(POLL_MS);
+  }
+}
+
 /** Task 4.2's two hit checks for one model and one variant, against the live host. */
 async function hitCheck(
   model: BakeModel,
   ao: boolean,
   recipe: ManifestRecipe,
+  origin: string,
 ): Promise<string> {
   const q = `path=${encodeURIComponent(model.path)}&mtime=${model.mtime}${ao ? "" : "&ao=off"}`;
   const info = await getJson<ThumbGetResponse & { gen?: number }>(
-    `${DEMO_ORIGIN}/api/thumb?${q}`,
+    `${origin}/api/thumb?${q}`,
   );
   const problems: string[] = [];
   if (info.status !== "hit") problems.push(`status ${info.status}`);
@@ -1237,7 +1320,7 @@ async function hitCheck(
     );
   }
   const image = await fetch(
-    `${DEMO_ORIGIN}/api/thumb/image?${q}${info.gen !== undefined ? `&gen=${info.gen}` : ""}`,
+    `${origin}/api/thumb/image?${q}${info.gen !== undefined ? `&gen=${info.gen}` : ""}`,
   );
   const type = image.headers.get("content-type") ?? "";
   const cacheControl = image.headers.get("cache-control") ?? "";
@@ -1285,9 +1368,12 @@ async function ship(
   }
   run("sh", ["-c", rsync], process.cwd());
   run("sh", ["-c", restart], process.cwd());
+  const origin = originFromShip(host);
+  log(`waiting for ${origin} to answer /api/features after the restart`);
+  await waitForShipReady(origin);
   for (const m of three)
     for (const ao of [true, false])
-      log("hit check:", await hitCheck(m, ao, recipe));
+      log("hit check:", await hitCheck(m, ao, recipe, origin));
 }
 
 /** The whole run, D1's eleven steps in order; the child server is stopped on every path out. */

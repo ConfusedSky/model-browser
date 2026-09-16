@@ -1,26 +1,38 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   type BakeModel,
   type FetchLike,
   type ManifestInput,
   type ManifestRecipe,
+  DEMO_ORIGIN,
   auditUnposed,
   fetchPoses,
   indexCacheDirMatches,
   indexFingerprint,
   manifestFor,
   manifestPath,
+  originFromShip,
   parseArgs,
   rsyncCommand,
   sidecarKey,
   verifyBake,
   writeManifest,
 } from "../../scripts/bake-demo";
-import { type IndexPose, POSES_MAX } from "../../shared/types";
+import {
+  type IndexPose,
+  type LightingMode,
+  POSES_MAX,
+} from "../../shared/types";
 import { ThumbCache } from "../src/cache";
 import { libraryFor, realTempDir } from "./helpers";
 
@@ -79,6 +91,7 @@ async function store(): Promise<Store> {
 
 type Labels = {
   mtime?: number;
+  lighting?: LightingMode;
   rig?: number;
   posed?: number;
   poseKey?: string;
@@ -94,7 +107,7 @@ async function render(
   await s.cache.put(model.path, {
     mtime: labels.mtime ?? model.mtime,
     png: Buffer.from(`webp ${model.path} ${ao ? "ao" : "noao"}`),
-    lighting: RECIPE.lighting,
+    lighting: labels.lighting ?? RECIPE.lighting,
     rig: labels.rig ?? RECIPE.rig,
     posed: labels.posed,
     poseKey: labels.poseKey,
@@ -167,6 +180,35 @@ describe("verifyBake", () => {
     ]);
   });
 
+  it("lists an ao render at another lighting", async () => {
+    const s = await completeStore();
+    await render(s, MODELS[1]!, true, { ...POSED, lighting: "axis" });
+    const r = await verifyBake(s.cacheDir, s.id, MODELS, RECIPE);
+    expect(r.misses.map((m) => m.path)).toEqual(["/kit/b.stl"]);
+    expect(missFor(r.misses, "/kit/b.stl")!.reasons).toEqual([
+      `ao: lighting axis, recipe ${RECIPE.lighting}`,
+    ]);
+  });
+
+  it("lists a posed label at the wrong pose version, on both renders", async () => {
+    const s = await completeStore();
+    // Both renders, at the same wrong version — `put`'s unowned-entry pose
+    // rule (cache.ts) invalidates a sibling whose `posed` *differs* from
+    // this write's, so a single-render override would clear the other
+    // rather than exercise the compare this cell is after.
+    for (const ao of [true, false])
+      await render(s, MODELS[1]!, ao, {
+        ...POSED,
+        posed: RECIPE.poseVersion - 1,
+      });
+    const r = await verifyBake(s.cacheDir, s.id, MODELS, RECIPE);
+    expect(r.misses.map((m) => m.path)).toEqual(["/kit/b.stl"]);
+    expect(missFor(r.misses, "/kit/b.stl")!.reasons).toEqual([
+      `ao: posed ${RECIPE.poseVersion - 1}, recipe ${RECIPE.poseVersion}`,
+      `noao: posed ${RECIPE.poseVersion - 1}, recipe ${RECIPE.poseVersion}`,
+    ]);
+  });
+
   it("lists posed carried without a poseKey, on both renders", async () => {
     const s = await completeStore();
     for (const ao of [true, false])
@@ -208,6 +250,65 @@ describe("verifyBake", () => {
       `no sidecar ${key}.json`,
     ]);
     expect(r.refusal).toBe("1 of 4 models fail verification");
+  });
+
+  it("lists ao and noao poseKeys that disagree — the two renders drawn under different orientations", async () => {
+    const s = await completeStore();
+    // Own the entry with a camera first (an orbited tile, in the finding's
+    // telling) — which exempts `put`'s unowned-entry pose rule (cache.ts)
+    // from invalidating a sibling whose poseKey moves on its own; an
+    // unowned entry would self-heal the very state this cell wants to
+    // catch. Setting the camera itself clears both renders' recipe labels
+    // (a camera move invalidates what was drawn before it), so both are
+    // re-rendered afterwards with the camera already in place and absent
+    // from `opts` — no further "moved" — the ao render back at its
+    // original poseKey, the noao one at a different orientation.
+    await s.cache.put(MODELS[0]!.path, {
+      mtime: MODELS[0]!.mtime,
+      camera: { az: 1, el: 0, distR: 2, target: [0, 0, 0] },
+    });
+    await render(s, MODELS[0]!, true, POSED);
+    await render(s, MODELS[0]!, false, { ...POSED, poseKey: "v3@10/5" });
+    const r = await verifyBake(s.cacheDir, s.id, MODELS, RECIPE);
+    expect(r.misses.map((m) => m.path)).toEqual(["/kit/a.stl"]);
+    expect(missFor(r.misses, "/kit/a.stl")!.reasons).toEqual([
+      `poseKey differs: ao ${POSE_KEY}, noao v3@10/5`,
+    ]);
+  });
+
+  it("lists a sidecar that parses to null rather than skipping it silently", async () => {
+    const s = await completeStore();
+    const key = sidecarKey("/kit/a.stl");
+    writeFileSync(join(s.dir, `${key}.json`), "null");
+    const r = await verifyBake(s.cacheDir, s.id, MODELS, RECIPE);
+    expect(r.misses.map((m) => m.path)).toEqual(["/kit/a.stl"]);
+    expect(missFor(r.misses, "/kit/a.stl")!.reasons).toEqual([
+      `sidecar ${key}.json is not an object`,
+    ]);
+    // "a" is neither posed nor unposed — its sidecar could not be read as
+    // labels at all — while "b" (still posed) and "c" (still unlabelled)
+    // are unaffected.
+    expect(r.posed).toBe(1);
+    expect(r.unposed).toBe(1);
+    expect(r.unlabelled).toEqual(["/kit/c.stl"]);
+  });
+
+  it("lists a noao label that is null rather than throwing", async () => {
+    const s = await completeStore();
+    const key = sidecarKey("/kit/b.stl");
+    const file = join(s.dir, `${key}.json`);
+    const sidecar = JSON.parse(readFileSync(file, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    sidecar.noao = null;
+    writeFileSync(file, JSON.stringify(sidecar));
+    const r = await verifyBake(s.cacheDir, s.id, MODELS, RECIPE);
+    expect(r.misses.map((m) => m.path)).toEqual(["/kit/b.stl"]);
+    expect(missFor(r.misses, "/kit/b.stl")!.reasons).toEqual([
+      "noao: no labels",
+      "posed on one render only",
+    ]);
   });
 });
 
@@ -545,6 +646,53 @@ describe("parseArgs", () => {
     expect(() => parseArgs([...required, "--ship", "root@box"])).toThrow(
       /--ship needs --ship-dir/,
     );
+  });
+
+  it("resolves root/cache/index-cache/client/ship-dir to absolute paths, against process.cwd()", () => {
+    const args = parseArgs([
+      "--root",
+      "corpus",
+      "--cache",
+      "scratch",
+      "--index-cache",
+      "idx",
+      "--client",
+      "cli",
+      "--ship",
+      "root@box",
+      "--ship-dir",
+      "srv/cache/box-id",
+    ]);
+    for (const p of [args.root, args.cache, args.indexCache]) {
+      expect(isAbsolute(p)).toBe(true);
+    }
+    expect(args.client).toBeDefined();
+    expect(isAbsolute(args.client!)).toBe(true);
+    expect(args.shipDir).toBeDefined();
+    expect(isAbsolute(args.shipDir!)).toBe(true);
+    // `--ship` names a host for ssh/rsync, not a local path — left as typed.
+    expect(args.ship).toBe("root@box");
+    // Already-absolute input is unaffected (existing behaviour, re-pinned).
+    expect(parseArgs(required).root).toBe("/corpus");
+  });
+});
+
+describe("originFromShip", () => {
+  it("derives https://<host> from a hostname, with or without a user@", () => {
+    expect(originFromShip("models.masamaeda.com")).toBe(
+      "https://models.masamaeda.com",
+    );
+    expect(originFromShip("root@models.masamaeda.com")).toBe(
+      "https://models.masamaeda.com",
+    );
+  });
+
+  it("keeps DEMO_ORIGIN when the ship host is a bare IPv4 address", () => {
+    // The demo box is reached as root@157.90.25.110 for ssh/rsync but serves
+    // the demo at models.masamaeda.com — deriving an origin from the IP
+    // would reach a host with no certificate for that name.
+    expect(originFromShip("root@157.90.25.110")).toBe(DEMO_ORIGIN);
+    expect(originFromShip("157.90.25.110")).toBe(DEMO_ORIGIN);
   });
 });
 
