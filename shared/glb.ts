@@ -31,19 +31,31 @@ interface Triangles {
   count: number;
 }
 
-/** Detected the way `STLLoader` does: an 80-byte header, a uint32 face count,
- *  then `50 * n` bytes of facets — so `84 + 50·n` is the whole file. Anything
- *  else is parsed as ASCII, so a file the client renders today still renders. */
+/** Detected the way `STLLoader.isBinary` does, so a file the client renders
+ *  today converts too: binary when `84 + 50·n` is the whole file, **or** when
+ *  the first bytes do not spell `solid` at any of the offsets a BOM could push
+ *  it to — exporters that pad a binary file past its face count exist, and
+ *  size alone would send those to the ASCII parser. */
 function parseStl(bytes: ArrayBuffer): Triangles {
   if (bytes.byteLength >= 84) {
     const view = new DataView(bytes);
     const n = view.getUint32(80, true);
-    if (84 + 50 * n === bytes.byteLength) return parseBinary(view, n);
+    if (84 + 50 * n === bytes.byteLength || !startsWithSolid(bytes)) {
+      return parseBinary(view, n);
+    }
   }
   return parseAscii(bytes);
 }
 
+function startsWithSolid(bytes: ArrayBuffer): boolean {
+  const head = new TextDecoder("latin1").decode(new Uint8Array(bytes, 0, 10));
+  return head.includes("solid");
+}
+
 function parseBinary(view: DataView, n: number): Triangles {
+  if (84 + 50 * n > view.byteLength) {
+    throw new GlbError("truncated STL: fewer facets than the header claims");
+  }
   const coords = new Float32Array(n * 9);
   let o = 0;
   for (let i = 0; i < n; i++) {
@@ -62,7 +74,12 @@ function parseAscii(bytes: ArrayBuffer): Triangles {
   const re = /vertex\s+(\S+)\s+(\S+)\s+(\S+)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
-    nums.push(Number(m[1]), Number(m[2]), Number(m[3]));
+    for (const t of [m[1]!, m[2]!, m[3]!]) {
+      const v = Number(t);
+      if (Number.isNaN(v))
+        throw new GlbError(`not an STL: bad coordinate ${t}`);
+      nums.push(v);
+    }
   }
   if (nums.length === 0 || nums.length % 9 !== 0) {
     throw new GlbError("not an STL: no triangles found");
@@ -218,6 +235,10 @@ export function readGlb(bytes: ArrayBuffer): GlbGeometry {
   if (view.getUint32(16, true) !== CHUNK_JSON)
     throw new GlbError("first chunk is not JSON");
   const jsonStart = 20;
+  // Both chunk headers must fit before either is read, or a file cut short
+  // throws a RangeError out of the typed-array view instead of a GlbError.
+  if (jsonStart + jsonLen + 8 > bytes.byteLength)
+    throw new GlbError("JSON chunk overruns the file");
   const json = JSON.parse(
     new TextDecoder().decode(new Uint8Array(bytes, jsonStart, jsonLen)),
   );
@@ -244,17 +265,20 @@ export function readGlb(bytes: ArrayBuffer): GlbGeometry {
   if (posView === undefined || idxView === undefined)
     throw new GlbError("missing buffer view");
 
+  const posOffset = binStart + (posView.byteOffset ?? 0);
+  const idxOffset = binStart + (idxView.byteOffset ?? 0);
+  const idxWidth = idxAcc.componentType === COMP_USHORT ? 2 : 4;
+  if (
+    posOffset + posAcc.count * 12 > binStart + binLen ||
+    idxOffset + idxAcc.count * idxWidth > binStart + binLen
+  ) {
+    throw new GlbError("accessor overruns the BIN chunk");
+  }
+
   // Copy out so the returned arrays own their bytes and stay aligned.
   const positions = new Float32Array(posAcc.count * 3);
-  positions.set(
-    new Float32Array(
-      bytes,
-      binStart + (posView.byteOffset ?? 0),
-      posAcc.count * 3,
-    ),
-  );
+  positions.set(new Float32Array(bytes, posOffset, posAcc.count * 3));
 
-  const idxOffset = binStart + (idxView.byteOffset ?? 0);
   let index: Uint16Array | Uint32Array;
   if (idxAcc.componentType === COMP_USHORT) {
     index = new Uint16Array(idxAcc.count);

@@ -113,6 +113,26 @@ describe("stlToGlb", () => {
     expect(u32.index).toBeInstanceOf(Uint32Array);
   });
 
+  it("parses a binary STL padded past its face count, as STLLoader does", () => {
+    const padded = new Uint8Array(84 + 50 * quad.length + 2);
+    padded.set(new Uint8Array(binaryStl(quad)));
+    const { index } = readGlb(stlToGlb(padded.buffer));
+    expect(index.length).toBe(quad.length * 3);
+  });
+
+  it("parses a binary STL whose header happens to start with 'solid'", () => {
+    const buf = binaryStl(quad);
+    new Uint8Array(buf).set(new TextEncoder().encode("solid "), 0);
+    expect(readGlb(stlToGlb(buf)).index.length).toBe(quad.length * 3);
+  });
+
+  it("rejects an ASCII coordinate that is not a number", () => {
+    const bad = new TextEncoder().encode(
+      "solid x\nfacet normal 0 0 0\nouter loop\nvertex a b c\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid x\n",
+    ).buffer;
+    expect(() => stlToGlb(bad)).toThrow(GlbError);
+  });
+
   it("throws on empty, truncated, and non-STL bytes", () => {
     expect(() => stlToGlb(new ArrayBuffer(0))).toThrow(GlbError);
     // A binary header claiming two faces but carrying one triangle's bytes.
@@ -122,5 +142,23 @@ describe("stlToGlb", () => {
     expect(() =>
       stlToGlb(new TextEncoder().encode("not an stl").buffer),
     ).toThrow(GlbError);
+    // Long enough to reach the binary branch, no `solid`, header claims more
+    // facets than the bytes hold.
+    const lying = new Uint8Array(100);
+    new DataView(lying.buffer).setUint32(80, 5, true);
+    expect(() => stlToGlb(lying.buffer)).toThrow(GlbError);
+  });
+});
+
+describe("readGlb", () => {
+  it("throws GlbError, not RangeError, on a GLB cut short", () => {
+    const glb = stlToGlb(binaryStl(quad));
+    const view = new DataView(glb);
+    const jsonLen = view.getUint32(12, true);
+    // Keep the header, JSON and BIN chunk header; drop half the BIN payload.
+    const cut = glb.slice(0, 20 + jsonLen + 8 + 8);
+    expect(() => readGlb(cut)).toThrow(GlbError);
+    // Cut inside the JSON chunk itself.
+    expect(() => readGlb(glb.slice(0, 20 + jsonLen - 4))).toThrow(GlbError);
   });
 });

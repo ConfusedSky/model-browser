@@ -106,9 +106,9 @@ describe("parseModel glb arm matches the stl arm", () => {
     ["ascii", asciiStl],
   ] as const) {
     it(`${label} STL served as GLB shades identically`, () => {
-      // Canonical reference is the binary STL parsed directly; each input form
-      // converted to GLB must match it.
-      const direct = parseModel(stlBytes(EXTENTS_123), "stl");
+      // Each form's reference is STLLoader's own parse of *that* form, so the
+      // ASCII cell runs STLLoader's ASCII path against the converter's.
+      const direct = parseModel(make(EXTENTS_123), "stl");
       const viaGlb = parseModel(stlToGlb(make(EXTENTS_123)), "glb");
       const a = attrs(direct);
       const b = attrs(viaGlb);

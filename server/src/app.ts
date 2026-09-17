@@ -933,6 +933,7 @@ export function createApp(
   // An STL model's geometry as an indexed, position-only GLB, converted on
   // demand and cached per library (server-glb-cache). STL only — the client
   // requests this for `stl` and keeps `/api/file` for `obj`/`3mf`.
+  let meshCacheWarned = false;
   app.get("/api/model.glb", async (c) => {
     const path = c.req.query("path");
     if (path === undefined || path === "")
@@ -978,8 +979,15 @@ export function createApp(
       if (err instanceof GlbError) return c.json({ error: err.message }, 422);
       throw err;
     }
-    // A read-only cache dir must not fail the request: serve without persisting.
-    await meshCache.write(libPath, glb, mtime).catch(() => undefined);
+    // A read-only cache dir must not fail the request: serve without
+    // persisting — but say so once, or every open silently reconverts.
+    await meshCache.write(libPath, glb, mtime).catch((err: unknown) => {
+      if (meshCacheWarned) return;
+      meshCacheWarned = true;
+      console.warn(
+        `mesh cache not persisted (${String(err)}); converting per request`,
+      );
+    });
     return c.body(new Uint8Array(glb), 200, headers);
   });
 

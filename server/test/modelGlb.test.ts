@@ -68,14 +68,18 @@ describe("GET /api/model.glb", () => {
     expect(write).toHaveBeenCalledTimes(1);
   });
 
-  it("serves an STL zip entry as GLB", async () => {
-    const { app } = appWith();
-    const res = await get(
-      app,
-      `/api/model.glb?path=${encodeURIComponent("/models.zip!/box.stl")}`,
-    );
+  it("serves an STL zip entry as GLB, and a hit never reopens the zip", async () => {
+    const { app, mc } = appWith();
+    const write = vi.spyOn(mc, "write");
+    const url = `/api/model.glb?path=${encodeURIComponent("/models.zip!/box.stl")}`;
+    const res = await get(app, url);
     expect(res.status).toBe(200);
     expect(isGlb(await res.arrayBuffer())).toBe(true);
+    expect(write).toHaveBeenCalledTimes(1);
+    // `write` runs only after an extract + convert, so one write across two
+    // requests is the hit path skipping the archive.
+    expect((await get(app, url)).status).toBe(200);
+    expect(write).toHaveBeenCalledTimes(1);
   });
 
   it("answers 404 for a non-STL path", async () => {
