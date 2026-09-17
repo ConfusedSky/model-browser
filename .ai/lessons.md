@@ -106,3 +106,56 @@
   Rule: never `git checkout`/`restore` a path in this shared tree — other sessions and
   Masa edit the same files. To undo my own experiment, restore from the copy I made
   before making it, and take that copy every time I mutate a file I did not write.
+
+## 2026-09-17 — I documented a workaround instead of deleting it
+
+- Asked to clear stale `clustered-hq` references, I found the deploy recipe still built its
+  ship list there and read `overrides.json` out of it. I wrote a README note explaining that
+  the retired tree was therefore load-bearing and must not be deleted. Masa's reply was
+  "This is a hack" — and it was: copying one 209 KB file into `decimated/` removed the
+  coupling entirely, and measuring showed the ship list did not need the old tree either
+  (identical 3,122-file STL sets; the ten kits missing from the overrides are empty
+  directories). The note I wrote would have entrenched the coupling by making it look
+  deliberate. Rule: when a doc paragraph exists to explain why an awkward dependency
+  survives, first check whether the dependency can simply be removed. Prose that justifies
+  a workaround is a signal to delete the workaround, not to write the prose.
+
+## 2026-09-17 — I verified the observation and then invented the cause
+
+- Having confirmed that ten kit directories under `decimated/` are empty and hold no model,
+  I wrote that they were "kits dropped for being incomplete". That cause was inference, not
+  measurement. A fable review caught it: dedup emptied them, because every file in them
+  duplicated another kit's — seven hold only Thingiverse's `SoLongb.stl` takedown
+  placeholder, byte-identical across the kits carrying it, which `metadata/miniatures.json`
+  shows by `sha256` in one query. The claim shipped into a deploy runbook, where a wrong
+  reason invites a wrong fix. Rule: verifying *that* something holds licenses no claim about
+  *why*. Either measure the cause too, or state the property alone. See the earlier entry on
+  arguing from a code path a kill switch had disabled — same failure, different evidence.
+
+## 2026-09-17 — the endpoint I tested was not the one the cache backs
+
+- I reported that the in-place-overwrite listing-cache blindness "did not bite" after an
+  rsync of 104 models, citing `/api/dir` and search both returning the new mtimes. `/api/dir`
+  without `flat=true` reads the filesystem every request — the memory on this says so
+  outright — so it was never a test of the cache. The search half was confounded: another
+  session recreated the app container inside the same window, which clears the cache, and I
+  could not reconstruct whether my probe landed before or after. Rule: before citing a
+  green probe as evidence a cache behaved, confirm the endpoint is actually backed by that
+  cache, and account for every restart in the window. I also floated a mechanism — rsync
+  writes a temp file and renames it over, moving the directory mtime into the "rename" shape
+  that *is* caught — and a fable review holed it: `rsync -a` implies `-t`, so rsync resets
+  each destination directory's mtime to the source's after transferring it, undoing the bump,
+  and revalidation keys on exactly that mtime (`held.mtime === s.mtimeMs` in
+  `server/src/listing.ts`). So the mechanism is probably wrong as well as unmeasured. Rule:
+  an explanation offered to cover a gap in evidence is not weaker evidence, it is a second
+  claim needing its own check — and I left the memory alone, which was the one right call.
+
+## 2026-09-17 — deleting a thing is not done until its references are gone
+
+- After removing the probe's `/root/.bun` and `/root/.local/bin` from the demo box, every
+  root login printed `bash: /root/.local/bin/env: No such file or directory` twice, because
+  `.bashrc` and `.profile` still sourced it unconditionally. The deletion itself was correct
+  and well checked; the breakage was in what pointed at it. Rule: after deleting anything a
+  shell profile, unit file, cron entry or config might name, grep those for the path before
+  calling the cleanup finished. Guard the reference (`[ -f … ] && . …`) rather than dropping
+  the line, so a later reinstall heals itself, and back up the file first.
