@@ -3,6 +3,7 @@ import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { ThreeMFLoader } from "three/examples/jsm/loaders/3MFLoader.js";
 import { unzipSync } from "fflate";
+import { readGlb } from "../../../shared/glb";
 import type { DirEntry, ModelFormat } from "../../../shared/types";
 
 export type { ModelFormat } from "../../../shared/types";
@@ -46,7 +47,7 @@ function withShadows<T extends THREE.Object3D>(object: T): T {
  *  its format's up convention (`defaultAxisFor`, shared/frames.ts). */
 export function parseModel(
   bytes: ArrayBuffer,
-  format: ModelFormat,
+  format: ModelFormat | "glb",
 ): THREE.Object3D {
   if (format === "stl") {
     const geometry = new STLLoader().parse(bytes);
@@ -54,6 +55,19 @@ export function parseModel(
     // and files exist whose normal field is zeroed, stale, or rotated into
     // another up-axis convention than the vertices.
     geometry.deleteAttribute("normal");
+    geometry.computeVertexNormals();
+    return withShadows(new THREE.Mesh(geometry, makeMaterial()));
+  }
+  if (format === "glb") {
+    // The server's derived STL delivery (server-glb-cache): positions and
+    // indices only. De-indexing and recomputing winding normals gives the same
+    // geometry the `stl` arm produces, so the pixels match by construction.
+    const { positions, index } = readGlb(bytes);
+    const indexed = new THREE.BufferGeometry();
+    indexed.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    indexed.setIndex(new THREE.BufferAttribute(index, 1));
+    const geometry = indexed.toNonIndexed();
+    indexed.dispose();
     geometry.computeVertexNormals();
     return withShadows(new THREE.Mesh(geometry, makeMaterial()));
   }

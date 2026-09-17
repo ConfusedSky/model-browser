@@ -11,6 +11,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { vi } from "vitest";
 import type { DirEntry, DirListing, FeatureReport } from "../../shared/types";
+import { stlToGlb } from "../../shared/glb";
 import { thumbImageUrl } from "../src/api/thumbUrl";
 (
   globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -49,6 +50,12 @@ export const credits = vi.fn().mockResolvedValue([]);
 // overriding this switches on, and an argument-less default would type the mock
 // as taking none.
 export const fetchModel = vi.fn((_path: string) => Promise.resolve(tinyStl()));
+// The viewer fetches STL geometry as a derived GLB. The harness converts the
+// same bytes `fetchModel` would return, so a test stubbing `fetchModel` per path
+// still drives the STL an `stl` tile renders.
+export const fetchModelGlb = vi.fn((path: string) =>
+  fetchModel(path).then((stl) => stlToGlb(stl)),
+);
 // The semantic index is a separate service; the default is the state most
 // machines are in — not running — so a test opts *into* it existing.
 export const indexAvailability = vi.fn().mockResolvedValue({ state: "absent" });
@@ -164,6 +171,7 @@ export function apiClientModule(): Record<string, unknown> {
       models = models;
       complete = vi.fn().mockResolvedValue([]);
       fetchModel = fetchModel;
+      fetchModelGlb = fetchModelGlb;
       peek = peek;
       overrides = overrides;
       credits = credits;
@@ -390,6 +398,7 @@ async function mount(initial: DirListing): Promise<void> {
   overrides.mockClear();
   credits.mockClear();
   fetchModel.mockClear();
+  fetchModelGlb.mockClear();
   // Cleared before the render, so the count a test reads afterwards is the
   // session's own one reading of the registry and nothing left over — which is
   // exactly the count "raising a menu fires no fetch" is measured against.
@@ -499,6 +508,9 @@ export async function unmountApp(): Promise<void> {
   credits.mockReset();
   credits.mockResolvedValue([]);
   fetchModel.mockImplementation(() => Promise.resolve(tinyStl()));
+  fetchModelGlb.mockImplementation((path: string) =>
+    fetchModel(path).then((stl) => stlToGlb(stl)),
+  );
   renderThumbnail.mockClear();
   renderThumbnail.mockImplementation(() => Promise.resolve(new Blob()));
   await act(async () => {
