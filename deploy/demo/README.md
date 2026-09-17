@@ -524,6 +524,49 @@ level; move it back. It is never deleted at the id level.
   `poseKey` derives), which is why the fingerprint hashes both files and a §3.3
   rsync that changes either is refused at the next redeploy.
 
+**Re-baking part of a corpus needs two seeds**, and the obvious spelling of
+either costs a full run or arms a deploy refusal days later. "*Generate* is
+incremental" above is a property of the **store `--cache` points at**, not of the
+script: from an empty scratch directory every model is a miss and the run is the
+whole corpus. So pull the box's own store and its own index first, and bake
+against those:
+
+```sh
+# 1. the store — the ids differ; the box's is §5's startup line, the local one is
+#    the marker under decimated, and bake-demo.ts remaps them at ship
+rsync -az root@<ip>:/srv/cache/<box id>/ <scratch cache>/<local id>/
+# 2. the index — a copy, kept outside the mini-classify checkout
+rsync -az root@<ip>:/srv/index/ <scratch index>/
+```
+
+The index copy is the part that is not optional. The manifest pins the SHA-256 of
+`pose-cache.json` and `run-params.json`, and `check-bake.sh` compares those
+against the box's `/srv/index` at every later redeploy — so baking against the
+local `embed-cache-test` writes a manifest that **refuses the next deploy**, and
+says so only then. The two drift on their own: mini-classify keys its pose cache
+`path|mtime_seconds|size`, so re-exporting a model re-keys its entry while
+copying the pose value forward, and two caches can hold byte-identical poses and
+still hash differently. The hash is what breaks the gate, not the poses — diff
+them before a partial bake, and pull the box's rather than reconcile.
+
+Because `--index-cache` must be what the index server reports as `cache_dir`, the
+copy needs its own server rather than the one above — a spare port, and
+`CUDA_VISIBLE_DEVICES=""` so an index already serving on 8077 keeps the GPU:
+
+```sh
+cd ~/Documents/tests/mini-classify && CUDA_VISIBLE_DEVICES="" .venv/bin/python \
+  serve_api.py ~/Documents/tests/test-models/miniatures/decimated \
+  --cache-dir <scratch index> --no-volume --port 8078
+# then bake with MODEL_BROWSER_INDEX=http://127.0.0.1:8078
+# and --index-cache <scratch index>
+```
+
+Seeding is for the case where only the corpus moved. When the corpus *and* the
+index have both moved — a re-embed — seeding from the box is the wrong shape:
+ship corpus, index and store as one unit, in that order. A corpus rsync alone
+leaves every changed model's sidecar `stale`, which on a `thumbWrites: false`
+deployment no visitor can heal.
+
 **The pin** is `sh deploy/demo/check-bake.sh <manifest> [<index dir>]`, POSIX `sh`
 over `grep`, `sed` and `sha256sum` because the box has no Bun. It compares four
 values — the checkout's `RIG_VERSION` and `POSE_VERSION` against the manifest's
