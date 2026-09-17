@@ -517,7 +517,8 @@ level; move it back. It is never deleted at the id level.
   for every visitor; the check refuses the redeploy until the store is re-baked.
 * The corpus changes — a new kit (no sidecar; a miss the client renders per visit)
   or a re-exported file (its mtime moves and the sidecar reads `stale`). *Generate*
-  is incremental, so the re-bake renders only what changed — but it must be run.
+  is incremental against a seeded `--cache` (below), so the re-bake renders only
+  what changed — but it must be run.
 * The index's poses change, **by re-embedding or by view configuration** — a pose
   is a function of both `pose-cache.json` and `run-params.json` (whose `views` and
   `elevations` key the `front` each entry resolves to, from which the render's
@@ -533,8 +534,9 @@ against those:
 
 ```sh
 # 1. the store — the ids differ; the box's is §5's startup line, the local one is
-#    the marker under decimated, and bake-demo.ts remaps them at ship
-rsync -az root@<ip>:/srv/cache/<box id>/ <scratch cache>/<local id>/
+#    `id` in decimated/.model-browser/library.json, and bake-demo.ts remaps them
+#    at ship. Exclude snapshots/ for the same reason the ship line does.
+rsync -az --exclude 'snapshots/' root@<ip>:/srv/cache/<box id>/ <scratch cache>/<local id>/
 # 2. the index — a copy, kept outside the mini-classify checkout
 rsync -az root@<ip>:/srv/index/ <scratch index>/
 ```
@@ -544,14 +546,19 @@ The index copy is the part that is not optional. The manifest pins the SHA-256 o
 against the box's `/srv/index` at every later redeploy — so baking against the
 local `embed-cache-test` writes a manifest that **refuses the next deploy**, and
 says so only then. The two drift on their own: mini-classify keys its pose cache
-`path|mtime_seconds|size`, so re-exporting a model re-keys its entry while
-copying the pose value forward, and two caches can hold byte-identical poses and
-still hash differently. The hash is what breaks the gate, not the poses — diff
-them before a partial bake, and pull the box's rather than reconcile.
+`path|mtime_seconds|size`, so re-exporting a model moves its key and the loader
+drops the old entry rather than migrating it (`load_pose_cache` in
+mini-classify's `src/pose.py`). Two caches over the same models therefore hash
+differently once either side re-exports — and they can *also* hold identical pose
+values while hashing differently, because `migrate_pose_mtimes.py` re-keys an
+in-place rewrite without re-deciding the pose. Either way the hash is what breaks
+the gate, not the poses, so pull the box's copy rather than try to reconcile.
 
 Because `--index-cache` must be what the index server reports as `cache_dir`, the
-copy needs its own server rather than the one above — a spare port, and
-`CUDA_VISIBLE_DEVICES=""` so an index already serving on 8077 keeps the GPU:
+copy needs a server pointed at it. Simplest is to start the precondition server
+above on `<scratch index>` instead of `embed-cache-test` and leave the port
+alone. Where 8077 must stay on `embed-cache-test` for other work, run a second on
+a spare port, with `CUDA_VISIBLE_DEVICES=""` so the first keeps the GPU:
 
 ```sh
 cd ~/Documents/tests/mini-classify && CUDA_VISIBLE_DEVICES="" .venv/bin/python \
@@ -563,9 +570,21 @@ cd ~/Documents/tests/mini-classify && CUDA_VISIBLE_DEVICES="" .venv/bin/python \
 
 Seeding is for the case where only the corpus moved. When the corpus *and* the
 index have both moved — a re-embed — seeding from the box is the wrong shape:
-ship corpus, index and store as one unit, in that order. A corpus rsync alone
-leaves every changed model's sidecar `stale`, which on a `thumbWrites: false`
-deployment no visitor can heal.
+ship corpus, index and store together, then restart **both** containers. A corpus
+rsync alone leaves every changed model's sidecar `stale`, which on a
+`thumbWrites: false` deployment no visitor can heal; and a new `/srv/index` is
+not picked up by landing the bytes, because the index loads its matrix once at
+warmup and never re-reads the mount (`serve_api.py`: "One worker, no reload").
+`--ship`'s restart is `restart app` alone, so the index needs its own:
+
+```sh
+ssh root@<ip> 'cd /opt/model-browser && \
+  docker compose -f deploy/demo/compose.yaml restart index app'
+```
+
+Restart the index *before* the app, so the app's startup sweep asks an index that
+is already serving the new poses; `POST /reload {"rescan": true}` is the lighter
+alternative where a SigLIP reload is not wanted.
 
 **The pin** is `sh deploy/demo/check-bake.sh <manifest> [<index dir>]`, POSIX `sh`
 over `grep`, `sed` and `sha256sum` because the box has no Bun. It compares four
