@@ -39,7 +39,9 @@ import {
   apps,
   click,
   container,
+  DEFAULT_REPORT,
   dir,
+  features,
   fetchModel,
   getThumb,
   indexAvailability,
@@ -284,6 +286,30 @@ describe("the info panel offers the entry actions", () => {
     expect(
       document.querySelector('button[aria-label="Copy path"]'),
     ).not.toBeNull();
+  });
+
+  it("keeps reset framing where the deployment would not store the pixels", async () => {
+    // **What this pins is that `resetFraming` is not gated**, and the list is
+    // deliberately the same one the case above asserts: `reRenderThumbnail` is
+    // already absent here for the surface's own reason, so nothing in this row
+    // moves with the report. Give `resetFraming` the predicate that takes
+    // re-render off a *tile* menu on such a deployment and this fails — which
+    // is the whole point, because the panel is where the live body lives and a
+    // gate copied across would take a visitor's only way to hand a badly framed
+    // model back.
+    await unmountApp();
+    features.mockResolvedValue({ ...DEFAULT_REPORT, thumbWrites: false });
+    // Both re-stated because the unmount clears them: without the index there
+    // would be no *find similar* and the list would differ for a second reason.
+    indexAvailability.mockResolvedValue({
+      state: "ready",
+      collectionRoot: "/models",
+    });
+    await mountApp("/models", NESTED);
+    listDir.mockResolvedValue(NESTED);
+    await openLightbox("Alpha/found.stl");
+
+    expect(actions()).toEqual(["reveal", "findSimilar", "resetFraming"]);
   });
 
   it("puts the row after the metadata, drawn as the context menu’s own items", async () => {

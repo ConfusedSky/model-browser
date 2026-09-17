@@ -210,6 +210,17 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   by name (KEY_LIGHT); a light added to makeScene without that name is silently never fitted
 - Scene teardown (renderThumbnail's finally, ViewerSession.close) disposes every
   DirectionalLight — shadow maps are VRAM; the model is LRU-owned and never disposed there
+- **The browser-held framing store is off**: `FRAMINGS_KEPT_LOCALLY` (client/src/api/
+  localFramings.ts) is `false` pending issue #28, and it is the first statement in
+  `writeLocalFraming`, `readLocalFraming` and the startup sweep — so on a `thumbWrites:false`
+  deployment nothing a visitor does to a framing survives a reload or a navigation away and
+  back. `model-thumbnails`' *A client whose writes are refused keeps its framings locally*
+  still requires the keep, so spec and code diverge here on purpose. Read that constant before
+  resting an argument on this path: a module-level `const X = false` disables every function
+  below it and appears at no call site. Related: `resetFramingLive` ends by queueing a
+  **non-discarding** `refreshThumbnail` pinned to its own lookup, which on such a deployment
+  still answers the camera the route declined to delete — the tile returns to the deployment's
+  framing after the close (issue #23)
 
 ## Tailwind
 

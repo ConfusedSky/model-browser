@@ -130,7 +130,11 @@ The action SHALL discard the stored axis along with the camera, whatever is avai
 
 The re-render action SHALL never change the model's orbit axis.
 
-Both actions SHALL be offered on every model, including one whose thumbnail is currently missing or failed, and SHALL NOT be offered on entries that are not models. Both SHALL leave the entry's file untouched: they replace a cached rendering, never the model.
+The re-render action's whole product is pixels, and it leaves the model's orientation exactly as it found it by design. Where the deployment would not store those pixels, the action SHALL be withheld rather than offered and left to draw what it cannot keep — the rule stated once under `feature-report`, of which this is a case. It SHALL be offered on every model where the deployment accepts thumbnail writes, including one whose thumbnail is currently missing or failed, since a failed image is one of the things it exists to fix.
+
+Giving up a framing SHALL be offered on every model, whatever the deployment accepts, because what it produces is the absence of an orientation rather than an image, and that absence governs where the model is shown from whether the deployment records it or the browser does. Where neither records it, the action SHALL still take effect until the view is next rebuilt from the deployment, and the orientation the deployment holds SHALL return on that rebuild: what a deployment that declines the write does with an orientation given up is `model-thumbnails`' question, and the answer there SHALL NOT decide whether the action is offered.
+
+Taken from the surface **showing** the model, the action reframes that view at once. A deployment that still holds an orientation it declined to give up may then redraw the tile from it, since the render that follows the close reads what the deployment holds rather than what was asked of it; that is the deployment's image reasserting itself, not a failure of the action. Neither action SHALL be offered on entries that are not models. Both SHALL leave the entry's file untouched: they replace a cached rendering, never the model.
 
 #### Scenario: Refreshing after the thumbnail settings changed
 - **WHEN** the user changes a setting that alters how thumbnails are drawn and then re-renders a tile whose image predates the change
@@ -165,8 +169,16 @@ Both actions SHALL be offered on every model, including one whose thumbnail is c
 - **THEN** the model keeps that axis and is drawn about it
 
 #### Scenario: Offered on a tile that has no image
-- **WHEN** the user raises the menu on a model whose thumbnail failed to render
+- **WHEN** the user raises the menu on a model whose thumbnail failed to render, on a deployment that accepts thumbnail writes
 - **THEN** both actions are offered, since a failed image is one of the things re-rendering exists to fix
+
+#### Scenario: A tile that has no image where the pixels would be dropped
+- **WHEN** the user raises the menu on a model whose thumbnail failed to render, on a deployment that refuses thumbnail writes
+- **THEN** re-rendering is absent, since the image it produced would last only until the view was rebuilt, and giving up the framing is offered
+
+#### Scenario: Giving up a framing is offered where pixels are not kept
+- **WHEN** the user gives up the framing of a model from its tile, on a deployment that refuses thumbnail writes
+- **THEN** the action is offered and takes effect: until the view is next rebuilt from the deployment the model is shown at what it resolves to with none of its own, on the tile and in the expanded viewer alike, and where nothing recorded the discard the deployment's own orientation returns on that rebuild
 
 #### Scenario: Not offered on containers
 - **WHEN** the user raises the menu on a directory or an archive

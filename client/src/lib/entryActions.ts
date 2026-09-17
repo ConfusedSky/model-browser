@@ -612,8 +612,10 @@ export interface EntryCommand {
  * ```
  *
  * The last two rows are groups, not commands: `orbitAxisApplies` and
- * `openInApps` answer for them. Four rows also wait on a facility outside this
- * app, named in their own `applies`, and are absent rather than inert without it.
+ * `openInApps` answer for them. Five rows also wait on something outside this
+ * app — a facility that has to be there, or a deployment that has to accept
+ * what the row produces — named in their own `applies`, and are absent rather
+ * than inert without it.
  */
 export const ENTRY_COMMANDS: readonly EntryCommand[] = [
   {
@@ -688,7 +690,12 @@ export const ENTRY_COMMANDS: readonly EntryCommand[] = [
     id: "reRenderThumbnail",
     label: "Re-render thumbnail",
     // Offered even on a current image: a failed one is what this exists to fix.
-    applies: (entry) => entry.kind === "model",
+    // **Everything it produces is pixels** — the orientation is left as found —
+    // so where the deployment would not store them the press does nothing at
+    // all, and the row goes rather than render and discard. `resetFraming`
+    // stays: giving up an orientation moves the model whoever keeps it.
+    applies: (entry, ctx) =>
+      entry.kind === "model" && ctx.features?.thumbWrites === true,
     run: (entry, host) =>
       refreshThumbnail(entry, host, { discardFraming: false }),
   },

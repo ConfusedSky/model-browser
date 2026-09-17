@@ -107,6 +107,28 @@
   Masa edit the same files. To undo my own experiment, restore from the copy I made
   before making it, and take that copy every time I mutate a file I did not write.
 
+## 2026-09-17 — I argued a design decision from a code path a kill switch had disabled
+
+- Drafting `withhold-discarded-rerender`, I justified keeping *Reset framing* on a
+  write-refusing deployment with "the client keeps the discard locally, so it survives the
+  reload". It does not: `FRAMINGS_KEPT_LOCALLY` in `client/src/api/localFramings.ts` is
+  `false` — off since 2026-09-15 pending issue #28 — and it is the first statement in both
+  `writeLocalFraming` and `readLocalFraming`. I had read that module twice in two ranges
+  (the functions, not the head) and never saw the constant, so a fable review caught it.
+  Two spec deltas ended up contradicting each other on shipped code, and one verification
+  task would have passed with the action never performed. Rule: before resting an argument
+  on a code path, read the module's head for the module-level constants that gate it —
+  a `const X = false` disables every function below it and shows up in no call site. Where
+  a main spec normatively requires the behaviour (`model-thumbnails`' *A client whose
+  writes are refused keeps its framings locally*), the spec being right is not evidence
+  that the code does it.
+- Second-order version of the same miss, same review: a trailing call can undo the body
+  that made it. `resetFramingLive` ends by queueing a **non-discarding** `refreshThumbnail`,
+  whose lookup on a refusing deployment still answers the camera the route declined to
+  delete — so the tile returns to the deployment's framing after the close. Rule: when a
+  body ends by queueing another body, read that one too, under the failure mode being
+  argued and not the happy path.
+
 ## 2026-09-17 — I documented a workaround instead of deleting it
 
 - Asked to clear stale `clustered-hq` references, I found the deploy recipe still built its
