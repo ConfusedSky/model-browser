@@ -1,864 +1,775 @@
 # Plan: serve the demo's thumbnails and models from a CDN (issue #24)
 
-Status: decided 2026-09-16 (§D), revised after review the same day (§R). Phase 1 is the
-pull-zone experiment; nothing else started, no repo code changed.
+Decided 2026-09-16, revised 2026-09-17. Phase 1 is a measurement; nothing else is started
+and no repo code has changed. This file was rewritten whole on 2026-09-16 after seven review
+rounds, then reviewed again by opus, sonnet and fable — §R says what all of that settled and
+what it cost.
 
-## D. Decisions taken 2026-09-16
+**Three decisions taken 2026-09-17, and they cut the plan roughly in half:**
 
-- **Motive: latency and consistency.** Not cost. The box shares two vCPU with a SigLIP
-  index, and when it is busy the file downloads slow with it. Consistency is the harder
-  half — an edge that answers without touching the box removes the contention, not just
-  the distance.
-- **Host: Cloudflare R2**, on a custom domain. Its Developer Platform terms carry no
-  large-file clause (§2).
-- **Order: run the pull-zone experiment first** (§8), before building anything in §3.
+- **The edge composes the CDN URL** (a Worker bound to R2), not the client. Every client and
+  server change below is struck — see §4.
+- **The contention motive is dead**, measured: 48 ms of a 1,772 ms fetch, 2.7% (§8.1). The
+  win is distance.
+- **The models half waits for GLB** (issue #4). Thumbnails proceed now, and they are ~114 of
+  the ~115 requests a first screen makes.
 
-One consequence worth naming: an R2 custom domain requires the zone to be on Cloudflare,
-so the Namecheap → Cloudflare nameserver move is needed either way. The experiment does not
-spend that step, it takes it early.
+## 1. Motive, and what it is not
 
-### Baseline, from this machine (US Pacific → Falkenstein)
+- **Latency.** A US visitor pays ~168 ms per round trip to Falkenstein, and a first screen
+  is ~114 images.
+- **Consistency — settled 2026-09-17, and it is *not* the motive.** The box's contention is
+  real and far too small to matter to a visitor: measured, it costs **48 ms of a 1,772 ms
+  fetch, 2.7%** (§8.1). The 1.69→4.10 s spread §8 records is network — slow start and loss —
+  not the box. The models half is still worth doing, but for **distance**, which is the
+  first bullet, not for contention.
+- **Not cost.** The CX23 includes 20 TB/month at €5.49 (hetzner.com/cloud/regular-performance,
+  fetched 2026-09-16). 500 GB of egress is 2.5% of that. Nothing here is justified as a bill
+  reduction.
 
-Run it, do not read it here:
-`.ai/probe-demo-latency.sh .ai/demo-latency-before.csv 60 60`, then summarise with the
-snippet at the end of this section. The output path is an argument and the run holds a
-`flock` on `<output>.lock`, because two runs writing one file interleave rows and produce a
-file that looks like data and is not — which happened twice on 2026-09-16 and cost two
-baselines. Do not delete the lock file while a run holds it, and **do not edit the script
-while a run is using it**: bash reads a script incrementally, and a run started before an
-edit keeps writing the old columns. The snippet below reports min / median / max over the
-rows with `ok=1`; that file, written by the current script, is what a later claim must be
-checked against.
+## 2. What moves
 
-**The probe was rewritten repeatedly through §R, and its columns changed almost every
-time** — `model_bps` became transfer-only, `batch_hit`, `batch_cf` and `why` arrived later
-still. Only rows written by the *current* script compare with each other. The table below
-predates all of it and is kept solely as evidence that the model spread is real.
-
-The run in flight writes `.ai/demo-latency-before.csv` and its PID is in
-`.ai/demo-latency-before.pid`; the file is **partial until the run ends** (60 samples, one
-per interval — the sleep runs to a deadline taken before the work, so a run only runs long
-if a sample exceeds the interval). `kill "$(cat .ai/demo-latency-before.pid)"` stops it.
-
-A first run of 8 samples (2026-09-16, ~11:53 PT, the first version of the probe, which
-reused one model and divided by the wrong denominator) gave:
-
-| column | min | median | max |
+| asset | count | size | served today by |
 |---|---|---|---|
-| `thumb_ttfb` | 0.505 | 0.513 | 0.518 |
-| `batch_total` (20 renders) | 1.169 | 1.185 | 1.250 |
-| `model_total` (2.5 MB) | 1.723 | 1.747 | **4.064** |
-| `model_bps` | 615,117 | 1,431,350 | 1,451,317 |
-| `dir_ttfb` | 0.524 | 0.538 | 0.549 |
+| thumbnails, both occlusion variants | 6,244 | ~32.3 MB (33.3 MB is the whole 9,367-file ship, sidecars and manifest included) | `/api/thumb/image` |
+| models (STL) | 3,122 | 4,894,875,398 B — 4.89 GB decimal, 4.56 GiB | `/api/file` |
 
-The model column is the consistency complaint, measured: the same file, same probe, 1.72 s
-and 4.06 s minutes apart. Nothing else in the table moves by more than 3%. Do not read the
-throughput spread off *that* table — those rows divided by a total containing the round
-trip, and a later version drew files of differing sizes, so part of any spread there was
-arithmetic. The current probe fixes both (one size band, transfer-only throughput); the
-spread it reports is the number to quote. That run is kept as
-`.ai/demo-latency-v1-partial.csv`.
-
-Structural facts from the same measurements, which do not vary: one round trip to
-Falkenstein is ~168 ms (`*_ttfb_net`, TTFB net of connection setup — the subtracted
-`time_appconnect` is DNS plus TCP plus TLS, not the TLS handshake alone); setup completes
-at ~342 ms cold; 20 renders multiplexed over one HTTP/2 connection take ~1.0 s.
-
-Confirmed live against the demo: `/api/thumb/image` answers `Cache-Control: public,
-max-age=31536000, immutable` at a current generation, and **`/api/file` sends no
-`Cache-Control` at all**. That single fact is why the experiment caches thumbnails for
-free and models not at all.
+Counts are sizing, not a pin; `check-assets.sh` (§5) asserts per key, never a total. The
+thumbnail figures are the 2026-09-15 bake's, recorded in `corpus-bake`. Re-run the corpus
+ones:
 
 ```sh
-python3 - <<'PY'
-import csv, statistics as st
-import collections
-allrows = list(csv.DictReader(open('.ai/demo-latency-before.csv')))
-rows = [r for r in allrows if r['ok'] == '1']
-print('rows', len(allrows), 'ok', len(rows))
-print('excluded by reason:', collections.Counter(r['why'] for r in allrows if r['ok'] != '1'))
-if not rows:
-    raise SystemExit('no ok rows — read the why column before reading any timing')
-gate = [r for r in rows if int(r['batch_hit']) == 20 and float(r['batch_total_net']) < 0.3]
-print('rows passing the phase-1 gate (batch_hit==20 and batch_total_net<0.3):', len(gate))
-print('best batch_hit seen:', max((int(r['batch_hit']) for r in rows), default=0))
-for c in ('thumb_ttfb','thumb_ttfb_net','batch_total','batch_total_net','model_total','model_bps','dir_ttfb'):
-    v = [float(r[c]) for r in rows]
-    print(f'{c:16s} min {min(v):.3f} med {st.median(v):.3f} max {max(v):.3f}')
-PY
+CORPUS_DIR=${CORPUS_DIR:-~/Documents/tests/test-models}   # the default `dev:demo` takes
+find "$CORPUS_DIR/miniatures/decimated" -name '*.stl' | wc -l
+find "$CORPUS_DIR/miniatures/decimated" -name '*.stl' -printf '%s\n' | awk '{s+=$1}END{print s}'
 ```
 
-## R. Review findings folded in, 2026-09-16
-
-A review of the first draft found three blockers and a list of wrong claims. What changed:
-
-- The §8 cache rules were ordered so the bypass rule also matched `/api/thumb/image`, and
-  Cloudflare's last-matching-rule-wins would have made the experiment answer "no
-  improvement" whatever the truth. Fixed in §8.4.
-- The probe checked no status codes, so a challenge page or a 5xx would have been recorded
-  as a fast small success — and a new Cloudflare zone turns Browser Integrity Check on by
-  default, which challenges bare curl. The probe was rewritten: status columns,
-  `cf-cache-status`, an `ok` flag, TTFB net of the handshake, a fresh random model per
-  sample, and no concurrency cap on the batch.
-- §D quoted figures that were not in the CSV it cited. Rewritten to point at the file.
-- The thumbnail key no longer drops the generation (§3), which was in conflict with the
-  recorded "thumbnails keyed path+mtime" decision and would have made an in-place model
-  replacement serve stale pixels forever.
-- Corrected claims: the `<img onError>` fallback catches a *missing* object, never a wrong
-  one; the client change is not one-place; `Cross-Origin-Resource-Policy: same-origin` is
-  real exposure that a public bucket loses; Cloudflare Free includes the query string in
-  the cache key and does not let you customise it, so the argument against query-string
-  versioning was backwards.
-
-A second review of the corrected draft found two more blockers. What changed again:
-
-- §4 claimed the generation "is not in the sidecar" and invented a re-derivation. False:
-  `ThumbCache.writeMeta` writes `gen` into `<sha>.json` and `infoFor` reads it back. The
-  publisher reads it from there.
-- Risk 8's rule refused `features.thumbWrites: true`, but `DEFAULT_FEATURES.thumbWrites`
-  is `true` and index.ts merges over it — so a config with `assets` and no `thumbWrites`
-  key would have passed the check and accepted writes. The rule now requires an explicit
-  `false`.
-- §3 said the bases need "no new plumbing" while the server section put `assets` outside
-  `FeatureReport`; and `fetchModel` had no route to a base at all. Both answered by a
-  `readAssets` getter and a `withAssets` decorator.
-- The generation moved to the end of the key, so prefixes stay purgeable.
-- `check-assets.sh` pinned bucket object *counts*, which a re-bake doubles. It now pins
-  per-key existence and reports the prune list.
-- The probe was rewritten a second time: `model_bps` is transfer-only, the models are drawn
-  from one size band, the standalone thumbnail is random and excluded from the batch, the
-  header file is a `mktemp` (a fixed `/tmp/probe.h` was being written by two concurrent
-  runs, corrupting the `cf-cache-status` column the whole experiment rests on),
-  `batch_total_net` removes the handshake, a non-`immutable` thumbnail fails the row, and
-  there is no trailing sleep.
-- The phase-1 gate moved onto handshake-net columns and now requires `cf_cache: HIT`;
-  both of the old gate's thresholds could be met by a zone that cached nothing.
-- Also corrected: the CDN is gated on the box's own cache annotations, so `rm -rf` on the
-  cache makes every published object unreachable; `usable()`, not the key, is what catches
-  a stale render; the bucket needs its own Cache Rule because R2 custom domains cache by
-  extension; `not … eq` is not valid wirefilter; and Caddy tries TLS-ALPN-01 before
-  HTTP-01, which a terminating proxy breaks.
-
-The second review independently confirmed what the first got wrong: `renders: {ao, noao}`
-is top-level in the written `BakeManifest`, and `verify` never reaches the file.
-
-A third review found three more blockers. What changed again:
-
-- The experiment recorded **no edge evidence at all**: `cf-cache-status` was captured only
-  for the standalone thumbnail, which is drawn at random from a pool of over a thousand
-  URLs and so reads MISS on a working edge. The batch now carries
-  `%header{cf-cache-status}` per transfer, the new `batch_hit` column counts HITs, and the
-  phase-1 gate is stated on it.
-- `batch_total_net` subtracted the *first* completed transfer's handshake, but only one of
-  the 20 pays it and `-Z` finishes them out of order — so the column silently equalled
-  `batch_total` on an unpredictable subset of rows, an error larger than the whole gate
-  margin. It now takes the maximum across all transfers.
-- §3 told the publisher to percent-encode object keys. An R2 key is a raw byte string and
-  the edge decodes before matching, so that would have 404'd every non-ASCII path. Keys are
-  raw; only the URL builder encodes.
-- A truncated transfer still reports HTTP 200 — reproduced live: `-m 1` against the demo
-  gave `200`, exit 28, 81,920 of 2,500,084 bytes. That is precisely the stall being
-  measured, and it read as a fast row. The gate now checks curl's exit code and the byte
-  count against the listing's `size`.
-- §4 assumed every sidecar names two renders. A baked store does carry both, but a
-  browsing-built one mostly does not (505 sidecars with `noao` labels against 35 with both,
-  on this machine), so publish and check are per variant.
-- `readAssets` cannot share `featuresRef`, whose readers — `withLocalFramings`
-  (client/src/api/localFramings.ts) and the `useThumbnails` sweep — take a bare
-  `FeatureReport | null`; two refs, one effect.
-- The publish scripts were specified for a box that has no jq, no Bun, no Node and no
-  rclone. §4 now names that as a decision to take, not an assumption.
-- The encoding test matrix pinned `#`, `?`, `%`, `+` — none of which occur in the corpus.
-  The real class is `Ø` and katakana, i.e. multi-byte UTF-8 and NFC/NFD.
-- Also corrected: `rm -rf <cache>/<id>` costs nothing until a *restart* (the annotations are
-  served from an in-memory map); a wrong base puts the first screen through the heavy
-  base64 tier, not one wasted request each; `allocateGen` can reissue a generation after a
-  cache wipe and a backwards clock, so the publisher must refuse to overwrite; the symbol
-  is `ApiClient.features`, not `getFeatures`; and the probe's period is interval plus work,
-  not a flat minute.
-
-Confirmed across reviews, not re-litigated: `renders: {ao, noao}` is top-level in the
-written `BakeManifest` and `verify` never reaches the file; the key shape produces no
-collision on the real corpus (zero segment-prefix pairs across 3,122 paths, and a path
-cannot be both a file and a directory); and the `ok` gate does fail when it should —
-falsified against a missing `immutable` header, a challenge page, and a truncated
-transfer.
-
-A fourth review found one blocker and five majors. What changed again:
-
-- The model key named a `<corpus id>` segment that **nothing on the wire carried**: the
-  config holds two base strings and the client was told to compose an id it never receives.
-  The version now lives inside the `models` base URL itself, and the client only
-  concatenates.
-- §1's counts were described as what `check-assets.sh` pins against, contradicting §4,
-  which says a total cannot work. They are sizing; the check is per key.
-- The phase-1 gate stated its two conditions independently, so a partially cold edge could
-  satisfy each on a different row. One row must satisfy both, and the §D snippet now counts
-  exactly those rows.
-- The gate was thumbnail-shaped while the motive is the model spread. It now says so:
-  failing it stops the thumbnail work only.
-- §8 said not to leave the experiment running and nothing discharged it — phase 6 turned
-  off the cache rule but left the zone orange, which keeps every `/api/file` byte flowing
-  through the free CDN. Phase 6 now grey-clouds.
-- The claim that `featuresRef` is read by "`keepsFramingsLocally` and four
-  App/SidePanel/entryActions call sites" was fabricated — it was relayed from a review
-  without being checked. Every `readFeatures` reader lives in App.tsx. The real reason for
-  a second ref is simply that `assets` is not a `FeatureReport` field.
-- `createApp` takes nine positional parameters, not ten; `assets` would be the tenth.
-- The probe counted only the literal `HIT`, so `REVALIDATED`/`UPDATING`/`STALE` — all
-  edge-served — would have failed the gate; and the batch carried no exit code or byte
-  count, so round 3's own truncated-200 argument had never been applied to the twenty
-  transfers the gate rests on. Both fixed, plus a `batch_cf` histogram and a startup check
-  that fails fast when curl cannot expand `%header{}`.
-- Also corrected: the key-ordering argument no longer rests on purge arithmetic (single-file
-  purges run at 800 URLs/second on Free, so the store purges in seconds either way); the
-  encoding paragraph names `Ø`, katakana and an NFC/NFD pair instead of dangling a
-  reference to five ASCII specials it no longer argues; `gen === 0` is pinned alongside
-  `undefined`, since `infoFor` reads `meta.gen ?? 0`; `Caddyfile.local` cannot mirror an
-  ACME issuer block and needs a recorded second divergence; and §8 now records that
-  Cloudflare's 100-second origin timeout turns the box's "degrade to waiting" posture into
-  524s while the experiment runs.
-
-A fifth review found two blockers and eight majors. What changed again:
-
-- Round 4's `<corpus id>` removal **missed the one bullet an implementer acts on**:
-  `fetchModel` still said `GET <base>/<corpus id>/<path>`, which would 404 every model and
-  fall back to the origin forever without a visible error. Fixed, and the stray sentence
-  two paragraphs up with it.
-- **Two probe runs were writing the baseline CSV at once**, having survived a `kill` that
-  read a stale PID file, and the file held NUL bytes, out-of-order rows and rows of the
-  wrong width — the summary snippet reported a `model_total` median of 1,179,694 before
-  dying on a path. Both were killed, the file was discarded, and the probe now takes its
-  output path as an argument and holds a `flock` on it; a second run refuses to start
-  (falsified).
-- `batch_hit` counted `REVALIDATED`, which is served only *after* a blocking origin
-  revalidation — the exact round trip the experiment removes — so twenty 304s could have
-  passed the gate with the box contacted twenty times. It now counts HIT, STALE and
-  UPDATING; REVALIDATED still shows in `batch_cf`.
-- Every failure a CDN introduces (a 524 at Cloudflare's 100-second origin timeout, a
-  truncation) lands in `ok=0`, and those rows left every average — so a CDN that converts
-  slow answers into failures would have read as pure improvement. Rows now carry a `why`
-  column, and §D's snippet prints the excluded count and reasons first.
-- `check-assets.sh`'s prune list was unscoped: no sidecar names a model, so it would have
-  proposed deleting the entire 4.6 GB models prefix. Scoped to the thumbnails base.
-- Risk 7 blamed re-bakes for the free-tier cliff. A re-bake orphans 33.3 MB; a `models`
-  base bump is 4.6 GB, so the second bump exceeds the 10 GB free tier. Deleting the retired
-  prefix is now part of the bump.
-- "Rolling back is republishing, not reverting a config string" became false for models the
-  moment the version moved into the base: reverting that string *is* the models rollback.
-  Split per half.
-- §8.7 still told the operator to read `cf_cache` per row — the mistake §7's gate was
-  rewritten to forbid, since the standalone thumbnail is *meant* to read MISS.
-- §8.5's issuer pin is a tracked-file edit plus a redeploy, which phase 1 is not allowed to
-  be. It now says so and falls under the phase-6 go-ahead.
-- Corrections: 105 sidecars carry both renders, not 35; `readFeatures`' readers are
-  `withLocalFramings` and the `useThumbnails` sweep (the round-4 note "every reader lives in
-  App.tsx" was itself wrong, relayed a second time without checking);
-  `thumbnailQueue.test.tsx` is `.tsx` and `folderSheets.test.tsx` calls the real builder in
-  eight assertions; whether rclone is on the box was relayed, not verified, and is now
-  marked as such; the key-ordering argument no longer rests on purge arithmetic; and the
-  `%header{}` startup check no longer blames curl for an unreachable host (falsified).
-
-**Status after five rounds: not yet "safe as written".** The review cap agreed with Masa is
-spent. What remains open is listed as such above — §3's open decisions (the box's
-toolchain, `/api/features`'s breaking shape) and §4's unverified rclone availability are
-proposal-time questions, not implementation surprises, but they have not had a review pass
-of their own.
-
-A sixth review found three blockers and eight majors. What changed again:
-
-- **Round 5's prune fix landed beside the old text instead of replacing it**, so the
-  sentence still ended "report anything in the bucket no sidecar names" — rebuilding the
-  unscoped sweep that proposes deleting all 4.6 GB. Same failure as round 4's missed
-  `<corpus id>` bullet: a correction added, the wrong version left standing.
-- **§6 had no instrument for what it verifies.** The probe builds only origin-shaped URLs
-  and its startup check demands `/api/features`, so pointing `HOST` at a bucket refuses to
-  start and leaving it alone measures the untouched origin. Teaching it the CDN URLs is now
-  a phase-5 task, before any flip.
-- Phases 3 and 4 were not independently landable: a nested `{features, assets}` response
-  would leave `main` between them reporting every capability `undefined`. **The wire shape
-  is now additive** — `FeatureReport & { assets?: AssetBases }` — which breaks nothing and
-  was the right shape anyway; the nested form had been asserted with no argument behind it.
-- Publishing had no stated ordering, and `deploy/demo/README.md` §7 prescribes the opposite: ship
-  sidecars, restart, *then* the CDN URLs exist. Publish first, then ship, then restart.
-- Nothing in the phase list touched `deploy/demo/README.md`, the only steps an operator
-  follows, or CLAUDE.md's `DeploymentConfig` line. Both are phase 5 now.
-- `bun run dev:demo` cannot rehearse this: its `MODEL_BROWSER_CONFIG` is a plain assignment
-  in `package.json`, so a scratch config cannot be pointed at.
-- The publisher cannot read a hit verdict from a sidecar — none is stored. `statusFor`
-  (server/src/cache.ts) derives it by comparing the variant's `mtime` against the model
-  file's.
-- `withAssets` as a second decorator would duplicate all 19 of `LocalFramingClient`'s
-  explicit delegates to override two, and raise a composition-order question. One more
-  parameter on `withLocalFramings` instead.
-- Risk 8's hard `ConfigError` refused startup over a harm §3 calls benign — and since
-  `thumbWrites` defaults true, it would have refused **every** deployment that set `assets`
-  without writing `thumbWrites: false`. Downgraded to a startup warning.
-- The version-in-prefix design had never been weighed against alternatives. Both are now
-  recorded with the reason each lost, and the short-Edge-TTL option is named as the one to
-  take if the 10 GB free tier binds.
-- Probe: `asorti` is a gawk extension, so `batch_cf` would have died under mawk; the EXIT
-  trap unlinked a lock file the process still held; `model_path` and `why` were unquoted in
-  CSV. All fixed and re-run.
-- Corrections: every non-ASCII corpus path is already NFC, so the NFD case is synthetic and
-  is now labelled so — the "live risk" claim was relayed, not measured; the example path
-  said `Mini_Warehouse` where the directory is `Mini_Warehouse_6185614`; and the "net"
-  columns subtract `time_appconnect`, which is DNS + TCP + TLS, not the TLS handshake, as
-  the header comment and §D both claimed.
-
-A seventh review found two blockers and seven majors, and was asked to sweep the whole
-document for the failure this process kept repeating: a correction landing *beside* the
-text it should have replaced. It found three more instances. What changed:
-
-- §6's config-parse test list still specified the `ConfigError` round 6 had downgraded —
-  the risk said "warns", the test said "refused".
-- §3 and phase 4 still described "a base parameter across the interface", the design round 6
-  replaced with a decorator override. **No `ApiClient` signature moves**, so the test stubs
-  are untouched; both places now say so.
-- §4 said `publish-assets.sh` runs "on the box after a bake", which is exactly the ordering
-  the same section forbids two paragraphs earlier. It runs from this machine between the
-  bake and `--ship`, and `deploy/demo/README.md` §7's `--ship` cannot be used unsplit
-  because it rsyncs and restarts in one step.
-- Risk 2 named `check-assets.sh` as what catches a wrong models include filter, while §4
-  forbids that sweep from enumerating the models base at all. It gets an assert-only
-  models-side pass.
-- "`check-assets.sh` refuses a publish into a prefix the bucket already holds" contradicted
-  that script's job and would block resuming an interrupted 4.6 GB upload. The refusal is
-  the publisher's, and it is about a key whose bytes differ.
-- §8 never discharged the orange cloud between phase 1 and phase 6 — weeks of terms
-  exposure and 524s for a measurement. Grey-cloud as soon as the gate is read.
-- **The in-flight baseline was started before the round-6 probe edits and kept writing the
-  old columns** — §R's "fixed and re-run" was false for the file §D calls the baseline.
-  Discarded and restarted. The lesson is recorded in §D: never edit the script while a run
-  is using it, since bash reads a script incrementally.
-- Corrections: the corpus has seven non-ASCII paths (six `Ø`, one katakana directory), not
-  "six and seven"; `LocalFramingClient` already carries real logic in `getThumb`/`putThumb`
-  and the delegate count is not worth pinning; an R2 lifecycle rule on *age* would expire
-  live thumbnail keys, so it is no longer offered as an alternative to the prune; risk 7's
-  free-tier arithmetic now uses decimal GB (4.89 GB per corpus copy, ~9.86 GB against 10),
-  where GiB had flattered the margin; §3's "under a version segment" contradicted "the
-  generation goes after the path"; §D overstated what its own table covers and undercounted
-  the probe rewrites; and the probe now sets `LC_ALL=C`, since a comma-decimal locale would
-  have made every `sub()` a malformed awk program.
-
-**Where this stands: seven review rounds, and the verdict is still not "safe as written".**
-Rounds 5, 6 and 7 each found a fix from the previous round sitting beside the text it was
-meant to replace — the process's own characteristic failure, and the reason a final
-end-to-end read by someone new is worth more than another round of the same.
-
-## 0. Motive — cost is not one
-
-The CX23 already includes **20 TB/month of traffic** at €5.49/mo
-(hetzner.com/cloud/regular-performance, fetched 2026-09-16). 500 GB of egress is 2.5% of
-that. The motive is §D's: latency, and the box's own contention showing up in download
-times.
-
-## 1. What moves, and what does not
-
-| asset | count | size | today |
-|---|---|---|---|
-| thumbnails (WebP, both occlusion variants) | 6,244 | 33.3 MB | `/api/thumb/image`, baked 2026-09-15 |
-| models (STL) | 3,122 | 4.6 GB | `/api/file`, streamed from `/library` |
-
-Re-run the two counts rather than trusting them. They are corpus **sizing** — what to
-budget for storage and upload — and not a pin: `check-assets.sh` asserts per-key existence,
-never a total (§4). The 6,244 is two renders for each of 3,122 models because the demo bake
-deliberately produces both occlusion variants; a store built by browsing is mostly
-one-sided, which is why the publisher must not assume the pair.
-
-```sh
-find "$CORPUS_DIR/miniatures/decimated" -type f -name '*.stl' | wc -l   # models
-du -sh "$CORPUS_DIR/miniatures/decimated"
-ls "$CACHE_DIR/<library id>"/*.webp | wc -l                            # renders
-du -sh --exclude=bake --exclude=snapshots "$CACHE_DIR/<library id>"
-```
+`du -sb` is the wrong instrument and does not reproduce the table — it counts directories,
+`overrides.json` and the library marker.
 
 Not moving: every `/api/*` answer (listings, search, credits, features), the client bundle
-(already hash-named and served `immutable` by the app), and zip entries — `/api/file`
-extracts those in memory per request and the demo corpus contains none, so they keep the
+(hash-named and already served `immutable` by the app), and zip entries — `/api/file`
+extracts those in memory per request, the demo corpus contains none, and they keep the
 origin path unconditionally.
 
-## 2. Host
+## 3. Host: Cloudflare R2 on a custom domain
 
 Prices verified 2026-09-16 against vendor pages.
 
-| option | 10 GB egress/mo | 500 GB egress/mo | storage 5 GB | failure mode |
+| option | 10 GB egress/mo | 500 GB egress/mo | storage | failure mode |
 |---|---|---|---|---|
-| **Cloudflare R2 + custom domain** | $0 | $0 | $0 (10 GB free) | bills, no cap; free tier discretionary |
-| Bunny Storage + Pull Zone | $1.00 (minimum) | ~$5.10 | ~$0.05 | prepaid — account pauses at €0 |
+| **Cloudflare R2 + custom domain** | $0 | $0 | 10 GB-month free, then **$0.015/GB-month pay-as-you-go** | bills past the free tier; no hard cap, and no cliff either |
+| Bunny Storage + Pull Zone | $1.00 (minimum) | ~$5.10 | $0.01–0.02/GB-month | prepaid; account pauses at €0 |
 | Cloudflare CDN over the existing origin | $0 | $0 | — | Application Services terms restrict serving "a disproportionate percentage of pictures … or other large files" |
-| Backblaze B2 + Cloudflare | $0 | $0 | $0.03 | same terms restriction; B2 custom domain needs sales approval |
-| CloudFront + S3 | ~$0.25 | ~$0.25 | $0.12 | no hard cap; a spike past the 1 TB free tier is $0.085/GB |
-| Hetzner Object Storage | €6.49 | €6.49 | included | ruled out: no custom domains, and their FAQ says it is not a CDN |
-| Pages / Netlify / Vercel / jsDelivr / HF | — | — | — | ruled out: 25 MiB per-file cap (Pages), or AUP language naming hotlinked media hosting as abuse |
+| Backblaze B2 + Cloudflare | $0 | $0 | $0.00695/GB-month | same terms restriction; B2 custom domain needs sales approval |
+| CloudFront + S3 | ~$0.25 | ~$0.25 | $0.0245/GB-month | no cap; a spike past the 1 TB free tier is $0.085/GB |
+| Hetzner Object Storage | €6.49 | €6.49 | €6.26/TB over 1 TB | no custom domains; their FAQ says it is not a CDN |
+| Pages / Netlify / Vercel / jsDelivr / HF | — | — | — | 25 MiB per-file cap (Pages), or AUP language naming hotlinked media hosting as abuse |
 
-The terms detail that picked the winner: Cloudflare's **Developer Platform** terms (which
-govern R2, dated 2026-06-02) carry **no** large-file or non-HTML clause, while the
-**Application Services** terms (which govern the CDN) do.
+What decided it: Cloudflare's **Developer Platform** terms (governing R2, dated 2026-06-02)
+carry no large-file or non-HTML clause, while the **Application Services** terms (governing
+the CDN) do. R2 on a custom domain is the sanctioned shape; proxying the box's own bytes
+through the free CDN is the restricted one.
 
-## 3. Architecture: version-in-the-key, config-driven, origin fallback
+An R2 custom domain requires the zone on Cloudflare, so the Namecheap → Cloudflare
+nameserver move is needed either way. Phase 1 takes that step early rather than spending it.
 
-Object keys mirror the library path, with a version segment **after** it for thumbnails
-(the generation, which the client already holds) and **inside the base URL** for models:
+## 4. Architecture
+
+### Keys
 
     <thumbnails base>/<library path>/<gen>.webp        occluded render
     <thumbnails base>/<library path>/<gen>.noao.webp   unoccluded render
     <models base>/<library path>                       model bytes
 
-Both bases are **whole URL prefixes carried in the configuration**, and a version lives
-inside them: `"models": "https://assets.example/m/2026-09-16"`. There is no separate
-corpus-id field on the wire and the client never composes one — it concatenates a base and
-a path, nothing else. Bumping the corpus is editing that one string, which is why the
-models side is a config change and a redeploy where the thumbnails side is not.
+Both bases are whole URL prefixes carried in the deployment's configuration. **The
+thumbnail version is the generation, in the key**; **the model version is a segment inside
+the base URL** (`"models": "https://assets.example/m/2026-09-16"`). The client never
+composes the *models* version — it concatenates that base and a path. Thumbnails are the
+other way round: the client does place `gen` in the key, because it already holds it.
 
-The generation goes **after** the path, not in front of it: a per-entry millisecond stamp
-at the top would give no two entries a shared prefix, so the prune could never scope
-itself to a path and would have to enumerate the bucket. (Do not rest this on purge speed:
-single-file purges on Free run at 800 URLs a second, so the store purges in seconds either
-way.)
+Why the split:
 
-**Thumbnails carry the generation**, which the listing annotation already supplies and
-which the origin's own image URL already names. So the object key and the origin URL
-identify the same render, `immutable` is honest, a re-render writes a new key, and no
-config bump is coupled to a publish. This is the shape the recorded "thumbnails keyed
-path+mtime" decision asks for.
+- Thumbnails already have a per-entry version the client holds: `gen`, an integer the
+  listing annotation carries and the origin's own image URL already names. So the object
+  key and the origin URL identify the same render, `immutable` is honest, a re-render
+  writes a new key, and no configuration changes when the store is re-baked.
+- Models have no such number. `DirEntry.mtime` is a float on the wire
+  (`1789446597239.1736`), and a key built from one would depend on Python and JavaScript
+  formatting the same float identically. The operator's string in the base avoids that and
+  makes a rollback a one-line revert.
+- The generation goes **after** the path, not in front of it. A millisecond stamp at the
+  top would give no two entries a shared prefix, and the prune could never scope itself to
+  a path.
 
-**Models are versioned by their base URL**, which the operator bumps when the corpus is
-rsynced. Two simpler options were weighed and lost, but only just, and the second is worth
-revisiting if risk 7 bites:
+### Who composes the CDN URL — DECIDED 2026-09-17: the edge does (shape 1)
 
-- *An unversioned models prefix, corrected by purge.* Cheapest in storage — no retired
-  prefix, no free-tier cliff — and purge by prefix is available on Free (risk 9). Rejected
-  because it makes every model correction a manual purge whose omission is invisible: the
-  stale bytes are served `immutable` for a year and nothing in the client can tell.
+**Masa chose the edge Worker.** The consequence is large and good: **§4's client sections,
+the `assets` config key and the `/api/features` change are all struck from the plan.** They
+were bought by shape 4 and shape 4 is not being built. What remains below is kept as the
+record of why, and because the key shapes still describe what the Worker maps *to*.
+
+Struck with it: the mount race, the wrong-base hole, the `readAssets` getter, the decorator
+question, the `withLocalFramings` parameter, and every client test in §7 — none of them
+exist under an edge mapping. `thumbUrl.ts` and `fetchModel` are untouched; the client keeps
+asking the origin's own URLs and never learns a CDN exists.
+
+The four shapes, kept for the record:
+
+1. *The edge maps.* A Worker route-scoped to `/api/thumb/image*` and `/api/file*`, bound to
+   R2, translating those URL shapes into object keys and falling back to the origin on a
+   miss. **No app change at all**: no config key, no features field, no decorator, no race,
+   no wrong-base hole, and it is Developer Platform code, so §3's terms question on the
+   app's own hostname goes away. An earlier draft rejected this on the Workers Free ceiling
+   — wrongly. The free plan's per-route behaviour past 100,000 requests a day is
+   **fail-open**: "Bypasses the Worker. Requests behave as if no Worker is configured"
+   (developers.cloudflare.com/workers/platform/limits/), which is this plan's own fallback
+   philosophy. The route scope also means it is not in front of the whole site, and
+   `immutable` repeats never reach it. Its real costs are different ones: the app hostname
+   stays orange-clouded, so §9's 524 behaviour becomes permanent rather than time-boxed; and
+   an R2-binding Worker bypasses the edge cache unless it uses the Cache API or fetches
+   through the custom domain.
+2. *The origin redirects.* `/api/file` answers 302 to the CDN when `assets.models` is set.
+   No client code at all; `modelFormat`'s allowlist and the nested-zip rule stay per-request
+   at the origin, so risk 2 disappears entirely; no race, no wrong-base hole. Costs one
+   origin round trip — ~168 ms of a 1.77 s fetch by §8, about 10% of the models win, and
+   none of the contention win if §1's contention turns out to be real.
+3. *The server emits the URL.* The listing annotation carries the CDN URL beside
+   `state:'hit'`. This puts the URL where the vouching already lives (`statusFor`/`infoFor`),
+   which dissolves both the mount race and the "the override cannot enforce vouching" hole
+   below, and leaves the client concatenating nothing.
+4. *The client composes* — the largest, and the one every "client" paragraph below was
+   written for. **Not being built.**
+
+What shape 1 still requires, and what a later phase must specify: the Worker's own code
+(a key rewrite plus an R2 `get`, with origin fallback on a miss), whether it reads through
+the Cache API or fetches the custom domain so that edge caching still applies, **fail-open
+chosen deliberately on the route** (it is a setting, not a default — see the cost section),
+and the fact that the app hostname stays orange-clouded permanently, so §9's 524 behaviour
+is a standing condition rather than a time-boxed one.
+
+Two key *shapes* were also weighed and lost:
+
+- *An unversioned models prefix, corrected by purge.* No retired prefix, no free-tier
+  cliff, and purge by prefix is available on Free (§6, risk 8). Rejected because every
+  model correction becomes a manual purge whose omission is invisible — stale bytes served
+  `immutable` for a year with nothing in the client able to tell.
 - *A short Edge TTL for models instead of `immutable`.* `/api/file` sends no
   `Cache-Control` at all today, so even an hour would be an improvement, and staleness
-  self-heals. Rejected because it gives up the thing the CDN is for on the half that
-  carries the bytes — but if the 10 GB free tier turns out to be the binding constraint,
-  this is the option to take, not a paid plan.
+  self-heals. Rejected because it gives up most of the win on the half that carries the
+  bytes, and because the reason once given for keeping it in reserve — the 10 GB free tier
+  — turned out to be mispriced (risk 6).
 
-The version segment is not an mtime: `DirEntry.mtime` is a float on the wire (`1789446597239.1736`), and a key built from
-one would depend on Python and JavaScript formatting the same float identically. The version is a string the operator puts in the base URL, and models change only when the
-operator replaces them.
+### What any of this costs — $0, and where the ceilings are
 
-Consequences, and they differ per half. **Thumbnails**: a re-bake writes new keys and
-leaves the old ones, so the bucket needs a prune (a sweep in `publish-assets.sh` that deletes keys no sidecar names — **not** an R2 lifecycle rule on
-age, which would expire live keys, since a current generation's object is never rewritten),
-and rolling back means
-republishing, since no config string points at a generation. **Models**: reverting the
-`models` base to the previous version prefix *is* the rollback — that is why the version
-lives in the base — so keep one retired prefix until the new one is verified, then delete
-it (risk 7).
+Verified 2026-09-17 against developers.cloudflare.com (r2/pricing, workers/platform/limits).
+Nothing in §4 has a monthly bill at this demo's scale, and that is true of every shape above:
+a Worker's invocations come out of the same free tier as everything else.
 
-**Encoding belongs to the URL alone, never to the key.** An R2 object key is a raw byte
-string: the publisher writes `Mini_Warehouse_6185614/Oildrum_Lid_Ø50.stl/<gen>.webp` with
-the bytes
-as they are on disk, and only the *client* percent-encodes, per segment, joined with real
-`/`, leading slash dropped. A publisher that stores the encoded form serves nothing: the
-edge decodes the request path before matching, so `…%C3%98…` looks for the raw name and
-404s. Note this is a **second URL shape** inside one builder — today `thumbImageUrl` puts
-the whole path in a *query parameter*, where `encodeURIComponent` escapes the slashes too.
+| item | free allowance | price past it | this demo |
+|---|---|---|---|
+| Workers requests | 100,000/day | $5/mo Paid → 10M/mo | $0 |
+| Worker CPU | 10 ms/request | — | $0; a key rewrite is I/O wait, not CPU |
+| R2 storage | 10 GB-month | $0.015/GB-month | 4.93 GB → $0 |
+| R2 Class A (writes) | 1M/month | $4.50/M | 9,366 per bake → $0 |
+| R2 Class B (reads) | 10M/month | $0.36/M | $0 |
+| R2 egress | unlimited | — | $0 |
 
-The characters that actually matter are not the ASCII specials: a scan of all 3,122 corpus
-paths finds **seven** non-ASCII paths in total: six carrying `Ø`, and one katakana
-directory (`Pompompurin_ポムポムプリン_4649260`). Nothing else falls outside
-`[A-Za-z0-9/._-]`.
-Every one of those is already NFC on disk — re-run it rather than trusting the line:
+The tighter ceiling is the Worker's: a cold first screen is ~114 requests, so 100,000/day is
+~877 **cold** first screens a day. R2's read tier is ~87,000 of them a month. "Cold" carries
+the argument — the renders are `immutable` and the whole set is ~32 MB, so once a PoP is
+warm its visitors reach neither the Worker nor the bucket, and warming every PoP is a few
+hundred × 114 ≈ 34,000 invocations.
+
+Two things the documentation does not settle, neither of which changes the decision at this
+scale: whether a `bucket.get()` through a Workers binding bills as a Class B operation, and
+whether a cache HIT in front of an R2 custom domain still incurs one. Re-check both if the
+demo ever carries real traffic.
+
+Note also that **fail-open is a route setting, not a default** — the same limits page offers
+fail-closed (a Cloudflare `1027` error page) for security-critical Workers. Shape 1 above is
+only as safe as that setting, so it has to be chosen deliberately.
+
+### Encoding
+
+**Keys are raw bytes; only the URL is encoded.** The publisher writes
+`Mini_Warehouse_6185614/Oildrum_Lid_Ø50.stl/<gen>.webp` exactly as the path reads on disk.
+The client encodes per segment, joins with real `/`, drops the leading one. A publisher
+that stores the percent-encoded form serves nothing: the edge decodes before matching, so
+`…%C3%98…` looks for the raw name and 404s.
+
+Note this is a second URL shape inside one builder — today `thumbImageUrl` puts the whole
+path in a *query parameter*, where `encodeURIComponent` escapes the slashes too.
+
+The corpus has seven non-ASCII paths: six carrying `Ø`, one katakana directory
+(`Pompompurin_ポムポムプリン_4649260`). All are already NFC on disk:
 
 ```sh
 find "$CORPUS_DIR/miniatures/decimated" -name '*.stl' \
   | python3 -c "import sys,unicodedata as u; print(sum(u.normalize('NFC',l)!=l for l in sys.stdin))"
 ```
 
-So the falsification bucket carries two real cases — `/Mini_Warehouse_6185614/Oildrum_Lid_Ø50.stl`
-and a katakana path — plus one **deliberately synthetic** NFD name, kept because a corpus
-imported from HFS+ would arrive decomposed even though this one did not.
+So the falsification bucket (§7) carries those two real cases plus one **deliberately
+synthetic** NFD name — kept because a corpus imported from HFS+ would arrive decomposed
+even though this one did not.
 
 ### Server
 
 - New optional top-level key in `DeploymentConfig` (shared/types.ts):
-  `"assets": { "thumbnails": "https://…", "models": "https://…" }`. Both optional strings;
-  validate absolute `https:` URL, no trailing slash. Add `"assets"` to `TOP_LEVEL_KEYS` in
-  server/src/config.ts with its own `rejectUnknown` key list. It sits at the top level,
-  **not** under `features`: `FEATURE_KEYS` derives from `DEFAULT_FEATURES` and must stay
-  boolean-only, and `config.features` is typed `Partial<FeatureReport>`, so an `assets`
-  field inside `FeatureReport` would be type-legal in a place the parser refuses at
-  runtime.
-- The wire shape is **additive, not nested**: `/api/features` answers
-  `FeatureReport & { assets?: AssetBases }`. Nothing breaks — today's client reads the
-  capability booleans exactly as it does now and ignores the extra key — and nothing about
-  the parser changes either, because `assets` stays a *top-level config* key and
-  `FEATURE_KEYS` still derives from `DEFAULT_FEATURES`, which is a plain `FeatureReport`.
-  A nested `{features, assets}` was considered and rejected: it is a breaking response
-  change bought for nothing, and it would force the server and client phases to land
-  together. `createApp` — nine positional parameters today, `cache` through `origins` —
-  gains a tenth — "nothing else on the server changes" is not true.
-- `guard()` still covers `/api/*` only and still emits no CORS headers; `/api/thumb`,
-  `/api/thumb/image` and `/api/file` are unchanged and remain both the fallback and the
-  whole local/dev posture (no `assets` key).
+  `"assets": { "thumbnails": "https://…", "models": "https://…" }`. Both optional strings,
+  validated as absolute `https:` URLs with no trailing slash. Add `"assets"` to
+  `TOP_LEVEL_KEYS` in server/src/config.ts with its own `rejectUnknown` list.
+- It is a **top-level** key, not a capability. `FEATURE_KEYS` derives from
+  `DEFAULT_FEATURES` and must stay boolean-only, and `config.features` is typed
+  `Partial<FeatureReport>`, so an `assets` field inside `FeatureReport` would be type-legal
+  in a place the parser refuses at runtime.
+- `/api/features` answers `FeatureReport & { assets?: AssetBases }` — **additive**. Today's
+  client reads the capability booleans exactly as it does now and ignores the extra key, so
+  the server phase lands alone. (A nested `{features, assets}` was carried for four review
+  rounds before anyone asked what it bought: it is a breaking response change that would
+  also force the server and client phases to land together.)
+- `createApp` — nine positional parameters today, `cache` through `origins` — gains a tenth.
+- Unchanged: `guard()` still covers `/api/*` only and still emits no CORS headers;
+  `/api/thumb`, `/api/thumb/image` and `/api/file` keep their behaviour and remain both the
+  fallback and the entire local/dev posture, where no `assets` key is set.
 
-### Client — bigger than one file
+### Client
 
-`thumbImageUrl` is a pure builder in client/src/api/thumbUrl.ts, and also a method on the
-`ApiClient` interface, on `HttpApiClient`, delegated through `withLocalFramings`, and
-stubbed in `client/test/appHarness.tsx` and `client/test/thumbnailQueue.test.tsx` (with
-`client/test/folderSheets.test.tsx` calling the real builder). **No `ApiClient` signature
-moves.** The decorator composes the CDN URL itself and the pure builder keeps its current
-five-argument shape, so every stub and every caller stays as it is — which is the point of
-doing this in the decorator rather than in the interface.
+Two pieces, and **no `ApiClient` signature moves**:
 
-The base cannot arrive through the `ApiClient` constructor: the client is memoised at
-mount and feature-report D6 forbids rebuilding it when the report resolves. The shape that
-fits is the one already in the tree — `withLocalFramings` decorates a client and reads a
-report through a stable getter. Add a **second ref and getter** `readAssets` — not a second reader over `featuresRef`,
-which is `useRef<FeatureReport | null>` and whose every reader takes a bare
-`FeatureReport | null`, so it cannot carry a `{features, assets}` shape without changing
-all of them; the one features effect writes both refs — and a **fifth parameter on `withLocalFramings`** rather than a second decorator.
-`LocalFramingClient` delegates every `ApiClient` method explicitly, on purpose, so that a
-new method fails to compile, and already carries real logic in `getThumb` and `putThumb`; a
-`withAssets` wrapper would duplicate the whole interface to override two
-and would raise a composition-order question with no good answer. Overriding
-`thumbImageUrl` and `fetchModel` in the class that already holds a report getter costs one
-parameter. That is what answers both call
-sites: `HttpApiClient` is constructed with no getter and must not gain one, and
-`useThumbnails` calls `api.thumbImageUrl`, so the decorator reaches the vouched branch
-without touching the hook's signature at all. `thumbImageUrl`'s `gen` is optional and a
-key cannot be built without one: with `gen` undefined the decorator returns the origin URL
-unchanged, pinned by a test. Pin `gen === 0` the same way — `infoFor` reads `meta.gen ?? 0`,
-so zero is the degenerate value that can actually arrive, and it would otherwise key
-`…/0.webp`. It is new plumbing — one ref, one getter and one parameter on the decorator that already
-exists — not none, and the earlier draft claiming otherwise contradicted its own server
-section.
+1. A second getter, `readAssets`, over the **same** ref, whose type widens to
+   `(FeatureReport & { assets?: AssetBases }) | null`. Every existing reader
+   (`withLocalFramings`, the `useThumbnails` sweep, `notEmbeddedMessage`) takes a bare
+   `FeatureReport | null` and an intersection stays assignable to that, so none of them
+   change. One ref, one effect, two getters.
+2. The overrides themselves — and **not** in `LocalFramingClient`. Two reasons an earlier
+   draft missed: that class already holds `report`, a getter over the same ref, so widening
+   its type hands it `assets` with no new parameter at all; and its concern is D6 local
+   framings, so composing CDN URLs there makes the class name lie. `HttpApiClient` is the
+   network-shaped class, already carrying an injectable `fetchFn`, and is where a base URL
+   belongs. (Under shape 2 or 3 above, this whole item disappears.)
 
-**The race, and why it is left alone.** The features effect fires at mount; the sweep runs
-after a listing resolves; the sweep's dependency array holds only the getter's stable
-identity, so a report landing later does not re-run it. A first screen drawn before the
-report resolves would therefore use origin URLs. Accepted, because the failure is benign
-(the tiles are correct, merely served from the box) and because the ordering is heavily in
-our favour: the features answer is a few hundred bytes issued at mount, the listing it
-races is orders of magnitude larger and the sweep only starts once that lands. Neither
-alternative earns its cost — injecting the bases into the served HTML loses the
-"configuration is a commit" shape, and re-running the sweep pays a second pass over every
-first screen to win a race that is already won. Pin the *benign fallback* in a test, not
-the race: a tile whose draw sees a null report must render from the origin URL and must not
-throw.
+`client/src/api/thumbUrl.ts`'s own comment — that an `<img>` and the JSON lookup "name the
+same bytes and land in the same cache tier" — is **falsified** by a CDN URL and must be
+rewritten with the change. The pure builder itself keeps its current shape and every test stub (`appHarness.tsx`, `thumbnailQueue.test.tsx`,
+and `folderSheets.test.tsx`, which calls the real builder) is untouched. One signature does
+move — `ApiClient.features()`'s **return type** widens to carry `assets` — but a narrower
+return type stays assignable, so the stubs still compile unchanged.
 
-**The CDN does not decouple from the box's own cache.** A CDN URL is used only where the
-listing annotation reads `hit`, and that annotation is the *box's* thumbnail store. The
-annotation is served from `ThumbCache.facts`, an in-memory map seeded by `maintain`'s
-startup pass, so the documented `rm -rf <cache>/<id>` costs nothing *until the server
-restarts* — after that the annotations are gone, every object is still in the bucket, no
-visitor reaches one, and every tile re-renders locally. (`maintain`'s cap eviction is not
-this case: it clears a variant's labels without bumping the generation, so it moves the
-staleness state rather than the key.) So a republish implies a re-bake, and losing
-the box's cache loses the CDN's usefulness with it.
+Rules the override follows:
 
-Other client points:
+- A CDN URL must only be minted where the listing already vouches for the render — variant
+  `state: 'hit'` and `usable(...)` passing. **The override cannot enforce that**:
+  `thumbImageUrl(path, mtime, ao, gen)` sees none of it. The invariant lives in
+  `useThumbnails`' `start`, today's only caller of that method, and nothing but convention
+  keeps the next caller from routing a whole screen into the base64 tier. Pin it: a comment
+  at the call site and a test that a non-vouched entry never produces a CDN URL.
+- `gen` is optional on the method and `infoFor` reads `meta.gen ?? 0`, so **both `undefined`
+  and `0` return the origin URL unchanged**. Pin both.
+- `fetchModel`: with a models base, `GET <base>/<library path>`; on a non-ok status or a
+  network error, retry `/api/file?path=…`. Paths containing `!` (zip entries) always go to
+  the origin. This is a `fetch()`, so the bucket must send
+  `Access-Control-Allow-Origin: https://models.masamaeda.com`; thumbnails need no CORS,
+  since a plain `<img>` load is not CORS-governed. Route it through `HttpApiClient`'s
+  injectable `fetchFn` rather than the global, or §7's fallback tests have no seam to stub.
 
-- Use the CDN URL only where the listing already vouches for the render: variant
-  `state: 'hit'` and `usable(...)` passes. Everything else keeps today's path.
-- The existing `<img onError>` → `onImageError` → JSON-lookup path recovers a **missing**
-  object at one wasted request. It does **not** recover a *wrong* one: wrong pixels are a
-  200 that decodes, no error event fires, and there is no client-side detection at all.
-  What actually keeps a stale render from being drawn is `usable()` failing on the labels a
-  write clears, not the key — a write to one occlusion variant bumps the shared generation
-  and clears the sibling's recipe labels while leaving the sibling's pixels alone, so at
-  the new generation those bytes are the old render and only the label check catches it.
-- `HttpApiClient.fetchModel`: with a models base, `GET <base>/<library path>`; on a
-  non-ok status or a network error, retry `/api/file?path=…` (the base already carries
-  whatever version segment the operator put in it). Paths containing `!` (zip
-  entries) always go to the origin. This is a `fetch()`, so the bucket must send
-  `Access-Control-Allow-Origin: https://models.masamaeda.com`; thumbnails need no CORS
-  because a plain `<img>` load is not CORS-governed.
+### What the fallback does and does not cover
 
-## 4. Publishing
+A **missing** object recovers by itself: `<img onError>` → `onImageError` → the `/api/thumb`
+lookup → a `blob:` URL. But that lookup carries the render base64-inlined, which is the
+heavy tier `/api/thumb/image` exists to avoid — so a wrong *base* puts a whole first screen
+through the expensive path. It does not loop (`getThumb` never calls `thumbImageUrl`), so it
+is safe, only costly.
 
-**Hard ordering, and it is the reverse of what the runbook does today.** `deploy/demo/README.md` §7
-rsyncs sidecars to the box and restarts the app; the moment it restarts, the listing
-annotates the new generations and every CDN URL 404s until the upload finishes — which
-routes all 6,244 tiles through `getThumb`'s base64 tier for the whole window (risk 5).
-Publish to the bucket **first**, then ship the sidecars, then restart.
+A **wrong** object does not recover at all: wrong pixels are a 200 that decodes, no error
+event fires, and there is no client-side detection. What keeps a stale render from being
+drawn is `usable()` failing on the labels a write clears — not the key.
 
-New `deploy/demo/publish-assets.sh`. It runs **from this machine against the bake's own
-cache, between the bake and `--ship`** — not on the box after shipping, which is the
-ordering the paragraph above forbids. `deploy/demo/README.md` §7's `--ship` does the rsync
-and the restart as one step, so it cannot be used unsplit: rsync, publish, then restart.
-rclone against R2's S3 endpoint.
+### The race, and why it is left alone
 
-**Name the toolchain first.** `deploy/demo/check-bake.sh` records that the box has no jq,
-no Bun and no Node, which is why every existing check there is line-oriented `grep`/`sed`.
-Whether rclone is installed is unchecked — confirm on the box rather than assuming. Walking thousands of JSON sidecars is not a shell job, so
-either add an interpreter and rclone to the box's provisioning in `deploy/demo/README.md` §1, or run
-the publish from this machine against a `rsync`'d copy of the cache. Decide in the proposal
-— the scripts below are unrunnable on the box as it stands.
+The features effect fires at mount; the sweep runs after a listing resolves; the sweep's
+dependency array holds the getter's *stable* identity alongside its other inputs (`poses`,
+`libraryId` and the rest), so a report landing later changes nothing in it, so a report landing later does not
+re-run it. A first screen drawn before the report resolves therefore uses origin URLs.
+Accepted: the failure is benign (correct tiles, served from the box), and the ordering
+favours us — the features answer is a few hundred bytes issued at mount, the listing it
+races is far larger, and the sweep only starts once that lands. Pin the *benign fallback* in
+a test, not the race: a tile drawn while the report is null renders the origin URL and does
+not throw.
 
-- **Thumbnails.** Walk `<cache>/<library id>/*.json`; each sidecar carries the **library**
-  path *and* the generation — `{"path":"/Kit/x.stl","gen":1789519399619,…}`, written by
-  `ThumbCache.writeMeta` and read back by `infoFor`, which is the same number the listing
-  annotation hands the client. Upload `<sha>.webp` → `<path>/<gen>.webp` and
-  `<sha>.noao.webp` → `<path>/<gen>.noao.webp` — **per variant, only where that variant is
-  a hit**. No sidecar stores that verdict: `statusFor` (server/src/cache.ts) derives it by
-  comparing the variant's stored `mtime` against the model file's, so the publisher stats
-  each model and compares. The recipe labels (`rig`, `lighting`, `posed`, `poseKey`) are
-  `usable()`'s business at draw time, not the publisher's. The demo's *baked* store does carry both variants for every model (6,244 for
-  3,122), but a store is not always baked: on this machine's browsing-built store all 505
-  sidecars carry `noao` labels while 105 carry both renders. That asymmetry is why
-  `BakeManifest` counts `renders.ao` and `renders.noao` separately, and why the publisher
-  reads each variant's state rather than assuming a pair. Skip `bake/` and `snapshots/`, and publish
-  neither the sidecars nor `bake.json`.
+### The CDN does not decouple from the box's cache
+
+A CDN URL is used only where the listing annotation reads `hit`, and that annotation comes
+from `ThumbCache.facts`, an in-memory map seeded by `maintain`'s startup pass. So
+`rm -rf <cache>/<id>` during visual tuning costs nothing *until the server restarts* — after
+which the annotations are gone, every object is still in the bucket, no visitor reaches one,
+and every tile re-renders locally. A republish implies a re-bake. (`maintain`'s cap eviction
+is a different case: it clears a variant's labels without bumping the generation.)
+
+### The models half waits for GLB (decided 2026-09-17)
+
+Issue [#4](https://github.com/ConfusedSky/model-browser/issues/4) replaces STL with GLB at
+roughly a third the bytes (its own table: 169.7 MB → 59.9 MB on a 200-model corpus, 2.8x;
+5.8x gzipped). Masa reports it is approaching final review. Publishing 4.89 GB of STL now
+would be **paid twice**: the upload, and then a retired 4.89 GB prefix to prune when the
+corpus turns over — and the keys change wholesale, since the models key is the library path
+and #4 changes both the extension and `MODEL_EXT`.
+
+The saving compounds with this plan rather than merely shrinking it: fewer bytes is fewer
+slow-start round trips, which is the entire models win per §8.1. At ~1/3 the size a model
+needs about six round trips instead of eight, and from a `wnam` edge that is ~0.12 s against
+today's 1.77 s.
+
+So: **the thumbnails half proceeds now; the models half waits for #4.** Thumbnails are
+unaffected by it — 32.3 MB of WebP, no relationship to the model container — and they are
+~114 of the ~115 requests a first screen makes, so nearly all of the request-count win lands
+in the half that is not waiting.
+
+Two things to carry into #4's review, because they are cheaper to decide there than to
+retrofit: whether GLB objects are served under the same `/api/file?path=` shape the Worker
+maps (if the route or the extension changes, the Worker's rewrite changes with it), and
+whether both formats are ever served at once — which would double the bucket rather than
+shrink it.
+
+## 5. Publishing
+
+**Ordering, and it is the reverse of the runbook's.** `deploy/demo/README.md` §7 rsyncs
+sidecars to the box and restarts the app as one `--ship` step; the moment it restarts, the
+listing annotates the new generations and every CDN URL 404s until the upload finishes —
+routing all 6,244 tiles through the base64 tier for the whole window. So: **bake, publish,
+rsync, restart**, which means `--ship` cannot be used unsplit. `--ship` also carries the
+post-ship verification `deploy/demo/README.md` §7 documents — waiting for `/api/library` to
+read ready, hit-checking three models on both variants, running every example query — so
+splitting it means either running those by hand or teaching the bake script a
+publish-aware flag. Decide which in phase 5; do not simply lose them.
+
+`deploy/demo/publish-assets.sh` runs **from this machine against the bake's own cache**, not
+on the box after shipping. rclone against R2's S3 endpoint.
+
+**Name the toolchain before writing either script.** `deploy/demo/check-bake.sh` records
+that the box has no jq, no Bun and no Node, which is why every check there is line-oriented
+`grep`/`sed`; python3 is present. **rclone is absent on the box and on this machine too**
+(verified 2026-09-17), so installing it is a phase-5 step wherever the publisher runs. The
+publish running from this machine (above) sidesteps the interpreter question but not that
+one.
+
+- **Thumbnails.** Walk `<cache>/<library id>/*.json`. Each sidecar carries the library path
+  and the generation — `{"path":"/Kit/x.stl","gen":1789519399619,…}`, written by
+  `ThumbCache.writeMeta`, read back by `infoFor`, and the same number the listing hands the
+  client. Upload `<sha>.webp` → `<path>/<gen>.webp` and `<sha>.noao.webp` →
+  `<path>/<gen>.noao.webp`, **per variant, only where that variant is a hit**. No sidecar
+  stores that verdict: `statusFor` (server/src/cache.ts) derives it by comparing the
+  variant's stored `mtime` against the model file's, so the publisher stats each model and
+  compares. Recipe labels (`rig`, `lighting`, `posed`, `poseKey`) are `usable()`'s business
+  at draw time, not the publisher's. One-sided entries are ordinary — a baked store carries
+  both variants for every model, a browsing-built one mostly does not, which is why
+  `BakeManifest` counts `renders.ao` and `renders.noao` separately.
 - **Models.** `rclone sync` under the version prefix the `models` base names, with an
-  include filter mirroring
-  `modelFormat`'s allowlist. Load-bearing: `/api/file` enforces "model formats only,
-  everything else answered as missing" per request, and publishing moves that rule to
-  publish time. A `notes.txt` or a runbook rsynced into the corpus must not be published.
+  include filter mirroring `modelFormat`'s allowlist. Load-bearing: `/api/file` enforces
+  "model formats only, everything else answered as missing" per request, and publishing
+  moves that rule to publish time. A `notes.txt` or a runbook rsynced into the corpus must
+  not be published.
 - **Headers at upload:** `Cache-Control: public, max-age=31536000, immutable`;
-  `Content-Type: image/webp` / `application/octet-stream`;
-  `X-Content-Type-Options: nosniff`. Bucket directory listing off.
-- **The bucket needs its own Cache Rule**, for the reason §8.4 records for the origin: an
-  R2 custom domain caches by file extension by default, and `.stl` is not in that set. Set
-  the models prefix eligible for cache explicitly, or the CDN in front of R2 caches nothing
-  and every model download is a bucket read.
+  `Content-Type: image/webp` / `application/octet-stream`; `X-Content-Type-Options:
+  nosniff`. Bucket directory listing off.
+- **The models prefix needs its own Cache Rule.** An R2 custom domain caches by file
+  extension by default; `webp` is in that set, `stl` is not
+  (developers.cloudflare.com/cache/concepts/default-cache-behavior/), so the thumbnails
+  half needs nothing and the models half would otherwise be a bucket read every time. On
+  the assets hostname: `ends_with(http.request.uri.path, ".stl")` → Cache eligibility
+  **Eligible for cache**, Edge TTL **Respect origin** (the objects are uploaded
+  `immutable`).
+- **Refusing an overwrite is the publisher's job.** It must not write a key that exists with
+  different bytes (risk 8). It must *not* refuse a populated prefix — that would block
+  resuming an interrupted 4.89 GB upload.
 - **CC-BY attribution.** Publish a `CREDITS.txt` generated from the override store at each
-  prefix root. Attribution currently exists only inside the app.
-- **`deploy/demo/check-assets.sh`**, the pin: **per-key existence at the current
-  generation**, not a total. A total cannot work: `allocateGen` stamps each entry in
-  milliseconds, so a re-bake writes a fully disjoint key set and the bucket holds 2x the
-  manifest's count after one re-bake and 3x after two. Walk the sidecars, assert that the
-  object for **each hit variant** is present (never assuming both), and report anything
-  **under the thumbnails base** that no sidecar names — that list is the prune's input. The
-  sweep must never reach the models base: no sidecar names a model, so an unscoped sweep
-  proposes deleting all 4.6 GB. `bake.json`'s `renders.ao` / `renders.noao` (top-level
-  keys in `BakeManifest`, the written shape; `verify` is on `ManifestInput` only and never
-  reaches the file) stay useful as the *expected* sidecar count, not as a bucket count.
-- **The version segment** is the operator's string inside the `models` base — no
-  derivation from `bake.json`'s optional `client.commit` or its `dirty` flag, which would
-  need rules for an absent commit and a dirty tree. `publish-assets.sh` refuses to overwrite an
-  existing key whose bytes differ (risk 9); it does **not** refuse a populated prefix,
-  which would block resuming an interrupted 4.6 GB upload. `check-assets.sh` asserts after
-  a publish, so it finds the prefix populated by definition.
+  prefix root. Attribution exists only inside the app today.
+- **`deploy/demo/check-assets.sh`**, the pin, in two passes:
+  - *Thumbnails*: per-key existence at the current generation for each hit variant, never
+    assuming a pair, plus a list of keys under the thumbnails base that no sidecar names —
+    that list is the prune's input. A *total* cannot work: `allocateGen` stamps each entry
+    in milliseconds, so a re-bake writes a disjoint key set and the bucket holds 2x the
+    manifest's count after one re-bake. `bake.json`'s `renders.ao` / `renders.noao`
+    (top-level keys in `BakeManifest`, the written shape; `verify` is on `ManifestInput`
+    only and never reaches the file) stay useful as the expected *sidecar* count.
+  - *Models*: two directions, both read-only. Forward, from the corpus file list filtered
+    by `modelFormat`'s allowlist, every expected key must exist. Backward, an enumeration of
+    the models prefix must report keys the allowlist does not explain — that is what catches
+    risk 2's over-broad include filter, which a corpus-driven pass alone could never see.
+    It **reports**; it never proposes a deletion, since no sidecar names a model and a
+    deleting sweep here would propose all 4.89 GB.
+- **Pruning runs after the restart, never between publish and restart.** Its input is "keys
+  no sidecar names" computed from the local bake, and between publish and restart the box is
+  still serving the *previous* generation — so a prune in that window deletes exactly what
+  visitors are asking for. Thumbnails: the sweep above, and **not** an R2 lifecycle
+  rule on age — a current generation's object is never rewritten, so an age rule would
+  expire live keys. Models: deleting the retired version prefix, which is a step of the
+  bump (risk 6).
+- **Rolling back differs per half too.** Thumbnails: republish, since no configuration
+  string points at a generation. Models: revert the `models` base to the previous prefix —
+  which is the reason the version lives there — so keep one retired prefix until the new one
+  is verified, then delete it.
 
-## 5. Risks
+## 6. Risks
 
-1. **A wrong object is undetectable client-side** (§3). Carrying `gen` in the thumbnail key
-   is the whole mitigation; nothing catches it if the publisher gets a key wrong.
-2. **The allowlist moves from per-request to publish time.** A wrong include filter
-   publishes a file `/api/file` would refuse. `check-assets.sh` catches it with a
-   **models-side pass of its own** — driven by the corpus file list and `modelFormat`'s
-   allowlist, assert-only, never proposing a deletion — since its thumbnail sweep is
-   forbidden from enumerating the models base (§4).
-3. **`Cross-Origin-Resource-Policy: same-origin` is lost** for thumbnails. The origin sets
-   it deliberately, so that a guessed URL is not an existence oracle through
-   `onload`/`onerror`. A public bucket object has no such header: any third-party page can
-   then probe library-path existence and hotlink every render. Accepted cost — record it in
-   the proposal, do not let it pass silently.
+1. **A wrong object under a correct key is invisible and lasts a year.** No client-side
+   detection exists (§4). `check-assets.sh` before the flip is the only guard.
+2. **The model-format allowlist moves from per-request to publish time.** A wrong include
+   filter publishes a file `/api/file` would refuse; `check-assets.sh`'s models pass is what
+   catches it.
+3. **`Cross-Origin-Resource-Policy` is lost for thumbnails — recoverably.** If the assets
+   hostname is a subdomain of `masamaeda.com`, a Response Header Transform rule (available
+   on Free) adding `Cross-Origin-Resource-Policy: same-site` restores the block; choose the
+   hostname with that in mind and this closes rather than being accepted. Unrecovered, it
+   reads: The origin sets
+   it deliberately, so a guessed URL is not an existence oracle through `onload`/`onerror`.
+   A public bucket object has no such header: a third-party page can then probe library-path
+   existence and hotlink every render. Accepted cost — record it in the proposal rather than
+   letting it pass silently.
 4. **Model bytes are not new exposure**: `/api/file` already serves them publicly. Risk 3
    applies to thumbnails only.
-5. **A wrong base costs more than one wasted request per tile.** Every tile 404s at the
-   CDN and then falls back to `getThumb`, whose answer carries the render base64-inlined —
-   the heavy tier `/api/thumb/image` exists to avoid. A wrong base therefore puts a whole
-   first screen through the expensive path. It does not loop (`getThumb` never calls
-   `thumbImageUrl`), so it is safe, only costly. Falsify the fallback first.
-6. **Vendor cliff.** R2's free tier bills past its limits with no cap. Set a budget alert.
-7. **The free tier is spent by model *versions*, not by re-bakes.** A re-bake orphans
-   33.3 MB of thumbnail keys, which the prune handles. A `models` base bump is the corpus
-   again — 4,894,873,256 bytes, i.e. **4.89 GB decimal**, which is what a bucket bills in —
-   and `rclone sync` under a new prefix never touches the old one: two prefixes plus both
-   thumbnail generations is ~9.86 GB against a 10 GB free tier, a margin thinner than one
-   re-bake's orphans. **Deleting the retired prefix is a step of the
-   bump**, once the new one is verified — not a later cleanup.
-8. **`thumbWrites` with `assets` warns at startup; it does not refuse.** A deployment that
-   accepts visitor writes produces renders the bucket does not carry — but that is a
-   *missing object*, which §3's `onImageError` path already recovers with correct pixels at
-   one extra request. A `ConfigError` would be a hard startup failure for a benign harm,
-   and since `DEFAULT_FEATURES.thumbWrites` is `true` and index.ts merges
-   `{...DEFAULT_FEATURES, ...config.features}`, it would refuse to start **every**
-   deployment that sets `assets` without explicitly writing `thumbWrites: false`. So: one
-   warning line naming both keys when `thumbWrites` resolves true and `assets.thumbnails`
+5. **A wrong base is costly, not just wasteful** — see §4's fallback note.
+6. **A model version bump doubles the stored bytes — and costs pennies, not a cliff.** A
+   `models` base bump is the corpus again (4.89 GB) and `rclone sync` under a new prefix
+   never touches the old one, so two prefixes plus both thumbnail generations is ~9.86 GB
+   against a 10 GB-month free tier. Past that R2 bills **$0.015/GB-month pay-as-you-go with
+   no cap and no cliff** (developers.cloudflare.com/r2/pricing/): carrying a second 4.89 GB
+   prefix for a month is about **$0.07**. So deleting the retired prefix is *hygiene, done
+   once the new one is verified*, not an emergency — and nothing in this plan should be
+   traded away to stay under 10 GB. An earlier draft called the margin "thinner than one
+   re-bake's orphans", which was backwards twice over: the margin is ~140 MB against 33 MB
+   of orphans, and the overage was never a failure in the first place.
+7. **`thumbWrites` with `assets` warns; it does not refuse.** A deployment accepting visitor
+   writes produces renders the bucket does not carry — but that is a *missing* object, which
+   the `onImageError` path recovers with correct pixels. A `ConfigError` would be a hard
+   startup failure for a benign harm, and since `DEFAULT_FEATURES.thumbWrites` is `true` and
+   index.ts merges `{...DEFAULT_FEATURES, ...config.features}`, it would refuse to start
+   **every** deployment that sets `assets` without explicitly writing `thumbWrites: false`.
+   One warning line naming both keys when `thumbWrites` resolves true and `assets.thumbnails`
    is set. The demo sets `false` explicitly and never sees it.
-9. **A wrong object under a correct generation is a year-long error.** It is published
-   `immutable` and the client has no way to see it (risk 1). Recovery is: fix the object,
-   then purge. Cloudflare's purge by **prefix** is available on the Free plan (up to 100
-   operations per request, 5 requests per minute — developers.cloudflare.com/cache/how-to/
-   purge-cache/), so a bad publish is recoverable at the edge without Purge Everything.
-   That lever is the reason `check-assets.sh` runs *before* the config points at a new
-   prefix, not after. One way a wrong object arises with no publisher mistake at all:
-   `allocateGen` is `max(Date.now(), lastGen + 1, prev + 1)` with `lastGen` module-level and
-   reset per process, so after an `rm -rf <cache>/<id>` there is no `prev` floor and a
-   backwards clock step can reissue a generation the bucket already holds — under
-   `immutable`. The publisher must refuse to overwrite an existing key with different
-   bytes. Two caveats the docs attach: a URL's query string cannot be purged
-   by prefix, and an R2 custom domain caches by file extension by default — so §4's models
-   Cache Rule is what makes the model objects cacheable and therefore purgeable at all.
+8. **A generation can be reissued after a cache wipe.** `allocateGen` is
+   `max(Date.now(), lastGen + 1, prev + 1)` with `lastGen` module-level and reset per
+   process, so after `rm -rf <cache>/<id>` there is no `prev` floor and a backwards clock
+   step can reissue a generation the bucket already holds — under `immutable`. Hence the
+   publisher's refusal to overwrite differing bytes. Recovery at the edge is purge by
+   prefix, available on the Free plan (100 operations per request, 5 requests a minute —
+   developers.cloudflare.com/cache/how-to/purge-cache/). A prefix purge covers every URI
+   beneath it whatever the query string; what is unsupported is naming a query string
+   *inside* the prefix, which R2 keys never carry anyway.
 
-## 6. Verification
+## 7. Verification
 
-- Baseline first, per §D, with the current probe. That is the number the change must beat.
-- Config parse tests: `assets` accepted, unknown sub-key refused, non-https refused, absent
-  key means today's behaviour, `assets.thumbnails` with an explicit
-  `features.thumbWrites: false` accepted **silently**, and `assets.thumbnails` with
-  `thumbWrites` set `true` **or absent** accepted **with one warning line naming both
-  keys** (risk 8 — absence is the case that matters, since the default is `true`; this is
-  a warning, not a refusal).
-- Client tests: the builder with and without a base; `fetchModel`'s fallback on 404 and on
-  a network error; zip paths never leaving the origin; a path containing `#`, `?`, `%`, `+`
-  and a space round-tripping to the right key (synthetic, deliberately — no corpus path
-  contains any of them), plus the cases §3 names: `Ø` and katakana from the real corpus,
-  and a synthetic NFD name; a tile drawn while the feature report is
-  still null rendering from the origin URL without throwing (§3's race).
+- **Baseline first**, per §8. It is what the change has to beat.
+- **Config parse tests**: `assets` accepted; unknown sub-key refused; non-https refused;
+  absent key means today's behaviour; `assets.thumbnails` with an explicit
+  `features.thumbWrites: false` accepted silently; `assets.thumbnails` with `thumbWrites`
+  `true` **or absent** accepted **with one warning line naming both keys** (risk 7 — absence
+  is the case that matters, since the default is `true`).
+- **Client tests**: the decorator with and without bases; `gen` `undefined` and `0` both
+  returning the origin URL; `fetchModel`'s fallback on a 404 and on a network error; zip
+  paths never leaving the origin; a tile drawn while the feature report is null rendering
+  the origin URL without throwing; and key round-tripping for `Ø`, the katakana path, a
+  synthetic NFD name, and a synthetic path carrying `#`, `?`, `%`, `+` and a space (no
+  corpus path contains any of those, which is why it is synthetic).
 - **Falsify two cases, do not assume either**: a *missing* object (the tile must still draw
   through `onImageError`) and a *stale* one (an object published under a generation the
   listing no longer names must never be reached).
-- After the flip: re-measure per §D — but **the probe cannot measure the §3 destination as
-  written**, and fixing that is a phase-5 task, not an afterthought. It builds only
-  origin-shaped URLs (`$HOST/api/thumb/image?path=…&gen=…`, `$HOST/api/file?path=…`) and
-  its startup check demands `$HOST/api/features`, so pointing `HOST` at a bucket refuses to
-  start and leaving it alone measures the untouched origin. Teach it to read `assets` from
-  `/api/features` and build `<base>/<path>/<gen>.webp` and `<base>/<path>`, keeping the
-  origin columns beside them so one row compares both.
-- Confirm `cf-cache-status: HIT` and the `immutable` header on a CDN response.
-- Confirm the box's egress dropped, against a named instrument: the Hetzner cloud console's
-  traffic figure for the server, or `vnstat -m` on the box. Record the before number at
-  phase 1 or there is nothing to compare.
+- **Teach the probe the CDN before the flip.** As written it cannot measure the destination:
+  it builds only origin-shaped URLs and its startup check demands `$HOST/api/features`, so
+  pointing `HOST` at a bucket refuses to start and leaving it alone measures the untouched
+  origin. It must read `assets` from `/api/features` and build `<base>/<path>/<gen>.webp`
+  and `<base>/<path>`, keeping the origin columns beside them so one row compares both.
+  This is phase 5 work, not an afterthought.
+- **After the flip**: re-measure per §8; confirm `cf-cache-status: HIT` and the `immutable`
+  header on a CDN response; confirm the box's egress dropped against a named instrument —
+  the Hetzner cloud console's traffic figure, or `vnstat -m`, which is **not installed on
+  the box** — so either use the console or install it now, because a *before* month has to
+  exist before the flip.
 
-## 7. Phases
+## 8. Baseline, and the probe
 
-0. **Done 2026-09-16** — motive, host and order settled (§D); baseline measured; plan
-   reviewed and corrected (§R).
-1. **The pull-zone experiment (§8).** Gate, stated so it can fail, and stated on the
-   handshake-net columns because an edge terminating TLS moves the raw ones by itself:
-   **one row must satisfy both at once** — `batch_hit == 20` *and* `batch_total_net < 0.3`
-   (`batch_hit` counts only HIT, STALE and UPDATING: REVALIDATED means the edge asked the
-   origin before answering, which is the round trip being removed)
-   (it is ~0.68 s today). Two conditions met on different rows prove nothing: a partially
-   cold edge would pass them separately. Read `batch_hit`, not `thumb_cf`: the standalone
-   thumbnail is drawn at random from a pool of over a thousand and is *meant* to be a cold
-   object, so it reads MISS on a perfectly working edge. Ignore the first samples after a
-   rule change; the edge is per-PoP and starts cold.
+From this machine (US Pacific) to Falkenstein. Run it; do not read figures out of this file:
 
-   **The gate decides the thumbnail half only.** The models are bypassed, so nothing here
-   can pass or fail judgement on §D's motive — the model throughput spread. Failing it
-   stops the thumbnail work; the models still go to R2 on the §3 plan either way, since
-   that is the only thing that addresses them.
-2. OpenSpec proposal `cdn-assets`: delta specs for **public-deployment** (the config key and
-   the features payload), **model-thumbnails** (an image URL may name an external base, and
-   the CORP loss), and **deployment-infrastructure** (the publish and check scripts).
-   Update
-   docs/web-demo-notes.md, which still records the CDN question as open, and say there that
-   this proposal supersedes it.
-3. Server: config key, additive features payload, tests. Landable alone **because** the
-   payload is additive (§3): a client that has not been taught about `assets` reads the
-   capability booleans exactly as before. A nested `{features, assets}` would have made
-   `main` between phases 3 and 4 report every capability `undefined` — `intro` off,
-   framings not kept — which is why that shape was dropped.
-4. Client: the `withLocalFramings` parameter and its two overrides (`thumbImageUrl`,
-   `fetchModel`), the `readAssets` ref and getter, and the falsified tests. No `ApiClient`
-   signature changes, so the existing stubs are untouched.
-5. `publish-assets.sh` + `check-assets.sh` + the prune, **and the runbook edits that make
-   them real**: `deploy/demo/README.md` §6's redeploy line and §7's bake/ship section are
-   the only steps an operator follows, so a publish that exists in no runbook is a `models`
-   base pointed at a prefix nobody uploaded — 404 on every model, silent origin fallback.
-   Add the `assets` key to CLAUDE.md's `DeploymentConfig` line in the same phase. Teach the
-   probe the CDN URLs (§6). Rehearse against a throwaway bucket — **not** with
-   `bun run dev:demo`, whose `MODEL_BROWSER_CONFIG` is a plain assignment in `package.json`
-   and so cannot be pointed elsewhere; add a `dev:cdn` script, or make that line
-   `${MODEL_BROWSER_CONFIG:-…}`.
-6. Publish, flip the config, redeploy — **only on an explicit go-ahead**. `deploy/demo/
-   config.json` currently has an *uncommitted* `intro: false → true` in the tree, and a
-   deploy is push-then-pull: say in the commit which change is shipping, and do not let the
-   withheld landing page ride along with the CDN flip. Verify per §6.
-   Then **end the experiment**, which §8 says not to leave running: turn the
-   `/api/thumb/image` cache rule off (two caches for one asset is two places a stale render
-   can hide) **and grey-cloud the records**, so the origin's own bytes stop flowing through
-   the free CDN. Only the R2 custom domain stays proxied — that is the hostname the
-   Developer Platform terms cover, and leaving the app's hostname orange would keep exactly
-   the exposure §2 chose R2 to avoid.
+```sh
+.ai/probe-demo-latency.sh .ai/demo-latency/demo-latency-before.csv 60 60
+```
 
-## 8. Phase 1 — the pull-zone experiment
+The output path is an argument and the run holds a `flock` on `<output>.lock`. Two runs
+writing one file interleave rows into something that looks like data and is not — that
+happened twice on 2026-09-16 and cost two baselines. Do not delete the lock while a run
+holds it, and **do not edit the script while a run is using it**: bash reads a script
+incrementally, so a run started before an edit keeps writing the old columns. That cost a
+third.
 
-Orange-cloud the existing hostname. **No second hostname, no origin rename**: Cloudflare
+Summarise with the excluded rows *first* — a CDN that turns slow-but-complete answers into
+failures (Cloudflare gives up on an origin at 125 s) would otherwise read as pure
+improvement, because every row it broke left the average:
+
+```sh
+python3 - <<'PY'
+import csv, collections, statistics as st
+allrows = list(csv.DictReader(open('.ai/demo-latency/demo-latency-before.csv')))
+rows = [r for r in allrows if r['ok'] == '1']
+print('rows', len(allrows), 'ok', len(rows))
+print('excluded by reason:', collections.Counter(r['why'] for r in allrows if r['ok'] != '1'))
+if not rows:
+    raise SystemExit('no ok rows — read the why column before reading any timing')
+gate = [r for r in rows if int(r['batch_hit']) == 20 and float(r['batch_total_net']) < 0.3]
+print('rows passing the phase-1 gate:', len(gate),
+      '| best batch_hit:', max(int(r['batch_hit']) for r in rows))
+for c in ('thumb_ttfb','thumb_ttfb_net','batch_total','batch_total_net','model_total','model_bps','dir_ttfb'):
+    v = [float(r[c]) for r in rows]
+    print(f'{c:16s} min {min(v):.3f} med {st.median(v):.3f} max {max(v):.3f}')
+PY
+```
+
+What the probe is built to survive, and why each matters, is in its own header comment. The
+three that decide whether a result means anything: `ok`/`why` (a truncated transfer still
+reports HTTP 200, and a Cloudflare challenge is a fast small 403), `batch_hit` (counts only
+HIT, STALE and UPDATING — REVALIDATED means the edge asked the origin first, which is the
+round trip being removed), and the `*_net` columns (subtracting `time_appconnect`, which is
+DNS plus TCP plus TLS — an edge shortens all three even for bypassed routes).
+
+Structural facts, stable across every version of the probe: one round trip to Falkenstein is
+~168 ms; connection setup completes at ~342 ms cold; 20 renders multiplexed over one HTTP/2
+connection take ~1.0 s, ~0.68 s net of setup.
+
+Outputs live in `.ai/demo-latency/`, which `.ai/.gitignore` excludes — the probe and this
+plan are tracked, the measurements are not.
+
+Confirmed live: `/api/thumb/image` answers `Cache-Control: public, max-age=31536000,
+immutable` at a current generation, and **`/api/file` sends no `Cache-Control` at all**.
+That one fact is why the phase-1 experiment caches thumbnails for free and models not at all.
+
+**The completed baseline, 60 samples over an hour, 2026-09-16, all `ok=1`** — this is what
+the change has to beat, and it is the measurement that justifies the models half:
+
+| column | min | median | max | spread |
+|---|---|---|---|---|
+| `thumb_ttfb_net` (one round trip) | 0.165 | 0.168 | 0.173 | 5% |
+| `batch_total_net` (20 renders) | 0.657 | 0.681 | 0.781 | 19% |
+| `model_total` | 1.686 | 1.772 | 4.101 | 143% |
+| `model_bps` | 696,802 | 1,960,577 | 2,084,160 | 3.0x |
+
+The round trip is steady to 5% while model throughput swings threefold. **Do not read that
+as box contention — the baseline cannot support it.** Two reasons:
+
+- The *median* is distance, not load. 2,500,084 bytes from an IW10 initial window at a
+  168 ms round trip needs 8 round trips of slow start = 1.344 s; the measured median
+  transfer is `model_total − model_ttfb` = 1.772 − 0.510 = **1.262 s**, within 6%. That is
+  TCP, not the box.
+- The *tail* is five rows of sixty with no box-side correlate recorded beside them. One lost
+  segment during slow start at this round trip costs about a second on its own, which is the
+  whole of the observed spread.
+
+What would settle it: record `/proc/loadavg` and the index's busy state per sample, or run
+the same probe from a low-round-trip vantage where slow start is cheap. Note too that the
+probe opens a fresh connection per model where a browser reuses the HTTP/2 one it already
+has for the thumbnails, so `model_total` overstates what a visitor pays.
+
+An earlier 8-sample run is kept at `.ai/demo-latency/demo-latency-v1-partial.csv`; its columns predate
+several probe rewrites and do **not** compare with the current file.
+
+### 8.1 The contention question, settled
+
+The claim under test: "when the box is busy, downloads slow with it." The mechanism is real
+and it is negligible at the visitor's scale. Measured 2026-09-17 with
+`.ai/probe-box-contention.sh` (output kept at `.ai/demo-latency/box-contention.csv`), which
+fetches the same 2.5 MB model **from the box itself** through Caddy on loopback — no round
+trip, no slow start — every 2 s for a minute, firing three concurrent `/api/semantic`
+queries during the middle third so the SigLIP index competes for the two vCPU:
+
+| phase | n | total, median | worst | throughput |
+|---|---|---|---|---|
+| idle | 20 | 0.038 s | 0.062 s | 65.2 MB/s |
+| index queries running | 10 | 0.087 s | 0.117 s | 28.9 MB/s |
+
+So contention is a genuine **2.4x on the box** — and 2.4x of 38 ms is 48 ms, **2.7% of the
+1,772 ms a visitor waits**. It cannot produce §8's 2.4-second tail; that is 20–40x larger
+than the whole mechanism. The box serves this file 36x faster than the wire delivers it even
+while loaded.
+
+Two conclusions the rest of this plan rests on:
+
+- **The models win is distance, not load.** Slow start is 1.26 s of the 1.772 s median at a
+  168 ms round trip. An edge at ~20 ms turns those 8 round trips into ~0.16 s. That is the
+  prize, and it is large — but only if the bytes are served from near the *visitor*.
+- **Nothing here should be justified by contention again.** If it is quoted as a motive in a
+  later draft, this is the measurement that refutes it.
+
+## 9. Phase 1 — the pull-zone experiment
+
+**Orange cloud / grey cloud** is Cloudflare's toggle on a DNS record. *Orange* (proxied)
+publishes Cloudflare's address instead of the box's, so visitors land on an edge that
+terminates TLS and applies caching and rules before forwarding. *Grey* (DNS only) answers
+with the box's real address and Cloudflare is just a nameserver. The toggle is one click and
+is the revert for everything below; nothing on the box changes either way.
+
+Orange-cloud the existing hostname. **No second hostname and no origin rename**: Cloudflare
 proxies `models.masamaeda.com` straight to the box's address and connects back with the
 `Host` header unchanged, so the app's guard, `config.json`'s `origins` and Caddy's site
 block all keep working untouched.
 
-1. **Add the zone at Cloudflare** and move the nameservers at Namecheap. Masa's step — it
+1. **Add the zone at Cloudflare** and move the nameservers at Namecheap — Masa's step, it
    needs the registrar login. Record the existing Namecheap records first: the revert is
    moving the nameservers back and re-creating them, and grey-clouding does not undo it.
    Wait for the zone to read Active.
-2. **Turn off what a new zone turns on by default**: Browser Integrity Check (it challenges
-   bare curl, which is what the probe is) and Email Obfuscation.
+2. **Turn off what a new zone turns on**: Browser Integrity Check (it challenges bare curl,
+   which is what the probe is) and Email Obfuscation.
 3. **SSL/TLS mode: Full (strict).** Caddy keeps its own Let's Encrypt certificate and
-   Cloudflare validates it. Anything less lets the edge talk plaintext to the box. Note the
-   coupling this creates: under Full (strict) an expired origin certificate is a 526 for
-   every visitor, where today it would be a browser warning.
-4. **Cache Rules — order matters.** Cloudflare's rules stack and the *last matching* rule
-   wins for conflicting settings, so the bypass rule must not also match the image path:
+   Cloudflare validates it; anything less lets the edge talk plaintext to the box. Note the
+   coupling: under Full (strict) an expired origin certificate is a 526 for every visitor,
+   where today it would be a browser warning.
+4. **Cache Rules — order matters.** Rules stack and the *last matching* rule wins for
+   conflicting settings, so the bypass must not also match the image path. A rule is needed
+   at all because the free plan caches by file extension and `/api/thumb/image` has none.
    - Rule 1: `http.request.uri.path eq "/api/thumb/image"` → Cache eligibility **Eligible
      for cache**, Edge TTL **Respect origin** (the route already says `immutable`). The
-     default cache key includes the query string, and Free cannot customise that — which
-     is what makes `gen` part of the identity.
-   - Rule 2: `starts_with(http.request.uri.path, "/api/") and
-     http.request.uri.path ne "/api/thumb/image"` → **Bypass cache**. (`not` is unary in
-     wirefilter; the negated-equality form is `ne`.)
-   A Cache Rule is needed at all because the free plan caches by file extension and
-   `/api/thumb/image` has none.
-5. **Protect the ACME challenge** before the next renewal, not after. Note this step
-   breaks phase 1's "no repo code changed" shape: pinning the issuer edits a tracked file
-   and needs a commit, a push, a pull on the box and `up --build`, so it falls under the
-   same explicit go-ahead §7.6 requires. Two parts:
-   `deploy/demo/Caddyfile` has no `tls` line, so Caddy tries **TLS-ALPN-01 first**, and
-   that challenge cannot succeed behind a proxy that terminates TLS — pin the HTTP-01
-   issuer rather than relying on the fallback. `deploy/demo/Caddyfile.local` cannot mirror
-   that block — its site is `localhost` with `tls internal`, and its header names the
-   internal CA as the permitted difference — so record the issuer line as the **second**
-   sanctioned divergence between the two files, in both headers, or the next reader
-   "fixes" it back. Then a Configuration Rule exempting
-   `/.well-known/acme-challenge/*` (no Always Use HTTPS, no Automatic HTTPS Rewrites),
-   which are the documented breakers of HTTP-01 through a proxy.
-6. **Skip `trusted_proxies` for now.** `deploy/demo/Caddyfile` has no `log` directive, so
-   there are no access-log lines to record an edge address in; and it is a global
-   `servers { }` option, not a site-block line, with stock Caddy offering only a static IP
-   list that must be pasted and maintained by hand. Revisit if logging is ever turned on.
-7. **Re-measure** with `.ai/probe-demo-latency.sh` over a window of the same length and
-   compare against §D. Read **`batch_hit` and `batch_cf`**, never the standalone
-   thumbnail's `thumb_cf` — that object is drawn at random from a pool of over a thousand
-   and is meant to read MISS. Compare the two runs' `ok=0` counts and their `why` columns
-   *before* comparing any timing: excluded rows are not noise here, they are the failure
-   mode an edge introduces.
+     default cache key includes the query string and Free cannot customise that, which is
+     what makes `gen` part of the identity.
+   - Rule 2: `starts_with(http.request.uri.path, "/api/") and http.request.uri.path ne
+     "/api/thumb/image"` → **Bypass cache**. (`not` is unary in wirefilter; the
+     negated-equality form is `ne`.)
+5. **Protect ACME renewal.** `deploy/demo/Caddyfile` has no `tls` line, so Caddy chooses
+   among the enabled challenges at random and then learns a preference
+   (caddyserver.com/docs/automatic-https) — it does not deterministically try TLS-ALPN-01
+   first, as an earlier draft claimed. What matters is that TLS-ALPN-01 **cannot succeed at
+   all** behind a proxy terminating TLS, so half the attempts are wasted and the outcome
+   depends on what Caddy happens to have learned. Pin the HTTP-01 issuer rather than
+   relying on that. **Check whether this is due before doing it**: the live certificate runs
+   to `notAfter Dec 8 2026` (`openssl s_client -connect models.masamaeda.com:443 </dev/null
+   | openssl x509 -noout -dates`), so renewal is ~Nov 8 and a same-day experiment does not
+   touch it. Then a
+   Configuration Rule exempting `/.well-known/acme-challenge/*` (no Always Use HTTPS, no
+   Automatic HTTPS Rewrites), the documented breakers of HTTP-01 through a proxy.
+   `deploy/demo/Caddyfile.local` cannot mirror an issuer block — its site is `localhost`
+   with `tls internal` — so record the line as the **second** sanctioned divergence in both
+   files' headers, or the next reader "fixes" it back. **This step edits a tracked file and
+   needs a commit, a push, a pull on the box and `up --build`**, so it falls under the same
+   explicit go-ahead §10.6 requires.
+6. **Skip `trusted_proxies`.** `deploy/demo/Caddyfile` has no `log` directive, so no access
+   line records an edge address; and it is a global `servers { }` option with only a static
+   IP list to maintain by hand. Revisit if logging is ever turned on.
+7. **Re-measure** over a window of the same length and compare per §8. Read `batch_hit` and
+   `batch_cf`, never the standalone thumbnail's `thumb_cf` — that object is drawn at random
+   from a pool of over a thousand and is *meant* to read MISS. Ignore the first samples
+   after a rule change: the edge is per-PoP and starts cold. Compare the two runs' `ok=0`
+   counts and `why` columns before comparing any timing.
+8. **End it.** Grey-cloud the records as soon as the gate has been read. This is a
+   measurement, not a posture: leaving the zone proxied keeps both the terms exposure and
+   the 524 behaviour below in place for however long phases 2–6 take. Re-orange only for the
+   phase-6 flip, and only for the hostname that needs it.
 
-**What it can show:** whether edge-cached thumbnails remove both the distance and the
-box contention for the ~114 images of a first screen. That is most of the requests.
+**What it can show:** whether edge-cached thumbnails remove both the distance and the box
+contention for the ~114 images of a first screen — most of the requests.
 
-**What it costs while it runs:** Cloudflare's origin-response timeout is 100 seconds, so a
-request the box would have served slowly — the deliberate posture in
-`deploy/demo/Caddyfile`, where abuse degrades to waiting rather than to failure, with a
-serialising index behind it — becomes a 524 for the visitor instead. That is a behaviour
-change for the duration, not just a measurement.
+**Where the models win actually comes from:** distance, and only distance (§8.1). Slow start
+is 1.26 s of the 1.772 s median at a 168 ms round trip; an edge at ~20 ms turns those eight
+round trips into ~0.16 s. But a model fetch mostly *misses* the edge (3,122 files, long
+tail), and a miss is served from the bucket's region, which is **fixed when the bucket is
+created** — automatic placement lands near the creating caller and the hint cannot be
+changed afterwards. So the bucket cannot be created without choosing a location hint:
+`wnam` for §1's US visitor, `weur` beside the box. Choose `wnam` — the box is already the
+`weur` copy, and a miss served from Falkenstein buys nothing over what exists today.
 
-**What it cannot show:** any improvement for model *throughput*. Models are bypassed (no
-`Cache-Control`), and even cached they would mostly miss — 4.6 GB across 3,122 files with a
-long tail. Expect their TTFB to fall anyway, purely because TLS now terminates at an edge;
-that is why the probe reports TTFB net of the handshake, and why `model_bps` is the column
-to read for models.
+**What it cannot show:** any improvement in model *throughput*. Models are bypassed (no
+`Cache-Control`) and even cached would mostly miss — 4.89 GB across 3,122 files with a long
+tail. Their TTFB will fall anyway because TLS now terminates at an edge, which is why the
+probe reports TTFB net of setup and why `model_bps` is the column to read for models.
 
-**Ending it.** Grey-cloud the records as soon as the gate in §7.1 has been read. The
-experiment is a measurement, not a posture: leaving the zone proxied keeps both the terms
-exposure below and the 524 behaviour above in place for however many weeks phases 2–6 take.
-Re-orange only for the phase-6 flip, and only for the hostname that needs it.
+**What it costs while it runs:** Cloudflare's origin-response timeout is 125 seconds, so a
+request the box would have served slowly — the deliberate posture in `deploy/demo/Caddyfile`,
+where abuse degrades to waiting rather than failing, with a serialising index behind it —
+becomes a 524 instead. A behaviour change for the duration, not just a measurement.
 
-**Terms, stated plainly:** serving the box's images through the free CDN is the pattern
-Cloudflare's Application Services terms restrict (§2). As a time-boxed measurement the risk
-is small, and the destination — R2 — is the sanctioned one. Do not leave the experiment
-running as the permanent arrangement.
+**Terms, plainly:** routing the box's images through the free CDN is the pattern §3's
+Application Services terms restrict. As a time-boxed measurement the risk is small and the
+destination is the sanctioned one. Step 8 is what keeps it time-boxed.
+
+**Reverting:** grey-cloud (step 8). The nameserver move is not reverted that way — see
+step 1.
+
+## 10. Phases
+
+0. **Done 2026-09-16** — motive, host and order settled; baseline measured; plan reviewed
+   seven times and rewritten (§R).
+1. **The experiment (§9).** Gate, stated so it can fail: **one row must satisfy both at
+   once** — `batch_hit == 20` *and* `batch_total_net < 0.3` (it is ~0.68 s today). Two
+   conditions met on different rows prove nothing; a partially cold edge would pass them
+   separately. **The gate decides the thumbnail half only** — models are bypassed, so
+   nothing here judges §1's consistency motive, and failing it stops the thumbnail work
+   while the models still go to R2 on this plan.
+2. **OpenSpec proposal `cdn-assets`**: delta specs for **public-deployment** (the config key
+   and the additive features payload), **model-thumbnails** (an image URL may name an
+   external base; the CORP loss, risk 3), and **deployment-infrastructure** (the publish and
+   check scripts). Update docs/web-demo-notes.md, which still records the CDN question as
+   open, and say there that this proposal supersedes it.
+3. ~~**Server**: config key, additive features payload.~~ **Struck** — the edge Worker needs
+   no config key and no features change (§4). One implementation detail is load-bearing: `server/test/features.test.ts`
+   asserts the report with exact `toEqual` cells ("the whole report, not a subset"), and
+   `config.test.ts` and `refusals.test.ts` do the same, so `assets` must be **omitted when
+   unset**, not serialised as `assets: undefined`.
+4. ~~**Client**: the decorator, the getter, the tests.~~ **Struck** — under an edge mapping
+   the client is untouched. Replacing both 3 and 4: **the Worker** — key rewrite, R2 `get`,
+   origin fallback, the Cache API question, and fail-open set deliberately on the route.
+5. **Scripts and the runbook they live in**: `publish-assets.sh`, `check-assets.sh`, the
+   prune, the `assets` key in CLAUDE.md's `DeploymentConfig` line, and — load-bearing —
+   `deploy/demo/README.md` §6's redeploy line and §7's bake/ship section, which are the only
+   steps an operator follows. A publish that exists in no runbook is a `models` base pointed
+   at a prefix nobody uploaded: 404 on every model, silent origin fallback. Teach the probe
+   the CDN URLs (§7). Rehearse against a throwaway bucket — **not** with `bun run dev:demo`,
+   whose `MODEL_BROWSER_CONFIG` is a plain assignment in `package.json` and cannot be
+   repointed. The seam already exists: `scripts/dev-remote.sh --demo` writes a modified copy
+   of the demo configuration to `$XDG_RUNTIME_DIR` and points `MODEL_BROWSER_CONFIG` at it.
+   Reuse that rather than adding a script. Name the hostname the rehearsal uses, too — an
+   R2 `r2.dev` URL is rate-limited and uncached by design, so the rehearsal wants the real
+   custom domain, which means it happens after §9 step 1. The throwaway bucket's CORS must
+   allow the tailnet origin `dev-remote.sh --demo` appends, or `fetchModel` fails, falls
+   back to the origin silently, and the rehearsal rehearses nothing.
+6. **Publish, flip the config, redeploy — only on an explicit go-ahead.** Turn the
+   experiment's `/api/thumb/image` cache rule off once R2 serves the thumbnails: two caches
+   for one asset is two places a stale render can hide. The landing page is no longer a
+   loose end to keep out of this: `intro: true` is committed in `deploy/demo/config.json`
+   (`a364bf3 Landing page go live`), so it ships on the next deploy
+   whatever else does. Nothing to hold back — just say in the commit which change is
+   shipping.
+
+## R. What seven review rounds settled, and what they cost
+
+Seven adversarial rounds ran on 2026-09-16, all on opus-5 (fable-5 was out of credits on
+every attempt, so no round got a cross-model reviewer). The technical core stopped moving at
+round 4. Rounds 5–7 found mostly documentation defects, and three of them were the same
+defect: **a correction landing beside the text it was meant to replace rather than
+replacing it** — round 4's `<corpus id>`, round 5's prune scope, round 6's decorator
+decision all survived in a second place. That is why this file was rewritten whole instead
+of patched an eighth time.
+
+Decisions that were reversed, recorded so they are not re-proposed:
+
+| decision | proposed | reversed because |
+|---|---|---|
+| nested `{features, assets}` response | round 1 | a breaking change bought for nothing; additive works and decouples the phases |
+| a second `withAssets` decorator | round 2 | duplicates the whole `ApiClient` interface to override two methods |
+| `ConfigError` on `thumbWrites` + `assets` | round 2 | refuses startup over a harm the fallback already handles, for every deployment that omits the key |
+| a bake-wide prefix instead of `gen` in the key | round 1 | contradicts "thumbnails keyed path+mtime"; an in-place replacement would serve stale pixels forever |
+| percent-encoded object keys | round 3 | an R2 key is raw bytes; the edge decodes before matching |
+
+Claims that were relayed from a review and folded in **without being checked**, each of
+which became the next round's finding: who reads `readFeatures` (wrong twice), whether
+rclone is on the box (still unverified — §5), the NFC/NFD "live risk" (measured: every
+corpus path is already NFC), and the both-variant sidecar count. The lesson is the repo's
+own: a review tells you what is broken; it is not automatically right about the repair, and
+a relayed measurement is not a measurement.
 
 ## Related issues
 
 - [#24 Move files to a cdn](https://github.com/ConfusedSky/model-browser/issues/24) — this
-  plan is the answer to it; the issue has no body. Not fixed.
+  plan answers it; the issue has no body. Not fixed.
 - [#25 Skip the /api/thumb lookup when the listing already annotates the entry](https://github.com/ConfusedSky/model-browser/issues/25)
-  — related and worth doing first. It widens the listing-vouched branch, which is exactly
-  the branch that gets to use a CDN URL.
+  — related, worth doing first: it widens the listing-vouched branch, which is exactly the
+  branch that gets to use a CDN URL.
 - [#4 glTF/GLB support — 5.8x smaller than STL](https://github.com/ConfusedSky/model-browser/issues/4)
-  — related: it attacks the same 4.6 GB from the other side, and the two compose.
+  — related: attacks the same 4.89 GB from the other side, and the two compose.
 - [#2 Review the demo corpus for third-party IP before publishing](https://github.com/ConfusedSky/model-browser/issues/2)
-  — related, and it gains weight here: publishing to a bucket is a second act of
-  redistribution, which is also why §4 adds `CREDITS.txt`.
+  — related, and heavier here: publishing to a bucket is a second act of redistribution,
+  which is also why §5 adds `CREDITS.txt`.

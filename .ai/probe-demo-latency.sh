@@ -10,7 +10,8 @@ export LC_ALL=C   # $EPOCHREALTIME and awk both parse decimals; a comma locale b
 #
 #   - `ok=0` marks a row that must be excluded from the timings, and `why` says which
 #     check failed. Never discard those rows: a CDN that turns slow-but-complete answers
-#     into failures (Cloudflare gives up on an origin at 100 s) would otherwise read as
+#     into failures (Cloudflare gives up on an origin at 125 s, which is why the model
+#     fetch allows 150 — a shorter timeout turns a 524 into a curl error) would read as
 #     pure improvement, because every row it broke left the average. Compare the ok/not-ok
 #     split between runs before comparing any timing.
 #   - every latency column is reported **net of connection setup** as well as raw. The
@@ -127,7 +128,7 @@ for ((i=0;i<SAMPLES;i++)); do
   BTLS=$(awk 'BEGIN{m=0} {if ($2+0 > m) m=$2+0} END{printf "%.6f", m}' <<<"$BOUT")
   BNET=$(sub "$BTOTAL" "$BTLS")
 
-  M=$(curl -s -o /dev/null -m 120 -D "$H" -w "$W" "$HOST/api/file?path=$PE")
+  M=$(curl -s -o /dev/null -m 150 -D "$H" -w "$W" "$HOST/api/file?path=$PE")
   MCF=$(grep -ai '^cf-cache-status:' "$H" | tr -d '\r' | awk '{print $2}')
   IFS=, read -r MCODE MEXIT MTLS MTTFB MTOTAL MBYTES <<<"$M"
   MBPS=$(bps "$MBYTES" "$MTOTAL" "$MTTFB")
