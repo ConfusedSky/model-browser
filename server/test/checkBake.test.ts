@@ -46,10 +46,17 @@ function versionIn(file: string, name: string): number {
 }
 const RIG = versionIn(RENDERER_TS, "RIG_VERSION");
 const POSE = versionIn(POSE_TS, "POSE_VERSION");
-const HEAD = execFileSync("git", ["rev-parse", "HEAD"], {
-  cwd: REPO,
-  encoding: "utf8",
-}).trim();
+/** Read per fixture, never once per module: the script asks git the same question
+ *  when it runs, and sessions commit to this tree in parallel, so a value read at
+ *  import time is a different commit by the time a case asserts on it — which is
+ *  silent, since the script only *prints* a differing commit and leaves the exit
+ *  code alone. Keep the read next to the `check()` that will be compared to it. */
+function headCommit(): string {
+  return execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: REPO,
+    encoding: "utf8",
+  }).trim();
+}
 const OTHER_COMMIT = "f".repeat(40);
 
 // The script's shebang says `#!/bin/sh`, and the box runs dash — but `sh` on
@@ -74,12 +81,16 @@ interface Fixture {
   dir: string;
   manifest: string;
   index: string;
+  /** The checkout commit this fixture was built against — the side the script
+   *  reads for itself, so an expectation must use this and not a second read. */
+  head: string;
 }
 
 interface FixtureOptions {
   rig?: number;
   poseVersion?: number;
-  /** `null` omits `client.commit` — a bake whose git could not answer. Defaults to HEAD. */
+  /** `null` omits `client.commit` — a bake whose git could not answer. Defaults to
+   *  the checkout's own commit, read as this fixture is built. */
   commit?: string | null;
 }
 
@@ -91,7 +102,8 @@ async function fixture(opts: FixtureOptions = {}): Promise<Fixture> {
   await mkdir(index);
   writeFileSync(join(index, POSE_CACHE_FILE), '{"poses":{"/a.stl":{}}}');
   writeFileSync(join(index, RUN_PARAMS_FILE), '{"views":8,"elevations":[20]}');
-  const commit = opts.commit === undefined ? HEAD : opts.commit;
+  const head = headCommit();
+  const commit = opts.commit === undefined ? head : opts.commit;
   const input: ManifestInput = {
     date: "2026-09-15T00:00:00.000Z",
     client: commit === null ? { dirty: false } : { commit, dirty: false },
@@ -123,7 +135,7 @@ async function fixture(opts: FixtureOptions = {}): Promise<Fixture> {
     "lib",
     manifestFor(input),
   );
-  return { dir, manifest, index };
+  return { dir, manifest, index, head };
 }
 
 interface Run {
@@ -199,13 +211,16 @@ describe("check-bake.sh", () => {
       const f = await fixture({ commit: OTHER_COMMIT });
       expect(check(f.manifest, f.index)).toEqual({
         status: 0,
-        stdout: `commit: checkout ${HEAD}, bake ${OTHER_COMMIT}\n`,
+        stdout: `commit: checkout ${f.head}, bake ${OTHER_COMMIT}\n`,
         stderr: "",
       });
     });
 
     it("prints nothing when the bake commit equals HEAD", async () => {
-      const f = await fixture({ commit: HEAD });
+      // The default, said out loud: the manifest carries the checkout's own
+      // commit, so the line the case above saw has nothing to report.
+      const f = await fixture();
+      expect(readFileSync(f.manifest, "utf8")).toContain(`"${f.head}"`);
       expect(check(f.manifest, f.index)).toEqual(SILENT_OK);
     });
 
@@ -233,7 +248,7 @@ describe("check-bake.sh", () => {
       const r = check(f.manifest, f.index);
       expect(r.status).toBe(1);
       expect(r.stdout).toBe(
-        `rig: checkout ${RIG}, bake ${RIG - 1}\ncommit: checkout ${HEAD}, bake ${OTHER_COMMIT}\n`,
+        `rig: checkout ${RIG}, bake ${RIG - 1}\ncommit: checkout ${f.head}, bake ${OTHER_COMMIT}\n`,
       );
     });
 
