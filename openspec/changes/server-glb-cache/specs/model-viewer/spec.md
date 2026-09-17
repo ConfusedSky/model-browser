@@ -1,13 +1,13 @@
 ## ADDED Requirements
 
 ### Requirement: STL viewer meshes served as cached GLB
-An STL model's geometry SHALL be delivered to the viewer as an indexed binary GLB derived from the source STL, not as the raw STL bytes. The server SHALL convert on demand and cache the result per library, keyed by the model's library path and mtime, using the same staleness contract as thumbnails: a cached GLB SHALL be served only when its stored mtime matches the source file's current mtime, otherwise it SHALL be regenerated. On a cache miss the server SHALL convert the STL and return the GLB in the same response; the whole STL SHALL NOT be streamed to the browser for viewing.
+An STL model's geometry SHALL be delivered to the viewer as an indexed binary GLB derived from the source STL, not as the raw STL bytes. The server SHALL convert on demand and cache the result per library, keyed by the model's library path, stale when the source's mtime changes — the same staleness contract as thumbnails: a cached GLB SHALL be served only while its recorded mtime matches the source's current mtime, otherwise it SHALL be regenerated. On a cache miss the server SHALL convert the STL and return the GLB in the same response; the whole STL SHALL NOT be streamed to the browser for viewing. This SHALL hold for an STL inside a zip archive as for a plain file, with the archive's mtime standing for the entry's.
+
+The GLB SHALL carry vertex positions and triangle indices only, and SHALL NOT carry normals: shading normals stay derived on the client from winding (see *STL shading normals derive from winding*). Vertex coordinates SHALL be bit-identical to the source STL's and triangles SHALL keep the source's order and winding, so the geometry the client shades from is the same it would have parsed from the STL, and the model displays in its file's own coordinates exactly as before (see *Upright model display*): conversion welds vertices with identical coordinates but SHALL NOT move, rotate, or rescale them.
 
 The source STL file SHALL remain untouched on disk and SHALL stay the file that the search index, the directory listing, `MODEL_EXT`, and slicer/app association all operate on — the GLB SHALL exist only on the delivery path from server to viewer, never as a listed entry, an openable file, or a stored sibling of the model. This delivery SHALL apply to the STL format only; `obj` and `3mf` SHALL continue to be delivered and parsed as their own bytes.
 
-The GLB's vertex coordinates SHALL be byte-identical to the source STL's, so the model displays in its file's own coordinates exactly as before (see *Upright model display*): conversion indexes and welds vertices but SHALL NOT move, rotate, or rescale them.
-
-When conversion fails because the source cannot be read or parsed, the delivery SHALL surface as a model-load failure the viewer already handles (see *Missing-model error feedback*), not as a silent empty result.
+When the source cannot be read, the delivery SHALL answer as `/api/file` does for a missing model; when it exists but cannot be parsed as STL, the delivery SHALL answer with an error status. Either way the viewer SHALL show the model-load failure it already renders (see *Missing-model error feedback*), not a silent empty result. A cache directory that cannot be written SHALL NOT fail the request: the server SHALL convert and serve without persisting.
 
 #### Scenario: STL delivered as GLB, source untouched
 - **WHEN** an STL model is opened in the orbit overlay or lightbox
@@ -25,47 +25,26 @@ When conversion fails because the source cannot be read or parsed, the delivery 
 - **WHEN** the viewer loads an STL model, whether the GLB is a hit or a miss
 - **THEN** the browser receives GLB bytes, never the raw STL file
 
+#### Scenario: STL inside a zip is delivered as GLB
+- **WHEN** an STL entry of a zip archive is opened in the viewer
+- **THEN** it is delivered as a GLB derived from the extracted entry, cached under the entry's virtual path, and a later open of the unchanged archive is served from the cache without opening the zip
+
 #### Scenario: Other formats are unaffected
 - **WHEN** an `obj` or `3mf` model is opened
 - **THEN** it is delivered and parsed as its own format's bytes, with no GLB conversion
 
-#### Scenario: Coordinates preserved through conversion
-- **WHEN** an STL and its derived GLB are compared vertex for vertex
-- **THEN** the GLB's positions equal the STL's, so the model stands upright and its spindle axis names the same direction in both
+#### Scenario: Coordinates and winding preserved through conversion
+- **WHEN** an STL and its derived GLB are compared triangle for triangle
+- **THEN** every GLB vertex position is bit-identical to the STL's, the triangles come in the same order with the same winding, the GLB carries no normals, and the client's recomputed normals equal those it computes from the STL directly
 
 #### Scenario: Unreadable source surfaces as a load error
-- **WHEN** the GLB for a model whose source file no longer exists or cannot be parsed is requested
+- **WHEN** the GLB for a model whose source file no longer exists, or cannot be parsed as STL, is requested
 - **THEN** the viewer shows its normal missing-model error rather than an empty or silently missing mesh
 
-## MODIFIED Requirements
-
-### Requirement: STL shading normals derive from winding
-The shading normals for an STL model SHALL be derived from triangle winding and SHALL NOT use the file's stored facet normals, so an exporter that wrote its normal field in a different axis convention than its vertices — or wrote zero-length, inverted, or otherwise inconsistent normals — cannot corrupt lighting. This derivation MAY occur during the server-side GLB bake (see *STL viewer meshes served as cached GLB*) rather than in the client, but the guarantee SHALL hold end to end regardless of where it runs. Recomputed normals SHALL be flat facet normals — no smoothing is introduced, and vertices SHALL be welded only where both position and winding-derived normal are identical, so no shared normal is averaged across a facet edge — so a file whose stored normals agree with its winding renders as before, up to the precision the file itself stored them at, and the rendered pixels SHALL be unchanged from parsing the STL directly on the client. This applies identically to thumbnails, the orbit overlay, and the lightbox; other model formats keep their format-native vertex normals.
-
-#### Scenario: A convention-mismatched STL shades correctly
-- **WHEN** a binary STL whose stored facet normals disagree with its triangle winding (e.g. rotated 90° about X by a Z-up/Y-up export mismatch) is thumbnailed or viewed
-- **THEN** lighting, self-shadowing detail, and ambient occlusion read against the geometry's true orientation, indistinguishable in character from a well-formed export of the same mesh
-
-#### Scenario: A well-formed STL is unchanged
-- **WHEN** an STL whose stored normals agree with its winding is delivered to the viewer as GLB
-- **THEN** the derived normals reproduce the stored ones to within the precision they were stored at, and the rendered output is identical to parsing the STL directly on the client
-
-#### Scenario: Isolated bad facets in an otherwise healthy file
-- **WHEN** a file whose normal field is broadly correct carries a few facets whose stored normals disagree with their winding (an inverted or stale facet normal)
-- **THEN** those facets shade from their winding like every other facet, correcting them rather than preserving the file's claim
-
-#### Scenario: Zero-length stored normals
-- **WHEN** an STL stores `0 0 0` as a facet's normal, as some exporters do
-- **THEN** the facet shades from its winding rather than rendering unlit
-
-#### Scenario: Welding preserves faceted shading
-- **WHEN** an STL with large flat faces spanning many coplanar triangles is delivered as an indexed GLB
-- **THEN** the flat faces read flat, hard edges stay hard, and no facet edge is softened by an averaged normal, exactly as the unindexed client parse rendered them
+#### Scenario: Read-only cache still serves
+- **WHEN** the cache directory cannot be written and a GLB is requested on a miss
+- **THEN** the server converts and returns the GLB without persisting it, and the request does not fail
 
 #### Scenario: Cached thumbnails are not disturbed
 - **WHEN** a model already thumbnailed under the current pixel recipe is displayed after this change ships
-- **THEN** its thumbnail is a cache hit and is not re-rendered, because the delivered GLB produces the same pixels as the previous STL parse
-
-#### Scenario: Cached thumbnails refresh to the corrected shading
-- **WHEN** a model was thumbnailed under the previous recipe and its tile is next displayed
-- **THEN** the thumbnail re-renders once under the bumped pixel-recipe version and is cached thereafter
+- **THEN** its thumbnail is a cache hit and is not re-rendered, because the client shades the delivered GLB from the same vertices as it shaded the STL

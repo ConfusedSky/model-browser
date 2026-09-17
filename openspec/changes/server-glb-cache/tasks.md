@@ -1,29 +1,29 @@
-## 1. Server: STL→GLB converter
+## 1. Shared: STL→GLB converter and its reader (`shared/glb.ts`)
 
-- [ ] 1.1 Add `three` as a server-workspace dependency, pinned to the same version the client uses, and verify `bun install` succeeds and `bun run typecheck` passes with `STLLoader` and `BufferGeometryUtils` importable server-side.
-- [ ] 1.2 Implement `stlToGlb(bytes: ArrayBuffer): ArrayBuffer` in the server: `STLLoader().parse` → `deleteAttribute("normal")` → `computeVertexNormals()` → `BufferGeometryUtils.mergeVertices` → hand-written binary GLB (header + JSON chunk + BIN chunk; POSITION, NORMAL, indices accessors). Verify a unit test converts a small STL and the result is valid GLB (magic `glTF`, version 2, chunk lengths consistent).
-- [ ] 1.3 Round-trip test: parse the same STL via `stlToGlb` + `GLTFLoader`, and via the client `stl` arm of `parseModel`; assert positions and normals are equal within float precision. Verify the test passes.
-- [ ] 1.4 Faceted-shading test: convert an STL with large flat faces and hard edges; assert coplanar triangles share vertices (index count < 3× triangle count) while edge vertices stay split (no normal averaged across an edge). Verify it passes.
-- [ ] 1.5 Failure test: `stlToGlb` on empty/truncated bytes throws (does not return empty geometry). Verify the test asserts the throw.
+- [ ] 1.1 Implement `stlToGlb(bytes: ArrayBuffer): ArrayBuffer`: detect binary STL the way `STLLoader` does (`84 + 50·n` equals the length), else parse ASCII; weld vertices by the exact bit pattern of their three `float32` coordinates; emit `uint16` indices when the welded count fits, else `uint32`; write the GLB container (header, JSON chunk with `asset`/`buffers`/`bufferViews`/`accessors` incl. `POSITION` `min`/`max`/`meshes`/`nodes`/`scenes`/`scene`, BIN chunk). No `three` import. Verify a unit test converts a small binary STL and an ASCII STL of the same triangles to byte-identical GLB, and that the result has magic `glTF`, version 2, and chunk lengths consistent with the total.
+- [ ] 1.2 Implement `readGlb(bytes: ArrayBuffer): { positions: Float32Array; index: Uint16Array | Uint32Array }` as the matched reader: check magic and version, parse the JSON chunk, read exactly the two accessors 1.1 writes, throw on anything else. Verify a round-trip test (`stlToGlb` → `readGlb`) returns positions and triangle order equal to the STL's.
+- [ ] 1.3 Weld test: an STL whose triangles share corners yields a welded vertex count below `3 × triangles`, and every position in the output is bit-identical to one in the input (no coordinate moved). Verify it passes.
+- [ ] 1.4 Index-width test: a mesh below 65 536 welded vertices gets a `uint16` index accessor, one above gets `uint32`. Verify it passes.
+- [ ] 1.5 Failure test: `stlToGlb` on empty, truncated, and non-STL bytes throws (does not return empty geometry). Verify the test asserts the throw.
 
 ## 2. Server: cache + route
 
-- [ ] 2.1 Add GLB storage to the per-library cache dir (`<cache>/<library.id()>/<sha256(libPath)>.glb`) with mtime carried for staleness, reusing `ThumbCache`'s keying. Verify a unit test writes and reads back a GLB and reports hit only when mtime matches.
-- [ ] 2.2 Add `GET /api/model.glb?path=&mtime=`: hit → cached bytes; miss/stale → convert, cache, serve; `application/octet-stream` + `nosniff`. Verify a route test gets GLB bytes on first call and a cache hit (no reconvert) on the second.
-- [ ] 2.3 Read-only cache dir: convert-and-serve without persisting instead of erroring. Verify a test with an unwritable dir still returns valid GLB bytes.
-- [ ] 2.4 Unreadable/unparseable source → error response the client maps to a model-load failure (not 200 with empty body). Verify a route test for a deleted/corrupt source returns the failure.
+- [ ] 2.1 Add `MeshCache` (server/src/meshCache.ts) in the pattern of `snapshot.ts`: `<cache>/<library.id()>/mesh/<sha256(libPath)>.glb`, file mtime set to the source's via `utimes`, hit iff `stat(cached).mtimeMs` equals the source's, write via temporary sibling + rename. Verify a unit test writes and reads back a GLB, reports a hit only while the mtime matches, and reports stale after the source mtime changes.
+- [ ] 2.2 Add `GET /api/model.glb?path=`: `canonicalLibPath` → `library.resolve`; a zip entry is extracted with `extractEntry` and its staleness taken from the zip's mtime; a plain path 404s "missing" unless `modelFormat(libPath) === "stl"`; hit → cached bytes; miss/stale → convert, cache, serve; `application/octet-stream` + `nosniff`. Verify route tests: GLB bytes on first call and no reconversion on the second (spy on `stlToGlb`); a zip-entry STL served as GLB; a `.obj` path answers 404 "missing".
+- [ ] 2.3 Read-only cache dir: convert and serve without persisting instead of erroring. Verify a test with an unwritable dir still returns valid GLB bytes.
+- [ ] 2.4 Failure paths: a deleted source answers the same 404 `/api/file` gives; a source that exists but cannot be parsed answers `422 {error}`. Verify route tests for both.
+- [ ] 2.5 Confirm `ThumbCache.maintain` and the legacy sweep leave `mesh/` alone (they parse `*.json` at the id level only). Verify by a test that runs `maintain` with a populated `mesh/` and asserts the GLB is still there.
 
 ## 3. Client: GLB delivery path
 
-- [ ] 3.1 Add a `glb` arm to `parseModel` (client/src/three/models.ts) using `GLTFLoader`, wrapping the mesh in `makeMaterial()` with shadows; do **not** recompute normals. Verify a client test parses a GLB fixture into a `Mesh` with the baked normals.
-- [ ] 3.2 Add `ApiClient.fetchModelGlb(path, mtime)` (client/src/api/client.ts) going through `ApiClient` (no raw fetch, D1). Verify the apiClient test covers it.
-- [ ] 3.3 Wire `meshLoader` (App.tsx): for `formatOf(path) === "stl"` fetch GLB + parse as `glb`; `obj`/`3mf` keep `fetchModel` + their arms. Verify STL tiles load via `/api/model.glb` and other formats via `/api/file` (test or observed network).
-- [ ] 3.4 Confirm `MODEL_EXT`/`modelFormat`/`formatOf`/`defaultAxisFor` are unchanged and the STL spindle default is still +Z. Verify by test that the source path is still classified `stl` and the default axis is unchanged.
+- [ ] 3.1 Add a `glb` arm to `parseModel` (client/src/three/models.ts): `readGlb` → `BufferGeometry` with `POSITION` + index → `toNonIndexed()` → `computeVertexNormals()` → `Mesh` via `makeMaterial()` + `withShadows`, exactly as the `stl` arm wraps its geometry. Verify an attribute-parity test: for a fixture STL, `parseModel(stlToGlb(stl), "glb")` and `parseModel(stl, "stl")` produce equal `position` and `normal` arrays and equal `geometryBytes`.
+- [ ] 3.2 Add `ApiClient.fetchModelGlb(path)` (client/src/api/client.ts) going through `ApiClient` (no raw fetch, D1), non-2xx → `errorOf`. Verify the apiClient test covers a success and a 422.
+- [ ] 3.3 Wire `meshLoader` (App.tsx): `formatOf(path) === "stl"` → `fetchModelGlb` + `parseModel(bytes, "glb")`; `obj`/`3mf` keep `fetchModel` + their arms. Verify by test that an STL path calls `fetchModelGlb` and never `fetchModel`, and that a `.3mf` path still calls `fetchModel`.
+- [ ] 3.4 Confirm `MODEL_EXT`/`modelFormat`/`formatOf`/`defaultAxisFor` are unchanged and the STL spindle default is still +Z. Verify by test that the source path is still classified `stl` and `defaultAxisFor("stl")` is unchanged.
 
-## 4. Pixel parity + integration
+## 4. Integration
 
-- [ ] 4.1 Render-parity test: thumbnail render of a model via the GLB path equals the render via the direct STL parse, pixel for pixel. Verify it passes and that `RIG_VERSION` is **not** bumped.
-- [ ] 4.2 Manual: with a real library rooted at an STL kit, open a tile in the lightbox; confirm it downloads `/api/model.glb`, the model stands upright with correct faceted shading and AO, and a previously cached thumbnail is a cache hit (not re-rendered). Confirm the source `.stl` is byte-unchanged and still listed/openable.
-- [ ] 4.3 Re-verify D5 mesh LRU byte budget against the smaller indexed `geometryBytes`; adjust the cap only if the smaller meshes make the current cap nonsensical. Verify by inspecting the eviction test.
-- [ ] 4.4 Decide GLB cache eviction (join thumbnail `maintain()` sweep vs separate budget) and implement it; verify a sweep test bounds the GLB cache size.
-- [ ] 4.5 Update docs/platform-surface.md only if a new OS-specific surface was added (none expected — note "no change" if so). Verify by review.
+- [ ] 4.1 Manual: with a real library rooted at an STL kit, open a tile in the lightbox; confirm the network panel shows `/api/model.glb` and no `/api/file` for it, the model stands upright with faceted shading and AO indistinguishable from `main`, and a previously cached thumbnail is a cache hit (sidecar untouched, no re-render). Confirm the source `.stl` is byte-unchanged and still listed/openable, and that `RIG_VERSION` is **not** bumped.
+- [ ] 4.2 Manual: open an STL inside a zip; confirm it is served as GLB and that a second open does not re-read the zip (no `extractEntry` call — log or spy in dev).
+- [ ] 4.3 Measure on the demo posture (`bun run dev:demo`, decimated corpus): transferred bytes for one lightbox open before and after, and first-open server time for a 50k-triangle model. Record both in this file's review section; the design's 0.24x is the raw ratio, gzipped will differ.
+- [ ] 4.4 Update docs/platform-surface.md only if a new OS-specific surface was added (none expected — note "no change" if so). Verify by review.
