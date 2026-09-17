@@ -101,8 +101,9 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
         </h1>
 
         {/* source: landing-page's proposal.md; deploy/demo/config.json. A tile
-          here is a baked picture (`corpus-bake`), not a render — only the
-          lightbox fetches a model. */}
+          here is a baked picture (`corpus-bake`), not a render; the mesh is
+          fetched to draw one, which a lingering hover and a drag do as well as
+          an open. */}
         <Section id="what" title="What this is">
           <p className="mb-2">
             A public demo of Model Browser, a viewer for a library of 3D-print
@@ -162,7 +163,7 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
               while you are here.
             </li>
             <li>
-              Alt+Up Arrow; goes up a folder, the same as the &uarr; button at
+              Alt+Up Arrow goes up a folder, the same as the &uarr; button at
               the top left.
             </li>
             <li>
@@ -373,9 +374,9 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
               are not here.
             </li>
             <li>
-              Every mesh was re-exported as STL and reduced for display by
-              quadric decimation, so a model arrives in a browser tab rather
-              than in a slicer.
+              Meshes were re-exported as STL, and one too heavy to draw in a
+              browser tab was reduced until it was not. A mesh already light
+              enough was passed through untouched.
             </li>
             <li>
               A kit&rsquo;s own tile is named from the corpus&rsquo;s metadata
@@ -401,6 +402,30 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
           </p>
         </Section>
 
+        {/* source: the corpus repository's convert.py — one triangle ceiling
+          applied by script, and a mesh under it copied through. Verified
+          against the corpus: a kit whose credit line says only "re-exported as
+          STL" is byte-identical between the original and served trees. Says
+          what the reduction does and what it leaves alone; it does not argue a
+          licence, which is not this page's business. */}
+        <Section id="reduction" title="What the reduction changes">
+          <p className="mb-2">
+            The reduction is one rule applied by a script, not a judgement taken
+            model by model: a mesh heavier than a fixed ceiling is simplified
+            until it sits under it, and a mesh already under the ceiling is
+            copied through with nothing done to it. Which of the two happened to
+            a kit is in its credit line.
+          </p>
+          <p>
+            What it changes is surface resolution — the number of triangles a
+            shape is described with. Shape, proportion and pose it leaves alone,
+            and at the sizes shown here the two are hard to tell apart. It is
+            also why these files are for looking at: print from the
+            designer&rsquo;s own, which the source link in a model&rsquo;s
+            credits leads to.
+          </p>
+        </Section>
+
         {/* source: the `model-browser:` keys read through lib/stored.ts, and
           api/localFramings.ts. The search options are the exception because
           they are not local: the tuning is posted with the query and written
@@ -408,19 +433,20 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
         <Section id="privacy" title="Privacy">
           <p className="mb-2">
             There are no accounts and nothing to sign in to, and no analytics
-            script runs on these pages. Whether you dismissed the introduction
-            and the ambient-occlusion setting are kept in this browser&rsquo;s
-            own storage; the server holds neither for you, and clearing this
-            site&rsquo;s data is the whole of forgetting them. How you have
-            turned a model is kept nowhere at all &mdash; not here, not on the
-            server.
+            script runs on these pages. Whether you dismissed the introduction,
+            the ambient-occlusion setting, your search options, the folders you
+            have opened recently and which panel tab was last open are kept in
+            this browser&rsquo;s own storage; the server holds none of them for
+            you, and clearing this site&rsquo;s data is the whole of forgetting
+            them. How you have turned a model is kept nowhere at all &mdash; not
+            here, not on the server.
           </p>
           <p>
-            Your search options are the exception, and they are one by design:
-            they say which models a search returns, so the mode and the tuning
-            travel with the query and are written into the address bar. A link
-            you copy carries them, which is what makes the results you send
-            someone the results they see.
+            Your search options go one place more. They say which models a
+            search returns, so the mode and the tuning are written into the
+            address bar as well as into this browser. A link you copy carries
+            them, which is what makes the results you send someone the results
+            they see.
           </p>
         </Section>
 

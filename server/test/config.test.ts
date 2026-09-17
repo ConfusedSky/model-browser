@@ -334,6 +334,24 @@ describe("the shipped demo configuration", () => {
   });
 });
 
+describe("the loaded configuration reaches the library", () => {
+  it("carries the file root through to the library state", async () => {
+    // The one cell composing the two: `loadConfig`'s shape is what
+    // `createLibrary` is handed at start, and a `root` that parses but does not
+    // reach the library is a server that answers `unconfigured` with a
+    // configuration file sitting right there.
+    const tmp = realTempDir("mb-config-tolib-");
+    const root = join(tmp, "lib");
+    mkdirSync(root);
+    const file = join(tmp, "config.json");
+    writeFileSync(file, JSON.stringify({ root }));
+
+    const config = await loadConfig({ MODEL_BROWSER_CONFIG: file });
+    const state = await createLibrary({}, config).state();
+    expect(state.state === "ready" && state.top).toBe(root);
+  });
+});
+
 describe("a deployment that declares an origin", () => {
   it("answers that origin and loopback, and refuses any other", async () => {
     // Its own configuration file rather than the shipped one: this is the

@@ -330,10 +330,11 @@ describe("a stored URL reads as its host", () => {
 });
 
 describe("how a credit link may break", () => {
-  it("wraps at its spaces, never inside a word", () => {
-    // `break-all` splits ordinary words mid-word, which the About page shows.
-    // A string assertion only: happy-dom applies no Tailwind CSS, so there is
-    // no computed style here to read.
+  it("keeps `break-words` in the class, which nothing here can check renders", () => {
+    // `break-all` splits ordinary words mid-word, which the About page shows —
+    // but happy-dom applies no Tailwind CSS, so this asserts the constant and
+    // nothing about wrapping. A tripwire against reverting it, not a test of
+    // the behaviour; that one is a computed `word-break` in a real browser.
     expect(CREDIT_LINK_CLASS).toContain("break-words");
     expect(CREDIT_LINK_CLASS).not.toContain("break-all");
   });

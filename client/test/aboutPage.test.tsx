@@ -2,8 +2,9 @@
 //
 // The About page as a document (`visitor-intro`: "The About page carries what
 // the banner cannot", "The credits list is every kit the store credits"):
-// which sections it has and in what order, the way back, the two things its
-// copy must never say, and the four states of the one dynamic section.
+// which sections it has, the way back, the claims its copy must and must not
+// carry, and the four states of the one dynamic section. Not their order,
+// which is editorial.
 //
 // Driven against the component with plain react-dom rather than through App,
 // because the page is not a view of the app at all — it has its own Vite entry
@@ -29,6 +30,7 @@ const SECTIONS: readonly (readonly [string, string])[] = [
   ["what", "What this is"],
   ["licence", "Licence and provenance"],
   ["corpus", "How the corpus was altered"],
+  ["reduction", "What the reduction changes"],
   ["differences", "What differs from the desktop app"],
   ["how-to", "How to use it"],
   ["links", "Links"],
