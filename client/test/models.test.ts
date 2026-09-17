@@ -1,7 +1,14 @@
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 import type { DirEntry } from "../../shared/types";
-import { formatOfEntry, parseModel } from "../src/three/models";
+import { stlToGlb } from "../../shared/glb";
+import { defaultAxisFor } from "../../shared/frames";
+import {
+  formatOf,
+  formatOfEntry,
+  geometryBytes,
+  parseModel,
+} from "../src/three/models";
 
 type V3 = [number, number, number];
 
@@ -59,6 +66,64 @@ describe("parseModel", () => {
     const box = new THREE.Box3().setFromObject(object);
     expect(box.min.toArray()).toEqual([0, 0, 0]);
     expect(box.max.toArray()).toEqual([1, 2, 3]);
+  });
+});
+
+/** The one mesh's position and normal attribute arrays. */
+function attrs(object: THREE.Object3D): {
+  position: Float32Array;
+  normal: Float32Array;
+} {
+  let mesh: THREE.Mesh | null = null;
+  object.traverse((o) => {
+    if (o instanceof THREE.Mesh) mesh = o;
+  });
+  const g = (mesh as unknown as THREE.Mesh).geometry as THREE.BufferGeometry;
+  return {
+    position: g.getAttribute("position").array as Float32Array,
+    normal: g.getAttribute("normal").array as Float32Array,
+  };
+}
+
+/** ASCII STL of the same facets, integer coords so each parses to the exact
+ *  float32 the binary form stores. */
+function asciiStl(facets: [V3, V3, V3][]): ArrayBuffer {
+  let s = "solid t\n";
+  for (const tri of facets) {
+    s += "facet normal 0 0 0\nouter loop\n";
+    for (const v of tri) s += `vertex ${v[0]} ${v[1]} ${v[2]}\n`;
+    s += "endloop\nendfacet\n";
+  }
+  s += "endsolid t\n";
+  return new TextEncoder().encode(s).buffer;
+}
+
+describe("parseModel glb arm matches the stl arm", () => {
+  // The ASCII cell pins that the converter's ASCII triangle order matches
+  // STLLoader's, which the binary cell alone cannot.
+  for (const [label, make] of [
+    ["binary", stlBytes],
+    ["ascii", asciiStl],
+  ] as const) {
+    it(`${label} STL served as GLB shades identically`, () => {
+      // Each form's reference is STLLoader's own parse of *that* form, so the
+      // ASCII cell runs STLLoader's ASCII path against the converter's.
+      const direct = parseModel(make(EXTENTS_123), "stl");
+      const viaGlb = parseModel(stlToGlb(make(EXTENTS_123)), "glb");
+      const a = attrs(direct);
+      const b = attrs(viaGlb);
+      expect(Array.from(b.position)).toEqual(Array.from(a.position));
+      expect(Array.from(b.normal)).toEqual(Array.from(a.normal));
+      expect(geometryBytes(viaGlb)).toBe(geometryBytes(direct));
+    });
+  }
+});
+
+describe("STL stays an STL for classification despite GLB delivery", () => {
+  it("keeps its format and its default spindle", () => {
+    // GLB is only the wire form; the model is still `.stl` everywhere else.
+    expect(formatOf("/kit/part.stl")).toBe("stl");
+    expect(defaultAxisFor("stl")).toBe("z");
   });
 });
 

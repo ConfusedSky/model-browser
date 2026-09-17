@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { relative, resolve as resolvePath } from "node:path";
 import { Readable } from "node:stream";
 import { Hono, type Context } from "hono";
@@ -22,6 +22,8 @@ import type {
 } from "../../shared/types";
 import { SEARCH_TEXT_MAX, THUMB_MIME } from "../../shared/types";
 import { StaleWriteError, ThumbCache } from "./cache";
+import { MeshCache } from "./meshCache";
+import { GlbError, stlToGlb } from "../../shared/glb";
 import { guard } from "./guard";
 import {
   LaunchError,
@@ -324,6 +326,15 @@ export const DEFAULT_FEATURES: FeatureReport = {
   intro: false,
 };
 
+/** A Buffer's exact bytes as a standalone ArrayBuffer — `.buffer` may be a
+ *  shared pool slice, so copy the window `stlToGlb` should see. */
+function toArrayBuffer(b: Buffer): ArrayBuffer {
+  return b.buffer.slice(
+    b.byteOffset,
+    b.byteOffset + b.byteLength,
+  ) as ArrayBuffer;
+}
+
 export function createApp(
   cache: ThumbCache = new ThumbCache(),
   launcher: Launcher = createLauncher(),
@@ -345,6 +356,8 @@ export function createApp(
   listings: ListingCache = new ListingCache(snapshots),
   /** The origins answered beside loopback (public-deployment D3). */
   origins: readonly string[] = [],
+  /** The derived-GLB store (server-glb-cache D5). Shares the cache dir. */
+  meshCache: MeshCache = new MeshCache(cache.dir, library),
 ): Hono {
   const app = new Hono();
   const layers = listings.layers;
@@ -915,6 +928,67 @@ export function createApp(
     }
     const stream = Readable.toWeb(createReadStream(fsPath)) as ReadableStream;
     return c.body(stream, 200, { ...ranged, "content-length": String(s.size) });
+  });
+
+  // An STL model's geometry as an indexed, position-only GLB, converted on
+  // demand and cached per library (server-glb-cache). STL only — the client
+  // requests this for `stl` and keeps `/api/file` for `obj`/`3mf`.
+  let meshCacheWarned = false;
+  app.get("/api/model.glb", async (c) => {
+    const path = c.req.query("path");
+    if (path === undefined || path === "")
+      return c.json({ error: "path is required" }, 400);
+    const libPath = canonicalLibPath(path);
+    const { fsPath, entry } = await library.resolve(libPath);
+    const headers = {
+      "content-type": "application/octet-stream",
+      "x-content-type-options": "nosniff",
+    };
+    // Answered as missing rather than refused, exactly as `/api/file` is.
+    if (modelFormat(libPath) !== "stl")
+      return c.json({ error: `no such file: ${libPath}` }, 404);
+
+    // Staleness is the source's mtime — the archive's for a zip entry, whose
+    // own mtime moves whenever an entry does.
+    const s = await stat(fsPath).catch(() => null);
+    if (s === null || !s.isFile())
+      return c.json({ error: `no such file: ${libPath}` }, 404);
+    const mtime = s.mtimeMs;
+
+    const cached = await meshCache.read(libPath, mtime);
+    if (cached !== null) return c.body(new Uint8Array(cached), 200, headers);
+
+    let stl: ArrayBuffer;
+    if (entry !== undefined) {
+      let bytes;
+      try {
+        bytes = await extractEntry(fsPath, entry);
+      } catch (err) {
+        if (err instanceof ZipError) throw err;
+        throw new ListingError(404, `cannot read zip: ${archiveOf(libPath)}`);
+      }
+      stl = toArrayBuffer(bytes);
+    } else {
+      stl = toArrayBuffer(await readFile(fsPath));
+    }
+
+    let glb: ArrayBuffer;
+    try {
+      glb = stlToGlb(stl);
+    } catch (err) {
+      if (err instanceof GlbError) return c.json({ error: err.message }, 422);
+      throw err;
+    }
+    // A read-only cache dir must not fail the request: serve without
+    // persisting — but say so once, or every open silently reconverts.
+    await meshCache.write(libPath, glb, mtime).catch((err: unknown) => {
+      if (meshCacheWarned) return;
+      meshCacheWarned = true;
+      console.warn(
+        `mesh cache not persisted (${String(err)}); converting per request`,
+      );
+    });
+    return c.body(new Uint8Array(glb), 200, headers);
   });
 
   /**

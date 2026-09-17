@@ -128,7 +128,8 @@ import {
   type Subject,
   type View,
 } from "./state/view";
-import { MeshLru, type LoadedModel } from "./three/lru";
+import { MeshLru } from "./three/lru";
+import { meshLoader } from "./three/meshLoader";
 import { defaultAxisFor } from "./three/camera";
 import {
   disposeModel,
@@ -302,25 +303,6 @@ const LIBRARY_STATES: ReadonlySet<string> = new Set(
     .filter(([, isFault]) => isFault)
     .map(([state]) => state),
 );
-
-/** `placeholderRef` is read at call time, so the loader can be built before
- *  `useThumbnails` hands over `setPlaceholder`. */
-function meshLoader(
-  api: Pick<ApiClient, "fetchModel">,
-  placeholderRef: { current: (path: string, url: string) => void },
-): (path: string) => Promise<LoadedModel<THREE.Object3D>> {
-  return async (path) => {
-    const format = formatOf(path);
-    if (format === null) throw new Error(`not a model: ${path}`);
-    const bytes = await api.fetchModel(path);
-    if (format === "3mf") {
-      const preview = embedded3mfThumbnail(bytes);
-      if (preview !== null) placeholderRef.current(path, preview);
-    }
-    const object = parseModel(bytes, format);
-    return { object, bytes: geometryBytes(object) };
-  };
-}
 
 export default function App() {
   /** A stable getter for the two consumers that must read the report without

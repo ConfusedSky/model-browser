@@ -609,6 +609,24 @@ describe("HttpApiClient contract", () => {
     expect(new Uint8Array(buf)).toEqual(new Uint8Array([1, 2, 3]));
   });
 
+  it("fetchModelGlb requests /api/model.glb and returns its bytes", async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValue(new Response(new Uint8Array([4, 5, 6])));
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch);
+    const buf = await api.fetchModelGlb("/m.stl");
+    expect(fetchFn.mock.calls[0]![0]).toBe("/api/model.glb?path=%2Fm.stl");
+    expect(new Uint8Array(buf)).toEqual(new Uint8Array([4, 5, 6]));
+  });
+
+  it("fetchModelGlb throws on a non-2xx status", async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValue(new Response("bad", { status: 422 }));
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch);
+    await expect(api.fetchModelGlb("/m.stl")).rejects.toThrow();
+  });
+
   // The pixel field has three states on the wire, and `null` is the one that
   // survives only if it is passed through deliberately — `JSON.stringify` drops
   // an `undefined` field, and the ternary this replaced turned a deletion into

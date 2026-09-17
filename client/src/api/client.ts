@@ -98,6 +98,9 @@ export interface ApiClient {
    *  side; a zip answers `[]` rather than an error. */
   peek(path: string, n?: number): Promise<DirEntry[]>;
   fetchModel(path: string): Promise<ArrayBuffer>;
+  /** An STL model's geometry as a derived GLB (server-glb-cache). The viewer
+   *  calls this for `stl` and keeps `fetchModel` for `obj`/`3mf`. */
+  fetchModelGlb(path: string): Promise<ArrayBuffer>;
   /** One entry's effective overrides, `{}` where nothing resolves
    *  (`library-overrides` D3). One path per call is the trade the route exists
    *  to make: a listing would resolve hundreds to serve one lightbox. */
@@ -411,6 +414,14 @@ export class HttpApiClient implements ApiClient {
   async fetchModel(path: string): Promise<ArrayBuffer> {
     const res = await this.fetchFn(
       `/api/file?path=${encodeURIComponent(path)}`,
+    );
+    if (!res.ok) throw await errorOf(res);
+    return res.arrayBuffer();
+  }
+
+  async fetchModelGlb(path: string): Promise<ArrayBuffer> {
+    const res = await this.fetchFn(
+      `/api/model.glb?path=${encodeURIComponent(path)}`,
     );
     if (!res.ok) throw await errorOf(res);
     return res.arrayBuffer();

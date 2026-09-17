@@ -270,6 +270,11 @@ class LocalFramingClient implements ApiClient {
   ): Promise<ArrayBuffer> {
     return this.inner.fetchModel(...args);
   }
+  fetchModelGlb(
+    ...args: Parameters<ApiClient["fetchModelGlb"]>
+  ): Promise<ArrayBuffer> {
+    return this.inner.fetchModelGlb(...args);
+  }
   overrides(
     ...args: Parameters<ApiClient["overrides"]>
   ): Promise<ResolvedOverrides> {
