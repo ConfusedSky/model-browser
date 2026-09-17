@@ -181,3 +181,26 @@
   shell profile, unit file, cron entry or config might name, grep those for the path before
   calling the cleanup finished. Guard the reference (`[ -f … ] && . …`) rather than dropping
   the line, so a later reinstall heals itself, and back up the file first.
+
+## 2026-09-17 — a test task that says "below N" leaves N itself untested
+
+- tasks.md 1.4 of `server-glb-cache` said `uint16` "below 65 536", which reads as `<`
+  where the correct branch is `<=` (65 536 vertices index 0…65535). Masa caught it.
+  Rule: when a task pins a width, size or count boundary, name the equality case as its
+  own test cell ("exactly N gets A, N+1 gets B") so the branch operator is fixed by the
+  test rather than by the prose.
+
+## 2026-09-17 — a parity test covers only the parser branch its fixture exercises
+
+- The converter parses binary and ASCII STL, but the attribute-parity task used one
+  binary fixture, so the ASCII branch's triangle order against `STLLoader` was asserted
+  by nothing; "the corpus has 0 ASCII files" is not coverage of a library that is
+  unaudited. Rule: for every input branch a converter has, the parity test gets a fixture
+  that reaches it, even when the corpus you measured never does.
+
+## 2026-09-17 — re-committed the Claude trailer that lessons.md already forbids
+
+- b1faaea carried `Co-Authored-By: Claude Fable 5.1` two days after the 2026-09-15 lesson
+  recording that the user's global CLAUDE.md forbids it. I had not read this file at
+  session start. Amended before pushing. Rule: read `.ai/lessons.md` before the first
+  commit of a session, and grep `Co-Authored` on `git log -1` after every commit.

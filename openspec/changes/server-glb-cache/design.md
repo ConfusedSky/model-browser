@@ -39,7 +39,7 @@ The GLB carries a `POSITION` accessor and an index accessor and **no normals**. 
 
 Why not ship normals: STL stores one normal per face and the viewer recomputes it, so a GLB carrying per-vertex normals can only share a vertex between faces whose normals are bit-identical. On the miniatures corpus that is almost none of them — measured on 40 decimated STLs (68.1 MB), a `(position, normal)` weld gave 108.0 MB of GLB (1.59x *larger*), while position-only gave 16.2 MB (0.24x). Issue #4's 59.9 MB figure is ~17.7 bytes per triangle, which is position-only-indexed with no normals; it was never a faceted weld.
 
-Index width is `uint16` when the welded vertex count fits, else `uint32` — 6 bytes per triangle on small meshes for one branch.
+Index width is `uint16` when the welded vertex count is at most 65 536 (indices 0…65535), else `uint32` — 6 bytes per triangle on small meshes for one branch.
 
 *Alternative — weld by `(position, winding-derived normal)` and bake normals server-side:* rejected by the measurement above. It also needed a tolerance-based weld (`BufferGeometryUtils.mergeVertices` rounds by `~~(v * hashMultiplier + hashAdditive)` and keeps the first vertex it saw), which moves coordinates up to the tolerance and breaks the byte-identical positions the spec promises.
 
