@@ -264,9 +264,7 @@ describe("gen-overrides", () => {
   });
 
   it("makes keys top-relative when the kit directory is below the top", async () => {
-    const { top, kitsDir, metadata } = fixture(
-      join("miniatures", "clustered-hq"),
-    );
+    const { top, kitsDir, metadata } = fixture(join("miniatures", "decimated"));
     await generateOverrides({
       top,
       kitsDir,
@@ -274,8 +272,8 @@ describe("gen-overrides", () => {
       report: () => undefined,
     });
     expect(Object.keys((await readStore(top)).entries)).toEqual([
-      `/miniatures/clustered-hq/${PACK}`,
-      `/miniatures/clustered-hq/${CHEST}`,
+      `/miniatures/decimated/${PACK}`,
+      `/miniatures/decimated/${CHEST}`,
     ]);
 
     // Rooting the library at the kit directory itself yields keys `/<stem>`.
@@ -399,7 +397,7 @@ describe("gen-overrides", () => {
     // nearer key: false attribution at maximum blast radius (found by review;
     // the first escape guard let it through and the root-key ternary minted
     // `/` for it).
-    const { top, kitsDir, metadata } = fixture("miniatures/clustered-hq");
+    const { top, kitsDir, metadata } = fixture("miniatures/decimated");
     writeFileSync(
       metadata,
       JSON.stringify([
@@ -446,7 +444,7 @@ describe("gen-overrides", () => {
     // the `startsWith(kitsDir + sep)` prefix, so without normalisation every
     // dot-onto-the-top spelling written with a trailing slash minted the root
     // key again (review round four; the third life of this bug).
-    const { top, kitsDir, metadata } = fixture("miniatures/clustered-hq");
+    const { top, kitsDir, metadata } = fixture("miniatures/decimated");
     writeFileSync(
       metadata,
       JSON.stringify([
@@ -466,7 +464,7 @@ describe("gen-overrides", () => {
         },
         {
           thing_id: 3,
-          stem: "../clustered-hq/",
+          stem: "../decimated/",
           name: "Attacker",
           author: "Attacker",
           files: [],
@@ -480,7 +478,7 @@ describe("gen-overrides", () => {
       report: () => undefined,
     });
     expect(result.written).toBe(0);
-    expect(result.escaped).toEqual(["./", "a/../", "../clustered-hq/"]);
+    expect(result.escaped).toEqual(["./", "a/../", "../decimated/"]);
     const keys = Object.keys((await readStore(top)).entries);
     expect(keys).toEqual([]);
   });

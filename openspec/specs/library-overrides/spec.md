@@ -177,7 +177,7 @@ as a zero rather than as a silently thinner store.
 - **THEN** it refuses before writing anything
 
 #### Scenario: Keys are top-relative
-- **WHEN** the library top is above the kit directory (kits at `<top>/miniatures/clustered-hq/<stem>`)
+- **WHEN** the library top is above the kit directory (kits at `<top>/miniatures/decimated/<stem>`)
 - **THEN** the generated keys carry the full top-relative path, and rooting the library at the kit directory itself yields keys `/<stem>`
 
 #### Scenario: Rerun preserves what it does not own

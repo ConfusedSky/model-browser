@@ -192,7 +192,17 @@ Still open, in the order they matter:
 
 ## Addendum: the whole app on the box (2026-09-04)
 
-Done after the query probe, driven over SSH. Shape, so it can be repeated:
+**Superseded.** The box runs the `deploy/demo/` compose stack now, rooted at
+`/library/miniatures/decimated` — `clustered-hq` stopped being the shipped tree
+on 2026-09-15. Read this addendum as the record of the probe, not as a procedure
+to repeat: `deploy/demo/README.md` is the procedure. The hand-run scripts this
+addendum left in `/root` were removed on 2026-09-17, along with the probe's corpus
+and its `mini-classify` checkout. Do not rebuild them against the live box: from
+the host, `pkill -f "src/index.ts"` and `pkill -f serve_api.py` match the
+containers' own processes (checked on the box — `pgrep` sees the app container's
+`bun src/index.ts`), so a hand-run restart script kills the demo.
+
+Done after the query probe, driven over SSH. Shape, for the record:
 
 ```sh
 # on the box

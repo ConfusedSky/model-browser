@@ -19,8 +19,10 @@ phrase; the corpus repo's CLAUDE.md, "NoDerivatives is accepted, after checking"
 why the modification notice is compliant under every one of them. Then 2026-09-15, Masa:
 vertex clustering alters ND-licensed models too far in spirit to pass as a technical
 modification, so the demo ships `miniatures/decimated/` bytes — quadric decimation,
-1.53 MB/model mean, 4.6 GB — over `clustered-hq`'s file set; deploy/demo/README.md §3.2
-has the recipe.)* Provenance per kit in `metadata/miniatures.json`
+1.53 MB/model mean, 4.6 GB, 3,122 models. `decimated/` is the ship on its own —
+its STL set *is* the shipped set, the ten kits dedup emptied being empty
+directories that carry nothing. deploy/demo/README.md §3.2 has the recipe.)*
+Provenance per kit in `metadata/miniatures.json`
 (`name`, `author`, `author_url`, `source_url`, `license`, per-file `sha256`) —
 **gitignored, exists only on that disk.** Index: mini-classify `embed-cache-test`,
 2,165 models = 2,254 − ~89 `NON_MODEL_TAGS` drops (consistent, not confirmed by
@@ -433,7 +435,7 @@ own origin"; only its body hardcodes loopback.
    corpus's tri counts (median 15k, p90 32k, max 117k — `miniatures.json`),
    so decimation does not shrink the cost, canvas size does; the population
    that trips it on a portfolio link is **phones**. Unmeasured: one
-   `clustered-hq` kit in the iGPU browser, lightbox, pill on/off — do this
+   `decimated` kit in the iGPU browser, lightbox, pill on/off — do this
    first. Model-dependence is weak on the demo and real locally (million-tri
    STLs) — sample *continuously* (running median; flip off when exceeded; only
    the user flips back on), not once on the first model opened. The cache
@@ -1004,7 +1006,9 @@ All re-runnable; say whose run when quoting.
 Verified true: `openInApps` empty-report behaviour; `wantsPose` gate;
 `cached.camera ?? posed?.camera ?? DEFAULT_CAMERA` precedence (stored camera
 beats pose); `POSE_VERSION = 2` and `posed:` on the PUT; production serving is
-Vite-dev-only. Corrected: corpus path is `test-models/miniatures/clustered-hq/`;
+Vite-dev-only. Corrected: corpus path is `test-models/miniatures/clustered-hq/`
+(*superseded 2026-09-15: the corpus is `test-models/miniatures/decimated/`, which
+carries its own `overrides.json` — nothing reads `clustered-hq` any more*);
 licence mix is 297/297 CC-BY, not "CC-BY/PD"; "flips `posed: POSE_VERSION`" is
 the `wantsPose` gate opening for every model, not a version bump — same
 consequence (full sweep on the real library), different cause.

@@ -147,10 +147,11 @@ that talks to the internet on purpose (`HF_HUB_OFFLINE=0` for that run only).
 **3.2 The corpus**, from this machine (4.6 GB, ~24 MB/s on the probe run). The
 bytes ship from `miniatures/decimated/` (quadric decimation, since 2026-09-15 —
 vertex clustering altered ND-licensed models too far in spirit; `clustered-hq`
-shipped before). The *file set* is still `clustered-hq`'s, because that tree is
-the deduplicated one with the incomplete kits dropped, while `decimated/` mirrors
-`original/` whole — 282 byte-identical duplicates and 11 directories more. So the
-list comes from one tree and the bytes from the other:
+shipped before). `decimated/` is the whole ship: its 3,122 STLs are the shipped
+set exactly. Ten kit directories in it are empty and so never travel — it mirrors
+`deduplicated/`'s coverage, and in those ten every file was a duplicate of another
+kit's, most of them Thingiverse's `SoLongb.stl` takedown placeholder, which is
+byte-identical across the kits that carry it.
 
 ```sh
 ssh root@<ip> 'mkdir -p /srv/corpus/miniatures/decimated/.model-browser /srv/cache /srv/index'
@@ -158,7 +159,7 @@ ssh root@<ip> 'mkdir -p /srv/corpus/miniatures/decimated/.model-browser /srv/cac
 # Models only, by list. The dot entries and anything that is not a model are
 # excluded by policy — the app refuses non-model paths now, but what is not
 # shipped cannot be served by a later change of mind either.
-(cd ~/Documents/tests/test-models/miniatures/clustered-hq && \
+(cd ~/Documents/tests/test-models/miniatures/decimated && \
   find . -type f -iname '*.stl' ! -path './.model-browser/*' | sed 's|^\./||' | sort) > /tmp/ship-files.txt
 rsync -az --info=progress2 --files-from=/tmp/ship-files.txt \
   ~/Documents/tests/test-models/miniatures/decimated/ \
@@ -169,7 +170,7 @@ Then the one dot-path that *does* travel:
 
 ```sh
 rsync -az \
-  ~/Documents/tests/test-models/miniatures/clustered-hq/.model-browser/overrides.json \
+  ~/Documents/tests/test-models/miniatures/decimated/.model-browser/overrides.json \
   root@<ip>:/srv/corpus/miniatures/decimated/.model-browser/
 ```
 
