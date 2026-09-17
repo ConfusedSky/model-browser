@@ -1,7 +1,7 @@
 # model-viewer Specification
 
 ## Purpose
-TBD - created by archiving change model-browser-v1. Update Purpose after archive.
+How the browser renders a model interactively — in the grid's orbit overlay and the expanded lightbox — and everything about that rendering a viewer relies on: upright display in the file's own coordinates, a per-model turntable spindle, a camera-fixed lighting rig with contact shadows and ambient occlusion, the source credit shown beside a model, stepping between siblings, and how a model's mesh is fetched, parsed, and bounded in memory.
 
 ## Requirements
 
