@@ -25,5 +25,25 @@
 
 - [ ] 4.1 Manual: with a real library rooted at an STL kit, open a tile in the lightbox; confirm the network panel shows `/api/model.glb` and no `/api/file` for it, the model stands upright with faceted shading and AO indistinguishable from `main`, and a previously cached thumbnail is a cache hit (sidecar untouched, no re-render). Confirm the source `.stl` is byte-unchanged and still listed/openable, and that `RIG_VERSION` is **not** bumped.
 - [ ] 4.2 Manual: open an STL inside a zip; confirm it is served as GLB and that a second open does not re-read the zip (no `extractEntry` call — log or spy in dev).
-- [ ] 4.3 Measure on the demo posture (`bun run dev:demo`, decimated corpus): transferred bytes for one lightbox open before and after, and first-open server time for a 50k-triangle model. Record both in this file's review section; the design's 0.24x is the raw ratio, gzipped will differ.
-- [ ] 4.4 Update docs/platform-surface.md only if a new OS-specific surface was added (none expected — note "no change" if so). Verify by review.
+- [x] 4.3 Measure on the demo posture (`bun run dev:demo`, decimated corpus): transferred bytes for one lightbox open before and after, and first-open server time for a 50k-triangle model. Record both in this file's review section; the design's 0.24x is the raw ratio, gzipped will differ.
+- [x] 4.4 Update docs/platform-surface.md only if a new OS-specific surface was added (none expected — note "no change" if so). Verify by review.
+
+## Review
+
+### Measurements (4.3)
+
+In-process (`app.request` against the real decimated corpus, no port bind), STL served by `/api/file` vs GLB by `/api/model.glb`:
+
+| model | tris | STL | GLB | raw | STL gz | GLB gz | gz | miss | hit |
+|---|---|---|---|---|---|---|---|---|---|
+| Shelf1and3-Left-Minitaire | 1 400 | 70 KB | 17.3 KB | 0.247 | 15.2 KB | 11.4 KB | 0.751 | 4.3 ms | 0.27 ms |
+| Night_Dragon…WING_up | 7 996 | 400 KB | 96.6 KB | 0.242 | 187.5 KB | 74.5 KB | 0.397 | 9.7 ms | 0.38 ms |
+| catmini (50k target) | 50 000 | 2.50 MB | 601 KB | 0.240 | 1.91 MB | 551 KB | 0.289 | 65.2 ms | 1.12 ms |
+
+Raw ratio holds at the design's 0.24x for every size. The gzipped win grows with triangle density — small flat parts compress well as STL so GLB's edge there is modest (0.75x), but a dense 50k-triangle mesh (float noise, poorly compressible) drops to **0.29x gzipped**, ~1.35 MB saved on the wire for one open. First-open conversion is 65 ms for 50k triangles, paid once; a hit is ~1 ms.
+
+### Notes
+
+- `meshLoader` was extracted from `App.tsx` to `client/src/three/meshLoader.ts` for a direct unit test of the routing (STL → `fetchModelGlb`, others → `fetchModel`).
+- `parseModel`'s parameter widened to `ModelFormat | "glb"`; `ModelFormat` (and so `MODEL_EXT`/`modelFormat`/listing) is unchanged — GLB is never a stored format.
+- **4.1 / 4.2 remain a manual browser pass** (ports 3177/5173 are held by another session's server running `main`). The substance is covered by automated tests: the parity cell proves the GLB and STL arms produce identical positions, normals, and `geometryBytes` (so pixels, thumbnail cache validity, and `RIG_VERSION` are untouched); the route test proves miss-converts/hit-serves and that a zip entry is served as GLB; the server only *reads* the source, so the `.stl` is byte-unchanged. What is left is purely visual confirmation (upright, faceted, AO indistinguishable from `main`) and the network-panel/`extractEntry`-spy observation.
