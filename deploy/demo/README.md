@@ -715,7 +715,7 @@ because the failure modes are not obvious and the revert depends on them.
 | Nameservers | `lily.ns.cloudflare.com`, `ricardo.ns.cloudflare.com` |
 | Cloudflare account / zone | `Masamaedae@gmail.com`, account `56f9a3b5db52c638fe8babeaee0a6390`, **Free** plan |
 | Zone status | Active |
-| `models` A / AAAA | `157.90.25.110` / `2a01:4f8:1c16:d835::1`, **grey-clouded (DNS only)** — traffic still goes straight to the box, nothing is proxied |
+| `models` A / AAAA | `157.90.25.110` / `2a01:4f8:1c16:d835::1`, **proxied since 2026-09-18** — the zone answers Cloudflare anycast (`104.21.33.208`, `172.67.166.160`), not the box |
 | Encryption mode | Full (strict) |
 | Universal certificate | Active, `*.masamaeda.com`, expires 2026-12-17 |
 | Caddy's own certificate | unchanged and still doing the work, since nothing is proxied |
@@ -853,6 +853,29 @@ Two Edge TTL notes, and they differ per route because the origins differ:
 Bot Fight Mode was already off. The AI crawler policies (Search/Agent/Training) and Bot
 Preference Sync were left at Cloudflare's defaults — they do nothing while nothing is
 proxied, and they are a content decision rather than part of this work.
+
+### Verified through the edge, 2026-09-18
+
+Proxying went on with the three rules already in place. Measured from US Pacific against
+the SJC edge, second request in each pair:
+
+| request | cold | warm | against the direct baseline |
+|---|---|---|---|
+| `/api/thumb/image` at a current `gen` | MISS | **HIT, 69 ms** | 507 ms — **7.3x** |
+| `/api/model.glb` (593,140 B) | MISS 1.61 s | **HIT 0.365 s** | 4.4x |
+| `/assets/main-*.js` (682,385 B) | MISS 1.23 s | **HIT 0.234 s** | 5.3x, and with **no rule** — `.js` is in the default cached set |
+| `/api/dir` | DYNAMIC, not cached | | correct |
+| `/` | DYNAMIC, not cached | | correct — it is `no-cache` on purpose |
+
+Full (strict) validates against Caddy's certificate: 200 rather than 526. Page TTFB roughly
+halved (0.513 s → 0.258 s) simply because TLS now terminates at an edge — that gain applies
+even to bypassed routes, which is why the probe reports TTFB net of connection setup.
+
+**A stale `gen` looks exactly like a broken CDN.** The first test used a generation captured
+earlier the same day. The origin correctly answered `no-cache` for it, so every request came
+back `EXPIRED` — found in cache, revalidated against the origin, never a HIT. Nothing was
+wrong with the rule. **Take the `gen` from a live listing before concluding anything about
+edge caching**; `.ai/probe-demo-latency.sh` re-derives it per run for this reason.
 
 Only then the CDN work itself: the R2 bucket (**`wnam` location hint** — the box
 is already the `weur` copy, and the hint cannot be changed after creation), its
