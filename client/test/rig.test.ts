@@ -10,8 +10,8 @@ describe("light rig contents", () => {
   const white = directionals.filter((l) => l.color.getHex() === 0xffffff);
   const rims = directionals.filter((l) => l.color.getHex() !== 0xffffff);
 
-  it("is at pixel-recipe version 7 (bump deliberately, with the test mocks, when pixels change)", () => {
-    expect(RIG_VERSION).toBe(7);
+  it("is at pixel-recipe version 8 (bump deliberately, with the test mocks, when pixels change)", () => {
+    expect(RIG_VERSION).toBe(8);
   });
 
   it("keeps the base three lights with their historical parameters", () => {

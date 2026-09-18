@@ -324,6 +324,9 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
     fact when the opposite was true. Restore what you set inside the same `evaluate`, or
     reload before measuring again — and prefer rebuilding the *other* layout in the live DOM
     over trusting a memory of what it measured
-  - Generated STL fixtures need outward *winding* (vertex order): parsing ignores stored
-    facet normals and recomputes from winding, so a zeroed normal field is fine — but
-    inverted winding still mirrors lighting left/right (false bugs in lighting assertions)
+  - Generated STL fixtures need outward *winding* (vertex order) when a test inspects
+    the normal attribute (`stlNormals.test.ts`): parsing ignores stored facet normals
+    and recomputes from winding, so a zeroed normal field is fine. Inverted winding is
+    no longer a lighting-assertion trap — materials are double-sided and `gl_FrontFacing`
+    lights the visible face (`double-sided-shading`) — but a normals-from-winding
+    assertion still wants outward vertex order so expected and parsed normals agree

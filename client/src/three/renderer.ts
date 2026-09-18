@@ -25,7 +25,7 @@ export const THUMB_QUALITY = 0.8;
 /** **Bump whenever rendered output changes for the same input** — rig,
  *  materials, tone mapping, size, encoder — or old renders stay on screen
  *  looking fresh. Entries at another version are re-rendered. */
-export const RIG_VERSION = 7;
+export const RIG_VERSION = 8;
 
 /** The other recipe input the cache key does not carry. One producible value —
  *  the rig is fixed in camera space — so any other label is stale (D2). */
@@ -107,6 +107,7 @@ function makeChain(
   const camera = new THREE.PerspectiveCamera(40, 1);
   const scenePass = new RenderPass(scene, camera);
   const aoPass = new GTAOPass(scene, camera, width, height);
+  aoPass.normalMaterial.side = THREE.DoubleSide;
   // OutputPass owns the linear→sRGB conversion for both paths (D2).
   const outputPass = new OutputPass();
   composer.addPass(scenePass);
