@@ -1,7 +1,10 @@
 # Plan: serve the demo's thumbnails and models from a CDN (issue #24)
 
-Decided 2026-09-16, revised 2026-09-17. Phase 1 is a measurement; nothing else is started
-and no repo code has changed. This file was rewritten whole on 2026-09-16 after seven review
+Decided 2026-09-16, revised 2026-09-17. **Phase 1 was executed on 2026-09-18 and the demo
+is now behind Cloudflare** — the zone moved, both `models` records are proxied, and three
+cache rules are live. `deploy/demo/README.md` §10 is the record of what was done and
+measured; this file keeps the reasoning. No app code has changed, and none is planned until
+the measurement in issue #39 settles whether the R2 half is still worth building. This file was rewritten whole on 2026-09-16 after seven review
 rounds, then reviewed again by opus, sonnet and fable — §R says what all of that settled and
 what it cost.
 
@@ -663,6 +666,11 @@ block all keep working untouched.
 **What it can show:** whether edge-cached thumbnails remove both the distance and the box
 contention for the ~114 images of a first screen — most of the requests.
 
+> **Re-open this before building the Worker.** GLB landed (#4) at ~4x smaller than STL and
+> is now edge-cached, so a HIT already serves from a PoP near the visitor — most of what R2
+> was for. What remains is cheaper *misses* on a 3,122-model long tail. Issue #39 decides it
+> on the measurement rather than on this section's original reasoning.
+
 **Where the models win actually comes from:** distance, and only distance (§8.1). Slow start
 is 1.26 s of the 1.772 s median at a 168 ms round trip; an edge at ~20 ms turns those eight
 round trips into ~0.16 s. But a model fetch mostly *misses* the edge (3,122 files, long
@@ -693,7 +701,11 @@ step 1.
 
 0. **Done 2026-09-16** — motive, host and order settled; baseline measured; plan reviewed
    seven times and rewritten (§R).
-1. **The experiment (§9).** Gate, stated so it can fail: **one row must satisfy both at
+1. **The experiment (§9) — DONE 2026-09-18.** Zone moved, proxied, rules live, spot-checked
+   through the SJC edge: thumbnails at a current generation HIT in 69 ms against 507 ms
+   direct, GLB in 0.365 s warm, the bundle in 0.234 s with no rule. **The before/after
+   comparison is still outstanding** and waits on the 48-hour NS TTL — issue #39. The
+   original gate, kept because it is what #39 checks against: **one row must satisfy both at
    once** — `batch_hit == 20` *and* `batch_total_net < 0.3` (it is ~0.68 s today). Two
    conditions met on different rows prove nothing; a partially cold edge would pass them
    separately. **The gate decides the thumbnail half only** — models are bypassed, so
