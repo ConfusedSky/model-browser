@@ -700,19 +700,39 @@ stack up and idle — used 1303, free 247, swap 74; after one meaning search —
 the index's resident share is under the probe's 2.43 GB peak because the checkpoint is
 mapped, not read, and the kernel keeps it in page cache under `buff/cache`.
 
-## 10. The zone: Namecheap today, Cloudflare for the CDN
+## 10. The zone: on Cloudflare since 2026-09-18
 
 An R2 custom domain requires the zone on Cloudflare, so the CDN work
-(`.ai/todo.md`, issue #24) needs this move. Nothing about the box changes; the
-revert at every step is setting the nameservers back.
+(`.ai/todo.md`, issue #24) needed this move. Nothing about the box changed, at any
+step. **The move is done** — the rest of this section is the record of how, kept
+because the failure modes are not obvious and the revert depends on them.
 
-**What is published today** (`dig`, 2026-09-18):
+### Where things stand
+
+| | |
+|---|---|
+| Registrar | Namecheap, nameservers set to **Custom DNS** |
+| Nameservers | `lily.ns.cloudflare.com`, `ricardo.ns.cloudflare.com` |
+| Cloudflare account / zone | `Masamaedae@gmail.com`, account `56f9a3b5db52c638fe8babeaee0a6390`, **Free** plan |
+| Zone status | Active |
+| `models` A / AAAA | `157.90.25.110` / `2a01:4f8:1c16:d835::1`, **grey-clouded (DNS only)** — traffic still goes straight to the box, nothing is proxied |
+| Encryption mode | Full (strict) |
+| Universal certificate | Active, `*.masamaeda.com`, expires 2026-12-17 |
+| Caddy's own certificate | unchanged and still doing the work, since nothing is proxied |
+
+**To revert the whole thing:** set the nameservers back to
+`dns1.registrar-servers.com` / `dns2.registrar-servers.com` at Namecheap. Their zone
+still holds the same records. Grey-clouding is *not* the revert for the nameserver
+move — see step 1 below.
+
+**What was published before the move** (`dig`, 2026-09-18), which is the checklist the
+import had to match:
 
 | record | value |
 |---|---|
 | NS | `dns1.registrar-servers.com`, `dns2.registrar-servers.com` |
 | `models` A / AAAA | `157.90.25.110` / `2a01:4f8:1c16:d835::1` |
-| MX ×5 | `eforward1`–`eforward5.registrar-servers.com` |
+| MX ×5 | `eforward1`–`eforward5.registrar-servers.com` (priorities 10/10/10/15/20) |
 | TXT | `v=spf1 include:spf.efwd.registrar-servers.com ~all` |
 | apex A, `www`, DNSSEC DS | none |
 
