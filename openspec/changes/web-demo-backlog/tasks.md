@@ -85,7 +85,10 @@
       having MODIFIED *A context menu on grid tiles* — no ordering to declare, but rederive
       against the applied spec rather than against what that requirement said before.
       Carries the print warning: downloads are decimated display copies, print from the
-      source — at the Download action itself, not only on the About page (notes item 4)
+      source — at the Download action itself, not only on the About page (notes item 4).
+      Also updates the About page's `#differences` list, which describes what ships
+      (`landing-page` 7.1, moved here at its archive); verify by re-reading it on the
+      live host afterwards
 - [x] 1.7 the corpus bake — preview paths attached to dir entries (the decided shape);
       rides `listing-tree-cache` and `bulk-thumbnail-jobs`. The preview paths themselves
       came with `listing-tree-cache` (`DirEntry.preview`, `/api/peek`), not with the bake.
