@@ -717,24 +717,33 @@ revert at every step is setting the nameservers back.
 | apex A, `www`, DNSSEC DS | none |
 
 **The trap, and it loses mail silently.** Namecheap's Advanced DNS → *Host
-Records* table lists only the two `models` records. The five MX and the SPF TXT
-are injected by the *Email Forwarding* feature in Mail Settings further down the
-same page, and they appear in no table anyone would think to copy. So the obvious
-procedure — screenshot Host Records, recreate it at Cloudflare — drops every mail
-record with no error anywhere. **Build the import checklist from `dig`, not from
-the page.** Namecheap's own documentation says forwarding is configured "if your
-domain is pointed to our BasicDNS, PremiumDNS or FreeDNS"; whether their relays
-keep accepting mail for a domain on foreign nameservers is documented neither way,
-so do not rely on it. Cloudflare Email Routing is free and does the same job.
+Records* table lists **only the two `models` records**. Mail Settings, further down
+the same page, reads *Email Forwarding* (confirmed in the UI 2026-09-18) — and
+that mode is what publishes the mail records. The SPF TXT appears under Mail
+Settings carrying a **padlock rather than a delete control**, so it is
+system-managed and goes away with the mode. The five MX appear in **neither**
+table: they follow from the forwarding mode and are listed nowhere in the
+interface at all.
 
-**No DNSSEC is published**, which removes the usual way this goes wrong — there is
-no DS record to withdraw first. Verify before starting (`dig +short DS
-masamaeda.com`), since enabling it later changes the answer.
+So the obvious procedure — copy Host Records into Cloudflare — drops every mail
+record, with no error anywhere and nothing on screen to suggest anything is
+missing. **Build the import checklist from `dig`, not from the page.**
+
+Namecheap's documentation says forwarding is configured "if your domain is pointed
+to our BasicDNS, PremiumDNS or FreeDNS"; whether their relays keep accepting mail
+for a domain on foreign nameservers is documented neither way, so do not rely on
+it. Since forwarding is actually in use here, plan on **Cloudflare Email Routing**
+(free, same job) rather than on recreating the eforward records and hoping.
+
+**DNSSEC is off** — the Status toggle in Advanced DNS, and no DS published — which
+removes the usual way this goes wrong: there is no DS record to withdraw first.
+Re-check before starting (`dig +short DS masamaeda.com`), since turning it on
+later changes the answer.
 
 **The move:**
 
-1. Record the published set with `dig` (the table above), *and* open Mail Settings
-   to see what mail forwarding is configured.
+1. Record the published set with `dig` (the table above). Host Records and Mail
+   Settings between them do not show it all — see the trap above.
 2. Cloudflare → Add a Site → `masamaeda.com` → Free. It imports what it can find.
 3. **Check the import against step 1's `dig` output**, not against Host Records.
    Add the five MX and the SPF TXT by hand if the scan missed them.
