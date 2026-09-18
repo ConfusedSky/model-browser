@@ -826,12 +826,29 @@ curl -sI https://models.masamaeda.com | head -3
 | Encryption mode | **Full (strict)** | SSL/TLS → Configuration (mind the Save button) |
 | Browser Integrity Check | **off** | Security → Settings. It challenges bare `curl`, which is what the probe is — left on, it turns the measurement into fast small 403s that read as an improvement |
 | Cache rule 1 | `http.request.uri.path eq "/api/thumb/image"` → Eligible for cache | Caching → Cache Rules |
-| Cache rule 2 | `starts_with(http.request.uri.path, "/api/") and http.request.uri.path ne "/api/thumb/image"` → Bypass cache | same |
+| Cache rule 2 | `starts_with(http.request.uri.path, "/api/") and ... ne "/api/thumb/image" and ... ne "/api/model.glb"` → Bypass cache | same |
+| Cache rule 3 | `http.request.uri.path eq "/api/model.glb"` → Eligible for cache, **Edge TTL 1 day (ignore cache-control)** | same |
 
-Rule 2 excludes the image path explicitly rather than relying on rule order, so the
-last-matching-rule-wins behaviour cannot turn the experiment into a null result. Edge TTL is
-left unset on rule 1: the default respects the origin, and `/api/thumb/image` already sends
-`immutable` at a current generation.
+**How the rules interact, since it decides the whole design.** Cache Rules are
+*stackable*: every matching rule applies, and "for conflicting settings (for example,
+bypass cache versus eligible for cache), the last matching rule wins"
+(developers.cloudflare.com/cache/how-to/cache-rules/order/). There is no ambiguity
+exception — Cloudflare never declines a setting because two rules disagree, it just takes
+the later one. So a bypass rule that also matched a cacheable path would silently decide
+the outcome by position alone. **Rule 2 therefore excludes both cacheable paths in its own
+expression**, which makes order irrelevant and the intent readable in the rule itself.
+
+Two Edge TTL notes, and they differ per route because the origins differ:
+
+- `/api/thumb/image` needs none. It already sends `public, max-age=31536000, immutable` at
+  a current generation, and the default ("use cache-control if present") respects that.
+- `/api/model.glb` sends **no `Cache-Control` at all**, and the Edge TTL default is "use
+  cache-control if present, **bypass cache if not**" — which would have bypassed every GLB
+  and made the rule a no-op. It is set to *ignore cache-control and use 1 day*. One day is
+  a judgement call: the GLB URL is `?path=` with **no version in it**, so a re-derived mesh
+  (new source mtime) is invisible to the edge. The corpus is static between deploys, so a
+  day is cheap; **a corpus swap or a re-bake needs a purge**, and that belongs in §7's ship
+  steps if the TTL is ever raised.
 
 Bot Fight Mode was already off. The AI crawler policies (Search/Agent/Training) and Bot
 Preference Sync were left at Cloudflare's defaults — they do nothing while nothing is
