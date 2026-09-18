@@ -56,6 +56,10 @@ Both must answer with the box's addresses **before the first `up`**: the first
 ACME attempt happens the moment Caddy starts, and Let's Encrypt allows five
 duplicate issuances a week (D7).
 
+The zone is at Namecheap on their BasicDNS (`dns1`/`dns2.registrar-servers.com`).
+§10 records what is actually published and what it takes to move the zone to
+Cloudflare, which the CDN work needs.
+
 **1.3 Docker.** Docker Engine and the Compose plugin from Docker's own apt
 repository (Ubuntu's `docker.io` is older and ships no `docker compose`):
 
@@ -235,6 +239,23 @@ openssl s_client -connect models.masamaeda.com:443 -servername models.masamaeda.
 
 Nothing here issued or installed anything: Caddy did (D7). If it did not, its log
 carries the ACME error — `docker compose logs caddy`.
+
+**From the box itself — not `127.0.0.1:3177`.** The three containers share one
+network namespace (D1), so the app's loopback bind exists *inside* that namespace
+and not on the host's. `curl http://127.0.0.1:3177/...` from an SSH session answers
+`Connection refused`, which reads like a dead app and is not. Go through Caddy
+instead, resolving the public name to loopback:
+
+```sh
+curl -s --resolve models.masamaeda.com:443:127.0.0.1 \
+  -o /dev/null -w 'ttfb %{time_starttransfer} total %{time_total} size %{size_download}\n' \
+  'https://models.masamaeda.com/api/file?path=<url-encoded library path>'
+```
+
+That is also the only way to time the box's own serving without the wire in the
+way. Measured 2026-09-17 on a 2.5 MB model: **38 ms idle, 87 ms while three
+`/api/semantic` queries loaded the index** — a real 2.4x of contention, and 2.7%
+of what a US visitor waits for the same file.
 
 **The app.**
 
@@ -678,3 +699,67 @@ stack up and idle — used 1303, free 247, swap 74; after one meaning search —
 1332. `docker stats`: index 873 MiB, app 46 MiB, caddy 26 MiB. Well inside D10's table;
 the index's resident share is under the probe's 2.43 GB peak because the checkpoint is
 mapped, not read, and the kernel keeps it in page cache under `buff/cache`.
+
+## 10. The zone: Namecheap today, Cloudflare for the CDN
+
+An R2 custom domain requires the zone on Cloudflare, so the CDN work
+(`.ai/todo.md`, issue #24) needs this move. Nothing about the box changes; the
+revert at every step is setting the nameservers back.
+
+**What is published today** (`dig`, 2026-09-18):
+
+| record | value |
+|---|---|
+| NS | `dns1.registrar-servers.com`, `dns2.registrar-servers.com` |
+| `models` A / AAAA | `157.90.25.110` / `2a01:4f8:1c16:d835::1` |
+| MX ×5 | `eforward1`–`eforward5.registrar-servers.com` |
+| TXT | `v=spf1 include:spf.efwd.registrar-servers.com ~all` |
+| apex A, `www`, DNSSEC DS | none |
+
+**The trap, and it loses mail silently.** Namecheap's Advanced DNS → *Host
+Records* table lists only the two `models` records. The five MX and the SPF TXT
+are injected by the *Email Forwarding* feature in Mail Settings further down the
+same page, and they appear in no table anyone would think to copy. So the obvious
+procedure — screenshot Host Records, recreate it at Cloudflare — drops every mail
+record with no error anywhere. **Build the import checklist from `dig`, not from
+the page.** Namecheap's own documentation says forwarding is configured "if your
+domain is pointed to our BasicDNS, PremiumDNS or FreeDNS"; whether their relays
+keep accepting mail for a domain on foreign nameservers is documented neither way,
+so do not rely on it. Cloudflare Email Routing is free and does the same job.
+
+**No DNSSEC is published**, which removes the usual way this goes wrong — there is
+no DS record to withdraw first. Verify before starting (`dig +short DS
+masamaeda.com`), since enabling it later changes the answer.
+
+**The move:**
+
+1. Record the published set with `dig` (the table above), *and* open Mail Settings
+   to see what mail forwarding is configured.
+2. Cloudflare → Add a Site → `masamaeda.com` → Free. It imports what it can find.
+3. **Check the import against step 1's `dig` output**, not against Host Records.
+   Add the five MX and the SPF TXT by hand if the scan missed them.
+4. SSL/TLS → **Full (strict)** *before* the switch. A new zone can default to a
+   weaker mode, and the first proxied request must not be served under Flexible.
+   Note what this couples: under Full (strict) an expired origin certificate is a
+   526 for every visitor, where today it is a browser warning.
+5. Leave `models` **grey-clouded** (DNS only). Behaviour identical to today.
+6. Namecheap → Domain List → Manage → Nameservers → Custom DNS → the two
+   Cloudflare nameservers. (A nameserver change is not a transfer; the registrar
+   lock is irrelevant.)
+7. Wait for the zone to read Active, then verify:
+
+```sh
+dig +short NS masamaeda.com            # the two Cloudflare names
+dig +short A models.masamaeda.com      # 157.90.25.110
+dig +short MX masamaeda.com            # the five eforward hosts, or their replacement
+curl -sI https://models.masamaeda.com | head -3
+```
+
+8. Send mail to the forwarded address from an outside account. If it does not
+   arrive, that is step 3's failure showing up late — configure Cloudflare Email
+   Routing and drop the eforward MX records.
+
+Only then the CDN work itself: the R2 bucket (**`wnam` location hint** — the box
+is already the `weur` copy, and the hint cannot be changed after creation), its
+custom domain, and the Worker route. Orange-clouding `models` is a later,
+deliberate step, and `.ai/todo.md` §9 says when.
