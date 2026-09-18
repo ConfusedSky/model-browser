@@ -4,9 +4,10 @@ Decided 2026-09-16, revised 2026-09-17. **Phase 1 was executed on 2026-09-18 and
 is now behind Cloudflare** — the zone moved, both `models` records are proxied, and three
 cache rules are live. `deploy/demo/README.md` §10 is the record of what was done and
 measured; this file keeps the reasoning. No app code has changed, and none is planned until
-the measurement in issue #39 settles whether the R2 half is still worth building. This file was rewritten whole on 2026-09-16 after seven review
-rounds, then reviewed again by opus, sonnet and fable — §R says what all of that settled and
-what it cost.
+the measurement in issue #39 settles whether the R2 half is still worth building.
+
+The file was rewritten whole on 2026-09-16 after seven review rounds, then reviewed again by
+opus, sonnet and fable — §R says what all of that settled and what it cost.
 
 **Three decisions taken 2026-09-17, and they cut the plan roughly in half:**
 
