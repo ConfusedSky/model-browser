@@ -185,6 +185,24 @@ describe("ViewerLayer missing-model error", () => {
   });
 });
 
+describe("the session names the model’s version", () => {
+  // The seam is an *optional* trailing argument at every hop
+  // (`client-names-model-version` D2/D3), so a session effect left as
+  // `acquire(viewer.entry.path)` compiles and every cell above stays green.
+  // This one is what notices, and the fraction is what notices a rounding (D5).
+  const MTIME = 1789446597239.1736;
+
+  it("acquires the mesh under the version its entry reports, fraction and all", async () => {
+    const props = makeProps("lightbox");
+    props.viewer = { ...props.viewer, entry: { ...ENTRY, mtime: MTIME } };
+    await render(props);
+    expect(vi.mocked(props.lru.acquire)).toHaveBeenCalledWith(
+      "/models/gone.stl",
+      MTIME,
+    );
+  });
+});
+
 describe("lightbox gesture binding", () => {
   function press(el: HTMLElement, x: number, y: number): void {
     el.dispatchEvent(

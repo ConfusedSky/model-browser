@@ -61,7 +61,7 @@ interface Props {
   ) => void;
   /** Keyboard activation (Enter/Space) — opens the lightbox directly. */
   onModelOpen: (entry: DirEntry, el: HTMLElement) => void;
-  onModelHover: (path: string | null) => void;
+  onModelHover: (path: string | null, mtime?: number) => void;
   /** A secondary press, or the platform's context-menu key. */
   onEntryMenu: (
     entry: DirEntry,
@@ -466,7 +466,7 @@ interface TileProps {
     el: HTMLElement,
   ) => void;
   onModelOpen: (entry: DirEntry, el: HTMLElement) => void;
-  onModelHover: (path: string | null) => void;
+  onModelHover: (path: string | null, mtime?: number) => void;
   onEntryMenu: (
     entry: DirEntry,
     el: HTMLElement,
@@ -664,7 +664,7 @@ const Tile = memo(function Tile({
           onModelOpen(entry, e.currentTarget);
         }
       }}
-      onPointerEnter={() => onModelHover(entry.path)}
+      onPointerEnter={() => onModelHover(entry.path, entry.mtime)}
       onPointerLeave={() => onModelHover(null)}
     >
       <div

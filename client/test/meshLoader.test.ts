@@ -27,12 +27,18 @@ function stubApi() {
 
 const placeholderRef = { current: () => {} };
 
+/** Fractional on purpose: a rounding anywhere on this path fails here (D5). */
+const MODEL_MTIME = 1789446597239.1736;
+
 describe("meshLoader", () => {
   it("loads an STL through fetchModelGlb and never fetchModel", async () => {
     const api = stubApi();
     const load = meshLoader(api, placeholderRef);
-    const { object } = await load("/kit/part.stl");
-    expect(api.fetchModelGlb).toHaveBeenCalledWith("/kit/part.stl");
+    const { object } = await load("/kit/part.stl", MODEL_MTIME);
+    expect(api.fetchModelGlb).toHaveBeenCalledWith(
+      "/kit/part.stl",
+      MODEL_MTIME,
+    );
     expect(api.fetchModel).not.toHaveBeenCalled();
     expect(object).toBeTruthy();
   });
@@ -45,9 +51,24 @@ describe("meshLoader", () => {
     const load = meshLoader(api, placeholderRef);
     // Parsing an empty 3MF may throw; the route taken is what this asserts, and
     // the fetch happens before any parse.
-    await load("/kit/part.3mf").catch(() => {});
-    expect(api.fetchModel).toHaveBeenCalledWith("/kit/part.3mf");
+    await load("/kit/part.3mf", MODEL_MTIME).catch(() => {});
+    expect(api.fetchModel).toHaveBeenCalledWith("/kit/part.3mf", MODEL_MTIME);
     expect(api.fetchModelGlb).not.toHaveBeenCalled();
+  });
+
+  // The version-less path, which no caller in `client/src` takes today (D7).
+  // What it has to preserve is the URL, not the arity: the loader forwards
+  // whatever it was handed, so an unversioned load reaches the fetcher as
+  // `undefined` and the fetcher appends nothing (apiClient.test.ts pins that).
+  it("loads with no version, naming none to the fetcher", async () => {
+    const api = stubApi();
+    const load = meshLoader(api, placeholderRef);
+    await load("/kit/part.stl");
+    expect(api.fetchModelGlb).toHaveBeenCalledWith("/kit/part.stl", undefined);
+
+    api.fetchModel.mockResolvedValueOnce(emptyZip());
+    await load("/kit/part.3mf").catch(() => {});
+    expect(api.fetchModel).toHaveBeenCalledWith("/kit/part.3mf", undefined);
   });
 });
 

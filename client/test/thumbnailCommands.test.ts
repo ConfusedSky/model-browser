@@ -56,6 +56,13 @@ const HERO: DirEntry = {
   size: 1,
   mtime: 7,
 };
+/** A modification time with a fraction, as a listing really reports one. The
+ *  version travels to `fetchModel*` as an *optional* trailing argument at every
+ *  hop (`client-names-model-version` D2/D3), so a seam left as `acquire(path)`
+ *  compiles and every other cell here stays green — the two cells that name
+ *  `VERSIONED` are what notice, and the fraction is what notices a rounding (D5). */
+const MTIME = 1789446597239.1736;
+const VERSIONED: DirEntry = { ...HERO, mtime: MTIME };
 const CAM = {
   az: 1,
   el: 0.25,
@@ -410,6 +417,13 @@ describe("set orbit axis", () => {
     expect(h.putThumb).toHaveBeenCalledTimes(1);
   });
 
+  it("acquires the mesh under the version its entry reports, fraction and all", async () => {
+    const h = harness({ status: "hit", camera: CAM, axis: "-x" });
+    setOrbitAxis(VERSIONED, h.host, "z", "-x");
+    await flush();
+    expect(h.acquire).toHaveBeenCalledWith(VERSIONED.path, MTIME);
+  });
+
   it("says so when the render fails, and leaves the tile showing what it had", async () => {
     const h = harness({ status: "hit", camera: CAM, axis: "-x" });
     h.acquire.mockRejectedValue(new Error("mesh is not a mesh"));
@@ -702,6 +716,17 @@ describe("the core the generate job runs directly", () => {
 
     expect(outcome).toBe("done");
     expect((h.putThumb.mock.calls[0]![0] as ThumbSave).ifGen).toBe(11);
+  });
+
+  it("acquires the mesh under the version its entry reports, fraction and all", async () => {
+    const h = harness({ status: "miss" });
+
+    await renderEntryThumbnail(VERSIONED, h.host, {
+      discardFraming: false,
+      pose: undefined,
+    });
+
+    expect(h.acquire).toHaveBeenCalledWith(VERSIONED.path, MTIME);
   });
 
   it("leaves the write unconditional when no generation is offered — a press means it", async () => {

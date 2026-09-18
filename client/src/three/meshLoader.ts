@@ -13,18 +13,18 @@ import {
 export function meshLoader(
   api: Pick<ApiClient, "fetchModel" | "fetchModelGlb">,
   placeholderRef: { current: (path: string, url: string) => void },
-): (path: string) => Promise<LoadedModel<THREE.Object3D>> {
-  return async (path) => {
+): (path: string, mtime?: number) => Promise<LoadedModel<THREE.Object3D>> {
+  return async (path, mtime) => {
     const format = formatOf(path);
     if (format === null) throw new Error(`not a model: ${path}`);
     // STL geometry arrives as a derived GLB (server-glb-cache); `obj`/`3mf`
     // keep their own bytes.
     if (format === "stl") {
-      const bytes = await api.fetchModelGlb(path);
+      const bytes = await api.fetchModelGlb(path, mtime);
       const object = parseModel(bytes, "glb");
       return { object, bytes: geometryBytes(object) };
     }
-    const bytes = await api.fetchModel(path);
+    const bytes = await api.fetchModel(path, mtime);
     if (format === "3mf") {
       const preview = embedded3mfThumbnail(bytes);
       if (preview !== null) placeholderRef.current(path, preview);
