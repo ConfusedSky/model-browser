@@ -33,12 +33,13 @@ already reads, and for an entry inside an archive it is already the archive's mt
   source the caller believes it is asking for, and **declare the cacheability of every
   answer**, in three tiers modelled on `thumbHitTiers`: named and current →
   `public, max-age=31536000, immutable`; named and not current → `no-cache` with the
-  current bytes and no validator, so the caller re-keys; named not at all → `no-cache` with
-  a strong ETag derived from the source's version. The pinned tier carries that **same
-  ETag**, which is where these routes part company with the thumbnail's tiers: `/api/file`
+  current bytes, so the caller re-keys; named not at all → `no-cache`. All three carry the
+  **same strong ETag** derived from the source's version, which is where these routes part
+  company with the thumbnail's tiers, whose pinned and mis-keyed rows emit none: `/api/file`
   serves 206s, and a download resuming a pinned URL needs a validator to make its
-  resumption conditional on (design D3). A matching `if-none-match` answers 304 in every
-  tier.
+  resumption conditional on; and a caller a stale listing has left naming a version that no
+  longer exists should pay a 304 rather than a whole payload (design D3). A matching
+  `if-none-match` answers 304 in every tier.
 - **Nothing that is not the bytes is cacheable.** A rejected request, a missing or
   non-model source, an unconvertible STL and an unsatisfiable range all answer `no-store`.
   Most of those statuses are not produced by the byte handlers at all — a missing archive,

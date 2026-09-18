@@ -23,10 +23,12 @@
       `Number(...)` does not turn into a finite number counts as **not named** (D2 — note
       `Number("")` is `0`, so the empty case needs its own arm or it lands in the wrong
       tier). Named and `=== version` → `headers` of `cache-control: public, max-age=31536000,
-      immutable` **and the `etag`** (D3's first row — it carries the tag where `thumbHitTiers`
-      does not, because `/api/file` serves 206s). Named and different → `cache-control:
-      no-cache` alone, no `etag` in `headers`. Not named → `cache-control: no-cache` plus the
-      `etag`. `version === null` (unknown) → the not-named tier, `headers` of `no-cache`
+      immutable` **and the `etag`**. Named and different → `cache-control: no-cache` plus the
+      `etag`. Not named → `cache-control: no-cache` plus the `etag`. Only the directive
+      varies: every byte-carrying answer of a known version carries the same tag, which is
+      where these tiers part company with `thumbHitTiers`' (D3 — `/api/file` serves 206s, and
+      a caller a stale listing left naming a version that no longer exists must cost a 304
+      rather than a whole payload). `version === null` (unknown) → `headers` of `no-cache`
       alone, `etag: null`, `notModified: false`.
 - [x] 1.2a **`byteTiers` writes nothing** (D8): no `c.header`, no touching `c.res`. It reads
       the request and returns the header object for the call site to spread into the
@@ -139,11 +141,11 @@
 
 - [x] 4.1 `api.test.ts`: the three tiers on `/api/file` for a loose model — the current
       `mtime` from `statSync` gives `public, max-age=31536000, immutable` **and the quoted
-      `etag`** (D3's first row); a wrong `mtime` gives `no-cache`, no `etag`, and the same
-      bytes as the whole file; no `mtime` gives `no-cache` plus the same quoted `etag`.
-      Assert the bytes in the first two cells, not only the headers, and assert that the tag
-      the pinned tier emits is byte-identical to the version-less tier's — one representation,
-      one validator.
+      `etag`** (D3's first row); a wrong `mtime` gives `no-cache`, the same bytes as the whole
+      file, **and that same `etag`**; no `mtime` gives `no-cache` plus that same `etag` again.
+      Assert the bytes in the first two cells, not only the headers, and assert that all
+      three tags are byte-identical to one another — one representation, one validator, the
+      directive the only thing that moves.
 - [x] 4.2 `api.test.ts`: the version round-trips from the listing — read an entry's `mtime`
       from `/api/dir`, put `String(entry.mtime)` straight into `/api/file?path=…&mtime=…`,
       and assert `immutable` (D1/D2). This is the cell that fails if anything ever rounds
@@ -171,7 +173,9 @@
       than adding a parallel one.
 - [x] 4.7 `api.test.ts`: `/api/file` on a zip entry — the version that matches is the
       **archive's** `mtimeMs` (the entry's own timestamp does not), it answers `immutable`,
-      and a `range` header still returns the whole entry 200 (D4/D6). Pair it with a cell
+      and a `range` header still returns the whole entry 200 (D4/D6). A version that is *not*
+      the archive's degrades to `no-cache` and keeps the archive's tag, like every other
+      byte-carrying answer. Pair it with a cell
       taking the entry's `mtime` from `/api/dir` on the archive's virtual folder, so the
       listing and the route are pinned to agree.
 - [x] 4.8 `api.test.ts`: `if-range` — with the current tag plus `bytes=0-9` → 206; with a
@@ -183,7 +187,8 @@
       model — answer `no-store` and carry no `etag`. The failures that leave by `throw` are
       4.14's.
 - [x] 4.11 `modelGlb.test.ts`: the three tiers on `/api/model.glb` keyed by the **source
-      STL's** mtime, including the zip-entry case keyed by the archive's; the non-STL 404,
+      STL's** mtime, including the zip-entry case keyed by the archive's, with all three
+      tiers' tags asserted identical as 4.1 does on the other route; the non-STL 404,
       the missing-source 404 and the `bad.stl` 422 answer `no-store` **and a null `etag`**.
       Request the 422 with `mtime=<the current one>` because that is the tier whose `headers`
       carries the tag. Only the `etag` can leak: under 4.13's mutation the handler's own
@@ -203,7 +208,10 @@
       null-`etag` assertions in 4.6, 4.11 and 4.14 a `byteTiers` rewritten to stage its
       headers on the context the way `thumbHitTiers` does, which is the exact regression 1.2a
       exists to prevent — and confirm the matching cell goes red. A green cell under a reverted call site means the cell is
-      asserting nothing.
+      asserting nothing. Falsify the stale tier's validator the same way: restore the
+      no-validator arm (`headers` of `no-cache` alone when the request named some other
+      version) and confirm 4.1's, 4.7's and 4.11's stale cells go red. A cell that stays
+      green under that mutation is not pinning the rule D3's second row now states.
 - [x] 4.14 `api.test.ts`: the failures that never reach handler code answer `no-store` and
       carry no `etag` (1.4) — `/api/file?path=` (empty, the in-handler 400),
       `/api/file?path=/a.zip!/b.zip` (nested zip, the in-handler 400),

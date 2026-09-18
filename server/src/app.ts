@@ -1467,10 +1467,13 @@ export function createApp(
   /**
    * The tiers a model's **bytes** are served under (`byte-route-cache-headers` D3), over
    * the optional `mtime` the listing reports for the source — the archive's for a zip
-   * entry; a `null` version is *unknown* and gets no tag. Unlike its sibling
-   * `thumbHitTiers` this stages nothing on the context (D8): a header set here would ride
-   * every failure reached after it, and since `c.header` is `Headers.set`, a later
-   * `no-store` would replace the directive while the stale `ETag` survived beside it.
+   * entry; a `null` version is *unknown* and gets no tag. Only the directive varies:
+   * every byte-carrying answer of a known version carries the same validator, so a
+   * caller keyed on a version this source no longer has costs a revalidation rather
+   * than a download. Unlike its sibling `thumbHitTiers` this stages nothing on the
+   * context (D8): a header set here would ride every failure reached after it, and
+   * since `c.header` is `Headers.set`, a later `no-store` would replace the directive
+   * while the stale `ETag` survived beside it.
    */
   function byteTiers(
     c: Context,
@@ -1491,26 +1494,20 @@ export function createApp(
     const notModified = c.req.header("if-none-match") === etag;
     const named = c.req.query("mtime");
     // `Number("")` is `0`, so the empty spelling needs its own arm or it names version
-    // zero; a malformed hint is absent, never a refusal (D2).
+    // zero. Everything else malformed becomes `NaN`, which matches no version and so
+    // lands in `no-cache` — a bad hint degrades the declaration, it never refuses (D2).
     const asked = named === undefined || named === "" ? NaN : Number(named);
-    if (!Number.isFinite(asked))
-      return {
-        headers: { "cache-control": "no-cache", etag },
+    const pinned = asked === version;
+    return {
+      headers: {
+        "cache-control": pinned
+          ? "public, max-age=31536000, immutable"
+          : "no-cache",
         etag,
-        notModified,
-      };
-    if (asked === version)
-      return {
-        headers: {
-          "cache-control": "public, max-age=31536000, immutable",
-          etag,
-        },
-        etag,
-        notModified,
-      };
-    // A caller that named a version this source does not have is mis-keyed: no
-    // validator, so it re-reads the listing rather than settling on this URL (D3).
-    return { headers: { "cache-control": "no-cache" }, etag, notModified };
+      },
+      etag,
+      notModified,
+    };
   }
 
   /**

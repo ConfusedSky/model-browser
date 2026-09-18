@@ -102,9 +102,12 @@ There is no input that makes the server pin the wrong bytes.
 | the request | `Cache-Control` | validator | body |
 |---|---|---|---|
 | names the source's current version | `public, max-age=31536000, immutable` | `ETag: "<mtime>-<size>"` | the bytes |
-| names some other version | `no-cache` | none | the current bytes |
-| names no version | `no-cache` | `ETag: "<mtime>-<size>"` | the bytes, or 304 on a matching `if-none-match` |
+| names some other version | `no-cache` | `ETag: "<mtime>-<size>"` | the current bytes |
+| names no version | `no-cache` | `ETag: "<mtime>-<size>"` | the bytes |
 | 400 / 404 / 422 / 416 | `no-store` | none | the error, or empty |
+
+Only the directive varies across the three byte-carrying rows; the validator is the same
+tag in all of them, and a matching `if-none-match` is a 304 in every one (D7).
 
 `immutable` is sound on the first row for the reason it is sound for a thumbnail: a source
 that changes moves its mtime, so every later request for it is a different URL. `public`
@@ -119,10 +122,24 @@ answer that started it carried a tag, and both components are already in hand fr
 same `stat` (D9). Emitting it weakens nothing: `immutable` still says the representation
 cannot change, and the tag merely lets a cache prove that cheaply for a slice.
 
-The second row deliberately carries **no** validator, matching `thumbHitTiers`: the caller
-named a version the server does not have, so it is mis-keyed and should re-read the
-listing, not settle into revalidating a URL it should stop using. It is a transient state
-that ends at the caller's next listing.
+**The second row was written without a validator and now carries one.** The original
+argument, matching `thumbHitTiers`, was that a caller naming a version the server does not
+have is mis-keyed and should re-read the listing rather than settle into revalidating a URL
+it should stop using. That argument is not reversed here, because the thing that forces the
+re-key is the **directive**: `no-cache` still makes every request revalidate, and the row's
+whole point is still that it is a transient state ending at the caller's next listing. What
+the validator changes is only the *price* of that forced revalidation while the state lasts.
+
+The price stopped being hypothetical once the client half was planned. Issue #42 will have
+the client name the version the listing handed it, and issue #34 records that the listing
+cache is **blind to a model overwritten in place** — an add, a delete or a rename is caught;
+only an overwrite is invisible, and `/api/reload` does not heal it. A model overwritten that
+way is then requested under a stale version indefinitely, which is precisely this row, and
+`no-cache` with no validator is an unconditional full download on every visit — strictly
+worse than the version-less row that every request sits in today. With the tag it degrades
+to a 304 instead. That is what makes the client change unable to make any request more
+expensive than it is now, which is the property worth having; the re-key pressure is
+unchanged.
 
 The fourth row is the issue's rule and the `thumbnail cacheability` suite's rule: a
 failure is never stored at any hop, and carries no ETag either — an ETag on a 404 invites
@@ -220,17 +237,19 @@ and both components come from the `stat` D5 already makes mandatory. For `/api/m
 the mtime and size are the **source STL's**, which is precisely what its GLB is keyed by,
 so the tag moves exactly when the cached GLB goes stale.
 
-The ETag is emitted on the byte-carrying answers of the first and third tiers (D3), and
-never on the second. But the *evaluation* of a conditional a client offers back is
+The ETag is emitted on every byte-carrying answer whose version is known (D3) — all three
+tiers — and on no failure. The *evaluation* of a conditional a client offers back is
 unconditional, and this is the rule both call sites obey, with no per-tier variation:
 
 > **`if-none-match` is compared against the current tag whenever the source's version is
-> known — in every tier, including the one whose answer emits no tag.**
+> known — in every tier, whatever version the request named, and whether or not the
+> answer would have emitted the tag.**
 
 The helper *reports* this; the call site acts on it. Nothing is written to the response
 until the call site returns the bytes or the 304 (D8), so "evaluated unconditionally" and
 "declared only on a byte-carrying answer" are two separate statements and neither implies
-the other.
+the other — which is why the rule survives the second tier gaining its validator, having
+been written to hold when it had none.
 
 A single rule is the point. Deciding it per tier is how the two routes silently diverge:
 a named-and-current request carrying a matching `If-None-Match` would be a 304 on one

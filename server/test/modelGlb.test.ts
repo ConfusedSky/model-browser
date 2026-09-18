@@ -138,22 +138,29 @@ describe("model byte cacheability (/api/model.glb)", () => {
     const bytes = new Uint8Array(await pinned.arrayBuffer());
     expect(isGlb(bytes.buffer)).toBe(true);
 
+    // A version the source no longer has degrades the directive and keeps the tag: a
+    // listing blind to an overwrite (issue #34) can leave a caller here indefinitely,
+    // and a revalidation is what stops that being a download every time (D3).
     const stale = await get(
       app,
       `/api/model.glb?path=/loose.stl&mtime=${stl.mtimeMs - 1000}`,
     );
     expect(stale.status).toBe(200);
     expect(stale.headers.get("cache-control")).toBe("no-cache");
-    expect(stale.headers.get("etag")).toBeNull();
     expect(new Uint8Array(await stale.arrayBuffer())).toEqual(bytes);
 
     const plain = await get(app, "/api/model.glb?path=/loose.stl");
     expect(plain.status).toBe(200);
     expect(plain.headers.get("cache-control")).toBe("no-cache");
-    // One representation, one validator: the pinned tier's tag is the
-    // version-less tier's, byte for byte.
-    expect(plain.headers.get("etag")).toBe(pinned.headers.get("etag"));
     expect(new Uint8Array(await plain.arrayBuffer())).toEqual(bytes);
+
+    // One representation, one validator: all three tiers' tags are the same bytes, so
+    // the directive is the only thing that moves between them.
+    expect([
+      pinned.headers.get("etag"),
+      stale.headers.get("etag"),
+      plain.headers.get("etag"),
+    ]).toEqual([tagFor(stl), tagFor(stl), tagFor(stl)]);
   });
 
   it("keys a zip entry by the archive, not by the entry", async () => {
@@ -175,7 +182,7 @@ describe("model byte cacheability (/api/model.glb)", () => {
     const stale = await get(app, `${url}&mtime=${zip.mtimeMs - 1000}`);
     expect(stale.status).toBe(200);
     expect(stale.headers.get("cache-control")).toBe("no-cache");
-    expect(stale.headers.get("etag")).toBeNull();
+    expect(stale.headers.get("etag")).toBe(tagFor(zip));
 
     const plain = await get(app, url);
     expect(plain.headers.get("cache-control")).toBe("no-cache");

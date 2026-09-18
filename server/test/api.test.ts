@@ -372,22 +372,26 @@ describe("model byte cacheability", () => {
     expect(pinned.headers.get("etag")).toBe(tag);
     expect((await bytes(pinned)).equals(whole)).toBe(true);
 
-    // Some other version: the current bytes, and deliberately no validator, so a
-    // mis-keyed caller re-reads the listing rather than settling on revalidating a URL
-    // it should stop using.
+    // Some other version: the current bytes and `no-cache`, which is what makes the
+    // mis-keyed caller re-read the listing — and the tag all the same. A listing blind
+    // to an overwrite (issue #34) can leave a caller in this tier indefinitely, where a
+    // missing validator would mean a full download on every visit (D3).
     const other = await get(`${url}&mtime=${s.mtimeMs - 5000}`);
     expect(other.status).toBe(200);
     expect(other.headers.get("cache-control")).toBe("no-cache");
-    expect(other.headers.get("etag")).toBeNull();
+    expect(other.headers.get("etag")).toBe(tag);
     expect((await bytes(other)).equals(whole)).toBe(true);
 
     const versionless = await get(url);
     expect(versionless.status).toBe(200);
     expect(versionless.headers.get("cache-control")).toBe("no-cache");
-    expect(versionless.headers.get("etag")).toBe(tag);
-    // One representation, one validator: the pinned tier's tag is byte-identical to
-    // the version-less tier's, or a resumption across the two cannot be conditional.
-    expect(pinned.headers.get("etag")).toBe(versionless.headers.get("etag"));
+    // One representation, one validator: all three tags are byte-identical, so the
+    // directive is the only thing a tier moves.
+    expect([
+      pinned.headers.get("etag"),
+      other.headers.get("etag"),
+      versionless.headers.get("etag"),
+    ]).toEqual([tag, tag, tag]);
   });
 
   it("pins the version the listing reported, fraction and all", async (ctx) => {
@@ -517,11 +521,12 @@ describe("model byte cacheability", () => {
     expect((await bytes(pinned)).equals(fx.boxStl)).toBe(true);
 
     // A version that is not the archive's — the entry's own recorded timestamp is one
-    // such value, DOS-resolution and never the archive's `mtimeMs` — degrades.
+    // such value, DOS-resolution and never the archive's `mtimeMs` — degrades the
+    // directive and keeps the archive's tag, so the mis-keyed caller revalidates.
     const stale = await get(`${entry}&mtime=1`);
     expect(stale.status).toBe(200);
     expect(stale.headers.get("cache-control")).toBe("no-cache");
-    expect(stale.headers.get("etag")).toBeNull();
+    expect(stale.headers.get("etag")).toBe(`"${zip.mtimeMs}-${zip.size}"`);
     expect((await bytes(stale)).equals(fx.boxStl)).toBe(true);
 
     // This branch reads the entry into memory and ignores `Range` as it always has

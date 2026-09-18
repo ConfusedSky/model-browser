@@ -15,19 +15,24 @@ than as text, so that any spelling of the same value is the same version, and SH
 read before the bytes it describes, so that a version can never name a source newer than
 the bytes sent with it.
 
-A response that carries the bytes SHALL be declared in one of three ways. When the request
+A response that carries the bytes SHALL be declared in one of three ways, and wherever the
+source's version is known all three SHALL carry the same strong validator derived from it —
+one representation, one validator — so that what the three ways differ in is what a cache
+may do without asking, and nothing else. When the request
 names the version the source currently has, the answer SHALL be publicly cacheable for a
 long lifetime and immutable, because a source that changes moves every subsequent request
-for it to a different version and therefore a different URL, and SHALL carry the same
-strong validator a version-less answer for that source would carry, so that a reader
-resuming a partial download of a pinned answer has something to make its resumption
-conditional on. When the request names any
+for it to a different version and therefore a different URL; the validator is what lets a
+reader resuming a partial download of a pinned answer make its resumption conditional.
+When the request names any
 other version, the answer SHALL carry the source's current bytes and SHALL be declared
-uncacheable without revalidation, and SHALL carry no validator, so that the reader
-re-keys from a fresh listing rather than settling on a URL it should stop using. When the
-request names no version at all, the answer SHALL be declared uncacheable without
-revalidation and SHALL carry a strong validator derived from the source's version, and a
-request offering that validator back SHALL be answered as not-modified with no body.
+uncacheable without revalidation, so that the reader re-keys from a fresh listing rather
+than settling on a URL it should stop using, and it SHALL carry the validator all the
+same, so that a reader naming a version the source no longer has — which it may keep doing
+for as long as its listing stays stale — pays a revalidation rather than a whole payload on
+every request it makes meanwhile. When the
+request names no version at all, the answer SHALL likewise be declared uncacheable without
+revalidation, and a request offering that validator back SHALL be answered as not-modified
+with no body.
 
 A validator a request offers back SHALL be evaluated against the source's current version
 whenever that version is known, whichever of the three ways the answer would otherwise
@@ -69,7 +74,7 @@ build behaves identically to a hosted one.
 
 #### Scenario: A version that is no longer current is answered, not pinned
 - **WHEN** a request names a version the source no longer has
-- **THEN** the source's current bytes are returned, declared uncacheable without revalidation and carrying no validator
+- **THEN** the source's current bytes are returned, declared uncacheable without revalidation, and carrying the same validator every other byte-carrying answer for that source carries, so that a reader that keeps naming the stale version is answered not-modified rather than re-sent the bytes
 
 #### Scenario: A version-less request costs a revalidation rather than a payload
 - **WHEN** a request names no version, and the same reader repeats it offering back the validator it was given, with the source unchanged
