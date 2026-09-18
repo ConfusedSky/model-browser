@@ -14,6 +14,7 @@ import type { ApiClient } from "../src/api/client";
 import { GestureTracker } from "../src/lib/gesture";
 import type { ScoreScale } from "../src/lib/scoreScale";
 import type { MeshLru } from "../src/three/lru";
+import { ViewerSession } from "../src/viewer/session";
 import ViewerLayer, { type ViewerState } from "../src/viewer/ViewerLayer";
 
 // The overlay drives real ViewerSession math; only the WebGL renderer is faked.
@@ -411,5 +412,91 @@ describe("an index pose is advisory", () => {
 
     expect(posed.onDismiss).toHaveBeenCalled();
     expect(posed.onPersist).not.toHaveBeenCalled();
+  });
+});
+
+describe("the orbit baseline tracks the pointer", () => {
+  /** The press that opened the overlay, so the baseline is the press point
+   *  as in the app, not the mount default. */
+  function press(x: number, y: number): void {
+    container!.querySelector<HTMLElement>(".fixed")!.dispatchEvent(
+      new PointerEvent("pointerdown", {
+        bubbles: true,
+        clientX: x,
+        clientY: y,
+      }),
+    );
+  }
+
+  it("orbits from where the pointer was when the session landed, not from the press", async () => {
+    // The symptom: press, keep moving while the spinner shows, and the model
+    // lurches the moment it appears. Only travel after the session lands may
+    // reach `orbit`, and every later move turns by its own increment.
+    const { props } = makeProps();
+    let resolveAcquire!: (mesh: THREE.Object3D) => void;
+    const acquire = new Promise<THREE.Object3D>((r) => {
+      resolveAcquire = r;
+    });
+    props.lru = {
+      acquire: vi.fn(() => acquire),
+    } as unknown as MeshLru<THREE.Object3D>;
+    const orbit = vi.spyOn(ViewerSession.prototype, "orbit");
+    try {
+      await render(props);
+      await act(async () => {
+        press(50, 50);
+      });
+
+      await act(async () => {
+        pointer("pointermove", 80, 50); // beyond the threshold: this is a drag…
+        pointer("pointermove", 150, 50); // …still travelling, no mesh yet
+      });
+      expect(orbit).not.toHaveBeenCalled();
+
+      resolveAcquire(
+        new THREE.Mesh(
+          new THREE.BoxGeometry(2, 2, 2),
+          new THREE.MeshBasicMaterial(),
+        ),
+      );
+      await act(async () => {});
+      await act(async () => {
+        pointer("pointermove", 151, 50); // the first move with a session
+      });
+      // One pixel since the last move, not a hundred since the press.
+      expect(orbit).toHaveBeenCalledTimes(1);
+      expect(orbit).toHaveBeenCalledWith(1, 0);
+
+      // The baseline keeps advancing: a stuck one would answer 11 here.
+      await act(async () => {
+        pointer("pointermove", 161, 50);
+      });
+      expect(orbit).toHaveBeenCalledTimes(2);
+      expect(orbit).toHaveBeenLastCalledWith(10, 0);
+    } finally {
+      orbit.mockRestore();
+    }
+  });
+
+  it("a drag begun after the load still opens with a zero turn", async () => {
+    // The threshold-crossing move marks the session manipulated without
+    // turning it; the moves before it must not be summed into that call.
+    const { props } = makeProps();
+    const orbit = vi.spyOn(ViewerSession.prototype, "orbit");
+    try {
+      await render(props); // acquire resolved: the session exists
+      await act(async () => {
+        press(50, 50);
+        pointer("pointermove", 53, 50); // under the threshold
+        pointer("pointermove", 80, 50); // crosses it
+        pointer("pointermove", 85, 55);
+      });
+      expect(orbit.mock.calls).toEqual([
+        [0, 0],
+        [5, 5],
+      ]);
+    } finally {
+      orbit.mockRestore();
+    }
   });
 });
