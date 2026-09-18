@@ -19,7 +19,7 @@
 - [x] 3.2 Shadow bias. On a flat-faced print and an organic miniature, overlay and lightbox: no speckling on the bed, no detached contact shadow. Leave `SHADOW_NORMAL_BIAS_R` alone unless one of those shows up; if it changes, bump `RIG_VERSION` again and pin the new value in `stageModel.test.ts`. Write the verdict on this line.
   Verdict: leave `SHADOW_NORMAL_BIAS_R = 0.02`. Fountain crown (flat panels) and fountain middle (recessed discs) both show an attached contact shadow, no bed speckle, lightbox, occlusion on.
 - [x] 3.3 Frame time. Lightbox orbit on a heavy miniature with occlusion on, after the persist settle (~5s). Record median frame time on this line. Not a ship gate unless the unoccluded path is the one that becomes unusable (D6).
-  Recorded: median 33.4 ms / min 29.7 / max 766.7 over 30 rAF samples on `FOUNTAIN_Middle` with occlusion on, in an unfocused preview tab (rAF throttled ~30 fps, so this is a floor not a GPU cost). Unoccluded path still usable. Not a ship gate.
+  **Not measured.** A 30-sample rAF run on `FOUNTAIN_Middle` with occlusion on sat at median 33.4 ms in an unfocused preview tab (rAF throttled to ~30 fps). That is not GPU cost and does not satisfy D6. Unoccluded path still usable. Not a ship gate.
 - [x] 3.4 `stlNormals.test.ts` still passes unchanged: `cd client && bunx vitest run test/stlNormals.test.ts`. Winding remains the source of the normal attribute.
 
 ## 4. Gates

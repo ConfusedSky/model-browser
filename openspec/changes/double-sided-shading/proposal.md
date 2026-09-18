@@ -31,5 +31,6 @@ Client only.
 - `client/test/models.test.ts`, `client/test/composer.test.ts`, `client/test/rig.test.ts`.
 - Playwright E2E against `/28mm_fantasy_Fountain_Mounument_1778555/FOUNTAIN_Crown_Alternate_28mm.stl` (confirmed inverted) and `/28mm_fantasy_Fountain_Mounument_1778555/FOUNTAIN_Middle.stl` as the well-wound control. Unit tests pin `side`/`shadowSide` on the existing STL and GLB parses; they do not add an inverted-winding fixture. A crafted inward-wound STL is the Playwright fallback only, if the fountain gate is later repaired, and is not checked into the repo.
 - No server, wire, cache schema, or UI change. The GLB delivery path is geometry-only; it picks up the material from `makeMaterial` the same way the STL arm does.
+- **Demo box:** re-bake before deploy. `thumbWrites` is off, so a `RIG_VERSION` bump is a miss on every baked tile and `check-bake.sh` refuses the redeploy until the store matches (`deploy/demo/README.md`). Dev with writes on is still lazy.
 
 **Ordering.** Independent of `adaptive-ao-default` (deferred, no `RIG_VERSION` bump, different files). Re-read `models.ts` and `renderer.ts` against main before applying: `RIG_VERSION` is shared and other sessions may have bumped it.

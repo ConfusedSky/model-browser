@@ -81,7 +81,9 @@ Double-siding doubles rasterised fragments on opaque geometry, and the AO prepas
 
 ## Migration Plan
 
-Lazy. Existing cache entries carry the old `rig` and re-render on next display. No bake, no server restart, no config key. Rollback is revert; the previous `RIG_VERSION` is then current again and old renders start hitting.
+**Dev / a deployment with `thumbWrites` on.** Lazy. Existing cache entries carry the old `rig` and re-render on next display. No server restart, no config key. Rollback is revert; the previous `RIG_VERSION` is then current again and old renders start hitting.
+
+**The demo box (`thumbWrites` off).** Not lazy. `RIG_VERSION` 7 → 8 makes every baked thumbnail a miss, and `deploy/demo/check-bake.sh` refuses the redeploy until the store is re-baked (`deploy/demo/README.md`, "What triggers a re-bake"). Re-bake before this ships to the box. A visitor cannot heal a miss there.
 
 ## Open Questions
 
