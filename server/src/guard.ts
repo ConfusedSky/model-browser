@@ -4,17 +4,26 @@ const LOOPBACK_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 const LOOPBACK_HOST = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 
 /**
+ * Loopback in the `scheme://host[:port]` spelling. Exported so the guard's rule
+ * and the preview resolver's "not a public origin" test cannot drift apart
+ * (link-previews D3).
+ */
+export function isLoopbackOrigin(origin: string): boolean {
+  return LOOPBACK_ORIGIN.test(origin);
+}
+
+/**
  * One origin in the two shapes a request can name it. A `Host` may or may not
  * carry the scheme's default port — a proxy sends either — so both spellings are
  * held; an explicit non-default port is named by that spelling alone.
  */
-interface AllowedOrigin {
+export interface AllowedOrigin {
   origin: string;
   hosts: ReadonlySet<string>;
 }
 
 /** Entries are already `scheme://host[:port]`: `config.ts` refuses the rest. */
-function normalize(origins: readonly string[]): AllowedOrigin[] {
+export function normalize(origins: readonly string[]): AllowedOrigin[] {
   return origins.map((raw) => {
     const url = new URL(raw);
     // `URL.origin` is the spelling a browser sends.
@@ -25,6 +34,21 @@ function normalize(origins: readonly string[]): AllowedOrigin[] {
       hosts.add(`${hostname}:${url.protocol === "https:" ? "443" : "80"}`);
     return { origin, hosts };
   });
+}
+
+/**
+ * The `Host` rule, over an already-normalised allowlist: loopback, which is
+ * always allowed, plus the hosts the configured origins name. The entry document
+ * is served under no guard at all, so its preview resolver applies this itself
+ * rather than describing the library to a rebound name (link-previews D6).
+ */
+export function isAllowedHost(
+  host: string,
+  allowed: readonly AllowedOrigin[],
+): boolean {
+  if (LOOPBACK_HOST.test(host)) return true;
+  const lower = host.toLowerCase();
+  return allowed.some((a) => a.hosts.has(lower));
 }
 
 /**
@@ -43,7 +67,7 @@ export function guard(origins: readonly string[] = []): MiddlewareHandler {
     if (origin !== undefined) {
       const lower = origin.toLowerCase();
       if (
-        !LOOPBACK_ORIGIN.test(origin) &&
+        !isLoopbackOrigin(origin) &&
         !allowed.some((a) => a.origin === lower)
       ) {
         return c.json({ error: "forbidden origin" }, 403);
@@ -51,11 +75,7 @@ export function guard(origins: readonly string[] = []): MiddlewareHandler {
     }
     const host = c.req.header("host");
     if (host === undefined) return c.json({ error: "forbidden host" }, 403);
-    const lowerHost = host.toLowerCase();
-    if (
-      !LOOPBACK_HOST.test(host) &&
-      !allowed.some((a) => a.hosts.has(lowerHost))
-    ) {
+    if (!isAllowedHost(host, allowed)) {
       return c.json({ error: "forbidden host" }, 403);
     }
     await next();

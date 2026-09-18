@@ -166,6 +166,14 @@ export interface CameraState {
 export const THUMB_MIME = "image/webp";
 
 /**
+ * The square every thumbnail is captured and served at — sized, with
+ * `THUMB_QUALITY`, for a whole screen of tiles on a cold visit. Shared for
+ * `THUMB_MIME`'s reason: the renderer captures it and the entry document's
+ * preview metadata declares it, and a second spelling of a number drifts silently.
+ */
+export const THUMB_SIZE = 256;
+
+/**
  * How far two `CameraState`s may differ per component and still be the same
  * orientation — one tolerance for all of them, since every component is
  * unit-free. A lightbox close re-captures through az/el → cartesian → az/el and

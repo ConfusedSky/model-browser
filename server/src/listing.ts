@@ -6,7 +6,7 @@ import type { DirEntry, DirListing, ModelFormat } from "../../shared/types";
 import { envPositiveInt } from "./env";
 import type { Library } from "./library";
 import type { SnapshotEntry, SnapshotStore, TreeSnapshot } from "./snapshot";
-import { joinVPath, parseVPath, VPathError } from "./vpath";
+import { isZipName, joinVPath, parseVPath, VPathError } from "./vpath";
 import { ZipError, type ZipDirCache, listZipEntries } from "./zip";
 
 export class ListingError extends Error {
@@ -158,7 +158,7 @@ async function listFsDir(
         size: 0,
         mtime: s.mtimeMs,
       });
-    } else if (/\.zip$/i.test(d.name)) {
+    } else if (isZipName(d.name)) {
       entries.push({
         name: d.name,
         path,
@@ -296,7 +296,7 @@ async function listZipDir(
       ? undefined
       : zipEntries.find((e) => e.name === norm.slice(0, -1));
   if (exactFile !== undefined) {
-    if (/\.zip$/i.test(exactFile.name))
+    if (isZipName(exactFile.name))
       throw new VPathError("nested zips are unsupported");
     throw new ListingError(400, `not a directory: ${exactFile.name}`);
   }
@@ -312,7 +312,7 @@ async function listZipDir(
       dirs.add(rest.slice(0, slash));
       continue;
     }
-    if (/\.zip$/i.test(rest)) {
+    if (isZipName(rest)) {
       entries.push({
         name: rest,
         path: joinVPath(zipLibPath, e.name),
@@ -388,7 +388,7 @@ function libHalfOf(libPath: string): string {
 async function requireArchive(fsPath: string, libPath: string): Promise<void> {
   const s = await stat(fsPath).catch(() => null);
   if (s === null) return;
-  if (!s.isFile() || !/\.zip$/i.test(fsPath)) {
+  if (!s.isFile() || !isZipName(fsPath)) {
     throw new ListingError(400, `not an archive: ${libPath}`);
   }
 }
@@ -410,7 +410,7 @@ export async function listDir(
         entries: wire(await listFsDir(fsPath, libHalf, realTop)),
       };
     }
-    if (/\.zip$/i.test(fsPath)) {
+    if (isZipName(fsPath)) {
       return {
         path: libPath,
         entries: await listZipDir(fsPath, libHalf, "", zips),
@@ -577,7 +577,7 @@ async function peekInArchive(
   const zipLibPath = libHalfOf(libPath);
   const s = await stat(fsPath).catch(() => null);
   // Left to the 404 below: "not found" and "not an archive" are different answers.
-  if (s !== null && (!s.isFile() || !/\.zip$/i.test(fsPath))) {
+  if (s !== null && (!s.isFile() || !isZipName(fsPath))) {
     throw new ListingError(400, `not an archive: ${libPath}`);
   }
   // Before the empty-entry-half case below: `/nope.zip` already 404s, and two
@@ -600,7 +600,7 @@ async function peekInArchive(
   // `listZipDir`'s taxonomy, so a peek and a listing refuse alike.
   const exactFile = zipEntries.find((e) => e.name === norm);
   if (exactFile !== undefined) {
-    if (/\.zip$/i.test(exactFile.name))
+    if (isZipName(exactFile.name))
       throw new VPathError("nested zips are unsupported");
     throw new ListingError(400, `not a directory: ${exactFile.name}`);
   }
@@ -644,7 +644,7 @@ export async function peek(
   if (s === null) throw new ListingError(404, `no such path: ${libPath}`);
   if (!s.isDirectory()) {
     // Stat'd first, so a *directory* named `x.zip` is walked like any other.
-    if (/\.zip$/i.test(fsPath)) return [];
+    if (isZipName(fsPath)) return [];
     // 400, not 404: the path is there, it simply has no inside.
     throw new ListingError(400, `not a directory: ${libPath}`);
   }
@@ -755,7 +755,7 @@ async function walkZip(
     // file is a zip this is the nested-zip case — same taxonomy as listZipDir.
     const exactFile = zipEntries.find((e) => e.name === norm.slice(0, -1));
     if (exactFile !== undefined) {
-      if (/\.zip$/i.test(exactFile.name))
+      if (isZipName(exactFile.name))
         throw new VPathError("nested zips are unsupported");
       throw new ListingError(400, `not a directory: ${exactFile.name}`);
     }
@@ -890,7 +890,7 @@ async function gatherFlat(
       containers = level.filter((e) => e.kind !== "model");
       walk.visited.add(await realpath(fsPath).catch(() => fsPath));
       await walkFsLevel(level, "", walk, realTop);
-    } else if (/\.zip$/i.test(fsPath)) {
+    } else if (isZipName(fsPath)) {
       // An archive root keeps no directory state: its `{mtime, size}` is the
       // signal, and `walkZip` checks it on every pass.
       containers = await walkZip(fsPath, libHalf, "", "", walk, true);
@@ -1160,7 +1160,7 @@ async function requireEnumerable(
   if (entry !== undefined) return await requireArchive(fsPath, libPath);
   const s = await stat(fsPath).catch(() => null);
   if (s === null) throw new ListingError(404, `no such path: ${libPath}`);
-  if (!s.isDirectory() && !/\.zip$/i.test(fsPath)) {
+  if (!s.isDirectory() && !isZipName(fsPath)) {
     throw new ListingError(400, `not a directory or zip: ${libPath}`);
   }
 }

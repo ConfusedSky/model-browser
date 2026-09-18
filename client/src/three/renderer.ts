@@ -5,6 +5,7 @@ import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import {
   THUMB_MIME,
+  THUMB_SIZE,
   type CameraState,
   type LightingMode,
   type OrbitAxis,
@@ -17,9 +18,11 @@ import {
   type Bounds,
 } from "./camera";
 
-/** Thumbnail edge and WebP quality, sized for a whole screen of tiles on a cold
- *  visit. A browser that cannot encode WebP falls back to PNG silently. */
-export const THUMB_SIZE = 256;
+// The edge is `shared/types.ts`' — the server's preview metadata declares the
+// same square — and re-exported here, where every renderer caller reads it.
+export { THUMB_SIZE };
+/** With `THUMB_SIZE`, what a cold visit's screen of tiles costs. A browser that
+ *  cannot encode WebP falls back to PNG silently. */
 export const THUMB_QUALITY = 0.8;
 
 /** **Bump whenever rendered output changes for the same input** — rig,
