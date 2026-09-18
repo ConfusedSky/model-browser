@@ -69,7 +69,8 @@ already reads, and for an entry inside an archive it is already the archive's mt
   still strictly better than today (a revisit costs a revalidation rather than a
   re-download), and that is exactly what makes this half safe to land alone.
 - `thumbHitTiers` and every thumbnail behaviour: untouched (design D8).
-- The edge itself — cache rules, R2, the Worker (`.ai/todo.md`, issue #24). This change
+- The edge itself — cache rules, R2, the Worker (issues #24 and #39;
+  `deploy/demo/README.md` §10 records the live rules). This change
   only makes those rules expressible against a truthful origin.
 - A converter-version dimension in `MeshCache` (design D10 records why it is a residual
   risk and not a blocker).

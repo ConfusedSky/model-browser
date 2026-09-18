@@ -240,6 +240,17 @@ openssl s_client -connect models.masamaeda.com:443 -servername models.masamaeda.
 Nothing here issued or installed anything: Caddy did (D7). If it did not, its log
 carries the ACME error — `docker compose logs caddy`.
 
+**Since the zone went proxied (§10) that check no longer sees Caddy's certificate.**
+What it reports is Cloudflare's Universal certificate for the edge —
+`CN=masamaeda.com`, a different expiry — and it would keep reporting a healthy one
+while the origin's had expired, which under Full (strict) is a 526 for every visitor.
+Caddy's own certificate is reachable only by addressing the origin directly:
+
+```sh
+openssl s_client -connect 157.90.25.110:443 -servername models.masamaeda.com </dev/null 2>/dev/null \
+  | openssl x509 -noout -issuer -subject -dates     # CN=models.masamaeda.com — Caddy's
+```
+
 **From the box itself — not `127.0.0.1:3177`.** The three containers share one
 network namespace (D1), so the app's loopback bind exists *inside* that namespace
 and not on the host's. `curl http://127.0.0.1:3177/...` from an SSH session answers
@@ -702,10 +713,10 @@ mapped, not read, and the kernel keeps it in page cache under `buff/cache`.
 
 ## 10. The zone: on Cloudflare since 2026-09-18
 
-An R2 custom domain requires the zone on Cloudflare, so the CDN work
-(`.ai/todo.md`, issue #24) needed this move. Nothing about the box changed, at any
-step. **The move is done** — the rest of this section is the record of how, kept
-because the failure modes are not obvious and the revert depends on them.
+An R2 custom domain requires the zone on Cloudflare, so the CDN work (issue #24)
+needed this move. Nothing about the box changed, at any step. **The move is done** —
+the rest of this section is the record of how, kept because the failure modes are
+not obvious and the revert depends on them.
 
 ### Where things stand
 
@@ -877,7 +888,108 @@ back `EXPIRED` — found in cache, revalidated against the origin, never a HIT. 
 wrong with the rule. **Take the `gen` from a live listing before concluding anything about
 edge caching**; `.ai/probe-demo-latency.sh` re-derives it per run for this reason.
 
-Only then the CDN work itself: the R2 bucket (**`wnam` location hint** — the box
-is already the `weur` copy, and the hint cannot be changed after creation), its
-custom domain, and the Worker route. Orange-clouding `models` is a later,
-deliberate step, and `.ai/todo.md` §9 says when.
+Whether there is any CDN work after this — an R2 bucket (**`wnam` location hint**: the
+box is already the `weur` copy, and the hint cannot be changed after creation), its
+custom domain, and a Worker route mapping `/api/file` and `/api/thumb/image` onto object
+keys — is now a measurement rather than a plan. Issue #39 decides it, against the baseline
+below. Most of what R2 was for is already had: GLB is about a quarter of the STL it
+replaced, and an edge HIT already serves it from a PoP near the visitor. What is left to
+buy is cheaper *misses* on a 3,122-model long tail.
+
+### The two cache rules are provisional, and #42 is what settles them
+
+Rules 2 and 3 above are shaped around a client that names no version. Since
+`byte-route-cache-headers` (issue #36) both `/api/file` and `/api/model.glb` accept an
+optional `mtime` naming the version the caller believes it is asking for, and answer
+`public, max-age=31536000, immutable` when it is the current one, `no-cache` with a strong
+validator otherwise. The client does not send it yet — that is issue #42 — so today every
+request lands in the version-less tier and an edge that respected the origin would
+revalidate rather than hit. **Do not flip the rules before #42 ships.** Once it has, rule 3
+can drop its blind one-day Edge TTL and rule 2 can stop bypassing `/api/file`: both become
+*eligible for cache, respect origin*, a re-derived mesh becomes a different URL instead of a
+stale hit, and the purge-on-re-bake caveat above goes away.
+
+### What staying proxied costs, standing
+
+Proxying was originally scoped as a time-boxed experiment that ended by grey-clouding the
+records. It did not end, and the two conditions it was time-boxed against are now standing
+ones. Neither is an emergency; both are things to know before reading a report of odd
+behaviour.
+
+- **Slow answers become failures.** Cloudflare gives up on an origin at 125 seconds and
+  serves a 524. `Caddyfile`'s deliberate posture — no rate limit, a serialising index
+  behind it, abuse degrading to *waiting* rather than to failure — now has a ceiling it did
+  not have. A request the box would have served slowly is a 524 to the visitor.
+- **Caddy's renewal has never run behind the edge.** The origin certificate expires
+  2026-12-08, so the first attempt is due around 2026-11-08, and under Full (strict) a
+  failed one is a 526 for every visitor rather than a browser warning. TLS-ALPN-01 cannot
+  succeed through a proxy that terminates TLS, and the HTTP-01 path is currently answered
+  by Cloudflare rather than by the box. Issue #45 has the measurements and what to do.
+- **The terms question.** Cloudflare's Application Services terms, which govern the CDN,
+  restrict serving "a disproportionate percentage of pictures … or other large files";
+  their Developer Platform terms, which govern R2 and Workers, carry no such clause. Serving
+  the box's own images through the free CDN is the pattern the first set restricts, and it
+  is one of the arguments for the bucket rather than against it.
+
+Grey-clouding the `models` records (DNS only) reverts all of this in one click and changes
+nothing on the box. It does not revert the nameserver move — see above.
+
+### The baseline, and the probe
+
+`.ai/probe-demo-latency.sh` is what measures a visitor's experience from outside; run it
+rather than reading figures out of any document. It takes the output path as an argument
+and holds a `flock` on `<output>.lock`, because two runs writing one file interleave rows
+into something that looks like data and is not.
+
+```sh
+.ai/probe-demo-latency.sh .ai/demo-latency/after.csv 60 60
+```
+
+Its own header comment says what each column survives; the three that decide whether a
+result means anything are `ok`/`why` (a truncated transfer still reports HTTP 200, and a
+Cloudflare challenge is a fast small 403), `batch_hit` (HIT, STALE and UPDATING only —
+REVALIDATED means the edge asked the origin first, which is the round trip being removed),
+and the `*_net` columns (net of `time_appconnect`, which is DNS plus TCP plus TLS, all
+three of which an edge shortens even for bypassed routes). Summarise with the excluded rows
+*first*: a CDN that turns slow-but-complete answers into failures would otherwise read as
+pure improvement, because every row it broke left the average.
+
+```sh
+python3 - <<'PY'
+import csv, collections, statistics as st
+allrows = list(csv.DictReader(open('.ai/demo-latency/demo-latency-before.csv')))
+rows = [r for r in allrows if r['ok'] == '1']
+print('rows', len(allrows), 'ok', len(rows))
+print('excluded by reason:', collections.Counter(r['why'] for r in allrows if r['ok'] != '1'))
+if not rows:
+    raise SystemExit('no ok rows — read the why column before reading any timing')
+gate = [r for r in rows if int(r['batch_hit']) == 20 and float(r['batch_total_net']) < 0.3]
+print('rows passing the phase-1 gate:', len(gate),
+      '| best batch_hit:', max(int(r['batch_hit']) for r in rows))
+for c in ('thumb_ttfb','thumb_ttfb_net','batch_total','batch_total_net','model_total','model_bps','dir_ttfb'):
+    v = [float(r[c]) for r in rows]
+    print(f'{c:16s} min {min(v):.3f} med {st.median(v):.3f} max {max(v):.3f}')
+PY
+```
+
+**The direct baseline, 60 samples over an hour on 2026-09-16, every row `ok=1`**, taken
+from US Pacific against the box with nothing proxied. This is what an after-run is compared
+against, and the file it came from (`.ai/demo-latency/`) is gitignored, so the table is the
+only durable copy:
+
+| column | min | median | max | spread |
+|---|---|---|---|---|
+| `thumb_ttfb_net` (one round trip) | 0.165 | 0.168 | 0.173 | 5% |
+| `batch_total_net` (20 renders) | 0.657 | 0.681 | 0.781 | 19% |
+| `model_total` (2,500,084 B of STL) | 1.686 | 1.772 | 4.101 | 143% |
+| `model_bps` | 696,802 | 1,960,577 | 2,084,160 | 3.0x |
+
+Structural facts behind those numbers, stable across every version of the probe: one round
+trip to Falkenstein is ~168 ms, connection setup completes at ~342 ms cold, and 20 renders
+multiplexed over one HTTP/2 connection take ~1.0 s, ~0.68 s net of setup. **Do not read the
+model spread as the box being busy** — the median is distance. 2,500,084 bytes from an IW10
+initial window at a 168 ms round trip needs 8 slow-start round trips, 1.344 s, against a
+measured transfer of 1.262 s; and §5's loopback measurement puts the box's whole contention
+effect at 48 ms of the 1,772 ms a visitor waits. The model column is also pessimistic by
+construction: the probe opens a fresh connection per model where a browser reuses the
+HTTP/2 one it already has.

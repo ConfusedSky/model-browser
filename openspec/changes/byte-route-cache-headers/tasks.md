@@ -253,16 +253,18 @@
 - [x] 5.4 Confirm the desktop story by the same run: no configuration was added, nothing in
       `deploy/demo/config.json` or `DEFAULT_FEATURES` changed, and the local server's headers
       are the ones 5.3 observed (D10).
-      **Confirmed**: the diff is `server/src/app.ts`, the two test files and `.ai/todo.md` —
+      **Confirmed**: the diff is `server/src/app.ts`, the two test files and the CDN plan file (since retired) —
       no configuration file, no `DEFAULT_FEATURES` and nothing in `deploy/demo/config.json`
       changed, and the headers above came from a loopback server with nothing in front of it.
 - [x] 5.5 `docs/platform-surface.md` — no change expected (response headers and a query
       parameter are not an OS-specific surface). Record "no change" here after review. **Reviewed: no change** — response headers and a query parameter are not an OS-specific surface.
-- [x] 5.6 Note in `.ai/todo.md` that the origin now declares both byte routes, so the
+- [x] 5.6 Note where the edge rules are recorded that the origin now declares both byte
+      routes, so the
       `/api/model.glb` *ignore cache-control, TTL 1 day* rule and the `/api/file` bypass can
       become "eligible for cache, respect origin" — **after** the follow-up client change
       lands, since until then every request is version-less and an edge rule that respects
-      the origin will revalidate rather than hit.
+      the origin will revalidate rather than hit. **Noted** — the CDN plan file it was
+      written into has since been retired; `deploy/demo/README.md` §10 carries it.
 - [x] 5.7 Open the follow-up client change (append `mtime` to `fetchModel` and
       `fetchModelGlb` from the listing entry the caller already holds) as its own change or
-      issue, and name it here. It is deliberately not created by this change. **Opened as issue #42**, and `.ai/todo.md` names it as the gate on flipping the edge rules.
+      issue, and name it here. It is deliberately not created by this change. **Opened as issue #42**, and `deploy/demo/README.md` §10 names it as the gate on flipping the edge rules.
