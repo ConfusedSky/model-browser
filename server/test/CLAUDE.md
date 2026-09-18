@@ -35,3 +35,8 @@
   verification runs that followed. If it recurs, suspect live-index latency under
   parallel load before the test's own logic; the suite skips cleanly when :8077 is down
 
+- A cell exercising `launch.ts`'s **override** branches must configure `default` *and*
+  `associations` (and `chooser` for a chooser cell). Any operation left unconfigured falls
+  through to the `xdg-mime` builtin, so the cell passes against reverted code and asserts
+  nothing about the override path — set every op the branch touches, not just the one under
+  test

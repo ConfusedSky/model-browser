@@ -276,6 +276,13 @@ landed, so `/about.html/` and `/about.html%2F` served the page while
 `config.json` change, deployed like any other (§6), after which every one of
 them answers 200.
 
+Withholding the introduction also withholds the **consolidated credits list**,
+which the corpus's attribution issue called the one gating compliance item for
+CC-BY. Attribution is still present — per-kit credits show in the lightbox panel
+(`/api/overrides`, not gated on `intro`) and `/api/credits` still answers for all
+444 kits — but only to a visitor who opens a model. No single page lists them
+while `intro` is off, which is a thing to weigh when deciding how long to withhold.
+
 **The two startup lines**, which are the only place the resolved library top can
 be read at all (`hostDetails` withholds it on the wire):
 
@@ -366,6 +373,14 @@ unit to check.
 
 ## 6. Redeploy, and rollback
 
+**A redeploy runs only on an explicit go-ahead from Masa in the conversation.** A
+deploy step written into a tasks.md is not one, and neither is a change being
+finished and verified. A new visitor-facing surface ships with its capability key
+**off** until he has reviewed it live — the landing page and About were withheld
+on 2026-09-15 for exactly that. An instruction to change one thing on the live
+site authorises that deploy alone, so say which other commits would ride along
+with it.
+
 ```sh
 cd /opt/model-browser && git pull && \
   sh deploy/demo/check-bake.sh /srv/cache/<id>/bake/bake.json /srv/index && \
@@ -377,7 +392,11 @@ recipe pin (§7): it compares the checkout's `RIG_VERSION` and `POSE_VERSION` wi
 the ones the shipped store was rendered under, and the SHA-256 of
 `/srv/index/pose-cache.json` and `run-params.json` with the ones the bake hashed,
 and exits non-zero on any disagreement. The `&&` is the refusal: the build does
-not start and the running stack keeps serving — nothing is half-deployed. Give it
+not start and the running stack keeps serving — nothing is half-deployed. A build
+that *fails* has the same shape and is the trap: the old container keeps serving
+with nothing at the shell saying the new one never replaced it, so curl
+`/api/features` from outside after every deploy rather than trusting the exit.
+Give it
 the index directory: called without one it prints `index: not checked, no index
 directory given` and skips the two hash **comparisons** — it still enforces both hash
 lines' format, and still refuses a manifest whose hash line is malformed or duplicated —

@@ -130,12 +130,25 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
 ## Workflow
 
 - Parallel Claude sessions implement/archive changes concurrently — re-read files and
-  `git status` before planning or editing against earlier reads
+  `git status` before planning or editing against earlier reads. Two sessions' uncommitted
+  hunks interleave **inside one file**, so `git stash` and `git reset` are the wrong tools
+  (both are file-level and take the other session's work with them, as does
+  `git checkout <path>`). Stage a contested file from a hunk-filtered patch instead —
+  `git show HEAD:<path>` as the base, your hunks only, `git apply --cached` — which leaves
+  their work in the tree. The tell that you are in this situation is unrelated test cells
+  going red. **None of this applies in your own worktree** — the tree is yours, so
+  `stash`, `reset` and `checkout <path>` are safe and no hunk filtering is needed. Confirm
+  you are in one rather than assuming: `git rev-parse --git-dir` differing from
+  `--git-common-dir` is the check, and a resumed agent can be back in the main checkout
+  holding a prompt written for a worktree
 - Before writing delta specs, read other active changes' specs/ deltas: two changes
   MODIFYing the same requirement collide at archive — ADD a separate requirement for a
   new concern, and declare hard ordering in tasks.md when changes share files/constants
 - design.md cites specific code (classes, call sites, geometry) — re-check those citations
-  against the source when reviewing; plausible-sounding ones have been wrong
+  against the source when reviewing; plausible-sounding ones have been wrong. The same goes
+  for a *causal* claim: "X was slow because Y" is measured, with the timing pasted and sized
+  against the whole effect, or it is labelled "read from the code, not measured" — a real
+  mechanism can still be a negligible share of what you are explaining
 - Cite code by **symbol name, never `file.ts:123`** — line numbers rot silently as code is
   inserted above them. All sixteen of open-in-slicer's citations, across ten symbols, were
   wrong within two weeks of the code landing (`LIGHTBOX_PANEL_EXCLUDES` 769→1018), and
@@ -157,7 +170,11 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   of the same fact: the link-preview tags (`og:*`, `link-previews-and-credit-focus`) are
   spliced into the entry document by the server, and Vite serves its own document on 5173
   (proxying only `/api`), so `curl localhost:5173 | grep og:` finds nothing by
-  construction — they exist only on 3177, and only after a `bun run build`
+  construction — they exist only on 3177, and only after a `bun run build`. **It may also
+  be rooted somewhere else than you assume** — another session repoints it (often at the
+  demo corpus). Record `/api/library`'s `top` and `id`, and the root's folder count, beside
+  every measurement; a baseline and its comparison showing different counts is void, not
+  a finding
 - tasks.md lines that bundle code with a visual-tuning clause ("tune … then freeze") are not
   done when the code lands — leave them open until the pixels are judged
 - Archive changes with plain `openspec archive` (it applies delta specs); if the deltas
@@ -268,7 +285,10 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   round, and how its replacement's own control cell was wrong until it was run under Bun.
   Assert the order-free property (that *some* match is found, that a bound is respected),
   and re-run anything order-sensitive with `bun run <script.ts>` against the real module
-- Manual/E2E: Playwright MCP works here including headless WebGL
+- Manual/E2E: Playwright MCP works here including headless WebGL. When it drops
+  mid-session, drive a standalone loop through `scripts/playwright-found.mjs` rather than
+  waiting on it — better for repro loops anyway, since `browser_run_code_unsafe` is one
+  shot per call
   - E2E fixture models: there is no dedicated fixture set. The six STLs this line used to
     name (Enforcer, paint-rack, bod_test_cube, fat_cat) lived under
     `.superpowers/sdd/tasks/e2e-models/`, which no longer exists and whose contents were not
