@@ -794,13 +794,28 @@ curl -sI https://models.masamaeda.com | head -3
   publishing the MX, but no forwarding rules existed, so mail to `@masamaeda.com` was
   reaching the eforward relays and going nowhere. The mail risk this section warns about
   was therefore mostly theoretical here — check before assuming it applies again.
-- **Full (Strict) would not persist**, before or after activation, across three attempts
-  through the dashboard — the radio reverts to `Full` on reload. The Universal certificate
-  is Active (`*.masamaeda.com`, expires 2026-12-17), so a missing edge certificate is not
-  the cause; the cause is unknown. It changes nothing while every record is grey-clouded,
-  because no encryption mode applies to traffic that is not proxied. **It has to be settled
-  before anything goes orange** — try the API (`PATCH /zones/<id>/settings/ssl` with
-  `{"value":"strict"}`) rather than the dashboard.
+- **The encryption mode has its own Save button, below the fold.** Selecting a radio on
+  SSL/TLS → Configuration does nothing on its own: the setting reverts on reload unless you
+  scroll past the four mode cards and press **Save**. Three attempts were lost to this
+  before the button was found. Nothing about the zone's pending state was to blame.
+
+**Settled 2026-09-18, before anything was proxied:**
+
+| setting | value | where |
+|---|---|---|
+| Encryption mode | **Full (strict)** | SSL/TLS → Configuration (mind the Save button) |
+| Browser Integrity Check | **off** | Security → Settings. It challenges bare `curl`, which is what the probe is — left on, it turns the measurement into fast small 403s that read as an improvement |
+| Cache rule 1 | `http.request.uri.path eq "/api/thumb/image"` → Eligible for cache | Caching → Cache Rules |
+| Cache rule 2 | `starts_with(http.request.uri.path, "/api/") and http.request.uri.path ne "/api/thumb/image"` → Bypass cache | same |
+
+Rule 2 excludes the image path explicitly rather than relying on rule order, so the
+last-matching-rule-wins behaviour cannot turn the experiment into a null result. Edge TTL is
+left unset on rule 1: the default respects the origin, and `/api/thumb/image` already sends
+`immutable` at a current generation.
+
+Bot Fight Mode was already off. The AI crawler policies (Search/Agent/Training) and Bot
+Preference Sync were left at Cloudflare's defaults — they do nothing while nothing is
+proxied, and they are a content decision rather than part of this work.
 
 Only then the CDN work itself: the R2 bucket (**`wnam` location hint** — the box
 is already the `weur` copy, and the hint cannot be changed after creation), its
