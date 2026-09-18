@@ -32,6 +32,11 @@ export function joinVPath(zipPath: string, entry: string): string {
   return `${zipPath}${SEP}${entry}`;
 }
 
+/** The one spelling of "this name is an archive" the listing and the preview share. */
+export function isZipName(name: string): boolean {
+  return /\.zip$/i.test(name);
+}
+
 export function isVPath(vpath: string): boolean {
   return vpath.includes(SEP);
 }

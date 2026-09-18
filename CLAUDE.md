@@ -153,7 +153,11 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   server serves the built client since `public-deployment`; `dist/` is gitignored, so
   `git status` will not show it): after a `bun run build` for a verification, a browser on
   3177 runs that stale bundle against the live server while 5173 runs the live app.
-  Browse 5173, or `rm -rf client/dist` when the build is no longer needed
+  Browse 5173, or `rm -rf client/dist` when the build is no longer needed. The other face
+  of the same fact: the link-preview tags (`og:*`, `link-previews-and-credit-focus`) are
+  spliced into the entry document by the server, and Vite serves its own document on 5173
+  (proxying only `/api`), so `curl localhost:5173 | grep og:` finds nothing by
+  construction — they exist only on 3177, and only after a `bun run build`
 - tasks.md lines that bundle code with a visual-tuning clause ("tune … then freeze") are not
   done when the code lands — leave them open until the pixels are judged
 - Archive changes with plain `openspec archive` (it applies delta specs); if the deltas
