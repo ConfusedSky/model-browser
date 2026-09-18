@@ -93,6 +93,13 @@ describe("post-process chains", () => {
     }
   });
 
+  it("double-sides the GTAO normal prepass on both chains", () => {
+    for (const chain of [getLiveChain(64, 64), getThumbChain()]) {
+      const aoPass = chain.composer.passes[1] as GTAOPass;
+      expect(aoPass.normalMaterial.side).toBe(THREE.DoubleSide);
+    }
+  });
+
   it("never takes the composer default target: 4× MSAA on both, bytes for readback", () => {
     // EffectComposer's own default is single-sample half-float, which would
     // drop today's antialiasing and break the thumbnail readback (D1).

@@ -27,6 +27,8 @@ function makeMaterial(): THREE.MeshStandardMaterial {
     color: 0x9aa4b2,
     metalness: 0.1,
     roughness: 0.75,
+    side: THREE.DoubleSide,
+    shadowSide: THREE.DoubleSide,
   });
 }
 

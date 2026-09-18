@@ -59,6 +59,21 @@ describe("parseModel", () => {
     ]);
   });
 
+  it("shades both sides on the STL and GLB arms, so inverted winding is not culled", () => {
+    const stl = parseModel(stlBytes(ONE_TRIANGLE), "stl");
+    const glb = parseModel(stlToGlb(stlBytes(ONE_TRIANGLE)), "glb");
+    for (const object of [stl, glb]) {
+      const meshes: THREE.Mesh[] = [];
+      object.traverse((o) => {
+        if (o instanceof THREE.Mesh) meshes.push(o);
+      });
+      expect(meshes).toHaveLength(1);
+      const material = meshes[0]!.material as THREE.MeshStandardMaterial;
+      expect(material.side).toBe(THREE.DoubleSide);
+      expect(material.shadowSide).toBe(THREE.DoubleSide);
+    }
+  });
+
   it("renders an STL in its file's coordinates: the parsed bounding box is the file's", () => {
     // file-frame-spindle: no rotation at parse time. Under the retired
     // rotateX(−π/2) bake the max would read (1, 3, 0) and the min (0, 0, −2).
