@@ -778,6 +778,30 @@ curl -sI https://models.masamaeda.com | head -3
    arrive, that is step 3's failure showing up late — configure Cloudflare Email
    Routing and drop the eforward MX records.
 
+**Executed 2026-09-18.** What actually happened, against what this section predicted:
+
+- The `.com` delegation updated in about **three minutes**, not the 48 hours Namecheap's
+  confirmation warns about. `1.1.1.1` and `8.8.8.8` were both answering from
+  `lily`/`ricardo.ns.cloudflare.com` within the same window, and the zone went Active
+  without anyone pressing "Check nameservers now".
+- All eight records verified through the new delegation, and the app answered HTTP 200
+  throughout. No interruption at any point.
+- The 172800-second (48 h) NS TTL on the `.com` delegation is still the ceiling for
+  stragglers. It does not matter while both zones agree — but **do not orange-cloud until
+  it has passed**, or half the resolvers get a proxied answer and half a direct one, which
+  makes any measurement meaningless.
+- **Namecheap's Email Redirect list was empty.** The forwarding *mode* was on and
+  publishing the MX, but no forwarding rules existed, so mail to `@masamaeda.com` was
+  reaching the eforward relays and going nowhere. The mail risk this section warns about
+  was therefore mostly theoretical here — check before assuming it applies again.
+- **Full (Strict) would not persist**, before or after activation, across three attempts
+  through the dashboard — the radio reverts to `Full` on reload. The Universal certificate
+  is Active (`*.masamaeda.com`, expires 2026-12-17), so a missing edge certificate is not
+  the cause; the cause is unknown. It changes nothing while every record is grey-clouded,
+  because no encryption mode applies to traffic that is not proxied. **It has to be settled
+  before anything goes orange** — try the API (`PATCH /zones/<id>/settings/ssl` with
+  `{"value":"strict"}`) rather than the dashboard.
+
 Only then the CDN work itself: the R2 bucket (**`wnam` location hint** — the box
 is already the `weur` copy, and the hint cannot be changed after creation), its
 custom domain, and the Worker route. Orange-clouding `models` is a later,
