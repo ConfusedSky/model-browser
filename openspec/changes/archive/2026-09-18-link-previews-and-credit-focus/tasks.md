@@ -417,7 +417,7 @@
       through Facebook's and LinkedIn's sharing debuggers to settle the relayed WebP claim in
       design's Risks (Discord/Slack/X are the three issue #11 names and do render it). Record
       the answer there — verified or retracted — rather than leaving the claim relayed.
-- [ ] 6.10 Close issue #9 on 6.8's observation, citing
+- [x] 6.10 Close issue #9 on 6.8's observation, citing
       `2026-09-15-lightbox-sibling-stepping` and `2026-09-15-grid-arrow-navigation`. Close #27
       on 6.7 and #11 on 6.2–6.6.
 
@@ -463,7 +463,7 @@
       (`python3 -c "import re,sys;print(re.sub(r'\s+',' ',open(sys.argv[1]).read()))" FILE |
       grep …`), to confirm neither ADDED title already exists in its capability and the
       MODIFIED one exists exactly once.
-- [ ] 7.4 After archiving, read `openspec/specs/public-deployment/spec.md` and
+- [x] 7.4 After archiving, read `openspec/specs/public-deployment/spec.md` and
       `openspec/specs/model-viewer/spec.md`: a delta's HTML comments land verbatim, so confirm
       the applied requirements carry no change-scoped prose. (These deltas are written with no
       HTML comments on purpose — confirm that is still true at apply.)
