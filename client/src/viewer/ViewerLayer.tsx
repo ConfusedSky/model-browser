@@ -411,17 +411,17 @@ export default function ViewerLayer({
       if (!pointer.current.down) return;
       const wasDrag = tracker.isDrag;
       const isDrag = tracker.move(e.clientX, e.clientY);
+      const dx = e.clientX - pointer.current.lastX;
+      const dy = e.clientY - pointer.current.lastY;
+      // The baseline follows the pointer whether or not a session exists yet:
+      // a drag begun over the spinner must not land the whole pre-load travel
+      // on the model in one frame.
+      pointer.current.lastX = e.clientX;
+      pointer.current.lastY = e.clientY;
       if (isDrag && sessionRef.current !== null) {
-        if (!wasDrag) {
-          pointer.current.lastX = e.clientX;
-          pointer.current.lastY = e.clientY;
-        }
-        sessionRef.current.orbit(
-          e.clientX - pointer.current.lastX,
-          e.clientY - pointer.current.lastY,
-        );
-        pointer.current.lastX = e.clientX;
-        pointer.current.lastY = e.clientY;
+        // The move that crosses the threshold marks the session manipulated
+        // and cancels an axis tween, but turns nothing.
+        sessionRef.current.orbit(wasDrag ? dx : 0, wasDrag ? dy : 0);
         renderNow();
       }
     }
