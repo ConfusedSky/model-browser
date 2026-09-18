@@ -9,6 +9,21 @@ the measurement in issue #39 settles whether the R2 half is still worth building
 The file was rewritten whole on 2026-09-16 after seven review rounds, then reviewed again by
 opus, sonnet and fable — §R says what all of that settled and what it cost.
 
+**Origin-side update, 2026-09-18 (`byte-route-cache-headers`, issue #36).** `/api/file` and
+`/api/model.glb` now declare their own cacheability and accept an optional `mtime` naming
+the version the caller believes it is asking for, exactly as `/api/thumb/image` accepts
+`gen`. A named-and-current request is answered `public, max-age=31536000, immutable`; any
+other request is `no-cache` with a strong validator, and every failure is `no-store`. So the
+`/api/model.glb` *ignore cache-control, TTL 1 day* rule and the `/api/file` bypass can both
+become **eligible for cache, respect origin**, and the day-long guess goes away — a
+re-derived mesh is then a different URL rather than a stale hit.
+
+**Do not flip those rules yet.** The client still requests both routes without `mtime`, so
+every request lands in the version-less tier and an edge that respects the origin will
+revalidate rather than hit — correct, but no faster than today. The follow-up that appends
+`mtime` to `fetchModel` and `fetchModelGlb` from the listing entry the caller already holds
+is issue #42; flip the rules once it ships.
+
 **Three decisions taken 2026-09-17, and they cut the plan roughly in half:**
 
 - **The edge composes the CDN URL** (a Worker bound to R2), not the client. Every client and

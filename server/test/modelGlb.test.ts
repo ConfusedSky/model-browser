@@ -4,7 +4,7 @@
  * unreadable/unparseable sources answer as `/api/file`'s failures do.
  */
 
-import { writeFileSync } from "node:fs";
+import { rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/app";
@@ -101,6 +101,194 @@ describe("GET /api/model.glb", () => {
     const res = await get(app, "/api/model.glb?path=/loose.stl");
     expect(res.status).toBe(200);
     expect(isGlb(await res.arrayBuffer())).toBe(true);
+  });
+});
+
+/**
+ * `byte-route-cache-headers`: the GLB route's half. The version is the **source
+ * STL's** — the archive's for a zip entry — so the tag moves exactly when the
+ * cached GLB goes stale, and never names the converted body.
+ */
+describe("model byte cacheability (/api/model.glb)", () => {
+  const stl = statSync(join(fx.dir, "loose.stl"));
+  const zip = statSync(fx.zipPath);
+  const tagFor = (s: { mtimeMs: number; size: number }) =>
+    `"${s.mtimeMs}-${s.size}"`;
+
+  function getWith(
+    app: ReturnType<typeof appWith>["app"],
+    path: string,
+    headers: Record<string, string>,
+  ) {
+    return app.request(path, { headers: { ...LOOPBACK, ...headers } });
+  }
+
+  it("declares the three tiers over the source STL's mtime", async () => {
+    const { app } = appWith();
+
+    const pinned = await get(
+      app,
+      `/api/model.glb?path=/loose.stl&mtime=${stl.mtimeMs}`,
+    );
+    expect(pinned.status).toBe(200);
+    expect(pinned.headers.get("cache-control")).toBe(
+      "public, max-age=31536000, immutable",
+    );
+    expect(pinned.headers.get("etag")).toBe(tagFor(stl));
+    const bytes = new Uint8Array(await pinned.arrayBuffer());
+    expect(isGlb(bytes.buffer)).toBe(true);
+
+    const stale = await get(
+      app,
+      `/api/model.glb?path=/loose.stl&mtime=${stl.mtimeMs - 1000}`,
+    );
+    expect(stale.status).toBe(200);
+    expect(stale.headers.get("cache-control")).toBe("no-cache");
+    expect(stale.headers.get("etag")).toBeNull();
+    expect(new Uint8Array(await stale.arrayBuffer())).toEqual(bytes);
+
+    const plain = await get(app, "/api/model.glb?path=/loose.stl");
+    expect(plain.status).toBe(200);
+    expect(plain.headers.get("cache-control")).toBe("no-cache");
+    // One representation, one validator: the pinned tier's tag is the
+    // version-less tier's, byte for byte.
+    expect(plain.headers.get("etag")).toBe(pinned.headers.get("etag"));
+    expect(new Uint8Array(await plain.arrayBuffer())).toEqual(bytes);
+  });
+
+  it("keys a zip entry by the archive, not by the entry", async () => {
+    const { app } = appWith();
+    const url = `/api/model.glb?path=${encodeURIComponent("/models.zip!/box.stl")}`;
+
+    const pinned = await get(app, `${url}&mtime=${zip.mtimeMs}`);
+    expect(pinned.status).toBe(200);
+    expect(pinned.headers.get("cache-control")).toBe(
+      "public, max-age=31536000, immutable",
+    );
+    expect(pinned.headers.get("etag")).toBe(tagFor(zip));
+    // Both components are the archive's: the entry's own size never appears.
+    expect(pinned.headers.get("etag")).not.toBe(
+      `"${zip.mtimeMs}-${fx.boxStl.length}"`,
+    );
+    expect(isGlb(await pinned.arrayBuffer())).toBe(true);
+
+    const stale = await get(app, `${url}&mtime=${zip.mtimeMs - 1000}`);
+    expect(stale.status).toBe(200);
+    expect(stale.headers.get("cache-control")).toBe("no-cache");
+    expect(stale.headers.get("etag")).toBeNull();
+
+    const plain = await get(app, url);
+    expect(plain.headers.get("cache-control")).toBe("no-cache");
+    expect(plain.headers.get("etag")).toBe(tagFor(zip));
+  });
+
+  it("answers a zip entry's own validator with a 304, converting nothing", async () => {
+    const dir = realTempDir("mb-glb-zip-304-");
+    const { app, mc } = appWith(new MeshCache(dir, libraryFor(fx.dir)));
+    const write = vi.spyOn(mc, "write");
+    const url = `/api/model.glb?path=${encodeURIComponent("/models.zip!/box.stl")}`;
+
+    expect((await get(app, url)).status).toBe(200);
+    expect(write).toHaveBeenCalledTimes(1);
+    // Drop the cached GLB, so a 304 that never happened is a miss — and a miss on
+    // this branch re-extracts the entry and reconverts it.
+    rmSync(dir, { recursive: true, force: true });
+
+    const res = await getWith(app, url, { "if-none-match": tagFor(zip) });
+    expect(res.status).toBe(304);
+    expect(await res.text()).toBe("");
+    expect(res.headers.get("etag")).toBe(tagFor(zip));
+    expect(res.headers.get("cache-control")).toBe("no-cache");
+    expect(write).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers its own 404s no-store, with no validator", async () => {
+    const { app } = appWith();
+
+    const nonStl = await get(app, "/api/model.glb?path=/notes.txt");
+    expect(nonStl.status).toBe(404);
+    expect(nonStl.headers.get("cache-control")).toBe("no-store");
+    expect(nonStl.headers.get("etag")).toBeNull();
+
+    const missing = await get(app, "/api/model.glb?path=/gone.stl");
+    expect(missing.status).toBe(404);
+    expect(missing.headers.get("cache-control")).toBe("no-store");
+    expect(missing.headers.get("etag")).toBeNull();
+  });
+
+  it("answers an unconvertible source no-store, with no validator", async () => {
+    const { app } = appWith();
+    // The *current* version on purpose: that is the tier carrying a tag, and it is
+    // decided before `stlToGlb` throws. A stray validator is all this can catch —
+    // the handler's own `no-store` would replace a staged directive either way.
+    const bad = statSync(join(fx.dir, "bad.stl"));
+    const res = await get(
+      app,
+      `/api/model.glb?path=/bad.stl&mtime=${bad.mtimeMs}`,
+    );
+    expect(res.status).toBe(422);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.headers.get("etag")).toBeNull();
+  });
+
+  it("answers a matching validator 304 without reconverting", async () => {
+    const dir = realTempDir("mb-glb-304-");
+    const { app, mc } = appWith(new MeshCache(dir, libraryFor(fx.dir)));
+    const write = vi.spyOn(mc, "write");
+
+    const first = await get(app, "/api/model.glb?path=/loose.stl");
+    expect(first.status).toBe(200);
+    const tag = first.headers.get("etag");
+    expect(tag).toBe(tagFor(stl));
+    expect(write).toHaveBeenCalledTimes(1);
+
+    // Drop the cached GLB, so a 304 that never happened would be a *miss* and
+    // convert a second time rather than being hidden by a live entry.
+    rmSync(dir, { recursive: true, force: true });
+
+    const second = await getWith(app, "/api/model.glb?path=/loose.stl", {
+      "if-none-match": tag ?? "",
+    });
+    expect(second.status).toBe(304);
+    expect(await second.text()).toBe("");
+    expect(write).toHaveBeenCalledTimes(1);
+  });
+
+  it("honours a matching validator alongside the current version", async () => {
+    const { app } = appWith();
+    const tag = (await get(app, "/api/model.glb?path=/loose.stl")).headers.get(
+      "etag",
+    );
+    expect(tag).toBe(tagFor(stl));
+
+    const res = await getWith(
+      app,
+      `/api/model.glb?path=/loose.stl&mtime=${stl.mtimeMs}`,
+      { "if-none-match": tag ?? "" },
+    );
+    expect(res.status).toBe(304);
+    expect(await res.text()).toBe("");
+    expect(res.headers.get("cache-control")).toBe(
+      "public, max-age=31536000, immutable",
+    );
+    expect(res.headers.get("etag")).toBe(tag);
+  });
+
+  it("honours a matching validator alongside a stale version", async () => {
+    const { app } = appWith();
+    const tag = (await get(app, "/api/model.glb?path=/loose.stl")).headers.get(
+      "etag",
+    );
+
+    // The tag matches the source's current version, which is what the rule turns
+    // on, whatever the request claimed.
+    const res = await getWith(
+      app,
+      `/api/model.glb?path=/loose.stl&mtime=${stl.mtimeMs - 1000}`,
+      { "if-none-match": tag ?? "" },
+    );
+    expect(res.status).toBe(304);
+    expect(await res.text()).toBe("");
   });
 });
 
