@@ -725,9 +725,19 @@ system-managed and goes away with the mode. The five MX appear in **neither**
 table: they follow from the forwarding mode and are listed nowhere in the
 interface at all.
 
-So the obvious procedure — copy Host Records into Cloudflare — drops every mail
-record, with no error anywhere and nothing on screen to suggest anything is
-missing. **Build the import checklist from `dig`, not from the page.**
+So the obvious procedure — copy Host Records into Cloudflare — would drop every
+mail record. **Build the import checklist from `dig`, not from the page.**
+
+**What actually happened on 2026-09-18, which is the opposite way round.**
+Cloudflare's scan queries DNS, so it found all five MX and the SPF TXT by itself.
+What it missed was **`models` — both the A and the AAAA** — because a scanner
+cannot enumerate subdomains and `models` is not a guessable name. Its own wording
+admits this ("our scan may have missed uncommon records or custom subdomains").
+Accepting the scan unedited and switching nameservers would have left
+`models.masamaeda.com` not resolving at all: the demo dark, mail fine. Both
+directions fail silently, which is the reason the rule is `dig` rather than any
+one screen — the check is that **all eight records** are present, not that the
+mail ones are.
 
 Namecheap's documentation says forwarding is configured "if your domain is pointed
 to our BasicDNS, PremiumDNS or FreeDNS"; whether their relays keep accepting mail
