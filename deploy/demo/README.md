@@ -915,18 +915,32 @@ below. Most of what R2 was for is already had: GLB is about a quarter of the STL
 replaced, and an edge HIT already serves it from a PoP near the visitor. What is left to
 buy is cheaper *misses* on a 3,122-model long tail.
 
-### The two cache rules are provisional, and #42 is what settles them
+### The two cache rules are provisional, and the box's deploy is what settles them
 
-Rules 2 and 3 above are shaped around a client that names no version. Since
-`byte-route-cache-headers` (issue #36) both `/api/file` and `/api/model.glb` accept an
-optional `mtime` naming the version the caller believes it is asking for, and answer
-`public, max-age=31536000, immutable` when it is the current one, `no-cache` with a strong
-validator otherwise. The client does not send it yet — that is issue #42 — so today every
-request lands in the version-less tier and an edge that respected the origin would
-revalidate rather than hit. **Do not flip the rules before #42 ships.** Once it has, rule 3
-can drop its blind one-day Edge TTL and rule 2 can stop bypassing `/api/file`: both become
-*eligible for cache, respect origin*, a re-derived mesh becomes a different URL instead of a
-stale hit, and the purge-on-re-bake caveat above goes away.
+Rules 2 and 3 above are shaped around a client that names no version. Both halves of that
+have now shipped: `byte-route-cache-headers` (issue #36) gave `/api/file` and
+`/api/model.glb` an optional `mtime` naming the version the caller believes it is asking
+for, answered `public, max-age=31536000, immutable` when it is the current one and
+`no-cache` with a strong validator otherwise; `client-names-model-version` (issue #42) sends
+it from the listing entry the client already holds.
+
+**What gates the rules now is the deploy, not the code.** The Edge TTL default is *use
+cache-control if present, bypass cache if not*, so flipping either rule to *respect origin*
+against a box that still sends no `Cache-Control` bypasses every GLB and silently undoes the
+caching the demo has today. Confirm the origin itself declares the header before touching
+Cloudflare — through the proxy you would be reading the edge's answer, not the box's:
+
+```sh
+curl -sI --resolve models.masamaeda.com:443:157.90.25.110 \
+  "https://models.masamaeda.com/api/model.glb?path=<encoded>&mtime=<the listing's mtime>" \
+  | grep -i cache-control        # want: public, max-age=31536000, immutable
+```
+
+Once that answers, rule 3 drops its blind one-day Edge TTL and rule 2 stops bypassing
+`/api/file`: both become *eligible for cache, respect origin*, a re-derived mesh becomes a
+different URL instead of a stale hit, and the purge-on-re-bake caveat above goes away. No
+purge is needed at the flip — the client's URLs now carry `&mtime=`, so they are new keys
+and whatever sits under the old version-less URLs ages out on its own.
 
 ### What staying proxied costs, standing
 
