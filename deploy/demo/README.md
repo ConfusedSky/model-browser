@@ -859,6 +859,9 @@ curl -sI https://models.masamaeda.com | head -3
 | Cache rule 2 | `starts_with(http.request.uri.path, "/api/") and ... ne "/api/thumb/image" and ... ne "/api/model.glb"` → Bypass cache | same |
 | Cache rule 3 | `http.request.uri.path eq "/api/model.glb"` → Eligible for cache, **Edge TTL 1 day (ignore cache-control)** | same |
 
+Rules 2 and 3 were rewritten on 2026-09-21 once the byte routes declared themselves — see
+*What the rules are now*, below. Rule 1 is unchanged.
+
 **How the rules interact, since it decides the whole design.** Cache Rules are
 *stackable*: every matching rule applies, and "for conflicting settings (for example,
 bypass cache versus eligible for cache), the last matching rule wins"
@@ -915,20 +918,36 @@ below. Most of what R2 was for is already had: GLB is about a quarter of the STL
 replaced, and an edge HIT already serves it from a PoP near the visitor. What is left to
 buy is cheaper *misses* on a 3,122-model long tail.
 
-### The two cache rules are provisional, and the box's deploy is what settles them
+### What the rules are now (2026-09-21)
 
-Rules 2 and 3 above are shaped around a client that names no version. Both halves of that
-have now shipped: `byte-route-cache-headers` (issue #36) gave `/api/file` and
-`/api/model.glb` an optional `mtime` naming the version the caller believes it is asking
-for, answered `public, max-age=31536000, immutable` when it is the current one and
-`no-cache` with a strong validator otherwise; `client-names-model-version` (issue #42) sends
-it from the listing entry the client already holds.
+The rules above were shaped around a client that names no version. Both halves of that have
+since shipped — `byte-route-cache-headers` (issue #36) gave `/api/file` and `/api/model.glb`
+an optional `mtime` naming the version the caller believes it is asking for, and
+`client-names-model-version` (issue #42) sends it from the listing entry the client already
+holds — so the rules were rewritten to let the origin decide:
 
-**What gates the rules now is the deploy, not the code.** The Edge TTL default is *use
-cache-control if present, bypass cache if not*, so flipping either rule to *respect origin*
-against a box that still sends no `Cache-Control` bypasses every GLB and silently undoes the
-caching the demo has today. Confirm the origin itself declares the header before touching
-Cloudflare — through the proxy you would be reading the edge's answer, not the box's:
+| | |
+|---|---|
+| Rule 1 | `http.request.uri.path eq "/api/thumb/image"` → Eligible for cache. **Unchanged.** |
+| Rule 2, *api bypass except thumbnails* | `starts_with(http.request.uri.path, "/api/") and ... ne "/api/thumb/image" and ... ne "/api/model.glb" and ... ne "/api/file"` → Bypass cache |
+| Rule 3, *byte routes cacheable* | `http.request.uri.path eq "/api/model.glb" or http.request.uri.path eq "/api/file"` → Eligible for cache, Edge TTL **use cache-control if present, bypass cache if not** |
+
+Rule 3's blind one-day TTL is gone, and with it the purge-on-re-bake caveat above: a
+re-derived mesh is a different URL rather than a stale hit. No purge was needed at the flip
+— the client's URLs carry `&mtime=`, so they are new keys and the old version-less ones age
+out on their own. Rule 2 still excludes every cacheable path in its own expression, for the
+ordering reason above.
+
+**`/api/file` needs rule 3, not just an exemption from rule 2.** Dropping it from the bypass
+only stops Cloudflare being told not to cache it; nothing under `/api/` has a
+default-cacheable extension, so it would have stayed DYNAMIC. Being *named* by an eligibility
+rule is what makes it cacheable at all.
+
+**Deploy the box before touching the rules.** The Edge TTL default is *use cache-control if
+present, bypass cache if not*, so a rule that respects the origin against a box that sends no
+`Cache-Control` bypasses every GLB and silently undoes the caching the demo has. Confirm the
+origin itself declares the header — through the proxy you read the edge's answer, not the
+box's:
 
 ```sh
 curl -sI --resolve models.masamaeda.com:443:157.90.25.110 \
@@ -936,11 +955,35 @@ curl -sI --resolve models.masamaeda.com:443:157.90.25.110 \
   | grep -i cache-control        # want: public, max-age=31536000, immutable
 ```
 
-Once that answers, rule 3 drops its blind one-day Edge TTL and rule 2 stops bypassing
-`/api/file`: both become *eligible for cache, respect origin*, a re-derived mesh becomes a
-different URL instead of a stale hit, and the purge-on-re-bake caveat above goes away. No
-purge is needed at the flip — the client's URLs now carry `&mtime=`, so they are new keys
-and whatever sits under the old version-less URLs ages out on its own.
+**Browser Cache TTL was overriding the origin, and is now `Respect Existing Headers`**
+(Caching → Configuration). It was Cloudflare's default of *4 hours*, and it rewrites
+`Cache-Control` on responses the zone considers **cacheable** — so the moment rule 3 made the
+byte routes eligible, an unversioned or mis-keyed request came back `max-age=14400` in place
+of the origin's `no-cache`. That is precisely the tier `byte-route-cache-headers` added a
+validator to: a caller holding a superseded version would have cached it for four hours
+rather than revalidating. `/` was never affected, because it is DYNAMIC and the override
+reaches only cacheable responses — which is why the setting looked harmless for three days.
+Nothing on the box relies on it: Caddy and the app declare `immutable` on `/assets/*`,
+`/api/thumb/image` at a current `gen` and both byte routes at a current `mtime`, and
+`no-cache` on `/` and the version-less tiers.
+
+Verified through the edge after the change:
+
+| request | `cf-cache-status` | `Cache-Control` |
+|---|---|---|
+| `/api/model.glb` at a current `mtime` | HIT | `public, max-age=31536000, immutable` |
+| `/api/model.glb` with no `mtime`, or a stale one | MISS then REVALIDATED | `no-cache` |
+| `/api/file` at a current `mtime` | HIT | `public, max-age=31536000, immutable` |
+| `/assets/main-*.js` | HIT | `public, max-age=31536000, immutable` |
+| `/` | DYNAMIC | `no-cache` |
+| `/api/dir` | DYNAMIC | none |
+
+**Tiered Cache is still off** (Caching → Tiered Cache). Smart Tiered Cache is free on every
+plan and reduces origin load, so it is worth turning on — but it changes what a miss costs,
+so turn it on *between* measurements rather than during one. Note it is not a substitute for
+an R2 `wnam` bucket: Smart Topology picks the upper tier closest to the **origin**, so it
+sits near Falkenstein and a US miss still crosses the Atlantic. The topologies that would
+help a distant visitor, Generic Global and Regional Tiered Cache, are Enterprise only.
 
 ### What staying proxied costs, standing
 
