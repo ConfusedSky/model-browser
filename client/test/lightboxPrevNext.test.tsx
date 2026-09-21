@@ -6,7 +6,7 @@
 // close does, and following the URL in place. Helper idioms are urlLightbox's.
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { DirEntry, DirListing } from "../../shared/types";
+import type { DirEntry, DirListing, OverrideCredits } from "../../shared/types";
 import {
   container,
   deferred,
@@ -15,6 +15,7 @@ import {
   listDir,
   model,
   mountApp,
+  overrides,
   putThumb,
   settle,
   tinyStl,
@@ -74,6 +75,49 @@ const axisGroup = (): Element | null =>
   dialog()?.querySelector('[aria-label="Orbit axis"]') ?? null;
 const spinner = (): Element | null =>
   dialog()?.querySelector(".animate-spin") ?? null;
+const closeButton = (): HTMLButtonElement =>
+  dialog()!.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!;
+const copyPathButton = (): HTMLButtonElement =>
+  dialog()!.querySelector<HTMLButtonElement>('button[aria-label="Copy path"]')!;
+const creditLink = (field: string): HTMLAnchorElement =>
+  dialog()!.querySelector<HTMLAnchorElement>(`[data-credit="${field}"] a`)!;
+
+/** A kit credited in all three linked fields, so the panel draws three anchors. */
+const CREDITS: OverrideCredits = {
+  author: "Valandar",
+  authorUrl: "https://www.thingiverse.com/Valandar",
+  license: "Creative Commons - Attribution",
+  licenseUrl: "https://creativecommons.org/licenses/by/4.0/",
+  sourceUrl: "https://www.thingiverse.com/thing:3750572",
+};
+
+/** The first `<button>` after the metadata list, read from the DOM rather than
+ *  named: which group draws it depends on the feature report and on whether any
+ *  app resolved, and the ring's shape is what these cells are about. */
+function buttonAfterCredits(): HTMLButtonElement {
+  const dl = dialog()!.querySelector("dl")!;
+  return Array.from(dialog()!.querySelectorAll("button")).find(
+    (b) => dl.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING,
+  )!;
+}
+
+const pressTab = (opts: KeyboardEventInit = {}): Promise<void> =>
+  act(async () => {
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", ...opts }));
+  });
+
+/** The dialog's ring is finite, so a walk that cannot reach its target has to
+ *  end in a failure rather than spin. */
+const RING_CAP = 40;
+async function tabTo(target: HTMLElement): Promise<void> {
+  for (let i = 0; i < RING_CAP; i++) {
+    await pressTab();
+    if (document.activeElement === target) return;
+  }
+  throw new Error(
+    `focus never reached ${target.getAttribute("aria-label") ?? target.tagName} in ${RING_CAP} presses`,
+  );
+}
 
 /** The persist's own write for a path, told apart from the sweep's: a camera
  *  rides only on a persist, never on a background render. */
@@ -341,6 +385,63 @@ describe("lightbox sibling stepping", () => {
     // Focus advanced off the dialog to the first *enabled* control (Next), not stuck.
     expect(document.activeElement).not.toBe(dialog());
     expect(document.activeElement).toBe(nextButton());
+  });
+
+  it("the attribution links sit in the Tab ring where the panel draws them", async () => {
+    // Reachability is the smaller half: a ring that appended the anchors after
+    // every button would reach all three and put them nowhere near the text
+    // they credit. So the run is asserted with its neighbours on both sides —
+    // Copy path before, and whatever button the panel drew after the list.
+    overrides.mockResolvedValue({ credits: CREDITS });
+    await openModel(M1);
+
+    await tabTo(copyPathButton());
+    for (const link of [
+      creditLink("author"),
+      creditLink("license"),
+      creditLink("source"),
+    ]) {
+      await pressTab();
+      expect(document.activeElement).toBe(link);
+    }
+    await pressTab();
+    expect(document.activeElement).toBe(buttonAfterCredits());
+  });
+
+  it("Shift+Tab walks back out of the attribution links to Copy path", async () => {
+    overrides.mockResolvedValue({ credits: CREDITS });
+    await openModel(M1);
+
+    await tabTo(creditLink("source"));
+    for (const target of [
+      creditLink("license"),
+      creditLink("author"),
+      copyPathButton(),
+    ]) {
+      await pressTab({ shiftKey: true });
+      expect(document.activeElement).toBe(target);
+      expect(dialog()!.contains(document.activeElement)).toBe(true);
+    }
+  });
+
+  it("an uncredited model's ring is buttons only, all the way round", async () => {
+    // A guard, not coverage: it passes whatever the query selects today,
+    // because the panel draws nothing anchor-shaped for a model no key covers.
+    // It is here to catch a later change that starts drawing one.
+    await openModel(M1);
+    expect(dialog()!.querySelectorAll("[data-credit]")).toHaveLength(0);
+
+    const seen: Element[] = [];
+    for (let i = 0; i < RING_CAP; i++) {
+      await pressTab();
+      if (document.activeElement === dialog()) break;
+      seen.push(document.activeElement!);
+    }
+    expect(document.activeElement).toBe(dialog()); // the walk closed the loop
+    expect(seen.every((el) => el.tagName === "BUTTON")).toBe(true);
+    expect(seen).toContain(nextButton());
+    expect(seen).toContain(copyPathButton());
+    expect(seen).toContain(closeButton());
   });
 
   it("a second arrow during a step persist is ignored — no double persist", async () => {

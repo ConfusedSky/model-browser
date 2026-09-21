@@ -245,7 +245,7 @@ Models SHALL be rendered with screen-space ambient occlusion that darkens crevic
 - **THEN** background pixels are still fully transparent and the silhouette's edge is the one the render produced, the alpha channel having been carried losslessly while colour took the lossy path
 
 ### Requirement: STL shading normals derive from winding
-When parsing an STL model, the client SHALL derive shading normals from triangle winding and SHALL NOT use the file's stored facet normals, so an exporter that wrote its normal field in a different axis convention than its vertices — or wrote zero-length, inverted, or otherwise inconsistent normals — cannot corrupt lighting. Recomputed normals SHALL be flat facet normals — no smoothing is introduced — so a file whose stored normals agree with its winding renders as before, up to the precision the file itself stored them at. This applies identically to thumbnails, the orbit overlay, and the lightbox; other model formats keep their format-native vertex normals.
+When parsing an STL model, the client SHALL derive shading normals from triangle winding and SHALL NOT use the file's stored facet normals, so an exporter that wrote its normal field in a different axis convention than its vertices — or wrote zero-length, inverted, or otherwise inconsistent normals — cannot corrupt lighting. Recomputed normals SHALL be flat facet normals — no smoothing is introduced — so a file whose stored normals agree with its winding produces the same normal attribute, up to the precision the file itself stored them at. This applies identically to thumbnails, the orbit overlay, and the lightbox; other model formats keep their format-native vertex normals.
 
 #### Scenario: A convention-mismatched STL shades correctly
 - **WHEN** a binary STL whose stored facet normals disagree with its triangle winding (e.g. rotated 90° about X by a Z-up/Y-up export mismatch) is thumbnailed or viewed
@@ -253,7 +253,7 @@ When parsing an STL model, the client SHALL derive shading normals from triangle
 
 #### Scenario: A well-formed STL is unchanged
 - **WHEN** an STL whose stored normals agree with its winding is parsed
-- **THEN** the derived normals reproduce the stored ones to within the precision they were stored at, and the rendered output is unchanged
+- **THEN** the derived normals reproduce the stored ones to within the precision they were stored at
 
 #### Scenario: Isolated bad facets in an otherwise healthy file
 - **WHEN** a file whose normal field is broadly correct carries a few facets whose stored normals disagree with their winding (an inverted or stale facet normal)
@@ -462,6 +462,70 @@ When the source cannot be read, the delivery SHALL answer as `/api/file` does fo
 #### Scenario: Cached thumbnails are not disturbed
 - **WHEN** a model already thumbnailed under the current pixel recipe is displayed after this change ships
 - **THEN** its thumbnail is a cache hit and is not re-rendered, because the client shades the delivered GLB from the same vertices as it shaded the STL
+### Requirement: The panel's links are in the lightbox's focus ring
+
+Every link the lightbox's side panel renders — the author, the license and the source of the
+model's attribution — SHALL participate in the lightbox's focus trap alongside the panel's
+controls, so that a visitor using the keyboard alone can reach one and follow it. The links
+SHALL take their place in the ring in the order they are read on screen, among the controls
+they sit between, rather than being appended after them: the attribution is part of what the
+panel says about the model, and a ring that reordered it would not match what a screen reader
+announces. Advancing SHALL step forward through that sequence and retreating SHALL step
+backward through the same sequence, and both SHALL stay inside the lightbox, wrapping as the
+trap already wraps.
+
+Adding links to the ring SHALL NOT admit anything that cannot take focus: a disabled control
+SHALL continue to be skipped. A model for which the library holds no attribution renders no
+such links, and its ring SHALL be exactly the ring of controls it was.
+
+#### Scenario: The attribution links are reachable
+
+- **WHEN** the lightbox is open on a model whose library holds an author URL, a license URL
+  and a source URL, and the visitor tabs forward through the dialog
+- **THEN** each of the three links is focused in turn, in the order the panel draws them, and
+  the dialog and its controls are focused in the same pass
+
+#### Scenario: Retreating walks the same ring
+
+- **WHEN** the visitor holds shift and tabs backward from a focused attribution link
+- **THEN** focus moves to whatever precedes it in the forward order, and continuing backward
+  reaches the same members in reverse without leaving the lightbox
+
+#### Scenario: A disabled control is still skipped
+
+- **WHEN** the lightbox is open on the first model of its listing, where the previous-model
+  control is disabled, and the visitor tabs forward
+- **THEN** focus advances past the disabled control to the next member of the ring rather
+  than stopping on it
+
+#### Scenario: An uncredited model's ring is unchanged
+
+- **WHEN** the lightbox is open on a model the library holds no attribution for and the
+  visitor tabs through it
+- **THEN** the ring is the dialog and its controls, with no additional stops
+
+### Requirement: Models shade double-sided
+The client SHALL render every parsed model with both triangle sides visible, and SHALL light, occlude, and shadow the side that faces the camera, including when triangle winding points the stored front face away from the viewer. This SHALL apply identically in thumbnails, the orbit overlay, and the lightbox, and SHALL apply to every format the viewer parses. A model whose winding is inward on some or all facets SHALL read as a solid surface rather than a hollow shell showing the interior of the far side. A model whose winding is outward SHALL remain a solid surface. The pixel-recipe version SHALL bump so cached thumbnails re-render.
+
+#### Scenario: An inverted-winding model looks solid
+- **WHEN** a model whose triangles wind inward is thumbnailed or opened in the overlay or lightbox
+- **THEN** the near surface is shaded and lit as a solid object, not as a hollow shell showing the interior of the far side
+
+#### Scenario: Mixed-winding patches look solid
+- **WHEN** a model that is mostly outward-wound but carries inward-wound patches is viewed
+- **THEN** those patches shade as part of the near surface rather than punching holes that show the interior
+
+#### Scenario: A well-wound model stays solid
+- **WHEN** a model whose triangles wind outward is thumbnailed or viewed
+- **THEN** it still reads as a solid surface, grounded by its contact shadow, with no new holes or inverted lighting
+
+#### Scenario: Occlusion follows the visible surface
+- **WHEN** an inverted-winding model is viewed with ambient occlusion on
+- **THEN** occlusion darkens crevices on the surface the viewer sees, and SHALL NOT fill the silhouette with the far interior's occlusion
+
+#### Scenario: Cached thumbnails refresh
+- **WHEN** a model was thumbnailed under the previous recipe and its tile is next displayed
+- **THEN** the thumbnail re-renders once under the bumped pixel-recipe version and is cached thereafter
 
 ### Requirement: The viewer names the version of the model it fetches
 When the client requests a model's bytes — the source file and the derived mesh alike — and

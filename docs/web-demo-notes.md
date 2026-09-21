@@ -1026,3 +1026,23 @@ consequence (full sweep on the real library), different cause.
   is gitignored and was never committed; `metadata/` is gitignored too).
 - mini-classify: `load_siglip` dtype-by-device, its test, `eval/cpu_dtype.py`,
   learnings entry + index + README row. Uncommitted at time of writing.
+
+## The link-preview site image (2026-09-18)
+
+`client/public/og.png` — 1200×630, ~190 KB — is what every view that is not a model deep
+link unfurls as (`link-previews-and-credit-focus` D5), and it is a hand-taken screenshot
+rather than a build step. The recipe, so it can be retaken: `bun run dev:demo` (the shipped
+demo posture — every capability off, `intro` on, `MODEL_BROWSER_ROOT` at this machine's copy
+of the box's corpus), then Playwright MCP — `browser_resize` to 1200×630, `browser_navigate`
+to `http://localhost:5173/` (the library top; Vite binds IPv6, so `localhost`, never
+`127.0.0.1`), dismiss the intro banner and collapse the side panel so the grid fills the
+frame, wait until the tiles have painted (the demo renders them in the browser unless the
+bake is present), then `browser_take_screenshot` to a path under the repo root — the MCP
+browser writes nowhere else — and move it to `client/public/`. What it caught on 2026-09-18:
+the header with an example query as the search placeholder and two and a half rows of the
+library top's folder sheets, five across.
+Vite copies `public/` to the dist root, so the file is served at `/og.png` with `no-cache`
+(the immutable tier only covers `/assets/`). A retake that lands above ~500 KB should be
+saved as `og.jpg` at q0.85 instead; one place names the file (the resolver in
+`server/src/preview.ts`) and the cell beside it globs `og.*`, so the extension is a one-line
+change.

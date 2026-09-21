@@ -524,10 +524,14 @@ export default function ViewerLayer({
         if (dialog === null) return;
         // `:not([disabled])` — a disabled end control cannot take focus, and it
         // is first in the ring on the first model, so the trap dead-stops
-        // there (D2).
+        // there (D2). `[disabled]` is not a thing an anchor has, so the one
+        // selector governs the buttons and still admits the credit links, in
+        // the document order the panel reads them in.
         const focusables = [
           dialog,
-          ...dialog.querySelectorAll<HTMLElement>("button:not([disabled])"),
+          ...dialog.querySelectorAll<HTMLElement>(
+            "button:not([disabled]), a[href]",
+          ),
         ];
         const idx = focusables.indexOf(document.activeElement as HTMLElement);
         const next = e.shiftKey

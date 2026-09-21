@@ -2,7 +2,9 @@
 //
 // Arrow-key focus movement across the grid (grid-arrow-navigation). The handler
 // sits on the grid container; a keydown from a focused tile bubbles to it and
-// moves focus between the tile buttons. happy-dom lays nothing out, so the
+// moves focus between the tile buttons. A second, document-level listener
+// (link-previews D11) catches the arrow nobody is focused for and lands it on
+// the first tile. happy-dom lays nothing out, so the
 // column-stepping cells stub each tile's `getBoundingClientRect` to fake a
 // three-column layout, and `columnCount` is unit-tested directly over stubbed
 // rects. Import `./appHarness` before any `../src/...` module (the renderer-mock
@@ -15,8 +17,10 @@ import {
   model,
   mountApp,
   openFind,
+  settle,
   tiles,
   unmountApp,
+  wait,
 } from "./appHarness";
 import { columnCount } from "../src/components/Grid";
 import { resetLookupQueueForTests } from "../src/hooks/useThumbnails";
@@ -174,5 +178,62 @@ describe("grid arrow-key focus movement", () => {
     // falsification (the falsifiable mutants are preventDefault and the Up clamp).
     expect(document.activeElement).toBe(input);
     expect(tiles().some((t) => t === document.activeElement)).toBe(false);
+  });
+
+  /** Drop focus to `body`, the state a fresh visitor or a click on empty space leaves. */
+  function blurAll(): void {
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(document.activeElement).toBe(document.body);
+  }
+
+  it("lands on the first tile when nothing has focus", async () => {
+    blurAll();
+    const right = await fireArrow("ArrowRight");
+    expect(document.activeElement).toBe(tiles()[0]);
+    expect(right.defaultPrevented).toBe(true);
+
+    // Every arrow, not only the forward ones: there is no tile to step from.
+    blurAll();
+    await fireArrow("ArrowLeft");
+    expect(document.activeElement).toBe(tiles()[0]);
+    blurAll();
+    await fireArrow("ArrowUp");
+    expect(document.activeElement).toBe(tiles()[0]);
+
+    // A modified arrow is the browser's whatever holds focus.
+    blurAll();
+    const modified = await fireArrow("ArrowRight", { alt: true });
+    expect(document.activeElement).toBe(document.body);
+    expect(modified.defaultPrevented).toBe(false);
+  });
+
+  it("leaves an unfocused arrow alone while the lightbox is open", async () => {
+    tiles()[0]!.focus();
+    await act(async () => {
+      tiles()[0]!.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Enter",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    await wait(200);
+    await settle();
+    expect(document.querySelector('[aria-modal="true"]')).not.toBeNull();
+
+    // The lightbox pulls focus back on every step, so `activeElement` cannot
+    // tell whether the grid grabbed it first; the tile's own `focus` can.
+    const grab = vi.spyOn(tiles()[0]!, "focus");
+    blurAll();
+    await fireArrow("ArrowRight");
+    await wait(200);
+    await settle();
+    expect(grab).not.toHaveBeenCalled();
+    expect(tiles().some((t) => t === document.activeElement)).toBe(false);
+    // The body-targeted arrow still reached the lightbox's window listener.
+    expect(
+      document.querySelector('[aria-modal="true"]')?.getAttribute("aria-label"),
+    ).toBe("m1.stl");
   });
 });

@@ -35,11 +35,12 @@
   literal — and never mock a cache hit as `lighting: 'axis'` to mean "the current mode":
   `'axis'` is the retired label and now reads as *stale*, which silently inverts a test
   that asserts a hit with no render into one that asserts a re-render loop it wanted absent
-- Reading a source file as text: the client workspace has no `@types/node`, so `node:fs`
-  does not typecheck, and happy-dom replaces global `URL` (so `fileURLToPath(new URL(...))`
-  fails "must be of scheme file"). Import it through Vite instead — `import CSS from
-  '../src/index.css?raw'` — which needs `test: { css: true }` in vite.config.ts, since
-  vitest otherwise stubs every CSS import, `?raw` included, to an empty string
+- Reading a source file as text **from a happy-dom cell**: happy-dom replaces global `URL`,
+  so `fileURLToPath(new URL(...))` fails "must be of scheme file". Import it through Vite
+  instead — `import CSS from '../src/index.css?raw'` — which needs `test: { css: true }` in
+  vite.config.ts, since vitest otherwise stubs every CSS import, `?raw` included, to an empty
+  string. `node:fs` itself is fine: `@types/node` is hoisted to the root, and the node-environment
+  cells (`checkBake.test.ts`, `siteImage.test.ts`) read files that way with `tsc` green
 - The harness stubs `URL` for object URLs **as a subclass with two statics overridden**,
   never as a spread copy: happy-dom parses every `<img src>` with the global `URL`, and a
   stub that is not a constructor makes that parse throw, which happy-dom answers by firing

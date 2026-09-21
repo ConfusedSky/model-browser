@@ -271,21 +271,28 @@ of what a US visitor waits for the same file.
 **The app.**
 
 ```sh
-curl -s https://models.masamaeda.com/api/features        # the demo posture: every field false, `intro` included
+curl -s https://models.masamaeda.com/api/features        # the demo posture: every field false but `intro`
 curl -s https://models.masamaeda.com/ | head -5          # the client's index.html, not JSON
 curl -s https://models.masamaeda.com/api/library         # ready, and **no `top`** — hostDetails is off
-curl -s -o /dev/null -w '%{http_code}\n' https://models.masamaeda.com/about.html   # 404 while `intro` is off
+curl -s -o /dev/null -w '%{http_code}\n' https://models.masamaeda.com/about.html   # 200 while `intro` is on
 ```
 
-`intro` went off on 2026-09-15, pending a review of the introduction and the
-About page — both went live that day unreviewed. The last line is what that
-posture looks like from outside: the build still carries `about.html`, and the
-app withholds it because the configuration says so. Worth asking rather than
-assuming — the withholding gate was keyed on the request's *spelling* when it
-landed, so `/about.html/` and `/about.html%2F` served the page while
-`/about.html` 404'd. Ask one of those too. Turning the introduction on is a
-`config.json` change, deployed like any other (§6), after which every one of
-them answers 200.
+`intro` is the one capability on. It was withheld on 2026-09-15 pending a review
+of the introduction and the About page, and turned back on 2026-09-16 once they
+had been read live. While it is off the build still carries `about.html` and the
+app withholds it because the configuration says so — `/about.html` answers 404.
+Ask `/about.html/` and `/about.html%2F` as well when checking either posture: the
+withholding gate was keyed on the request's *spelling* when it landed and served
+those two while `/about.html` 404'd. Flipping `intro` is a `config.json` change,
+deployed like any other (§6).
+
+Withholding the introduction also withholds the **consolidated credits list**,
+which the corpus's attribution issue called the one gating compliance item for
+CC-BY. Attribution stays present either way — per-kit credits show in the
+lightbox panel (`/api/overrides`, not gated on `intro`) and `/api/credits`
+answers for every kit — but only to a visitor who opens a model. No single page
+lists them while `intro` is off, which is the thing to weigh before withholding
+it again.
 
 **The two startup lines**, which are the only place the resolved library top can
 be read at all (`hostDetails` withholds it on the wire):
@@ -330,9 +337,9 @@ that phrase in `shared/exampleQueries.ts` with one the corpus answers. A
 answering.
 
 While `intro` is off no visitor sees those chips at all, so a `dead:` line is
-not a live defect today; it is what the introduction would show the day the
-capability goes back on, which is why the check stays in this list rather than
-waiting for it.
+not a live defect then; it is what the introduction shows the day the capability
+goes back on, which is why the check stays in this list rather than waiting for
+it.
 
 **The guard is alive.** A foreign `Origin` is the check, not a foreign `Host` —
 Caddy's site block never forwards a `Host` it does not serve:
@@ -377,6 +384,14 @@ unit to check.
 
 ## 6. Redeploy, and rollback
 
+**A redeploy runs only on an explicit go-ahead from Masa in the conversation.** A
+deploy step written into a tasks.md is not one, and neither is a change being
+finished and verified. A new visitor-facing surface ships with its capability key
+**off** until he has reviewed it live — the landing page and About were withheld
+on 2026-09-15 for exactly that. An instruction to change one thing on the live
+site authorises that deploy alone, so say which other commits would ride along
+with it.
+
 ```sh
 cd /opt/model-browser && git pull && \
   sh deploy/demo/check-bake.sh /srv/cache/<id>/bake/bake.json /srv/index && \
@@ -388,7 +403,11 @@ recipe pin (§7): it compares the checkout's `RIG_VERSION` and `POSE_VERSION` wi
 the ones the shipped store was rendered under, and the SHA-256 of
 `/srv/index/pose-cache.json` and `run-params.json` with the ones the bake hashed,
 and exits non-zero on any disagreement. The `&&` is the refusal: the build does
-not start and the running stack keeps serving — nothing is half-deployed. Give it
+not start and the running stack keeps serving — nothing is half-deployed. A build
+that *fails* has the same shape and is the trap: the old container keeps serving
+with nothing at the shell saying the new one never replaced it, so curl
+`/api/features` from outside after every deploy rather than trusting the exit.
+Give it
 the index directory: called without one it prints `index: not checked, no index
 directory given` and skips the two hash **comparisons** — it still enforces both hash
 lines' format, and still refuses a manifest whose hash line is malformed or duplicated —

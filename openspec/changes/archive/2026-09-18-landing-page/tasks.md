@@ -255,7 +255,7 @@
       the six chips, #15 by the cycling placeholder; #18 left to 1.6. Note for whoever reads
       them next: the closing comments say the surfaces are live, and they were at `cbad523`,
       but `beaef45` withheld them — 6.6 is what makes those comments true again)* Close issues #12 and #15 with the live evidence; leave #18 to 1.6
-- [ ] 6.6 **Re-enable the introduction on the demo, once Masa has read it live.** Gated
+- [x] 6.6 *(done: `intro` back to `true` in `a364bf3` "Landing page go live", 2026-09-16, after the live read; README §5 corrected at archive, 2026-09-18. Live: `/api/features` reports `intro:true`, `/about.html` answers 200. The test cell needed nothing — it asserts the keys, not the values, on purpose)* **Re-enable the introduction on the demo, once Masa has read it live.** Gated
       on that reading, not on any code: flip `"intro"` back to `true` in
       `deploy/demo/config.json`, correct `deploy/demo/README.md` §5's feature line back
       to "every field false but `intro`" in the same commit, update `server/test/config.test.ts`'s
@@ -268,7 +268,7 @@
 
 ## 7. Follow-ups found at apply (2026-09-15)
 
-- [ ] 7.1 Backlog 1.6 updates the About page's differences list when Download and Copy
+- [x] 7.1 *(moved to `web-demo-backlog` 1.6 at archive, 2026-09-18 — it is that change's work)* Backlog 1.6 updates the About page's differences list when Download and Copy
       link land — the list describes what ships (spec reworded at apply; design "Decided at
       apply"); verify by re-reading `#differences` on the live host after 1.6
 - [x] 7.2 *(done 2026-09-15: `shipExampleQueries` runs after `ship`'s hit checks and throws
@@ -286,7 +286,7 @@
       imports `../../scripts/bake-demo`, and the client build runs `tsc --noEmit` over its
       tests, so the box had been unable to build since that test landed; the old container
       kept serving through both failed builds
-- [ ] 7.4 The About page could take the `/about` name if the static handler tried
+- [x] 7.4 *(declined at archive, 2026-09-18: it did not grate)* The About page could take the `/about` name if the static handler tried
       `<name>.html` before its fallback (design D2 declined it); leave unless it grates
 - [x] 7.5 *(closed 2026-09-15: `feature-report`'s *Not inferred* now has a cell —
       `introBanner.test.tsx` "is not inferred from the capabilities being off" mounts

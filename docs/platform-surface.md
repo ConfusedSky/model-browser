@@ -33,6 +33,12 @@ contracts and placeholder rules: `openspec/changes/open-in-slicer/design.md` (L2
   `resolve`'s `realTop + sep` — and the `foo.zip!/entry` virtual-path separator
   (`server/src/vpath.ts`) is POSIX-spelled too. All of it is exercised only against POSIX
   paths; Windows drive letters and separators are untested against them.
+- **Storage media**: the library is not assumed to be on this machine's SSD. The target is
+  unknown hardware — removable drives, network mounts, spinning disks — where a cold
+  metadata walk costs roughly 15x what it does locally (the per-entry figures are in the
+  archived `listing-tree-cache` proposal). Any conclusion about walk, stat or read cost that
+  was measured on a local disk says nothing about the deployment it is meant to serve;
+  measure on the slow medium before designing against a number.
 - **User dirs**: thumbnail cache at `~/.cache/model-browser/<library-id>/` (the pre-library flat
   layout beside it is migrated once, then existence-swept), launch config at
   `~/.config/model-browser/launch.json` and the deployment's configuration in

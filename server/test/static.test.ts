@@ -2,6 +2,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
+  type Preview,
   clientDist,
   createStaticHandler,
   isApiRequest,
@@ -19,8 +20,14 @@ import { realTempDir } from "./helpers";
  */
 const dist = realTempDir("mb-static-dist-");
 mkdirSync(join(dist, "assets"));
-const INDEX = "<!doctype html><title>model browser</title>";
-const BUNDLE = `console.log(${JSON.stringify("x".repeat(4096))})\n`;
+// A real `<head>…</head>`, as the build emits: the splice point is what the
+// annotation cells below are about, and a fixture without one would let every
+// one of them pass by serving the document unchanged (2.5).
+const INDEX =
+  '<!doctype html><html><head><meta charset="utf-8"><title>model browser</title></head><body><div id="root"></div></body></html>';
+// Carrying the splice point too, so "annotate every file" is an edit the asset
+// cell can catch rather than one nothing notices.
+const BUNDLE = `console.log(${JSON.stringify(`</head>${"x".repeat(4096)}`)})\n`;
 writeFileSync(join(dist, "index.html"), INDEX);
 writeFileSync(join(dist, "assets", "main-abc123.js"), BUNDLE);
 writeFileSync(join(dist, "assets", "main-abc123.css"), "body{margin:0}");
@@ -29,7 +36,8 @@ writeFileSync(
   Buffer.from([0x89, 0x50, 0x4e, 0x47]),
 );
 writeFileSync(join(dist, "favicon.ico"), Buffer.from([0, 0, 1, 0]));
-const ABOUT = "<!doctype html><title>about</title>";
+const ABOUT =
+  "<!doctype html><html><head><title>about</title></head><body>about</body></html>";
 writeFileSync(join(dist, "about.html"), ABOUT);
 // A name the withholding gate must *not* catch, and the one a `startsWith`
 // spelling of it would: same prefix, a different file.
@@ -200,6 +208,121 @@ describe("the static handler", () => {
       await bare(new Request("http://models.example/anything")),
     ).toBeNull();
     rmSync(empty, { recursive: true, force: true });
+  });
+});
+
+/**
+ * Link-preview annotation (link-previews D1/D7). The handler is handed a
+ * resolver and splices what it answers into the entry document's head; what the
+ * resolver *decides* is `preview.test.ts`'s subject, not this file's.
+ */
+describe("annotating the entry document", () => {
+  const PREVIEW: Preview = {
+    title: "Dragon",
+    description: "Some Author — CC BY 4.0",
+    image:
+      "https://models.example/api/thumb/image?path=%2FKit%2Fx.stl&mtime=1.5&gen=2",
+    imageType: "image/webp",
+    imageWidth: 256,
+    imageHeight: 256,
+    url: "https://models.example/?path=/Kit&model=/Kit/x.stl",
+    card: "summary",
+  };
+  const annotated = (
+    resolver: (url: URL, headers: Headers) => Promise<Preview | null>,
+    intro = true,
+  ) => {
+    const handler = createStaticHandler(dist, { intro, describe: resolver });
+    return (path: string, headers: Record<string, string> = {}) =>
+      handler(new Request(`http://models.example${path}`, { headers }));
+  };
+
+  it("serves the entry document as built when no resolver is configured", async () => {
+    // The dev loop and the Electron seam: `describe` is optional, and unset it
+    // costs the document nothing.
+    for (const path of ["/", "/index.html", "/?path=/Kit&model=/Kit/x.stl"]) {
+      expect(await (await ask(path))?.text(), path).toBe(INDEX);
+    }
+    expect(await (await ask("/about.html"))?.text()).toBe(ABOUT);
+  });
+
+  it("annotates the fallback document with what the address names", async () => {
+    const seen: URL[] = [];
+    const ask2 = annotated(async (url) => {
+      seen.push(url);
+      return PREVIEW;
+    });
+    const res = await ask2("/?path=/Kit&model=/Kit/x.stl");
+    const html = await res!.text();
+    expect(res!.status).toBe(200);
+    // The whole URL, query included — a shareable address names its view there
+    // and nowhere else (D2).
+    expect(seen[0]?.search).toBe("?path=/Kit&model=/Kit/x.stl");
+    expect(html).toContain('<meta property="og:title" content="Dragon">');
+    expect(html).toContain('<meta property="og:image" content=');
+    expect(html).toContain('<meta name="twitter:card" content="summary">');
+    // The build's own head survives, and the block lands inside it.
+    expect(html).toContain("<title>model browser</title>");
+    expect(html.indexOf("og:title")).toBeLessThan(html.indexOf("</head>"));
+    expect(res!.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(res!.headers.get("cache-control")).toBe("no-cache");
+    // Nothing sets a length by hand, so the longer body cannot be truncated.
+    expect(res!.headers.get("content-length")).toBeNull();
+    // The document's own name, not only the fallback.
+    expect(await (await ask2("/index.html"))?.text()).toContain("og:title");
+  });
+
+  it("never annotates an asset, even one whose bytes carry </head>", async () => {
+    // Assets are immutable for a year: one annotated would be cached forever
+    // carrying one address's description (D7).
+    const ask2 = annotated(async () => PREVIEW);
+    const js = await ask2("/assets/main-abc123.js");
+    expect(await js?.text()).toBe(BUNDLE);
+    expect(js?.headers.get("cache-control")).toBe(
+      "public, max-age=31536000, immutable",
+    );
+    const ico = await ask2("/favicon.ico");
+    expect(new Uint8Array(await ico!.arrayBuffer())).toEqual(
+      new Uint8Array([0, 0, 1, 0]),
+    );
+  });
+
+  it("escapes every value it places in the document", async () => {
+    // A display name is library text, and on a library whose overrides someone
+    // else wrote it is attacker-controlled.
+    const ask2 = annotated(async () => ({
+      title: 'A " > <script>alert(1)</script>',
+      description: "Ada & Co",
+      url: 'https://models.example/?q="x"',
+    }));
+    const html = await (await ask2("/"))!.text();
+    expect(html).toContain("&lt;script&gt;");
+    expect(html).toContain("&quot;");
+    expect(html).toContain("Ada &amp; Co");
+    expect(html).not.toContain("<script>alert(1)");
+  });
+
+  it("serves the document unchanged when the resolver rejects or declines", async () => {
+    const thrown = annotated(async () => {
+      throw new Error("the library is not ready");
+    });
+    const res = await thrown("/kits/dragons");
+    expect(res?.status).toBe(200);
+    expect(await res?.text()).toBe(INDEX);
+    const silent = annotated(async () => null);
+    expect(await (await silent("/"))?.text()).toBe(INDEX);
+  });
+
+  it("annotates the About page, and withholds it when the introduction is off", async () => {
+    const on = annotated(async () => PREVIEW);
+    const page = await on("/about.html");
+    const html = await page!.text();
+    expect(html).toContain("<title>about</title>");
+    expect(html).toContain('<meta property="og:title" content="Dragon">');
+    const off = annotated(async () => PREVIEW, false);
+    const refused = await off("/about.html");
+    expect(refused?.status).toBe(404);
+    expect(await refused?.text()).not.toContain("og:");
   });
 });
 

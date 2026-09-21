@@ -35,6 +35,8 @@ const CELL_BAND: Record<Band, Band> = {
   far: "far",
 };
 
+const ARROWS = new Set(["ArrowRight", "ArrowLeft", "ArrowDown", "ArrowUp"]);
+
 /** The grid is `auto-fill`, so its columns are whatever the width yields (D2):
  *  the leading run of tiles sharing the first one's `top` is the top row. Pure
  *  over the rects, since happy-dom lays nothing out. Empty grid returns 1. */
@@ -239,6 +241,31 @@ function Grid({
   }, [previews, publish]);
 
   /**
+   * With nothing focused, an arrow lands on the first tile instead of doing
+   * nothing (link-previews D11). A keydown with focus on `body` never reaches
+   * the grid's own handler below, hence the document listener; focus anywhere
+   * else — the path bar, the find input, a tile — is left to its own handler.
+   */
+  useEffect(() => {
+    function onDocumentKeyDown(e: KeyboardEvent): void {
+      if (e.altKey || e.ctrlKey || e.metaKey) return;
+      if (!ARROWS.has(e.key)) return;
+      const active = document.activeElement;
+      if (active !== null && active !== document.body) return;
+      // The lightbox steps models on the same keys from a window listener,
+      // whatever holds focus while it is open. The entry menu needs no guard
+      // only because it always holds focus itself (`EntryMenu` seeds it).
+      if (document.querySelector('[aria-modal="true"]') !== null) return;
+      const first = gridRef.current ? tilesIn(gridRef.current)[0] : undefined;
+      if (first === undefined) return;
+      e.preventDefault();
+      first.focus();
+    }
+    document.addEventListener("keydown", onDocumentKeyDown);
+    return () => document.removeEventListener("keydown", onDocumentKeyDown);
+  }, []);
+
+  /**
    * Arrow-key focus movement between tiles (grid-arrow-navigation). **Container
    * scoping, not a guard, is what isolates the find input and the path bar**:
    * they render outside `gridRef`, so their keydowns never reach here (D3).
@@ -247,14 +274,7 @@ function Grid({
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
     if (e.altKey || e.ctrlKey || e.metaKey) return;
     const { key } = e;
-    if (
-      key !== "ArrowRight" &&
-      key !== "ArrowLeft" &&
-      key !== "ArrowDown" &&
-      key !== "ArrowUp"
-    ) {
-      return;
-    }
+    if (!ARROWS.has(key)) return;
     const tiles = gridRef.current ? tilesIn(gridRef.current) : [];
     const idx = tiles.indexOf(document.activeElement as HTMLElement);
     if (idx === -1) return;

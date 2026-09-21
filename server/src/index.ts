@@ -9,6 +9,7 @@ import { ZipTempStore, createLauncher } from "./launch";
 import { createLibrary } from "./library";
 import { ListingCache } from "./listingCache";
 import { createOverrideHolder } from "./overrides";
+import { createDescribe } from "./preview";
 import { SnapshotStore } from "./snapshot";
 import { clientDist, createStaticHandler, route } from "./static";
 
@@ -73,7 +74,18 @@ const app = createApp(
 const dist = clientDist(process.env);
 const client =
   statSync(dist, { throwIfNoEntry: false })?.isDirectory() === true
-    ? createStaticHandler(dist, { intro: features.intro })
+    ? createStaticHandler(dist, {
+        intro: features.intro,
+        // The entry document's link previews (link-previews D1): the handler
+        // takes a function, so nothing in `static.ts` learns what a library is.
+        describe: createDescribe({
+          library,
+          cache,
+          overrides,
+          origins: config.origins ?? [],
+          distDir: dist,
+        }),
+      })
     : null;
 // Said out loud: a failed or late client build otherwise 404s the app silently.
 console.log(
